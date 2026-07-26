@@ -8,32 +8,318 @@ use oxideterm_gpui_ui::button::ButtonVariant;
 
 impl WorkspaceApp {
     pub(super) fn render_host_tmux_panel(&self, cx: &mut Context<Self>) -> AnyElement {
-        let connections = self.monitor_connections(cx);
+        let tokens = self.tokens;
+        let i18n = &self.i18n;
+        let mono_font_family = settings_mono_font_family(self.settings_store.settings());
+        let selectable_text = self.selectable_text_render_state(cx);
+        let search_ime = self
+            .host_tools_plain_text_ime_frame(HostToolsTextInput::TmuxSearch, cx)
+            .expect("tmux search is a non-secret Host Tools input");
+        let sidebar_width = self.ai.chat.sidebar_width;
+        self.host_tools.update(cx, |host_tools, cx| {
+            host_tools.render_host_tmux_panel(
+                search_ime,
+                sidebar_width,
+                &tokens,
+                i18n,
+                mono_font_family,
+                &selectable_text,
+                cx,
+            )
+        })
+    }
+
+    pub(in crate::workspace) fn handle_host_tmux_search_key(
+        &mut self,
+        event: &KeyDownEvent,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if !self
+            .host_tools
+            .read(cx)
+            .ui
+            .input_is_focused(HostToolsTextInput::TmuxSearch)
+        {
+            return false;
+        }
+        if event.keystroke.key.as_str() == "escape" && !event.keystroke.modifiers.platform {
+            self.host_tools.update(cx, |host_tools, _cx| {
+                host_tools.ui.clear_input_focus();
+            });
+            self.ime_marked_text = None;
+            self.clear_ime_selection();
+            cx.notify();
+            return true;
+        }
+        false
+    }
+
+    pub(in crate::workspace) fn handle_host_tmux_confirm_key(
+        &mut self,
+        event: &KeyDownEvent,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if self.host_tools.read(cx).tmux_confirm_view().is_none() {
+            return false;
+        }
+        match self.handle_standard_confirm_key(event, cx) {
+            Some(ConfirmKeyboardAction::Cancel) => {
+                self.begin_host_tmux_confirm_exit(cx);
+                true
+            }
+            Some(ConfirmKeyboardAction::Confirm) => {
+                self.confirm_host_tmux_action(cx);
+                true
+            }
+            Some(ConfirmKeyboardAction::Handled) => true,
+            None => false,
+        }
+    }
+
+    pub(in crate::workspace) fn handle_host_tmux_input_dialog_key(
+        &mut self,
+        event: &KeyDownEvent,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if self.host_tools.read(cx).ui.host_tmux_input_dialog.is_none() {
+            return false;
+        }
+        if event.keystroke.modifiers.platform {
+            return false;
+        }
+        match event.keystroke.key.as_str() {
+            "escape" => {
+                self.host_tools.update(cx, |host_tools, cx| {
+                    host_tools.dismiss_tmux_input_dialog(cx);
+                });
+                self.ime_marked_text = None;
+                self.clear_ime_selection();
+                cx.notify();
+                true
+            }
+            "enter" => {
+                self.submit_host_tmux_input_dialog(cx);
+                true
+            }
+            _ => false,
+        }
+    }
+
+    pub(super) fn confirm_host_tmux_action(&mut self, cx: &mut Context<Self>) {
+        self.clear_standard_confirm_focus();
+        let delay = oxideterm_gpui_ui::motion::duration(
+            &self.tokens,
+            oxideterm_gpui_ui::motion::MotionDuration::Control,
+        );
+        self.host_tools.update(cx, |host_tools, cx| {
+            host_tools.confirm_tmux_action_from_view(delay, cx);
+        });
+    }
+
+    /// Keeps the request mounted until the current exit generation completes.
+    fn begin_host_tmux_confirm_exit(&mut self, cx: &mut Context<Self>) -> bool {
+        self.clear_standard_confirm_focus();
+        let delay = oxideterm_gpui_ui::motion::duration(
+            &self.tokens,
+            oxideterm_gpui_ui::motion::MotionDuration::Control,
+        );
+        self.host_tools.update(cx, |host_tools, cx| {
+            host_tools.begin_tmux_confirm_exit(delay, cx)
+        })
+    }
+
+    pub(super) fn submit_host_tmux_input_dialog(&mut self, cx: &mut Context<Self>) {
+        self.host_tools.update(cx, |host_tools, cx| {
+            host_tools.submit_tmux_input_from_view(cx);
+        });
+        self.ime_marked_text = None;
+        self.clear_ime_selection();
+    }
+
+    pub(in crate::workspace) fn render_host_tmux_confirm_dialog(
+        &self,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        let (phase, view) = self
+            .host_tools
+            .read(cx)
+            .render_host_tmux_confirm_view(&self.i18n)?;
+        Some(
+            oxideterm_gpui_ui::confirm::confirm_dialog_with_focus_motion(
+                &self.tokens,
+                "host-tmux-confirm-motion",
+                phase,
+                view,
+                self.standard_confirm_focus(),
+                cx.listener(|this, _event, _window, cx| {
+                    this.begin_host_tmux_confirm_exit(cx);
+                }),
+                cx.listener(|this, _event, _window, cx| {
+                    this.confirm_host_tmux_action(cx);
+                }),
+            )
+            .into_any_element(),
+        )
+    }
+
+    pub(in crate::workspace) fn render_host_tmux_input_dialog(
+        &self,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        let target = WorkspaceImeTarget::HostTmuxDialogInput;
+        let (kind, session_name, target_label, submit_disabled, input_control) = {
+            let host_tools = self.host_tools.read(cx);
+            let ui = &host_tools.ui;
+            let dialog = ui.host_tmux_input_dialog.as_ref()?;
+            let input_control = text_input(
+                &self.tokens,
+                TextInputView {
+                    value: dialog.value.as_str(),
+                    placeholder: self.i18n.t(host_tmux_input_placeholder_key(&dialog.kind)),
+                    focused: ui.input_is_focused(HostToolsTextInput::TmuxDialog),
+                    caret_visible: self.new_connection_caret_visible,
+                    secret: false,
+                    selected_all: false,
+                    selected_range: self.ime_selected_range_for_target(target, cx),
+                    marked_text: self.marked_text_for_target(target, cx),
+                },
+            )
+            .h(px(34.0))
+            .cursor(CursorStyle::IBeam);
+            (
+                dialog.kind.clone(),
+                dialog.session_name.clone(),
+                dialog.target_label.clone(),
+                dialog.value.trim().is_empty() || host_tools.tmux_action_running(),
+                input_control,
+            )
+        };
+        let submit_label = self.i18n.t(host_tmux_input_submit_key(&kind));
+        let workspace = cx.entity();
+        let input_control = text_input_anchor_probe(
+            target.anchor_id(),
+            input_control
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(move |this, event: &MouseDownEvent, window, cx| {
+                        this.host_tools.update(cx, |host_tools, _cx| {
+                            host_tools.ui.focus_input(HostToolsTextInput::TmuxDialog);
+                        });
+                        this.ime_marked_text = None;
+                        this.new_connection_caret_visible = true;
+                        window.focus(&this.focus_handle, cx);
+                        this.begin_ime_selection_from_mouse_down(target, event, window, cx);
+                        cx.stop_propagation();
+                    }),
+                )
+                .on_mouse_move(cx.listener(|this, event: &MouseMoveEvent, window, cx| {
+                    this.update_ime_selection_drag_from_mouse_move(event, window, cx);
+                })),
+            move |anchor, _window, cx| {
+                let _ = workspace.update(cx, |this, cx| {
+                    this.update_text_input_anchor(anchor, cx);
+                });
+            },
+        )
+        .into_any_element();
+        let cancel_action = self.workspace_confirm_footer_action_button(
+            self.i18n.t("sidebar.host_tmux.confirm.cancel"),
+            ButtonVariant::Secondary,
+            ConfirmDialogAction::Cancel,
+            false,
+            None,
+            |this, _event, _window, cx| {
+                this.host_tools.update(cx, |host_tools, cx| {
+                    host_tools.dismiss_tmux_input_dialog(cx);
+                });
+                this.ime_marked_text = None;
+                this.clear_ime_selection();
+                cx.notify();
+            },
+            cx,
+        );
+        let submit_action = self.workspace_confirm_footer_action_button(
+            submit_label,
+            ButtonVariant::Default,
+            ConfirmDialogAction::Confirm,
+            submit_disabled,
+            None,
+            |this, _event, _window, cx| {
+                this.submit_host_tmux_input_dialog(cx);
+            },
+            cx,
+        );
+        let dialog = self
+            .host_tools
+            .read(cx)
+            .render_host_tmux_input_dialog_shell(
+                kind,
+                session_name,
+                target_label,
+                input_control,
+                cancel_action,
+                submit_action,
+                &self.tokens,
+                &self.i18n,
+            );
+
+        Some(
+            oxideterm_gpui_ui::modal::dismissible_dialog_backdrop()
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(|this, _event, _window, cx| {
+                        this.host_tools.update(cx, |host_tools, cx| {
+                            host_tools.dismiss_tmux_input_dialog(cx);
+                        });
+                        this.ime_marked_text = None;
+                        this.clear_ime_selection();
+                        cx.stop_propagation();
+                        cx.notify();
+                    }),
+                )
+                .child(oxideterm_gpui_ui::modal::overlay_content_boundary(dialog))
+                .into_any_element(),
+        )
+    }
+}
+
+impl HostToolsEntity {
+    #[allow(clippy::too_many_arguments)]
+    fn render_host_tmux_panel(
+        &self,
+        search_ime: HostToolsPlainTextImeFrame,
+        sidebar_width: f32,
+        tokens: &ThemeTokens,
+        i18n: &I18n,
+        mono_font_family: SharedString,
+        selectable_text: &SelectableTextRenderState,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let connections = self.monitor_connections();
         if connections.is_empty() {
-            return monitor_center_state(
-                self,
+            return host_tools_center_state(
                 LucideIcon::WifiOff,
-                self.tokens.ui.text_muted,
-                self.i18n.t("profiler.panel.no_connection"),
+                tokens.ui.text_muted,
+                i18n.t("profiler.panel.no_connection"),
+                selectable_text,
                 cx,
             );
         }
 
-        let selected_connection_id = self.host_tools.read(cx).selected_connection_id_owned();
+        let selected_connection_id = self.selected_connection_id_owned();
         let selected_id = selected_connection_id
             .as_deref()
             .unwrap_or(connections[0].connection_id.as_str());
-        let snapshot = self.host_tools.read(cx).tmux_snapshot_for(selected_id);
-        let tmux_search_query = self.host_tools.read(cx).ui.host_tmux_search_query.clone();
+        let snapshot = self.tmux_snapshot_for(selected_id);
         let rows = snapshot
             .as_ref()
-            .map(|snapshot| visible_tmux_session_rows(snapshot, &tmux_search_query))
+            .map(|snapshot| visible_tmux_session_rows(snapshot, &self.ui.host_tmux_search_query))
             .unwrap_or_default();
         let status = snapshot
             .as_ref()
             .map(|snapshot| snapshot.status.clone())
             .unwrap_or_default();
-        self.sync_host_tmux_list_state(&rows, snapshot.as_ref(), selected_id, cx);
+        self.sync_host_tmux_list_state(&rows, snapshot.as_ref(), selected_id);
 
         div()
             .id("host-tmux-panel")
@@ -56,103 +342,120 @@ impl WorkspaceApp {
                     .flex_col()
                     .gap_2()
                     .border_b_1()
-                    .border_color(rgba((self.tokens.ui.border << 8) | MONITOR_BORDER_ALPHA))
-                    .child(self.render_connection_switcher_row(
+                    .border_color(rgba((tokens.ui.border << 8) | MONITOR_BORDER_ALPHA))
+                    .child(self.render_connection_switcher(
                         &connections,
                         selected_id,
-                        !self.host_tools.read(cx).tmux_snapshot_polling(),
+                        !self.tmux_snapshot_polling(),
+                        tokens,
+                        mono_font_family.clone(),
+                        selectable_text,
                         cx,
                     ))
-                    .child(self.render_host_tmux_search(cx))
+                    .child(self.render_host_tmux_search(&search_ime, tokens, i18n, cx))
                     .child(self.render_host_tmux_status_row(
                         rows.len(),
-                        selected_id.to_string(),
-                        status.clone(),
+                        selected_id,
+                        &status,
+                        tokens,
+                        i18n,
                         cx,
                     )),
             )
             .child(self.render_host_tmux_list(
                 rows,
-                snapshot.as_ref(),
-                self.host_tools.read(cx).tmux_snapshot_polling(),
+                snapshot,
+                self.tmux_snapshot_polling(),
                 status,
                 selected_id,
+                sidebar_width,
+                tokens,
+                i18n,
+                mono_font_family,
+                selectable_text,
                 cx,
             ))
             .into_any_element()
     }
 
-    pub(super) fn render_host_tmux_search(&self, cx: &mut Context<Self>) -> AnyElement {
-        let target = WorkspaceImeTarget::HostTmuxSearch;
-        let (focused, value) = {
-            let ui = &self.host_tools.read(cx).ui;
-            (
-                ui.input_is_focused(HostToolsTextInput::TmuxSearch),
-                ui.host_tmux_search_query.clone(),
-            )
-        };
-        let workspace = cx.entity();
+    fn render_host_tmux_search(
+        &self,
+        ime: &HostToolsPlainTextImeFrame,
+        tokens: &ThemeTokens,
+        i18n: &I18n,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let input = ime.input();
+        let anchor_frame = ime.clone();
         text_input_anchor_probe(
-            target.anchor_id(),
+            ime.anchor_id(),
             text_input(
-                &self.tokens,
+                tokens,
                 TextInputView {
-                    value: &value,
-                    placeholder: self.i18n.t("sidebar.host_tmux.search_placeholder"),
-                    focused,
-                    caret_visible: self.new_connection_caret_visible,
+                    value: &self.ui.host_tmux_search_query,
+                    placeholder: i18n.t("sidebar.host_tmux.search_placeholder"),
+                    focused: self.ui.input_is_focused(input),
+                    caret_visible: ime.caret_visible(),
                     secret: false,
                     selected_all: false,
-                    selected_range: self.ime_selected_range_for_target(target, cx),
-                    marked_text: self.marked_text_for_target(target, cx),
+                    selected_range: ime.selected_range(),
+                    marked_text: ime.marked_text(),
                 },
             )
             .h(px(34.0))
             .cursor(CursorStyle::IBeam)
             .on_mouse_down(
                 MouseButton::Left,
-                cx.listener(move |this, event: &MouseDownEvent, window, cx| {
-                    this.host_tools.update(cx, |host_tools, _cx| {
-                        host_tools.ui.focus_input(HostToolsTextInput::TmuxSearch);
-                    });
-                    this.ime_marked_text = None;
-                    this.new_connection_caret_visible = true;
-                    window.focus(&this.focus_handle, cx);
-                    this.begin_ime_selection_from_mouse_down(target, event, window, cx);
+                cx.listener(move |host_tools, event: &MouseDownEvent, window, cx| {
+                    host_tools.ui.focus_input(input);
+                    // Only pointer metadata crosses to the workspace IME coordinator.
+                    window.dispatch_action(
+                        Box::new(HostToolsWindowRequest::new(
+                            HostToolsWindowIntent::BeginPlainTextImeSelection {
+                                input,
+                                event: event.clone(),
+                            },
+                        )),
+                        cx,
+                    );
                     cx.stop_propagation();
                 }),
-            )
-            .on_mouse_move(cx.listener(|this, event: &MouseMoveEvent, window, cx| {
-                this.update_ime_selection_drag_from_mouse_move(event, window, cx);
-            })),
-            move |anchor, _window, cx| {
-                let _ = workspace.update(cx, |this, cx| {
-                    this.update_text_input_anchor(anchor, cx);
-                });
+            ),
+            move |anchor, _window, _cx| {
+                anchor_frame.update_anchor(anchor);
             },
         )
         .into_any_element()
     }
 
-    pub(super) fn render_host_tmux_status_row(
+    fn render_host_tmux_status_row(
         &self,
         visible_count: usize,
-        selected_id: String,
-        status: ResourceTmuxStatus,
+        connection_id: &str,
+        status: &ResourceTmuxStatus,
+        tokens: &ThemeTokens,
+        i18n: &I18n,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let theme = self.tokens.ui;
+        let theme = tokens.ui;
         let capability_label = match status {
             ResourceTmuxStatus::Available {
                 capability: TmuxCommandCapability::Full,
                 ..
-            } => self.i18n.t("sidebar.host_tmux.capability.full"),
+            } => i18n.t("sidebar.host_tmux.capability.full"),
             ResourceTmuxStatus::Available {
                 capability: TmuxCommandCapability::Partial,
                 ..
-            } => self.i18n.t("sidebar.host_tmux.capability.partial"),
-            _ => self.i18n.t("sidebar.host_tmux.capability.unknown"),
+            } => i18n.t("sidebar.host_tmux.capability.partial"),
+            _ => i18n.t("sidebar.host_tmux.capability.unknown"),
         };
+        let new_session_title = i18n.t("sidebar.host_tmux.new_session_title");
+        let new_session_name = i18n.t("sidebar.host_tmux.new_session_name");
+        let opened_notice = i18n
+            .t("sidebar.host_tmux.toast.new_session_opened")
+            .replace("{{name}}", &new_session_name);
+        let missing_notice = i18n.t("sidebar.host_tmux.toast.exec_terminal_missing");
+        let connection_id_for_terminal = connection_id.to_string();
         div()
             .flex()
             .items_center()
@@ -164,7 +467,7 @@ impl WorkspaceApp {
             .child(div().min_w_0().flex_1().truncate().child(format!(
                 "{} {} · {}",
                 visible_count,
-                self.i18n.t("sidebar.host_tmux.count_suffix"),
+                i18n.t("sidebar.host_tmux.count_suffix"),
                 capability_label
             )))
             .child(
@@ -174,7 +477,7 @@ impl WorkspaceApp {
                     .items_center()
                     .gap_1()
                     .child(host_tools_tooltip_icon_button(
-                        &self.tokens,
+                        tokens,
                         LucideIcon::Plus,
                         13.0,
                         rgb(theme.text),
@@ -186,44 +489,41 @@ impl WorkspaceApp {
                             idle_opacity: 1.0,
                             ..oxideterm_gpui_ui::button::IconButtonOptions::compact(24.0)
                         },
-                        self.i18n.t("sidebar.host_tmux.actions.new_session"),
+                        i18n.t("sidebar.host_tmux.actions.new_session"),
                         "host-tmux-new-session",
                         true,
-                        cx.listener({
-                            let selected_id = selected_id.clone();
-                            move |this, _event, window, cx| {
-                                this.open_host_tmux_new_session_terminal(
-                                    selected_id.clone(),
-                                    window,
-                                    cx,
-                                );
-                                cx.stop_propagation();
-                            }
+                        cx.listener(move |host_tools, _event, window, cx| {
+                            host_tools.dispatch_tmux_new_session_terminal(
+                                connection_id_for_terminal.clone(),
+                                new_session_title.clone(),
+                                opened_notice.clone(),
+                                missing_notice.clone(),
+                                window,
+                                cx,
+                            );
+                            cx.stop_propagation();
                         }),
                     ))
                     .child(host_tools_tooltip_icon_button(
-                        &self.tokens,
+                        tokens,
                         LucideIcon::RefreshCw,
                         13.0,
                         rgb(theme.text),
                         oxideterm_gpui_ui::button::IconButtonOptions {
                             size: 24.0,
-                            disabled: self.host_tools.read(cx).tmux_snapshot_polling(),
+                            disabled: self.tmux_snapshot_polling(),
                             has_background: true,
                             background: Some(rgb(theme.bg_hover)),
                             hover_background: Some(rgb(theme.bg_panel)),
                             idle_opacity: 1.0,
                             ..oxideterm_gpui_ui::button::IconButtonOptions::compact(24.0)
                         },
-                        self.i18n.t("sidebar.host_tmux.actions.refresh"),
+                        i18n.t("sidebar.host_tmux.actions.refresh"),
                         "host-tmux-refresh",
                         true,
-                        cx.listener(move |this, _event, _window, cx| {
-                            this.request_host_tmux_snapshot(
-                                selected_id.clone(),
-                                HostSnapshotFeedback::Toast,
-                                cx,
-                            );
+                        cx.listener(move |host_tools, _event, _window, cx| {
+                            host_tools
+                                .request_active_tool_snapshot(HostSnapshotFeedback::Toast, cx);
                             cx.stop_propagation();
                         }),
                     )),
@@ -231,63 +531,71 @@ impl WorkspaceApp {
             .into_any_element()
     }
 
-    pub(super) fn render_host_tmux_list(
+    #[allow(clippy::too_many_arguments)]
+    fn render_host_tmux_list(
         &self,
         rows: Vec<ResourceTmuxSession>,
-        snapshot: Option<&ResourceTmuxSnapshot>,
+        snapshot: Option<ResourceTmuxSnapshot>,
         loading: bool,
         status: ResourceTmuxStatus,
-        selected_id: &str,
+        connection_id: &str,
+        sidebar_width: f32,
+        tokens: &ThemeTokens,
+        i18n: &I18n,
+        mono_font_family: SharedString,
+        selectable_text: &SelectableTextRenderState,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         if loading && rows.is_empty() {
-            return monitor_center_state(
-                self,
+            return host_tools_center_state(
                 LucideIcon::Terminal,
-                self.tokens.ui.text_muted,
-                self.i18n.t("sidebar.host_tmux.loading"),
+                tokens.ui.text_muted,
+                i18n.t("sidebar.host_tmux.loading"),
+                selectable_text,
                 cx,
             );
         }
         match status {
             ResourceTmuxStatus::Unavailable => {
-                return monitor_center_state(
-                    self,
+                return host_tools_center_state(
                     LucideIcon::Terminal,
-                    self.tokens.ui.text_muted,
-                    self.i18n.t("sidebar.host_tmux.unavailable"),
+                    tokens.ui.text_muted,
+                    i18n.t("sidebar.host_tmux.unavailable"),
+                    selectable_text,
                     cx,
                 );
             }
             ResourceTmuxStatus::Error { message } => {
-                return monitor_center_state(
-                    self,
+                return host_tools_center_state(
                     LucideIcon::AlertTriangle,
                     MONITOR_RED,
-                    self.i18n_replace("sidebar.host_tmux.error", &[("error", message)]),
+                    i18n.t("sidebar.host_tmux.error")
+                        .replace("{{error}}", &message),
+                    selectable_text,
                     cx,
                 );
             }
             ResourceTmuxStatus::Unknown | ResourceTmuxStatus::Available { .. } => {}
         }
         if rows.is_empty() {
-            return monitor_center_state(
-                self,
+            return host_tools_center_state(
                 LucideIcon::Terminal,
-                self.tokens.ui.text_muted,
-                self.i18n.t("sidebar.host_tmux.empty"),
+                tokens.ui.text_muted,
+                i18n.t("sidebar.host_tmux.empty"),
+                selectable_text,
                 cx,
             );
         }
 
-        let snapshot = Arc::new(snapshot.cloned().unwrap_or_default());
+        let snapshot = Arc::new(snapshot.unwrap_or_default());
         let rows = Arc::new(rows);
-        let selected_id = Arc::new(selected_id.to_string());
-        let state = self.host_tools.read(cx).ui.host_tmux_list_state.clone();
+        let connection_id = Arc::new(connection_id.to_string());
+        let state = self.ui.host_tmux_list_state.clone();
         let spec = TauriVirtualListSpec::new(px(HOST_TMUX_LIST_ESTIMATED_ROW_HEIGHT), 8);
-        let workspace = cx.entity();
-        let show_context_columns =
-            self.ai.chat.sidebar_width >= HOST_TMUX_CONTEXT_COLUMNS_MIN_WIDTH;
+        let host_tools = cx.entity();
+        let tokens = *tokens;
+        let i18n = i18n.clone();
+        let show_context_columns = sidebar_width >= HOST_TMUX_CONTEXT_COLUMNS_MIN_WIDTH;
         div()
             .w_full()
             .min_w_0()
@@ -296,7 +604,7 @@ impl WorkspaceApp {
             .flex()
             .flex_col()
             .overflow_hidden()
-            .child(self.render_host_tmux_table_header(show_context_columns))
+            .child(self.render_host_tmux_table_header(show_context_columns, &tokens, &i18n))
             .child(
                 div()
                     .flex_1()
@@ -306,15 +614,18 @@ impl WorkspaceApp {
                         state,
                         spec,
                         move |index, _window, cx| {
-                            let rows = rows.clone();
-                            let snapshot = snapshot.clone();
-                            let selected_id = selected_id.clone();
-                            workspace.update(cx, |this, cx| {
-                                this.render_host_tmux_row(
-                                    selected_id.as_str(),
+                            let rows = Arc::clone(&rows);
+                            let snapshot = Arc::clone(&snapshot);
+                            let connection_id = Arc::clone(&connection_id);
+                            host_tools.update(cx, |host_tools, cx| {
+                                host_tools.render_host_tmux_row(
+                                    connection_id.as_str(),
                                     snapshot.as_ref(),
                                     rows.get(index).cloned(),
                                     show_context_columns,
+                                    &tokens,
+                                    &i18n,
+                                    mono_font_family.clone(),
                                     cx,
                                 )
                             })
@@ -324,8 +635,103 @@ impl WorkspaceApp {
             .into_any_element()
     }
 
-    pub(super) fn render_host_tmux_table_header(&self, show_context_columns: bool) -> AnyElement {
-        let theme = self.tokens.ui;
+    fn render_host_tmux_confirm_view(
+        &self,
+        i18n: &I18n,
+    ) -> Option<(oxideterm_gpui_ui::motion::ExitPhase, ConfirmDialogView)> {
+        let (request, phase) = self.tmux_confirm_view()?;
+        let description = i18n
+            .t(host_tmux_confirm_description_key(&request.action))
+            .replace("{{name}}", &request.session_name)
+            .replace("{{id}}", &request.session_id)
+            .replace("{{target}}", &request.target_label);
+        Some((
+            phase,
+            ConfirmDialogView {
+                variant: ConfirmDialogVariant::Danger,
+                title: div()
+                    .child(i18n.t("sidebar.host_tmux.confirm.title"))
+                    .into_any_element(),
+                description: Some(div().child(description).into_any_element()),
+                cancel_label: div()
+                    .child(i18n.t("sidebar.host_tmux.confirm.cancel"))
+                    .into_any_element(),
+                confirm_label: div()
+                    .child(i18n.t(host_tmux_confirm_label_key(&request.action)))
+                    .into_any_element(),
+            },
+        ))
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn render_host_tmux_input_dialog_shell(
+        &self,
+        kind: HostTmuxInputDialogKind,
+        session_name: String,
+        target_label: String,
+        input_control: AnyElement,
+        cancel_action: gpui::Div,
+        submit_action: gpui::Div,
+        tokens: &ThemeTokens,
+        i18n: &I18n,
+    ) -> gpui::Div {
+        let theme = tokens.ui;
+        let description = i18n
+            .t(host_tmux_input_description_key(&kind))
+            .replace("{{name}}", &session_name)
+            .replace("{{target}}", &target_label);
+        // The secret-bearing input stays materialized by WorkspaceApp; the Entity
+        // receives only the element and safe labels, never a cloned input value.
+        oxideterm_gpui_ui::modal::dialog_content(tokens)
+            .w(px(HOST_TMUX_INPUT_DIALOG_WIDTH))
+            .child(
+                div()
+                    .flex_none()
+                    .px_4()
+                    .py_3()
+                    .border_b_1()
+                    .border_color(rgb(theme.border))
+                    .flex()
+                    .flex_col()
+                    .gap_1()
+                    .child(
+                        div()
+                            .text_size(px(14.0))
+                            .font_weight(gpui::FontWeight::MEDIUM)
+                            .text_color(rgb(theme.text))
+                            .child(i18n.t(host_tmux_input_title_key(&kind))),
+                    )
+                    .child(
+                        div()
+                            .text_size(px(11.0))
+                            .text_color(rgb(theme.text_muted))
+                            .child(description),
+                    ),
+            )
+            .child(div().px_4().py_4().child(input_control))
+            .child(
+                div()
+                    .flex_none()
+                    .px_4()
+                    .py_3()
+                    .border_t_1()
+                    .border_color(rgb(theme.border))
+                    .flex()
+                    .items_center()
+                    .justify_end()
+                    .gap_2()
+                    .child(cancel_action)
+                    .child(submit_action),
+            )
+    }
+
+    fn render_host_tmux_table_header(
+        &self,
+        show_context_columns: bool,
+        tokens: &ThemeTokens,
+        i18n: &I18n,
+    ) -> AnyElement {
+        let theme = tokens.ui;
         div()
             .flex_none()
             .w_full()
@@ -345,13 +751,13 @@ impl WorkspaceApp {
                     .min_w_0()
                     .flex_1()
                     .truncate()
-                    .child(self.i18n.t("sidebar.host_tmux.columns.session")),
+                    .child(i18n.t("sidebar.host_tmux.columns.session")),
             )
             .child(
                 div()
                     .flex_none()
                     .w(px(HOST_TMUX_ATTACHED_COLUMN_WIDTH))
-                    .child(self.i18n.t("sidebar.host_tmux.columns.attached")),
+                    .child(i18n.t("sidebar.host_tmux.columns.attached")),
             )
             .child(
                 div()
@@ -359,7 +765,7 @@ impl WorkspaceApp {
                     .w(px(HOST_TMUX_WINDOWS_COLUMN_WIDTH))
                     .flex()
                     .justify_end()
-                    .child(self.i18n.t("sidebar.host_tmux.columns.windows")),
+                    .child(i18n.t("sidebar.host_tmux.columns.windows")),
             )
             .child(
                 div()
@@ -367,7 +773,7 @@ impl WorkspaceApp {
                     .w(px(HOST_TMUX_PANES_COLUMN_WIDTH))
                     .flex()
                     .justify_end()
-                    .child(self.i18n.t("sidebar.host_tmux.columns.panes")),
+                    .child(i18n.t("sidebar.host_tmux.columns.panes")),
             )
             .when(show_context_columns, |header| {
                 header.child(
@@ -375,38 +781,36 @@ impl WorkspaceApp {
                         .flex_none()
                         .w(px(HOST_TMUX_ACTIVITY_COLUMN_WIDTH))
                         .truncate()
-                        .child(self.i18n.t("sidebar.host_tmux.columns.activity")),
+                        .child(i18n.t("sidebar.host_tmux.columns.activity")),
                 )
             })
             .into_any_element()
     }
 
-    pub(super) fn render_host_tmux_row(
+    fn render_host_tmux_row(
         &self,
         connection_id: &str,
         snapshot: &ResourceTmuxSnapshot,
         session: Option<ResourceTmuxSession>,
         show_context_columns: bool,
+        tokens: &ThemeTokens,
+        i18n: &I18n,
+        mono_font: SharedString,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let Some(session) = session else {
             return div().into_any_element();
         };
-        let expanded = self
-            .host_tools
-            .read(cx)
-            .ui
-            .host_tmux_expanded_session_id
-            .as_deref()
-            == Some(session.id.as_str());
-        let theme = self.tokens.ui;
-        let mono_font = settings_mono_font_family(self.settings_store.settings());
+        let expanded =
+            self.ui.host_tmux_expanded_session_id.as_deref() == Some(session.id.as_str());
+        let theme = tokens.ui;
         let pane_count = snapshot.pane_count_for_session(&session.id);
         let attached_label = if session.attached {
-            self.i18n.t("sidebar.host_tmux.attached.yes")
+            i18n.t("sidebar.host_tmux.attached.yes")
         } else {
-            self.i18n.t("sidebar.host_tmux.attached.no")
+            i18n.t("sidebar.host_tmux.attached.no")
         };
+        let session_id = session.id.clone();
 
         div()
             .w_full()
@@ -424,8 +828,7 @@ impl WorkspaceApp {
                     .flex()
                     .items_center()
                     .gap_2()
-                    // Keep the session identity as a first-level flex child.
-                    // Nested fixed wrappers are how earlier Host Tools tables collapsed names to `...`.
+                    // Keep identity at the first flex level so narrow sidebars preserve names.
                     .child(
                         div()
                             .min_w_0()
@@ -504,56 +907,76 @@ impl WorkspaceApp {
                             .truncate()
                             .text_size(px(HOST_PROCESS_TABLE_META_TEXT_SIZE))
                             .text_color(rgb(theme.text_muted))
-                            .font_family(mono_font)
+                            .font_family(mono_font.clone())
                             .child(format!(
                                 "{} · {}",
                                 session.id,
-                                self.active_tmux_window_label(snapshot, &session.id)
+                                Self::active_tmux_window_label(snapshot, &session.id, i18n)
                             )),
                     )
-                    .child(self.render_host_tmux_inline_actions(connection_id, &session, cx)),
+                    .child(self.render_host_tmux_inline_actions(
+                        connection_id,
+                        &session,
+                        tokens,
+                        i18n,
+                        cx,
+                    )),
             )
             .when(expanded, |row| {
                 row.child(self.render_host_tmux_session_detail(
                     connection_id,
                     snapshot,
                     &session,
+                    tokens,
+                    i18n,
+                    mono_font,
                     cx,
                 ))
             })
             .on_mouse_down(
                 MouseButton::Left,
-                cx.listener({
-                    let id = session.id.clone();
-                    move |this, _event, _window, cx| {
-                        this.host_tools.update(cx, |host_tools, _cx| {
-                            let ui = &mut host_tools.ui;
-                            if ui.host_tmux_expanded_session_id.as_deref() == Some(id.as_str()) {
-                                ui.host_tmux_expanded_session_id = None;
-                            } else {
-                                ui.host_tmux_expanded_session_id = Some(id.clone());
-                            }
-                            ui.host_tmux_expanded_window_id = None;
-                        });
-                        cx.notify();
-                        cx.stop_propagation();
+                cx.listener(move |host_tools, _event, _window, cx| {
+                    // Expansion is page-owned view state and never re-enters WorkspaceApp.
+                    if host_tools.ui.host_tmux_expanded_session_id.as_deref()
+                        == Some(session_id.as_str())
+                    {
+                        host_tools.ui.host_tmux_expanded_session_id = None;
+                    } else {
+                        host_tools.ui.host_tmux_expanded_session_id = Some(session_id.clone());
                     }
+                    host_tools.ui.host_tmux_expanded_window_id = None;
+                    cx.notify();
+                    cx.stop_propagation();
                 }),
             )
             .into_any_element()
     }
 
-    pub(super) fn render_host_tmux_inline_actions(
+    fn render_host_tmux_inline_actions(
         &self,
         connection_id: &str,
         session: &ResourceTmuxSession,
+        tokens: &ThemeTokens,
+        i18n: &I18n,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let is_running = self
-            .host_tools
-            .read(cx)
-            .tmux_action_running_for(&session.id);
-        let theme = self.tokens.ui;
+        let theme = tokens.ui;
+        let is_running = self.tmux_action_running_for(&session.id);
+        let connection_id_for_attach = connection_id.to_string();
+        let session_id_for_attach = session.id.clone();
+        let connection_id_for_rename = connection_id.to_string();
+        let session_id_for_rename = session.id.clone();
+        let session_name_for_rename = session.name.clone();
+        let connection_id_for_kill = connection_id.to_string();
+        let session_id_for_kill = session.id.clone();
+        let session_name_for_kill = session.name.clone();
+        let missing_notice = i18n.t("sidebar.host_tmux.toast.exec_terminal_missing");
+        let attach_title = i18n
+            .t("sidebar.host_tmux.attach_title")
+            .replace("{{name}}", &session.name);
+        let opened_notice = i18n
+            .t("sidebar.host_tmux.toast.attach_opened")
+            .replace("{{name}}", &session.name);
         div()
             .flex_none()
             .flex()
@@ -561,7 +984,7 @@ impl WorkspaceApp {
             .justify_end()
             .gap(px(4.0))
             .child(host_tools_tooltip_icon_button(
-                &self.tokens,
+                tokens,
                 LucideIcon::Terminal,
                 13.0,
                 rgb(theme.text),
@@ -574,27 +997,24 @@ impl WorkspaceApp {
                     idle_opacity: 1.0,
                     ..oxideterm_gpui_ui::button::IconButtonOptions::compact(22.0)
                 },
-                self.i18n.t("sidebar.host_tmux.actions.attach"),
+                i18n.t("sidebar.host_tmux.actions.attach"),
                 "host-tmux-attach",
                 true,
-                cx.listener({
-                    let connection_id = connection_id.to_string();
-                    let session_id = session.id.clone();
-                    let session_name = session.name.clone();
-                    move |this, _event, window, cx| {
-                        this.open_host_tmux_attach_terminal(
-                            connection_id.clone(),
-                            session_id.clone(),
-                            session_name.clone(),
-                            window,
-                            cx,
-                        );
-                        cx.stop_propagation();
-                    }
+                cx.listener(move |host_tools, _event, window, cx| {
+                    host_tools.dispatch_tmux_attach_terminal(
+                        connection_id_for_attach.clone(),
+                        session_id_for_attach.clone(),
+                        attach_title.clone(),
+                        opened_notice.clone(),
+                        missing_notice.clone(),
+                        window,
+                        cx,
+                    );
+                    cx.stop_propagation();
                 }),
             ))
             .child(host_tools_tooltip_icon_button(
-                &self.tokens,
+                tokens,
                 LucideIcon::Pencil,
                 13.0,
                 rgb(theme.text),
@@ -607,27 +1027,29 @@ impl WorkspaceApp {
                     idle_opacity: 1.0,
                     ..oxideterm_gpui_ui::button::IconButtonOptions::compact(22.0)
                 },
-                self.i18n.t("sidebar.host_tmux.actions.rename_session"),
+                i18n.t("sidebar.host_tmux.actions.rename_session"),
                 "host-tmux-rename-session",
                 true,
-                cx.listener({
-                    let connection_id = connection_id.to_string();
-                    let session_id = session.id.clone();
-                    let session_name = session.name.clone();
-                    move |this, _event, window, cx| {
-                        this.open_host_tmux_rename_session_dialog(
-                            connection_id.clone(),
-                            session_id.clone(),
-                            session_name.clone(),
-                            window,
-                            cx,
-                        );
-                        cx.stop_propagation();
-                    }
+                cx.listener(move |host_tools, _event, window, cx| {
+                    host_tools.open_tmux_input_from_view(
+                        HostTmuxInputDialog {
+                            connection_id: connection_id_for_rename.clone(),
+                            session_id: session_id_for_rename.clone(),
+                            session_name: session_name_for_rename.clone(),
+                            target_label: session_name_for_rename.clone(),
+                            value: zeroize::Zeroizing::new(session_name_for_rename.clone()),
+                            kind: HostTmuxInputDialogKind::RenameSession {
+                                target: session_id_for_rename.clone(),
+                            },
+                        },
+                        window,
+                        cx,
+                    );
+                    cx.stop_propagation();
                 }),
             ))
             .child(host_tools_tooltip_icon_button(
-                &self.tokens,
+                tokens,
                 LucideIcon::Trash2,
                 13.0,
                 rgb(MONITOR_RED),
@@ -640,36 +1062,237 @@ impl WorkspaceApp {
                     idle_opacity: 1.0,
                     ..oxideterm_gpui_ui::button::IconButtonOptions::compact(22.0)
                 },
-                self.i18n.t("sidebar.host_tmux.actions.kill_session"),
+                i18n.t("sidebar.host_tmux.actions.kill_session"),
                 "host-tmux-kill-session",
                 true,
-                cx.listener({
-                    let connection_id = connection_id.to_string();
-                    let session_id = session.id.clone();
-                    let session_name = session.name.clone();
-                    move |this, _event, _window, cx| {
-                        this.request_host_tmux_kill_session(
-                            connection_id.clone(),
-                            session_id.clone(),
-                            session_name.clone(),
-                            cx,
-                        );
-                        cx.stop_propagation();
-                    }
+                cx.listener(move |host_tools, _event, window, cx| {
+                    host_tools.open_tmux_confirm_from_view(
+                        HostTmuxActionRequest {
+                            connection_id: connection_id_for_kill.clone(),
+                            session_id: session_id_for_kill.clone(),
+                            session_name: session_name_for_kill.clone(),
+                            target_label: session_name_for_kill.clone(),
+                            action: HostTmuxDestructiveAction::KillSession {
+                                target: session_id_for_kill.clone(),
+                            },
+                        },
+                        window,
+                        cx,
+                    );
+                    cx.stop_propagation();
                 }),
             ))
             .into_any_element()
     }
 
-    pub(super) fn render_host_tmux_session_detail(
+    fn render_host_tmux_window_actions(
+        &self,
+        connection_id: &str,
+        session: &ResourceTmuxSession,
+        tmux_window: &ResourceTmuxWindow,
+        tokens: &ThemeTokens,
+        i18n: &I18n,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let theme = tokens.ui;
+        let is_running = self.tmux_action_running_for(&session.id);
+        let connection_id_for_rename = connection_id.to_string();
+        let session_id_for_rename = session.id.clone();
+        let session_name_for_rename = session.name.clone();
+        let window_id_for_rename = tmux_window.id.clone();
+        let window_label_for_rename = format!("#{} {}", tmux_window.index, tmux_window.name);
+        let window_name_for_rename = tmux_window.name.clone();
+        let connection_id_for_kill = connection_id.to_string();
+        let session_id_for_kill = session.id.clone();
+        let session_name_for_kill = session.name.clone();
+        let window_id_for_kill = tmux_window.id.clone();
+        let window_label_for_kill = format!("#{} {}", tmux_window.index, tmux_window.name);
+        div()
+            .flex_none()
+            .flex()
+            .items_center()
+            .gap(px(3.0))
+            .child(host_tools_tooltip_icon_button(
+                tokens,
+                LucideIcon::Pencil,
+                12.0,
+                rgb(theme.text),
+                oxideterm_gpui_ui::button::IconButtonOptions {
+                    size: 20.0,
+                    disabled: is_running,
+                    has_background: true,
+                    background: Some(rgb(theme.bg_hover)),
+                    hover_background: Some(rgb(theme.bg_panel)),
+                    idle_opacity: 1.0,
+                    ..oxideterm_gpui_ui::button::IconButtonOptions::compact(20.0)
+                },
+                i18n.t("sidebar.host_tmux.actions.rename_window"),
+                "host-tmux-rename-window",
+                true,
+                cx.listener(move |host_tools, _event, window, cx| {
+                    host_tools.open_tmux_input_from_view(
+                        HostTmuxInputDialog {
+                            connection_id: connection_id_for_rename.clone(),
+                            session_id: session_id_for_rename.clone(),
+                            session_name: session_name_for_rename.clone(),
+                            target_label: window_label_for_rename.clone(),
+                            value: zeroize::Zeroizing::new(window_name_for_rename.clone()),
+                            kind: HostTmuxInputDialogKind::RenameWindow {
+                                target: window_id_for_rename.clone(),
+                            },
+                        },
+                        window,
+                        cx,
+                    );
+                    cx.stop_propagation();
+                }),
+            ))
+            .child(host_tools_tooltip_icon_button(
+                tokens,
+                LucideIcon::Trash2,
+                12.0,
+                rgb(MONITOR_RED),
+                oxideterm_gpui_ui::button::IconButtonOptions {
+                    size: 20.0,
+                    disabled: is_running,
+                    has_background: true,
+                    background: Some(rgba((MONITOR_RED << 8) | MONITOR_TINT_ALPHA)),
+                    hover_background: Some(rgba((MONITOR_RED << 8) | 0x30)),
+                    idle_opacity: 1.0,
+                    ..oxideterm_gpui_ui::button::IconButtonOptions::compact(20.0)
+                },
+                i18n.t("sidebar.host_tmux.actions.kill_window"),
+                "host-tmux-kill-window",
+                true,
+                cx.listener(move |host_tools, _event, window, cx| {
+                    host_tools.open_tmux_confirm_from_view(
+                        HostTmuxActionRequest {
+                            connection_id: connection_id_for_kill.clone(),
+                            session_id: session_id_for_kill.clone(),
+                            session_name: session_name_for_kill.clone(),
+                            target_label: window_label_for_kill.clone(),
+                            action: HostTmuxDestructiveAction::KillWindow {
+                                target: window_id_for_kill.clone(),
+                            },
+                        },
+                        window,
+                        cx,
+                    );
+                    cx.stop_propagation();
+                }),
+            ))
+            .into_any_element()
+    }
+
+    fn render_host_tmux_pane_actions(
+        &self,
+        connection_id: &str,
+        session: &ResourceTmuxSession,
+        pane: &ResourceTmuxPane,
+        tokens: &ThemeTokens,
+        i18n: &I18n,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let theme = tokens.ui;
+        let is_running = self.tmux_action_running_for(&session.id);
+        let connection_id_for_command = connection_id.to_string();
+        let session_id_for_command = session.id.clone();
+        let session_name_for_command = session.name.clone();
+        let pane_id_for_command = pane.id.clone();
+        let pane_label_for_command = format!("%{} {}", pane.index, pane.command);
+        let connection_id_for_kill = connection_id.to_string();
+        let session_id_for_kill = session.id.clone();
+        let session_name_for_kill = session.name.clone();
+        let pane_id_for_kill = pane.id.clone();
+        let pane_label_for_kill = format!("%{} {}", pane.index, pane.command);
+        div()
+            .flex_none()
+            .flex()
+            .items_center()
+            .gap(px(3.0))
+            .child(host_tools_tooltip_icon_button(
+                tokens,
+                LucideIcon::Keyboard,
+                12.0,
+                rgb(theme.text),
+                oxideterm_gpui_ui::button::IconButtonOptions {
+                    size: 20.0,
+                    disabled: is_running,
+                    has_background: true,
+                    background: Some(rgb(theme.bg_hover)),
+                    hover_background: Some(rgb(theme.bg_panel)),
+                    idle_opacity: 1.0,
+                    ..oxideterm_gpui_ui::button::IconButtonOptions::compact(20.0)
+                },
+                i18n.t("sidebar.host_tmux.actions.send_command"),
+                "host-tmux-send-pane-command",
+                true,
+                cx.listener(move |host_tools, _event, window, cx| {
+                    host_tools.open_tmux_input_from_view(
+                        HostTmuxInputDialog {
+                            connection_id: connection_id_for_command.clone(),
+                            session_id: session_id_for_command.clone(),
+                            session_name: session_name_for_command.clone(),
+                            target_label: pane_label_for_command.clone(),
+                            value: zeroize::Zeroizing::new(String::new()),
+                            kind: HostTmuxInputDialogKind::SendPaneCommand {
+                                target: pane_id_for_command.clone(),
+                            },
+                        },
+                        window,
+                        cx,
+                    );
+                    cx.stop_propagation();
+                }),
+            ))
+            .child(host_tools_tooltip_icon_button(
+                tokens,
+                LucideIcon::Trash2,
+                12.0,
+                rgb(MONITOR_RED),
+                oxideterm_gpui_ui::button::IconButtonOptions {
+                    size: 20.0,
+                    disabled: is_running,
+                    has_background: true,
+                    background: Some(rgba((MONITOR_RED << 8) | MONITOR_TINT_ALPHA)),
+                    hover_background: Some(rgba((MONITOR_RED << 8) | 0x30)),
+                    idle_opacity: 1.0,
+                    ..oxideterm_gpui_ui::button::IconButtonOptions::compact(20.0)
+                },
+                i18n.t("sidebar.host_tmux.actions.kill_pane"),
+                "host-tmux-kill-pane",
+                true,
+                cx.listener(move |host_tools, _event, window, cx| {
+                    host_tools.open_tmux_confirm_from_view(
+                        HostTmuxActionRequest {
+                            connection_id: connection_id_for_kill.clone(),
+                            session_id: session_id_for_kill.clone(),
+                            session_name: session_name_for_kill.clone(),
+                            target_label: pane_label_for_kill.clone(),
+                            action: HostTmuxDestructiveAction::KillPane {
+                                target: pane_id_for_kill.clone(),
+                            },
+                        },
+                        window,
+                        cx,
+                    );
+                    cx.stop_propagation();
+                }),
+            ))
+            .into_any_element()
+    }
+
+    fn render_host_tmux_session_detail(
         &self,
         connection_id: &str,
         snapshot: &ResourceTmuxSnapshot,
         session: &ResourceTmuxSession,
+        tokens: &ThemeTokens,
+        i18n: &I18n,
+        mono_font: SharedString,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let theme = self.tokens.ui;
-        let windows = snapshot.windows_for_session(&session.id);
+        let theme = tokens.ui;
         let mut detail = div()
             .px_3()
             .pb_3()
@@ -681,47 +1304,47 @@ impl WorkspaceApp {
             .gap_1()
             .text_size(px(HOST_PROCESS_DETAIL_TEXT_SIZE))
             .text_color(rgb(theme.text_muted))
-            .child(self.render_host_process_detail_line(
-                self.i18n.t("sidebar.host_tmux.columns.created"),
+            .child(Self::render_host_tmux_detail_line(
+                i18n.t("sidebar.host_tmux.columns.created"),
                 tmux_time_label(&session.created),
             ))
-            .child(self.render_host_process_detail_line(
-                self.i18n.t("sidebar.host_tmux.columns.activity"),
+            .child(Self::render_host_tmux_detail_line(
+                i18n.t("sidebar.host_tmux.columns.activity"),
                 tmux_time_label(&session.activity),
             ));
-        for window in windows {
+        // Child rows and their actions are materialized only after the session expands.
+        for window in snapshot.windows_for_session(&session.id) {
             detail = detail.child(self.render_host_tmux_window_detail(
                 connection_id,
                 snapshot,
                 session,
-                &window,
+                window,
+                tokens,
+                i18n,
+                mono_font.clone(),
                 cx,
             ));
         }
         detail.into_any_element()
     }
 
-    pub(super) fn render_host_tmux_window_detail(
+    fn render_host_tmux_window_detail(
         &self,
         connection_id: &str,
         snapshot: &ResourceTmuxSnapshot,
         session: &ResourceTmuxSession,
-        window: &ResourceTmuxWindow,
+        window: ResourceTmuxWindow,
+        tokens: &ThemeTokens,
+        i18n: &I18n,
+        mono_font: SharedString,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let theme = self.tokens.ui;
-        let mono_font = settings_mono_font_family(self.settings_store.settings());
-        let expanded = self
-            .host_tools
-            .read(cx)
-            .ui
-            .host_tmux_expanded_window_id
-            .as_deref()
-            == Some(window.id.as_str());
-        let panes = snapshot.panes_for_window(&window.id);
+        let theme = tokens.ui;
+        let expanded = self.ui.host_tmux_expanded_window_id.as_deref() == Some(window.id.as_str());
+        let window_id = window.id.clone();
         div()
             .mt_1()
-            .rounded(px(self.tokens.radii.md))
+            .rounded(px(tokens.radii.md))
             .border_1()
             .border_color(rgba((theme.border << 8) | MONITOR_BORDER_ALPHA))
             .bg(rgb(theme.bg_panel))
@@ -740,7 +1363,7 @@ impl WorkspaceApp {
                             .min_w_0()
                             .flex_1()
                             .truncate()
-                            .font_family(mono_font)
+                            .font_family(mono_font.clone())
                             .text_color(rgb(if window.active {
                                 theme.text
                             } else {
@@ -756,114 +1379,31 @@ impl WorkspaceApp {
                             .child(format!(
                                 "{} {}",
                                 window.panes,
-                                self.i18n.t("sidebar.host_tmux.columns.panes")
+                                i18n.t("sidebar.host_tmux.columns.panes")
                             )),
                     )
-                    .child(
-                        div()
-                            .flex_none()
-                            .flex()
-                            .items_center()
-                            .gap(px(3.0))
-                            .child(host_tools_tooltip_icon_button(
-                                &self.tokens,
-                                LucideIcon::Pencil,
-                                12.0,
-                                rgb(theme.text),
-                                oxideterm_gpui_ui::button::IconButtonOptions {
-                                    size: 20.0,
-                                    disabled: self
-                                        .host_tools
-                                        .read(cx)
-                                        .tmux_action_running_for(&session.id),
-                                    has_background: true,
-                                    background: Some(rgb(theme.bg_hover)),
-                                    hover_background: Some(rgb(theme.bg_panel)),
-                                    idle_opacity: 1.0,
-                                    ..oxideterm_gpui_ui::button::IconButtonOptions::compact(20.0)
-                                },
-                                self.i18n.t("sidebar.host_tmux.actions.rename_window"),
-                                "host-tmux-rename-window",
-                                true,
-                                cx.listener({
-                                    let connection_id = connection_id.to_string();
-                                    let session_id = session.id.clone();
-                                    let session_name = session.name.clone();
-                                    let window_id = window.id.clone();
-                                    let window_label = format!("#{} {}", window.index, window.name);
-                                    let window_name = window.name.clone();
-                                    move |this, _event, window, cx| {
-                                        this.open_host_tmux_rename_window_dialog(
-                                            connection_id.clone(),
-                                            session_id.clone(),
-                                            session_name.clone(),
-                                            window_id.clone(),
-                                            window_label.clone(),
-                                            window_name.clone(),
-                                            window,
-                                            cx,
-                                        );
-                                        cx.stop_propagation();
-                                    }
-                                }),
-                            ))
-                            .child(host_tools_tooltip_icon_button(
-                                &self.tokens,
-                                LucideIcon::Trash2,
-                                12.0,
-                                rgb(MONITOR_RED),
-                                oxideterm_gpui_ui::button::IconButtonOptions {
-                                    size: 20.0,
-                                    disabled: self
-                                        .host_tools
-                                        .read(cx)
-                                        .tmux_action_running_for(&session.id),
-                                    has_background: true,
-                                    background: Some(rgba((MONITOR_RED << 8) | MONITOR_TINT_ALPHA)),
-                                    hover_background: Some(rgba((MONITOR_RED << 8) | 0x30)),
-                                    idle_opacity: 1.0,
-                                    ..oxideterm_gpui_ui::button::IconButtonOptions::compact(20.0)
-                                },
-                                self.i18n.t("sidebar.host_tmux.actions.kill_window"),
-                                "host-tmux-kill-window",
-                                true,
-                                cx.listener({
-                                    let connection_id = connection_id.to_string();
-                                    let session_id = session.id.clone();
-                                    let session_name = session.name.clone();
-                                    let window_id = window.id.clone();
-                                    let window_label = format!("#{} {}", window.index, window.name);
-                                    move |this, _event, _window, cx| {
-                                        this.request_host_tmux_kill_window(
-                                            connection_id.clone(),
-                                            session_id.clone(),
-                                            session_name.clone(),
-                                            window_id.clone(),
-                                            window_label.clone(),
-                                            cx,
-                                        );
-                                        cx.stop_propagation();
-                                    }
-                                }),
-                            )),
-                    )
+                    .child(self.render_host_tmux_window_actions(
+                        connection_id,
+                        session,
+                        &window,
+                        tokens,
+                        i18n,
+                        cx,
+                    ))
                     .on_mouse_down(
                         MouseButton::Left,
-                        cx.listener({
-                            let id = window.id.clone();
-                            move |this, _event, _window, cx| {
-                                this.host_tools.update(cx, |host_tools, _cx| {
-                                    let expanded_window_id =
-                                        &mut host_tools.ui.host_tmux_expanded_window_id;
-                                    if expanded_window_id.as_deref() == Some(id.as_str()) {
-                                        *expanded_window_id = None;
-                                    } else {
-                                        *expanded_window_id = Some(id.clone());
-                                    }
-                                });
-                                cx.notify();
-                                cx.stop_propagation();
+                        cx.listener(move |host_tools, _event, _window, cx| {
+                            // Window disclosure state belongs to the Host Tools page entity.
+                            if host_tools.ui.host_tmux_expanded_window_id.as_deref()
+                                == Some(window_id.as_str())
+                            {
+                                host_tools.ui.host_tmux_expanded_window_id = None;
+                            } else {
+                                host_tools.ui.host_tmux_expanded_window_id =
+                                    Some(window_id.clone());
                             }
+                            cx.notify();
+                            cx.stop_propagation();
                         }),
                     ),
             )
@@ -871,11 +1411,15 @@ impl WorkspaceApp {
                 let mut body = div()
                     .border_t_1()
                     .border_color(rgba((theme.border << 8) | MONITOR_BORDER_ALPHA));
-                for pane in panes {
+                // Pane rows stay lazy so collapsed windows do not allocate action closures.
+                for pane in snapshot.panes_for_window(&window.id) {
                     body = body.child(self.render_host_tmux_pane_detail(
                         connection_id,
                         session,
-                        &pane,
+                        pane,
+                        tokens,
+                        i18n,
+                        mono_font.clone(),
                         cx,
                     ));
                 }
@@ -884,15 +1428,17 @@ impl WorkspaceApp {
             .into_any_element()
     }
 
-    pub(super) fn render_host_tmux_pane_detail(
+    fn render_host_tmux_pane_detail(
         &self,
         connection_id: &str,
         session: &ResourceTmuxSession,
-        pane: &ResourceTmuxPane,
+        pane: ResourceTmuxPane,
+        tokens: &ThemeTokens,
+        i18n: &I18n,
+        mono_font: SharedString,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let theme = self.tokens.ui;
-        let mono_font = settings_mono_font_family(self.settings_store.settings());
+        let theme = tokens.ui;
         div()
             .px_2()
             .py_1()
@@ -926,835 +1472,196 @@ impl WorkspaceApp {
                     .text_color(rgb(theme.text_muted))
                     .child(format!("{} · {}", pane.pid, pane.size)),
             )
-            .child(
-                div()
-                    .flex_none()
-                    .flex()
-                    .items_center()
-                    .gap(px(3.0))
-                    .child(host_tools_tooltip_icon_button(
-                        &self.tokens,
-                        LucideIcon::Keyboard,
-                        12.0,
-                        rgb(theme.text),
-                        oxideterm_gpui_ui::button::IconButtonOptions {
-                            size: 20.0,
-                            disabled: self
-                                .host_tools
-                                .read(cx)
-                                .tmux_action_running_for(&session.id),
-                            has_background: true,
-                            background: Some(rgb(theme.bg_hover)),
-                            hover_background: Some(rgb(theme.bg_panel)),
-                            idle_opacity: 1.0,
-                            ..oxideterm_gpui_ui::button::IconButtonOptions::compact(20.0)
-                        },
-                        self.i18n.t("sidebar.host_tmux.actions.send_command"),
-                        "host-tmux-send-pane-command",
-                        true,
-                        cx.listener({
-                            let connection_id = connection_id.to_string();
-                            let session_id = session.id.clone();
-                            let session_name = session.name.clone();
-                            let pane_id = pane.id.clone();
-                            let pane_label = format!("%{} {}", pane.index, pane.command);
-                            move |this, _event, window, cx| {
-                                this.open_host_tmux_send_pane_command_dialog(
-                                    connection_id.clone(),
-                                    session_id.clone(),
-                                    session_name.clone(),
-                                    pane_id.clone(),
-                                    pane_label.clone(),
-                                    window,
-                                    cx,
-                                );
-                                cx.stop_propagation();
-                            }
-                        }),
-                    ))
-                    .child(host_tools_tooltip_icon_button(
-                        &self.tokens,
-                        LucideIcon::Trash2,
-                        12.0,
-                        rgb(MONITOR_RED),
-                        oxideterm_gpui_ui::button::IconButtonOptions {
-                            size: 20.0,
-                            disabled: self
-                                .host_tools
-                                .read(cx)
-                                .tmux_action_running_for(&session.id),
-                            has_background: true,
-                            background: Some(rgba((MONITOR_RED << 8) | MONITOR_TINT_ALPHA)),
-                            hover_background: Some(rgba((MONITOR_RED << 8) | 0x30)),
-                            idle_opacity: 1.0,
-                            ..oxideterm_gpui_ui::button::IconButtonOptions::compact(20.0)
-                        },
-                        self.i18n.t("sidebar.host_tmux.actions.kill_pane"),
-                        "host-tmux-kill-pane",
-                        true,
-                        cx.listener({
-                            let connection_id = connection_id.to_string();
-                            let session_id = session.id.clone();
-                            let session_name = session.name.clone();
-                            let pane_id = pane.id.clone();
-                            let pane_label = format!("%{} {}", pane.index, pane.command);
-                            move |this, _event, _window, cx| {
-                                this.request_host_tmux_kill_pane(
-                                    connection_id.clone(),
-                                    session_id.clone(),
-                                    session_name.clone(),
-                                    pane_id.clone(),
-                                    pane_label.clone(),
-                                    cx,
-                                );
-                                cx.stop_propagation();
-                            }
-                        }),
-                    )),
-            )
+            .child(self.render_host_tmux_pane_actions(
+                connection_id,
+                session,
+                &pane,
+                tokens,
+                i18n,
+                cx,
+            ))
             .into_any_element()
     }
 
-    pub(super) fn active_tmux_window_label(
-        &self,
-        snapshot: &ResourceTmuxSnapshot,
-        session_id: &str,
-    ) -> String {
-        snapshot
-            .windows_for_session(session_id)
-            .into_iter()
-            .find(|window| window.active)
-            .map(|window| {
-                self.i18n_replace(
-                    "sidebar.host_tmux.active_window",
-                    &[("name", window.name), ("index", window.index.to_string())],
-                )
-            })
-            .unwrap_or_else(|| self.i18n.t("sidebar.host_tmux.no_active_window"))
+    fn render_host_tmux_detail_line(label: String, value: String) -> AnyElement {
+        div()
+            .min_w_0()
+            .flex()
+            .items_center()
+            .gap_2()
+            .child(div().flex_none().child(label))
+            .child(div().min_w_0().flex_1().truncate().child(value))
+            .into_any_element()
     }
 
-    pub(super) fn sync_host_tmux_list_state(
+    fn active_tmux_window_label(
+        snapshot: &ResourceTmuxSnapshot,
+        session_id: &str,
+        i18n: &I18n,
+    ) -> String {
+        snapshot
+            .windows
+            .iter()
+            .find(|window| window.session_id == session_id && window.active)
+            .map(|window| {
+                i18n.t("sidebar.host_tmux.active_window")
+                    .replace("{{name}}", &window.name)
+                    .replace("{{index}}", &window.index.to_string())
+            })
+            .unwrap_or_else(|| i18n.t("sidebar.host_tmux.no_active_window"))
+    }
+
+    fn sync_host_tmux_list_state(
         &self,
         rows: &[ResourceTmuxSession],
         snapshot: Option<&ResourceTmuxSnapshot>,
         selected_id: &str,
-        cx: &mut Context<Self>,
     ) {
-        self.host_tools.update(cx, |host_tools, _cx| {
-            let ui = &host_tools.ui;
-            let signatures = rows
-                .iter()
-                .map(|session| {
-                    let expanded =
-                        ui.host_tmux_expanded_session_id.as_deref() == Some(session.id.as_str());
-                    let child_count = if expanded {
-                        let window_count = snapshot
-                            .map(|snapshot| snapshot.windows_for_session(&session.id).len())
-                            .unwrap_or_default();
-                        let pane_count = ui
-                            .host_tmux_expanded_window_id
-                            .as_deref()
-                            .and_then(|window_id| {
-                                snapshot.map(|snapshot| snapshot.panes_for_window(window_id).len())
-                            })
-                            .unwrap_or_default();
-                        window_count + pane_count
-                    } else {
-                        0
-                    };
-                    tmux_session_row_signature(session, expanded, child_count)
-                })
-                .collect::<Vec<_>>();
-            let identity = format!(
-                "host-tmux:{selected_id}:{}:{}:{}",
-                ui.host_tmux_search_query,
-                ui.host_tmux_expanded_session_id
-                    .as_deref()
-                    .unwrap_or_default(),
-                ui.host_tmux_expanded_window_id
-                    .as_deref()
-                    .unwrap_or_default()
-            );
-            sync_tauri_variable_list_state_by_signatures(
-                &ui.host_tmux_list_state,
-                &mut ui.host_tmux_list_cache.borrow_mut(),
-                &identity,
-                &signatures,
-                TauriVirtualListSpec::new(px(HOST_TMUX_LIST_ESTIMATED_ROW_HEIGHT), 8),
-            );
-        });
-    }
-
-    pub(in crate::workspace) fn handle_host_tmux_search_key(
-        &mut self,
-        event: &KeyDownEvent,
-        cx: &mut Context<Self>,
-    ) -> bool {
-        if !self
-            .host_tools
-            .read(cx)
-            .ui
-            .input_is_focused(HostToolsTextInput::TmuxSearch)
-        {
-            return false;
-        }
-        if event.keystroke.key.as_str() == "escape" && !event.keystroke.modifiers.platform {
-            self.host_tools.update(cx, |host_tools, _cx| {
-                host_tools.ui.clear_input_focus();
-            });
-            self.ime_marked_text = None;
-            self.clear_ime_selection();
-            cx.notify();
-            return true;
-        }
-        false
-    }
-
-    pub(super) fn request_host_tmux_snapshot_for_selected_connection(
-        &mut self,
-        cx: &mut Context<Self>,
-    ) {
-        let connections = self.monitor_connections(cx);
-        let Some(connection_id) = self
-            .host_tools
-            .read(cx)
-            .selected_connection_id_owned()
-            .or_else(|| {
-                connections
-                    .first()
-                    .map(|connection| connection.connection_id.clone())
+        let ui = &self.ui;
+        let signatures = rows
+            .iter()
+            .map(|session| {
+                let expanded =
+                    ui.host_tmux_expanded_session_id.as_deref() == Some(session.id.as_str());
+                let child_count = if expanded {
+                    let window_count = snapshot
+                        .map(|snapshot| snapshot.windows_for_session(&session.id).len())
+                        .unwrap_or_default();
+                    let pane_count = ui
+                        .host_tmux_expanded_window_id
+                        .as_deref()
+                        .and_then(|window_id| {
+                            snapshot.map(|snapshot| snapshot.panes_for_window(window_id).len())
+                        })
+                        .unwrap_or_default();
+                    window_count + pane_count
+                } else {
+                    0
+                };
+                tmux_session_row_signature(session, expanded, child_count)
             })
-        else {
-            return;
+            .collect::<Vec<_>>();
+        let identity = format!(
+            "host-tmux:{selected_id}:{}:{}:{}",
+            ui.host_tmux_search_query,
+            ui.host_tmux_expanded_session_id
+                .as_deref()
+                .unwrap_or_default(),
+            ui.host_tmux_expanded_window_id
+                .as_deref()
+                .unwrap_or_default()
+        );
+        sync_tauri_variable_list_state_by_signatures(
+            &ui.host_tmux_list_state,
+            &mut ui.host_tmux_list_cache.borrow_mut(),
+            &identity,
+            &signatures,
+            TauriVirtualListSpec::new(px(HOST_TMUX_LIST_ESTIMATED_ROW_HEIGHT), 8),
+        );
+    }
+
+    fn dispatch_tmux_attach_terminal(
+        &self,
+        connection_id: String,
+        session_id: String,
+        title: String,
+        opened_notice: String,
+        missing_notice: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let command = match self.tmux_attach_command(&connection_id, &session_id) {
+            Ok(command) => command,
+            Err(_) => {
+                cx.emit(HostToolsEvent::ShowNotice(
+                    HostToolsNotice::TmuxActionFailed,
+                ));
+                return;
+            }
         };
-        self.request_host_tmux_snapshot(connection_id, HostSnapshotFeedback::Silent, cx);
-    }
-
-    pub(in crate::workspace) fn request_host_tmux_snapshot(
-        &mut self,
-        connection_id: String,
-        feedback: HostSnapshotFeedback,
-        cx: &mut Context<Self>,
-    ) {
-        if !self.host_tool_monitoring_enabled(ContextSidebarTool::Tmux)
-            || !self.host_tools_surface_visible()
-            || self.host_tools.read(cx).active_tool() != ContextSidebarTool::Tmux
-        {
-            return;
-        }
-        let failure_fallback = self.i18n.t("sidebar.host_tmux.toast.unknown_error");
-        let unavailable_fallback = self.i18n.t("sidebar.host_tmux.unavailable");
-        let search_query = self.host_tools.read(cx).ui.host_tmux_search_query.clone();
-        let runtime = self.forwarding_runtime.handle().clone();
-        let notices = self.host_tools.update(cx, |host_tools, cx| {
-            host_tools.request_tmux_snapshot(
-                connection_id,
-                feedback,
-                search_query,
-                failure_fallback,
-                unavailable_fallback,
-                runtime,
-                cx,
-            )
-        });
-        for notice in notices {
-            self.push_host_tools_notice(notice);
-        }
-    }
-
-    pub(super) fn request_host_tmux_kill_session(
-        &mut self,
-        connection_id: String,
-        session_id: String,
-        session_name: String,
-        cx: &mut Context<Self>,
-    ) {
-        let notice = self.host_tools.update(cx, |host_tools, cx| {
-            host_tools.open_tmux_action_confirm(
-                HostTmuxActionRequest {
+        // The builder is the only source of terminal commands for this action.
+        window.dispatch_action(
+            Box::new(HostToolsWindowRequest::new(
+                HostToolsWindowIntent::OpenExistingNodeTerminal {
                     connection_id,
-                    session_id: session_id.clone(),
-                    session_name: session_name.clone(),
-                    target_label: session_name,
-                    action: HostTmuxDestructiveAction::KillSession { target: session_id },
+                    command,
+                    title,
+                    opened_notice,
+                    missing_notice,
                 },
-                cx,
-            )
-        });
-        if let Some(notice) = notice {
-            self.push_host_tools_notice(notice);
-            return;
-        }
-        self.reset_standard_confirm_focus();
-        cx.notify();
-    }
-
-    pub(super) fn request_host_tmux_kill_window(
-        &mut self,
-        connection_id: String,
-        session_id: String,
-        session_name: String,
-        window_id: String,
-        window_label: String,
-        cx: &mut Context<Self>,
-    ) {
-        let notice = self.host_tools.update(cx, |host_tools, cx| {
-            host_tools.open_tmux_action_confirm(
-                HostTmuxActionRequest {
-                    connection_id,
-                    session_id,
-                    session_name,
-                    target_label: window_label,
-                    action: HostTmuxDestructiveAction::KillWindow { target: window_id },
-                },
-                cx,
-            )
-        });
-        if let Some(notice) = notice {
-            self.push_host_tools_notice(notice);
-            return;
-        }
-        self.reset_standard_confirm_focus();
-        cx.notify();
-    }
-
-    pub(super) fn request_host_tmux_kill_pane(
-        &mut self,
-        connection_id: String,
-        session_id: String,
-        session_name: String,
-        pane_id: String,
-        pane_label: String,
-        cx: &mut Context<Self>,
-    ) {
-        let notice = self.host_tools.update(cx, |host_tools, cx| {
-            host_tools.open_tmux_action_confirm(
-                HostTmuxActionRequest {
-                    connection_id,
-                    session_id,
-                    session_name,
-                    target_label: pane_label,
-                    action: HostTmuxDestructiveAction::KillPane { target: pane_id },
-                },
-                cx,
-            )
-        });
-        if let Some(notice) = notice {
-            self.push_host_tools_notice(notice);
-            return;
-        }
-        self.reset_standard_confirm_focus();
-        cx.notify();
-    }
-
-    pub(super) fn open_host_tmux_rename_session_dialog(
-        &mut self,
-        connection_id: String,
-        session_id: String,
-        session_name: String,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        self.open_host_tmux_input_dialog(
-            HostTmuxInputDialog {
-                connection_id,
-                session_id: session_id.clone(),
-                session_name: session_name.clone(),
-                target_label: session_name.clone(),
-                value: zeroize::Zeroizing::new(session_name),
-                kind: HostTmuxInputDialogKind::RenameSession { target: session_id },
-            },
-            window,
+            )),
             cx,
         );
     }
 
-    pub(super) fn open_host_tmux_rename_window_dialog(
-        &mut self,
+    fn dispatch_tmux_new_session_terminal(
+        &self,
         connection_id: String,
-        session_id: String,
-        session_name: String,
-        window_id: String,
-        window_label: String,
-        window_name: String,
+        title: String,
+        opened_notice: String,
+        missing_notice: String,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.open_host_tmux_input_dialog(
-            HostTmuxInputDialog {
-                connection_id,
-                session_id,
-                session_name,
-                target_label: window_label,
-                value: zeroize::Zeroizing::new(window_name),
-                kind: HostTmuxInputDialogKind::RenameWindow { target: window_id },
-            },
-            window,
+        let command = match self.tmux_new_session_command(&connection_id) {
+            Ok(command) => command,
+            Err(_) => {
+                cx.emit(HostToolsEvent::ShowNotice(
+                    HostToolsNotice::TmuxActionFailed,
+                ));
+                return;
+            }
+        };
+        // The builder is the only source of terminal commands for this action.
+        window.dispatch_action(
+            Box::new(HostToolsWindowRequest::new(
+                HostToolsWindowIntent::OpenExistingNodeTerminal {
+                    connection_id,
+                    command,
+                    title,
+                    opened_notice,
+                    missing_notice,
+                },
+            )),
             cx,
         );
     }
 
-    pub(super) fn open_host_tmux_send_pane_command_dialog(
+    fn open_tmux_confirm_from_view(
         &mut self,
-        connection_id: String,
-        session_id: String,
-        session_name: String,
-        pane_id: String,
-        pane_label: String,
+        request: HostTmuxActionRequest,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.open_host_tmux_input_dialog(
-            HostTmuxInputDialog {
-                connection_id,
-                session_id,
-                session_name,
-                target_label: pane_label,
-                value: zeroize::Zeroizing::new(String::new()),
-                kind: HostTmuxInputDialogKind::SendPaneCommand { target: pane_id },
-            },
-            window,
+        if let Some(notice) = self.open_tmux_action_confirm(request, cx) {
+            cx.emit(HostToolsEvent::ShowNotice(notice));
+            return;
+        }
+        // The root owns only the shared focus adapter, not the confirm state.
+        window.dispatch_action(
+            Box::new(HostToolsWindowRequest::new(
+                HostToolsWindowIntent::PrepareTmuxConfirm,
+            )),
             cx,
         );
     }
 
-    pub(super) fn open_host_tmux_input_dialog(
+    fn open_tmux_input_from_view(
         &mut self,
         dialog: HostTmuxInputDialog,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.host_tools.update(cx, |host_tools, cx| {
-            host_tools.open_tmux_input_dialog(dialog, cx);
-        });
-        self.ime_marked_text = None;
-        self.clear_ime_selection();
-        self.new_connection_caret_visible = true;
-        window.focus(&self.focus_handle, cx);
-        cx.notify();
-    }
-
-    pub(super) fn open_host_tmux_attach_terminal(
-        &mut self,
-        connection_id: String,
-        session_id: String,
-        session_name: String,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        let command = match self
-            .host_tools
-            .read(cx)
-            .tmux_attach_command(&connection_id, &session_id)
-        {
-            Ok(command) => command,
-            Err(error) => {
-                self.push_host_tmux_toast(error, TerminalNoticeVariant::Error);
-                cx.notify();
-                return;
-            }
-        };
-        let title = self.i18n_replace(
-            "sidebar.host_tmux.attach_title",
-            &[("name", session_name.clone())],
-        );
-        self.open_host_tmux_terminal_command(
-            connection_id,
-            session_name,
-            command,
-            title,
-            "sidebar.host_tmux.toast.attach_opened",
-            window,
+        // The zeroizing dialog remains the sole owner of its secret-capable input.
+        self.open_tmux_input_dialog(dialog, cx);
+        window.dispatch_action(
+            Box::new(HostToolsWindowRequest::new(
+                HostToolsWindowIntent::PrepareTmuxInputDialog,
+            )),
             cx,
         );
     }
 
-    pub(super) fn open_host_tmux_new_session_terminal(
-        &mut self,
-        connection_id: String,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        let command = match self
-            .host_tools
-            .read(cx)
-            .tmux_new_session_command(&connection_id)
-        {
-            Ok(command) => command,
-            Err(error) => {
-                self.push_host_tmux_toast(error, TerminalNoticeVariant::Error);
-                cx.notify();
-                return;
-            }
-        };
-        let name = self.i18n.t("sidebar.host_tmux.new_session_name");
-        let title = self.i18n.t("sidebar.host_tmux.new_session_title");
-        self.open_host_tmux_terminal_command(
-            connection_id,
-            name,
-            command,
-            title,
-            "sidebar.host_tmux.toast.new_session_opened",
-            window,
-            cx,
-        );
-    }
-
-    pub(super) fn open_host_tmux_terminal_command(
-        &mut self,
-        connection_id: String,
-        name: String,
-        command: String,
-        title: String,
-        opened_toast_key: &'static str,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        let Some(node_id) = self.node_router.node_id_for_connection(&connection_id) else {
-            self.push_host_tmux_toast(
-                self.i18n.t("sidebar.host_tmux.toast.exec_terminal_missing"),
-                TerminalNoticeVariant::Error,
-            );
-            cx.notify();
-            return;
-        };
-        if !self.ssh_nodes.contains_key(&node_id) {
-            self.push_host_tmux_toast(
-                self.i18n.t("sidebar.host_tmux.toast.exec_terminal_missing"),
-                TerminalNoticeVariant::Error,
-            );
-            cx.notify();
-            return;
-        }
-        match self.queue_ssh_terminal_tab_for_existing_node(
-            node_id,
-            Some(command),
-            title,
-            window,
-            cx,
-        ) {
-            Ok(()) => self.push_host_tmux_toast(
-                self.i18n_replace(opened_toast_key, &[("name", name)]),
-                TerminalNoticeVariant::Success,
-            ),
-            Err(error) => {
-                self.push_host_tmux_toast(error.to_string(), TerminalNoticeVariant::Error)
-            }
-        }
-        cx.notify();
-    }
-
-    pub(in crate::workspace) fn handle_host_tmux_confirm_key(
-        &mut self,
-        event: &KeyDownEvent,
-        cx: &mut Context<Self>,
-    ) -> bool {
-        if self.host_tools.read(cx).tmux_confirm_view().is_none() {
-            return false;
-        }
-        match self.handle_standard_confirm_key(event, cx) {
-            Some(ConfirmKeyboardAction::Cancel) => {
-                self.begin_host_tmux_confirm_exit(cx);
-                true
-            }
-            Some(ConfirmKeyboardAction::Confirm) => {
-                self.confirm_host_tmux_action(cx);
-                true
-            }
-            Some(ConfirmKeyboardAction::Handled) => true,
-            None => false,
-        }
-    }
-
-    pub(in crate::workspace) fn handle_host_tmux_input_dialog_key(
-        &mut self,
-        event: &KeyDownEvent,
-        cx: &mut Context<Self>,
-    ) -> bool {
-        if self.host_tools.read(cx).ui.host_tmux_input_dialog.is_none() {
-            return false;
-        }
-        if event.keystroke.modifiers.platform {
-            return false;
-        }
-        match event.keystroke.key.as_str() {
-            "escape" => {
-                self.host_tools.update(cx, |host_tools, cx| {
-                    host_tools.dismiss_tmux_input_dialog(cx);
-                });
-                self.ime_marked_text = None;
-                self.clear_ime_selection();
-                cx.notify();
-                true
-            }
-            "enter" => {
-                self.submit_host_tmux_input_dialog(cx);
-                true
-            }
-            _ => false,
-        }
-    }
-
-    pub(super) fn confirm_host_tmux_action(&mut self, cx: &mut Context<Self>) {
-        self.clear_standard_confirm_focus();
-        let delay = oxideterm_gpui_ui::motion::duration(
-            &self.tokens,
-            oxideterm_gpui_ui::motion::MotionDuration::Control,
-        );
-        let runtime = self.forwarding_runtime.handle().clone();
-        let notices = self.host_tools.update(cx, |host_tools, cx| {
-            host_tools.confirm_tmux_action(delay, runtime, cx)
-        });
-        for notice in notices {
-            self.push_host_tools_notice(notice);
-        }
-    }
-
-    /// Keeps the request mounted until the current exit generation completes.
-    fn begin_host_tmux_confirm_exit(&mut self, cx: &mut Context<Self>) -> bool {
-        self.clear_standard_confirm_focus();
-        let delay = oxideterm_gpui_ui::motion::duration(
-            &self.tokens,
-            oxideterm_gpui_ui::motion::MotionDuration::Control,
-        );
-        self.host_tools.update(cx, |host_tools, cx| {
-            host_tools.begin_tmux_confirm_exit(delay, cx)
-        })
-    }
-
-    pub(super) fn submit_host_tmux_input_dialog(&mut self, cx: &mut Context<Self>) {
-        if self.host_tools.read(cx).tmux_action_running() {
-            self.push_host_tools_notice(HostToolsNotice::TmuxActionAlreadyRunning);
-            return;
-        }
-        let runtime = self.forwarding_runtime.handle().clone();
-        let notices = self.host_tools.update(cx, |host_tools, cx| {
-            host_tools.submit_tmux_input(runtime, cx)
-        });
-        self.ime_marked_text = None;
-        self.clear_ime_selection();
-        for notice in notices {
-            self.push_host_tools_notice(notice);
-        }
-    }
-
-    pub(super) fn push_host_tmux_toast(&mut self, message: String, variant: TerminalNoticeVariant) {
-        let _ = self.terminal_notice_tx.send(TerminalNotice {
-            title: message,
-            description: None,
-            status_text: None,
-            progress: None,
-            variant,
-        });
-    }
-
-    pub(in crate::workspace) fn render_host_tmux_confirm_dialog(
-        &self,
-        cx: &mut Context<Self>,
-    ) -> Option<AnyElement> {
-        let (request, phase) = self.host_tools.read(cx).tmux_confirm_view()?;
-        let title = self.i18n.t("sidebar.host_tmux.confirm.title");
-        let description = self.i18n_replace(
-            host_tmux_confirm_description_key(&request.action),
-            &[
-                ("name", request.session_name.clone()),
-                ("id", request.session_id.clone()),
-                ("target", request.target_label.clone()),
-            ],
-        );
-        Some(
-            oxideterm_gpui_ui::confirm::confirm_dialog_with_focus_motion(
-                &self.tokens,
-                "host-tmux-confirm-motion",
-                phase,
-                ConfirmDialogView {
-                    variant: ConfirmDialogVariant::Danger,
-                    title: div().child(title).into_any_element(),
-                    description: Some(div().child(description).into_any_element()),
-                    cancel_label: div()
-                        .child(self.i18n.t("sidebar.host_tmux.confirm.cancel"))
-                        .into_any_element(),
-                    confirm_label: div()
-                        .child(self.i18n.t(host_tmux_confirm_label_key(&request.action)))
-                        .into_any_element(),
-                },
-                self.standard_confirm_focus(),
-                cx.listener(|this, _event, _window, cx| {
-                    this.begin_host_tmux_confirm_exit(cx);
-                }),
-                cx.listener(|this, _event, _window, cx| {
-                    this.confirm_host_tmux_action(cx);
-                }),
-            )
-            .into_any_element(),
-        )
-    }
-
-    pub(in crate::workspace) fn render_host_tmux_input_dialog(
-        &self,
-        cx: &mut Context<Self>,
-    ) -> Option<AnyElement> {
-        let theme = self.tokens.ui;
-        let target = WorkspaceImeTarget::HostTmuxDialogInput;
-        let (kind, session_name, target_label, submit_disabled, input_control) = {
-            let host_tools = self.host_tools.read(cx);
-            let ui = &host_tools.ui;
-            let dialog = ui.host_tmux_input_dialog.as_ref()?;
-            let input_control = text_input(
-                &self.tokens,
-                TextInputView {
-                    value: dialog.value.as_str(),
-                    placeholder: self.i18n.t(host_tmux_input_placeholder_key(&dialog.kind)),
-                    focused: ui.input_is_focused(HostToolsTextInput::TmuxDialog),
-                    caret_visible: self.new_connection_caret_visible,
-                    secret: false,
-                    selected_all: false,
-                    selected_range: self.ime_selected_range_for_target(target, cx),
-                    marked_text: self.marked_text_for_target(target, cx),
-                },
-            )
-            .h(px(34.0))
-            .cursor(CursorStyle::IBeam);
-            (
-                dialog.kind.clone(),
-                dialog.session_name.clone(),
-                dialog.target_label.clone(),
-                dialog.value.trim().is_empty() || host_tools.tmux_action_running(),
-                input_control,
-            )
-        };
-        let title = self.i18n.t(host_tmux_input_title_key(&kind));
-        let description = self.i18n_replace(
-            host_tmux_input_description_key(&kind),
-            &[("name", session_name), ("target", target_label)],
-        );
-        let submit_label = self.i18n.t(host_tmux_input_submit_key(&kind));
-        let workspace = cx.entity();
-
-        Some(
-            oxideterm_gpui_ui::modal::dismissible_dialog_backdrop()
-                .on_mouse_down(
-                    MouseButton::Left,
-                    cx.listener(|this, _event, _window, cx| {
-                        this.host_tools.update(cx, |host_tools, cx| {
-                            host_tools.dismiss_tmux_input_dialog(cx);
-                        });
-                        this.ime_marked_text = None;
-                        this.clear_ime_selection();
-                        cx.stop_propagation();
-                        cx.notify();
-                    }),
-                )
-                .child(oxideterm_gpui_ui::modal::overlay_content_boundary(
-                    oxideterm_gpui_ui::modal::dialog_content(&self.tokens)
-                        .w(px(HOST_TMUX_INPUT_DIALOG_WIDTH))
-                        .child(
-                            div()
-                                .flex_none()
-                                .px_4()
-                                .py_3()
-                                .border_b_1()
-                                .border_color(rgb(theme.border))
-                                .flex()
-                                .flex_col()
-                                .gap_1()
-                                .child(
-                                    div()
-                                        .text_size(px(14.0))
-                                        .font_weight(gpui::FontWeight::MEDIUM)
-                                        .text_color(rgb(theme.text))
-                                        .child(title),
-                                )
-                                .child(
-                                    div()
-                                        .text_size(px(11.0))
-                                        .text_color(rgb(theme.text_muted))
-                                        .child(description),
-                                ),
-                        )
-                        .child(
-                            div().px_4().py_4().child(text_input_anchor_probe(
-                                target.anchor_id(),
-                                input_control
-                                    .on_mouse_down(
-                                        MouseButton::Left,
-                                        cx.listener(
-                                            move |this, event: &MouseDownEvent, window, cx| {
-                                                this.host_tools.update(cx, |host_tools, _cx| {
-                                                    host_tools.ui.focus_input(
-                                                        HostToolsTextInput::TmuxDialog,
-                                                    );
-                                                });
-                                                this.ime_marked_text = None;
-                                                this.new_connection_caret_visible = true;
-                                                window.focus(&this.focus_handle, cx);
-                                                this.begin_ime_selection_from_mouse_down(
-                                                    target, event, window, cx,
-                                                );
-                                                cx.stop_propagation();
-                                            },
-                                        ),
-                                    )
-                                    .on_mouse_move(cx.listener(
-                                        |this, event: &MouseMoveEvent, window, cx| {
-                                            this.update_ime_selection_drag_from_mouse_move(
-                                                event, window, cx,
-                                            );
-                                        },
-                                    )),
-                                move |anchor, _window, cx| {
-                                    let _ = workspace.update(cx, |this, cx| {
-                                        this.update_text_input_anchor(anchor, cx);
-                                    });
-                                },
-                            )),
-                        )
-                        .child(
-                            div()
-                                .flex_none()
-                                .px_4()
-                                .py_3()
-                                .border_t_1()
-                                .border_color(rgb(theme.border))
-                                .flex()
-                                .items_center()
-                                .justify_end()
-                                .gap_2()
-                                .child(self.workspace_confirm_footer_action_button(
-                                    self.i18n.t("sidebar.host_tmux.confirm.cancel"),
-                                    ButtonVariant::Secondary,
-                                    ConfirmDialogAction::Cancel,
-                                    false,
-                                    None,
-                                    |this, _event, _window, cx| {
-                                        this.host_tools.update(cx, |host_tools, cx| {
-                                            host_tools.dismiss_tmux_input_dialog(cx);
-                                        });
-                                        this.ime_marked_text = None;
-                                        this.clear_ime_selection();
-                                        cx.notify();
-                                    },
-                                    cx,
-                                ))
-                                .child(self.workspace_confirm_footer_action_button(
-                                    submit_label,
-                                    ButtonVariant::Default,
-                                    ConfirmDialogAction::Confirm,
-                                    submit_disabled,
-                                    None,
-                                    |this, _event, _window, cx| {
-                                        this.submit_host_tmux_input_dialog(cx);
-                                    },
-                                    cx,
-                                )),
-                        ),
-                ))
-                .into_any_element(),
-        )
-    }
-}
-
-impl HostToolsEntity {
     pub(super) fn tmux_snapshot_for(&self, connection_id: &str) -> Option<ResourceTmuxSnapshot> {
         (self.host_tmux.snapshot_connection_id.as_deref() == Some(connection_id))
             .then(|| self.host_tmux.snapshot.clone())
@@ -2007,6 +1914,18 @@ impl HostToolsEntity {
         self.start_tmux_action(request, runtime, cx)
     }
 
+    fn confirm_tmux_action_from_view(&mut self, delay: Duration, cx: &mut Context<Self>) {
+        let Some(runtime) = self.lifecycle_runtime.clone() else {
+            cx.emit(HostToolsEvent::ShowNotice(
+                HostToolsNotice::TmuxConnectionMissing,
+            ));
+            return;
+        };
+        for notice in self.confirm_tmux_action(delay, runtime, cx) {
+            cx.emit(HostToolsEvent::ShowNotice(notice));
+        }
+    }
+
     fn start_tmux_action(
         &mut self,
         request: HostTmuxActionRequest,
@@ -2199,6 +2118,24 @@ impl HostToolsEntity {
             target_label: dialog.target_label,
         };
         self.start_tmux_action_command(command, request, runtime, cx)
+    }
+
+    fn submit_tmux_input_from_view(&mut self, cx: &mut Context<Self>) {
+        if self.tmux_action_running() {
+            cx.emit(HostToolsEvent::ShowNotice(
+                HostToolsNotice::TmuxActionAlreadyRunning,
+            ));
+            return;
+        }
+        let Some(runtime) = self.lifecycle_runtime.clone() else {
+            cx.emit(HostToolsEvent::ShowNotice(
+                HostToolsNotice::TmuxConnectionMissing,
+            ));
+            return;
+        };
+        for notice in self.submit_tmux_input(runtime, cx) {
+            cx.emit(HostToolsEvent::ShowNotice(notice));
+        }
     }
 }
 
