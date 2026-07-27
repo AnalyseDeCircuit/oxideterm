@@ -20,7 +20,7 @@ impl WorkspaceApp {
 
         for (index, group) in groups.into_iter().enumerate() {
             let provider = group.provider;
-            let has_key = self.ai_model_selector_has_key(&provider);
+            let has_key = self.ai_model_selector_has_key(&provider, cx);
             let online = self.ai_model_selector_provider_is_online(&provider);
             let expanded = !self.ai.models.selector_search_query.trim().is_empty()
                 || self

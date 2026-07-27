@@ -35,8 +35,6 @@ impl WorkspaceApp {
                                 workspace.poll_ai_acp_agent_probe_results(cx);
                             let model_discovery_backlog =
                                 workspace.poll_ai_acp_model_discovery_results(cx);
-                            let key_status_backlog =
-                                workspace.poll_ai_provider_key_statuses(cx);
                             let knowledge_backlog =
                                 workspace.poll_knowledge_reindex_results(cx);
                             let inline_backlog =
@@ -46,7 +44,6 @@ impl WorkspaceApp {
                                 || selector_backlog
                                 || agent_probe_backlog
                                 || model_discovery_backlog
-                                || key_status_backlog
                                 || knowledge_backlog
                                 || inline_backlog
                         })

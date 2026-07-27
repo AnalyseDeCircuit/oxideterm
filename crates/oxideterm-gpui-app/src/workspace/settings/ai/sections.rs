@@ -881,12 +881,12 @@ impl WorkspaceApp {
             "settings_view.ai.provider_settings_summary",
             self.settings_store.settings().ai.providers.len(),
         );
-        self.sync_ai_provider_card_list_state(providers);
+        self.sync_ai_provider_card_list_state(providers, cx);
         let provider_list = if expanded {
             let state = self.ai.models.provider_card_list_state.clone();
             let spec = self.ai_provider_card_list_spec();
             let workspace = cx.entity();
-            let list_height = self.ai_provider_card_list_estimated_height(providers);
+            let list_height = self.ai_provider_card_list_estimated_height(providers, cx);
             Some(
                 div()
                     .w_full()
@@ -933,10 +933,11 @@ impl WorkspaceApp {
     pub(in crate::workspace) fn ai_provider_card_list_estimated_height(
         &self,
         providers: &[AiProviderView],
+        cx: &App,
     ) -> f32 {
         providers
             .iter()
-            .map(|provider| self.ai_provider_card_estimated_height(provider))
+            .map(|provider| self.ai_provider_card_estimated_height(provider, cx))
             .sum::<f32>()
             + AI_PROVIDER_CARD_LIST_ESTIMATED_HEIGHT
     }
@@ -944,6 +945,7 @@ impl WorkspaceApp {
     pub(in crate::workspace) fn ai_provider_card_estimated_height(
         &self,
         provider: &AiProviderView,
+        cx: &App,
     ) -> f32 {
         let active_provider = self
             .settings_store
@@ -974,7 +976,7 @@ impl WorkspaceApp {
             .div_ceil(AI_PROVIDER_MODEL_CHIPS_PER_VIRTUAL_ROW)
             .max(1);
         let key_input_height = if self
-            .ai_provider_key_display_state(provider)
+            .ai_provider_key_display_state(provider, cx)
             .shows_key_control()
         {
             72.0
@@ -994,6 +996,7 @@ impl WorkspaceApp {
     pub(in crate::workspace) fn sync_ai_provider_card_list_state(
         &self,
         providers: &[AiProviderView],
+        cx: &App,
     ) {
         let mut signatures = providers
             .iter()
@@ -1017,7 +1020,7 @@ impl WorkspaceApp {
                     self.settings_page
                         .expanded_ai_provider_models
                         .contains(&provider.id),
-                    self.ai_provider_has_key_cached(&provider.id),
+                    self.ai_provider_has_key_cached(&provider.id, cx),
                 )
             })
             .collect::<Vec<_>>();

@@ -6,7 +6,7 @@ impl WorkspaceApp {
         section_index: usize,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        self.ensure_ai_provider_key_statuses();
+        self.ensure_ai_provider_key_statuses(cx);
         let collections =
             oxideterm_ai::rag_list_collections(&self.ai.knowledge.rag_store.get(), None)
                 .unwrap_or_default();
@@ -577,7 +577,7 @@ impl WorkspaceApp {
         );
         let has_api_key = preliminary.provider.as_ref().and_then(|provider| {
             oxideterm_ai::ai_embedding_requires_api_key(provider)
-                .then(|| self.ai_provider_has_key_cached(&provider.id))
+                .then(|| self.ai_provider_has_key_cached(&provider.id, cx))
         });
         let resolved = oxideterm_ai::resolve_ai_embedding_provider(
             &settings.ai.providers,

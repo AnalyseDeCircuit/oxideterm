@@ -71,7 +71,7 @@ impl WorkspaceApp {
             self.ai.models.selector_open && self.ai.models.selector_scope == Some(scope);
         let ready = active_provider
             .map(|provider| {
-                self.ai_model_selector_has_key(provider)
+                self.ai_model_selector_has_key(provider, cx)
                     && self.ai_model_selector_provider_is_online(provider)
             })
             .unwrap_or(false);

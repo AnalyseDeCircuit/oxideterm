@@ -2,6 +2,7 @@ use super::*;
 
 pub(in crate::workspace) enum AiWorkspaceEvent {
     ModelRefreshDeliveryReady,
+    ProviderKeyStatusChanged,
 }
 
 pub(in crate::workspace) enum AiModelRefreshIntent {
@@ -40,6 +41,11 @@ pub(in crate::workspace) struct AiWorkspaceEntity {
     model_refresh_pending: usize,
     next_model_refresh_generation: u64,
     model_refresh_intents: VecDeque<AiModelRefreshIntent>,
+    provider_key_status: HashMap<String, bool>,
+    provider_key_status_pending: HashSet<String>,
+    provider_key_status_tx:
+        crate::workspace::delivery::ActiveDeliverySender<AiProviderKeyStatusDelivery>,
+    provider_key_status_rx: std::sync::mpsc::Receiver<AiProviderKeyStatusDelivery>,
 }
 
 impl AiWorkspaceEntity {
@@ -49,6 +55,8 @@ impl AiWorkspaceEntity {
         cx: &mut Context<Self>,
     ) -> Self {
         let (model_refresh_tx, model_refresh_rx) =
+            crate::workspace::delivery::ActiveDeliverySender::channel();
+        let (provider_key_status_tx, provider_key_status_rx) =
             crate::workspace::delivery::ActiveDeliverySender::channel();
         let entity = Self {
             task_runtime,
@@ -60,8 +68,13 @@ impl AiWorkspaceEntity {
             model_refresh_pending: 0,
             next_model_refresh_generation: 0,
             model_refresh_intents: VecDeque::new(),
+            provider_key_status: HashMap::new(),
+            provider_key_status_pending: HashSet::new(),
+            provider_key_status_tx,
+            provider_key_status_rx,
         };
         entity.schedule_model_refresh_delivery(cx);
+        entity.schedule_provider_key_status_delivery(cx);
         entity
     }
 
@@ -144,6 +157,54 @@ impl AiWorkspaceEntity {
         std::mem::take(&mut self.model_refresh_intents)
     }
 
+    pub(in crate::workspace) fn provider_has_key(&self, provider_id: &str) -> bool {
+        self.provider_key_status
+            .get(provider_id)
+            .copied()
+            .unwrap_or(false)
+    }
+
+    pub(in crate::workspace) fn set_provider_key_status(
+        &mut self,
+        provider_id: String,
+        has_key: bool,
+    ) {
+        self.provider_key_status_pending.remove(&provider_id);
+        self.provider_key_status.insert(provider_id, has_key);
+    }
+
+    pub(in crate::workspace) fn invalidate_provider_key_status(&mut self, provider_id: &str) {
+        self.provider_key_status.remove(provider_id);
+        self.provider_key_status_pending.remove(provider_id);
+    }
+
+    pub(in crate::workspace) fn request_provider_key_statuses(
+        &mut self,
+        provider_ids: impl IntoIterator<Item = String>,
+    ) {
+        for provider_id in provider_ids {
+            if self.provider_key_status.contains_key(&provider_id)
+                || !self.provider_key_status_pending.insert(provider_id.clone())
+            {
+                continue;
+            }
+            let worker_tx = self.provider_key_status_tx.clone();
+            let key_store = self.key_store.clone();
+            self.task_runtime.spawn(async move {
+                let provider_id_for_check = provider_id.clone();
+                let has_key = tokio::task::spawn_blocking(move || {
+                    key_store.has_provider_key(&provider_id_for_check)
+                })
+                .await
+                .unwrap_or(false);
+                let _ = worker_tx.send(AiProviderKeyStatusDelivery {
+                    provider_id,
+                    has_key,
+                });
+            });
+        }
+    }
+
     fn begin_model_refresh(&mut self, provider_id: &str) -> Option<u64> {
         if self.refreshing_models.contains(provider_id) {
             return None;
@@ -215,6 +276,62 @@ impl AiWorkspaceEntity {
         }
         if !self.model_refresh_intents.is_empty() {
             cx.emit(AiWorkspaceEvent::ModelRefreshDeliveryReady);
+            cx.notify();
+        }
+        drain.outcome.backlog_remaining
+    }
+
+    fn schedule_provider_key_status_delivery(&self, cx: &mut Context<Self>) {
+        let delivery_wake = self.provider_key_status_tx.wake();
+        let release_wake = delivery_wake.clone();
+        cx.on_release(move |_, _| {
+            // Status probes expose only booleans and never own key material.
+            release_wake.stop();
+        })
+        .detach();
+        cx.spawn(async move |entity, cx| {
+            loop {
+                delivery_wake.wait().await;
+                let should_drain = delivery_wake.take();
+                let stopped = delivery_wake.is_stopped();
+                if should_drain {
+                    let backlog_remaining = entity
+                        .update(cx, |entity, cx| entity.drain_provider_key_statuses(cx))
+                        .unwrap_or(false);
+                    if backlog_remaining {
+                        delivery_wake.mark();
+                    }
+                }
+                if stopped {
+                    break;
+                }
+            }
+        })
+        .detach();
+    }
+
+    fn drain_provider_key_statuses(&mut self, cx: &mut Context<Self>) -> bool {
+        let drain = crate::workspace::delivery::drain_channel(
+            &self.provider_key_status_rx,
+            crate::workspace::delivery::USER_ACTION_DELIVERY_BUDGET,
+        );
+        let mut changed = false;
+        for delivery in drain.items {
+            // Ignore probes superseded by a save, delete, or provider removal
+            // while the blocking keychain lookup was still running.
+            if !self
+                .provider_key_status_pending
+                .remove(&delivery.provider_id)
+            {
+                continue;
+            }
+            let previous = self
+                .provider_key_status
+                .insert(delivery.provider_id, delivery.has_key);
+            changed |= previous != Some(delivery.has_key);
+        }
+        if changed {
+            cx.emit(AiWorkspaceEvent::ProviderKeyStatusChanged);
             cx.notify();
         }
         drain.outcome.backlog_remaining
@@ -310,7 +427,7 @@ pub(super) struct AiRuntimeWorkspaceState {
     pub(super) acp_agent_probe_rx: Option<std::sync::mpsc::Receiver<AcpAgentProbeDelivery>>,
 }
 
-/// Owns provider/model settings, selectors, key status, and model refresh state.
+/// Owns provider/model settings and selector state not yet extracted into the AI Entity.
 pub(super) struct AiModelWorkspaceState {
     pub(super) context_model_list_states: RefCell<HashMap<String, ListState>>,
     pub(super) context_model_list_caches: RefCell<HashMap<String, VirtualListSignatureCache>>,
@@ -338,12 +455,6 @@ pub(super) struct AiModelWorkspaceState {
     pub(super) acp_model_discovery_rx: Option<std::sync::mpsc::Receiver<AcpModelDiscoveryDelivery>>,
     pub(super) mcp_add_dialog: Option<AiMcpServerDraft>,
     pub(super) key_store: oxideterm_ai::AiProviderKeyStore,
-    pub(super) provider_key_status: HashMap<String, bool>,
-    pub(super) provider_key_status_pending: HashSet<String>,
-    pub(super) provider_key_status_tx:
-        Option<crate::workspace::delivery::ActiveDeliverySender<AiProviderKeyStatusDelivery>>,
-    pub(super) provider_key_status_rx:
-        Option<std::sync::mpsc::Receiver<AiProviderKeyStatusDelivery>>,
     pub(super) next_selector_probe_generation: u64,
     pub(super) selector_probe_rx: Option<std::sync::mpsc::Receiver<AiModelSelectorProbeDelivery>>,
     pub(super) selector_probe_tx:
@@ -505,10 +616,6 @@ impl AiModelWorkspaceState {
             acp_model_discovery_rx: None,
             mcp_add_dialog: None,
             key_store,
-            provider_key_status: HashMap::new(),
-            provider_key_status_pending: HashSet::new(),
-            provider_key_status_tx: None,
-            provider_key_status_rx: None,
             next_selector_probe_generation: 0,
             selector_probe_rx: None,
             selector_probe_tx: None,
@@ -587,17 +694,83 @@ mod entity_tests {
     }
 
     #[gpui::test]
-    fn entity_release_stops_only_model_refresh_delivery_waiter(cx: &mut TestAppContext) {
+    fn provider_key_status_delivery_is_entity_owned(cx: &mut TestAppContext) {
         let entity = cx.new(|cx| {
             AiWorkspaceEntity::new(test_runtime(), oxideterm_ai::AiProviderKeyStore::new(), cx)
         });
-        let delivery_wake = cx.read(|cx| entity.read(cx).model_refresh_tx.wake());
+        let worker_tx = entity.update(cx, |entity, _cx| {
+            // Seed the pending marker directly so the test never touches the
+            // operating system keychain or creates secret material.
+            entity
+                .provider_key_status_pending
+                .insert("provider-a".to_string());
+            entity.provider_key_status_tx.clone()
+        });
+        worker_tx
+            .send(AiProviderKeyStatusDelivery {
+                provider_id: "provider-a".to_string(),
+                has_key: true,
+            })
+            .unwrap();
+
+        cx.run_until_parked();
+
+        cx.read(|cx| {
+            let entity = entity.read(cx);
+            assert!(entity.provider_has_key("provider-a"));
+            assert!(!entity.provider_key_status_pending.contains("provider-a"));
+        });
+    }
+
+    #[gpui::test]
+    fn invalidating_provider_key_status_clears_cached_and_pending_state(cx: &mut TestAppContext) {
+        let entity = cx.new(|cx| {
+            AiWorkspaceEntity::new(test_runtime(), oxideterm_ai::AiProviderKeyStore::new(), cx)
+        });
+
+        let worker_tx = entity.update(cx, |entity, _cx| {
+            entity.set_provider_key_status("provider-a".to_string(), true);
+            entity
+                .provider_key_status_pending
+                .insert("provider-a".to_string());
+            entity.invalidate_provider_key_status("provider-a");
+            assert!(!entity.provider_has_key("provider-a"));
+            assert!(!entity.provider_key_status_pending.contains("provider-a"));
+            entity.provider_key_status_tx.clone()
+        });
+        worker_tx
+            .send(AiProviderKeyStatusDelivery {
+                provider_id: "provider-a".to_string(),
+                has_key: true,
+            })
+            .unwrap();
+
+        cx.run_until_parked();
+
+        cx.read(|cx| {
+            assert!(!entity.read(cx).provider_has_key("provider-a"));
+        });
+    }
+
+    #[gpui::test]
+    fn entity_release_stops_all_entity_delivery_waiters(cx: &mut TestAppContext) {
+        let entity = cx.new(|cx| {
+            AiWorkspaceEntity::new(test_runtime(), oxideterm_ai::AiProviderKeyStore::new(), cx)
+        });
+        let (model_refresh_wake, provider_key_status_wake) = cx.read(|cx| {
+            let entity = entity.read(cx);
+            (
+                entity.model_refresh_tx.wake(),
+                entity.provider_key_status_tx.wake(),
+            )
+        });
 
         drop(entity);
         cx.update(|_cx| {});
         cx.run_until_parked();
 
         // The workspace runtime owns in-flight HTTP work independently.
-        assert!(delivery_wake.is_stopped());
+        assert!(model_refresh_wake.is_stopped());
+        assert!(provider_key_status_wake.is_stopped());
     }
 }

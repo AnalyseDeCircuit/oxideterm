@@ -216,7 +216,10 @@ impl WorkspaceApp {
         keep_rx && !self.ai.models.acp_model_discovery_pending.is_empty() && !source_exhausted
     }
 
-    pub(in crate::workspace) fn ensure_ai_model_selector_mount_statuses(&mut self) {
+    pub(in crate::workspace) fn ensure_ai_model_selector_mount_statuses(
+        &mut self,
+        cx: &mut Context<Self>,
+    ) {
         let providers = self.ai_model_selector_providers();
         let signature = ai_model_selector_status_signature(&providers);
         if self.ai.models.selector_status_signature == signature {
@@ -225,7 +228,7 @@ impl WorkspaceApp {
         self.ai.models.selector_status_signature = signature;
         // Mirrors Tauri ModelSelector's mount/provider-change checkAllKeys
         // effect: the trigger indicator starts probing before the user opens it.
-        self.refresh_ai_model_selector_provider_statuses();
+        self.refresh_ai_model_selector_provider_statuses(cx);
     }
 
     pub(in crate::workspace) fn toggle_ai_model_selector(
@@ -260,8 +263,8 @@ impl WorkspaceApp {
             self.ai.models.selector_highlighted_model = None;
             self.ai.chat.input_focused = false;
             self.ai.chat.inline_panel.prompt_focused = false;
-            self.refresh_ai_model_selector_provider_statuses();
-window.focus(&self.focus_handle, cx);
+            self.refresh_ai_model_selector_provider_statuses(cx);
+            window.focus(&self.focus_handle, cx);
         } else {
             self.close_ai_model_selector();
         }
@@ -271,6 +274,7 @@ window.focus(&self.focus_handle, cx);
 
     pub(in crate::workspace) fn ai_model_selector_visible_model_keys(
         &self,
+        cx: &App,
     ) -> Vec<(String, String)> {
         let providers = self.ai_model_selector_providers();
         let searching = !self.ai.models.selector_search_query.trim().is_empty();
@@ -288,7 +292,7 @@ window.focus(&self.focus_handle, cx);
                         .contains(&group.provider.id)
             })
             .filter(|group| {
-                self.ai_model_selector_has_key(&group.provider)
+                self.ai_model_selector_has_key(&group.provider, cx)
                     && self.ai_model_selector_provider_is_online(&group.provider)
             })
             .flat_map(|group| {
@@ -301,8 +305,12 @@ window.focus(&self.focus_handle, cx);
             .collect()
     }
 
-    pub(in crate::workspace) fn move_ai_model_selector_highlight(&mut self, delta: isize) {
-        let rows = self.ai_model_selector_visible_model_keys();
+    pub(in crate::workspace) fn move_ai_model_selector_highlight(
+        &mut self,
+        delta: isize,
+        cx: &App,
+    ) {
+        let rows = self.ai_model_selector_visible_model_keys(cx);
         if rows.is_empty() {
             self.ai.models.selector_highlighted_model = None;
             return;
@@ -322,8 +330,12 @@ window.focus(&self.focus_handle, cx);
         self.ai.models.selector_highlighted_model = rows.get(next).cloned();
     }
 
-    pub(in crate::workspace) fn set_ai_model_selector_highlight_edge(&mut self, last: bool) {
-        let rows = self.ai_model_selector_visible_model_keys();
+    pub(in crate::workspace) fn set_ai_model_selector_highlight_edge(
+        &mut self,
+        last: bool,
+        cx: &App,
+    ) {
+        let rows = self.ai_model_selector_visible_model_keys(cx);
         // Home/End in Radix-style menu focus moves to the first/last selectable
         // model row, not to provider headers or disabled provider messages.
         self.ai.models.selector_highlighted_model = if last {
@@ -341,7 +353,7 @@ window.focus(&self.focus_handle, cx);
             return false;
         };
         if !self
-            .ai_model_selector_visible_model_keys()
+            .ai_model_selector_visible_model_keys(cx)
             .iter()
             .any(|row| row == &(provider_id.clone(), model.clone()))
         {
@@ -353,15 +365,17 @@ window.focus(&self.focus_handle, cx);
         true
     }
 
-    pub(in crate::workspace) fn refresh_ai_model_selector_provider_statuses(&mut self) {
-        self.ensure_ai_provider_key_statuses();
+    pub(in crate::workspace) fn refresh_ai_model_selector_provider_statuses(
+        &mut self,
+        cx: &mut Context<Self>,
+    ) {
+        self.ensure_ai_provider_key_statuses(cx);
         let providers = self.ai_model_selector_providers();
         for provider in providers {
             if Self::ai_acp_agent_id_from_provider_id(&provider.id).is_some() {
-                self.ai
-                    .models
-                    .provider_key_status
-                    .insert(provider.id.clone(), true);
+                self.ai_entity.update(cx, |ai, _cx| {
+                    ai.set_provider_key_status(provider.id.clone(), true);
+                });
                 self.ai.models.selector_provider_online.insert(
                     provider.id.clone(),
                     self.ai_acp_provider_ready(&provider.id),
@@ -370,31 +384,24 @@ window.focus(&self.focus_handle, cx);
             }
             match resolve_model_selector_provider_probe(&provider) {
                 ModelSelectorProviderProbe::Disabled => {
-                    self.ai
-                        .models
-                        .provider_key_status
-                        .insert(provider.id.clone(), false);
+                    self.ai_entity.update(cx, |ai, _cx| {
+                        ai.set_provider_key_status(provider.id.clone(), false);
+                    });
                     self.ai
                         .models
                         .selector_provider_online
                         .insert(provider.id.clone(), false);
                 }
                 ModelSelectorProviderProbe::StoredKey => {
-                    let has_key = self.ai_provider_has_key(&provider.id);
-                    self.ai
-                        .models
-                        .provider_key_status
-                        .insert(provider.id.clone(), has_key);
                     self.ai
                         .models
                         .selector_provider_online
                         .insert(provider.id.clone(), true);
                 }
                 ModelSelectorProviderProbe::ImplicitKey { endpoint } => {
-                    self.ai
-                        .models
-                        .provider_key_status
-                        .insert(provider.id.clone(), true);
+                    self.ai_entity.update(cx, |ai, _cx| {
+                        ai.set_provider_key_status(provider.id.clone(), true);
+                    });
                     if let Some(endpoint) = endpoint {
                         self.schedule_ai_model_selector_online_probe(
                             provider.clone(),
@@ -507,6 +514,7 @@ window.focus(&self.focus_handle, cx);
     pub(in crate::workspace) fn ai_model_selector_has_key(
         &self,
         provider: &AiProviderView,
+        cx: &App,
     ) -> bool {
         if Self::ai_acp_agent_id_from_provider_id(&provider.id).is_some() {
             return provider.enabled;
@@ -514,7 +522,7 @@ window.focus(&self.focus_handle, cx);
         match resolve_model_selector_provider_probe(provider) {
             ModelSelectorProviderProbe::Disabled => false,
             ModelSelectorProviderProbe::ImplicitKey { .. } => true,
-            ModelSelectorProviderProbe::StoredKey => self.ai_provider_has_key(&provider.id),
+            ModelSelectorProviderProbe::StoredKey => self.ai_provider_has_key(&provider.id, cx),
         }
     }
 
@@ -543,7 +551,7 @@ window.focus(&self.focus_handle, cx);
         provider: AiProviderView,
         cx: &mut Context<Self>,
     ) {
-        if !self.ai_model_selector_has_key(&provider) {
+        if !self.ai_model_selector_has_key(&provider, cx) {
             self.push_ai_settings_toast(
                 self.i18n.t("ai.model_selector.no_key_warning"),
                 TerminalNoticeVariant::Warning,

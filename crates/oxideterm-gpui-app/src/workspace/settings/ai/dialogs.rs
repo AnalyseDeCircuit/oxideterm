@@ -633,11 +633,9 @@ impl WorkspaceApp {
             return;
         };
         let provider_id = provider_id.to_string();
-        self.ai.models.provider_key_status.remove(&provider_id);
-        self.ai
-            .models
-            .provider_key_status_pending
-            .remove(&provider_id);
+        self.ai_entity.update(cx, |ai, _cx| {
+            ai.invalidate_provider_key_status(&provider_id);
+        });
         self.settings_page
             .remove_ai_provider_page_state(&provider_id);
         self.edit_settings(

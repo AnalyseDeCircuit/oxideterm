@@ -23,22 +23,22 @@ impl WorkspaceApp {
                     true
                 }
                 "down" | "arrowdown" => {
-                    self.move_ai_model_selector_highlight(1);
+                    self.move_ai_model_selector_highlight(1, cx);
                     cx.notify();
                     true
                 }
                 "up" | "arrowup" => {
-                    self.move_ai_model_selector_highlight(-1);
+                    self.move_ai_model_selector_highlight(-1, cx);
                     cx.notify();
                     true
                 }
                 "home" => {
-                    self.set_ai_model_selector_highlight_edge(false);
+                    self.set_ai_model_selector_highlight_edge(false, cx);
                     cx.notify();
                     true
                 }
                 "end" => {
-                    self.set_ai_model_selector_highlight_edge(true);
+                    self.set_ai_model_selector_highlight_edge(true, cx);
                     cx.notify();
                     true
                 }

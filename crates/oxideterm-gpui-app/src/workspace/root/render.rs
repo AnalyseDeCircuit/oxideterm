@@ -127,7 +127,7 @@ impl Render for WorkspaceApp {
         self.schedule_pending_auto_close_terminal_sessions(window, cx);
         self.refresh_workspace_toast_expirations(cx);
         if self.ai_sidebar_visible() || self.ai.chat.inline_panel.open {
-            self.ensure_ai_model_selector_mount_statuses();
+            self.ensure_ai_model_selector_mount_statuses(cx);
         }
         self.observe_active_tab_for_history();
         let window_opacity =

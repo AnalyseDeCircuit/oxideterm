@@ -63,7 +63,7 @@ impl WorkspaceApp {
                 ));
 
             if self
-                .ai_provider_key_display_state(provider)
+                .ai_provider_key_display_state(provider, cx)
                 .shows_key_control()
             {
                 card = card.child(self.ai_provider_key_input(index, provider, cx));
@@ -81,7 +81,7 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let provider_id = provider.id.clone();
-        let provider_key_state = self.ai_provider_key_display_state(provider);
+        let provider_key_state = self.ai_provider_key_display_state(provider, cx);
         let provider_has_key = provider_key_state.has_usable_key();
         div()
             .w_full()

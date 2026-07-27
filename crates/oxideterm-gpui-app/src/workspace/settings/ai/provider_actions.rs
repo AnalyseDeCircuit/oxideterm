@@ -44,10 +44,9 @@ impl WorkspaceApp {
                             );
                         }
                         ai_state::AiModelRefreshIntent::MissingApiKey { provider_id } => {
-                            self.ai
-                                .models
-                                .provider_key_status
-                                .insert(provider_id, false);
+                            self.ai_entity.update(cx, |ai, _cx| {
+                                ai.set_provider_key_status(provider_id, false);
+                            });
                             self.push_ai_settings_toast(
                                 self.i18n.t("settings_view.ai.api_key_missing"),
                                 TerminalNoticeVariant::Warning,
@@ -65,6 +64,7 @@ impl WorkspaceApp {
                 }
                 cx.notify();
             }
+            ai_state::AiWorkspaceEvent::ProviderKeyStatusChanged => cx.notify(),
         }
     }
 

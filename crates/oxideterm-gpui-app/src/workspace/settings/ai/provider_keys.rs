@@ -4,10 +4,11 @@ impl WorkspaceApp {
     pub(in crate::workspace) fn ai_provider_key_display_state(
         &self,
         provider: &AiProviderView,
+        cx: &App,
     ) -> AiProviderKeyDisplayState {
         ai_provider_key_display_state(
             &provider.provider_type,
-            self.ai_provider_has_key_cached(&provider.id),
+            self.ai_provider_has_key_cached(&provider.id, cx),
         )
     }
 
@@ -17,7 +18,7 @@ impl WorkspaceApp {
         provider: &AiProviderView,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        match self.ai_provider_key_display_state(provider) {
+        match self.ai_provider_key_display_state(provider, cx) {
             AiProviderKeyDisplayState::Keyless => div().into_any_element(),
             AiProviderKeyDisplayState::Stored => {
                 self.ai_provider_stored_key_input(index, provider, cx)
@@ -235,23 +236,23 @@ impl WorkspaceApp {
         .into_any_element()
     }
 
-    pub(in crate::workspace) fn ai_provider_has_key_cached(&self, provider_id: &str) -> bool {
-        self.ai
-            .models
-            .provider_key_status
-            .get(provider_id)
-            .copied()
-            .unwrap_or(false)
+    pub(in crate::workspace) fn ai_provider_has_key_cached(
+        &self,
+        provider_id: &str,
+        cx: &App,
+    ) -> bool {
+        self.ai_entity.read(cx).provider_has_key(provider_id)
     }
 
-    pub(in crate::workspace) fn ensure_ai_provider_key_statuses(&mut self) {
+    pub(in crate::workspace) fn ensure_ai_provider_key_statuses(&mut self, cx: &mut Context<Self>) {
         let provider_views = ai_provider_views(self.settings_store.settings());
-        self.ensure_ai_provider_key_statuses_for_views(&provider_views);
+        self.ensure_ai_provider_key_statuses_for_views(&provider_views, cx);
     }
 
     pub(in crate::workspace) fn ensure_ai_provider_key_statuses_for_views(
         &mut self,
         provider_views: &[AiProviderView],
+        cx: &mut Context<Self>,
     ) {
         // Rendering OxideSens already derives provider views, so reuse that
         // snapshot when available instead of parsing the same JSON again.
@@ -263,99 +264,9 @@ impl WorkspaceApp {
             .map(|provider| provider.id.clone())
             .collect();
 
-        for provider_id in provider_jobs {
-            if self
-                .ai
-                .models
-                .provider_key_status
-                .contains_key(&provider_id)
-                || self
-                    .ai
-                    .models
-                    .provider_key_status_pending
-                    .contains(&provider_id)
-            {
-                continue;
-            }
-            self.ai
-                .models
-                .provider_key_status_pending
-                .insert(provider_id.clone());
-            if self.ai.models.provider_key_status_tx.is_none() {
-                let (tx, rx) = crate::workspace::delivery::ActiveDeliverySender::channel_with_wake(
-                    self.ai.delivery_wake.clone(),
-                );
-                self.ai.models.provider_key_status_tx = Some(tx);
-                self.ai.models.provider_key_status_rx = Some(rx);
-            }
-            let Some(ui_tx) = self.ai.models.provider_key_status_tx.as_ref().cloned() else {
-                continue;
-            };
-            let key_store = self.ai.models.key_store.clone();
-            self.forwarding_runtime.spawn(async move {
-                let provider_id_for_check = provider_id.clone();
-                let has_key = tokio::task::spawn_blocking(move || {
-                    key_store.has_provider_key(&provider_id_for_check)
-                })
-                .await
-                .unwrap_or(false);
-                let _ = ui_tx.send(AiProviderKeyStatusDelivery {
-                    provider_id,
-                    has_key,
-                });
-            });
-        }
-    }
-
-    pub(in crate::workspace) fn poll_ai_provider_key_statuses(
-        &mut self,
-        cx: &mut Context<Self>,
-    ) -> bool {
-        let Some(rx) = self.ai.models.provider_key_status_rx.take() else {
-            return false;
-        };
-        let mut changed = false;
-        let mut source_exhausted = false;
-        let started_at = Instant::now();
-        let mut processed = 0usize;
-        while crate::workspace::delivery::USER_ACTION_DELIVERY_BUDGET
-            .allows_next(processed, started_at.elapsed())
-        {
-            match rx.try_recv() {
-                Ok(delivery) => {
-                    processed += 1;
-                    self.ai
-                        .models
-                        .provider_key_status_pending
-                        .remove(&delivery.provider_id);
-                    let previous = self
-                        .ai
-                        .models
-                        .provider_key_status
-                        .insert(delivery.provider_id, delivery.has_key);
-                    changed |= previous != Some(delivery.has_key);
-                }
-                Err(std::sync::mpsc::TryRecvError::Empty) => {
-                    source_exhausted = true;
-                    break;
-                }
-                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
-                    source_exhausted = true;
-                    self.ai.models.provider_key_status_pending.clear();
-                    self.ai.models.provider_key_status_tx = None;
-                    break;
-                }
-            }
-        }
-        if changed {
-            cx.notify();
-        }
-        if self.ai.models.provider_key_status_pending.is_empty() {
-            self.ai.models.provider_key_status_tx = None;
-        } else {
-            self.ai.models.provider_key_status_rx = Some(rx);
-        }
-        !self.ai.models.provider_key_status_pending.is_empty() && !source_exhausted
+        self.ai_entity.update(cx, |ai, _cx| {
+            ai.request_provider_key_statuses(provider_jobs);
+        });
     }
 
     pub(in crate::workspace) fn save_ai_provider_api_key(
@@ -399,10 +310,9 @@ impl WorkspaceApp {
             let _ = weak.update(cx, |this, cx| {
                 match result {
                     Ok(()) => {
-                        this.ai
-                            .models
-                            .provider_key_status
-                            .insert(provider_id.clone(), true);
+                        this.ai_entity.update(cx, |ai, _cx| {
+                            ai.set_provider_key_status(provider_id.clone(), true);
+                        });
                         this.focused_settings_input = None;
                         if let Some(provider) = this
                             .settings_store
@@ -448,10 +358,9 @@ impl WorkspaceApp {
             let _ = weak.update(cx, |this, cx| {
                 match result {
                     Ok(()) => {
-                        this.ai
-                            .models
-                            .provider_key_status
-                            .insert(provider_id.clone(), false);
+                        this.ai_entity.update(cx, |ai, _cx| {
+                            ai.set_provider_key_status(provider_id.clone(), false);
+                        });
                     }
                     Err(error) => {
                         this.push_ai_settings_toast(
