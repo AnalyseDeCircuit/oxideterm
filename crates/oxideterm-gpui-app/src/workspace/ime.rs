@@ -673,7 +673,7 @@ impl WorkspaceApp {
             return Some(WorkspaceImeTarget::QuickCommand(input));
         }
 
-        if self.terminal_cwd_picker.open {
+        if self.terminal.read(cx).cwd_picker_open() {
             return Some(WorkspaceImeTarget::TerminalCwdSearch);
         }
 
@@ -1427,10 +1427,12 @@ impl WorkspaceApp {
             WorkspaceImeTarget::TerminalCommandBar => self
                 .terminal_command_bar_focused
                 .then(|| self.terminal_command_bar_draft.clone()),
-            WorkspaceImeTarget::TerminalCwdSearch => self
-                .terminal_cwd_picker
-                .open
-                .then(|| self.terminal_cwd_picker.query.clone()),
+            WorkspaceImeTarget::TerminalCwdSearch => {
+                let terminal = self.terminal.read(cx);
+                terminal
+                    .cwd_picker_open()
+                    .then(|| terminal.cwd_query().to_string())
+            }
             WorkspaceImeTarget::TerminalGitBranchSearch => self
                 .terminal_git_branch_picker
                 .open
@@ -2231,9 +2233,9 @@ impl WorkspaceApp {
                 }
             }
             WorkspaceImeTarget::TerminalCwdSearch => {
-                if self.terminal_cwd_picker.open {
-                    replace_utf16(&mut self.terminal_cwd_picker.query, replacement_range, text);
-                    self.terminal_cwd_picker.highlighted_path = None;
+                if self.terminal.update(cx, |terminal, _cx| {
+                    terminal.replace_cwd_query(replacement_range, text)
+                }) {
                     self.new_connection_caret_visible = true;
                     cx.notify();
                 }

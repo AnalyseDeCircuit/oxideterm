@@ -658,7 +658,8 @@ impl WorkspaceApp {
                 && self.terminal.read(cx).broadcast_menu_open())
             || (anchor.id == SelectAnchorId::TerminalCommandBar
                 && self.terminal_quick_commands_open)
-            || (anchor.id == SelectAnchorId::TerminalCwdMenu && self.terminal_cwd_picker.open)
+            || (anchor.id == SelectAnchorId::TerminalCwdMenu
+                && self.terminal.read(cx).cwd_picker_open())
             || (anchor.id == SelectAnchorId::TerminalGitBranchMenu
                 && self.terminal_git_branch_picker.open)
             || (anchor.id == SelectAnchorId::TerminalProjectMenu

@@ -240,6 +240,44 @@ impl WorkspaceApp {
         delivery_batch.outcome.backlog_remaining
     }
 
+    pub(in crate::workspace) fn schedule_terminal_git_action_delivery(
+        &self,
+        cx: &mut Context<Self>,
+    ) {
+        let action_wake = self.terminal_git_action_tx.wake();
+        let release_wake = action_wake.clone();
+        cx.on_release(move |_, _| {
+            // Git actions may finish after their workspace UI is released.
+            release_wake.stop();
+        })
+        .detach();
+        cx.spawn(async move |weak, cx| {
+            loop {
+                action_wake.wait().await;
+                let should_drain = action_wake.take();
+                let stopped = action_wake.is_stopped();
+                if !should_drain {
+                    if stopped {
+                        break;
+                    }
+                    continue;
+                }
+                let Ok(backlog_remaining) =
+                    weak.update(cx, |workspace, cx| workspace.poll_terminal_git_results(cx))
+                else {
+                    break;
+                };
+                if backlog_remaining {
+                    // Continue bounded action batches without the workspace heartbeat.
+                    action_wake.mark();
+                } else if stopped {
+                    break;
+                }
+            }
+        })
+        .detach();
+    }
+
     pub(in crate::workspace) fn open_terminal_git_branch_picker(&mut self, cx: &mut Context<Self>) {
         let Some(key) = self.active_terminal_git_key(cx) else {
             return;
@@ -256,7 +294,7 @@ impl WorkspaceApp {
 
         self.close_terminal_quick_commands_popover();
         self.dismiss_terminal_broadcast_menu(cx);
-        self.close_terminal_cwd_picker();
+        self.close_terminal_cwd_picker(cx);
         self.close_terminal_project_panel(cx);
         self.terminal_command_suggestions_open = false;
         self.terminal_command_suggestion_highlighted = None;

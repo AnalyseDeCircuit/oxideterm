@@ -121,7 +121,7 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
-        let active = self.terminal_cwd_picker.open;
+        let active = self.terminal.read(cx).cwd_picker_open();
         let workspace = cx.entity();
         let tooltip_id = "terminal-cwd-chip";
         let tooltip_label = terminal_cwd_chip_tooltip(
@@ -198,8 +198,8 @@ impl WorkspaceApp {
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(|this, _event, _window, cx| {
-                    if this.terminal_cwd_picker.open {
-                        this.close_terminal_cwd_picker();
+                    if this.terminal.read(cx).cwd_picker_open() {
+                        this.close_terminal_cwd_picker(cx);
                     } else {
                         this.open_terminal_cwd_picker(cx);
                     }
@@ -245,19 +245,30 @@ impl WorkspaceApp {
         )
         .child(self.render_terminal_cwd_search(cx));
 
-        if let Some(path) = self.terminal_cwd_browse_path() {
-            panel = panel.child(self.render_terminal_cwd_context_row(path.to_string(), cx));
+        let browse_path = self.terminal.read(cx).cwd_browse_path().map(str::to_string);
+        if let Some(path) = browse_path {
+            panel = panel.child(self.render_terminal_cwd_context_row(path, cx));
         }
 
-        let body = if self.terminal_cwd_picker.loading {
+        let loading = self.terminal.read(cx).cwd_picker_loading();
+        let error = self.terminal.read(cx).cwd_picker_error();
+        let body = if loading {
             self.render_terminal_cwd_message(
                 LucideIcon::LoaderCircle,
                 self.i18n.t("terminal.cwd.loading"),
             )
-        } else if let Some(error) = self.terminal_cwd_picker.error.clone() {
-            self.render_terminal_cwd_message(LucideIcon::AlertCircle, error)
+        } else if let Some(error) = error {
+            let message = match error {
+                terminal_cwd::TerminalCwdError::Unavailable => {
+                    self.i18n.t("terminal.cwd.unavailable")
+                }
+                terminal_cwd::TerminalCwdError::RemoteListFailed => {
+                    self.i18n.t("terminal.cwd.remote_list_failed")
+                }
+            };
+            self.render_terminal_cwd_message(LucideIcon::AlertCircle, message)
         } else {
-            let visible = self.visible_terminal_cwd_entries();
+            let visible = self.terminal.read(cx).visible_cwd_entries();
             if visible.is_empty() {
                 self.render_terminal_cwd_message(
                     LucideIcon::Search,
@@ -276,9 +287,9 @@ impl WorkspaceApp {
         visible: Vec<terminal_cwd::TerminalCwdVisibleEntry>,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        self.sync_terminal_cwd_list_state(&visible);
+        self.terminal.read(cx).sync_cwd_list_state(&visible);
         let total = visible.len();
-        let state = self.terminal_cwd_picker.list_state.clone();
+        let state = self.terminal.read(cx).cwd_list_state();
         let spec = terminal_cwd::terminal_cwd_list_spec();
         let estimated_row_height = f32::from(spec.row_height);
         let list_height = (total as f32 * estimated_row_height)
@@ -319,23 +330,6 @@ impl WorkspaceApp {
             .into_any_element()
     }
 
-    pub(super) fn sync_terminal_cwd_list_state(
-        &self,
-        entries: &[terminal_cwd::TerminalCwdVisibleEntry],
-    ) {
-        let signatures = entries
-            .iter()
-            .map(terminal_cwd_entry_signature)
-            .collect::<Vec<_>>();
-        sync_tauri_variable_list_state_by_signatures(
-            &self.terminal_cwd_picker.list_state,
-            &mut self.terminal_cwd_picker.list_cache.borrow_mut(),
-            "terminal-cwd-picker",
-            &signatures,
-            terminal_cwd::terminal_cwd_list_spec(),
-        );
-    }
-
     pub(super) fn render_terminal_cwd_context_row(
         &self,
         path: String,
@@ -344,11 +338,7 @@ impl WorkspaceApp {
         let theme = self.tokens.ui;
         let display_path = path.clone();
         let switch_path = path.clone();
-        let scope = self
-            .terminal_cwd_picker
-            .snapshot
-            .as_ref()
-            .map(|snapshot| snapshot.scope().clone());
+        let scope = self.terminal.read(cx).cwd_snapshot_scope();
         let mut trailing = vec![
             self.render_terminal_cwd_context_action(
                 LucideIcon::Check,
@@ -483,19 +473,22 @@ impl WorkspaceApp {
     pub(super) fn render_terminal_cwd_search(&self, cx: &mut Context<Self>) -> AnyElement {
         let target = WorkspaceImeTarget::TerminalCwdSearch;
         let workspace = cx.entity();
+        let selected_range = self.ime_selected_range_for_target(target, cx);
+        let marked_text = self.marked_text_for_target(target, cx);
+        let terminal = self.terminal.read(cx);
         text_input_anchor_probe(
             target.anchor_id(),
             text_input(
                 &self.tokens,
                 TextInputView {
-                    value: &self.terminal_cwd_picker.query,
+                    value: terminal.cwd_query(),
                     placeholder: self.i18n.t("terminal.cwd.search_directories"),
-                    focused: self.terminal_cwd_picker.open,
+                    focused: terminal.cwd_picker_open(),
                     caret_visible: self.new_connection_caret_visible,
                     secret: false,
                     selected_all: false,
-                    selected_range: self.ime_selected_range_for_target(target, cx),
-                    marked_text: self.marked_text_for_target(target, cx),
+                    selected_range,
+                    marked_text,
                 },
             )
             .h(px(32.0))
@@ -529,7 +522,7 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
-        let active = self.terminal_cwd_picker.highlighted_path.as_deref() == Some(&entry.path);
+        let active = self.terminal.read(cx).cwd_path_highlighted(&entry.path);
         let (icon, label, accent) = match entry.kind {
             terminal_cwd::TerminalCwdVisibleEntryKind::Parent => (
                 LucideIcon::ArrowUp,
@@ -601,7 +594,9 @@ impl WorkspaceApp {
                     .on_mouse_down(
                         MouseButton::Left,
                         cx.listener(move |this, _event, _window, cx| {
-                            this.enter_terminal_cwd_directory(browse_path.clone(), cx);
+                            this.terminal.update(cx, |terminal, cx| {
+                                terminal.enter_cwd_directory(browse_path.clone(), cx);
+                            });
                             this.clear_workspace_tooltip(&browse_tooltip_id, cx);
                             cx.stop_propagation();
                         }),
@@ -640,8 +635,10 @@ impl WorkspaceApp {
         .on_mouse_move(cx.listener({
             let path = path.clone();
             move |this, _event: &gpui::MouseMoveEvent, _window, cx| {
-                if this.terminal_cwd_picker.highlighted_path.as_deref() != Some(&path) {
-                    this.terminal_cwd_picker.highlighted_path = Some(path.clone());
+                if this
+                    .terminal
+                    .update(cx, |terminal, _cx| terminal.set_cwd_path_highlight(&path))
+                {
                     cx.notify();
                 }
             }
@@ -649,7 +646,9 @@ impl WorkspaceApp {
         .on_mouse_down(
             MouseButton::Left,
             cx.listener(move |this, event: &gpui::MouseDownEvent, window, cx| {
-                this.terminal_cwd_picker.highlighted_path = Some(path.clone());
+                this.terminal.update(cx, |terminal, _cx| {
+                    terminal.set_cwd_path_highlight(&path);
+                });
                 if event.click_count >= 2 {
                     match entry_kind {
                         terminal_cwd::TerminalCwdVisibleEntryKind::File => {

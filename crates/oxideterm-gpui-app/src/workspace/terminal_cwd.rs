@@ -1,8 +1,15 @@
 // Copyright (C) 2026 OxideTerm contributors.
 // SPDX-License-Identifier: GPL-3.0-only
 
-use std::{cell::RefCell, time::Duration};
+use std::{
+    cell::RefCell,
+    collections::hash_map::DefaultHasher,
+    hash::{Hash, Hasher},
+    ops::Range,
+    time::Duration,
+};
 
+use oxideterm_editor_core::utf16::replace_utf16;
 use oxideterm_environment::{
     CurrentDirectoryEntry, CurrentDirectoryEntryKind, CurrentDirectoryKey, CurrentDirectoryScope,
     CurrentDirectorySnapshot, CurrentDirectorySource, current_directory_cd_command,
@@ -46,6 +53,12 @@ pub(in crate::workspace) enum TerminalCwdListOutcome {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(in crate::workspace) enum TerminalCwdError {
+    Unavailable,
+    RemoteListFailed,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(in crate::workspace) enum TerminalCwdVisibleEntryKind {
     Parent,
     Directory,
@@ -61,18 +74,17 @@ pub(in crate::workspace) struct TerminalCwdVisibleEntry {
 }
 
 pub(in crate::workspace) struct TerminalCwdPickerState {
-    pub open: bool,
-    pub key: Option<CurrentDirectoryKey>,
-    pub snapshot: Option<CurrentDirectorySnapshot>,
-    pub query: String,
-    pub entries: Vec<CurrentDirectoryEntry>,
-    pub highlighted_path: Option<String>,
-    pub loading: bool,
-    pub error: Option<String>,
-    pub list_state: ListState,
-    pub list_cache: RefCell<VirtualListSignatureCache>,
+    open: bool,
+    key: Option<CurrentDirectoryKey>,
+    snapshot: Option<CurrentDirectorySnapshot>,
+    query: String,
+    entries: Vec<CurrentDirectoryEntry>,
+    highlighted_path: Option<String>,
+    loading: bool,
+    error: Option<TerminalCwdError>,
+    list_state: ListState,
+    list_cache: RefCell<VirtualListSignatureCache>,
     probe_scope: Option<CurrentDirectoryScope>,
-    probe_pane_id: Option<PaneId>,
     generation: u64,
 }
 
@@ -92,7 +104,6 @@ impl Default for TerminalCwdPickerState {
             list_state: tauri_virtual_list_state(0, ListAlignment::Top, terminal_cwd_list_spec()),
             list_cache: RefCell::new(VirtualListSignatureCache::default()),
             probe_scope: None,
-            probe_pane_id: None,
             generation: 0,
         }
     }
@@ -107,6 +118,574 @@ impl TerminalCwdPickerState {
     fn close(&mut self) {
         *self = Self::default();
     }
+}
+
+fn terminal_cwd_entry_signature(entry: &TerminalCwdVisibleEntry) -> u64 {
+    // Virtual list state is index-based, so rows need a stable content signature
+    // when filtering or changing directories reshuffles the visible entries.
+    let mut hasher = DefaultHasher::new();
+    terminal_cwd_visible_entry_kind_signature(entry.kind).hash(&mut hasher);
+    entry.name.hash(&mut hasher);
+    entry.path.hash(&mut hasher);
+    hasher.finish()
+}
+
+fn terminal_cwd_visible_entry_kind_signature(kind: TerminalCwdVisibleEntryKind) -> u8 {
+    match kind {
+        TerminalCwdVisibleEntryKind::Parent => 0,
+        TerminalCwdVisibleEntryKind::Directory => 1,
+        TerminalCwdVisibleEntryKind::File => 2,
+        TerminalCwdVisibleEntryKind::TypedPath => 3,
+    }
+}
+
+impl WorkspaceTerminalEntity {
+    pub(in crate::workspace) fn cwd_picker_open(&self) -> bool {
+        self.cwd_picker.open
+    }
+
+    pub(in crate::workspace) fn cwd_picker_loading(&self) -> bool {
+        self.cwd_picker.loading
+    }
+
+    pub(in crate::workspace) fn cwd_picker_error(&self) -> Option<TerminalCwdError> {
+        self.cwd_picker.error
+    }
+
+    pub(in crate::workspace) fn cwd_query(&self) -> &str {
+        &self.cwd_picker.query
+    }
+
+    pub(in crate::workspace) fn cwd_snapshot_scope(&self) -> Option<CurrentDirectoryScope> {
+        self.cwd_picker
+            .snapshot
+            .as_ref()
+            .map(|snapshot| snapshot.scope().clone())
+    }
+
+    pub(in crate::workspace) fn cwd_browse_path(&self) -> Option<&str> {
+        self.cwd_picker
+            .key
+            .as_ref()
+            .map(CurrentDirectoryKey::path)
+            .or_else(|| {
+                self.cwd_picker
+                    .snapshot
+                    .as_ref()
+                    .map(CurrentDirectorySnapshot::path)
+            })
+    }
+
+    pub(in crate::workspace) fn cwd_list_state(&self) -> ListState {
+        self.cwd_picker.list_state.clone()
+    }
+
+    pub(in crate::workspace) fn sync_cwd_list_state(&self, entries: &[TerminalCwdVisibleEntry]) {
+        let signatures = entries
+            .iter()
+            .map(terminal_cwd_entry_signature)
+            .collect::<Vec<_>>();
+        sync_tauri_variable_list_state_by_signatures(
+            &self.cwd_picker.list_state,
+            &mut self.cwd_picker.list_cache.borrow_mut(),
+            "terminal-cwd-picker",
+            &signatures,
+            terminal_cwd_list_spec(),
+        );
+    }
+
+    pub(in crate::workspace) fn cwd_path_highlighted(&self, path: &str) -> bool {
+        self.cwd_picker.highlighted_path.as_deref() == Some(path)
+    }
+
+    pub(in crate::workspace) fn set_cwd_path_highlight(&mut self, path: &str) -> bool {
+        if self.cwd_path_highlighted(path) {
+            return false;
+        }
+        self.cwd_picker.highlighted_path = Some(path.to_string());
+        true
+    }
+
+    pub(in crate::workspace) fn begin_cwd_probe(&mut self, scope: CurrentDirectoryScope) -> u64 {
+        let generation = self.cwd_picker.next_generation();
+        self.cwd_picker.open = true;
+        self.cwd_picker.key = None;
+        self.cwd_picker.snapshot = None;
+        self.cwd_picker.query.clear();
+        self.cwd_picker.entries.clear();
+        self.cwd_picker.highlighted_path = None;
+        self.cwd_picker.loading = true;
+        self.cwd_picker.error = None;
+        self.cwd_picker.probe_scope = Some(scope);
+        generation
+    }
+
+    pub(in crate::workspace) fn finish_cwd_probe_unavailable(&mut self, generation: u64) {
+        if !self.cwd_picker.open || self.cwd_picker.generation != generation {
+            return;
+        }
+        self.cwd_picker.loading = false;
+        self.cwd_picker.error = Some(TerminalCwdError::Unavailable);
+        self.cwd_picker.probe_scope = None;
+    }
+
+    pub(in crate::workspace) fn open_cwd_picker_for_snapshot(
+        &mut self,
+        snapshot: CurrentDirectorySnapshot,
+        cx: &mut Context<Self>,
+    ) {
+        let generation = self.cwd_picker.next_generation();
+        self.open_cwd_picker_for_snapshot_generation(snapshot, generation, cx);
+    }
+
+    fn open_cwd_picker_for_snapshot_generation(
+        &mut self,
+        snapshot: CurrentDirectorySnapshot,
+        generation: u64,
+        cx: &mut Context<Self>,
+    ) {
+        let key = snapshot.key().clone();
+        let scope = snapshot.scope().clone();
+        self.cwd_picker.open = true;
+        self.cwd_picker.key = Some(key.clone());
+        self.cwd_picker.query.clear();
+        self.cwd_picker.entries.clear();
+        self.cwd_picker.highlighted_path =
+            current_directory_parent(snapshot.path()).or_else(|| Some(snapshot.path().to_string()));
+        self.cwd_picker.snapshot = Some(snapshot);
+        self.cwd_picker.error = None;
+        self.cwd_picker.probe_scope = None;
+
+        match scope {
+            CurrentDirectoryScope::Local => {
+                self.cwd_picker.loading = false;
+                let outcome = list_local_current_directory(key.path(), TERMINAL_CWD_MAX_ENTRIES)
+                    .map(TerminalCwdListOutcome::Ready)
+                    .unwrap_or(TerminalCwdListOutcome::Unavailable);
+                if self.apply_cwd_directory_list_result(key, generation, outcome) {
+                    cx.notify();
+                }
+            }
+            CurrentDirectoryScope::SshNode(node_id) => {
+                self.cwd_picker.loading = true;
+                self.spawn_remote_cwd_directory_list(key, generation, NodeId::new(node_id));
+                cx.notify();
+            }
+        }
+    }
+
+    pub(in crate::workspace) fn spawn_cwd_report_poll(
+        &mut self,
+        generation: u64,
+        pane: gpui::WeakEntity<TerminalPane>,
+        cx: &mut Context<Self>,
+    ) {
+        cx.spawn(async move |terminal, cx| {
+            for _ in 0..TERMINAL_CWD_REPORT_POLL_ATTEMPTS {
+                gpui::Timer::after(TERMINAL_CWD_REPORT_POLL_INTERVAL).await;
+                match terminal.update(cx, |terminal, cx| {
+                    terminal.apply_cwd_report_if_ready(generation, &pane, cx)
+                }) {
+                    Ok(true) | Err(_) => return,
+                    Ok(false) => {}
+                }
+            }
+            let _ = terminal.update(cx, |terminal, cx| {
+                terminal.finish_cwd_report_timeout(generation);
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    fn apply_cwd_report_if_ready(
+        &mut self,
+        generation: u64,
+        pane: &gpui::WeakEntity<TerminalPane>,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if !self.cwd_picker.open || self.cwd_picker.generation != generation {
+            return true;
+        }
+        if self.cwd_picker.snapshot.is_some() {
+            return true;
+        }
+        let Some(scope) = self.cwd_picker.probe_scope.clone() else {
+            return true;
+        };
+        let Some(pane) = pane.upgrade() else {
+            self.finish_cwd_probe_unavailable(generation);
+            return true;
+        };
+        let Some(snapshot) = terminal_cwd_snapshot_from_pane(scope, pane.read(cx)) else {
+            return false;
+        };
+        self.open_cwd_picker_for_snapshot_generation(snapshot, generation, cx);
+        true
+    }
+
+    fn finish_cwd_report_timeout(&mut self, generation: u64) {
+        if !self.cwd_picker.open
+            || self.cwd_picker.generation != generation
+            || self.cwd_picker.snapshot.is_some()
+        {
+            return;
+        }
+        self.cwd_picker.loading = false;
+        self.cwd_picker.error = Some(TerminalCwdError::Unavailable);
+    }
+
+    pub(in crate::workspace) fn close_cwd_picker(&mut self) -> bool {
+        let was_open = self.cwd_picker.open;
+        if was_open {
+            self.cwd_picker.close();
+        }
+        was_open
+    }
+
+    pub(in crate::workspace) fn set_cwd_error(&mut self, error: TerminalCwdError) {
+        if self.cwd_picker.open {
+            self.cwd_picker.loading = false;
+            self.cwd_picker.error = Some(error);
+        }
+    }
+
+    pub(in crate::workspace) fn visible_cwd_entries(&self) -> Vec<TerminalCwdVisibleEntry> {
+        let Some(path) = self.cwd_browse_path() else {
+            return Vec::new();
+        };
+        let query = self.cwd_picker.query.trim().to_ascii_lowercase();
+        let mut rows = Vec::new();
+
+        if let Some(parent) = current_directory_parent(path) {
+            rows.push(TerminalCwdVisibleEntry {
+                kind: TerminalCwdVisibleEntryKind::Parent,
+                name: "..".to_string(),
+                path: parent,
+            });
+        }
+        rows.extend(
+            self.cwd_picker
+                .entries
+                .iter()
+                .filter(|entry| {
+                    query.is_empty()
+                        || entry.name().to_ascii_lowercase().contains(&query)
+                        || entry.path().to_ascii_lowercase().contains(&query)
+                })
+                .map(|entry| TerminalCwdVisibleEntry {
+                    kind: match entry.kind() {
+                        CurrentDirectoryEntryKind::Directory => {
+                            TerminalCwdVisibleEntryKind::Directory
+                        }
+                        CurrentDirectoryEntryKind::File => TerminalCwdVisibleEntryKind::File,
+                    },
+                    name: entry.name().to_string(),
+                    path: entry.path().to_string(),
+                }),
+        );
+        if let Some(path) = self.cwd_query_path_candidate() {
+            rows.push(TerminalCwdVisibleEntry {
+                kind: TerminalCwdVisibleEntryKind::TypedPath,
+                name: path.clone(),
+                path,
+            });
+        }
+        rows
+    }
+
+    pub(in crate::workspace) fn replace_cwd_query(
+        &mut self,
+        replacement_range: Option<Range<usize>>,
+        text: &str,
+    ) -> bool {
+        if !self.cwd_picker.open {
+            return false;
+        }
+        replace_utf16(&mut self.cwd_picker.query, replacement_range, text);
+        self.cwd_picker.highlighted_path = None;
+        self.ensure_cwd_highlight();
+        true
+    }
+
+    pub(in crate::workspace) fn enter_cwd_directory(
+        &mut self,
+        path: String,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(snapshot) = &self.cwd_picker.snapshot else {
+            return;
+        };
+        let Some(key) = CurrentDirectoryKey::new(snapshot.scope().clone(), path) else {
+            return;
+        };
+        let generation = self.cwd_picker.next_generation();
+        self.load_cwd_directory(key, generation, cx);
+        cx.notify();
+    }
+
+    pub(in crate::workspace) fn selected_cwd_entry(&self) -> Option<TerminalCwdVisibleEntry> {
+        let visible = self.visible_cwd_entries();
+        self.cwd_picker
+            .highlighted_path
+            .as_deref()
+            .and_then(|path| visible.iter().find(|entry| entry.path == path))
+            .or_else(|| visible.first())
+            .cloned()
+    }
+
+    pub(in crate::workspace) fn step_cwd_highlight(&mut self, forward: bool) {
+        let visible = self.visible_cwd_entries();
+        if visible.is_empty() {
+            self.cwd_picker.highlighted_path = None;
+            return;
+        }
+        let current = self
+            .cwd_picker
+            .highlighted_path
+            .as_deref()
+            .and_then(|path| visible.iter().position(|entry| entry.path == path));
+        let next = match (current, forward) {
+            (Some(index), true) => (index + 1).min(visible.len() - 1),
+            (Some(index), false) => index.saturating_sub(1),
+            (None, true) => 0,
+            (None, false) => visible.len() - 1,
+        };
+        self.cwd_picker.highlighted_path = Some(visible[next].path.clone());
+    }
+
+    pub(in crate::workspace) fn highlight_cwd_edge(&mut self, last: bool) {
+        let visible = self.visible_cwd_entries();
+        self.cwd_picker.highlighted_path = if last {
+            visible.last()
+        } else {
+            visible.first()
+        }
+        .map(|entry| entry.path.clone());
+    }
+
+    pub(super) fn drain_cwd_results(&mut self, cx: &mut Context<Self>) -> bool {
+        let delivery_batch =
+            delivery::drain_channel(&self.cwd_rx, delivery::USER_ACTION_DELIVERY_BUDGET);
+        let mut changed = false;
+        for delivery in delivery_batch.items {
+            match delivery {
+                TerminalCwdDelivery::DirectoryList {
+                    key,
+                    generation,
+                    outcome,
+                } => {
+                    changed |= self.apply_cwd_directory_list_result(key, generation, outcome);
+                }
+            }
+        }
+        if changed {
+            cx.notify();
+        }
+        delivery_batch.outcome.backlog_remaining
+    }
+
+    fn spawn_remote_cwd_directory_list(
+        &self,
+        key: CurrentDirectoryKey,
+        generation: u64,
+        node_id: NodeId,
+    ) {
+        let node_router = self.node_router.clone();
+        let tx = self.cwd_tx.clone();
+        let cwd = key.path().to_string();
+        self.runtime.spawn(async move {
+            let outcome = tokio::time::timeout(TERMINAL_CWD_REMOTE_LIST_TIMEOUT, async {
+                // Acquire the registry-owned SFTP consumer; picker lifetime must
+                // never create or disconnect an unmanaged SSH transport.
+                let shared = node_router
+                    .acquire_sftp(&node_id)
+                    .await
+                    .map_err(|error| error.to_string())?;
+                let entries = {
+                    let sftp = shared.lock().await;
+                    sftp.list_dir_with_cwd(
+                        &cwd,
+                        Some(ListFilter {
+                            show_hidden: true,
+                            pattern: None,
+                            sort: SortOrder::Name,
+                        }),
+                    )
+                    .await
+                    .map_err(|error| error.to_string())?
+                };
+                let (_, entries) = entries;
+                let mut rows = entries
+                    .into_iter()
+                    .filter_map(|entry| match entry.file_type {
+                        RemotePathFileType::Directory => {
+                            CurrentDirectoryEntry::new(entry.name, entry.path)
+                        }
+                        RemotePathFileType::File
+                        | RemotePathFileType::Symlink
+                        | RemotePathFileType::Unknown => {
+                            CurrentDirectoryEntry::new_file(entry.name, entry.path)
+                        }
+                    })
+                    .collect::<Vec<_>>();
+                sort_current_directory_entries(&mut rows);
+                rows.truncate(TERMINAL_CWD_MAX_ENTRIES);
+                Ok::<Vec<CurrentDirectoryEntry>, String>(rows)
+            })
+            .await
+            .ok()
+            .and_then(|result| result.ok())
+            .map(TerminalCwdListOutcome::Ready)
+            .unwrap_or(TerminalCwdListOutcome::RemoteListFailed);
+            let _ = tx.send(TerminalCwdDelivery::DirectoryList {
+                key,
+                generation,
+                outcome,
+            });
+        });
+    }
+
+    fn load_cwd_directory(
+        &mut self,
+        key: CurrentDirectoryKey,
+        generation: u64,
+        cx: &mut Context<Self>,
+    ) {
+        self.cwd_picker.key = Some(key.clone());
+        self.cwd_picker.query.clear();
+        self.cwd_picker.entries.clear();
+        self.cwd_picker.highlighted_path =
+            current_directory_parent(key.path()).or_else(|| Some(key.path().to_string()));
+        self.cwd_picker.error = None;
+
+        match key.scope().clone() {
+            CurrentDirectoryScope::Local => {
+                self.cwd_picker.loading = false;
+                let outcome = list_local_current_directory(key.path(), TERMINAL_CWD_MAX_ENTRIES)
+                    .map(TerminalCwdListOutcome::Ready)
+                    .unwrap_or(TerminalCwdListOutcome::Unavailable);
+                if self.apply_cwd_directory_list_result(key, generation, outcome) {
+                    cx.notify();
+                }
+            }
+            CurrentDirectoryScope::SshNode(node_id) => {
+                self.cwd_picker.loading = true;
+                self.spawn_remote_cwd_directory_list(key, generation, NodeId::new(node_id));
+                cx.notify();
+            }
+        }
+    }
+
+    fn apply_cwd_directory_list_result(
+        &mut self,
+        key: CurrentDirectoryKey,
+        generation: u64,
+        outcome: TerminalCwdListOutcome,
+    ) -> bool {
+        if !self.cwd_picker.open
+            || self.cwd_picker.key.as_ref() != Some(&key)
+            || self.cwd_picker.generation != generation
+        {
+            return false;
+        }
+        self.cwd_picker.loading = false;
+        match outcome {
+            TerminalCwdListOutcome::Ready(entries) => {
+                self.cwd_picker.error = None;
+                self.cwd_picker.entries = entries;
+                self.ensure_cwd_highlight();
+            }
+            TerminalCwdListOutcome::Unavailable => {
+                self.cwd_picker.entries.clear();
+                self.cwd_picker.highlighted_path = None;
+                self.cwd_picker.error = Some(TerminalCwdError::Unavailable);
+            }
+            TerminalCwdListOutcome::RemoteListFailed => {
+                self.cwd_picker.entries.clear();
+                self.cwd_picker.highlighted_path = None;
+                self.cwd_picker.error = Some(TerminalCwdError::RemoteListFailed);
+            }
+        }
+        true
+    }
+
+    fn cwd_query_path_candidate(&self) -> Option<String> {
+        let query = self.cwd_picker.query.trim();
+        if !current_directory_path_is_explicit(query)
+            || self
+                .cwd_picker
+                .entries
+                .iter()
+                .any(|entry| entry.path() == query)
+        {
+            return None;
+        }
+        current_directory_cd_command(query).map(|_| query.to_string())
+    }
+
+    fn ensure_cwd_highlight(&mut self) {
+        let visible = self.visible_cwd_entries();
+        if visible
+            .iter()
+            .any(|entry| Some(entry.path.as_str()) == self.cwd_picker.highlighted_path.as_deref())
+        {
+            return;
+        }
+        self.cwd_picker.highlighted_path = visible.first().map(|entry| entry.path.clone());
+    }
+}
+
+fn terminal_cwd_snapshot_from_pane(
+    scope: CurrentDirectoryScope,
+    pane: &TerminalPane,
+) -> Option<CurrentDirectorySnapshot> {
+    let current_cwd = pane.current_working_directory();
+    let current_source = pane.current_working_directory_source();
+    // A pending user-selected directory and a shell-owned OSC report are
+    // more current than an asynchronous process probe.
+    if pane.current_working_directory_is_pending()
+        || current_source == Some(TerminalWorkingDirectorySource::ShellIntegration)
+    {
+        let cwd = current_cwd.clone()?;
+        let source = match current_source {
+            Some(TerminalWorkingDirectorySource::ShellIntegration) => {
+                CurrentDirectorySource::ShellIntegration
+            }
+            Some(TerminalWorkingDirectorySource::VisibleCommand) => {
+                CurrentDirectorySource::UserAction
+            }
+            Some(TerminalWorkingDirectorySource::SessionDefault) => {
+                CurrentDirectorySource::SessionDefault
+            }
+            None => CurrentDirectorySource::VisibleText,
+        };
+        return CurrentDirectorySnapshot::new(scope, cwd, source);
+    }
+    if matches!(&scope, CurrentDirectoryScope::Local)
+        && let Some(snapshot) = pane.process_info().cwd.and_then(|path| {
+            CurrentDirectorySnapshot::new(
+                scope.clone(),
+                path.to_string_lossy().to_string(),
+                CurrentDirectorySource::ProcessFallback,
+            )
+        })
+    {
+        return Some(snapshot);
+    }
+    if let Some(cwd) = current_cwd {
+        let source = match current_source {
+            Some(TerminalWorkingDirectorySource::VisibleCommand) => {
+                CurrentDirectorySource::UserAction
+            }
+            Some(TerminalWorkingDirectorySource::SessionDefault) => {
+                CurrentDirectorySource::SessionDefault
+            }
+            _ => CurrentDirectorySource::VisibleText,
+        };
+        return CurrentDirectorySnapshot::new(scope, cwd, source);
+    }
+    None
 }
 
 impl WorkspaceApp {
@@ -210,53 +789,7 @@ impl WorkspaceApp {
     ) -> Option<CurrentDirectorySnapshot> {
         let tab_host = self.tab_host.read(cx);
         let pane = tab_host.panes().get(&pane_id)?.read(cx);
-
-        let current_cwd = pane.current_working_directory();
-        let current_source = pane.current_working_directory_source();
-        // A pending user-selected directory and a shell-owned OSC report are
-        // more current than an asynchronous process probe.
-        if pane.current_working_directory_is_pending()
-            || current_source == Some(TerminalWorkingDirectorySource::ShellIntegration)
-        {
-            let cwd = current_cwd.clone()?;
-            let source = match current_source {
-                Some(TerminalWorkingDirectorySource::ShellIntegration) => {
-                    CurrentDirectorySource::ShellIntegration
-                }
-                Some(TerminalWorkingDirectorySource::VisibleCommand) => {
-                    CurrentDirectorySource::UserAction
-                }
-                Some(TerminalWorkingDirectorySource::SessionDefault) => {
-                    CurrentDirectorySource::SessionDefault
-                }
-                None => CurrentDirectorySource::VisibleText,
-            };
-            return CurrentDirectorySnapshot::new(scope, cwd, source);
-        }
-        if matches!(&scope, CurrentDirectoryScope::Local) {
-            if let Some(snapshot) = pane.process_info().cwd.and_then(|path| {
-                CurrentDirectorySnapshot::new(
-                    scope.clone(),
-                    path.to_string_lossy().to_string(),
-                    CurrentDirectorySource::ProcessFallback,
-                )
-            }) {
-                return Some(snapshot);
-            }
-        }
-        if let Some(cwd) = current_cwd {
-            let source = match current_source {
-                Some(TerminalWorkingDirectorySource::VisibleCommand) => {
-                    CurrentDirectorySource::UserAction
-                }
-                Some(TerminalWorkingDirectorySource::SessionDefault) => {
-                    CurrentDirectorySource::SessionDefault
-                }
-                _ => CurrentDirectorySource::VisibleText,
-            };
-            return CurrentDirectorySnapshot::new(scope, cwd, source);
-        }
-        None
+        terminal_cwd_snapshot_from_pane(scope, pane)
     }
 
     pub(in crate::workspace) fn open_terminal_cwd_picker(&mut self, cx: &mut Context<Self>) {
@@ -266,48 +799,48 @@ impl WorkspaceApp {
         self.prepare_terminal_cwd_picker(cx);
 
         if let Some(snapshot) = self.active_terminal_cwd_snapshot(cx) {
-            let generation = self.terminal_cwd_picker.next_generation();
-            self.open_terminal_cwd_picker_for_snapshot(snapshot, generation, cx);
+            self.terminal.update(cx, |terminal, cx| {
+                terminal.open_cwd_picker_for_snapshot(snapshot, cx);
+            });
             return;
         };
 
         let Some((scope, pane_id)) = self.active_terminal_cwd_scope_and_pane() else {
             return;
         };
+        let Some(pane) = self.tab_host.read(cx).panes().get(&pane_id).cloned() else {
+            return;
+        };
+        let remote_scope = matches!(&scope, CurrentDirectoryScope::SshNode(_));
+        let generation = self
+            .terminal
+            .update(cx, |terminal, _cx| terminal.begin_cwd_probe(scope));
 
-        let generation = self.terminal_cwd_picker.next_generation();
-        self.terminal_cwd_picker.open = true;
-        self.terminal_cwd_picker.key = None;
-        self.terminal_cwd_picker.snapshot = None;
-        self.terminal_cwd_picker.query.clear();
-        self.terminal_cwd_picker.entries.clear();
-        self.terminal_cwd_picker.highlighted_path = None;
-        self.terminal_cwd_picker.loading = true;
-        self.terminal_cwd_picker.error = None;
-        self.terminal_cwd_picker.probe_scope = Some(scope);
-        self.terminal_cwd_picker.probe_pane_id = Some(pane_id);
-
-        if matches!(
-            self.terminal_cwd_picker.probe_scope,
-            Some(CurrentDirectoryScope::SshNode(_))
-        ) {
+        if remote_scope {
             // SSH fallback probes used to write a hidden-looking command into the
             // interactive PTY, but remote shells can echo it visibly. Until the
             // prompt-owned hook is installed, unknown remote cwd must degrade
             // instead of mutating the user's terminal input stream.
-            self.terminal_cwd_picker.loading = false;
-            self.terminal_cwd_picker.error = Some(self.i18n.t("terminal.cwd.unavailable"));
-            self.terminal_cwd_picker.probe_scope = None;
-            self.terminal_cwd_picker.probe_pane_id = None;
+            self.terminal.update(cx, |terminal, _cx| {
+                terminal.finish_cwd_probe_unavailable(generation);
+            });
             cx.notify();
             return;
         }
 
-        if self.request_terminal_cwd_report(pane_id, cx) {
-            self.spawn_terminal_cwd_report_poll(generation, cx);
+        let command = current_directory_report_command();
+        if pane.update(cx, |pane, cx| {
+            pane.send_internal_control_command_line(command, cx)
+        }) {
+            self.terminal.update(cx, |terminal, cx| {
+                // The report task observes the pane weakly so closing the pane
+                // never delays terminal consumer release or shared-node cleanup.
+                terminal.spawn_cwd_report_poll(generation, pane.downgrade(), cx);
+            });
         } else {
-            self.terminal_cwd_picker.loading = false;
-            self.terminal_cwd_picker.error = Some(self.i18n.t("terminal.cwd.unavailable"));
+            self.terminal.update(cx, |terminal, _cx| {
+                terminal.finish_cwd_probe_unavailable(generation);
+            });
         }
         cx.notify();
     }
@@ -325,117 +858,14 @@ impl WorkspaceApp {
         cx.notify();
     }
 
-    fn open_terminal_cwd_picker_for_snapshot(
+    pub(in crate::workspace) fn close_terminal_cwd_picker(
         &mut self,
-        snapshot: CurrentDirectorySnapshot,
-        generation: u64,
-        cx: &mut Context<Self>,
-    ) {
-        let key = snapshot.key().clone();
-        self.terminal_cwd_picker.open = true;
-        self.terminal_cwd_picker.key = Some(key.clone());
-        self.terminal_cwd_picker.snapshot = Some(snapshot.clone());
-        self.terminal_cwd_picker.query.clear();
-        self.terminal_cwd_picker.entries.clear();
-        self.terminal_cwd_picker.highlighted_path =
-            current_directory_parent(snapshot.path()).or_else(|| Some(snapshot.path().to_string()));
-        self.terminal_cwd_picker.error = None;
-        self.terminal_cwd_picker.probe_scope = None;
-        self.terminal_cwd_picker.probe_pane_id = None;
-
-        match snapshot.scope() {
-            CurrentDirectoryScope::Local => {
-                self.terminal_cwd_picker.loading = false;
-                let outcome =
-                    list_local_current_directory(snapshot.path(), TERMINAL_CWD_MAX_ENTRIES)
-                        .map(TerminalCwdListOutcome::Ready)
-                        .unwrap_or(TerminalCwdListOutcome::Unavailable);
-                let changed =
-                    self.apply_terminal_cwd_directory_list_result(key, generation, outcome);
-                if changed {
-                    cx.notify();
-                }
-            }
-            CurrentDirectoryScope::SshNode(node_id) => {
-                self.terminal_cwd_picker.loading = true;
-                self.spawn_remote_terminal_cwd_directory_list(
-                    key,
-                    generation,
-                    NodeId::new(node_id.clone()),
-                );
-                cx.notify();
-            }
-        }
-    }
-
-    fn request_terminal_cwd_report(&mut self, pane_id: PaneId, cx: &mut Context<Self>) -> bool {
-        let Some(pane) = self.tab_host.read(cx).panes().get(&pane_id).cloned() else {
-            return false;
-        };
-        let command = current_directory_report_command();
-        pane.update(cx, |pane, cx| {
-            pane.send_internal_control_command_line(command, cx)
-        })
-    }
-
-    fn spawn_terminal_cwd_report_poll(&mut self, generation: u64, cx: &mut Context<Self>) {
-        cx.spawn(async move |weak, cx| {
-            for _ in 0..TERMINAL_CWD_REPORT_POLL_ATTEMPTS {
-                gpui::Timer::after(TERMINAL_CWD_REPORT_POLL_INTERVAL).await;
-                match weak.update(cx, |this, cx| {
-                    this.apply_terminal_cwd_report_if_ready(generation, cx)
-                }) {
-                    Ok(true) | Err(_) => return,
-                    Ok(false) => {}
-                }
-            }
-            let _ = weak.update(cx, |this, cx| {
-                this.finish_terminal_cwd_report_timeout(generation, cx);
-            });
-        })
-        .detach();
-    }
-
-    fn apply_terminal_cwd_report_if_ready(
-        &mut self,
-        generation: u64,
         cx: &mut Context<Self>,
     ) -> bool {
-        if !self.terminal_cwd_picker.open || self.terminal_cwd_picker.generation != generation {
-            return true;
-        }
-        if self.terminal_cwd_picker.snapshot.is_some() {
-            return true;
-        }
-        let Some(scope) = self.terminal_cwd_picker.probe_scope.clone() else {
-            return true;
-        };
-        let Some(pane_id) = self.terminal_cwd_picker.probe_pane_id else {
-            return true;
-        };
-        let Some(snapshot) = self.terminal_cwd_snapshot_for_pane(scope, pane_id, cx) else {
-            return false;
-        };
-        self.open_terminal_cwd_picker_for_snapshot(snapshot, generation, cx);
-        true
-    }
-
-    fn finish_terminal_cwd_report_timeout(&mut self, generation: u64, cx: &mut Context<Self>) {
-        if !self.terminal_cwd_picker.open
-            || self.terminal_cwd_picker.generation != generation
-            || self.terminal_cwd_picker.snapshot.is_some()
-        {
-            return;
-        }
-        self.terminal_cwd_picker.loading = false;
-        self.terminal_cwd_picker.error = Some(self.i18n.t("terminal.cwd.unavailable"));
-        cx.notify();
-    }
-
-    pub(in crate::workspace) fn close_terminal_cwd_picker(&mut self) -> bool {
-        let was_open = self.terminal_cwd_picker.open;
+        let was_open = self
+            .terminal
+            .update(cx, |terminal, _cx| terminal.close_cwd_picker());
         if was_open {
-            self.terminal_cwd_picker.close();
             self.ime_marked_text = None;
             self.clear_ime_selection();
         }
@@ -456,7 +886,7 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.close_terminal_cwd_picker();
+        self.close_terminal_cwd_picker(cx);
         self.open_file_manager_tab_at_path(path, window, cx);
     }
 
@@ -467,7 +897,7 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.close_terminal_cwd_picker();
+        self.close_terminal_cwd_picker(cx);
         self.open_sftp_tab_at_remote_path(node_id, path, window, cx);
     }
 
@@ -477,86 +907,8 @@ impl WorkspaceApp {
         path: String,
         cx: &mut Context<Self>,
     ) {
-        self.close_terminal_cwd_picker();
+        self.close_terminal_cwd_picker(cx);
         self.open_ide_folder_picker_tab_at_path(node_id, path, cx);
-    }
-
-    pub(in crate::workspace) fn visible_terminal_cwd_entries(
-        &self,
-    ) -> Vec<TerminalCwdVisibleEntry> {
-        let Some(path) = self.terminal_cwd_browse_path() else {
-            return Vec::new();
-        };
-        let query = self.terminal_cwd_picker.query.trim().to_ascii_lowercase();
-        let mut rows = Vec::new();
-
-        if let Some(parent) = current_directory_parent(path) {
-            rows.push(TerminalCwdVisibleEntry {
-                kind: TerminalCwdVisibleEntryKind::Parent,
-                name: "..".to_string(),
-                path: parent,
-            });
-        }
-
-        rows.extend(
-            self.terminal_cwd_picker
-                .entries
-                .iter()
-                .filter(|entry| {
-                    query.is_empty()
-                        || entry.name().to_ascii_lowercase().contains(&query)
-                        || entry.path().to_ascii_lowercase().contains(&query)
-                })
-                .map(|entry| TerminalCwdVisibleEntry {
-                    kind: match entry.kind() {
-                        CurrentDirectoryEntryKind::Directory => {
-                            TerminalCwdVisibleEntryKind::Directory
-                        }
-                        CurrentDirectoryEntryKind::File => TerminalCwdVisibleEntryKind::File,
-                    },
-                    name: entry.name().to_string(),
-                    path: entry.path().to_string(),
-                }),
-        );
-
-        if let Some(path) = self.terminal_cwd_query_path_candidate() {
-            rows.push(TerminalCwdVisibleEntry {
-                kind: TerminalCwdVisibleEntryKind::TypedPath,
-                name: path.clone(),
-                path,
-            });
-        }
-
-        rows
-    }
-
-    pub(in crate::workspace) fn terminal_cwd_browse_path(&self) -> Option<&str> {
-        self.terminal_cwd_picker
-            .key
-            .as_ref()
-            .map(CurrentDirectoryKey::path)
-            .or_else(|| {
-                self.terminal_cwd_picker
-                    .snapshot
-                    .as_ref()
-                    .map(CurrentDirectorySnapshot::path)
-            })
-    }
-
-    pub(in crate::workspace) fn enter_terminal_cwd_directory(
-        &mut self,
-        path: String,
-        cx: &mut Context<Self>,
-    ) {
-        let Some(snapshot) = &self.terminal_cwd_picker.snapshot else {
-            return;
-        };
-        let Some(key) = CurrentDirectoryKey::new(snapshot.scope().clone(), path) else {
-            return;
-        };
-        let generation = self.terminal_cwd_picker.next_generation();
-        self.load_terminal_cwd_directory(key, generation, cx);
-        cx.notify();
     }
 
     pub(in crate::workspace) fn select_terminal_cwd_path(
@@ -570,17 +922,23 @@ impl WorkspaceApp {
             return;
         };
         let Some(pane_id) = self.active_pane_id() else {
-            self.terminal_cwd_picker.error = Some(self.i18n.t("terminal.cwd.unavailable"));
+            self.terminal.update(cx, |terminal, _cx| {
+                terminal.set_cwd_error(TerminalCwdError::Unavailable);
+            });
             cx.notify();
             return;
         };
         let Some(pane) = self.tab_host.read(cx).panes().get(&pane_id).cloned() else {
-            self.terminal_cwd_picker.error = Some(self.i18n.t("terminal.cwd.unavailable"));
+            self.terminal.update(cx, |terminal, _cx| {
+                terminal.set_cwd_error(TerminalCwdError::Unavailable);
+            });
             cx.notify();
             return;
         };
         if !pane.read(cx).can_switch_working_directory_from_chrome() {
-            self.terminal_cwd_picker.error = Some(self.i18n.t("terminal.cwd.unavailable"));
+            self.terminal.update(cx, |terminal, _cx| {
+                terminal.set_cwd_error(TerminalCwdError::Unavailable);
+            });
             cx.notify();
             return;
         }
@@ -600,7 +958,7 @@ impl WorkspaceApp {
                 );
             }
         });
-        self.close_terminal_cwd_picker();
+        self.close_terminal_cwd_picker(cx);
         self.focus_active_pane(window, cx);
         cx.notify();
     }
@@ -628,7 +986,7 @@ impl WorkspaceApp {
         self.terminal_command_bar_focused = true;
         self.terminal_command_suggestions_open = false;
         self.terminal_command_suggestion_highlighted = None;
-        self.close_terminal_cwd_picker();
+        self.close_terminal_cwd_picker(cx);
         cx.notify();
     }
 
@@ -638,7 +996,7 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
-        if !self.terminal_cwd_picker.open {
+        if !self.terminal.read(cx).cwd_picker_open() {
             return false;
         }
         let key = event.keystroke.key.as_str();
@@ -649,39 +1007,36 @@ impl WorkspaceApp {
 
         match key {
             "escape" => {
-                self.close_terminal_cwd_picker();
+                self.close_terminal_cwd_picker(cx);
                 cx.notify();
                 true
             }
             "up" | "arrowup" => {
-                self.step_terminal_cwd_highlight(false);
+                self.terminal
+                    .update(cx, |terminal, _cx| terminal.step_cwd_highlight(false));
                 cx.notify();
                 true
             }
             "down" | "arrowdown" => {
-                self.step_terminal_cwd_highlight(true);
+                self.terminal
+                    .update(cx, |terminal, _cx| terminal.step_cwd_highlight(true));
                 cx.notify();
                 true
             }
             "home" => {
-                self.highlight_terminal_cwd_edge(false);
+                self.terminal
+                    .update(cx, |terminal, _cx| terminal.highlight_cwd_edge(false));
                 cx.notify();
                 true
             }
             "end" => {
-                self.highlight_terminal_cwd_edge(true);
+                self.terminal
+                    .update(cx, |terminal, _cx| terminal.highlight_cwd_edge(true));
                 cx.notify();
                 true
             }
             "enter" => {
-                let visible = self.visible_terminal_cwd_entries();
-                let selected = self
-                    .terminal_cwd_picker
-                    .highlighted_path
-                    .as_deref()
-                    .and_then(|path| visible.iter().find(|entry| entry.path == path))
-                    .or_else(|| visible.first())
-                    .cloned();
+                let selected = self.terminal.read(cx).selected_cwd_entry();
                 if let Some(entry) = selected {
                     match entry.kind {
                         TerminalCwdVisibleEntryKind::File => {
@@ -699,256 +1054,6 @@ impl WorkspaceApp {
             }
             _ => false,
         }
-    }
-
-    pub(in crate::workspace) fn poll_terminal_cwd_results(
-        &mut self,
-        cx: &mut Context<Self>,
-    ) -> bool {
-        let delivery_batch =
-            delivery::drain_channel(&self.terminal_cwd_rx, delivery::USER_ACTION_DELIVERY_BUDGET);
-        let mut changed = false;
-        for delivery in delivery_batch.items {
-            match delivery {
-                TerminalCwdDelivery::DirectoryList {
-                    key,
-                    generation,
-                    outcome,
-                } => {
-                    changed |=
-                        self.apply_terminal_cwd_directory_list_result(key, generation, outcome);
-                }
-            }
-        }
-        if changed {
-            cx.notify();
-        }
-        delivery_batch.outcome.backlog_remaining
-    }
-
-    pub(in crate::workspace) fn schedule_terminal_metadata_delivery(&self, cx: &mut Context<Self>) {
-        let metadata_wake = self.terminal_cwd_tx.wake();
-        let release_wake = metadata_wake.clone();
-        cx.on_release(move |_, _| {
-            // Metadata probes may finish after their workspace UI is released.
-            release_wake.stop();
-        })
-        .detach();
-        cx.spawn(async move |weak, cx| {
-            loop {
-                metadata_wake.wait().await;
-                let should_drain = metadata_wake.take();
-                let stopped = metadata_wake.is_stopped();
-                if !should_drain {
-                    if stopped {
-                        break;
-                    }
-                    continue;
-                }
-                let Ok(backlog_remaining) = weak.update(cx, |workspace, cx| {
-                    let cwd_backlog = workspace.poll_terminal_cwd_results(cx);
-                    let git_backlog = workspace.poll_terminal_git_results(cx);
-                    cwd_backlog || git_backlog
-                }) else {
-                    break;
-                };
-                if backlog_remaining {
-                    // Continue bounded metadata batches without the workspace heartbeat.
-                    metadata_wake.mark();
-                } else if stopped {
-                    break;
-                }
-            }
-        })
-        .detach();
-    }
-
-    fn spawn_remote_terminal_cwd_directory_list(
-        &self,
-        key: CurrentDirectoryKey,
-        generation: u64,
-        node_id: NodeId,
-    ) {
-        let node_router = self.node_router.clone();
-        let tx = self.terminal_cwd_tx.clone();
-        let cwd = key.path().to_string();
-        self.forwarding_runtime.spawn(async move {
-            let outcome = tokio::time::timeout(TERMINAL_CWD_REMOTE_LIST_TIMEOUT, async {
-                let shared = node_router
-                    .acquire_sftp(&node_id)
-                    .await
-                    .map_err(|error| error.to_string())?;
-                let entries = {
-                    let sftp = shared.lock().await;
-                    sftp.list_dir_with_cwd(
-                        &cwd,
-                        Some(ListFilter {
-                            show_hidden: true,
-                            pattern: None,
-                            sort: SortOrder::Name,
-                        }),
-                    )
-                    .await
-                    .map_err(|error| error.to_string())?
-                };
-                let (_, entries) = entries;
-                let mut rows = entries
-                    .into_iter()
-                    .filter_map(|entry| match entry.file_type {
-                        RemotePathFileType::Directory => {
-                            CurrentDirectoryEntry::new(entry.name, entry.path)
-                        }
-                        RemotePathFileType::File
-                        | RemotePathFileType::Symlink
-                        | RemotePathFileType::Unknown => {
-                            CurrentDirectoryEntry::new_file(entry.name, entry.path)
-                        }
-                    })
-                    .collect::<Vec<_>>();
-                sort_current_directory_entries(&mut rows);
-                rows.truncate(TERMINAL_CWD_MAX_ENTRIES);
-                Ok::<Vec<CurrentDirectoryEntry>, String>(rows)
-            })
-            .await
-            .ok()
-            .and_then(|result| result.ok())
-            .map(TerminalCwdListOutcome::Ready)
-            .unwrap_or(TerminalCwdListOutcome::RemoteListFailed);
-
-            let _ = tx.send(TerminalCwdDelivery::DirectoryList {
-                key,
-                generation,
-                outcome,
-            });
-        });
-    }
-
-    fn load_terminal_cwd_directory(
-        &mut self,
-        key: CurrentDirectoryKey,
-        generation: u64,
-        cx: &mut Context<Self>,
-    ) {
-        self.terminal_cwd_picker.key = Some(key.clone());
-        self.terminal_cwd_picker.query.clear();
-        self.terminal_cwd_picker.entries.clear();
-        self.terminal_cwd_picker.highlighted_path =
-            current_directory_parent(key.path()).or_else(|| Some(key.path().to_string()));
-        self.terminal_cwd_picker.error = None;
-
-        match key.scope().clone() {
-            CurrentDirectoryScope::Local => {
-                self.terminal_cwd_picker.loading = false;
-                let outcome = list_local_current_directory(key.path(), TERMINAL_CWD_MAX_ENTRIES)
-                    .map(TerminalCwdListOutcome::Ready)
-                    .unwrap_or(TerminalCwdListOutcome::Unavailable);
-                let changed =
-                    self.apply_terminal_cwd_directory_list_result(key, generation, outcome);
-                if changed {
-                    cx.notify();
-                }
-            }
-            CurrentDirectoryScope::SshNode(node_id) => {
-                self.terminal_cwd_picker.loading = true;
-                self.spawn_remote_terminal_cwd_directory_list(
-                    key,
-                    generation,
-                    NodeId::new(node_id),
-                );
-                cx.notify();
-            }
-        }
-    }
-
-    fn apply_terminal_cwd_directory_list_result(
-        &mut self,
-        key: CurrentDirectoryKey,
-        generation: u64,
-        outcome: TerminalCwdListOutcome,
-    ) -> bool {
-        if !self.terminal_cwd_picker.open
-            || self.terminal_cwd_picker.key.as_ref() != Some(&key)
-            || self.terminal_cwd_picker.generation != generation
-        {
-            return false;
-        }
-
-        self.terminal_cwd_picker.loading = false;
-        match outcome {
-            TerminalCwdListOutcome::Ready(entries) => {
-                self.terminal_cwd_picker.error = None;
-                self.terminal_cwd_picker.entries = entries;
-                self.ensure_terminal_cwd_highlight();
-            }
-            TerminalCwdListOutcome::Unavailable => {
-                self.terminal_cwd_picker.entries.clear();
-                self.terminal_cwd_picker.highlighted_path = None;
-                self.terminal_cwd_picker.error = Some(self.i18n.t("terminal.cwd.unavailable"));
-            }
-            TerminalCwdListOutcome::RemoteListFailed => {
-                self.terminal_cwd_picker.entries.clear();
-                self.terminal_cwd_picker.highlighted_path = None;
-                self.terminal_cwd_picker.error =
-                    Some(self.i18n.t("terminal.cwd.remote_list_failed"));
-            }
-        }
-        true
-    }
-
-    fn terminal_cwd_query_path_candidate(&self) -> Option<String> {
-        let query = self.terminal_cwd_picker.query.trim();
-        if !current_directory_path_is_explicit(query) {
-            return None;
-        }
-        if self
-            .terminal_cwd_picker
-            .entries
-            .iter()
-            .any(|entry| entry.path() == query)
-        {
-            return None;
-        }
-        current_directory_cd_command(query).map(|_| query.to_string())
-    }
-
-    fn ensure_terminal_cwd_highlight(&mut self) {
-        let visible = self.visible_terminal_cwd_entries();
-        if visible.iter().any(|entry| {
-            Some(entry.path.as_str()) == self.terminal_cwd_picker.highlighted_path.as_deref()
-        }) {
-            return;
-        }
-        self.terminal_cwd_picker.highlighted_path = visible.first().map(|entry| entry.path.clone());
-    }
-
-    fn step_terminal_cwd_highlight(&mut self, forward: bool) {
-        let visible = self.visible_terminal_cwd_entries();
-        if visible.is_empty() {
-            self.terminal_cwd_picker.highlighted_path = None;
-            return;
-        }
-        let current = self
-            .terminal_cwd_picker
-            .highlighted_path
-            .as_deref()
-            .and_then(|path| visible.iter().position(|entry| entry.path == path));
-        let next = match (current, forward) {
-            (Some(index), true) => (index + 1).min(visible.len() - 1),
-            (Some(index), false) => index.saturating_sub(1),
-            (None, true) => 0,
-            (None, false) => visible.len() - 1,
-        };
-        self.terminal_cwd_picker.highlighted_path = Some(visible[next].path.clone());
-    }
-
-    fn highlight_terminal_cwd_edge(&mut self, last: bool) {
-        let visible = self.visible_terminal_cwd_entries();
-        self.terminal_cwd_picker.highlighted_path = if last {
-            visible.last()
-        } else {
-            visible.first()
-        }
-        .map(|entry| entry.path.clone());
     }
 }
 

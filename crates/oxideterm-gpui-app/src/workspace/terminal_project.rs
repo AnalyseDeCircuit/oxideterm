@@ -68,7 +68,7 @@ impl WorkspaceApp {
         };
         self.dismiss_terminal_broadcast_menu(cx);
         self.close_terminal_quick_commands_popover();
-        self.close_terminal_cwd_picker();
+        self.close_terminal_cwd_picker(cx);
         self.close_terminal_git_branch_picker();
         self.terminal_command_suggestions_open = false;
         self.terminal_command_suggestion_highlighted = None;

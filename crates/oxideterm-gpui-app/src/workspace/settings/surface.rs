@@ -1165,7 +1165,7 @@ impl WorkspaceApp {
         {
             // CWD picker state is transient command-bar chrome; disabling the
             // feature should not leave an orphaned popover around.
-            self.close_terminal_cwd_picker();
+            self.close_terminal_cwd_picker(cx);
         }
         self.ssh_registry.set_idle_timeout(Some(Duration::from_secs(
             settings.connection_pool.idle_timeout_secs as u64,

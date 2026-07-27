@@ -138,11 +138,9 @@ impl WorkspaceApp {
                 workspace.handle_workspace_terminal_event(event, cx);
             },
         );
-        let terminal_metadata_wake = delivery::ActiveDeliveryWake::default();
-        let (terminal_cwd_tx, terminal_cwd_rx) =
-            delivery::ActiveDeliverySender::channel_with_wake(terminal_metadata_wake.clone());
+        let terminal_git_action_wake = delivery::ActiveDeliveryWake::default();
         let (terminal_git_action_tx, terminal_git_action_rx) =
-            delivery::ActiveDeliverySender::channel_with_wake(terminal_metadata_wake);
+            delivery::ActiveDeliverySender::channel_with_wake(terminal_git_action_wake);
         let (profiler_update_tx, profiler_update_rx) = tokio::sync::mpsc::unbounded_channel();
         let host_tools_messages = HostToolsMessages::from_i18n(&i18n);
         let host_tools = cx.new(|cx| {
@@ -283,9 +281,6 @@ impl WorkspaceApp {
             terminal_quick_commands_open: false,
             terminal_quick_commands_pinned: false,
             terminal_quick_command_pending: None,
-            terminal_cwd_tx,
-            terminal_cwd_rx,
-            terminal_cwd_picker: terminal_cwd::TerminalCwdPickerState::default(),
             terminal_git_action_tx,
             terminal_git_action_rx,
             terminal_git_branch_picker: terminal_git::TerminalGitBranchPickerState::default(),
@@ -743,7 +738,7 @@ impl WorkspaceApp {
         workspace.sync_ssh_config_sync_service();
         workspace.restore_session_tree_snapshot();
         workspace.schedule_launcher_worker_delivery(cx);
-        workspace.schedule_terminal_metadata_delivery(cx);
+        workspace.schedule_terminal_git_action_delivery(cx);
         workspace.schedule_native_update_delivery(cx);
         let window_handle = window.window_handle();
         workspace.schedule_graphics_worker_delivery(window_handle, cx);

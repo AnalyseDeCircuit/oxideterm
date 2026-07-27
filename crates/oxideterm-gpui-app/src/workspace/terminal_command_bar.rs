@@ -539,27 +539,6 @@ fn terminal_cwd_browse_element_id(path: &str) -> u64 {
     hasher.finish()
 }
 
-fn terminal_cwd_entry_signature(entry: &terminal_cwd::TerminalCwdVisibleEntry) -> u64 {
-    // Virtual list state is index-based, so rows need a stable content signature
-    // when filtering or changing directories reshuffles the visible entries.
-    let mut hasher = DefaultHasher::new();
-    terminal_cwd_visible_entry_kind_signature(entry.kind).hash(&mut hasher);
-    entry.name.hash(&mut hasher);
-    entry.path.hash(&mut hasher);
-    hasher.finish()
-}
-
-fn terminal_cwd_visible_entry_kind_signature(
-    kind: terminal_cwd::TerminalCwdVisibleEntryKind,
-) -> u8 {
-    match kind {
-        terminal_cwd::TerminalCwdVisibleEntryKind::Parent => 0,
-        terminal_cwd::TerminalCwdVisibleEntryKind::Directory => 1,
-        terminal_cwd::TerminalCwdVisibleEntryKind::File => 2,
-        terminal_cwd::TerminalCwdVisibleEntryKind::TypedPath => 3,
-    }
-}
-
 fn terminal_project_git_root_disagreement(project_root: &str, git_root: &str) -> Option<String> {
     let project_root = project_root.trim();
     let git_root = git_root.trim();

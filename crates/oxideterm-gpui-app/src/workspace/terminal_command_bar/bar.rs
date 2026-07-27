@@ -247,7 +247,7 @@ impl WorkspaceApp {
                 bar.child(self.render_terminal_git_branch_picker(cx))
             })
             .when(
-                cwd_display_enabled && self.terminal_cwd_picker.open,
+                cwd_display_enabled && self.terminal.read(cx).cwd_picker_open(),
                 |bar| bar.child(self.render_terminal_cwd_picker(cx)),
             )
             .when(
@@ -306,7 +306,7 @@ impl WorkspaceApp {
                                             this.terminal_command_suggestions_open = false;
                                             this.terminal_command_suggestion_highlighted = None;
                                             this.close_terminal_quick_commands_popover();
-                                            this.close_terminal_cwd_picker();
+                                            this.close_terminal_cwd_picker(cx);
                                             this.close_terminal_project_panel(cx);
                                         }
                                         this.clear_workspace_tooltip(input_toggle_tooltip_id, cx);
@@ -722,7 +722,7 @@ impl WorkspaceApp {
                                             this.terminal_quick_commands_open =
                                                 !this.terminal_quick_commands_open;
                                             this.dismiss_terminal_broadcast_menu(cx);
-                                            this.close_terminal_cwd_picker();
+                                            this.close_terminal_cwd_picker(cx);
                                             this.close_terminal_git_branch_picker();
                                             if !this.terminal_quick_commands_open {
                                                 this.close_terminal_quick_commands_popover();

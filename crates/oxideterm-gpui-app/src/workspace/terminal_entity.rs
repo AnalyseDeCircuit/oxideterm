@@ -73,9 +73,12 @@ pub(in crate::workspace) struct WorkspaceTerminalEntity {
     project_store: ProjectStatusStore,
     project_tasks_enabled: bool,
     project_panel: terminal_project::TerminalProjectPanelState,
+    pub(super) cwd_tx: delivery::ActiveDeliverySender<terminal_cwd::TerminalCwdDelivery>,
+    pub(super) cwd_rx: std::sync::mpsc::Receiver<terminal_cwd::TerminalCwdDelivery>,
+    pub(super) cwd_picker: terminal_cwd::TerminalCwdPickerState,
     broadcast: TerminalBroadcastState,
-    node_router: NodeRouter,
-    runtime: Arc<tokio::runtime::Runtime>,
+    pub(super) node_router: NodeRouter,
+    pub(super) runtime: Arc<tokio::runtime::Runtime>,
 }
 
 impl WorkspaceTerminalEntity {
@@ -90,6 +93,8 @@ impl WorkspaceTerminalEntity {
         let (git_tx, git_rx) =
             delivery::ActiveDeliverySender::channel_with_wake(delivery_wake.clone());
         let (project_tx, project_rx) =
+            delivery::ActiveDeliverySender::channel_with_wake(delivery_wake.clone());
+        let (cwd_tx, cwd_rx) =
             delivery::ActiveDeliverySender::channel_with_wake(delivery_wake.clone());
         let release_wake = delivery_wake.clone();
         cx.on_release(move |_, _| {
@@ -133,6 +138,9 @@ impl WorkspaceTerminalEntity {
             project_store: ProjectStatusStore::default(),
             project_tasks_enabled: false,
             project_panel: terminal_project::TerminalProjectPanelState::default(),
+            cwd_tx,
+            cwd_rx,
+            cwd_picker: terminal_cwd::TerminalCwdPickerState::default(),
             broadcast: TerminalBroadcastState::default(),
             node_router,
             runtime,
@@ -447,7 +455,10 @@ impl WorkspaceTerminalEntity {
     }
 
     fn drain_deliveries(&mut self, cx: &mut Context<Self>) -> bool {
-        self.drain_notices(cx) | self.drain_git_results(cx) | self.drain_project_results(cx)
+        self.drain_notices(cx)
+            | self.drain_git_results(cx)
+            | self.drain_project_results(cx)
+            | self.drain_cwd_results(cx)
     }
 
     fn drain_notices(&mut self, cx: &mut Context<Self>) -> bool {
@@ -652,7 +663,10 @@ fn terminal_project_now_ms() -> u64 {
 mod tests {
     use super::*;
     use gpui::TestAppContext;
-    use oxideterm_environment::{ProjectFacet, ProjectFacetKind, ProjectTaskGroup};
+    use oxideterm_environment::{
+        CurrentDirectoryScope, CurrentDirectorySnapshot, CurrentDirectorySource, ProjectFacet,
+        ProjectFacetKind, ProjectTaskGroup,
+    };
 
     struct TerminalEventRecorder {
         notices: Vec<TerminalNoticeBatchRequest>,
@@ -821,6 +835,41 @@ mod tests {
         terminal.read_with(cx, |terminal, _cx| {
             assert!(!terminal.project_panel_open());
             assert!(terminal.project_snapshot(&key).is_none());
+        });
+    }
+
+    #[gpui::test]
+    fn cwd_picker_state_actions_and_local_listing_are_entity_owned(cx: &mut TestAppContext) {
+        let terminal = new_terminal_entity(cx);
+        let root = env!("CARGO_MANIFEST_DIR");
+        let snapshot = CurrentDirectorySnapshot::new(
+            CurrentDirectoryScope::Local,
+            root,
+            CurrentDirectorySource::SessionDefault,
+        )
+        .expect("current directory snapshot");
+
+        terminal.update(cx, |terminal, cx| {
+            terminal.open_cwd_picker_for_snapshot(snapshot, cx);
+            assert!(terminal.replace_cwd_query(None, "src"));
+        });
+        terminal.read_with(cx, |terminal, _cx| {
+            assert!(terminal.cwd_picker_open());
+            assert!(!terminal.cwd_picker_loading());
+            assert_eq!(terminal.cwd_picker_error(), None);
+            assert_eq!(terminal.cwd_query(), "src");
+            assert!(terminal.visible_cwd_entries().iter().any(|entry| {
+                entry.kind == terminal_cwd::TerminalCwdVisibleEntryKind::Directory
+                    && entry.path.ends_with("/src")
+            }));
+        });
+
+        terminal.update(cx, |terminal, _cx| {
+            assert!(terminal.close_cwd_picker());
+        });
+        terminal.read_with(cx, |terminal, _cx| {
+            assert!(!terminal.cwd_picker_open());
+            assert!(terminal.visible_cwd_entries().is_empty());
         });
     }
 
