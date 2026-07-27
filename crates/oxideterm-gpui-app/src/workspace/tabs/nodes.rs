@@ -222,6 +222,10 @@ impl WorkspaceApp {
                 })
                 .detach();
             }
+            runtime_entity::WorkspaceRuntimeEvent::ActiveConnectionsChanged => {
+                self.refresh_ssh_terminal_input_locks(cx);
+                cx.notify();
+            }
         }
     }
 
@@ -866,12 +870,6 @@ impl WorkspaceApp {
                     }
                     changed = true;
                 }
-                ReconnectWorkerResult::ActiveConnectionsProbed {
-                    changed: probed_changed,
-                } => {
-                    self.ssh_active_probe_in_flight = false;
-                    changed = probed_changed > 0;
-                }
                 ReconnectWorkerResult::RemoteShellIntegrationGateFinished { node_id, result } => {
                     self.finish_remote_shell_integration_terminal_gate(node_id, result, window, cx);
                     changed = true;
@@ -882,37 +880,6 @@ impl WorkspaceApp {
             self.refresh_ssh_terminal_input_locks(cx);
             cx.notify();
         }
-    }
-
-    pub(in crate::workspace) fn maybe_probe_active_ssh_connections(
-        &mut self,
-        cx: &mut Context<Self>,
-    ) {
-        if self.ssh_active_probe_in_flight {
-            return;
-        }
-        let timing = self.reconnect_orchestrator.timing();
-        if self
-            .last_ssh_active_probe_at
-            .is_some_and(|last| last.elapsed() < timing.ssh_keepalive_interval)
-        {
-            return;
-        }
-        let stats = self.ssh_registry.stats();
-        if stats.active == 0 && stats.idle == 0 {
-            self.last_ssh_active_probe_at = Some(Instant::now());
-            return;
-        }
-        self.last_ssh_active_probe_at = Some(Instant::now());
-        self.ssh_active_probe_in_flight = true;
-        let registry = self.ssh_registry.clone();
-        let timeout = timing.proactive_keepalive_timeout;
-        let tx = self.reconnect_worker_sender(cx);
-        self.forwarding_runtime.spawn(async move {
-            let changed = registry.probe_active_connections(timeout).await.len();
-            let _ = tx.send(ReconnectWorkerResult::ActiveConnectionsProbed { changed });
-        });
-        cx.notify();
     }
 
     pub(in crate::workspace) fn emit_node_event(&self, event: NodeStateEvent) {

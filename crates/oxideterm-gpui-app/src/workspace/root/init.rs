@@ -88,7 +88,14 @@ impl WorkspaceApp {
             node_router.clone(),
             forwarding_runtime.clone(),
         );
-        let workspace_runtime = cx.new(runtime_entity::WorkspaceRuntimeEntity::new);
+        let workspace_runtime = cx.new(|cx| {
+            runtime_entity::WorkspaceRuntimeEntity::new(
+                ssh_registry.clone(),
+                forwarding_runtime.clone(),
+                reconnect_timing_from_settings(&settings),
+                cx,
+            )
+        });
         let runtime_window_handle = window.window_handle();
         let workspace_runtime_subscription = cx.subscribe(
             &workspace_runtime,
@@ -541,8 +548,6 @@ impl WorkspaceApp {
             active_connection_chain: None,
             connecting_node_locks: HashSet::new(),
             pending_reconnect_cascade_nodes: VecDeque::new(),
-            last_ssh_active_probe_at: None,
-            ssh_active_probe_in_flight: false,
             pending_reconnect_transfer_resumes: HashMap::new(),
             reconnect_transfer_resume_totals: HashMap::new(),
             reconnect_transfer_resume_successes: HashMap::new(),
@@ -787,7 +792,6 @@ impl WorkspaceApp {
                             workspace.maybe_refresh_active_terminal_git(cx);
                             workspace.maybe_refresh_active_terminal_project(cx);
                             workspace.sync_ssh_node_lifecycle(cx);
-                            workspace.maybe_probe_active_ssh_connections(cx);
                             if workspace.any_terminal_recording_active(cx) {
                                 cx.notify();
                             }

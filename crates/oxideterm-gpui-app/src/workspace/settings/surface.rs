@@ -1174,6 +1174,9 @@ impl WorkspaceApp {
             reconnect_timing_from_settings(&settings),
             reconnect_max_attempts_from_settings(&settings),
         );
+        self.workspace_runtime.update(cx, |runtime, cx| {
+            runtime.configure_reconnect_timing(reconnect_timing_from_settings(&settings), cx);
+        });
         self.ai_entity.update(cx, |ai, _cx| {
             ai.set_agent_fs_mode(crate::workspace::ide::node_agent_mode_from_settings(
                 &settings,

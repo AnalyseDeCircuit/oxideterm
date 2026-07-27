@@ -77,9 +77,6 @@ pub(in crate::workspace) enum ReconnectWorkerResult {
         created_forwards: Vec<(String, String)>,
         bindings: Vec<(String, String, ConnectionConsumer)>,
     },
-    ActiveConnectionsProbed {
-        changed: usize,
-    },
     RemoteShellIntegrationGateFinished {
         node_id: NodeId,
         result: std::result::Result<(RemoteShellIntegrationStatus, bool), String>,

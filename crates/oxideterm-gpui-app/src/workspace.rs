@@ -951,8 +951,6 @@ pub(crate) struct WorkspaceApp {
     active_connection_chain: Option<ConnectionChainRun>,
     connecting_node_locks: HashSet<NodeId>,
     pending_reconnect_cascade_nodes: VecDeque<NodeId>,
-    last_ssh_active_probe_at: Option<Instant>,
-    ssh_active_probe_in_flight: bool,
     pending_reconnect_transfer_resumes: HashMap<NodeId, HashSet<String>>,
     reconnect_transfer_resume_totals: HashMap<NodeId, usize>,
     reconnect_transfer_resume_successes: HashMap<NodeId, usize>,
