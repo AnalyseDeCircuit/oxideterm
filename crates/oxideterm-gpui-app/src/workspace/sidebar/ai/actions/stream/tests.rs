@@ -2,6 +2,65 @@
 mod ai_turn_order_tests {
     use super::*;
 
+    #[gpui::test]
+    fn runtime_evidence_records_are_entity_owned(cx: &mut gpui::TestAppContext) {
+        let task_runtime = Arc::new(
+            tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .expect("AI runtime"),
+        );
+        let entity = cx.new(|cx| {
+            crate::workspace::ai_state::AiWorkspaceEntity::new(
+                task_runtime,
+                oxideterm_ai::AiProviderKeyStore::new(),
+                cx,
+            )
+        });
+        entity.update(cx, |entity, _cx| {
+            let result = serde_json::json!({
+                "output": "API_KEY=supersecret123456",
+                "data": { "exitCode": 0 },
+                "meta": { "runtimeEpoch": entity.runtime_epoch() },
+            });
+            let record = entity
+                .record_ai_tool_execution_status(
+                    "conversation-a",
+                    "assistant-a",
+                    "tool-a",
+                    "run_command",
+                    r#"{"command":"codex --help API_KEY=supersecret123456"}"#,
+                    "completed",
+                    Some(&result),
+                    Some("execute"),
+                    10,
+                )
+                .expect("tool execution record");
+            let facts = entity.record_ai_tool_result_facts(&record, Some(&result), 10);
+            entity.record_ai_command_from_tool_status(
+                "run_command",
+                r#"{"command":"codex --help API_KEY=supersecret123456"}"#,
+                "completed",
+                Some(&result),
+                Some("execute"),
+            );
+
+            assert_eq!(entity.tool_execution_records.len(), 1);
+            assert!(!facts.is_empty());
+            assert_eq!(entity.tool_result_facts.len(), facts.len());
+            assert_eq!(entity.command_records().len(), 1);
+            assert_eq!(entity.cli_agent_sessions().len(), 1);
+            let retained = format!(
+                "{:?}{:?}{:?}",
+                entity.tool_execution_records,
+                entity.tool_result_facts,
+                entity.command_records()
+            );
+            assert!(!retained.contains("supersecret123456"));
+            assert!(retained.contains("[REDACTED]"));
+        });
+    }
+
     #[test]
     fn model_visible_settings_projection_excludes_secret_bearing_configuration() {
         let mut settings = oxideterm_settings::PersistedSettings::default();

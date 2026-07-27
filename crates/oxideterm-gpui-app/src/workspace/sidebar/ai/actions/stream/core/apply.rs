@@ -405,17 +405,19 @@ impl WorkspaceApp {
             let now = ai_now_ms();
             let round_id_value = round_id.clone();
             let round_number_value = round_number.unwrap_or(1);
-            let tool_execution_record = self.record_ai_tool_execution_status(
-                conversation_id,
-                message_id,
-                tool_call_id,
-                name,
-                arguments,
-                status,
-                result.as_ref(),
-                risk.as_deref(),
-                now,
-            );
+            let tool_execution_record = self.ai_entity.update(cx, |ai, _cx| {
+                ai.record_ai_tool_execution_status(
+                    conversation_id,
+                    message_id,
+                    tool_call_id,
+                    name,
+                    arguments,
+                    status,
+                    result.as_ref(),
+                    risk.as_deref(),
+                    now,
+                )
+            });
             let mut transcript_entries = Vec::new();
             let mut diagnostic_events = Vec::new();
             if synthetic_denied || matches!(status, "pending" | "running" | "pending_user_approval")
@@ -510,7 +512,9 @@ impl WorkspaceApp {
                     })),
                 ));
                 if let Some(record) = tool_execution_record.as_ref() {
-                    let facts = self.record_ai_tool_result_facts(record, result.as_ref(), now);
+                    let facts = self.ai_entity.update(cx, |ai, _cx| {
+                        ai.record_ai_tool_result_facts(record, result.as_ref(), now)
+                    });
                     diagnostic_events.push(ai_diagnostic_event(
                         format!("diagnostic-tool-execution-{tool_call_id}"),
                         conversation_id,
@@ -534,13 +538,15 @@ impl WorkspaceApp {
                         ));
                     }
                 }
-                self.record_ai_command_from_tool_status(
-                    name,
-                    arguments,
-                    status,
-                    result.as_ref(),
-                    risk.as_deref(),
-                );
+                self.ai_entity.update(cx, |ai, _cx| {
+                    ai.record_ai_command_from_tool_status(
+                        name,
+                        arguments,
+                        status,
+                        result.as_ref(),
+                        risk.as_deref(),
+                    );
+                });
             }
             self.persist_ai_transcript_entries(conversation_id.to_string(), transcript_entries);
             self.persist_ai_diagnostic_events(conversation_id.to_string(), diagnostic_events);
@@ -548,9 +554,11 @@ impl WorkspaceApp {
         }
         cx.notify();
     }
+}
 
+impl crate::workspace::ai_state::AiWorkspaceEntity {
     #[allow(clippy::too_many_arguments)]
-    pub(in crate::workspace) fn record_ai_tool_execution_status(
+    fn record_ai_tool_execution_status(
         &mut self,
         conversation_id: &str,
         message_id: &str,
@@ -564,13 +572,11 @@ impl WorkspaceApp {
     ) -> Option<AiToolExecutionRecord> {
         let args = serde_json::from_str::<serde_json::Value>(arguments).ok();
         let existing = self
-            .ai
-            .runtime
             .tool_execution_records
             .iter()
             .position(|record| record.tool_call_id == tool_call_id);
         let mut record = existing
-            .and_then(|index| self.ai.runtime.tool_execution_records.remove(index))
+            .and_then(|index| self.tool_execution_records.remove(index))
             .unwrap_or_else(|| AiToolExecutionRecord {
                 record_id: format!("tool-exec-{tool_call_id}"),
                 conversation_id: conversation_id.to_string(),
@@ -591,7 +597,7 @@ impl WorkspaceApp {
                 duration_ms: None,
                 started_at: now,
                 finished_at: None,
-                runtime_epoch: self.ai.runtime.epoch.clone(),
+                runtime_epoch: self.runtime_epoch.clone(),
             });
 
         record.status = status.to_string();
@@ -604,7 +610,7 @@ impl WorkspaceApp {
         record.visible_in_terminal = ai_tool_visible_in_terminal(result);
         record.approval_source = ai_tool_approval_source(status, result);
         record.runtime_epoch =
-            ai_tool_runtime_epoch(result).unwrap_or_else(|| self.ai.runtime.epoch.clone());
+            ai_tool_runtime_epoch(result).unwrap_or_else(|| self.runtime_epoch.clone());
 
         if matches!(status, "rejected" | "completed" | "error") {
             record.finished_at = Some(now);
@@ -618,21 +624,19 @@ impl WorkspaceApp {
                         .and_then(|value| value.get("output"))
                         .and_then(serde_json::Value::as_str)
                 })
-                .map(|value| truncate_ai_tool_record_text(value, 240));
+                .map(oxideterm_ai::sanitize_for_ai)
+                .map(|value| truncate_ai_tool_record_text(&value, 240));
             record.duration_ms = ai_tool_duration_ms(result);
         }
 
-        self.ai
-            .runtime
-            .tool_execution_records
-            .push_back(record.clone());
-        while self.ai.runtime.tool_execution_records.len() > 500 {
-            self.ai.runtime.tool_execution_records.pop_front();
+        self.tool_execution_records.push_back(record.clone());
+        while self.tool_execution_records.len() > 500 {
+            self.tool_execution_records.pop_front();
         }
         Some(record)
     }
 
-    pub(in crate::workspace) fn record_ai_tool_result_facts(
+    fn record_ai_tool_result_facts(
         &mut self,
         record: &AiToolExecutionRecord,
         result: Option<&serde_json::Value>,
@@ -643,15 +647,15 @@ impl WorkspaceApp {
         }
         let facts = extract_ai_tool_result_facts(record, result, now);
         for fact in &facts {
-            self.ai.runtime.tool_result_facts.push_back(fact.clone());
+            self.tool_result_facts.push_back(fact.clone());
         }
-        while self.ai.runtime.tool_result_facts.len() > 1000 {
-            self.ai.runtime.tool_result_facts.pop_front();
+        while self.tool_result_facts.len() > 1000 {
+            self.tool_result_facts.pop_front();
         }
         facts
     }
 
-    pub(in crate::workspace) fn record_ai_command_from_tool_status(
+    fn record_ai_command_from_tool_status(
         &mut self,
         tool_name: &str,
         arguments: &str,
@@ -681,7 +685,7 @@ impl WorkspaceApp {
                 .to_string(),
             _ => String::new(),
         };
-        let command = command.trim().to_string();
+        let command = oxideterm_ai::sanitize_for_ai(command.trim());
         if command.is_empty() {
             return;
         }
@@ -732,17 +736,16 @@ impl WorkspaceApp {
         let runtime_epoch = meta
             .and_then(|value| value.get("runtimeEpoch"))
             .and_then(serde_json::Value::as_str)
-            .unwrap_or(&self.ai.runtime.epoch)
+            .unwrap_or(&self.runtime_epoch)
             .to_string();
         let approval_mode = meta
             .and_then(|value| value.get("approvalMode"))
             .and_then(serde_json::Value::as_str)
             .map(ToString::to_string);
-        self.ai.runtime.command_record_sequence =
-            self.ai.runtime.command_record_sequence.saturating_add(1);
+        self.command_record_sequence = self.command_record_sequence.saturating_add(1);
         let now = ai_now_ms();
         let record = AiRuntimeCommandRecord {
-            command_id: format!("cmd-{}-{}", now, self.ai.runtime.command_record_sequence),
+            command_id: format!("cmd-{}-{}", now, self.command_record_sequence),
             target_id,
             session_id,
             node_id,
@@ -771,17 +774,17 @@ impl WorkspaceApp {
             risk: risk.unwrap_or("read").to_string(),
         };
         self.record_ai_cli_agent_command(&record);
-        self.ai.runtime.command_records.push_back(record);
-        while self.ai.runtime.command_records.len() > 200 {
-            self.ai.runtime.command_records.pop_front();
+        self.command_records.push_back(record);
+        while self.command_records.len() > 200 {
+            self.command_records.pop_front();
         }
         self.trim_ai_command_records_per_session();
     }
 
-    pub(in crate::workspace) fn trim_ai_command_records_per_session(&mut self) {
+    fn trim_ai_command_records_per_session(&mut self) {
         let mut per_session: HashMap<String, usize> = HashMap::new();
         let mut keep = VecDeque::new();
-        for record in self.ai.runtime.command_records.iter().rev() {
+        for record in self.command_records.iter().rev() {
             let key = record
                 .session_id
                 .as_ref()
@@ -795,13 +798,10 @@ impl WorkspaceApp {
                 *count += 1;
             }
         }
-        self.ai.runtime.command_records = keep;
+        self.command_records = keep;
     }
 
-    pub(in crate::workspace) fn record_ai_cli_agent_command(
-        &mut self,
-        record: &AiRuntimeCommandRecord,
-    ) {
+    fn record_ai_cli_agent_command(&mut self, record: &AiRuntimeCommandRecord) {
         let Some(kind) = detect_ai_cli_agent_kind(&record.command) else {
             return;
         };
@@ -814,8 +814,6 @@ impl WorkspaceApp {
             .unwrap_or_else(|| "unknown".to_string());
         let id = format!("cli-agent:{kind}:{target_key}");
         let existing_started_at = self
-            .ai
-            .runtime
             .cli_agent_sessions
             .get(&id)
             .map(|session| session.started_at)
@@ -825,7 +823,7 @@ impl WorkspaceApp {
             "error" => "failed",
             _ => "running",
         };
-        self.ai.runtime.cli_agent_sessions.insert(
+        self.cli_agent_sessions.insert(
             id.clone(),
             AiCliAgentSession {
                 id,
@@ -842,7 +840,9 @@ impl WorkspaceApp {
             },
         );
     }
+}
 
+impl WorkspaceApp {
     pub(in crate::workspace) fn apply_ai_guardrail(
         &mut self,
         generation: u64,
@@ -1005,7 +1005,8 @@ pub(in crate::workspace) fn ai_tool_argument_summary(
             let command = args
                 .get("command")
                 .and_then(serde_json::Value::as_str)
-                .map(|value| truncate_ai_tool_record_text(value, 200))
+                .map(oxideterm_ai::sanitize_for_ai)
+                .map(|value| truncate_ai_tool_record_text(&value, 200))
                 .unwrap_or_else(|| "<missing command>".to_string());
             let target = args
                 .get("target_id")
@@ -1300,7 +1301,10 @@ pub(in crate::workspace) fn ai_tool_result_fact(
     text: &str,
     now: i64,
 ) -> AiToolResultFact {
-    let output_preview = truncate_ai_tool_record_text(text, 4000);
+    // Facts can be replayed into later prompts and diagnostics, so redact
+    // before hashing or retaining any preview.
+    let safe_text = oxideterm_ai::sanitize_for_ai(text);
+    let output_preview = truncate_ai_tool_record_text(&safe_text, 4000);
     AiToolResultFact {
         fact_id: format!("{}.{}", record.tool_call_id, source_kind),
         conversation_id: record.conversation_id.clone(),
@@ -1308,8 +1312,11 @@ pub(in crate::workspace) fn ai_tool_result_fact(
         tool_call_id: record.tool_call_id.clone(),
         tool_name: record.tool_name.clone(),
         source_kind: source_kind.to_string(),
-        text_hash: ai_tool_fact_hash(text),
-        summary: truncate_ai_tool_record_text(text.lines().next().unwrap_or_default(), 240),
+        text_hash: ai_tool_fact_hash(&safe_text),
+        summary: truncate_ai_tool_record_text(
+            safe_text.lines().next().unwrap_or_default(),
+            240,
+        ),
         output_preview,
         created_at: now,
         runtime_epoch: record.runtime_epoch.clone(),

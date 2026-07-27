@@ -143,6 +143,14 @@ pub(in crate::workspace) struct AiWorkspaceEntity {
     chat_stream_rx: std::sync::mpsc::Receiver<AiStreamDelivery>,
     chat_stream_deliveries: VecDeque<AiStreamDelivery>,
     pending_tool_approvals: HashMap<String, tokio::sync::oneshot::Sender<bool>>,
+    // Runtime evidence transitions are implemented beside stream application,
+    // but these collections remain physically owned by this Entity.
+    pub(in crate::workspace) runtime_epoch: String,
+    pub(in crate::workspace) command_record_sequence: u64,
+    pub(in crate::workspace) command_records: VecDeque<AiRuntimeCommandRecord>,
+    pub(in crate::workspace) tool_execution_records: VecDeque<AiToolExecutionRecord>,
+    pub(in crate::workspace) tool_result_facts: VecDeque<AiToolResultFact>,
+    pub(in crate::workspace) cli_agent_sessions: HashMap<String, AiCliAgentSession>,
     compaction_tx: AiCompactionDeliverySender,
     compaction_rx: std::sync::mpsc::Receiver<AiCompactionDelivery>,
     compaction_deliveries: VecDeque<AiCompactionDelivery>,
@@ -217,6 +225,12 @@ impl AiWorkspaceEntity {
             chat_stream_rx,
             chat_stream_deliveries: VecDeque::new(),
             pending_tool_approvals: HashMap::new(),
+            runtime_epoch: uuid::Uuid::new_v4().to_string(),
+            command_record_sequence: 0,
+            command_records: VecDeque::new(),
+            tool_execution_records: VecDeque::new(),
+            tool_result_facts: VecDeque::new(),
+            cli_agent_sessions: HashMap::new(),
             compaction_tx,
             compaction_rx,
             compaction_deliveries: VecDeque::new(),
@@ -903,6 +917,18 @@ impl AiWorkspaceEntity {
         }
     }
 
+    pub(in crate::workspace) fn runtime_epoch(&self) -> &str {
+        &self.runtime_epoch
+    }
+
+    pub(in crate::workspace) fn command_records(&self) -> &VecDeque<AiRuntimeCommandRecord> {
+        &self.command_records
+    }
+
+    pub(in crate::workspace) fn cli_agent_sessions(&self) -> &HashMap<String, AiCliAgentSession> {
+        &self.cli_agent_sessions
+    }
+
     pub(in crate::workspace) fn take_chat_stream_deliveries(
         &mut self,
     ) -> VecDeque<AiStreamDelivery> {
@@ -1579,14 +1605,8 @@ pub(super) struct AiChatWorkspaceState {
     pub(super) next_sequence: u64,
 }
 
-/// Owns AI execution registries, agent integration, tool approvals, and runtime records.
+/// Owns AI integration services that have not yet moved into the AI Entity.
 pub(super) struct AiRuntimeWorkspaceState {
-    pub(super) epoch: String,
-    pub(super) command_record_sequence: u64,
-    pub(super) command_records: VecDeque<AiRuntimeCommandRecord>,
-    pub(super) tool_execution_records: VecDeque<AiToolExecutionRecord>,
-    pub(super) tool_result_facts: VecDeque<AiToolResultFact>,
-    pub(super) cli_agent_sessions: HashMap<String, AiCliAgentSession>,
     pub(super) agent_fs: NodeAgentIdeFileSystem,
     pub(super) mcp_registry: oxideterm_ai::McpRegistry,
     pub(super) acp_runtime_registry: oxideterm_ai::AcpRuntimeRegistry,
@@ -1695,12 +1715,6 @@ impl AiChatWorkspaceState {
 impl AiRuntimeWorkspaceState {
     fn new(agent_fs: NodeAgentIdeFileSystem, mcp_registry: oxideterm_ai::McpRegistry) -> Self {
         Self {
-            epoch: uuid::Uuid::new_v4().to_string(),
-            command_record_sequence: 0,
-            command_records: VecDeque::new(),
-            tool_execution_records: VecDeque::new(),
-            tool_result_facts: VecDeque::new(),
-            cli_agent_sessions: HashMap::new(),
             agent_fs,
             mcp_registry,
             acp_runtime_registry: oxideterm_ai::AcpRuntimeRegistry::default(),

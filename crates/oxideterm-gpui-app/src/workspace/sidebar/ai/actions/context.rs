@@ -190,7 +190,7 @@ impl WorkspaceApp {
             }
         }
         if chips.len() < 8 {
-            let mut sessions = self.ai_runtime_cli_agent_sessions(&command_records);
+            let mut sessions = self.ai_runtime_cli_agent_sessions(&command_records, cx);
             sessions.sort_by(|left, right| right.updated_at.cmp(&left.updated_at));
             for session in sessions.into_iter().take(3) {
                 chips.push(format!(
@@ -238,13 +238,13 @@ impl WorkspaceApp {
         &self,
         cx: &mut Context<Self>,
     ) -> Vec<AiRuntimeCommandRecord> {
-        let mut records = self
-            .ai
-            .runtime
-            .command_records
-            .iter()
-            .cloned()
-            .collect::<Vec<_>>();
+        let (mut records, runtime_epoch) = {
+            let ai = self.ai_entity.read(cx);
+            (
+                ai.command_records().iter().cloned().collect::<Vec<_>>(),
+                ai.runtime_epoch().to_string(),
+            )
+        };
         let mut seen = records
             .iter()
             .map(|record| record.command_id.clone())
@@ -274,7 +274,7 @@ impl WorkspaceApp {
                     exit_code: record.exit_code.map(i64::from),
                     started_at: record.started_at as i64,
                     finished_at: record.finished_at.map(|value| value as i64),
-                    runtime_epoch: self.ai.runtime.epoch.clone(),
+                    runtime_epoch: runtime_epoch.clone(),
                     approval_mode: None,
                     risk: "execute".to_string(),
                 });
@@ -286,11 +286,12 @@ impl WorkspaceApp {
     pub(in crate::workspace) fn ai_runtime_cli_agent_sessions(
         &self,
         records: &[AiRuntimeCommandRecord],
+        cx: &mut Context<Self>,
     ) -> Vec<AiCliAgentSession> {
         let mut sessions = self
-            .ai
-            .runtime
-            .cli_agent_sessions
+            .ai_entity
+            .read(cx)
+            .cli_agent_sessions()
             .values()
             .cloned()
             .collect::<Vec<_>>();

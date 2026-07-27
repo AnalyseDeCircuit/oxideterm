@@ -522,7 +522,8 @@ impl WorkspaceApp {
             })
         });
         let model_visible_settings = ai_model_visible_settings_projection(settings);
-        let transfers = ai_transfers_state(&self.sftp_transfer_manager, &self.ai.runtime.epoch);
+        let runtime_epoch = self.ai_entity.read(cx).runtime_epoch().to_string();
+        let transfers = ai_transfers_state(&self.sftp_transfer_manager, &runtime_epoch);
         let mut ssh_node_states = std::collections::BTreeMap::<String, usize>::new();
         for node in self.ssh_nodes.values() {
             let state = match node.readiness {
@@ -553,7 +554,7 @@ impl WorkspaceApp {
         // Keep get_state(health) on the same public shape as Tauri even though
         // native derives the values from GPUI-owned stores instead of Zustand.
         let health_state = serde_json::json!({
-            "runtimeEpoch": self.ai.runtime.epoch,
+            "runtimeEpoch": runtime_epoch.as_str(),
             "tabs": {
                 "open": self.tabs.len(),
                 "activeTabId": self.main_window_tabs.active_tab_id.map(|id| id.0.to_string()),
@@ -602,7 +603,7 @@ impl WorkspaceApp {
             ai_providers: settings.ai.providers.clone(),
             ai_embedding_config: settings.ai.embedding_config.clone(),
             ai_context_window: AI_COMPACTION_DEFAULT_CONTEXT_WINDOW,
-            runtime_epoch: self.ai.runtime.epoch.clone(),
+            runtime_epoch,
             model_visible_settings,
         }
     }
