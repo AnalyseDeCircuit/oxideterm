@@ -59,6 +59,26 @@ impl WorkspaceApp {
                 }
                 cx.notify();
             }
+            ai_state::AiWorkspaceEvent::KnowledgeReindexDeliveryReady => {
+                let intents = self
+                    .ai_entity
+                    .update(cx, |ai, _cx| ai.take_knowledge_reindex_intents());
+                for intent in intents {
+                    match intent {
+                        ai_state::AiKnowledgeReindexIntent::Finished { failed } => {
+                            if failed {
+                                self.push_ai_settings_toast(
+                                    self.i18n.t("settings_view.knowledge.error_reindex"),
+                                    TerminalNoticeVariant::Error,
+                                );
+                            } else {
+                                self.settings_page.clear_knowledge_error();
+                            }
+                        }
+                    }
+                }
+                cx.notify();
+            }
             ai_state::AiWorkspaceEvent::ModelRefreshDeliveryReady => {
                 let intents = self
                     .ai_entity

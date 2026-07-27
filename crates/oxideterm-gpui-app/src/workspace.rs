@@ -433,11 +433,6 @@ const KEYBINDING_RECORDING_FOOTER_ACTIONS: [KeybindingRecordingFooterAction; 2] 
     KeybindingRecordingFooterAction::Cancel,
 ];
 
-enum KnowledgeReindexDelivery {
-    Progress { current: usize, total: usize },
-    Finished(Result<usize, String>),
-}
-
 #[derive(Default)]
 struct AiMarkdownDocumentCache {
     documents: HashMap<String, AiCachedMarkdownDocument>,

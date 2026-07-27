@@ -153,9 +153,8 @@ impl WorkspaceApp {
             .knowledge_embedding_progress
             .map(|(current, total)| format!("{current}/{total}"))
             .unwrap_or_else(|| self.i18n.t("settings_view.knowledge.generate_embeddings"));
-        let reindex_label = self
-            .settings_page
-            .knowledge_reindex_progress
+        let reindex_progress = self.ai_entity.read(cx).knowledge_reindex_progress();
+        let reindex_label = reindex_progress
             .map(|(current, total)| {
                 if total == 0 {
                     self.i18n.t("settings_view.knowledge.reindex")
@@ -250,12 +249,9 @@ impl WorkspaceApp {
                             )
                         })
                         .child({
-                            let reindex_disabled = matches!(
-                                self.settings_page.knowledge_reindex_progress,
-                                Some((_current, 0))
-                            );
+                            let reindex_disabled = matches!(reindex_progress, Some((_current, 0)));
                             self.knowledge_text_icon_button(
-                                if self.settings_page.knowledge_reindex_progress.is_some() {
+                                if reindex_progress.is_some() {
                                     LucideIcon::X
                                 } else {
                                     LucideIcon::RefreshCw
@@ -263,7 +259,12 @@ impl WorkspaceApp {
                                 reindex_label,
                                 reindex_disabled,
                                 cx.listener(move |this, _event, _window, cx| {
-                                    if this.settings_page.knowledge_reindex_progress.is_some() {
+                                    if this
+                                        .ai_entity
+                                        .read(cx)
+                                        .knowledge_reindex_progress()
+                                        .is_some()
+                                    {
                                         this.knowledge_cancel_reindex(cx);
                                     } else {
                                         this.knowledge_reindex(reindex_collection_id.clone(), cx);

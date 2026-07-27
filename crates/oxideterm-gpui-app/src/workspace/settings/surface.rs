@@ -60,7 +60,7 @@ impl WorkspaceApp {
         self.focused_settings_input = None;
         self.settings_slider_drag = None;
         self.clear_ime_selection();
-        self.sync_settings_section_list_state();
+        self.sync_settings_section_list_state(cx);
         // Target the importer row directly so callers do not merely land at
         // the top of a long Connections settings page.
         self.settings_section_list_state
@@ -130,7 +130,7 @@ impl WorkspaceApp {
         &mut self,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        self.sync_settings_section_list_state();
+        self.sync_settings_section_list_state(cx);
         let state = self.settings_section_list_state.clone();
         let workspace = cx.entity();
         let spec = self.settings_section_list_spec();
@@ -344,10 +344,10 @@ impl WorkspaceApp {
         provider_views
     }
 
-    pub(in crate::workspace) fn sync_settings_section_list_state(&mut self) {
+    pub(in crate::workspace) fn sync_settings_section_list_state(&mut self, cx: &App) {
         let spec = self.settings_section_list_spec();
         let identity = self.settings_section_list_identity();
-        let signatures = self.settings_section_list_signatures();
+        let signatures = self.settings_section_list_signatures(cx);
         sync_tauri_variable_list_state_by_signatures(
             &self.settings_section_list_state,
             &mut self.settings_section_list_cache.borrow_mut(),
@@ -381,13 +381,13 @@ impl WorkspaceApp {
         )
     }
 
-    pub(in crate::workspace) fn settings_section_list_signatures(&self) -> Vec<u64> {
+    pub(in crate::workspace) fn settings_section_list_signatures(&self, cx: &App) -> Vec<u64> {
         (0..self.settings_section_list_item_count())
-            .map(|index| self.settings_section_signature(index))
+            .map(|index| self.settings_section_signature(index, cx))
             .collect()
     }
 
-    pub(in crate::workspace) fn settings_section_signature(&self, index: usize) -> u64 {
+    pub(in crate::workspace) fn settings_section_signature(&self, index: usize, cx: &App) -> u64 {
         let mut hasher = DefaultHasher::new();
         // GPUI caches variable-row measurements. Hash only states that can
         // change section height so ListState remeasures affected rows without
@@ -587,8 +587,9 @@ impl WorkspaceApp {
                 self.settings_page
                     .knowledge_embedding_progress
                     .hash(&mut hasher);
-                self.settings_page
-                    .knowledge_reindex_progress
+                self.ai_entity
+                    .read(cx)
+                    .knowledge_reindex_progress()
                     .hash(&mut hasher);
             }
             SettingsTab::Keybindings => {

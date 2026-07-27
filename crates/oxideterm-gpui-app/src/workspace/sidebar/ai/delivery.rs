@@ -29,14 +29,9 @@ impl WorkspaceApp {
                             let stream_backlog =
                                 workspace.poll_ai_chat_stream_events(Some(window), cx);
                             let compaction_backlog = workspace.poll_ai_compaction_results(cx);
-                            let knowledge_backlog =
-                                workspace.poll_knowledge_reindex_results(cx);
                             let inline_backlog =
                                 workspace.poll_terminal_ai_inline_delivery(cx);
-                            stream_backlog
-                                || compaction_backlog
-                                || knowledge_backlog
-                                || inline_backlog
+                            stream_backlog || compaction_backlog || inline_backlog
                         })
                     },
                 ) else {

@@ -124,101 +124,21 @@ impl WorkspaceApp {
         collection_id: String,
         cx: &mut Context<Self>,
     ) {
-        if self.settings_page.knowledge_reindex_progress.is_some() {
-            cx.notify();
-            return;
-        }
-        let cancel = Arc::new(AtomicBool::new(false));
-        let cancel_for_task = cancel.clone();
         let store = self.ai.knowledge.rag_store.get();
-        let (tx, rx) = crate::workspace::delivery::ActiveDeliverySender::channel_with_wake(
-            self.ai.delivery_wake.clone(),
-        );
-        self.settings_page.start_knowledge_reindex();
-        self.ai.knowledge.reindex_cancel = Some(cancel);
-        self.ai.knowledge.reindex_rx = Some(rx);
-        self.forwarding_runtime.spawn(async move {
-            let mut last_emitted = 0usize;
-            let mut on_progress = |current: usize, total: usize| {
-                if current == total || current.saturating_sub(last_emitted) >= 10 {
-                    let _ = tx.send(KnowledgeReindexDelivery::Progress { current, total });
-                    last_emitted = current;
-                }
-            };
-            let result = oxideterm_ai::rag_reindex_collection_with_progress(
-                &store,
-                &collection_id,
-                Some(cancel_for_task.as_ref()),
-                Some(&mut on_progress),
-            );
-            let _ = tx.send(KnowledgeReindexDelivery::Finished(result));
+        let started = self.ai_entity.update(cx, |ai, _cx| {
+            ai.request_knowledge_reindex(store, collection_id)
         });
+        if started {
+            self.settings_page.clear_knowledge_error();
+        }
         cx.notify();
     }
 
     pub(in crate::workspace) fn knowledge_cancel_reindex(&mut self, cx: &mut Context<Self>) {
-        if let Some(cancel) = self.ai.knowledge.reindex_cancel.as_ref() {
-            cancel.store(true, Ordering::Relaxed);
-        }
+        self.ai_entity.update(cx, |ai, _cx| {
+            ai.cancel_knowledge_reindex();
+        });
         cx.notify();
-    }
-
-    pub(in crate::workspace) fn poll_knowledge_reindex_results(
-        &mut self,
-        cx: &mut Context<Self>,
-    ) -> bool {
-        let Some(rx) = self.ai.knowledge.reindex_rx.take() else {
-            return false;
-        };
-        let mut keep_rx = true;
-        let mut source_exhausted = false;
-        let mut changed = false;
-        let started_at = Instant::now();
-        let mut processed = 0usize;
-        while crate::workspace::delivery::LIFECYCLE_DELIVERY_BUDGET
-            .allows_next(processed, started_at.elapsed())
-        {
-            let delivery = match rx.try_recv() {
-                Ok(delivery) => delivery,
-                Err(std::sync::mpsc::TryRecvError::Empty) => {
-                    source_exhausted = true;
-                    break;
-                }
-                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
-                    source_exhausted = true;
-                    keep_rx = false;
-                    break;
-                }
-            };
-            processed += 1;
-            changed = true;
-            match delivery {
-                KnowledgeReindexDelivery::Progress { current, total } => {
-                    self.settings_page.update_knowledge_reindex(current, total);
-                }
-                KnowledgeReindexDelivery::Finished(result) => {
-                    keep_rx = false;
-                    self.settings_page.finish_knowledge_reindex();
-                    self.ai.knowledge.reindex_cancel = None;
-                    if let Err(error) = result {
-                        let message = format!(
-                            "{}: {error}",
-                            self.i18n.t("settings_view.knowledge.error_reindex")
-                        );
-                        self.push_ai_settings_toast(message, TerminalNoticeVariant::Error);
-                    } else {
-                        self.settings_page.clear_knowledge_error();
-                    }
-                }
-            }
-        }
-        if keep_rx {
-            self.ai.knowledge.reindex_rx = Some(rx);
-        }
-        if changed {
-            cx.notify();
-        }
-        keep_rx && !source_exhausted
     }
 
     pub(in crate::workspace) fn knowledge_import_files(

@@ -3,6 +3,7 @@ use super::*;
 pub(in crate::workspace) enum AiWorkspaceEvent {
     AcpAgentProbeDeliveryReady,
     AcpModelDiscoveryDeliveryReady,
+    KnowledgeReindexDeliveryReady,
     ModelRefreshDeliveryReady,
     ProviderKeyStatusChanged,
     SelectorProviderStatusChanged,
@@ -19,6 +20,10 @@ pub(in crate::workspace) struct AiAcpModelDiscoveryIntent {
     pub(in crate::workspace) conversation_id: String,
     agent_id: String,
     config_options: Option<Vec<oxideterm_ai::AcpSessionConfigOption>>,
+}
+
+pub(in crate::workspace) enum AiKnowledgeReindexIntent {
+    Finished { failed: bool },
 }
 
 pub(in crate::workspace) enum AiModelRefreshIntent {
@@ -68,6 +73,11 @@ struct AiAcpModelDiscoveryDelivery {
     config_options: Option<Vec<oxideterm_ai::AcpSessionConfigOption>>,
 }
 
+enum AiKnowledgeReindexDelivery {
+    Progress { current: usize, total: usize },
+    Finished { failed: bool },
+}
+
 /// Owns AI worker delivery slices as they move out of the workspace root.
 pub(in crate::workspace) struct AiWorkspaceEntity {
     task_runtime: Arc<tokio::runtime::Runtime>,
@@ -102,6 +112,12 @@ pub(in crate::workspace) struct AiWorkspaceEntity {
         crate::workspace::delivery::ActiveDeliverySender<AiAcpModelDiscoveryDelivery>,
     acp_model_discovery_rx: std::sync::mpsc::Receiver<AiAcpModelDiscoveryDelivery>,
     acp_model_discovery_intents: VecDeque<AiAcpModelDiscoveryIntent>,
+    knowledge_reindex_progress: Option<(usize, usize)>,
+    knowledge_reindex_cancel: Option<Arc<AtomicBool>>,
+    knowledge_reindex_tx:
+        crate::workspace::delivery::ActiveDeliverySender<AiKnowledgeReindexDelivery>,
+    knowledge_reindex_rx: std::sync::mpsc::Receiver<AiKnowledgeReindexDelivery>,
+    knowledge_reindex_intents: VecDeque<AiKnowledgeReindexIntent>,
 }
 
 impl AiWorkspaceEntity {
@@ -119,6 +135,8 @@ impl AiWorkspaceEntity {
         let (acp_agent_probe_tx, acp_agent_probe_rx) =
             crate::workspace::delivery::ActiveDeliverySender::channel();
         let (acp_model_discovery_tx, acp_model_discovery_rx) =
+            crate::workspace::delivery::ActiveDeliverySender::channel();
+        let (knowledge_reindex_tx, knowledge_reindex_rx) =
             crate::workspace::delivery::ActiveDeliverySender::channel();
         let entity = Self {
             task_runtime,
@@ -149,12 +167,18 @@ impl AiWorkspaceEntity {
             acp_model_discovery_tx,
             acp_model_discovery_rx,
             acp_model_discovery_intents: VecDeque::new(),
+            knowledge_reindex_progress: None,
+            knowledge_reindex_cancel: None,
+            knowledge_reindex_tx,
+            knowledge_reindex_rx,
+            knowledge_reindex_intents: VecDeque::new(),
         };
         entity.schedule_model_refresh_delivery(cx);
         entity.schedule_provider_key_status_delivery(cx);
         entity.schedule_selector_probe_delivery(cx);
         entity.schedule_acp_agent_probe_delivery(cx);
         entity.schedule_acp_model_discovery_delivery(cx);
+        entity.schedule_knowledge_reindex_delivery(cx);
         entity
     }
 
@@ -505,6 +529,60 @@ impl AiWorkspaceEntity {
         }
     }
 
+    pub(in crate::workspace) fn knowledge_reindex_progress(&self) -> Option<(usize, usize)> {
+        self.knowledge_reindex_progress
+    }
+
+    pub(in crate::workspace) fn request_knowledge_reindex(
+        &mut self,
+        store: Arc<oxideterm_ai::RagStore>,
+        collection_id: String,
+    ) -> bool {
+        if self.knowledge_reindex_progress.is_some() {
+            return false;
+        }
+        let cancel = Arc::new(AtomicBool::new(false));
+        let worker_cancel = cancel.clone();
+        let worker_tx = self.knowledge_reindex_tx.clone();
+        self.knowledge_reindex_progress = Some((0, 0));
+        self.knowledge_reindex_cancel = Some(cancel);
+        // Reindexing is blocking storage work, so keep it off the async runtime workers.
+        self.task_runtime.spawn_blocking(move || {
+            let mut last_emitted = 0usize;
+            let mut on_progress = |current: usize, total: usize| {
+                if current == total || current.saturating_sub(last_emitted) >= 10 {
+                    let _ = worker_tx.send(AiKnowledgeReindexDelivery::Progress { current, total });
+                    last_emitted = current;
+                }
+            };
+            let failed = oxideterm_ai::rag_reindex_collection_with_progress(
+                &store,
+                &collection_id,
+                Some(worker_cancel.as_ref()),
+                Some(&mut on_progress),
+            )
+            .is_err();
+            // Storage errors may contain paths or indexed content, so only the
+            // stable failure bit crosses back to the GPUI entity.
+            let _ = worker_tx.send(AiKnowledgeReindexDelivery::Finished { failed });
+        });
+        true
+    }
+
+    pub(in crate::workspace) fn cancel_knowledge_reindex(&self) -> bool {
+        let Some(cancel) = self.knowledge_reindex_cancel.as_ref() else {
+            return false;
+        };
+        cancel.store(true, Ordering::Relaxed);
+        true
+    }
+
+    pub(in crate::workspace) fn take_knowledge_reindex_intents(
+        &mut self,
+    ) -> VecDeque<AiKnowledgeReindexIntent> {
+        std::mem::take(&mut self.knowledge_reindex_intents)
+    }
+
     fn begin_model_refresh(&mut self, provider_id: &str) -> Option<u64> {
         if self.refreshing_models.contains(provider_id) {
             return None;
@@ -794,6 +872,67 @@ impl AiWorkspaceEntity {
         }
         drain.outcome.backlog_remaining
     }
+
+    fn schedule_knowledge_reindex_delivery(&self, cx: &mut Context<Self>) {
+        let delivery_wake = self.knowledge_reindex_tx.wake();
+        let release_wake = delivery_wake.clone();
+        cx.on_release(move |_, _| {
+            // Releasing workspace AI state stops only its UI waiter; the
+            // blocking storage task retains its own cancellation lifetime.
+            release_wake.stop();
+        })
+        .detach();
+        cx.spawn(async move |entity, cx| {
+            loop {
+                delivery_wake.wait().await;
+                let should_drain = delivery_wake.take();
+                let stopped = delivery_wake.is_stopped();
+                if should_drain {
+                    let backlog_remaining = entity
+                        .update(cx, |entity, cx| entity.drain_knowledge_reindex_results(cx))
+                        .unwrap_or(false);
+                    if backlog_remaining {
+                        delivery_wake.mark();
+                    }
+                }
+                if stopped {
+                    break;
+                }
+            }
+        })
+        .detach();
+    }
+
+    fn drain_knowledge_reindex_results(&mut self, cx: &mut Context<Self>) -> bool {
+        let drain = crate::workspace::delivery::drain_channel(
+            &self.knowledge_reindex_rx,
+            crate::workspace::delivery::LIFECYCLE_DELIVERY_BUDGET,
+        );
+        let mut changed = false;
+        for delivery in drain.items {
+            match delivery {
+                AiKnowledgeReindexDelivery::Progress { current, total } => {
+                    if self.knowledge_reindex_progress.is_some() {
+                        self.knowledge_reindex_progress = Some((current, total));
+                        changed = true;
+                    }
+                }
+                AiKnowledgeReindexDelivery::Finished { failed } => {
+                    if self.knowledge_reindex_progress.take().is_some() {
+                        self.knowledge_reindex_cancel = None;
+                        self.knowledge_reindex_intents
+                            .push_back(AiKnowledgeReindexIntent::Finished { failed });
+                        changed = true;
+                    }
+                }
+            }
+        }
+        if changed {
+            cx.emit(AiWorkspaceEvent::KnowledgeReindexDeliveryReady);
+            cx.notify();
+        }
+        drain.outcome.backlog_remaining
+    }
 }
 
 fn ai_acp_probe_error_result(kind: &'static str) -> AiAcpAgentProbeResult {
@@ -913,11 +1052,9 @@ pub(super) struct AiModelWorkspaceState {
     pub(super) key_store: oxideterm_ai::AiProviderKeyStore,
 }
 
-/// Owns lazy RAG storage and knowledge reindex delivery state.
+/// Owns lazy RAG storage and the workspace-window observation adapter.
 pub(super) struct AiKnowledgeWorkspaceState {
     pub(super) rag_store: LazyAiRagStore,
-    pub(super) reindex_cancel: Option<Arc<AtomicBool>>,
-    pub(super) reindex_rx: Option<std::sync::mpsc::Receiver<KnowledgeReindexDelivery>>,
     pub(super) window_activation_subscription: Option<Subscription>,
 }
 
@@ -1066,8 +1203,6 @@ impl AiKnowledgeWorkspaceState {
     fn new() -> Self {
         Self {
             rag_store: LazyAiRagStore::default(),
-            reindex_cancel: None,
-            reindex_rx: None,
             window_activation_subscription: None,
         }
     }
@@ -1336,6 +1471,47 @@ mod entity_tests {
     }
 
     #[gpui::test]
+    fn knowledge_reindex_progress_cancel_and_completion_are_entity_owned(cx: &mut TestAppContext) {
+        let entity = cx.new(|cx| {
+            AiWorkspaceEntity::new(test_runtime(), oxideterm_ai::AiProviderKeyStore::new(), cx)
+        });
+        let cancel = Arc::new(AtomicBool::new(false));
+        let worker_tx = entity.update(cx, |entity, _cx| {
+            entity.knowledge_reindex_progress = Some((0, 0));
+            entity.knowledge_reindex_cancel = Some(cancel.clone());
+            entity.knowledge_reindex_tx.clone()
+        });
+        assert!(entity.read_with(cx, |entity, _cx| entity.cancel_knowledge_reindex()));
+        assert!(cancel.load(Ordering::Relaxed));
+
+        worker_tx
+            .send(AiKnowledgeReindexDelivery::Progress {
+                current: 10,
+                total: 25,
+            })
+            .unwrap();
+        cx.run_until_parked();
+        assert_eq!(
+            entity.read_with(cx, |entity, _cx| entity.knowledge_reindex_progress()),
+            Some((10, 25))
+        );
+
+        worker_tx
+            .send(AiKnowledgeReindexDelivery::Finished { failed: true })
+            .unwrap();
+        cx.run_until_parked();
+        let intents = entity.update(cx, |entity, _cx| entity.take_knowledge_reindex_intents());
+        assert!(matches!(
+            intents.front(),
+            Some(AiKnowledgeReindexIntent::Finished { failed: true })
+        ));
+        assert_eq!(
+            entity.read_with(cx, |entity, _cx| entity.knowledge_reindex_progress()),
+            None
+        );
+    }
+
+    #[gpui::test]
     fn entity_release_stops_all_entity_delivery_waiters(cx: &mut TestAppContext) {
         let entity = cx.new(|cx| {
             AiWorkspaceEntity::new(test_runtime(), oxideterm_ai::AiProviderKeyStore::new(), cx)
@@ -1346,6 +1522,7 @@ mod entity_tests {
             selector_probe_wake,
             acp_agent_probe_wake,
             acp_model_discovery_wake,
+            knowledge_reindex_wake,
         ) = cx.read(|cx| {
             let entity = entity.read(cx);
             (
@@ -1354,6 +1531,7 @@ mod entity_tests {
                 entity.selector_probe_tx.wake(),
                 entity.acp_agent_probe_tx.wake(),
                 entity.acp_model_discovery_tx.wake(),
+                entity.knowledge_reindex_tx.wake(),
             )
         });
 
@@ -1367,5 +1545,6 @@ mod entity_tests {
         assert!(selector_probe_wake.is_stopped());
         assert!(acp_agent_probe_wake.is_stopped());
         assert!(acp_model_discovery_wake.is_stopped());
+        assert!(knowledge_reindex_wake.is_stopped());
     }
 }

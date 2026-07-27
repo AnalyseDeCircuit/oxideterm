@@ -54,7 +54,6 @@ pub struct SettingsPageModel {
     pub knowledge_new_document_format: String,
     pub knowledge_import_progress: Option<(usize, usize)>,
     pub knowledge_embedding_progress: Option<(usize, usize)>,
-    pub knowledge_reindex_progress: Option<(usize, usize)>,
     pub knowledge_delete_confirm: Option<KnowledgeDeleteConfirm>,
     pub knowledge_external_edit: Option<KnowledgeExternalEdit>,
     pub knowledge_error: Option<String>,
@@ -106,7 +105,6 @@ impl Default for SettingsPageModel {
             knowledge_new_document_format: "markdown".to_string(),
             knowledge_import_progress: None,
             knowledge_embedding_progress: None,
-            knowledge_reindex_progress: None,
             knowledge_delete_confirm: None,
             knowledge_external_edit: None,
             knowledge_error: None,
@@ -434,23 +432,6 @@ impl SettingsPageModel {
     /// Finishes embedding progress and clears stale errors.
     pub fn finish_knowledge_embedding(&mut self) {
         self.knowledge_embedding_progress = None;
-        self.knowledge_error = None;
-    }
-
-    /// Starts reindex progress and clears stale errors.
-    pub fn start_knowledge_reindex(&mut self) {
-        self.knowledge_reindex_progress = Some((0, 0));
-        self.knowledge_error = None;
-    }
-
-    /// Updates the reindex progress counter.
-    pub fn update_knowledge_reindex(&mut self, current: usize, total: usize) {
-        self.knowledge_reindex_progress = Some((current, total));
-    }
-
-    /// Finishes reindex progress and clears stale errors.
-    pub fn finish_knowledge_reindex(&mut self) {
-        self.knowledge_reindex_progress = None;
         self.knowledge_error = None;
     }
 
