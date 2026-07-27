@@ -3,8 +3,10 @@
 
 use super::*;
 use oxideterm_environment::{
-    ProjectProbeError, ProjectProbeKey, ProjectProbeOutcome, ProjectProbeScope, ProjectSnapshot,
-    ProjectStatusStore, parse_remote_shell_project_probe_output, probe_local_project,
+    GitProbeError, GitProbeKey, GitProbeOutcome, GitProbeScope, GitRepositorySnapshot,
+    GitStatusStore, ProjectProbeError, ProjectProbeKey, ProjectProbeOutcome, ProjectProbeScope,
+    ProjectSnapshot, ProjectStatusStore, parse_remote_shell_project_probe_output,
+    parse_shell_probe_output, probe_local_project, remote_shell_probe_command,
     remote_shell_project_probe_command,
 };
 use std::{
@@ -37,13 +39,25 @@ impl TerminalNoticeBatchRequest {
 #[derive(Clone)]
 pub(in crate::workspace) enum WorkspaceTerminalEvent {
     NoticesReady(TerminalNoticeBatchRequest),
+    GitMetadataChanged,
     ProjectMetadataChanged,
+}
+
+enum TerminalGitProbeDelivery {
+    Probe {
+        key: GitProbeKey,
+        generation: u64,
+        outcome: GitProbeOutcome,
+    },
 }
 
 /// Owns terminal-wide delivery channels and their foreground cancellation lifecycle.
 pub(in crate::workspace) struct WorkspaceTerminalEntity {
     notice_tx: delivery::ActiveDeliverySender<TerminalNotice>,
     notice_rx: std::sync::mpsc::Receiver<TerminalNotice>,
+    git_tx: delivery::ActiveDeliverySender<TerminalGitProbeDelivery>,
+    git_rx: std::sync::mpsc::Receiver<TerminalGitProbeDelivery>,
+    git_store: GitStatusStore,
     project_tx: delivery::ActiveDeliverySender<terminal_project::TerminalProjectDelivery>,
     project_rx: std::sync::mpsc::Receiver<terminal_project::TerminalProjectDelivery>,
     project_store: ProjectStatusStore,
@@ -60,6 +74,8 @@ impl WorkspaceTerminalEntity {
     ) -> Self {
         let delivery_wake = delivery::ActiveDeliveryWake::default();
         let (notice_tx, notice_rx) =
+            delivery::ActiveDeliverySender::channel_with_wake(delivery_wake.clone());
+        let (git_tx, git_rx) =
             delivery::ActiveDeliverySender::channel_with_wake(delivery_wake.clone());
         let (project_tx, project_rx) =
             delivery::ActiveDeliverySender::channel_with_wake(delivery_wake.clone());
@@ -97,6 +113,9 @@ impl WorkspaceTerminalEntity {
         Self {
             notice_tx,
             notice_rx,
+            git_tx,
+            git_rx,
+            git_store: GitStatusStore::default(),
             project_tx,
             project_rx,
             project_store: ProjectStatusStore::default(),
@@ -119,6 +138,38 @@ impl WorkspaceTerminalEntity {
         key: &ProjectProbeKey,
     ) -> Option<ProjectSnapshot> {
         self.project_store.snapshot(key).cloned()
+    }
+
+    pub(in crate::workspace) fn git_snapshot(
+        &self,
+        key: &GitProbeKey,
+    ) -> Option<GitRepositorySnapshot> {
+        self.git_store.snapshot(key).cloned()
+    }
+
+    pub(in crate::workspace) fn maybe_refresh_git(
+        &mut self,
+        key: GitProbeKey,
+        cx: &mut Context<Self>,
+    ) {
+        let now_ms = terminal_git::terminal_git_now_ms();
+        if !self
+            .git_store
+            .should_probe(&key, now_ms, terminal_git::TERMINAL_GIT_PROBE_TTL_MS)
+        {
+            return;
+        }
+
+        let generation = self.git_store.mark_loading(key.clone(), now_ms);
+        let remote_node_id = match key.scope() {
+            GitProbeScope::Local => None,
+            GitProbeScope::SshNode(node_id) => Some(NodeId::new(node_id.clone())),
+        };
+        if let Some(node_id) = remote_node_id {
+            self.spawn_remote_git_probe(key, generation, node_id, cx);
+        } else {
+            self.spawn_local_git_probe(key, generation);
+        }
     }
 
     pub(in crate::workspace) fn set_project_tasks_enabled(
@@ -167,7 +218,7 @@ impl WorkspaceTerminalEntity {
     }
 
     fn drain_deliveries(&mut self, cx: &mut Context<Self>) -> bool {
-        self.drain_notices(cx) | self.drain_project_results(cx)
+        self.drain_notices(cx) | self.drain_git_results(cx) | self.drain_project_results(cx)
     }
 
     fn drain_notices(&mut self, cx: &mut Context<Self>) -> bool {
@@ -210,6 +261,91 @@ impl WorkspaceTerminalEntity {
             cx.emit(WorkspaceTerminalEvent::ProjectMetadataChanged);
         }
         delivery_batch.outcome.backlog_remaining
+    }
+
+    fn drain_git_results(&mut self, cx: &mut Context<Self>) -> bool {
+        let delivery_batch =
+            delivery::drain_channel(&self.git_rx, delivery::USER_ACTION_DELIVERY_BUDGET);
+        let mut changed = false;
+        for delivery in delivery_batch.items {
+            match delivery {
+                TerminalGitProbeDelivery::Probe {
+                    key,
+                    generation,
+                    outcome,
+                } => {
+                    changed |= self.git_store.finish_probe(
+                        &key,
+                        generation,
+                        outcome,
+                        terminal_git::terminal_git_now_ms(),
+                    );
+                }
+            }
+        }
+        if changed {
+            cx.emit(WorkspaceTerminalEvent::GitMetadataChanged);
+        }
+        delivery_batch.outcome.backlog_remaining
+    }
+
+    fn spawn_local_git_probe(&self, key: GitProbeKey, generation: u64) {
+        let git_tx = self.git_tx.clone();
+        let cwd = key.cwd().to_string();
+        self.runtime.spawn(async move {
+            let outcome = terminal_git::run_local_git_probe(&cwd).await;
+            let _ = git_tx.send(TerminalGitProbeDelivery::Probe {
+                key,
+                generation,
+                outcome,
+            });
+        });
+    }
+
+    fn spawn_remote_git_probe(
+        &mut self,
+        key: GitProbeKey,
+        generation: u64,
+        node_id: NodeId,
+        cx: &mut Context<Self>,
+    ) {
+        let handle = match self.node_router.resolve_connection_now(&node_id) {
+            Ok(resolved) => resolved.handle,
+            Err(_) => {
+                if self.git_store.finish_probe(
+                    &key,
+                    generation,
+                    GitProbeOutcome::Error(GitProbeError::new(
+                        "ssh node is not ready for git probing",
+                    )),
+                    terminal_git::terminal_git_now_ms(),
+                ) {
+                    cx.emit(WorkspaceTerminalEvent::GitMetadataChanged);
+                }
+                return;
+            }
+        };
+
+        let git_tx = self.git_tx.clone();
+        let command = remote_shell_probe_command(key.cwd());
+        self.runtime.spawn(async move {
+            let outcome = match handle
+                .run_command_capture(
+                    &command,
+                    terminal_git::TERMINAL_GIT_PROBE_TIMEOUT,
+                    terminal_git::TERMINAL_GIT_REMOTE_MAX_OUTPUT,
+                )
+                .await
+            {
+                Ok(output) => parse_shell_probe_output(&output.stdout),
+                Err(_) => GitProbeOutcome::Error(GitProbeError::new("ssh git probe failed")),
+            };
+            let _ = git_tx.send(TerminalGitProbeDelivery::Probe {
+                key,
+                generation,
+                outcome,
+            });
+        });
     }
 
     fn spawn_local_project_probe(&self, key: ProjectProbeKey, generation: u64) {
@@ -290,6 +426,7 @@ mod tests {
 
     struct TerminalEventRecorder {
         notices: Vec<TerminalNoticeBatchRequest>,
+        git_metadata_changes: usize,
         project_metadata_changes: usize,
         _subscription: Subscription,
     }
@@ -316,6 +453,9 @@ mod tests {
                     WorkspaceTerminalEvent::NoticesReady(request) => {
                         recorder.notices.push(request.clone());
                     }
+                    WorkspaceTerminalEvent::GitMetadataChanged => {
+                        recorder.git_metadata_changes += 1;
+                    }
                     WorkspaceTerminalEvent::ProjectMetadataChanged => {
                         recorder.project_metadata_changes += 1;
                     }
@@ -323,6 +463,7 @@ mod tests {
             );
             TerminalEventRecorder {
                 notices: Vec::new(),
+                git_metadata_changes: 0,
                 project_metadata_changes: 0,
                 _subscription: subscription,
             }
@@ -370,6 +511,9 @@ mod tests {
                     WorkspaceTerminalEvent::NoticesReady(request) => {
                         recorder.notices.push(request.clone());
                     }
+                    WorkspaceTerminalEvent::GitMetadataChanged => {
+                        recorder.git_metadata_changes += 1;
+                    }
                     WorkspaceTerminalEvent::ProjectMetadataChanged => {
                         recorder.project_metadata_changes += 1;
                     }
@@ -377,6 +521,7 @@ mod tests {
             );
             TerminalEventRecorder {
                 notices: Vec::new(),
+                git_metadata_changes: 0,
                 project_metadata_changes: 0,
                 _subscription: subscription,
             }
@@ -412,6 +557,65 @@ mod tests {
         );
         assert_eq!(
             recorder.read_with(cx, |recorder, _cx| recorder.project_metadata_changes),
+            1
+        );
+    }
+
+    #[gpui::test]
+    fn git_probe_state_and_delivery_are_entity_owned(cx: &mut TestAppContext) {
+        let terminal = new_terminal_entity(cx);
+        let recorder = cx.new(|cx| {
+            let subscription = cx.subscribe(
+                &terminal,
+                |recorder: &mut TerminalEventRecorder, _terminal, event, _cx| match event {
+                    WorkspaceTerminalEvent::NoticesReady(request) => {
+                        recorder.notices.push(request.clone());
+                    }
+                    WorkspaceTerminalEvent::GitMetadataChanged => {
+                        recorder.git_metadata_changes += 1;
+                    }
+                    WorkspaceTerminalEvent::ProjectMetadataChanged => {
+                        recorder.project_metadata_changes += 1;
+                    }
+                },
+            );
+            TerminalEventRecorder {
+                notices: Vec::new(),
+                git_metadata_changes: 0,
+                project_metadata_changes: 0,
+                _subscription: subscription,
+            }
+        });
+        let key =
+            GitProbeKey::new(GitProbeScope::Local, "/missing-repository").expect("git probe key");
+        let (generation, sender) = terminal.update(cx, |terminal, _cx| {
+            let generation = terminal
+                .git_store
+                .mark_loading(key.clone(), terminal_git::terminal_git_now_ms());
+            (generation, terminal.git_tx.clone())
+        });
+
+        sender
+            .send(TerminalGitProbeDelivery::Probe {
+                key: key.clone(),
+                generation,
+                outcome: GitProbeOutcome::GitUnavailable,
+            })
+            .expect("git delivery");
+        cx.run_until_parked();
+
+        let state = terminal.read_with(cx, |terminal, _cx| {
+            terminal
+                .git_store
+                .get(&key)
+                .map(|entry| entry.state().clone())
+        });
+        assert_eq!(
+            state,
+            Some(oxideterm_environment::GitProbeState::GitUnavailable)
+        );
+        assert_eq!(
+            recorder.read_with(cx, |recorder, _cx| recorder.git_metadata_changes),
             1
         );
     }

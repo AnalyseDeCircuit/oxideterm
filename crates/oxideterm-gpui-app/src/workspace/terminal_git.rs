@@ -17,9 +17,8 @@ use oxideterm_environment::{
     git_repo_root_args, git_staged_diff_patch_args, git_staged_diff_stat_args, git_status_args,
     git_worktree_list_args, infer_terminal_cwd_from_text, interpret_git_branch_list_outputs,
     interpret_git_command_outputs_with_status_and_operation, interpret_git_staged_diff_outputs,
-    parse_shell_branch_list_output, parse_shell_probe_output, parse_shell_staged_diff_output,
-    preferred_git_cwd, remote_shell_branch_list_command, remote_shell_probe_command,
-    remote_shell_staged_diff_command, shell_quote,
+    parse_shell_branch_list_output, parse_shell_staged_diff_output, preferred_git_cwd,
+    remote_shell_branch_list_command, remote_shell_staged_diff_command, shell_quote,
 };
 use oxideterm_ssh::NodeId;
 use tokio::process::Command;
@@ -28,22 +27,17 @@ use super::*;
 
 #[cfg(windows)]
 const TERMINAL_GIT_CREATE_NO_WINDOW: u32 = 0x08000000;
-const TERMINAL_GIT_PROBE_TTL_MS: u64 = 5_000;
-const TERMINAL_GIT_PROBE_TIMEOUT: Duration = Duration::from_secs(4);
+pub(super) const TERMINAL_GIT_PROBE_TTL_MS: u64 = 5_000;
+pub(super) const TERMINAL_GIT_PROBE_TIMEOUT: Duration = Duration::from_secs(4);
 const TERMINAL_GIT_BRANCH_LIST_TIMEOUT: Duration = Duration::from_secs(4);
 const TERMINAL_GIT_AI_DIFF_TIMEOUT: Duration = Duration::from_secs(6);
-const TERMINAL_GIT_REMOTE_MAX_OUTPUT: usize = 8 * 1024;
+pub(super) const TERMINAL_GIT_REMOTE_MAX_OUTPUT: usize = 8 * 1024;
 const TERMINAL_GIT_AI_DIFF_REMOTE_MAX_OUTPUT: usize = 128 * 1024;
 const TERMINAL_GIT_AI_DIFF_MAX_CHARS: usize = 24_000;
 const TERMINAL_GIT_COMMIT_SUBJECT_MAX_CHARS: usize = 96;
 
 #[derive(Clone, Debug)]
 pub(in crate::workspace) enum TerminalGitDelivery {
-    Probe {
-        key: GitProbeKey,
-        generation: u64,
-        outcome: GitProbeOutcome,
-    },
     BranchList {
         key: GitProbeKey,
         generation: u64,
@@ -199,7 +193,7 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> Option<GitRepositorySnapshot> {
         let key = self.active_terminal_git_key(cx)?;
-        self.terminal_git_store.snapshot(&key).cloned()
+        self.terminal.read(cx).git_snapshot(&key)
     }
 
     pub(in crate::workspace) fn maybe_refresh_active_terminal_git(
@@ -209,45 +203,21 @@ impl WorkspaceApp {
         let Some(key) = self.active_terminal_git_key(cx) else {
             return;
         };
-        let now_ms = terminal_git_now_ms();
-        if !self
-            .terminal_git_store
-            .should_probe(&key, now_ms, TERMINAL_GIT_PROBE_TTL_MS)
-        {
-            return;
-        }
-
-        let generation = self.terminal_git_store.mark_loading(key.clone(), now_ms);
-        match key.scope() {
-            GitProbeScope::Local => self.spawn_local_terminal_git_probe(key, generation),
-            GitProbeScope::SshNode(node_id) => {
-                let node_id = NodeId::new(node_id.clone());
-                self.spawn_remote_terminal_git_probe(key, generation, node_id, cx);
-            }
-        }
+        self.terminal
+            .update(cx, |terminal, cx| terminal.maybe_refresh_git(key, cx));
     }
 
     pub(in crate::workspace) fn poll_terminal_git_results(
         &mut self,
         cx: &mut Context<Self>,
     ) -> bool {
-        let delivery_batch =
-            delivery::drain_channel(&self.terminal_git_rx, delivery::USER_ACTION_DELIVERY_BUDGET);
+        let delivery_batch = delivery::drain_channel(
+            &self.terminal_git_action_rx,
+            delivery::USER_ACTION_DELIVERY_BUDGET,
+        );
         let mut changed = false;
         for delivery in delivery_batch.items {
             match delivery {
-                TerminalGitDelivery::Probe {
-                    key,
-                    generation,
-                    outcome,
-                } => {
-                    changed |= self.terminal_git_store.finish_probe(
-                        &key,
-                        generation,
-                        outcome,
-                        terminal_git_now_ms(),
-                    );
-                }
                 TerminalGitDelivery::BranchList {
                     key,
                     generation,
@@ -557,7 +527,7 @@ impl WorkspaceApp {
         let failed_to_get_key = self.i18n.t("ai.model_selector.failed_to_get_api_key");
         let context_max_chars = self.settings_store.settings().ai.context_max_chars.max(0) as usize;
         let max_context_chars = context_max_chars.clamp(4_000, TERMINAL_GIT_AI_DIFF_MAX_CHARS);
-        let tx = self.terminal_git_tx.clone();
+        let tx = self.terminal_git_action_tx.clone();
 
         match key.scope() {
             GitProbeScope::Local => {
@@ -824,69 +794,6 @@ impl WorkspaceApp {
         })
     }
 
-    fn spawn_local_terminal_git_probe(&self, key: GitProbeKey, generation: u64) {
-        let tx = self.terminal_git_tx.clone();
-        let cwd = key.cwd().to_string();
-        self.forwarding_runtime.spawn(async move {
-            let outcome = run_local_git_probe(&cwd).await;
-            let _ = tx.send(TerminalGitDelivery::Probe {
-                key,
-                generation,
-                outcome,
-            });
-        });
-    }
-
-    fn spawn_remote_terminal_git_probe(
-        &mut self,
-        key: GitProbeKey,
-        generation: u64,
-        node_id: NodeId,
-        cx: &mut Context<Self>,
-    ) {
-        let resolved = self.node_router.resolve_connection_now(&node_id);
-        let handle = match resolved {
-            Ok(resolved) => resolved.handle,
-            Err(_) => {
-                let changed = self.terminal_git_store.finish_probe(
-                    &key,
-                    generation,
-                    GitProbeOutcome::Error(oxideterm_environment::GitProbeError::new(
-                        "ssh node is not ready for git probing",
-                    )),
-                    terminal_git_now_ms(),
-                );
-                if changed {
-                    cx.notify();
-                }
-                return;
-            }
-        };
-
-        let tx = self.terminal_git_tx.clone();
-        let command = remote_shell_probe_command(key.cwd());
-        self.forwarding_runtime.spawn(async move {
-            let outcome = match handle
-                .run_command_capture(
-                    &command,
-                    TERMINAL_GIT_PROBE_TIMEOUT,
-                    TERMINAL_GIT_REMOTE_MAX_OUTPUT,
-                )
-                .await
-            {
-                Ok(output) => parse_shell_probe_output(&output.stdout),
-                Err(_) => GitProbeOutcome::Error(oxideterm_environment::GitProbeError::new(
-                    "ssh git probe failed",
-                )),
-            };
-            let _ = tx.send(TerminalGitDelivery::Probe {
-                key,
-                generation,
-                outcome,
-            });
-        });
-    }
-
     fn spawn_terminal_git_branch_list(
         &mut self,
         key: GitProbeKey,
@@ -903,7 +810,7 @@ impl WorkspaceApp {
     }
 
     fn spawn_local_terminal_git_branch_list(&self, key: GitProbeKey, generation: u64) {
-        let tx = self.terminal_git_tx.clone();
+        let tx = self.terminal_git_action_tx.clone();
         let cwd = key.cwd().to_string();
         self.forwarding_runtime.spawn(async move {
             let outcome = run_local_git_branch_list(&cwd).await;
@@ -934,7 +841,7 @@ impl WorkspaceApp {
             }
         };
 
-        let tx = self.terminal_git_tx.clone();
+        let tx = self.terminal_git_action_tx.clone();
         let command = remote_shell_branch_list_command(key.cwd());
         self.forwarding_runtime.spawn(async move {
             let outcome = match handle
@@ -1062,7 +969,7 @@ impl WorkspaceApp {
     }
 }
 
-async fn run_local_git_probe(cwd: &str) -> GitProbeOutcome {
+pub(super) async fn run_local_git_probe(cwd: &str) -> GitProbeOutcome {
     let root = match run_local_git_command(cwd, git_repo_root_args()).await {
         Ok(output) => output,
         Err(LocalGitProbeError::GitMissing) => return GitProbeOutcome::GitUnavailable,
@@ -1347,7 +1254,7 @@ fn configure_local_git_command(command: &mut Command) {
     }
 }
 
-fn terminal_git_now_ms() -> u64 {
+pub(super) fn terminal_git_now_ms() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|duration| duration.as_millis().min(u128::from(u64::MAX)) as u64)

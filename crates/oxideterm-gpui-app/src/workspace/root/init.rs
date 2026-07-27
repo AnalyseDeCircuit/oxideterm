@@ -141,7 +141,7 @@ impl WorkspaceApp {
         let terminal_metadata_wake = delivery::ActiveDeliveryWake::default();
         let (terminal_cwd_tx, terminal_cwd_rx) =
             delivery::ActiveDeliverySender::channel_with_wake(terminal_metadata_wake.clone());
-        let (terminal_git_tx, terminal_git_rx) =
+        let (terminal_git_action_tx, terminal_git_action_rx) =
             delivery::ActiveDeliverySender::channel_with_wake(terminal_metadata_wake);
         let (profiler_update_tx, profiler_update_rx) = tokio::sync::mpsc::unbounded_channel();
         let host_tools_messages = HostToolsMessages::from_i18n(&i18n);
@@ -289,9 +289,8 @@ impl WorkspaceApp {
             terminal_cwd_tx,
             terminal_cwd_rx,
             terminal_cwd_picker: terminal_cwd::TerminalCwdPickerState::default(),
-            terminal_git_store: oxideterm_environment::GitStatusStore::default(),
-            terminal_git_tx,
-            terminal_git_rx,
+            terminal_git_action_tx,
+            terminal_git_action_rx,
             terminal_git_branch_picker: terminal_git::TerminalGitBranchPickerState::default(),
             terminal_project_panel: terminal_project::TerminalProjectPanelState::default(),
             detached_local_terminals: HashMap::new(),
