@@ -79,7 +79,7 @@ pub fn resolve_ai_policy_decision(
     args: Option<&Value>,
     tool_use: &AiToolUsePolicy,
     safety_mode: AiPolicySafetyMode,
-    profile_id: Option<String>,
+    profile_id: Option<&str>,
 ) -> AiPolicyDecision {
     let risk = if is_orchestrator_tool_name(tool_name) {
         orchestrator_risk_for_tool(tool_name, args)
@@ -264,7 +264,7 @@ fn policy_decision(
     reason_text_key: &str,
     matched_policy_key: String,
     approval_mode: AiPolicySafetyMode,
-    profile_id: Option<String>,
+    profile_id: Option<&str>,
 ) -> AiPolicyDecision {
     AiPolicyDecision {
         decision,
@@ -273,7 +273,7 @@ fn policy_decision(
         reason_text_key: reason_text_key.to_string(),
         matched_policy_key,
         approval_mode,
-        profile_id,
+        profile_id: profile_id.map(str::to_owned),
     }
 }
 

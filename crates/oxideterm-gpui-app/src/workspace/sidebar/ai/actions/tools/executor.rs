@@ -659,8 +659,8 @@ impl AiOrchestratorRuntimeSnapshot {
         if resource == "settings" {
             let section = args.get("section").and_then(serde_json::Value::as_str);
             let data = section
-                .and_then(|section| self.settings_state.get(section).cloned())
-                .unwrap_or_else(|| self.settings_state.clone());
+                .and_then(|section| self.model_visible_settings.get(section).cloned())
+                .unwrap_or_else(|| self.model_visible_settings.clone());
             return self
                 .ok(
                     section
@@ -1301,7 +1301,7 @@ impl AiOrchestratorRuntimeSnapshot {
         }
         let mut data = match scope {
             "targets" => ai_targets_state(&self.targets, &self.runtime_epoch),
-            "settings" => self.settings_summary.clone(),
+            "settings" => self.model_visible_settings.clone(),
             "connections" => ai_connections_state(&self.targets, &self.runtime_epoch),
             "transfers" => ai_transfers_state(&self.sftp_transfer_manager, &self.runtime_epoch),
             "health" => ai_health_state(self),

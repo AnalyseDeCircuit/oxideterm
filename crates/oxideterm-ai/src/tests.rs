@@ -632,7 +632,7 @@ fn ai_policy_requires_destructive_approval_but_bypass_allows_it() {
         Some(&args),
         &policy,
         AiPolicySafetyMode::Default,
-        Some("profile-a".to_string()),
+        Some("profile-a"),
     );
     assert_eq!(
         default_decision.decision,

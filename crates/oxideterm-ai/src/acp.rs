@@ -47,7 +47,7 @@ use crate::types::AiStreamEvent;
 #[cfg(windows)]
 const ACP_BACKGROUND_PROCESS_CREATE_NO_WINDOW: u32 = 0x08000000;
 
-#[derive(Clone, PartialEq)]
+#[derive(PartialEq)]
 pub struct AcpLaunchConfig {
     pub id: String,
     pub display_name: String,

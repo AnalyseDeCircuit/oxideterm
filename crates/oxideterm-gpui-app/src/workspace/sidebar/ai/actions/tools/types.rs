@@ -4,7 +4,6 @@ pub(in crate::workspace) const AI_MAX_REQUIRED_TOOL_RETRIES: usize = 1;
 pub(in crate::workspace) const AI_MAX_HARD_DENY_RETRIES: usize = 1;
 pub(in crate::workspace) const AI_PSEUDO_TOOL_RETRY_TOOL_NAME: &str = "tool_use_disabled";
 
-#[derive(Clone)]
 pub(in crate::workspace) struct AiOrchestratorRuntimeSnapshot {
     pub(in crate::workspace) targets: Vec<AiOrchestratorTarget>,
     pub(in crate::workspace) active_tab: Option<serde_json::Value>,
@@ -14,8 +13,7 @@ pub(in crate::workspace) struct AiOrchestratorRuntimeSnapshot {
     pub(in crate::workspace) active_node_id: Option<String>,
     pub(in crate::workspace) memory: serde_json::Value,
     pub(in crate::workspace) health_state: serde_json::Value,
-    pub(in crate::workspace) settings_state: serde_json::Value,
-    pub(in crate::workspace) settings_summary: serde_json::Value,
+    pub(in crate::workspace) model_visible_settings: serde_json::Value,
     pub(in crate::workspace) node_router: NodeRouter,
     pub(in crate::workspace) sftp_transfer_manager: std::sync::Arc<SftpTransferManager>,
     pub(in crate::workspace) agent_fs: NodeAgentIdeFileSystem,
@@ -28,6 +26,13 @@ pub(in crate::workspace) struct AiOrchestratorRuntimeSnapshot {
     pub(in crate::workspace) ai_embedding_config: Option<serde_json::Value>,
     pub(in crate::workspace) ai_context_window: usize,
     pub(in crate::workspace) runtime_epoch: String,
+}
+
+pub(in crate::workspace) struct AiAcpChatLaunch {
+    pub(in crate::workspace) agent_id: String,
+    pub(in crate::workspace) launch_config: oxideterm_ai::AcpLaunchConfig,
+    pub(in crate::workspace) session_cwd: std::path::PathBuf,
+    pub(in crate::workspace) host_policy: oxideterm_ai::AcpHostCapabilityPolicy,
 }
 
 #[derive(Clone, Debug)]

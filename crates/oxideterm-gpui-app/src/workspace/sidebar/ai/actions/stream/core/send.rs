@@ -290,10 +290,12 @@ impl WorkspaceApp {
             .ai_entity
             .update(cx, |ai, _cx| ai.begin_chat_stream());
         let snapshot = self.ai_chat_orchestrator_snapshot(&config, cx);
+        let acp_launch = self.ai_acp_chat_launch(&config);
         let task = self.forwarding_runtime.spawn(run_ai_chat_tool_loop(
             config,
             history,
             snapshot,
+            acp_launch,
             budget_decision.map(|decision| decision.level).unwrap_or(0),
             generation,
             conversation_id,

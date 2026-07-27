@@ -1,9 +1,53 @@
 #[cfg(test)]
 mod ai_turn_order_tests {
-use super::*;
+    use super::*;
 
-#[test]
-fn acp_bridge_exposes_only_visible_terminal_tools() {
+    #[test]
+    fn model_visible_settings_projection_excludes_secret_bearing_configuration() {
+        let mut settings = oxideterm_settings::PersistedSettings::default();
+        settings.ai.custom_system_prompt = "private-system-prompt".to_string();
+        settings.ai.memory.content = "private-memory-content".to_string();
+        settings.ai.providers = vec![serde_json::json!({
+            "id": "private-provider",
+            "apiKey": "private-provider-key",
+        })];
+        settings.ai.mcp_servers = vec![serde_json::json!({
+            "id": "private-mcp",
+            "headers": { "Authorization": "Bearer private-mcp-token" },
+        })];
+        settings.ai.acp_agents = vec![
+            serde_json::from_value(serde_json::json!({
+                "id": "private-agent",
+                "command": "agent",
+                "args": ["--token", "private-acp-token"],
+                "env": { "AGENT_TOKEN": "private-acp-env" },
+            }))
+            .expect("ACP agent settings"),
+        ];
+
+        let projection = ai_model_visible_settings_projection(&settings);
+        let serialized = serde_json::to_string(&projection).expect("settings projection");
+
+        assert!(projection.pointer("/ai/toolUse").is_some());
+        assert!(projection.get("terminal").is_some());
+        assert!(projection.get("sftp").is_some());
+        for secret in [
+            "private-system-prompt",
+            "private-memory-content",
+            "private-provider-key",
+            "private-mcp-token",
+            "private-acp-token",
+            "private-acp-env",
+        ] {
+            assert!(!serialized.contains(secret));
+        }
+        assert!(projection.pointer("/ai/providers").is_none());
+        assert!(projection.pointer("/ai/mcpServers").is_none());
+        assert!(projection.pointer("/ai/acpAgents").is_none());
+    }
+
+    #[test]
+    fn acp_bridge_exposes_only_visible_terminal_tools() {
     let names = acp_visible_terminal_tool_definitions(true)
         .into_iter()
         .map(|definition| definition.name)

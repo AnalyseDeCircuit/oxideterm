@@ -1,6 +1,32 @@
 pub(in crate::workspace) const AI_CONNECT_TARGET_TIMEOUT_TICKS: usize = 900;
 pub(in crate::workspace) const AI_CONNECT_TARGET_POLL_INTERVAL_MS: u64 = 100;
 
+pub(in crate::workspace) fn ai_model_visible_settings_projection(
+    settings: &oxideterm_settings::PersistedSettings,
+) -> serde_json::Value {
+    // Only explicitly approved, non-secret settings may cross the model boundary.
+    serde_json::json!({
+        "ai": {
+            "enabled": settings.ai.enabled,
+            "toolUse": {
+                "enabled": settings.ai.tool_use.enabled,
+                "maxRounds": settings.ai.tool_use.max_rounds,
+                "maxCallsPerRound": settings.ai.tool_use.max_calls_per_round,
+                "autoApproveTools": settings.ai.tool_use.auto_approve_tools,
+                "disabledTools": settings.ai.tool_use.disabled_tools,
+            },
+        },
+        "terminal": {
+            "renderer": settings.terminal.renderer,
+            "encoding": settings.terminal.terminal_encoding,
+        },
+        "sftp": {
+            "directoryParallelism": settings.sftp.directory_parallelism,
+            "transferProtocol": settings.sftp.transfer_protocol,
+        }
+    })
+}
+
 fn ai_target_projection(target: &AiOrchestratorTarget) -> oxideterm_ai::AiTargetProjection {
     // Runtime snapshots stay app-owned; only their content-free DTO shape crosses
     // into the AI domain projection layer.
@@ -495,26 +521,7 @@ impl WorkspaceApp {
                 })
             })
         });
-        let settings_summary = serde_json::json!({
-            "ai": {
-                "enabled": settings.ai.enabled,
-                "toolUse": {
-                    "enabled": settings.ai.tool_use.enabled,
-                    "maxRounds": settings.ai.tool_use.max_rounds,
-                    "maxCallsPerRound": settings.ai.tool_use.max_calls_per_round,
-                    "autoApproveTools": settings.ai.tool_use.auto_approve_tools,
-                    "disabledTools": settings.ai.tool_use.disabled_tools,
-                },
-            },
-            "terminal": {
-                "renderer": settings.terminal.renderer,
-                "encoding": settings.terminal.terminal_encoding,
-            },
-            "sftp": {
-                "directoryParallelism": settings.sftp.directory_parallelism,
-                "transferProtocol": settings.sftp.transfer_protocol,
-            }
-        });
+        let model_visible_settings = ai_model_visible_settings_projection(settings);
         let transfers = ai_transfers_state(&self.sftp_transfer_manager, &self.ai.runtime.epoch);
         let mut ssh_node_states = std::collections::BTreeMap::<String, usize>::new();
         for node in self.ssh_nodes.values() {
@@ -596,11 +603,7 @@ impl WorkspaceApp {
             ai_embedding_config: settings.ai.embedding_config.clone(),
             ai_context_window: AI_COMPACTION_DEFAULT_CONTEXT_WINDOW,
             runtime_epoch: self.ai.runtime.epoch.clone(),
-            // Tauri read_resource(settings) exposes the settings object, while
-            // get_state(settings) returns a compact diagnostic summary.
-            settings_state: serde_json::to_value(settings)
-                .unwrap_or_else(|_| settings_summary.clone()),
-            settings_summary,
+            model_visible_settings,
         }
     }
 
@@ -612,6 +615,66 @@ impl WorkspaceApp {
         let mut snapshot = self.ai_orchestrator_snapshot(cx);
         snapshot.ai_context_window = self.ai_active_model_context_window(config);
         snapshot
+    }
+
+    pub(in crate::workspace) fn ai_acp_chat_launch(
+        &self,
+        config: &AiChatStreamConfig,
+    ) -> Result<Option<AiAcpChatLaunch>, String> {
+        if config.execution_backend != AiExecutionBackend::Acp {
+            return Ok(None);
+        }
+        let agent_id = config
+            .acp_agent_id
+            .as_deref()
+            .filter(|agent_id| !agent_id.trim().is_empty())
+            .ok_or_else(|| "No ACP agent selected for this execution profile.".to_string())?;
+        let agent = self
+            .settings_store
+            .settings()
+            .ai
+            .acp_agents
+            .iter()
+            .find(|agent| agent.id == agent_id)
+            .ok_or_else(|| format!("ACP agent `{agent_id}` is not configured."))?;
+        if !agent.enabled {
+            return Err(format!("ACP agent `{}` is disabled.", agent.id));
+        }
+
+        let agent_id = agent.id.clone();
+        let display_name = if agent.display_name.trim().is_empty() {
+            agent_id.clone()
+        } else {
+            agent.display_name.clone()
+        };
+        let session_cwd = std::env::current_dir().unwrap_or_else(|_| {
+            agent
+                .cwd
+                .as_deref()
+                .map(std::path::PathBuf::from)
+                .unwrap_or_else(|| std::path::PathBuf::from("."))
+        });
+        let host_policy = oxideterm_ai::AcpHostCapabilityPolicy {
+            fs_read_text_file: agent.capability_policy.fs_read_text_file,
+            fs_write_text_file: agent.capability_policy.fs_write_text_file,
+            terminal: agent.capability_policy.terminal,
+        };
+        // Copy token-bearing args and environment values exactly once into the
+        // zeroizing launch owner that is moved to the ACP worker.
+        let launch_config = oxideterm_ai::AcpLaunchConfig {
+            id: agent_id.clone(),
+            display_name,
+            command: agent.command.clone(),
+            args: agent.args.clone(),
+            env: agent.env.clone(),
+            cwd: agent.cwd.as_deref().map(std::path::PathBuf::from),
+        };
+        Ok(Some(AiAcpChatLaunch {
+            agent_id,
+            launch_config,
+            session_cwd,
+            host_policy,
+        }))
     }
 
     pub(in crate::workspace) fn resolve_ai_tool_approval(
