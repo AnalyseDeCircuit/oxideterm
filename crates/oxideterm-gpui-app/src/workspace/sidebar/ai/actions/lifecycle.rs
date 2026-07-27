@@ -82,14 +82,14 @@ impl WorkspaceApp {
     }
 
     pub(in crate::workspace) fn cancel_ai_chat_stream(&mut self, cx: &mut Context<Self>) {
-        if let Some(conversation_id) = self
+        let active_conversation_id = self
             .ai
             .chat
             .conversation_state
             .active_conversation_id
-            .as_deref()
-        {
-            let generation_id = self.ai.chat.stream_generation.to_string();
+            .clone();
+        if let Some(conversation_id) = active_conversation_id.as_deref() {
+            let generation_id = self.ai_entity.read(cx).chat_stream_generation().to_string();
             // ACP Stop must target the live generation before local task abort
             // drops the registered session handle.
             let _ = self
@@ -98,11 +98,9 @@ impl WorkspaceApp {
                 .acp_runtime_registry
                 .cancel_generation(conversation_id, &generation_id);
         }
-        if let Some(task) = self.ai.chat.stream_task.take() {
-            task.abort();
-        }
-        self.ai.chat.stream_rx = None;
-        self.ai.chat.stream_generation = self.ai.chat.stream_generation.saturating_add(1);
+        self.ai_entity.update(cx, |ai, _cx| {
+            ai.cancel_chat_stream();
+        });
         self.ai.chat.loading = false;
         for (_, sender) in self.ai.runtime.pending_tool_approvals.drain() {
             let _ = sender.send(false);
@@ -198,19 +196,19 @@ impl WorkspaceApp {
         self.ai.chat.tool_call_expansion_state.clear();
         self.close_ai_sidebar_popovers(cx);
         self.ai.chat.clear_all_confirm_open = false;
-        self.cancel_ai_chat_stream_without_notify();
+        self.cancel_ai_chat_stream_without_notify(cx);
         self.persist_ai_chat_state();
     }
 
-    pub(in crate::workspace) fn cancel_ai_chat_stream_without_notify(&mut self) {
-        if let Some(conversation_id) = self
+    pub(in crate::workspace) fn cancel_ai_chat_stream_without_notify(&mut self, cx: &mut App) {
+        let active_conversation_id = self
             .ai
             .chat
             .conversation_state
             .active_conversation_id
-            .as_deref()
-        {
-            let generation_id = self.ai.chat.stream_generation.to_string();
+            .clone();
+        if let Some(conversation_id) = active_conversation_id.as_deref() {
+            let generation_id = self.ai_entity.read(cx).chat_stream_generation().to_string();
             // Keep silent cancellation aligned with the visible Stop path.
             let _ = self
                 .ai
@@ -218,11 +216,9 @@ impl WorkspaceApp {
                 .acp_runtime_registry
                 .cancel_generation(conversation_id, &generation_id);
         }
-        if let Some(task) = self.ai.chat.stream_task.take() {
-            task.abort();
-        }
-        self.ai.chat.stream_rx = None;
-        self.ai.chat.stream_generation = self.ai.chat.stream_generation.saturating_add(1);
+        self.ai_entity.update(cx, |ai, _cx| {
+            ai.cancel_chat_stream();
+        });
         self.ai.chat.loading = false;
         for (_, sender) in self.ai.runtime.pending_tool_approvals.drain() {
             let _ = sender.send(false);

@@ -3,6 +3,9 @@ use super::*;
 pub(in crate::workspace) enum AiWorkspaceEvent {
     AcpAgentProbeDeliveryReady,
     AcpModelDiscoveryDeliveryReady,
+    ChatStreamDeliveryReady,
+    CompactionDeliveryReady,
+    CompactionStateChanged,
     KnowledgeReindexDeliveryReady,
     ModelRefreshDeliveryReady,
     ProviderKeyStatusChanged,
@@ -88,6 +91,8 @@ enum AiTerminalInlineDelivery {
 
 const AI_TERMINAL_INLINE_DELIVERY_BUDGET: crate::workspace::delivery::DeliveryBudget =
     crate::workspace::delivery::DeliveryBudget::new(128, Duration::from_millis(4));
+const AI_CHAT_STREAM_DELIVERY_BUDGET: crate::workspace::delivery::DeliveryBudget =
+    crate::workspace::delivery::DeliveryBudget::new(256, Duration::from_millis(4));
 
 /// Owns AI worker delivery slices as they move out of the workspace root.
 pub(in crate::workspace) struct AiWorkspaceEntity {
@@ -132,6 +137,16 @@ pub(in crate::workspace) struct AiWorkspaceEntity {
     terminal_inline_panel: AiInlinePanelState,
     terminal_inline_tx: crate::workspace::delivery::ActiveDeliverySender<AiTerminalInlineDelivery>,
     terminal_inline_rx: std::sync::mpsc::Receiver<AiTerminalInlineDelivery>,
+    chat_stream_generation: u64,
+    chat_stream_task: Option<tokio::task::JoinHandle<()>>,
+    chat_stream_tx: AiStreamDeliverySender,
+    chat_stream_rx: std::sync::mpsc::Receiver<AiStreamDelivery>,
+    chat_stream_deliveries: VecDeque<AiStreamDelivery>,
+    compaction_tx: AiCompactionDeliverySender,
+    compaction_rx: std::sync::mpsc::Receiver<AiCompactionDelivery>,
+    compaction_deliveries: VecDeque<AiCompactionDelivery>,
+    compacting_conversations: HashSet<String>,
+    compaction_notice: Option<AiCompactionNotice>,
 }
 
 impl AiWorkspaceEntity {
@@ -153,6 +168,10 @@ impl AiWorkspaceEntity {
         let (knowledge_reindex_tx, knowledge_reindex_rx) =
             crate::workspace::delivery::ActiveDeliverySender::channel();
         let (terminal_inline_tx, terminal_inline_rx) =
+            crate::workspace::delivery::ActiveDeliverySender::channel();
+        let (chat_stream_tx, chat_stream_rx) =
+            crate::workspace::delivery::ActiveDeliverySender::channel();
+        let (compaction_tx, compaction_rx) =
             crate::workspace::delivery::ActiveDeliverySender::channel();
         let entity = Self {
             task_runtime,
@@ -191,6 +210,16 @@ impl AiWorkspaceEntity {
             terminal_inline_panel: AiInlinePanelState::default(),
             terminal_inline_tx,
             terminal_inline_rx,
+            chat_stream_generation: 0,
+            chat_stream_task: None,
+            chat_stream_tx,
+            chat_stream_rx,
+            chat_stream_deliveries: VecDeque::new(),
+            compaction_tx,
+            compaction_rx,
+            compaction_deliveries: VecDeque::new(),
+            compacting_conversations: HashSet::new(),
+            compaction_notice: None,
         };
         entity.schedule_model_refresh_delivery(cx);
         entity.schedule_provider_key_status_delivery(cx);
@@ -199,6 +228,8 @@ impl AiWorkspaceEntity {
         entity.schedule_acp_model_discovery_delivery(cx);
         entity.schedule_knowledge_reindex_delivery(cx);
         entity.schedule_terminal_inline_delivery(cx);
+        entity.schedule_chat_stream_delivery(cx);
+        entity.schedule_compaction_delivery(cx);
         entity
     }
 
@@ -784,6 +815,147 @@ impl AiWorkspaceEntity {
         });
     }
 
+    pub(in crate::workspace) fn chat_stream_generation(&self) -> u64 {
+        self.chat_stream_generation
+    }
+
+    pub(in crate::workspace) fn is_chat_stream_generation(&self, generation: u64) -> bool {
+        self.chat_stream_generation == generation
+    }
+
+    pub(in crate::workspace) fn begin_chat_stream(&mut self) -> (u64, AiStreamDeliverySender) {
+        if let Some(task) = self.chat_stream_task.take() {
+            task.abort();
+        }
+        self.chat_stream_generation = self.chat_stream_generation.saturating_add(1);
+        (self.chat_stream_generation, self.chat_stream_tx.clone())
+    }
+
+    pub(in crate::workspace) fn set_chat_stream_task(
+        &mut self,
+        generation: u64,
+        task: tokio::task::JoinHandle<()>,
+    ) {
+        if generation == self.chat_stream_generation {
+            self.chat_stream_task = Some(task);
+        } else {
+            task.abort();
+        }
+    }
+
+    pub(in crate::workspace) fn cancel_chat_stream(&mut self) -> u64 {
+        if let Some(task) = self.chat_stream_task.take() {
+            task.abort();
+        }
+        self.chat_stream_generation = self.chat_stream_generation.saturating_add(1);
+        self.chat_stream_generation
+    }
+
+    pub(in crate::workspace) fn complete_chat_stream(&mut self, generation: u64) -> bool {
+        if generation != self.chat_stream_generation {
+            return false;
+        }
+        // Invalidate any delivery queued after the terminal event, matching the
+        // old one-shot receiver lifetime without keeping a receiver on the root.
+        self.chat_stream_task.take();
+        self.chat_stream_generation = self.chat_stream_generation.saturating_add(1);
+        true
+    }
+
+    pub(in crate::workspace) fn take_chat_stream_deliveries(
+        &mut self,
+    ) -> VecDeque<AiStreamDelivery> {
+        std::mem::take(&mut self.chat_stream_deliveries)
+    }
+
+    pub(in crate::workspace) fn compaction_sender(&self) -> AiCompactionDeliverySender {
+        self.compaction_tx.clone()
+    }
+
+    pub(in crate::workspace) fn take_compaction_deliveries(
+        &mut self,
+    ) -> VecDeque<AiCompactionDelivery> {
+        std::mem::take(&mut self.compaction_deliveries)
+    }
+
+    pub(in crate::workspace) fn begin_compaction(&mut self, conversation_id: &str) -> bool {
+        self.compacting_conversations
+            .insert(conversation_id.to_string())
+    }
+
+    pub(in crate::workspace) fn finish_compaction(&mut self, conversation_id: &str) {
+        self.compacting_conversations.remove(conversation_id);
+    }
+
+    pub(in crate::workspace) fn compaction_notice(&self) -> Option<&AiCompactionNotice> {
+        self.compaction_notice.as_ref()
+    }
+
+    pub(in crate::workspace) fn set_compaction_notice_running(
+        &mut self,
+        conversation_id: &str,
+        cx: &mut Context<Self>,
+    ) {
+        self.compaction_notice = Some(AiCompactionNotice {
+            conversation_id: conversation_id.to_string(),
+            phase: AiCompactionNoticePhase::Running,
+            compacted_count: None,
+            timestamp_ms: ai_now_ms(),
+        });
+        cx.emit(AiWorkspaceEvent::CompactionStateChanged);
+        cx.notify();
+    }
+
+    pub(in crate::workspace) fn set_compaction_notice_done(
+        &mut self,
+        conversation_id: &str,
+        compacted_count: usize,
+        cx: &mut Context<Self>,
+    ) {
+        let timestamp_ms = ai_now_ms();
+        self.compaction_notice = Some(AiCompactionNotice {
+            conversation_id: conversation_id.to_string(),
+            phase: AiCompactionNoticePhase::Done,
+            compacted_count: Some(compacted_count),
+            timestamp_ms,
+        });
+        let conversation_id = conversation_id.to_string();
+        cx.spawn(async move |entity, cx| {
+            Timer::after(Duration::from_secs(5)).await;
+            let _ = entity.update(cx, |entity, cx| {
+                let should_clear = entity.compaction_notice.as_ref().is_some_and(|notice| {
+                    notice.conversation_id == conversation_id
+                        && notice.phase == AiCompactionNoticePhase::Done
+                        && notice.timestamp_ms == timestamp_ms
+                });
+                if should_clear {
+                    entity.compaction_notice = None;
+                    cx.emit(AiWorkspaceEvent::CompactionStateChanged);
+                    cx.notify();
+                }
+            });
+        })
+        .detach();
+        cx.emit(AiWorkspaceEvent::CompactionStateChanged);
+        cx.notify();
+    }
+
+    pub(in crate::workspace) fn clear_compaction_notice_for(
+        &mut self,
+        conversation_id: &str,
+        cx: &mut Context<Self>,
+    ) {
+        let should_clear = self
+            .compaction_notice
+            .as_ref()
+            .is_some_and(|notice| notice.conversation_id == conversation_id);
+        if should_clear {
+            self.compaction_notice = None;
+            cx.emit(AiWorkspaceEvent::CompactionStateChanged);
+            cx.notify();
+        }
+    }
+
     fn begin_model_refresh(&mut self, provider_id: &str) -> Option<u64> {
         if self.refreshing_models.contains(provider_id) {
             return None;
@@ -1208,6 +1380,82 @@ impl AiWorkspaceEntity {
         }
         drain.outcome.backlog_remaining
     }
+
+    fn schedule_chat_stream_delivery(&self, cx: &mut Context<Self>) {
+        let delivery_wake = self.chat_stream_tx.wake();
+        let release_wake = delivery_wake.clone();
+        cx.on_release(move |_, _| release_wake.stop()).detach();
+        cx.spawn(async move |entity, cx| {
+            loop {
+                delivery_wake.wait().await;
+                let should_drain = delivery_wake.take();
+                let stopped = delivery_wake.is_stopped();
+                if should_drain {
+                    let backlog_remaining = entity
+                        .update(cx, |entity, cx| entity.drain_chat_stream_results(cx))
+                        .unwrap_or(false);
+                    if backlog_remaining {
+                        delivery_wake.mark();
+                    }
+                }
+                if stopped {
+                    break;
+                }
+            }
+        })
+        .detach();
+    }
+
+    fn drain_chat_stream_results(&mut self, cx: &mut Context<Self>) -> bool {
+        let drain = crate::workspace::delivery::drain_channel(
+            &self.chat_stream_rx,
+            AI_CHAT_STREAM_DELIVERY_BUDGET,
+        );
+        if !drain.items.is_empty() {
+            self.chat_stream_deliveries.extend(drain.items);
+            cx.emit(AiWorkspaceEvent::ChatStreamDeliveryReady);
+            cx.notify();
+        }
+        drain.outcome.backlog_remaining
+    }
+
+    fn schedule_compaction_delivery(&self, cx: &mut Context<Self>) {
+        let delivery_wake = self.compaction_tx.wake();
+        let release_wake = delivery_wake.clone();
+        cx.on_release(move |_, _| release_wake.stop()).detach();
+        cx.spawn(async move |entity, cx| {
+            loop {
+                delivery_wake.wait().await;
+                let should_drain = delivery_wake.take();
+                let stopped = delivery_wake.is_stopped();
+                if should_drain {
+                    let backlog_remaining = entity
+                        .update(cx, |entity, cx| entity.drain_compaction_results(cx))
+                        .unwrap_or(false);
+                    if backlog_remaining {
+                        delivery_wake.mark();
+                    }
+                }
+                if stopped {
+                    break;
+                }
+            }
+        })
+        .detach();
+    }
+
+    fn drain_compaction_results(&mut self, cx: &mut Context<Self>) -> bool {
+        let drain = crate::workspace::delivery::drain_channel(
+            &self.compaction_rx,
+            crate::workspace::delivery::USER_ACTION_DELIVERY_BUDGET,
+        );
+        if !drain.items.is_empty() {
+            self.compaction_deliveries.extend(drain.items);
+            cx.emit(AiWorkspaceEvent::CompactionDeliveryReady);
+            cx.notify();
+        }
+        drain.outcome.backlog_remaining
+    }
 }
 
 fn ai_acp_probe_error_result(kind: &'static str) -> AiAcpAgentProbeResult {
@@ -1224,7 +1472,6 @@ impl gpui::EventEmitter<AiWorkspaceEvent> for AiWorkspaceEntity {}
 
 /// Owns all AI-related workspace state while preserving the existing feature boundaries.
 pub(super) struct AiWorkspaceState {
-    pub(super) delivery_wake: crate::workspace::delivery::ActiveDeliveryWake,
     pub(super) chat: AiChatWorkspaceState,
     pub(super) runtime: AiRuntimeWorkspaceState,
     pub(super) models: AiModelWorkspaceState,
@@ -1280,13 +1527,6 @@ pub(super) struct AiChatWorkspaceState {
     pub(super) include_context: bool,
     pub(super) include_all_panes: bool,
     pub(super) loading: bool,
-    pub(super) stream_generation: u64,
-    pub(super) stream_task: Option<tokio::task::JoinHandle<()>>,
-    pub(super) stream_rx: Option<std::sync::mpsc::Receiver<AiStreamDelivery>>,
-    pub(super) compaction_rx: Option<std::sync::mpsc::Receiver<AiCompactionDelivery>>,
-    pub(super) compacting_conversations: HashSet<String>,
-    pub(super) compaction_notice: Option<AiCompactionNotice>,
-    pub(super) pending_after_compaction: Option<AiPendingChatStream>,
     pub(super) next_sequence: u64,
 }
 
@@ -1344,7 +1584,6 @@ impl AiWorkspaceState {
         let mcp_registry = oxideterm_ai::McpRegistry::new(key_store.clone());
 
         Self {
-            delivery_wake: crate::workspace::delivery::ActiveDeliveryWake::default(),
             chat: AiChatWorkspaceState::new(sidebar_width, overlay_window_size),
             runtime: AiRuntimeWorkspaceState::new(agent_fs, mcp_registry),
             models: AiModelWorkspaceState::new(key_store),
@@ -1400,13 +1639,6 @@ impl AiChatWorkspaceState {
             include_context: false,
             include_all_panes: false,
             loading: false,
-            stream_generation: 0,
-            stream_task: None,
-            stream_rx: None,
-            compaction_rx: None,
-            compacting_conversations: HashSet::new(),
-            compaction_notice: None,
-            pending_after_compaction: None,
             next_sequence: 0,
         }
     }
@@ -1843,6 +2075,81 @@ mod entity_tests {
     }
 
     #[gpui::test]
+    fn chat_stream_generation_task_boundary_and_delivery_are_entity_owned(cx: &mut TestAppContext) {
+        let entity = cx.new(|cx| {
+            AiWorkspaceEntity::new(test_runtime(), oxideterm_ai::AiProviderKeyStore::new(), cx)
+        });
+        let (generation, worker_tx) = entity.update(cx, |entity, _cx| entity.begin_chat_stream());
+        worker_tx
+            .send(AiStreamDelivery {
+                generation,
+                conversation_id: "conversation-a".to_string(),
+                assistant_id: "assistant-a".to_string(),
+                event: AiStreamDeliveryEvent::Stream(oxideterm_ai::AiStreamEvent::Content(
+                    "chunk".to_string(),
+                )),
+            })
+            .unwrap();
+
+        cx.run_until_parked();
+
+        let deliveries = entity.update(cx, |entity, _cx| entity.take_chat_stream_deliveries());
+        assert_eq!(deliveries.len(), 1);
+        assert!(matches!(
+            &deliveries.front().expect("chat delivery").event,
+            AiStreamDeliveryEvent::Stream(oxideterm_ai::AiStreamEvent::Content(chunk))
+                if chunk == "chunk"
+        ));
+        entity.update(cx, |entity, _cx| {
+            assert!(entity.complete_chat_stream(generation));
+            assert!(!entity.is_chat_stream_generation(generation));
+            assert!(!entity.complete_chat_stream(generation));
+        });
+    }
+
+    #[gpui::test]
+    fn compaction_lifecycle_notice_and_delivery_are_entity_owned(cx: &mut TestAppContext) {
+        let entity = cx.new(|cx| {
+            AiWorkspaceEntity::new(test_runtime(), oxideterm_ai::AiProviderKeyStore::new(), cx)
+        });
+        let worker_tx = entity.update(cx, |entity, cx| {
+            assert!(entity.begin_compaction("conversation-a"));
+            assert!(!entity.begin_compaction("conversation-a"));
+            entity.set_compaction_notice_running("conversation-a", cx);
+            entity.compaction_tx.clone()
+        });
+        worker_tx
+            .send(AiCompactionDelivery {
+                kind: AiCompactionDeliveryKind::Summary,
+                conversation_id: "conversation-a".to_string(),
+                base_ids: Vec::new(),
+                plan: None,
+                summary: "summary".to_string(),
+                stream_error: None,
+                resume_after: None,
+                silent: false,
+            })
+            .unwrap();
+
+        cx.run_until_parked();
+
+        entity.read_with(cx, |entity, _cx| {
+            let notice = entity.compaction_notice().expect("running notice");
+            assert_eq!(notice.conversation_id, "conversation-a");
+            assert_eq!(notice.phase, AiCompactionNoticePhase::Running);
+        });
+        let deliveries = entity.update(cx, |entity, _cx| {
+            entity.finish_compaction("conversation-a");
+            entity.take_compaction_deliveries()
+        });
+        assert_eq!(deliveries.len(), 1);
+        assert!(matches!(
+            deliveries.front().map(|delivery| &delivery.kind),
+            Some(AiCompactionDeliveryKind::Summary)
+        ));
+    }
+
+    #[gpui::test]
     fn entity_release_stops_all_entity_delivery_waiters(cx: &mut TestAppContext) {
         let entity = cx.new(|cx| {
             AiWorkspaceEntity::new(test_runtime(), oxideterm_ai::AiProviderKeyStore::new(), cx)
@@ -1855,6 +2162,8 @@ mod entity_tests {
             acp_model_discovery_wake,
             knowledge_reindex_wake,
             terminal_inline_wake,
+            chat_stream_wake,
+            compaction_wake,
         ) = cx.read(|cx| {
             let entity = entity.read(cx);
             (
@@ -1865,6 +2174,8 @@ mod entity_tests {
                 entity.acp_model_discovery_tx.wake(),
                 entity.knowledge_reindex_tx.wake(),
                 entity.terminal_inline_tx.wake(),
+                entity.chat_stream_tx.wake(),
+                entity.compaction_tx.wake(),
             )
         });
 
@@ -1880,5 +2191,7 @@ mod entity_tests {
         assert!(acp_model_discovery_wake.is_stopped());
         assert!(knowledge_reindex_wake.is_stopped());
         assert!(terminal_inline_wake.is_stopped());
+        assert!(chat_stream_wake.is_stopped());
+        assert!(compaction_wake.is_stopped());
     }
 }

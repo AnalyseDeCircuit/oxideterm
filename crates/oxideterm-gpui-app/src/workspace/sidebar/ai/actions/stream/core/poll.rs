@@ -1,7 +1,3 @@
-pub(in crate::workspace) const AI_STREAM_DELIVERY_BUDGET:
-    crate::workspace::delivery::DeliveryBudget =
-    crate::workspace::delivery::DeliveryBudget::new(256, Duration::from_millis(4));
-
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(in crate::workspace) enum PendingAiStreamTextKind {
     Content,
@@ -17,37 +13,44 @@ pub(in crate::workspace) struct PendingAiStreamText {
 }
 
 impl WorkspaceApp {
-    pub(in crate::workspace) fn poll_ai_chat_stream_events(
+    pub(in crate::workspace) fn schedule_ai_chat_stream_delivery_apply(
         &mut self,
-        mut window: Option<&mut Window>,
+        window_handle: AnyWindowHandle,
         cx: &mut Context<Self>,
-    ) -> bool {
-        let Some(rx) = self.ai.chat.stream_rx.take() else {
-            return false;
-        };
-        let mut keep_rx = true;
-        let mut source_exhausted = false;
+    ) {
+        let deliveries = self
+            .ai_entity
+            .update(cx, |ai, _cx| ai.take_chat_stream_deliveries());
+        if deliveries.is_empty() {
+            return;
+        }
+        cx.spawn(async move |weak, cx| {
+            let _ = cx.update_window(window_handle, |_, window, cx| {
+                weak.update(cx, |workspace, cx| {
+                    workspace.apply_ai_chat_stream_deliveries(deliveries, window, cx);
+                })
+            });
+        })
+        .detach();
+    }
+
+    pub(in crate::workspace) fn apply_ai_chat_stream_deliveries(
+        &mut self,
+        deliveries: VecDeque<AiStreamDelivery>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let mut pending_text: Option<PendingAiStreamText> = None;
-        let started_at = Instant::now();
-        let mut processed = 0usize;
-        while AI_STREAM_DELIVERY_BUDGET.allows_next(processed, started_at.elapsed()) {
-            let delivery = match rx.try_recv() {
-                Ok(delivery) => delivery,
-                Err(std::sync::mpsc::TryRecvError::Empty) => {
-                    source_exhausted = true;
-                    break;
-                }
-                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
-                    source_exhausted = true;
-                    keep_rx = false;
-                    break;
-                }
-            };
-            processed += 1;
-            let done = matches!(
-                delivery.event,
-                AiStreamDeliveryEvent::Stream(AiStreamEvent::Done | AiStreamEvent::Error(_))
-            );
+        for delivery in deliveries {
+            if !self
+                .ai_entity
+                .read(cx)
+                .is_chat_stream_generation(delivery.generation)
+            {
+                // Dropping a stale delivery also drops any retained approval
+                // sender, matching the old generation-scoped receiver.
+                continue;
+            }
             match delivery.event {
                 AiStreamDeliveryEvent::Stream(AiStreamEvent::Content(chunk)) => {
                     self.merge_or_flush_pending_ai_stream_text(
@@ -91,7 +94,9 @@ impl WorkspaceApp {
                             response_tx,
                         } => {
                             self.flush_pending_ai_stream_text(&mut pending_text, cx);
-                            if self.ai.chat.stream_generation != delivery.generation {
+                            if self.ai_entity.read(cx).chat_stream_generation()
+                                != delivery.generation
+                            {
                                 let _ = response_tx
                                     .send(Ok(oxideterm_ai::acp_permission_cancelled_response()));
                                 continue;
@@ -185,6 +190,7 @@ impl WorkspaceApp {
                         session_metadata,
                         session_config_options,
                         &agent_id,
+                        cx,
                     ) {
                         cx.notify();
                     }
@@ -267,6 +273,7 @@ impl WorkspaceApp {
                         &event_type,
                         round_id,
                         data,
+                        cx,
                     );
                 }
                 AiStreamDeliveryEvent::ToolStatus {
@@ -339,11 +346,6 @@ impl WorkspaceApp {
                     sender,
                 } => {
                     self.flush_pending_ai_stream_text(&mut pending_text, cx);
-                    let Some(window) = window.as_deref_mut() else {
-                        self.ai.chat.stream_rx = Some(rx);
-                        cx.notify();
-                        return true;
-                    };
                     self.start_ai_ui_orchestrator_tool_execution(
                         tool_call_id,
                         name,
@@ -354,16 +356,8 @@ impl WorkspaceApp {
                     );
                 }
             }
-            if done {
-                keep_rx = false;
-                break;
-            }
         }
         self.flush_pending_ai_stream_text(&mut pending_text, cx);
-        if keep_rx {
-            self.ai.chat.stream_rx = Some(rx);
-        }
-        keep_rx && !source_exhausted
     }
 
     pub(in crate::workspace) fn merge_or_flush_pending_ai_stream_text(
@@ -420,34 +414,12 @@ impl WorkspaceApp {
         );
     }
 
-    pub(in crate::workspace) fn poll_ai_compaction_results(
+    pub(in crate::workspace) fn apply_ai_compaction_deliveries(
         &mut self,
+        deliveries: VecDeque<AiCompactionDelivery>,
         cx: &mut Context<Self>,
-    ) -> bool {
-        let Some(rx) = self.ai.chat.compaction_rx.take() else {
-            return false;
-        };
-        let mut keep_rx = true;
-        let mut source_exhausted = false;
-        let started_at = Instant::now();
-        let mut processed = 0usize;
-        while crate::workspace::delivery::USER_ACTION_DELIVERY_BUDGET
-            .allows_next(processed, started_at.elapsed())
-        {
-            let delivery = match rx.try_recv() {
-                Ok(delivery) => delivery,
-                Err(std::sync::mpsc::TryRecvError::Empty) => {
-                    source_exhausted = true;
-                    break;
-                }
-                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
-                    source_exhausted = true;
-                    keep_rx = false;
-                    break;
-                }
-            };
-            processed += 1;
-            keep_rx = false;
+    ) {
+        for delivery in deliveries {
             match delivery.kind {
                 AiCompactionDeliveryKind::Compact => {
                     if let Some(plan) = delivery.plan {
@@ -474,9 +446,5 @@ impl WorkspaceApp {
                 }
             }
         }
-        if keep_rx {
-            self.ai.chat.compaction_rx = Some(rx);
-        }
-        keep_rx && !source_exhausted
     }
 }

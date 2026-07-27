@@ -217,10 +217,11 @@ impl WorkspaceApp {
                 cx,
             )
         });
+        let ai_window_handle = window.window_handle();
         let ai_entity_subscription = cx.subscribe(
             &ai_entity,
-            |workspace, _ai_entity, event: &ai_state::AiWorkspaceEvent, cx| {
-                workspace.handle_ai_workspace_event(event, cx);
+            move |workspace, _ai_entity, event: &ai_state::AiWorkspaceEvent, cx| {
+                workspace.handle_ai_workspace_event(event, ai_window_handle, cx);
             },
         );
         let settings_store_last_modified =
@@ -761,7 +762,6 @@ impl WorkspaceApp {
         let window_handle = window.window_handle();
         workspace.schedule_node_event_delivery(window_handle, cx);
         workspace.schedule_runtime_worker_delivery(window_handle, cx);
-        workspace.schedule_ai_delivery(window_handle, cx);
         workspace.schedule_native_plugin_ui_delivery(window_handle, cx);
         workspace.schedule_graphics_worker_delivery(window_handle, cx);
         cx.spawn(async move |weak, cx| {

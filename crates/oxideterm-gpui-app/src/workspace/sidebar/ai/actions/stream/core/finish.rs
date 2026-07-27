@@ -10,13 +10,13 @@ impl WorkspaceApp {
         silent: bool,
         cx: &mut Context<Self>,
     ) {
-        self.ai
-            .chat
-            .compacting_conversations
-            .remove(&conversation_id);
+        self.ai_entity
+            .update(cx, |ai, _cx| ai.finish_compaction(&conversation_id));
         if let Some(error) = stream_error {
             if silent {
-                self.clear_ai_compaction_notice_for(&conversation_id, cx);
+                self.ai_entity.update(cx, |ai, cx| {
+                    ai.clear_compaction_notice_for(&conversation_id, cx);
+                });
             }
             if !silent {
                 self.push_ai_settings_toast(error, TerminalNoticeVariant::Error);
@@ -27,7 +27,9 @@ impl WorkspaceApp {
         }
         if summary.trim().is_empty() {
             if silent {
-                self.clear_ai_compaction_notice_for(&conversation_id, cx);
+                self.ai_entity.update(cx, |ai, cx| {
+                    ai.clear_compaction_notice_for(&conversation_id, cx);
+                });
             }
             self.resume_ai_chat_after_pre_send_compaction(resume_after, cx);
             cx.notify();
@@ -44,7 +46,9 @@ impl WorkspaceApp {
             .find(|conversation| conversation.id == conversation_id)
         else {
             if silent {
-                self.clear_ai_compaction_notice_for(&conversation_id, cx);
+                self.ai_entity.update(cx, |ai, cx| {
+                    ai.clear_compaction_notice_for(&conversation_id, cx);
+                });
             }
             self.resume_ai_chat_after_pre_send_compaction(resume_after, cx);
             cx.notify();
@@ -63,7 +67,9 @@ impl WorkspaceApp {
                 .any(|(latest, expected)| *latest != expected);
         if stale {
             if silent {
-                self.clear_ai_compaction_notice_for(&conversation_id, cx);
+                self.ai_entity.update(cx, |ai, cx| {
+                    ai.clear_compaction_notice_for(&conversation_id, cx);
+                });
             }
             self.resume_ai_chat_after_pre_send_compaction(resume_after, cx);
             cx.notify();
@@ -156,7 +162,9 @@ impl WorkspaceApp {
             now,
         );
         if silent {
-            self.set_ai_compaction_notice_done(&conversation_id, total_compacted, cx);
+            self.ai_entity.update(cx, |ai, cx| {
+                ai.set_compaction_notice_done(&conversation_id, total_compacted, cx);
+            });
         }
         self.resume_ai_chat_after_pre_send_compaction(resume_after, cx);
         cx.notify();
@@ -167,11 +175,9 @@ impl WorkspaceApp {
         resume_after: Option<AiPendingChatStream>,
         cx: &mut Context<Self>,
     ) {
-        let pending = resume_after.or_else(|| self.ai.chat.pending_after_compaction.take());
-        let Some(pending) = pending else {
+        let Some(pending) = resume_after else {
             return;
         };
-        self.ai.chat.pending_after_compaction = None;
         self.start_ai_chat_stream_after_budget_preflight(
             pending.conversation_id,
             pending.config,
@@ -191,10 +197,8 @@ impl WorkspaceApp {
         stream_error: Option<String>,
         cx: &mut Context<Self>,
     ) {
-        self.ai
-            .chat
-            .compacting_conversations
-            .remove(&conversation_id);
+        self.ai_entity
+            .update(cx, |ai, _cx| ai.finish_compaction(&conversation_id));
         self.ai.chat.loading = false;
         if let Some(error) = stream_error {
             self.push_ai_settings_toast(error, TerminalNoticeVariant::Error);

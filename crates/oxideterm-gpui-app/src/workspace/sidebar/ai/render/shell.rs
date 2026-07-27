@@ -295,7 +295,8 @@ impl WorkspaceApp {
             .conversation_state
             .active_conversation_id
             .as_deref()?;
-        let notice = self.ai.chat.compaction_notice.as_ref()?;
+        let ai_entity = self.ai_entity.read(cx);
+        let notice = ai_entity.compaction_notice()?;
         if notice.conversation_id != active_id {
             return None;
         }

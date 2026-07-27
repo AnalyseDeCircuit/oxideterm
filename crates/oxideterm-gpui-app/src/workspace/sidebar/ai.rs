@@ -96,7 +96,6 @@ pub(in crate::workspace) enum AiHeaderAction {
     Settings,
 }
 
-#[derive(Clone)]
 pub(in crate::workspace) struct AiPendingChatStream {
     pub(super) conversation_id: String,
     pub(super) config: AiChatStreamConfig,
@@ -148,6 +147,5 @@ include!("ai/render.rs");
 include!("ai/input.rs");
 include!("ai/model_selector.rs");
 include!("ai/actions.rs");
-include!("ai/delivery.rs");
 include!("ai/helpers.rs");
 include!("ai/terminal_inline.rs");

@@ -270,7 +270,12 @@ use self::root::{background::*, helpers::*};
 use self::session_manager::SessionManagerState;
 use self::sidebar::AiInlinePanelState;
 use self::sidebar::{ActiveSessionSidebarViewMode, SidebarSection};
-use self::sidebar::{AiCompactionDelivery, AiPendingChatStream, AiStreamDelivery};
+use self::sidebar::{
+    AiCompactionDelivery, AiCompactionDeliverySender, AiStreamDelivery, AiStreamDeliverySender,
+    ai_now_ms,
+};
+#[cfg(test)]
+use self::sidebar::{AiCompactionDeliveryKind, AiStreamDeliveryEvent};
 use self::terminal_cast::TerminalCastPlayerState;
 use crate::{
     CloseOtherTabs, ClosePane, CloseSearch, CloseTab, CommandPalette, Copy, Cut, Find, FindNext,

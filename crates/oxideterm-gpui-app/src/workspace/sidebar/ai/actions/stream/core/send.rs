@@ -88,15 +88,17 @@ impl WorkspaceApp {
                 task_system_prompt,
                 rag_system_prompt,
             };
-            if self.start_ai_compact_conversation_for(
+            let pending = match self.start_ai_compact_conversation_for(
                 conversation_id,
                 true,
                 true,
-                Some(pending.clone()),
+                Some(pending),
                 cx,
             ) {
-                return;
-            }
+                Ok(()) => return,
+                Err(Some(pending)) => pending,
+                Err(None) => return,
+            };
 
             return self.start_ai_chat_stream_after_budget_preflight(
                 pending.conversation_id,
@@ -281,18 +283,11 @@ impl WorkspaceApp {
         self.persist_ai_transcript_entries(conversation_id.clone(), transcript_entries);
         self.persist_ai_diagnostic_events(conversation_id.clone(), diagnostic_events);
         self.ai.chat.loading = true;
-        self.ai.chat.stream_generation = self.ai.chat.stream_generation.saturating_add(1);
-        let generation = self.ai.chat.stream_generation;
-        let (ui_tx, ui_rx) =
-            crate::workspace::delivery::ActiveDeliverySender::channel_with_wake(
-                self.ai.delivery_wake.clone(),
-            );
-        if let Some(task) = self.ai.chat.stream_task.take() {
-            task.abort();
-        }
+        let (generation, ui_tx) = self
+            .ai_entity
+            .update(cx, |ai, _cx| ai.begin_chat_stream());
         let snapshot = self.ai_chat_orchestrator_snapshot(&config, cx);
-        self.ai.chat.stream_rx = Some(ui_rx);
-        self.ai.chat.stream_task = Some(self.forwarding_runtime.spawn(run_ai_chat_tool_loop(
+        let task = self.forwarding_runtime.spawn(run_ai_chat_tool_loop(
             config,
             history,
             snapshot,
@@ -301,6 +296,8 @@ impl WorkspaceApp {
             conversation_id,
             assistant_id,
             ui_tx,
-        )));
+        ));
+        self.ai_entity
+            .update(cx, |ai, _cx| ai.set_chat_stream_task(generation, task));
     }
 }

@@ -65,10 +65,12 @@ impl WorkspaceApp {
         session_metadata: Option<serde_json::Value>,
         session_config_options: Vec<oxideterm_ai::AcpSessionConfigOption>,
         agent_id: &str,
+        cx: &App,
     ) -> bool {
+        let current_generation = self.ai_entity.read(cx).chat_stream_generation();
         if !apply_ai_acp_session_started_to_conversations(
             &mut self.ai.chat.conversation_state.conversations,
-            self.ai.chat.stream_generation,
+            current_generation,
             generation,
             conversation_id,
             session_id,
@@ -90,7 +92,11 @@ impl WorkspaceApp {
         event: AiStreamEvent,
         cx: &mut Context<Self>,
     ) {
-        if self.ai.chat.stream_generation != generation {
+        if !self
+            .ai_entity
+            .read(cx)
+            .is_chat_stream_generation(generation)
+        {
             return;
         }
         match event {
@@ -159,7 +165,9 @@ impl WorkspaceApp {
                     },
                 );
                 self.persist_ai_assistant_turn_end(conversation_id, message_id, "complete");
-                self.ai.chat.stream_task = None;
+                self.ai_entity.update(cx, |ai, _cx| {
+                    ai.complete_chat_stream(generation);
+                });
                 self.ai.chat.loading = false;
                 self.persist_ai_chat_state();
                 self.maybe_start_ai_auto_compaction(conversation_id, cx);
@@ -196,7 +204,9 @@ impl WorkspaceApp {
                         })),
                     )],
                 );
-                self.ai.chat.stream_task = None;
+                self.ai_entity.update(cx, |ai, _cx| {
+                    ai.complete_chat_stream(generation);
+                });
                 self.ai.chat.loading = false;
                 self.persist_ai_chat_state();
                 self.push_ai_settings_toast(error, TerminalNoticeVariant::Error);
@@ -215,7 +225,11 @@ impl WorkspaceApp {
         metadata: serde_json::Value,
         cx: &mut Context<Self>,
     ) {
-        if self.ai.chat.stream_generation != generation {
+        if !self
+            .ai_entity
+            .read(cx)
+            .is_chat_stream_generation(generation)
+        {
             return;
         }
         let text = text.trim();
@@ -281,7 +295,11 @@ impl WorkspaceApp {
         marker: Option<String>,
         cx: &mut Context<Self>,
     ) {
-        if self.ai.chat.stream_generation != generation {
+        if !self
+            .ai_entity
+            .read(cx)
+            .is_chat_stream_generation(generation)
+        {
             return;
         }
         self.ai
@@ -302,8 +320,13 @@ impl WorkspaceApp {
         event_type: &str,
         round_id: Option<String>,
         data: serde_json::Value,
+        cx: &App,
     ) {
-        if self.ai.chat.stream_generation != generation {
+        if !self
+            .ai_entity
+            .read(cx)
+            .is_chat_stream_generation(generation)
+        {
             return;
         }
         let now = ai_now_ms();
@@ -339,7 +362,11 @@ impl WorkspaceApp {
         round_number_override: Option<i64>,
         cx: &mut Context<Self>,
     ) {
-        if self.ai.chat.stream_generation != generation {
+        if !self
+            .ai_entity
+            .read(cx)
+            .is_chat_stream_generation(generation)
+        {
             return;
         }
         let should_persist = result.is_some()
@@ -826,7 +853,11 @@ impl WorkspaceApp {
         raw_text: Option<String>,
         cx: &mut Context<Self>,
     ) {
-        if self.ai.chat.stream_generation != generation {
+        if !self
+            .ai_entity
+            .read(cx)
+            .is_chat_stream_generation(generation)
+        {
             return;
         }
         self.ai.chat.conversation_state.update_message(

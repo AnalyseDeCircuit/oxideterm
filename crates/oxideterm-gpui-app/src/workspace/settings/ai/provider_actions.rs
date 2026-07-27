@@ -16,6 +16,7 @@ impl WorkspaceApp {
     pub(in crate::workspace) fn handle_ai_workspace_event(
         &mut self,
         event: &ai_state::AiWorkspaceEvent,
+        window_handle: AnyWindowHandle,
         cx: &mut Context<Self>,
     ) {
         match event {
@@ -59,6 +60,17 @@ impl WorkspaceApp {
                 }
                 cx.notify();
             }
+            ai_state::AiWorkspaceEvent::ChatStreamDeliveryReady => {
+                self.schedule_ai_chat_stream_delivery_apply(window_handle, cx);
+            }
+            ai_state::AiWorkspaceEvent::CompactionDeliveryReady => {
+                let deliveries = self
+                    .ai_entity
+                    .update(cx, |ai, _cx| ai.take_compaction_deliveries());
+                self.apply_ai_compaction_deliveries(deliveries, cx);
+                cx.notify();
+            }
+            ai_state::AiWorkspaceEvent::CompactionStateChanged => cx.notify(),
             ai_state::AiWorkspaceEvent::KnowledgeReindexDeliveryReady => {
                 let intents = self
                     .ai_entity
