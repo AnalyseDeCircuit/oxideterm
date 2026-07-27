@@ -274,6 +274,20 @@ impl NodeRouter {
         Ok(event)
     }
 
+    pub fn prepare_node_connection_attempt(&self, node_id: &NodeId) -> Result<(), RouteError> {
+        let previous_connection_id = self.runtime.connection_id_for_node(node_id);
+        // Connection-chain preparation is an internal ownership transfer, not
+        // a user-visible disconnect. Publishing it could overtake the new
+        // Connecting event and incorrectly fail the in-flight attempt.
+        let _ = self
+            .runtime
+            .disconnect_node(node_id, "connection attempt preparation")?;
+        if let Some(connection_id) = previous_connection_id {
+            self.emitter.unregister(&connection_id);
+        }
+        Ok(())
+    }
+
     pub fn remove_runtime_subtree(&self, node_id: &NodeId) -> Vec<NodeId> {
         self.runtime.remove_subtree(node_id)
     }

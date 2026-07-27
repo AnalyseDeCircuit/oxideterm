@@ -590,9 +590,7 @@ impl WorkspaceRuntimeEntity {
         if let Some(connection_id) = self.node_router.connection_id_for_node(node_id) {
             self.retire_node_connection(node_id, &connection_id);
         }
-        let _ = self
-            .node_router
-            .disconnect_node_runtime(node_id, "reset before linear connection");
+        let _ = self.node_router.prepare_node_connection_attempt(node_id);
     }
 
     pub(in crate::workspace) fn remove_node_runtime_subtree(
@@ -2141,6 +2139,36 @@ mod tests {
             .info();
         assert!(parent_info.consumers.contains(&parent_consumer));
         assert!(!parent_info.consumers.contains(&ancestor_consumer));
+    }
+
+    #[gpui::test]
+    fn connection_chain_reset_does_not_publish_stale_disconnect(cx: &mut TestAppContext) {
+        let ssh_registry = SshConnectionRegistry::new(ConnectionPoolConfig::default());
+        let node_router = NodeRouter::new(ssh_registry.clone());
+        let node_id = NodeId::new("node-a");
+        node_router.upsert_node(node_id.clone(), SshConfig::default());
+        let (_, node_event_rx) = node_router.emitter().subscribe_bounded(8);
+        let task_runtime = test_task_runtime();
+        let entity = cx.new(|cx| {
+            WorkspaceRuntimeEntity::new(
+                ssh_registry,
+                node_router,
+                task_runtime,
+                true,
+                ReconnectTiming::default(),
+                3,
+                cx,
+            )
+        });
+
+        entity.update(cx, |entity, _cx| {
+            entity.reset_node_connection(&node_id);
+        });
+
+        assert!(matches!(
+            node_event_rx.try_recv(),
+            Err(std::sync::mpsc::TryRecvError::Empty)
+        ));
     }
 
     #[gpui::test]

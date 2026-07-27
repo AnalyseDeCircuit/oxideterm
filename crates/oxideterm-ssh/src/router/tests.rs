@@ -699,6 +699,32 @@ mod tests {
     }
 
     #[test]
+    fn connection_attempt_preparation_clears_runtime_without_disconnect_event() {
+        let registry = SshConnectionRegistry::default();
+        let router = NodeRouter::new(registry.clone());
+        let node = NodeId::new("node-a");
+        let config = SshConfig::password("host", 22, "me", "pw");
+        router.upsert_node(node.clone(), config.clone());
+        let handle = registry.acquire(config, ConnectionConsumer::NodeRouter("node-a".into()));
+        router
+            .bind_connection(&node, handle.connection_id().to_string())
+            .unwrap();
+        router
+            .bind_sftp_session(&node, "sftp-a", Some("/home/me".to_string()))
+            .unwrap();
+        let (tx, rx) = mpsc::channel();
+        router.emitter().subscribe(tx);
+
+        router.prepare_node_connection_attempt(&node).unwrap();
+
+        let snapshot = router.runtime_store().snapshot(&node).unwrap();
+        assert_eq!(snapshot.state.readiness, NodeReadiness::Disconnected);
+        assert!(snapshot.connection_id.is_none());
+        assert!(snapshot.sftp_session_id.is_none());
+        assert!(rx.try_iter().next().is_none());
+    }
+
+    #[test]
     fn acquiring_consumer_does_not_revive_link_down_connection() {
         let registry = SshConnectionRegistry::default();
         let router = NodeRouter::new(registry.clone());
