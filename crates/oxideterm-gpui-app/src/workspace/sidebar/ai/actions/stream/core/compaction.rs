@@ -249,7 +249,7 @@ impl WorkspaceApp {
                         cx.notify();
                         return;
                     }
-                    config.api_key = api_key;
+                    config.api_key = api_key.map(oxideterm_ai::SharedAiProviderKey::new);
                     this.start_ai_compaction_stream_with_config(
                         config,
                         kind,

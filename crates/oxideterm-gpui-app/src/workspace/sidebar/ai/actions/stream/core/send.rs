@@ -24,27 +24,30 @@ impl WorkspaceApp {
         };
 
         let snapshot = self.ai_chat_orchestrator_snapshot(&config, cx);
-        let config_for_rag = config.clone();
         let (rag_tx, rag_rx) = std::sync::mpsc::channel();
         self.forwarding_runtime.spawn(async move {
             let rag_system_prompt = tokio::time::timeout(
                 std::time::Duration::from_millis(3000),
-                snapshot.build_rag_system_prompt(Some(&rag_query), &config_for_rag),
+                snapshot.build_rag_system_prompt(Some(&rag_query), &config),
             )
             .await
             .ok()
             .flatten();
-            let _ = rag_tx.send(rag_system_prompt);
+            // Return the unique configuration with the lookup result instead
+            // of cloning a handle that extends the provider-key lifetime.
+            let _ = rag_tx.send((config, rag_system_prompt));
         });
         cx.spawn(async move |weak, cx| {
-            let rag_system_prompt = loop {
+            let Some((config, rag_system_prompt)) = (loop {
                 match rag_rx.try_recv() {
-                    Ok(rag_system_prompt) => break rag_system_prompt,
+                    Ok(result) => break Some(result),
                     Err(std::sync::mpsc::TryRecvError::Empty) => {
                         Timer::after(Duration::from_millis(16)).await;
                     }
                     Err(std::sync::mpsc::TryRecvError::Disconnected) => break None,
                 }
+            }) else {
+                return;
             };
             let _ = weak.update(cx, |this, cx| {
                 this.start_ai_chat_stream_after_budget_preflight(

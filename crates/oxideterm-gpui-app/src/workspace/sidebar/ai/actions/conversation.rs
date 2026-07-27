@@ -309,7 +309,8 @@ impl WorkspaceApp {
                         cx.notify();
                         return;
                     }
-                    stream_config.api_key = api_key;
+                    stream_config.api_key =
+                        api_key.map(oxideterm_ai::SharedAiProviderKey::new);
                     this.start_ai_chat_stream_after_rag_lookup(
                         conversation_id,
                         stream_config,

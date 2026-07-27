@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, fmt, sync::Arc};
 
 use serde::{Deserialize, Serialize};
 use zeroize::Zeroizing;
@@ -7,6 +7,33 @@ use crate::{
     policy::{AiPolicySafetyMode, AiToolUsePolicy},
     profiles::AiExecutionBackend,
 };
+
+/// Shares one zeroizing provider-key buffer across related request rounds.
+///
+/// Cloning this handle never duplicates the secret bytes. The buffer is
+/// zeroized when the final request/configuration owner releases it.
+#[derive(Clone)]
+pub struct SharedAiProviderKey(Arc<Zeroizing<String>>);
+
+impl SharedAiProviderKey {
+    pub fn new(api_key: Zeroizing<String>) -> Self {
+        Self(Arc::new(api_key))
+    }
+
+    pub fn as_str(&self) -> &str {
+        self.0.as_str()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+}
+
+impl fmt::Debug for SharedAiProviderKey {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("SharedAiProviderKey(<redacted>)")
+    }
+}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct AiProviderTemplate {
@@ -211,7 +238,7 @@ pub struct AiChatStreamConfig {
     pub provider_type: String,
     pub base_url: String,
     pub model: String,
-    pub api_key: Option<Zeroizing<String>>,
+    pub api_key: Option<SharedAiProviderKey>,
     pub max_response_tokens: Option<i64>,
     pub reasoning_effort: Option<String>,
     pub safety_mode: AiPolicySafetyMode,

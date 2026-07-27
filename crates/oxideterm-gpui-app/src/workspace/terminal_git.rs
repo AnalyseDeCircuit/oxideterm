@@ -1226,7 +1226,7 @@ async fn terminal_git_generate_ai_commit_message(
                 }
                 // The provider key stays inside the short-lived stream config;
                 // it is never stored in UI state, logs, or the generated prompt.
-                config.api_key = api_key;
+                config.api_key = api_key.map(oxideterm_ai::SharedAiProviderKey::new);
             }
             Err(_) if requires_key => {
                 return TerminalGitAiCommitMessageOutcome::Error(failed_to_get_key);

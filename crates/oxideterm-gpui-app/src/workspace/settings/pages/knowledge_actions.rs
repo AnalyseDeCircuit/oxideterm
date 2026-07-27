@@ -284,6 +284,9 @@ impl WorkspaceApp {
             } else {
                 None
             };
+            // Batch requests share one zeroizing key allocation; cloning the
+            // handle below never copies the provider secret bytes.
+            let api_key = api_key.map(oxideterm_ai::SharedAiProviderKey::new);
             let pending =
                 match oxideterm_ai::rag_get_pending_embeddings(&store, &collection_id, Some(500)) {
                     Ok(pending) => pending,
@@ -312,7 +315,7 @@ impl WorkspaceApp {
                     .iter()
                     .map(|pending| pending.content.clone())
                     .collect::<Vec<_>>();
-                match oxideterm_ai::embed_texts(&provider, api_key.clone(), &model, texts).await {
+                match oxideterm_ai::embed_texts(&provider, api_key.as_ref(), &model, texts).await {
                     Ok(vectors) => {
                         let embeddings = batch
                             .iter()

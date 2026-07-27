@@ -731,7 +731,7 @@ impl AiWorkspaceEntity {
                             });
                             return;
                         }
-                        config.api_key = api_key;
+                        config.api_key = api_key.map(oxideterm_ai::SharedAiProviderKey::new);
                     }
                     None if requires_key => {
                         let _ = worker_tx.send(AiTerminalInlineDelivery::Error {

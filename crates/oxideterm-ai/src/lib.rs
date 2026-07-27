@@ -142,7 +142,7 @@ pub use types::{
     AiChatMessage, AiChatMessageMetadata, AiChatRole, AiChatState, AiChatStreamConfig,
     AiConversation, AiFollowUpSuggestion, AiMessageBranches, AiProviderTemplate, AiProviderView,
     AiStreamEvent, AiToolCall, AiToolChoice, AiToolDefinition, ModelSelectorProviderGroup,
-    ModelSelectorProviderProbe, ProviderModelRefresh,
+    ModelSelectorProviderProbe, ProviderModelRefresh, SharedAiProviderKey,
 };
 
 #[cfg(test)]

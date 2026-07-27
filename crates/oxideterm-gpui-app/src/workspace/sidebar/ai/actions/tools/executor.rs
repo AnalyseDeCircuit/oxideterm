@@ -65,19 +65,26 @@ impl AiOrchestratorRuntimeSnapshot {
         let key_decision = oxideterm_ai::resolve_chat_embedding_api_key(
             &provider.id,
             config.provider_id.as_deref(),
-            config.api_key.clone(),
+            config.api_key.as_ref(),
             oxideterm_ai::ai_embedding_requires_api_key(&provider),
             resolved.mode,
         );
+        let loaded_api_key = match &key_decision {
+            oxideterm_ai::AiChatEmbeddingApiKeyDecision::LoadProviderKey(provider_id) => self
+                .ai_key_store
+                .get_provider_key(provider_id)
+                .ok()
+                .flatten()
+                .filter(|key| !key.trim().is_empty())
+                .map(oxideterm_ai::SharedAiProviderKey::new),
+            _ => None,
+        };
         let api_key = match key_decision {
             oxideterm_ai::AiChatEmbeddingApiKeyDecision::NoKey => None,
             oxideterm_ai::AiChatEmbeddingApiKeyDecision::UseKey(key) => Some(key),
-            oxideterm_ai::AiChatEmbeddingApiKeyDecision::LoadProviderKey(provider_id) => self
-                .ai_key_store
-                .get_provider_key(&provider_id)
-                .ok()
-                .flatten()
-                .filter(|key| !key.trim().is_empty()),
+            oxideterm_ai::AiChatEmbeddingApiKeyDecision::LoadProviderKey(_) => {
+                loaded_api_key.as_ref()
+            }
             oxideterm_ai::AiChatEmbeddingApiKeyDecision::Skip => None,
         };
         if oxideterm_ai::ai_embedding_requires_api_key(&provider) && api_key.is_none() {

@@ -1,10 +1,8 @@
 use std::{fmt, time::Duration};
 
+use crate::{AiProviderView, SharedAiProviderKey, provider_view};
 use anyhow::{Context, Result, anyhow};
 use serde::Deserialize;
-use zeroize::Zeroizing;
-
-use crate::{AiProviderView, provider_view};
 
 const EMBEDDING_TIMEOUT: Duration = Duration::from_secs(3);
 const OPENAI_DEFAULT_EMBEDDING_MODEL: &str = "text-embedding-3-small";
@@ -32,15 +30,15 @@ pub struct ResolvedAiEmbeddingProvider {
     pub reason: AiEmbeddingProviderReason,
 }
 
-#[derive(Clone, Eq, PartialEq)]
-pub enum AiChatEmbeddingApiKeyDecision {
-    UseKey(Zeroizing<String>),
+#[derive(Clone)]
+pub enum AiChatEmbeddingApiKeyDecision<'a> {
+    UseKey(&'a SharedAiProviderKey),
     NoKey,
     LoadProviderKey(String),
     Skip,
 }
 
-impl fmt::Debug for AiChatEmbeddingApiKeyDecision {
+impl fmt::Debug for AiChatEmbeddingApiKeyDecision<'_> {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         // Embedding key decisions are useful in tests/logs, but the loaded key
         // branch must never expose the provider secret.
@@ -166,20 +164,21 @@ pub fn resolve_ai_embedding_provider(
     }
 }
 
-pub fn resolve_chat_embedding_api_key(
+pub fn resolve_chat_embedding_api_key<'a>(
     embedding_provider_id: &str,
     active_provider_id: Option<&str>,
-    active_provider_api_key: Option<Zeroizing<String>>,
+    // Keep the returned active key tied to the caller-owned stream config.
+    active_provider_api_key: Option<&'a SharedAiProviderKey>,
     embedding_requires_api_key: bool,
     embedding_mode: AiEmbeddingMode,
-) -> AiChatEmbeddingApiKeyDecision {
+) -> AiChatEmbeddingApiKeyDecision<'a> {
     if !embedding_requires_api_key {
         return AiChatEmbeddingApiKeyDecision::NoKey;
     }
 
     if Some(embedding_provider_id) == active_provider_id {
         return active_provider_api_key
-            .filter(|key| !key.trim().is_empty())
+            .filter(|key| !key.as_str().trim().is_empty())
             .map(AiChatEmbeddingApiKeyDecision::UseKey)
             .unwrap_or(AiChatEmbeddingApiKeyDecision::Skip);
     }
@@ -193,7 +192,7 @@ pub fn resolve_chat_embedding_api_key(
 
 pub async fn embed_texts(
     provider: &AiProviderView,
-    api_key: Option<Zeroizing<String>>,
+    api_key: Option<&SharedAiProviderKey>,
     model: &str,
     texts: Vec<String>,
 ) -> Result<Vec<Vec<f32>>> {
@@ -245,7 +244,7 @@ fn ai_embedding_reason(
 
 async fn embed_openai_compatible(
     base_url: &str,
-    api_key: Option<Zeroizing<String>>,
+    api_key: Option<&SharedAiProviderKey>,
     model: &str,
     texts: Vec<String>,
 ) -> Result<Vec<Vec<f32>>> {
@@ -278,7 +277,7 @@ async fn embed_openai_compatible(
 
 async fn embed_ollama(
     base_url: &str,
-    api_key: Option<Zeroizing<String>>,
+    api_key: Option<&SharedAiProviderKey>,
     model: &str,
     texts: Vec<String>,
 ) -> Result<Vec<Vec<f32>>> {

@@ -1011,40 +1011,54 @@ fn embedding_provider_resolution_matches_tauri_auto_and_configured_paths() {
 
 #[test]
 fn chat_embedding_key_scope_matches_tauri_prompt_guard() {
-    assert_eq!(
+    assert!(matches!(
         resolve_chat_embedding_api_key("local", Some("chat"), None, false, AiEmbeddingMode::Auto,),
         AiChatEmbeddingApiKeyDecision::NoKey
+    ));
+    let provider_key = SharedAiProviderKey::new(zeroize::Zeroizing::new("sk-active".to_string()));
+    let active_key = resolve_chat_embedding_api_key(
+        "chat",
+        Some("chat"),
+        Some(&provider_key),
+        true,
+        AiEmbeddingMode::Auto,
     );
-    assert_eq!(
-        resolve_chat_embedding_api_key(
-            "chat",
-            Some("chat"),
-            Some(zeroize::Zeroizing::new("sk-active".to_string())),
-            true,
-            AiEmbeddingMode::Auto,
-        ),
-        AiChatEmbeddingApiKeyDecision::UseKey(zeroize::Zeroizing::new("sk-active".to_string()))
-    );
-    assert_eq!(
+    assert!(matches!(
+        active_key,
+        AiChatEmbeddingApiKeyDecision::UseKey(key) if key.as_str() == "sk-active"
+    ));
+    assert!(matches!(
         resolve_chat_embedding_api_key(
             "embedding",
             Some("chat"),
-            Some(zeroize::Zeroizing::new("sk-active".to_string())),
+            Some(&provider_key),
             true,
             AiEmbeddingMode::Auto,
         ),
         AiChatEmbeddingApiKeyDecision::Skip
-    );
-    assert_eq!(
+    ));
+    assert!(matches!(
         resolve_chat_embedding_api_key(
             "embedding",
             Some("chat"),
-            Some(zeroize::Zeroizing::new("sk-active".to_string())),
+            Some(&provider_key),
             true,
             AiEmbeddingMode::Configured,
         ),
-        AiChatEmbeddingApiKeyDecision::LoadProviderKey("embedding".to_string())
-    );
+        AiChatEmbeddingApiKeyDecision::LoadProviderKey(provider_id)
+            if provider_id == "embedding"
+    ));
+}
+
+#[test]
+fn shared_provider_key_debug_is_redacted() {
+    let key =
+        SharedAiProviderKey::new(zeroize::Zeroizing::new("provider-secret-value".to_string()));
+
+    let debug = format!("{key:?}");
+
+    assert_eq!(debug, "SharedAiProviderKey(<redacted>)");
+    assert!(!debug.contains("provider-secret-value"));
 }
 
 #[test]

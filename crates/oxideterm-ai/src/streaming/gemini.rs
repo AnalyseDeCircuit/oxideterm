@@ -19,7 +19,10 @@ pub(crate) async fn stream_gemini_completion(
     messages: Vec<AiChatMessage>,
     events: tokio::sync::mpsc::UnboundedSender<AiStreamEvent>,
 ) -> Result<()> {
-    let api_key = api_key_required_ref(&config.provider_type, config.api_key.as_ref())?;
+    let api_key = api_key_required_ref(
+        &config.provider_type,
+        config.api_key.as_ref().map(|api_key| api_key.as_str()),
+    )?;
     let url = format!(
         "{}/models/{}:streamGenerateContent",
         config.base_url.trim().trim_end_matches('/'),
@@ -35,7 +38,7 @@ pub(crate) async fn stream_gemini_completion(
         .post(&url)
         // Gemini requires the API key as a query parameter. Let reqwest attach
         // it to the request and strip URLs from transport errors below.
-        .query(&[("alt", "sse"), ("key", api_key.as_str())])
+        .query(&[("alt", "sse"), ("key", api_key)])
         .header(reqwest::header::CONTENT_TYPE, "application/json")
         .json(&body)
         .send()
