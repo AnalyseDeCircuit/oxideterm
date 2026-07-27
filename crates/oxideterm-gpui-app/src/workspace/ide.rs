@@ -565,6 +565,7 @@ impl WorkspaceApp {
                         &NodeId::new(reconnect_node_id.clone()),
                         PhaseResult::Ok,
                         "restored IDE project and open files".to_string(),
+                        cx,
                     );
                 }
                 IdeSurfaceEvent::ReconnectRestoreProjectFailed {
@@ -575,6 +576,7 @@ impl WorkspaceApp {
                         &NodeId::new(reconnect_node_id.clone()),
                         PhaseResult::Failed,
                         message.clone(),
+                        cx,
                     );
                 }
             },

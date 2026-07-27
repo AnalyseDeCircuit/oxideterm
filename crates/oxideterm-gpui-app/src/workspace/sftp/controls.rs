@@ -54,7 +54,7 @@ impl WorkspaceApp {
                             {
                                 // Retry asks the node owner to rebuild SFTP; SCP remains an
                                 // explicit compatibility action beside this control.
-                                this.ensure_node_connection_started(&node_id);
+                                this.ensure_node_connection_started(&node_id, cx);
                                 this.request_sftp_remote_load();
                             }
                             cx.stop_propagation();

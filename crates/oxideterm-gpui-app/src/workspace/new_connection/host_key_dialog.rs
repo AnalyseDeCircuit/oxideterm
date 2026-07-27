@@ -156,7 +156,12 @@ impl WorkspaceApp {
                 if challenge.session_tree_challenge.is_some() {
                     self.continue_active_proxy_session_tree_preflight_only(cx);
                 } else {
-                    self.start_ssh_preflight(challenge.config, challenge.title, challenge.intent);
+                    self.start_ssh_preflight(
+                        challenge.config,
+                        challenge.title,
+                        challenge.intent,
+                        cx,
+                    );
                 }
             }
             Err(error) => {

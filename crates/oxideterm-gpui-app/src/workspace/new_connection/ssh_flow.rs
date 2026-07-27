@@ -36,7 +36,7 @@ use super::{
 };
 use crate::workspace::{
     NativeProxyConnectRun, WorkspaceApp, WorkspaceSshNode,
-    delivery::{self, ActiveDeliverySender},
+    delivery::ActiveDeliverySender,
     session_manager::{
         duplicate_connection_template_name, form_from_saved_connection, save_request_from_form,
         save_request_from_form_with_existing_auth, upstream_proxy_config_from_form,
@@ -313,7 +313,7 @@ impl WorkspaceApp {
         self.duplicating_saved_connection_id = None;
         self.close_new_connection_select();
         self.session_manager.status = Some(self.i18n.t("ssh.drill_down.connecting"));
-        self.ensure_node_connection_started(&target_node_id);
+        self.ensure_node_connection_started(&target_node_id, cx);
         let _ = self.connection_store.mark_used(&saved_connection_id);
         self.persist_session_tree_snapshot();
         cx.notify();

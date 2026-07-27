@@ -67,7 +67,7 @@ impl WorkspaceApp {
                 }
                 ("connections", "reconnect") => {
                     if let Some(node_id) = string_arg(&effect.args, "nodeId") {
-                        self.ensure_node_connection_started(&NodeId::new(node_id.to_string()));
+                        self.ensure_node_connection_started(&NodeId::new(node_id.to_string()), cx);
                         cx.notify();
                     }
                 }

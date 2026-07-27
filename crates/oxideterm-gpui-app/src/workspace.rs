@@ -32,6 +32,7 @@ mod plugin_runtime;
 mod plugin_ui;
 mod quick_commands;
 mod remote_desktop;
+mod runtime_entity;
 mod root {
     pub(super) mod background;
     pub(super) mod helpers;
@@ -926,8 +927,8 @@ pub(crate) struct WorkspaceApp {
     active_proxy_connect_run: Option<NativeProxyConnectRun>,
     keyboard_interactive_challenge: Option<KeyboardInteractiveChallenge>,
     keyboard_interactive_timer_generation: u64,
-    ssh_worker_tx: delivery::ActiveDeliverySender<SshConnectionWorkerResult>,
-    ssh_worker_rx: std::sync::mpsc::Receiver<SshConnectionWorkerResult>,
+    workspace_runtime: Entity<runtime_entity::WorkspaceRuntimeEntity>,
+    _workspace_runtime_subscription: Subscription,
     ssh_registry: SshConnectionRegistry,
     forwarding_service: forwards::ForwardingRuntimeService,
     forwarding_runtime: Arc<tokio::runtime::Runtime>,
@@ -942,8 +943,6 @@ pub(crate) struct WorkspaceApp {
     node_event_wake: delivery::ActiveDeliveryWake,
     node_event_generations: HashMap<NodeId, u64>,
     reconnect_orchestrator: ReconnectOrchestratorStore,
-    reconnect_worker_tx: delivery::ActiveDeliverySender<ReconnectWorkerResult>,
-    reconnect_worker_rx: std::sync::mpsc::Receiver<ReconnectWorkerResult>,
     pending_reconnect_node_ids: HashSet<NodeId>,
     reconnect_debounce_scheduled: bool,
     reconnect_debounce_generation: u64,

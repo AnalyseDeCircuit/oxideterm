@@ -129,7 +129,7 @@ impl WorkspaceApp {
         self.refresh_remote_shell_integration_pending();
         let router = self.node_router.clone();
         let runtime = self.forwarding_runtime.clone();
-        let tx = self.reconnect_worker_tx.clone();
+        let tx = self.reconnect_worker_sender(cx);
         runtime.spawn(async move {
             // The node owns this capability check independently from the
             // terminal pane, matching the IDE Agent deployment lifecycle.

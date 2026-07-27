@@ -88,9 +88,14 @@ impl WorkspaceApp {
             node_router.clone(),
             forwarding_runtime.clone(),
         );
-        let runtime_delivery_wake = delivery::ActiveDeliveryWake::default();
-        let (ssh_worker_tx, ssh_worker_rx) =
-            delivery::ActiveDeliverySender::channel_with_wake(runtime_delivery_wake.clone());
+        let workspace_runtime = cx.new(runtime_entity::WorkspaceRuntimeEntity::new);
+        let runtime_window_handle = window.window_handle();
+        let workspace_runtime_subscription = cx.subscribe(
+            &workspace_runtime,
+            move |workspace, _runtime, event: &runtime_entity::WorkspaceRuntimeEvent, cx| {
+                workspace.handle_workspace_runtime_event(event, runtime_window_handle, cx);
+            },
+        );
         let (forwarding_worker_tx, forwarding_worker_rx) =
             delivery::ActiveDeliverySender::channel_with_wake(forwarding_delivery_wake);
         let forwarding = cx.new(|cx| {
@@ -120,8 +125,6 @@ impl WorkspaceApp {
         let (node_event_subscription, node_event_rx) = node_router
             .emitter()
             .subscribe_bounded_with_wake(256, Some(Arc::new(move || emitter_wake.mark())));
-        let (reconnect_worker_tx, reconnect_worker_rx) =
-            delivery::ActiveDeliverySender::channel_with_wake(runtime_delivery_wake);
         let (sftp_worker_tx, mut sftp_worker_rx) = tokio::sync::mpsc::unbounded_channel();
         let (terminal_notice_tx, terminal_notice_rx) = delivery::ActiveDeliverySender::channel();
         let terminal_metadata_wake = delivery::ActiveDeliveryWake::default();
@@ -512,8 +515,8 @@ impl WorkspaceApp {
             active_proxy_connect_run: None,
             keyboard_interactive_challenge: None,
             keyboard_interactive_timer_generation: 0,
-            ssh_worker_tx,
-            ssh_worker_rx,
+            workspace_runtime,
+            _workspace_runtime_subscription: workspace_runtime_subscription,
             ssh_registry,
             forwarding_service,
             forwarding_runtime,
@@ -530,8 +533,6 @@ impl WorkspaceApp {
                 reconnect_timing_from_settings(&settings),
                 reconnect_max_attempts_from_settings(&settings),
             ),
-            reconnect_worker_tx,
-            reconnect_worker_rx,
             pending_reconnect_node_ids: HashSet::new(),
             reconnect_debounce_scheduled: false,
             reconnect_debounce_generation: 0,
@@ -771,7 +772,6 @@ impl WorkspaceApp {
         workspace.schedule_native_update_delivery(cx);
         let window_handle = window.window_handle();
         workspace.schedule_node_event_delivery(window_handle, cx);
-        workspace.schedule_runtime_worker_delivery(window_handle, cx);
         workspace.schedule_graphics_worker_delivery(window_handle, cx);
         cx.spawn(async move |weak, cx| {
             loop {

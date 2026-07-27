@@ -608,7 +608,7 @@ impl WorkspaceApp {
         let preferences = self.prepare_terminal_preferences_for_tab_kind(&TabKind::SshTerminal, cx);
         let consumer = ConnectionConsumer::Terminal(session_id.0.to_string());
         let prompt_handler =
-            std::sync::Arc::new(NativeSshPromptHandler::new(self.ssh_worker_tx.clone()));
+            std::sync::Arc::new(NativeSshPromptHandler::new(self.ssh_worker_sender(cx)));
         let managed_key_resolver =
             oxideterm_session_adapter::managed_key_resolver_from_store(&self.connection_store);
         // Tauri passes postConnectCommand as a createTerminalForNode option.
@@ -1033,7 +1033,7 @@ impl WorkspaceApp {
                     title,
                 });
         }
-        self.ensure_node_connection_started(&node_id);
+        self.ensure_node_connection_started(&node_id, cx);
         cx.notify();
         Ok(())
     }

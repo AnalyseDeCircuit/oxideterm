@@ -146,15 +146,13 @@ impl WorkspaceApp {
         Some((config, title))
     }
 
-    pub(in crate::workspace) fn poll_ssh_worker_results(
+    pub(in crate::workspace) fn apply_ssh_worker_results(
         &mut self,
+        results: std::collections::VecDeque<SshConnectionWorkerResult>,
         window: &mut Window,
         cx: &mut Context<Self>,
-    ) -> bool {
-        let result_batch =
-            delivery::drain_channel(&self.ssh_worker_rx, delivery::USER_ACTION_DELIVERY_BUDGET);
-
-        for result in result_batch.items {
+    ) {
+        for result in results {
             match result {
                 SshConnectionWorkerResult::Preflight {
                     config,
@@ -191,7 +189,6 @@ impl WorkspaceApp {
                 }
             }
         }
-        result_batch.outcome.backlog_remaining
     }
 
     pub(super) fn handle_ssh_preflight_result(
@@ -489,7 +486,7 @@ impl WorkspaceApp {
         } else {
             self.session_manager.status = Some(self.i18n.t("ssh.form.checking_host_key"));
         }
-        let tx = self.ssh_worker_tx.clone();
+        let tx = self.ssh_worker_sender(cx);
         let router = self.node_router.clone();
         let runtime_store = self.node_runtime_store.clone();
         std::thread::spawn(move || {
@@ -568,7 +565,7 @@ impl WorkspaceApp {
         }
 
         self.apply_session_tree_step_host_key_options(&step);
-        if !self.ensure_node_connection_started_without_ancestors(&step.node_id) {
+        if !self.ensure_node_connection_started_without_ancestors(&step.node_id, cx) {
             self.cancel_active_proxy_connect_run();
             self.report_proxy_session_tree_error(
                 format!("failed to start SSH node {}", step.node_id.0),
@@ -843,7 +840,7 @@ impl WorkspaceApp {
         } else {
             self.session_manager.status = Some(self.i18n.t("ssh.form.checking_host_key"));
         }
-        self.start_ssh_preflight(config, title, SshConnectionIntent::Test);
+        self.start_ssh_preflight(config, title, SshConnectionIntent::Test, cx);
         cx.notify();
     }
 
@@ -987,7 +984,7 @@ impl WorkspaceApp {
                 self.duplicating_saved_connection_id = None;
                 self.close_new_connection_select();
                 self.session_manager.status = Some(self.i18n.t("ssh.drill_down.connecting"));
-                self.ensure_node_connection_started(&child_id);
+                self.ensure_node_connection_started(&child_id, cx);
                 self.persist_session_tree_snapshot();
             }
             SshConnectionIntent::Test => self.start_ssh_test(config, cx),
@@ -1005,7 +1002,7 @@ impl WorkspaceApp {
         } else {
             self.session_manager.status = Some(self.i18n.t("ssh.form.test_running"));
         }
-        let tx = self.ssh_worker_tx.clone();
+        let tx = self.ssh_worker_sender(cx);
         let managed_key_resolver = managed_key_resolver_from_store(&self.connection_store);
         std::thread::spawn(move || {
             let result = match tokio::runtime::Runtime::new() {

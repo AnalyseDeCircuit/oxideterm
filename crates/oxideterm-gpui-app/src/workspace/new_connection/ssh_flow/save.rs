@@ -5,7 +5,7 @@ use super::*;
 use crate::workspace::{
     WorkspaceNotificationKind, WorkspaceNotificationScope, WorkspaceNotificationSeverity,
 };
-use gpui::Timer;
+use gpui::{App, Timer};
 use oxideterm_connections::{ConnectionStore, SavedConnection};
 use oxideterm_gpui_terminal::TerminalNoticeVariant;
 
@@ -897,7 +897,7 @@ impl WorkspaceApp {
             cx.notify();
             return;
         }
-        self.start_ssh_preflight(config, title, intent);
+        self.start_ssh_preflight(config, title, intent, cx);
         cx.notify();
     }
 
@@ -1253,7 +1253,7 @@ impl WorkspaceApp {
             cx.notify();
             return;
         }
-        self.start_ssh_preflight(config, title, SshConnectionIntent::ConnectSaved(id));
+        self.start_ssh_preflight(config, title, SshConnectionIntent::ConnectSaved(id), cx);
         cx.notify();
     }
 
@@ -1262,8 +1262,9 @@ impl WorkspaceApp {
         config: SshConfig,
         title: String,
         intent: SshConnectionIntent,
+        cx: &App,
     ) {
-        let tx = self.ssh_worker_tx.clone();
+        let tx = self.ssh_worker_sender(cx);
         let host = config.host.clone();
         let port = config.port;
         let upstream_proxy = config.upstream_proxy.clone();
