@@ -45,6 +45,21 @@ impl WorkspaceApp {
             )),
             ..ConnectionPoolConfig::default()
         });
+        let forwarding_runtime = Arc::new(
+            tokio::runtime::Builder::new_multi_thread()
+                .enable_all()
+                .thread_name("oxideterm-forwarding")
+                // Most workspace backend jobs are async IO; keep idle thread
+                // stacks bounded. Features that need CPU-heavy parallelism
+                // should use a dedicated pool instead of expanding this
+                // shared runtime.
+                .worker_threads(Self::WORKSPACE_ASYNC_RUNTIME_WORKER_THREADS)
+                .build()?,
+        );
+        // The SSH pool idle timer is long-lived backend work, matching Tauri's
+        // registry-owned timeout task rather than tying disconnects to a GPUI
+        // render/update turn.
+        ssh_registry.set_task_runtime(forwarding_runtime.handle().clone());
         let forwarding_delivery_wake = delivery::ActiveDeliveryWake::default();
         let (forwarding_event_tx, forwarding_event_rx) = std::sync::mpsc::channel();
         let event_wake = forwarding_delivery_wake.clone();
@@ -71,6 +86,7 @@ impl WorkspaceApp {
             forwarding_registry,
             ssh_registry.clone(),
             node_router.clone(),
+            forwarding_runtime.clone(),
         );
         let runtime_delivery_wake = delivery::ActiveDeliveryWake::default();
         let (ssh_worker_tx, ssh_worker_rx) =
@@ -82,6 +98,7 @@ impl WorkspaceApp {
                 forwarding_worker_tx,
                 forwarding_worker_rx,
                 forwarding_event_rx,
+                forwarding_service.clone(),
                 cx,
             )
         });
@@ -157,21 +174,6 @@ impl WorkspaceApp {
             // a transfer actually needs persisted progress.
             Arc::new(LazyProgressStore::new(path))
         };
-        let forwarding_runtime = Arc::new(
-            tokio::runtime::Builder::new_multi_thread()
-                .enable_all()
-                .thread_name("oxideterm-forwarding")
-                // Most workspace backend jobs are async IO; keep idle thread
-                // stacks bounded. Features that need CPU-heavy parallelism
-                // should use a dedicated pool instead of expanding this
-                // shared runtime.
-                .worker_threads(Self::WORKSPACE_ASYNC_RUNTIME_WORKER_THREADS)
-                .build()?,
-        );
-        // The SSH pool idle timer is long-lived backend work, matching Tauri's
-        // registry-owned timeout task rather than tying disconnects to a GPUI
-        // render/update turn.
-        ssh_registry.set_task_runtime(forwarding_runtime.handle().clone());
         let ai_agent_fs = NodeAgentIdeFileSystem::new(
             node_router.clone(),
             crate::workspace::ide::node_agent_mode_from_settings(&settings),

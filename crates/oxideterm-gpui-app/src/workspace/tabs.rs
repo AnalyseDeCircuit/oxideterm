@@ -1,5 +1,4 @@
 use super::*;
-use crate::workspace::forwards::ForwardingWorkerResult;
 
 // Keep tab responsibilities in real modules while preserving WorkspaceApp's API.
 mod create;

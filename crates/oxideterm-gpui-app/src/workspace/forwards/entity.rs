@@ -47,6 +47,8 @@ pub(in crate::workspace) struct ForwardingWorkspaceEntity {
     worker_tx: delivery::ActiveDeliverySender<ForwardingWorkerResult>,
     worker_rx: std::sync::mpsc::Receiver<ForwardingWorkerResult>,
     runtime_event_rx: std::sync::mpsc::Receiver<ForwardEvent>,
+    runtime_service: ForwardingRuntimeService,
+    runtime_snapshots: HashMap<NodeId, ForwardingRuntimeSnapshot>,
     delivery_intents: VecDeque<ForwardingDeliveryIntent>,
     pub(super) port_detection_by_node: HashMap<NodeId, PortDetectionViewState>,
     port_profiler_nodes: std::collections::HashSet<NodeId>,
@@ -69,6 +71,8 @@ impl ForwardingWorkspaceEntity {
             worker_tx,
             worker_rx,
             runtime_event_rx,
+            runtime_service: ForwardingRuntimeService::test_fixture(),
+            runtime_snapshots: HashMap::new(),
             delivery_intents: VecDeque::new(),
             port_detection_by_node: HashMap::new(),
             port_profiler_nodes: std::collections::HashSet::new(),
@@ -79,6 +83,7 @@ impl ForwardingWorkspaceEntity {
         worker_tx: delivery::ActiveDeliverySender<ForwardingWorkerResult>,
         worker_rx: std::sync::mpsc::Receiver<ForwardingWorkerResult>,
         runtime_event_rx: std::sync::mpsc::Receiver<ForwardEvent>,
+        runtime_service: ForwardingRuntimeService,
         cx: &mut Context<Self>,
     ) -> Self {
         let entity = Self {
@@ -111,6 +116,8 @@ impl ForwardingWorkspaceEntity {
             worker_tx,
             worker_rx,
             runtime_event_rx,
+            runtime_service,
+            runtime_snapshots: HashMap::new(),
             delivery_intents: VecDeque::new(),
             port_detection_by_node: HashMap::new(),
             port_profiler_nodes: std::collections::HashSet::new(),
@@ -119,10 +126,63 @@ impl ForwardingWorkspaceEntity {
         entity
     }
 
-    pub(in crate::workspace) fn worker_sender(
-        &self,
-    ) -> delivery::ActiveDeliverySender<ForwardingWorkerResult> {
-        self.worker_tx.clone()
+    pub(super) fn request_operation(
+        &mut self,
+        tab_id: TabId,
+        node_id: NodeId,
+        owner_connection_id: Option<String>,
+        message_key: &'static str,
+        sync_saved_forwards_on_success: bool,
+        operation: ForwardingRuntimeOperation,
+    ) {
+        self.begin_operation();
+        self.runtime_service.submit_operation(
+            tab_id,
+            node_id,
+            owner_connection_id,
+            message_key,
+            sync_saved_forwards_on_success,
+            operation,
+            self.worker_tx.clone(),
+        );
+    }
+
+    pub(super) fn request_port_scan(
+        &mut self,
+        node_id: NodeId,
+        owner_connection_id: Option<String>,
+        restart_degraded_profiler: bool,
+    ) {
+        self.mark_port_scan_started(node_id.clone());
+        self.runtime_service.submit_port_scan(
+            node_id,
+            owner_connection_id,
+            restart_degraded_profiler,
+            self.worker_tx.clone(),
+        );
+    }
+
+    pub(in crate::workspace) fn request_session_restore(&self, node_id: NodeId) {
+        // Reconnect restores the node-owned runtime without exposing the
+        // Entity's delivery sender to workspace coordination code.
+        self.runtime_service
+            .submit_session_restore(node_id, self.worker_tx.clone());
+    }
+
+    pub(super) fn refresh_runtime_snapshot(&mut self, node_id: &NodeId) -> bool {
+        let snapshot = self.runtime_service.snapshot_for_node(node_id);
+        if self.runtime_snapshots.get(node_id) == Some(&snapshot) {
+            return false;
+        }
+        self.runtime_snapshots.insert(node_id.clone(), snapshot);
+        true
+    }
+
+    pub(super) fn runtime_snapshot(&self, node_id: &NodeId) -> ForwardingRuntimeSnapshot {
+        self.runtime_snapshots
+            .get(node_id)
+            .cloned()
+            .unwrap_or_default()
     }
 
     pub(in crate::workspace) fn node_for_tab(&self, tab_id: TabId) -> Option<NodeId> {
@@ -146,7 +206,8 @@ impl ForwardingWorkspaceEntity {
         cx: &mut Context<Self>,
     ) {
         let was_empty = self.tab_nodes.is_empty();
-        self.tab_nodes.insert(tab_id, node_id);
+        self.tab_nodes.insert(tab_id, node_id.clone());
+        self.refresh_runtime_snapshot(&node_id);
         if was_empty {
             self.sampling_generation = self.sampling_generation.wrapping_add(1);
             self.schedule_sampling(self.sampling_generation, cx);
@@ -156,6 +217,11 @@ impl ForwardingWorkspaceEntity {
     pub(in crate::workspace) fn unmap_tab(&mut self, tab_id: TabId) -> Option<NodeId> {
         // Removing a view mapping must not release the registry-owned tunnel.
         let removed = self.tab_nodes.remove(&tab_id);
+        if let Some(node_id) = removed.as_ref()
+            && !self.tab_nodes.values().any(|mapped| mapped == node_id)
+        {
+            self.runtime_snapshots.remove(node_id);
+        }
         if removed.is_some() && self.tab_nodes.is_empty() {
             // Cancel the page sampler without touching long-lived runtime state.
             self.sampling_generation = self.sampling_generation.wrapping_add(1);
@@ -256,6 +322,8 @@ impl ForwardingWorkspaceEntity {
     }
 
     pub(in crate::workspace) fn dismiss_detected_port(&mut self, node_id: &NodeId, port: u16) {
+        self.runtime_service
+            .ignore_detected_port_for_node(node_id, port);
         self.view.new_ports.retain(|detected| detected.port != port);
         if let Some(state) = self.port_detection_by_node.get_mut(node_id) {
             state.new_ports.retain(|detected| detected.port != port);
@@ -303,15 +371,19 @@ impl ForwardingWorkspaceEntity {
                     sync_saved_forwards_on_success,
                     binding,
                     result,
-                } => self
-                    .delivery_intents
-                    .push_back(ForwardingDeliveryIntent::Operation {
-                        tab_id,
-                        message_key,
-                        sync_saved_forwards_on_success,
-                        binding,
-                        result,
-                    }),
+                } => {
+                    if let Some(node_id) = self.node_for_tab(tab_id) {
+                        self.refresh_runtime_snapshot(&node_id);
+                    }
+                    self.delivery_intents
+                        .push_back(ForwardingDeliveryIntent::Operation {
+                            tab_id,
+                            message_key,
+                            sync_saved_forwards_on_success,
+                            binding,
+                            result,
+                        });
+                }
                 ForwardingWorkerResult::Binding { binding } => self
                     .delivery_intents
                     .push_back(ForwardingDeliveryIntent::Binding { binding }),
@@ -322,6 +394,7 @@ impl ForwardingWorkspaceEntity {
                     result,
                 } => {
                     self.apply_port_detection_result(&node_id, connection_id, result);
+                    self.refresh_runtime_snapshot(&node_id);
                     self.delivery_intents
                         .push_back(ForwardingDeliveryIntent::PortScan { node_id, binding });
                 }
@@ -330,12 +403,21 @@ impl ForwardingWorkspaceEntity {
 
         let event_drain =
             delivery::drain_channel(&self.runtime_event_rx, delivery::LIFECYCLE_DELIVERY_BUDGET);
-        self.delivery_intents.extend(
-            event_drain
-                .items
-                .into_iter()
-                .map(ForwardingDeliveryIntent::Runtime),
-        );
+        for event in event_drain.items {
+            let session_id = match &event {
+                ForwardEvent::StatusChanged { session_id, .. }
+                | ForwardEvent::StatsUpdated { session_id, .. }
+                | ForwardEvent::SessionSuspended { session_id, .. } => Some(session_id.as_str()),
+                ForwardEvent::PortDetected { .. } => None,
+            };
+            if let Some(node_id) =
+                session_id.and_then(ForwardingRuntimeService::node_id_for_session)
+            {
+                self.refresh_runtime_snapshot(&node_id);
+            }
+            self.delivery_intents
+                .push_back(ForwardingDeliveryIntent::Runtime(event));
+        }
         if !self.delivery_intents.is_empty() {
             cx.emit(ForwardingWorkspaceEvent::DeliveryReady);
             cx.notify();
@@ -448,13 +530,15 @@ mod tests {
 
         cx.read(|cx| {
             assert_eq!(entity.read(cx).node_for_tab(tab_id), Some(node_id.clone()));
+            assert!(entity.read(cx).runtime_snapshots.contains_key(&node_id));
             assert_eq!(entity.read(cx).sampling_generation, 1);
             assert!(entity.read(cx).sampling_task.is_some());
         });
         let removed = entity.update(cx, |entity, _cx| entity.unmap_tab(tab_id));
-        assert_eq!(removed, Some(node_id));
+        assert_eq!(removed, Some(node_id.clone()));
         cx.read(|cx| {
             assert!(entity.read(cx).node_for_tab(tab_id).is_none());
+            assert!(!entity.read(cx).runtime_snapshots.contains_key(&node_id));
             assert_eq!(entity.read(cx).sampling_generation, 2);
             assert!(entity.read(cx).sampling_task.is_none());
         });
@@ -468,8 +552,16 @@ mod tests {
     fn hidden_port_scan_delivery_updates_entity_state(cx: &mut TestAppContext) {
         let (worker_tx, worker_rx) = delivery::ActiveDeliverySender::channel();
         let (_runtime_tx, runtime_rx) = std::sync::mpsc::channel();
-        let entity = cx
-            .new(|cx| ForwardingWorkspaceEntity::new(worker_tx.clone(), worker_rx, runtime_rx, cx));
+        let runtime_service = ForwardingRuntimeService::test_fixture();
+        let entity = cx.new(|cx| {
+            ForwardingWorkspaceEntity::new(
+                worker_tx.clone(),
+                worker_rx,
+                runtime_rx,
+                runtime_service,
+                cx,
+            )
+        });
         let node_id = NodeId::new("hidden-forward");
         worker_tx
             .send(ForwardingWorkerResult::PortScan {
@@ -504,8 +596,10 @@ mod tests {
         let (worker_tx, worker_rx) = delivery::ActiveDeliverySender::channel();
         let delivery_wake = worker_tx.wake();
         let (_runtime_tx, runtime_rx) = std::sync::mpsc::channel();
-        let entity =
-            cx.new(|cx| ForwardingWorkspaceEntity::new(worker_tx, worker_rx, runtime_rx, cx));
+        let runtime_service = ForwardingRuntimeService::test_fixture();
+        let entity = cx.new(|cx| {
+            ForwardingWorkspaceEntity::new(worker_tx, worker_rx, runtime_rx, runtime_service, cx)
+        });
 
         drop(entity);
         cx.update(|_cx| {});

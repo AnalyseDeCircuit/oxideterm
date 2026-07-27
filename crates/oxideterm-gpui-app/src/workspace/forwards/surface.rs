@@ -8,15 +8,16 @@ use super::helpers::{
     forwards_transparent,
 };
 use super::{
-    ActiveSurface, AnyElement, App, Arc, ButtonOptions, ButtonRadius, ButtonSize, ClipboardItem,
+    ActiveSurface, AnyElement, App, ButtonOptions, ButtonRadius, ButtonSize, ClipboardItem,
     Context, DefaultHasher, Duration, FORWARDS_PAGE_PADDING, FORWARDS_SECTION_GAP,
     FORWARDS_SECTION_LIST_ESTIMATED_HEIGHT, FORWARDS_SECTION_LIST_OVERSCAN,
     FORWARDS_TABLE_HEADER_H, FORWARDS_TABLE_ROW_H, FORWARDS_TABLE_ROW_LIST_OVERSCAN,
     FORWARDS_TW_ALPHA_30, FORWARDS_TW_ALPHA_50, ForwardRule, ForwardStats, ForwardStatus,
-    ForwardType, ForwardingManager, Hash, Hasher, LucideIcon, MouseButton, NodeId, NodeReadiness,
-    TW_BLUE_500, TW_CYAN_500, TW_GREEN_400, TW_ORANGE_400, TW_ORANGE_500, Tab, TabId, TabKind,
-    TabTitleSource, TauriVirtualListSpec, ToolbarButtonOptions, UiButtonVariant, Window,
-    WorkspaceApp, div, px, rgb, rounded_shell_child_radius, settings_ui_font_family,
+    ForwardType, ForwardingQuickAction, ForwardingRuntimeOperation, Hash, HashMap, Hasher,
+    LucideIcon, MouseButton, NodeId, NodeReadiness, TW_BLUE_500, TW_CYAN_500, TW_GREEN_400,
+    TW_ORANGE_400, TW_ORANGE_500, Tab, TabId, TabKind, TabTitleSource, TauriVirtualListSpec,
+    ToolbarButtonOptions, UiButtonVariant, Window, WorkspaceApp, div, px, rgb,
+    rounded_shell_child_radius, settings_ui_font_family,
     sync_tauri_variable_list_state_by_signatures, tauri_virtual_list,
 };
 
@@ -224,13 +225,11 @@ impl WorkspaceApp {
                     .hash(&mut hasher);
             }
             ForwardsSection::Table | ForwardsSection::RemotePorts => {
-                if let Some(manager) = self.forwarding_manager_for_node_readonly(node_id) {
-                    let forwards = manager.list_forwards();
-                    forwards.len().hash(&mut hasher);
-                    for rule in forwards {
-                        rule.id.hash(&mut hasher);
-                        format!("{:?}", rule.status).hash(&mut hasher);
-                    }
+                let snapshot = self.forwarding.read(cx).runtime_snapshot(node_id);
+                snapshot.rules.len().hash(&mut hasher);
+                for rule in snapshot.rules {
+                    rule.id.hash(&mut hasher);
+                    format!("{:?}", rule.status).hash(&mut hasher);
                 }
             }
             ForwardsSection::CreateForm => {
@@ -317,12 +316,15 @@ impl WorkspaceApp {
             }
             ForwardsSection::Separator => self.render_forwards_separator(has_background),
             ForwardsSection::Table => {
-                let manager = self.forwarding_manager_for_node_readonly(&node_id);
-                let forwards = manager
-                    .as_ref()
-                    .map(|manager| manager.list_forwards())
-                    .unwrap_or_default();
-                self.render_forwards_table(node_id, tab_id, forwards, manager, has_background, cx)
+                let snapshot = self.forwarding.read(cx).runtime_snapshot(&node_id);
+                self.render_forwards_table(
+                    node_id,
+                    tab_id,
+                    snapshot.rules,
+                    snapshot.stats_by_forward_id,
+                    has_background,
+                    cx,
+                )
             }
             ForwardsSection::CreateForm => {
                 self.render_forward_create_form(node_id, tab_id, has_background, cx)
@@ -336,11 +338,7 @@ impl WorkspaceApp {
                 .map(|error| self.render_forwards_error(error))
                 .unwrap_or_else(|| div().into_any_element()),
             ForwardsSection::RemotePorts => {
-                let forwards = self
-                    .forwarding_manager_for_node_readonly(&node_id)
-                    .as_ref()
-                    .map(|manager| manager.list_forwards())
-                    .unwrap_or_default();
+                let forwards = self.forwarding.read(cx).runtime_snapshot(&node_id).rules;
                 self.render_remote_ports_section(node_id, tab_id, &forwards, has_background, cx)
             }
         }
@@ -438,39 +436,18 @@ impl WorkspaceApp {
                 ..ToolbarButtonOptions::default()
             },
             cx.listener(move |this, _event, _window, cx| {
-                let persist = this.forward_persist_context_for_node(&node_id);
-                let registry = this.forwarding_service.registry().clone();
+                let action = match label_key {
+                    "forwards.quick.jupyter" => ForwardingQuickAction::Jupyter,
+                    "forwards.quick.tensorboard" => ForwardingQuickAction::Tensorboard,
+                    "forwards.quick.vscode" => ForwardingQuickAction::Vscode,
+                    _ => unreachable!("unknown forward quick action"),
+                };
                 this.start_forward_operation(
                     tab_id,
                     node_id.clone(),
                     "forwards.messages.created",
                     true,
-                    move |manager| {
-                        Box::pin(async move {
-                            let created = match label_key {
-                                "forwards.quick.jupyter" => {
-                                    manager.forward_jupyter(port, port).await?
-                                }
-                                "forwards.quick.tensorboard" => {
-                                    manager.forward_tensorboard(port, port).await?
-                                }
-                                "forwards.quick.vscode" => {
-                                    manager.forward_vscode(port, port).await?
-                                }
-                                _ => unreachable!("unknown forward quick action"),
-                            };
-                            if let Some((session_id, owner_connection_id)) = persist {
-                                let forward_id = created.id.clone();
-                                let _ = registry.sync_persisted_forward_rule(
-                                    &forward_id,
-                                    &session_id,
-                                    owner_connection_id,
-                                    created,
-                                );
-                            }
-                            Ok(())
-                        })
-                    },
+                    ForwardingRuntimeOperation::Quick { action, port },
                     cx,
                 );
                 cx.stop_propagation();
@@ -487,7 +464,7 @@ impl WorkspaceApp {
         node_id: NodeId,
         tab_id: TabId,
         forwards: Vec<ForwardRule>,
-        manager: Option<Arc<ForwardingManager>>,
+        stats_by_forward_id: HashMap<String, ForwardStats>,
         has_background: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
@@ -498,8 +475,9 @@ impl WorkspaceApp {
         let table_row_state = self.forwarding.read(cx).table_row_list_state.clone();
         let table_row_spec = self.forwards_table_row_list_spec();
         let workspace = cx.entity();
+        let refresh_node_id = node_id.clone();
         let row_node_id = node_id;
-        let row_manager = manager;
+        let row_stats_by_forward_id = stats_by_forward_id;
         let row_forwards = forwards.clone();
         let row_has_background = has_background;
         div()
@@ -520,7 +498,10 @@ impl WorkspaceApp {
                                 LucideIcon::RefreshCcw,
                                 theme.text_muted,
                                 has_background,
-                                |_this, _event, _window, cx| {
+                                move |this, _event, _window, cx| {
+                                    this.forwarding.update(cx, |forwarding, _cx| {
+                                        forwarding.refresh_runtime_snapshot(&refresh_node_id);
+                                    });
                                     cx.notify();
                                     cx.stop_propagation();
                                 },
@@ -608,16 +589,9 @@ impl WorkspaceApp {
                                     let Some(rule) = row_forwards.get(index).cloned() else {
                                         return div().into_any_element();
                                     };
-                                    let manager = row_manager.clone();
                                     let node_id = row_node_id.clone();
+                                    let stats = row_stats_by_forward_id.get(&rule.id).cloned();
                                     workspace.update(cx, |this, cx| {
-                                        let stats = matches!(rule.status, ForwardStatus::Active)
-                                            .then(|| {
-                                                manager.as_ref().and_then(|manager| {
-                                                    manager.get_stats(&rule.id).ok()
-                                                })
-                                            })
-                                            .flatten();
                                         this.render_forward_row(
                                             node_id,
                                             tab_id,
@@ -739,11 +713,7 @@ impl WorkspaceApp {
                                     node_id.clone(),
                                     "forwards.messages.stopped",
                                     false,
-                                    move |manager| {
-                                        Box::pin(async move {
-                                            manager.stop_forward(&forward_id).await.map(|_| ())
-                                        })
-                                    },
+                                    ForwardingRuntimeOperation::Stop { forward_id },
                                     cx,
                                 );
                                 cx.stop_propagation();
@@ -762,31 +732,12 @@ impl WorkspaceApp {
                                 let node_id = node_id.clone();
                                 move |this, _event, _window, cx| {
                                     let forward_id = rule_for_restart.id.clone();
-                                    let persist = this.forward_persist_context_for_node(&node_id);
-                                    let registry = this.forwarding_service.registry().clone();
                                     this.start_forward_operation(
                                         tab_id,
                                         node_id.clone(),
                                         "forwards.messages.restarted",
                                         true,
-                                        move |manager| {
-                                            Box::pin(async move {
-                                                let restarted =
-                                                    manager.restart_forward(&forward_id).await?;
-                                                if let Some((session_id, owner_connection_id)) =
-                                                    persist
-                                                {
-                                                    let forward_id = restarted.id.clone();
-                                                    let _ = registry.sync_persisted_forward_rule(
-                                                        &forward_id,
-                                                        &session_id,
-                                                        owner_connection_id,
-                                                        restarted,
-                                                    );
-                                                }
-                                                Ok(())
-                                            })
-                                        },
+                                        ForwardingRuntimeOperation::Restart { forward_id },
                                         cx,
                                     );
                                     cx.stop_propagation();

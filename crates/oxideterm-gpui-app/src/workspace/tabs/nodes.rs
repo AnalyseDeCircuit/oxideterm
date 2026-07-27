@@ -2541,28 +2541,8 @@ impl WorkspaceApp {
     }
 
     fn restore_forwarding_session_for_node(&mut self, node_id: &NodeId, cx: &mut Context<Self>) {
-        let session_id = self.forwarding_session_id_for_node(node_id);
-        let consumer = ConnectionConsumer::PortForward(session_id.clone());
-        let forwarding_registry = self.forwarding_service.registry().clone();
-        let runtime = self.forwarding_runtime.clone();
-        let router = self.node_router.clone();
-        let node_id = node_id.clone();
-        let tx = self.forwarding.read(cx).worker_sender();
-        runtime.spawn(async move {
-            let binding = match router
-                .acquire_connection_wait(&node_id, consumer.clone(), Duration::from_secs(15))
-                .await
-            {
-                Ok(handle) => {
-                    let connection_id = handle.connection_id.clone();
-                    let _ = forwarding_registry
-                        .restore_session(&session_id, handle.handle)
-                        .await;
-                    Some((session_id, connection_id, consumer))
-                }
-                Err(_) => None,
-            };
-            let _ = tx.send(ForwardingWorkerResult::Binding { binding });
+        self.forwarding.update(cx, |forwarding, _cx| {
+            forwarding.request_session_restore(node_id.clone());
         });
     }
 

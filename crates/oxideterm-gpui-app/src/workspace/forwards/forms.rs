@@ -7,9 +7,9 @@ use super::helpers::{
 };
 use super::{
     AnyElement, ConfirmDialogVariant, ConfirmDialogView, Context, FORWARDS_TW_ALPHA_30,
-    FORWARDS_TW_ALPHA_50, ForwardInput, ForwardType, LucideIcon, MouseButton, NodeId, TW_BLACK,
-    TabId, TextInputView, WorkspaceApp, WorkspaceImeTarget, confirm_dialog, div, px, rgb,
-    settings_mono_font_family, text_input, text_input_anchor_probe,
+    FORWARDS_TW_ALPHA_50, ForwardInput, ForwardType, ForwardingRuntimeOperation, LucideIcon,
+    MouseButton, NodeId, TW_BLACK, TabId, TextInputView, WorkspaceApp, WorkspaceImeTarget,
+    confirm_dialog, div, px, rgb, settings_mono_font_family, text_input, text_input_anchor_probe,
 };
 
 impl WorkspaceApp {
@@ -338,19 +338,13 @@ impl WorkspaceApp {
             cx.listener(move |this, _event, _window, cx| {
                 this.forwarding
                     .update(cx, |forwarding, _cx| forwarding.clear_pending_delete());
-                let registry = this.forwarding_service.registry().clone();
-                let delete_id = confirm_id.clone();
                 this.start_forward_operation(
                     tab_id,
                     node_id.clone(),
                     "forwards.messages.deleted",
                     true,
-                    move |manager| {
-                        Box::pin(async move {
-                            manager.delete_forward(&delete_id).await?;
-                            let _ = registry.delete_persisted_forward(&delete_id);
-                            Ok(())
-                        })
+                    ForwardingRuntimeOperation::Delete {
+                        forward_id: confirm_id.clone(),
                     },
                     cx,
                 );

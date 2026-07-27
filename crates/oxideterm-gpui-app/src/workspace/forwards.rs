@@ -2,7 +2,6 @@ use std::{
     collections::{HashMap, VecDeque, hash_map::DefaultHasher},
     hash::{Hash, Hasher},
     sync::Arc,
-    thread,
     time::{Duration, Instant},
 };
 
