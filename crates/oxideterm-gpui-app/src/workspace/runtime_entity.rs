@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use super::*;
+use oxideterm_settings::RemoteShellIntegrationMode;
 use oxideterm_ssh::{ManagedKeyResolver, ReconnectTiming};
 
 const ACTIVE_PROBE_START_DELAY: Duration = Duration::from_millis(530);
@@ -59,6 +60,12 @@ pub(in crate::workspace) struct ReconnectGraceProbeRequest {
     pub(in crate::workspace) old_connection_count: usize,
     pub(in crate::workspace) progress_store: Arc<dyn ProgressStore>,
     pub(in crate::workspace) job_id: String,
+}
+
+pub(in crate::workspace) struct RemoteShellIntegrationGateRequest {
+    pub(in crate::workspace) node_id: NodeId,
+    pub(in crate::workspace) mode: RemoteShellIntegrationMode,
+    pub(in crate::workspace) force_install: bool,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -354,6 +361,63 @@ impl WorkspaceRuntimeEntity {
             };
         });
         Ok(())
+    }
+
+    pub(in crate::workspace) fn start_remote_shell_integration_gate(
+        &self,
+        request: RemoteShellIntegrationGateRequest,
+    ) {
+        let RemoteShellIntegrationGateRequest {
+            node_id,
+            mode,
+            force_install,
+        } = request;
+        let router = self.node_router.clone();
+        let result_tx = self.reconnect_worker_tx.clone();
+        self.task_runtime.spawn(async move {
+            // The node owns this capability check independently from the
+            // terminal pane, matching the IDE Agent deployment lifecycle.
+            let result = async {
+                let resolved = router
+                    .resolve_connection(&node_id)
+                    .await
+                    .map_err(|error| error.to_string())?;
+                // Detection starts only after the first visible Shell request,
+                // preserving PAM, MOTD, and Last login output ordering.
+                let mut remote_env = resolved.handle.remote_env();
+                for _ in 0..80 {
+                    if remote_env.is_some() {
+                        break;
+                    }
+                    tokio::time::sleep(Duration::from_millis(100)).await;
+                    remote_env = resolved.handle.remote_env();
+                }
+                let remote_env = remote_env.ok_or_else(|| {
+                    "remote Shell detection did not finish after the visible terminal opened"
+                        .to_string()
+                })?;
+                let sftp = router
+                    .acquire_sftp(&node_id)
+                    .await
+                    .map_err(|error| error.to_string())?;
+                let sftp = sftp.lock().await;
+                let status =
+                    oxideterm_terminal::inspect_remote_shell_integration(&sftp, Some(&remote_env))
+                        .await?;
+                if should_install_remote_shell_integration(force_install, mode, status.state) {
+                    oxideterm_terminal::install_remote_shell_integration(&sftp, Some(&remote_env))
+                        .await
+                        .map(|status| (status, true))
+                } else {
+                    Ok((status, false))
+                }
+            }
+            .await;
+            let _ = result_tx.send(ReconnectWorkerResult::RemoteShellIntegrationGateFinished {
+                node_id,
+                result,
+            });
+        });
     }
 
     pub(in crate::workspace) fn start_reconnect_grace_probe(
@@ -955,10 +1019,9 @@ impl WorkspaceRuntimeEntity {
         self.ssh_worker_tx.clone()
     }
 
-    pub(in crate::workspace) fn reconnect_worker_sender(
-        &self,
-    ) -> delivery::ActiveDeliverySender<ReconnectWorkerResult> {
-        // Delayed reconnect phases keep the Entity wake path without a root sender field.
+    #[cfg(test)]
+    fn reconnect_worker_sender(&self) -> delivery::ActiveDeliverySender<ReconnectWorkerResult> {
+        // Tests inject results through the same reliable wake path used by workers.
         self.reconnect_worker_tx.clone()
     }
 
@@ -1452,6 +1515,16 @@ impl WorkspaceRuntimeEntity {
     }
 }
 
+fn should_install_remote_shell_integration(
+    force_install: bool,
+    mode: RemoteShellIntegrationMode,
+    state: oxideterm_terminal::RemoteShellIntegrationState,
+) -> bool {
+    force_install
+        || (mode == RemoteShellIntegrationMode::Enabled
+            && state != oxideterm_terminal::RemoteShellIntegrationState::Installed)
+}
+
 fn reconnect_schedule_action_targets_any(
     action: &ReconnectScheduleAction,
     node_ids: &[NodeId],
@@ -1513,13 +1586,6 @@ impl WorkspaceApp {
     ) -> delivery::ActiveDeliverySender<SshConnectionWorkerResult> {
         self.workspace_runtime.read(cx).ssh_worker_sender()
     }
-
-    pub(in crate::workspace) fn reconnect_worker_sender(
-        &self,
-        cx: &App,
-    ) -> delivery::ActiveDeliverySender<ReconnectWorkerResult> {
-        self.workspace_runtime.read(cx).reconnect_worker_sender()
-    }
 }
 
 #[cfg(test)]
@@ -1528,6 +1594,37 @@ mod tests {
     use gpui::TestAppContext;
     use oxideterm_ssh::NodeEventEmitter;
     use std::sync::atomic::{AtomicBool, Ordering};
+
+    #[test]
+    fn remote_shell_gate_installs_only_when_requested_or_enabled_and_missing() {
+        use oxideterm_terminal::RemoteShellIntegrationState;
+
+        assert!(should_install_remote_shell_integration(
+            true,
+            RemoteShellIntegrationMode::Ask,
+            RemoteShellIntegrationState::Installed,
+        ));
+        assert!(should_install_remote_shell_integration(
+            false,
+            RemoteShellIntegrationMode::Enabled,
+            RemoteShellIntegrationState::NotInstalled,
+        ));
+        assert!(!should_install_remote_shell_integration(
+            false,
+            RemoteShellIntegrationMode::Enabled,
+            RemoteShellIntegrationState::Installed,
+        ));
+        assert!(!should_install_remote_shell_integration(
+            false,
+            RemoteShellIntegrationMode::Ask,
+            RemoteShellIntegrationState::NotInstalled,
+        ));
+        assert!(!should_install_remote_shell_integration(
+            false,
+            RemoteShellIntegrationMode::Disabled,
+            RemoteShellIntegrationState::NotInstalled,
+        ));
+    }
 
     fn test_task_runtime() -> Arc<tokio::runtime::Runtime> {
         Arc::new(

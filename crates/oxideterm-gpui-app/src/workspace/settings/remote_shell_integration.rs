@@ -1,4 +1,5 @@
 use super::*;
+use crate::workspace::runtime_entity::RemoteShellIntegrationGateRequest;
 
 #[derive(Clone, Debug, Default)]
 pub(in crate::workspace) struct RemoteShellIntegrationUiState {
@@ -127,57 +128,13 @@ impl WorkspaceApp {
             return;
         }
         self.refresh_remote_shell_integration_pending();
-        let router = self.node_router.clone();
-        let runtime = self.forwarding_runtime.clone();
-        let tx = self.reconnect_worker_sender(cx);
-        runtime.spawn(async move {
-            // The node owns this capability check independently from the
-            // terminal pane, matching the IDE Agent deployment lifecycle.
-            let result = async {
-                let resolved = router
-                    .resolve_connection(&node_id)
-                    .await
-                    .map_err(|error| error.to_string())?;
-                // Detection starts only after the first visible Shell request,
-                // preserving PAM, MOTD, and Last login output ordering.
-                let mut remote_env = resolved.handle.remote_env();
-                for _ in 0..80 {
-                    if remote_env.is_some() {
-                        break;
-                    }
-                    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-                    remote_env = resolved.handle.remote_env();
-                }
-                let remote_env = remote_env.ok_or_else(|| {
-                    "remote Shell detection did not finish after the visible terminal opened"
-                        .to_string()
-                })?;
-                let sftp = router
-                    .acquire_sftp(&node_id)
-                    .await
-                    .map_err(|error| error.to_string())?;
-                let sftp = sftp.lock().await;
-                let status =
-                    oxideterm_terminal::inspect_remote_shell_integration(&sftp, Some(&remote_env))
-                        .await?;
-                let should_install = force_install
-                    || (mode == RemoteShellIntegrationMode::Enabled
-                        && status.state
-                            != oxideterm_terminal::RemoteShellIntegrationState::Installed);
-                if should_install {
-                    oxideterm_terminal::install_remote_shell_integration(&sftp, Some(&remote_env))
-                        .await
-                        .map(|status| (status, true))
-                } else {
-                    Ok((status, false))
-                }
-            }
-            .await;
-            let _ = tx.send(ReconnectWorkerResult::RemoteShellIntegrationGateFinished {
+        self.workspace_runtime
+            .read(cx)
+            .start_remote_shell_integration_gate(RemoteShellIntegrationGateRequest {
                 node_id,
-                result,
+                mode,
+                force_install,
             });
-        });
         cx.notify();
     }
 
