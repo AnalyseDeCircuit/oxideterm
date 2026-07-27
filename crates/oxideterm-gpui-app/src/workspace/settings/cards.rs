@@ -1080,13 +1080,13 @@ impl WorkspaceApp {
                 self.terminal_command_specs_editor_initial_value()
             }
             SettingsInput::NativePluginInstallUrl => {
-                self.native_plugin_manager.install_url_draft.clone()
+                self.plugin_manager_state(cx).install_url_draft.clone()
             }
             SettingsInput::NativePluginInstallChecksum => {
-                self.native_plugin_manager.install_checksum_draft.clone()
+                self.plugin_manager_state(cx).install_checksum_draft.clone()
             }
             SettingsInput::NativePluginRegistryUrl => {
-                self.native_plugin_manager.registry_url_draft.clone()
+                self.plugin_manager_state(cx).registry_url_draft.clone()
             }
             SettingsInput::PortableCurrentPassword => self.portable_current_password.clone(),
             SettingsInput::PortableNewPassword => self.portable_new_password.clone(),
@@ -1193,18 +1193,24 @@ impl WorkspaceApp {
                 cx.notify();
             }
             SettingsInput::NativePluginInstallUrl => {
-                self.native_plugin_manager.install_url_draft =
-                    self.settings_input_draft.trim().to_string();
+                let draft = self.settings_input_draft.trim().to_string();
+                self.update_plugin_manager_state(cx, |manager| {
+                    manager.install_url_draft = draft;
+                });
                 cx.notify();
             }
             SettingsInput::NativePluginInstallChecksum => {
-                self.native_plugin_manager.install_checksum_draft =
-                    self.settings_input_draft.trim().to_string();
+                let draft = self.settings_input_draft.trim().to_string();
+                self.update_plugin_manager_state(cx, |manager| {
+                    manager.install_checksum_draft = draft;
+                });
                 cx.notify();
             }
             SettingsInput::NativePluginRegistryUrl => {
-                self.native_plugin_manager.registry_url_draft =
-                    self.settings_input_draft.trim().to_string();
+                let draft = self.settings_input_draft.trim().to_string();
+                self.update_plugin_manager_state(cx, |manager| {
+                    manager.registry_url_draft = draft;
+                });
                 cx.notify();
             }
             SettingsInput::PortableCurrentPassword => {

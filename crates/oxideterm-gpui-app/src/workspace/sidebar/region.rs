@@ -385,7 +385,7 @@ impl WorkspaceApp {
         let panel_section = self.effective_sidebar_panel_section();
         let plugin_panel_title = (panel_section == SidebarSection::Extensions)
             .then(|| {
-                self.native_plugin_manager
+                self.plugin_manager_state(cx)
                     .active_sidebar_panel
                     .as_ref()
                     .and_then(|selection| {

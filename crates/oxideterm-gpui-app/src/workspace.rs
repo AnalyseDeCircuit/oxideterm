@@ -823,7 +823,6 @@ pub(crate) struct WorkspaceApp {
     quick_command_list_cache: RefCell<VirtualListSignatureCache>,
     detached_local_terminal_list_state: ListState,
     detached_local_terminal_list_cache: RefCell<VirtualListSignatureCache>,
-    native_plugin_manager: plugin_manager::NativePluginManagerState,
     native_plugin_ui: plugin_ui::NativePluginUiState,
     plugin_entity: Entity<plugin_entity::PluginWorkspaceEntity>,
     _plugin_entity_subscription: Subscription,

@@ -300,7 +300,7 @@ impl WorkspaceApp {
     ) -> AnyElement {
         self.bootstrap_native_plugin_runtime(cx);
         let theme = self.tokens.ui;
-        let Some(selection) = self.native_plugin_manager.active_sidebar_panel.as_ref() else {
+        let Some(selection) = self.plugin_manager_state(cx).active_sidebar_panel.clone() else {
             return self.render_plugin_sidebar_placeholder();
         };
         let panels = self
@@ -1353,7 +1353,7 @@ impl WorkspaceApp {
             })
     }
 
-    pub(super) fn native_plugin_ui_control_is_visible(&self, key: u64) -> bool {
+    pub(super) fn native_plugin_ui_control_is_visible(&self, key: u64, cx: &App) -> bool {
         let Some(context) = self.native_plugin_ui.context(key) else {
             return false;
         };
@@ -1368,7 +1368,7 @@ impl WorkspaceApp {
             "sidebarPanel" => {
                 self.effective_sidebar_panel_section() == SidebarSection::Extensions
                     && self
-                        .native_plugin_manager
+                        .plugin_manager_state(cx)
                         .active_sidebar_panel
                         .as_ref()
                         .is_some_and(|selection| {

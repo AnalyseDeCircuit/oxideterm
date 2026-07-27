@@ -110,6 +110,7 @@ pub(in crate::workspace) struct PluginWorkspaceEntity {
     runtime_delivery_rx: std::sync::mpsc::Receiver<NativePluginRuntimeDelivery>,
     runtime_intents: VecDeque<PluginRuntimeIntent>,
     active_runtime_plugin_ids: HashSet<String>,
+    manager_state: plugin_manager::NativePluginManagerState,
     manager_operation_in_flight: bool,
     manager_delivery_tx:
         delivery::ActiveDeliverySender<plugin_manager::NativePluginManagerDelivery>,
@@ -168,6 +169,7 @@ impl PluginWorkspaceEntity {
             runtime_delivery_rx,
             runtime_intents: VecDeque::new(),
             active_runtime_plugin_ids: HashSet::new(),
+            manager_state: plugin_manager::NativePluginManagerState::new(),
             manager_operation_in_flight: false,
             manager_delivery_tx,
             manager_delivery_rx,
@@ -206,6 +208,16 @@ impl PluginWorkspaceEntity {
 
     pub(in crate::workspace) fn manager_operation_in_flight(&self) -> bool {
         self.manager_operation_in_flight
+    }
+
+    pub(in crate::workspace) fn manager_state(&self) -> &plugin_manager::NativePluginManagerState {
+        &self.manager_state
+    }
+
+    pub(in crate::workspace) fn manager_state_mut(
+        &mut self,
+    ) -> &mut plugin_manager::NativePluginManagerState {
+        &mut self.manager_state
     }
 
     pub(in crate::workspace) fn registry(&self) -> &plugin_host::NativePluginRegistry {
@@ -595,10 +607,107 @@ impl PluginWorkspaceEntity {
         true
     }
 
-    pub(in crate::workspace) fn take_manager_deliveries(
+    pub(in crate::workspace) fn apply_manager_deliveries(
         &mut self,
-    ) -> VecDeque<plugin_manager::NativePluginManagerDelivery> {
-        std::mem::take(&mut self.manager_deliveries)
+        settings_path: &std::path::Path,
+        i18n: &I18n,
+    ) -> bool {
+        let mut bootstrap_runtime = false;
+        while let Some(delivery) = self.manager_deliveries.pop_front() {
+            bootstrap_runtime |= self.apply_manager_delivery(delivery, settings_path, i18n);
+        }
+        bootstrap_runtime
+    }
+
+    fn apply_manager_delivery(
+        &mut self,
+        delivery: plugin_manager::NativePluginManagerDelivery,
+        settings_path: &std::path::Path,
+        i18n: &I18n,
+    ) -> bool {
+        match delivery {
+            plugin_manager::NativePluginManagerDelivery::Install {
+                download_url,
+                checksum,
+                outcome,
+            } => match outcome {
+                plugin_manager::NativePluginInstallOutcome::Installed(result) => {
+                    let installed_id = result.manifest.id.clone();
+                    let message = i18n
+                        .t("plugin.url_install_success")
+                        .replace("{{name}}", &result.manifest.name);
+                    self.replace_registry(plugin_host::NativePluginRegistry::discover(
+                        settings_path,
+                    ));
+                    self.manager_state
+                        .available_updates
+                        .retain(|entry| entry.id != installed_id);
+                    self.manager_state.pending_overwrite = None;
+                    self.manager_state.operation_status =
+                        plugin_manager::NativePluginManagerOperationStatus::Success(message);
+                    true
+                }
+                plugin_manager::NativePluginInstallOutcome::Conflict { plugin_id } => {
+                    // The retry keeps the only secret-bearing URL owner.
+                    self.manager_state.pending_overwrite =
+                        Some(plugin_manager::NativePluginPendingOverwrite {
+                            plugin_id,
+                            download_url,
+                            checksum,
+                        });
+                    self.manager_state.operation_status =
+                        plugin_manager::NativePluginManagerOperationStatus::Error(
+                            i18n.t("plugin.url_conflict_title"),
+                        );
+                    false
+                }
+                plugin_manager::NativePluginInstallOutcome::Failed => {
+                    self.manager_state.operation_status =
+                        plugin_manager::NativePluginManagerOperationStatus::Error(
+                            i18n.t("plugin.install_error"),
+                        );
+                    false
+                }
+            },
+            plugin_manager::NativePluginManagerDelivery::CheckUpdates(result) => {
+                match result {
+                    Some(updates) => {
+                        let update_count = updates.len();
+                        self.manager_state.available_updates = updates;
+                        self.manager_state.operation_status =
+                            plugin_manager::NativePluginManagerOperationStatus::Success(format!(
+                                "{update_count} {}",
+                                i18n.t("plugin.updates")
+                            ));
+                    }
+                    None => {
+                        self.manager_state.operation_status =
+                            plugin_manager::NativePluginManagerOperationStatus::Error(
+                                i18n.t("plugin.registry_error"),
+                            );
+                    }
+                }
+                false
+            }
+            plugin_manager::NativePluginManagerDelivery::InstallWasmRuntime(result) => match result
+            {
+                Some(result) => {
+                    self.manager_state.operation_status =
+                        plugin_manager::NativePluginManagerOperationStatus::Success(
+                            i18n.t("plugin.wasm_runtime_install_success")
+                                .replace("{{version}}", &result.version),
+                        );
+                    true
+                }
+                None => {
+                    self.manager_state.operation_status =
+                        plugin_manager::NativePluginManagerOperationStatus::Error(
+                            i18n.t("plugin.install_error"),
+                        );
+                    false
+                }
+            },
+        }
     }
 
     pub(in crate::workspace) fn runtime_request_senders(&self) -> PluginRuntimeRequestSenders {
@@ -1258,11 +1367,12 @@ mod tests {
 
         entity.update(cx, |entity, _cx| {
             assert!(!entity.manager_operation_in_flight());
+            let i18n = I18n::new(Locale::En);
+            assert!(!entity.apply_manager_deliveries(std::path::Path::new(""), &i18n));
+            assert!(entity.manager_deliveries.is_empty());
             assert!(matches!(
-                entity.take_manager_deliveries().pop_front(),
-                Some(plugin_manager::NativePluginManagerDelivery::CheckUpdates(Some(
-                    updates
-                ))) if updates.is_empty()
+                entity.manager_state().operation_status,
+                plugin_manager::NativePluginManagerOperationStatus::Success(_)
             ));
         });
     }

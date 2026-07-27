@@ -753,7 +753,7 @@ impl WorkspaceApp {
         }
 
         if let Some(key) = self.native_plugin_ui.focused_input
-            && self.native_plugin_ui_control_is_visible(key)
+            && self.native_plugin_ui_control_is_visible(key, cx)
         {
             return Some(WorkspaceImeTarget::PluginControl(key));
         }
@@ -1596,7 +1596,7 @@ impl WorkspaceApp {
                 .editing_message_focused
                 .then(|| self.ai.chat.editing_message_draft.clone()),
             WorkspaceImeTarget::PluginControl(key) => self
-                .native_plugin_ui_control_is_visible(key)
+                .native_plugin_ui_control_is_visible(key, cx)
                 .then(|| self.native_plugin_ui.text(key).map(str::to_string))
                 .flatten(),
             WorkspaceImeTarget::Sftp(input) => {
@@ -2535,7 +2535,7 @@ impl WorkspaceApp {
             }
             WorkspaceImeTarget::PluginControl(key) => {
                 if self.native_plugin_ui.focused_input == Some(key)
-                    && self.native_plugin_ui_control_is_visible(key)
+                    && self.native_plugin_ui_control_is_visible(key, cx)
                 {
                     if let Some(value) = self.native_plugin_ui.text_mut(key) {
                         replace_utf16(value, replacement_range, text);
