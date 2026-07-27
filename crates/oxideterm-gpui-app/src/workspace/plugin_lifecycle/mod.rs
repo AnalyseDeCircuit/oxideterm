@@ -441,7 +441,12 @@ impl WorkspaceApp {
         let Some(runtime) = self.node_runtime_store.snapshot(&node_id) else {
             return false;
         };
-        if native_plugin_session_connection_state(&runtime.state, terminal_count) != "active" {
+        if native_plugin_session_connection_state(
+            &runtime.state.readiness,
+            runtime.state.error.as_deref(),
+            terminal_count,
+        ) != "active"
+        {
             return false;
         }
         let Some(session_id) = node.terminal_ids.first().copied() else {
@@ -815,7 +820,7 @@ impl WorkspaceApp {
             })
             .collect::<HashMap<_, _>>();
         native_plugin_session_tree_from_nodes(
-            self.node_runtime_store.export_snapshot().nodes,
+            self.node_runtime_store.metadata_snapshots(),
             &titles,
             &terminal_ids,
         )

@@ -59,9 +59,16 @@ mod tests {
             ws_token: "native-terminal-term-a".to_string(),
             session_id: "term-a".to_string(),
         };
-        router
+        let event = router
             .bind_terminal_endpoint(&node, endpoint.clone())
             .unwrap();
+        assert!(matches!(
+            event,
+            NodeStateEvent::TerminalEndpointChanged {
+                available: true,
+                ..
+            }
+        ));
 
         assert_eq!(router.terminal_url(&node).unwrap(), endpoint);
 
@@ -70,6 +77,37 @@ mod tests {
             router.terminal_url(&node),
             Err(RouteError::NotConnected(_))
         ));
+    }
+
+    #[test]
+    fn metadata_snapshot_omits_authentication_and_endpoint_tokens() {
+        let store = NodeRuntimeStore::default();
+        let node = NodeId::new("node-a");
+        let config = SshConfig::password(
+            "example.test",
+            22,
+            "deploy",
+            "representative-password",
+        );
+        store.upsert_node(node.clone(), config);
+        store
+            .bind_terminal_endpoint(
+                &node,
+                TerminalEndpoint {
+                    ws_port: 8022,
+                    ws_token: "representative-endpoint-token".to_string(),
+                    session_id: "term-a".to_string(),
+                },
+            )
+            .unwrap();
+
+        let metadata = store.metadata_snapshots();
+        let debug_output = format!("{metadata:?}");
+
+        assert_eq!(metadata[0].host, "example.test");
+        assert_eq!(metadata[0].username, "deploy");
+        assert!(!debug_output.contains("representative-password"));
+        assert!(!debug_output.contains("representative-endpoint-token"));
     }
 
     #[test]

@@ -53,8 +53,7 @@ pub(super) fn native_plugin_host_api_snapshot_from_workspace(
         .collect::<HashMap<_, _>>();
     let node_connection_ids = workspace
         .node_runtime_store
-        .export_snapshot()
-        .nodes
+        .metadata_snapshots()
         .into_iter()
         .filter_map(|node| {
             node.connection_id

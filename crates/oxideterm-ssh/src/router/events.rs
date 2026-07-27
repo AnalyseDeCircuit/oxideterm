@@ -204,16 +204,14 @@ impl NodeEventEmitter {
     pub fn emit_terminal_endpoint_changed(
         &self,
         connection_id: &str,
-        ws_port: u16,
-        ws_token: impl Into<String>,
+        available: bool,
     ) -> Option<NodeStateEvent> {
         let node_id = self.node_id_for_connection(connection_id)?;
         let generation = self.sequencer.next(&node_id);
         let event = NodeStateEvent::TerminalEndpointChanged {
             node_id: node_id.0,
             generation,
-            ws_port,
-            ws_token: ws_token.into(),
+            available,
         };
         self.dispatch(&event);
         Some(event)

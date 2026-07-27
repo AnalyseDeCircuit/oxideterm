@@ -8,7 +8,7 @@ use std::{collections::HashMap, time::Duration};
 use oxideterm_i18n::I18n;
 use oxideterm_notification_center::{EventCategory, EventLogEntry, EventSeverity};
 use oxideterm_ssh::{
-    ConnectionConsumer, ConnectionInfo, ConnectionState, NodeReadiness, NodeTreeSnapshotNode,
+    ConnectionConsumer, ConnectionInfo, ConnectionState, NodeMetadataSnapshot, NodeReadiness,
 };
 use serde_json::Value;
 
@@ -199,57 +199,35 @@ pub(super) fn test_host_api_snapshot_with_sessions() -> NativePluginHostApiSnaps
     let root_id = oxideterm_ssh::NodeId::new("node-1");
     let child_id = oxideterm_ssh::NodeId::new("node-2");
     let nodes = vec![
-        NodeTreeSnapshotNode {
+        NodeMetadataSnapshot {
             id: root_id.clone(),
             parent_id: None,
             children_ids: vec![child_id.clone()],
             depth: 0,
-            config: oxideterm_ssh::SshConfig {
-                host: "example.test".to_string(),
-                port: 22,
-                username: "deploy".to_string(),
-                ..oxideterm_ssh::SshConfig::default()
-            },
-            origin: oxideterm_ssh::NodeOrigin::Direct,
-            state: oxideterm_ssh::NodeState {
-                readiness: NodeReadiness::Ready,
-                error: None,
-                sftp_ready: false,
-                sftp_cwd: None,
-                ws_endpoint: None,
-            },
+            host: "example.test".to_string(),
+            port: 22,
+            username: "deploy".to_string(),
+            readiness: NodeReadiness::Ready,
+            error: None,
             connection_id: Some("conn-1".to_string()),
             terminal_session_id: Some("term-legacy".to_string()),
-            terminal_endpoints: Vec::new(),
             sftp_session_id: None,
             created_at_ms: 1,
-            generation: 1,
         },
-        NodeTreeSnapshotNode {
+        NodeMetadataSnapshot {
             id: child_id,
             parent_id: Some(root_id),
             children_ids: Vec::new(),
             depth: 1,
-            config: oxideterm_ssh::SshConfig {
-                host: "child.test".to_string(),
-                port: 2222,
-                username: "root".to_string(),
-                ..oxideterm_ssh::SshConfig::default()
-            },
-            origin: oxideterm_ssh::NodeOrigin::DrillDown { timestamp: 1 },
-            state: oxideterm_ssh::NodeState {
-                readiness: NodeReadiness::Connecting,
-                error: None,
-                sftp_ready: false,
-                sftp_cwd: None,
-                ws_endpoint: None,
-            },
+            host: "child.test".to_string(),
+            port: 2222,
+            username: "root".to_string(),
+            readiness: NodeReadiness::Connecting,
+            error: None,
             connection_id: None,
             terminal_session_id: None,
-            terminal_endpoints: Vec::new(),
             sftp_session_id: Some("sftp-2".to_string()),
             created_at_ms: 2,
-            generation: 1,
         },
     ];
     let titles = HashMap::from([("node-1".to_string(), "Production".to_string())]);

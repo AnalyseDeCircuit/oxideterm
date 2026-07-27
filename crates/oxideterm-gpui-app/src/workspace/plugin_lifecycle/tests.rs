@@ -1970,7 +1970,7 @@ fn session_connection_state_maps_link_down_to_tauri_status() {
         ws_endpoint: None,
     };
     assert_eq!(
-        native_plugin_session_connection_state(&state, 0),
+        native_plugin_session_connection_state(&state.readiness, state.error.as_deref(), 0),
         "link-down"
     );
 }

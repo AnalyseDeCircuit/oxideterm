@@ -207,8 +207,7 @@ pub enum NodeStateEvent {
     TerminalEndpointChanged {
         node_id: String,
         generation: u64,
-        ws_port: u16,
-        ws_token: String,
+        available: bool,
     },
 }
 
@@ -254,14 +253,12 @@ impl fmt::Debug for NodeStateEvent {
             Self::TerminalEndpointChanged {
                 node_id,
                 generation,
-                ws_port,
-                ws_token: _,
+                available,
             } => formatter
                 .debug_struct("TerminalEndpointChanged")
                 .field("node_id", node_id)
                 .field("generation", generation)
-                .field("ws_port", ws_port)
-                .field("ws_token", &"[redacted token]")
+                .field("available", available)
                 .finish(),
         }
     }
@@ -281,6 +278,24 @@ pub struct NodeRuntimeSnapshot {
     pub state: NodeState,
     pub created_at_ms: u64,
     pub generation: u64,
+}
+
+/// Node metadata projection that never retains authentication or endpoint tokens.
+#[derive(Clone, Debug)]
+pub struct NodeMetadataSnapshot {
+    pub id: NodeId,
+    pub parent_id: Option<NodeId>,
+    pub children_ids: Vec<NodeId>,
+    pub depth: u32,
+    pub host: String,
+    pub port: u16,
+    pub username: String,
+    pub readiness: NodeReadiness,
+    pub error: Option<String>,
+    pub connection_id: Option<String>,
+    pub terminal_session_id: Option<String>,
+    pub sftp_session_id: Option<String>,
+    pub created_at_ms: u64,
 }
 
 #[derive(Clone, Debug)]

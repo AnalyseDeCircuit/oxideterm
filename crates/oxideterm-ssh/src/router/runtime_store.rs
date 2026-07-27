@@ -350,6 +350,33 @@ impl NodeRuntimeStore {
         }
     }
 
+    pub fn metadata_snapshots(&self) -> Vec<NodeMetadataSnapshot> {
+        let mut nodes = self
+            .nodes
+            .iter()
+            .map(|entry| {
+                let route = entry.value();
+                NodeMetadataSnapshot {
+                    id: entry.key().clone(),
+                    parent_id: route.parent_id.clone(),
+                    children_ids: route.children_ids.clone(),
+                    depth: route.depth,
+                    host: route.config.host.clone(),
+                    port: route.config.port,
+                    username: route.config.username.clone(),
+                    readiness: route.state.readiness.clone(),
+                    error: route.state.error.clone(),
+                    connection_id: route.connection_id.clone(),
+                    terminal_session_id: route.terminal_session_id.clone(),
+                    sftp_session_id: route.sftp_session_id.clone(),
+                    created_at_ms: route.created_at_ms,
+                }
+            })
+            .collect::<Vec<_>>();
+        nodes.sort_by_key(|node| (node.depth, node.created_at_ms, node.id.0.clone()));
+        nodes
+    }
+
     pub fn apply_snapshot(&self, snapshot: NodeTreeSnapshot) -> Result<(), RouteError> {
         let node_ids = snapshot
             .nodes
@@ -691,8 +718,9 @@ impl NodeRuntimeStore {
         Ok(NodeStateEvent::TerminalEndpointChanged {
             node_id: node_id.0.clone(),
             generation: route.generation,
-            ws_port: endpoint.ws_port,
-            ws_token: endpoint.ws_token,
+            // Event fan-out carries only availability; the token stays in the
+            // runtime endpoint owner and is resolved explicitly by consumers.
+            available: true,
         })
     }
 

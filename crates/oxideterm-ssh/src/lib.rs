@@ -59,9 +59,9 @@ pub use reconnect::{
 };
 pub use router::{
     FlatNode, NodeEventEmitter, NodeEventReceiver, NodeEventSequencer, NodeEventSubscription,
-    NodeId, NodeOrigin, NodeReadiness, NodeRouter, NodeRuntimeStore, NodeState, NodeStateEvent,
-    NodeStateSnapshot, NodeTreeExpansion, NodeTreeSnapshot, NodeTreeSnapshotNode,
-    ResolvedConnection, RouteError, SessionTreeSummary, TerminalEndpoint,
+    NodeId, NodeMetadataSnapshot, NodeOrigin, NodeReadiness, NodeRouter, NodeRuntimeStore,
+    NodeState, NodeStateEvent, NodeStateSnapshot, NodeTreeExpansion, NodeTreeSnapshot,
+    NodeTreeSnapshotNode, ResolvedConnection, RouteError, SessionTreeSummary, TerminalEndpoint,
 };
 pub use session_tree_plan::{
     NativeSessionTreeConnectAction, NativeSessionTreeConnectChallenge,

@@ -15,8 +15,7 @@ pub(super) fn native_plugin_profiler_node_connection_ids(
 ) -> HashMap<String, String> {
     workspace
         .node_runtime_store
-        .export_snapshot()
-        .nodes
+        .metadata_snapshots()
         .into_iter()
         .filter_map(|node| {
             node.connection_id

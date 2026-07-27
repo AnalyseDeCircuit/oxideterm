@@ -3,6 +3,7 @@
 
 use std::{
     collections::BTreeMap,
+    fmt,
     time::{Duration, SystemTime},
 };
 
@@ -75,7 +76,7 @@ pub struct ReconnectSnapshot {
     pub snapshot_at: Option<SystemTime>,
 }
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Default, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ReconnectIdeSnapshot {
     pub project_path: String,
@@ -84,6 +85,18 @@ pub struct ReconnectIdeSnapshot {
     /// reconnect; keep the field name for parity with its restore phase.
     pub connection_id: String,
     pub dirty_contents: BTreeMap<String, String>,
+}
+
+impl fmt::Debug for ReconnectIdeSnapshot {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("ReconnectIdeSnapshot")
+            .field("project_path", &"[redacted path]")
+            .field("tab_count", &self.tab_paths.len())
+            .field("connection_id", &self.connection_id)
+            .field("dirty_file_count", &self.dirty_contents.len())
+            .finish()
+    }
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
@@ -553,7 +566,10 @@ mod tests {
     #[test]
     fn reconnect_snapshot_carries_ide_dirty_contents() {
         let mut dirty_contents = BTreeMap::new();
-        dirty_contents.insert("/home/demo/main.rs".to_string(), "dirty".to_string());
+        dirty_contents.insert(
+            "/home/demo/main.rs".to_string(),
+            "representative-unsaved-content".to_string(),
+        );
         let snapshot = ReconnectSnapshot {
             ide_snapshot: Some(ReconnectIdeSnapshot {
                 project_path: "/home/demo".to_string(),
@@ -563,12 +579,15 @@ mod tests {
             }),
             ..ReconnectSnapshot::default()
         };
+        let debug_output = format!("{snapshot:?}");
+        assert!(!debug_output.contains("/home/demo"));
+        assert!(!debug_output.contains("representative-unsaved-content"));
 
         let ide_snapshot = snapshot.ide_snapshot.expect("IDE snapshot should exist");
         assert_eq!(ide_snapshot.connection_id, "node-a");
         assert_eq!(
             ide_snapshot.dirty_contents.get("/home/demo/main.rs"),
-            Some(&"dirty".to_string())
+            Some(&"representative-unsaved-content".to_string())
         );
     }
 
