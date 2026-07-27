@@ -612,38 +612,20 @@ impl WorkspaceApp {
                         TerminalNoticeVariant::Success,
                     );
                     self.resolve_connection_notifications_for_node(&node_id);
-                    if let Some(node) = self.ssh_nodes.get_mut(&node_id) {
-                        node.readiness = NodeReadiness::Ready;
-                    }
-                    let _ = self.node_router.sync_node_readiness_event(
-                        &node_id,
-                        NodeReadiness::Ready,
-                        "grace recovered",
-                    );
                     // Tauri's phaseGracePeriod calls clearLinkDown(root) and
                     // then clearLinkDown(each descendant). The descendant
                     // probes only decide whether their backend connection can
                     // also be marked Active; UI link-down is cleared for the
                     // whole affected subtree once the root connection survives.
-                    for affected_node_id in self.node_router.subtree_postorder(&node_id) {
+                    let affected_node_ids = self.workspace_runtime.update(cx, |runtime, _cx| {
+                        runtime.apply_grace_recovery(
+                            &node_id,
+                            &connection_id,
+                            recovered_connections,
+                        )
+                    });
+                    for affected_node_id in affected_node_ids {
                         if let Some(node) = self.ssh_nodes.get_mut(&affected_node_id) {
-                            node.readiness = NodeReadiness::Ready;
-                        }
-                        let _ = self.node_router.sync_node_readiness_event(
-                            &affected_node_id,
-                            NodeReadiness::Ready,
-                            "grace recovered",
-                        );
-                    }
-                    let _ = self
-                        .ssh_registry
-                        .mark_state_without_event(&connection_id, ConnectionState::Active);
-                    for (recovered_node_id, recovered_connection_id) in recovered_connections {
-                        let _ = self.ssh_registry.mark_state_without_event(
-                            &recovered_connection_id,
-                            ConnectionState::Active,
-                        );
-                        if let Some(node) = self.ssh_nodes.get_mut(&recovered_node_id) {
                             node.readiness = NodeReadiness::Ready;
                         }
                     }
@@ -667,15 +649,9 @@ impl WorkspaceApp {
                     if let Some(node) = self.ssh_nodes.get_mut(&node_id) {
                         node.readiness = NodeReadiness::Connecting;
                     }
-                    if let Some(info) = self
-                        .ssh_registry
-                        .mark_state(&connection_id, ConnectionState::LinkDown)
-                        && let Some(event) = self
-                            .node_router
-                            .sync_connection_state_by_connection_id(&info, "grace expired")
-                    {
-                        self.emit_node_event(event);
-                    }
+                    self.workspace_runtime.update(cx, |runtime, _cx| {
+                        runtime.apply_grace_expiration(&connection_id);
+                    });
                     let _ = self
                         .workspace_runtime
                         .read(cx)
@@ -1528,115 +1504,17 @@ impl WorkspaceApp {
                     .map(|connection_id| (affected_node_id.clone(), connection_id))
             })
             .collect::<Vec<_>>();
-        let progress_store = self.sftp_progress_store.clone();
-        let registry = self.ssh_registry.clone();
-        let tx = self.reconnect_worker_sender(cx);
-        let timing = self
-            .workspace_runtime
-            .read(cx)
-            .reconnect_orchestrator()
-            .timing();
-        let runtime = self.forwarding_runtime.clone();
-        let reconnect_job_id = reconnect_job.job_id;
-        runtime.spawn(async move {
-            let mut transfers_by_node = Vec::new();
-            for (affected_node_id, old_connection_id) in affected_transfer_nodes {
-                match progress_store.list_incomplete(&old_connection_id).await {
-                    Ok(transfers) => {
-                        let transfer_ids = transfers
-                            .into_iter()
-                            .filter(StoredTransferProgress::is_incomplete)
-                            .map(|transfer| transfer.transfer_id)
-                            .collect::<Vec<_>>();
-                        if !transfer_ids.is_empty() {
-                            transfers_by_node.push(ReconnectNodeTransferSnapshot {
-                                node_id: affected_node_id.0,
-                                transfer_ids,
-                            });
-                        }
-                    }
-                    Err(_error) => {}
-                }
-            }
-            let transfer_count = transfers_by_node
-                .iter()
-                .map(|entry| entry.transfer_ids.len())
-                .sum::<usize>();
-            let detail = format!(
-                "{} transfer(s), {} connection(s)",
-                transfer_count,
-                old_connection_ids.len()
-            );
-            let _ = tx.send(ReconnectWorkerResult::SftpTransfersSnapshotted {
-                node_id: node_id.clone(),
-                transfers_by_node,
-                detail,
-                job_id: reconnect_job_id.clone(),
-            });
-            let started_at = tokio::time::Instant::now();
-            loop {
-                match registry
-                    .probe_single_connection(&connection_id, timing.proactive_keepalive_timeout)
-                    .await
-                {
-                    ProbeConnectionStatus::Alive => {
-                        let mut recovered_connections = Vec::new();
-                        for old_connection in &old_connections_by_node {
-                            if old_connection.node_id == node_id.0 {
-                                continue;
-                            }
-                            if matches!(
-                                registry
-                                    .probe_single_connection(
-                                        &old_connection.old_connection_id,
-                                        timing.proactive_keepalive_timeout,
-                                    )
-                                    .await,
-                                ProbeConnectionStatus::Alive
-                            ) {
-                                recovered_connections.push((
-                                    NodeId::new(old_connection.node_id.clone()),
-                                    old_connection.old_connection_id.clone(),
-                                ));
-                            }
-                        }
-                        let _ = tx.send(ReconnectWorkerResult::GraceRecovered {
-                            node_id,
-                            connection_id,
-                            recovered_connections,
-                            job_id: reconnect_job_id,
-                        });
-                        return;
-                    }
-                    ProbeConnectionStatus::NotFound => {
-                        let detail =
-                            format!("connection {connection_id} is unavailable for grace probe");
-                        let _ = tx.send(ReconnectWorkerResult::GraceExpired {
-                            node_id,
-                            connection_id,
-                            detail,
-                            job_id: reconnect_job_id,
-                        });
-                        return;
-                    }
-                    ProbeConnectionStatus::Dead | ProbeConnectionStatus::NotApplicable => {
-                        if started_at.elapsed() >= timing.grace_period {
-                            let detail = format!(
-                                "connection {connection_id} did not recover within {:?}",
-                                timing.grace_period
-                            );
-                            let _ = tx.send(ReconnectWorkerResult::GraceExpired {
-                                node_id,
-                                connection_id,
-                                detail,
-                                job_id: reconnect_job_id,
-                            });
-                            return;
-                        }
-                        tokio::time::sleep(Duration::from_secs(3)).await;
-                    }
-                }
-            }
+        let grace_probe_request = runtime_entity::ReconnectGraceProbeRequest {
+            node_id,
+            connection_id,
+            affected_transfer_nodes,
+            old_connections_by_node,
+            old_connection_count: old_connection_ids.len(),
+            progress_store: self.sftp_progress_store.clone(),
+            job_id: reconnect_job.job_id,
+        };
+        self.workspace_runtime.update(cx, |runtime, _cx| {
+            runtime.start_reconnect_grace_probe(grace_probe_request);
         });
     }
 

@@ -51,6 +51,16 @@ pub(in crate::workspace) enum NodeTransportStartError {
     Route(String),
 }
 
+pub(in crate::workspace) struct ReconnectGraceProbeRequest {
+    pub(in crate::workspace) node_id: NodeId,
+    pub(in crate::workspace) connection_id: String,
+    pub(in crate::workspace) affected_transfer_nodes: Vec<(NodeId, String)>,
+    pub(in crate::workspace) old_connections_by_node: Vec<ReconnectNodeConnectionSnapshot>,
+    pub(in crate::workspace) old_connection_count: usize,
+    pub(in crate::workspace) progress_store: Arc<dyn ProgressStore>,
+    pub(in crate::workspace) job_id: String,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(in crate::workspace) struct ReconnectTransferResumeCompletion {
     pub(in crate::workspace) node_id: NodeId,
@@ -344,6 +354,156 @@ impl WorkspaceRuntimeEntity {
             };
         });
         Ok(())
+    }
+
+    pub(in crate::workspace) fn start_reconnect_grace_probe(
+        &self,
+        request: ReconnectGraceProbeRequest,
+    ) {
+        let registry = self.ssh_registry.clone();
+        let reconnect_tx = self.reconnect_worker_tx.clone();
+        let timing = self.reconnect_orchestrator.timing();
+        self.task_runtime.spawn(async move {
+            let ReconnectGraceProbeRequest {
+                node_id,
+                connection_id,
+                affected_transfer_nodes,
+                old_connections_by_node,
+                old_connection_count,
+                progress_store,
+                job_id,
+            } = request;
+            let mut transfers_by_node = Vec::new();
+            for (affected_node_id, old_connection_id) in affected_transfer_nodes {
+                if let Ok(transfers) = progress_store.list_incomplete(&old_connection_id).await {
+                    let transfer_ids = transfers
+                        .into_iter()
+                        .filter(StoredTransferProgress::is_incomplete)
+                        .map(|transfer| transfer.transfer_id)
+                        .collect::<Vec<_>>();
+                    if !transfer_ids.is_empty() {
+                        transfers_by_node.push(ReconnectNodeTransferSnapshot {
+                            node_id: affected_node_id.0,
+                            transfer_ids,
+                        });
+                    }
+                }
+            }
+            let transfer_count = transfers_by_node
+                .iter()
+                .map(|entry| entry.transfer_ids.len())
+                .sum::<usize>();
+            let detail =
+                format!("{transfer_count} transfer(s), {old_connection_count} connection(s)");
+            let _ = reconnect_tx.send(ReconnectWorkerResult::SftpTransfersSnapshotted {
+                node_id: node_id.clone(),
+                transfers_by_node,
+                detail,
+                job_id: job_id.clone(),
+            });
+
+            let started_at = tokio::time::Instant::now();
+            loop {
+                match registry
+                    .probe_single_connection(&connection_id, timing.proactive_keepalive_timeout)
+                    .await
+                {
+                    ProbeConnectionStatus::Alive => {
+                        let mut recovered_connections = Vec::new();
+                        for old_connection in &old_connections_by_node {
+                            if old_connection.node_id == node_id.0 {
+                                continue;
+                            }
+                            if matches!(
+                                registry
+                                    .probe_single_connection(
+                                        &old_connection.old_connection_id,
+                                        timing.proactive_keepalive_timeout,
+                                    )
+                                    .await,
+                                ProbeConnectionStatus::Alive
+                            ) {
+                                recovered_connections.push((
+                                    NodeId::new(old_connection.node_id.clone()),
+                                    old_connection.old_connection_id.clone(),
+                                ));
+                            }
+                        }
+                        let _ = reconnect_tx.send(ReconnectWorkerResult::GraceRecovered {
+                            node_id,
+                            connection_id,
+                            recovered_connections,
+                            job_id,
+                        });
+                        return;
+                    }
+                    ProbeConnectionStatus::NotFound => {
+                        let detail =
+                            format!("connection {connection_id} is unavailable for grace probe");
+                        let _ = reconnect_tx.send(ReconnectWorkerResult::GraceExpired {
+                            node_id,
+                            connection_id,
+                            detail,
+                            job_id,
+                        });
+                        return;
+                    }
+                    ProbeConnectionStatus::Dead | ProbeConnectionStatus::NotApplicable => {
+                        if started_at.elapsed() >= timing.grace_period {
+                            let detail = format!(
+                                "connection {connection_id} did not recover within {:?}",
+                                timing.grace_period
+                            );
+                            let _ = reconnect_tx.send(ReconnectWorkerResult::GraceExpired {
+                                node_id,
+                                connection_id,
+                                detail,
+                                job_id,
+                            });
+                            return;
+                        }
+                        tokio::time::sleep(Duration::from_secs(3)).await;
+                    }
+                }
+            }
+        });
+    }
+
+    pub(in crate::workspace) fn apply_grace_recovery(
+        &self,
+        root_node_id: &NodeId,
+        root_connection_id: &str,
+        recovered_connections: Vec<(NodeId, String)>,
+    ) -> Vec<NodeId> {
+        let affected_node_ids = self.runtime_subtree_postorder(root_node_id);
+        for node_id in &affected_node_ids {
+            let _ = self.node_router.sync_node_readiness_event(
+                node_id,
+                NodeReadiness::Ready,
+                "grace recovered",
+            );
+        }
+        let _ = self
+            .ssh_registry
+            .mark_state_without_event(root_connection_id, ConnectionState::Active);
+        for (_, connection_id) in recovered_connections {
+            let _ = self
+                .ssh_registry
+                .mark_state_without_event(&connection_id, ConnectionState::Active);
+        }
+        affected_node_ids
+    }
+
+    pub(in crate::workspace) fn apply_grace_expiration(&self, connection_id: &str) {
+        if let Some(connection) = self
+            .ssh_registry
+            .mark_state_without_event(connection_id, ConnectionState::LinkDown)
+            && let Some(event) = self
+                .node_router
+                .sync_connection_state_by_connection_id(&connection, "grace expired")
+        {
+            self.node_router.emitter().emit(event);
+        }
     }
 
     pub(in crate::workspace) fn retire_stale_node_connection(
@@ -1884,6 +2044,100 @@ mod tests {
             .info();
         assert!(parent_info.consumers.contains(&parent_consumer));
         assert!(!parent_info.consumers.contains(&ancestor_consumer));
+    }
+
+    #[gpui::test]
+    fn grace_connection_state_transitions_are_entity_owned(cx: &mut TestAppContext) {
+        let ssh_registry = SshConnectionRegistry::new(ConnectionPoolConfig::default());
+        let node_runtime_store = NodeRuntimeStore::default();
+        let root_id = NodeId::new("root");
+        let child_id = NodeId::new("child");
+        let root_config = SshConfig {
+            host: "root.example".to_string(),
+            ..SshConfig::default()
+        };
+        let child_config = SshConfig {
+            host: "child.example".to_string(),
+            ..SshConfig::default()
+        };
+        node_runtime_store.upsert_node(root_id.clone(), root_config.clone());
+        node_runtime_store
+            .upsert_child_node(root_id.clone(), child_id.clone(), child_config.clone())
+            .expect("child runtime node");
+        let node_router = NodeRouter::with_runtime_store(ssh_registry.clone(), node_runtime_store);
+        let root_connection = ssh_registry.acquire(
+            root_config,
+            ConnectionConsumer::NodeRouter(root_id.0.clone()),
+        );
+        let root_connection_id = root_connection.connection_id().to_string();
+        node_router
+            .bind_connection(&root_id, root_connection_id.clone())
+            .expect("root connection binding");
+        let child_connection = ssh_registry.acquire(
+            child_config,
+            ConnectionConsumer::NodeRouter(child_id.0.clone()),
+        );
+        let child_connection_id = child_connection.connection_id().to_string();
+        node_router
+            .bind_connection(&child_id, child_connection_id.clone())
+            .expect("child connection binding");
+        let _ =
+            ssh_registry.mark_state_without_event(&root_connection_id, ConnectionState::LinkDown);
+        let _ =
+            ssh_registry.mark_state_without_event(&child_connection_id, ConnectionState::LinkDown);
+        let task_runtime = test_task_runtime();
+        let entity = cx.new(|cx| {
+            WorkspaceRuntimeEntity::new(
+                ssh_registry.clone(),
+                node_router,
+                task_runtime,
+                true,
+                ReconnectTiming::default(),
+                3,
+                cx,
+            )
+        });
+
+        entity.update(cx, |entity, _cx| {
+            let affected_node_ids = entity.apply_grace_recovery(
+                &root_id,
+                &root_connection_id,
+                vec![(child_id.clone(), child_connection_id.clone())],
+            );
+            assert_eq!(affected_node_ids, vec![child_id.clone(), root_id.clone()]);
+            assert_eq!(
+                entity
+                    .node_router
+                    .node_metadata(&root_id)
+                    .expect("root runtime metadata")
+                    .readiness,
+                NodeReadiness::Ready
+            );
+            assert_eq!(
+                entity
+                    .node_router
+                    .node_metadata(&child_id)
+                    .expect("child runtime metadata")
+                    .readiness,
+                NodeReadiness::Ready
+            );
+            entity.apply_grace_expiration(&root_connection_id);
+        });
+
+        assert_eq!(
+            ssh_registry
+                .get(&root_connection_id)
+                .expect("root connection")
+                .state(),
+            ConnectionState::LinkDown
+        );
+        assert_eq!(
+            ssh_registry
+                .get(&child_connection_id)
+                .expect("child connection")
+                .state(),
+            ConnectionState::Active
+        );
     }
 
     #[gpui::test]
