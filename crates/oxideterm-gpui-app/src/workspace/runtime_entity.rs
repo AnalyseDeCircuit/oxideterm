@@ -6,13 +6,48 @@ use oxideterm_ssh::ReconnectTiming;
 
 const ACTIVE_PROBE_START_DELAY: Duration = Duration::from_millis(530);
 const RECONNECT_DEBOUNCE_DELAY: Duration = Duration::from_millis(500);
+const RECONNECT_MAX_REQUEUE: u32 = 120;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(in crate::workspace) enum WorkspaceRuntimeEvent {
     WorkerResultsReady,
     NodeEventsReady,
     ReconnectRootsReady,
+    ReconnectScheduleReady,
     ActiveConnectionsChanged,
+}
+
+#[derive(Debug)]
+pub(in crate::workspace) enum ReconnectScheduleAction {
+    ContinueConnectionChain {
+        node_id: NodeId,
+    },
+    ContinueReconnectCascade,
+    StartReconnectPipeline {
+        node_id: NodeId,
+        expected_connection_id: Option<String>,
+    },
+    RetryNodeConnect {
+        node_id: NodeId,
+        job_id: String,
+    },
+    CleanupReconnectJob {
+        node_id: NodeId,
+        started_at: SystemTime,
+    },
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(in crate::workspace) enum ReconnectPipelineClaim {
+    Acquired,
+    Requeued,
+    Exhausted,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct ReconnectRequeueState {
+    attempt: u32,
+    generation: u64,
 }
 
 /// Owns runtime worker endpoints and reliable delivery independently from tabs.
@@ -34,6 +69,11 @@ pub(in crate::workspace) struct WorkspaceRuntimeEntity {
     pending_reconnect_node_ids: HashSet<NodeId>,
     reconnect_debounce_generation: u64,
     ready_reconnect_roots: VecDeque<NodeId>,
+    reconnect_pipeline_active_node: Option<NodeId>,
+    reconnect_requeue_states: HashMap<NodeId, ReconnectRequeueState>,
+    pending_reconnect_cascade_nodes: VecDeque<NodeId>,
+    reconnect_cascade_generation: u64,
+    reconnect_schedule_actions: VecDeque<ReconnectScheduleAction>,
     ssh_registry: SshConnectionRegistry,
     task_runtime: Arc<tokio::runtime::Runtime>,
     reconnect_timing: ReconnectTiming,
@@ -82,6 +122,11 @@ impl WorkspaceRuntimeEntity {
             pending_reconnect_node_ids: HashSet::new(),
             reconnect_debounce_generation: 0,
             ready_reconnect_roots: VecDeque::new(),
+            reconnect_pipeline_active_node: None,
+            reconnect_requeue_states: HashMap::new(),
+            pending_reconnect_cascade_nodes: VecDeque::new(),
+            reconnect_cascade_generation: 0,
+            reconnect_schedule_actions: VecDeque::new(),
             ssh_registry,
             task_runtime,
             reconnect_timing,
@@ -168,6 +213,169 @@ impl WorkspaceRuntimeEntity {
             .retain(|node_id| !node_ids.contains(node_id));
         self.ready_reconnect_roots
             .retain(|node_id| !node_ids.contains(node_id));
+        self.cancel_reconnect_scheduler_nodes(node_ids);
+    }
+
+    pub(in crate::workspace) fn claim_reconnect_pipeline(
+        &mut self,
+        node_id: &NodeId,
+        expected_connection_id: Option<String>,
+        retry_delay: Duration,
+        cx: &mut Context<Self>,
+    ) -> ReconnectPipelineClaim {
+        if self
+            .reconnect_pipeline_active_node
+            .as_ref()
+            .is_some_and(|active_node_id| active_node_id != node_id)
+        {
+            let requeue_state = self
+                .reconnect_requeue_states
+                .entry(node_id.clone())
+                .and_modify(|state| {
+                    state.attempt = state.attempt.saturating_add(1);
+                    state.generation = state.generation.wrapping_add(1);
+                })
+                .or_insert(ReconnectRequeueState {
+                    attempt: 1,
+                    generation: 1,
+                });
+            if requeue_state.attempt > RECONNECT_MAX_REQUEUE {
+                self.reconnect_requeue_states.remove(node_id);
+                return ReconnectPipelineClaim::Exhausted;
+            }
+            let generation = requeue_state.generation;
+            let retry_node_id = node_id.clone();
+            cx.spawn(async move |entity, cx| {
+                Timer::after(retry_delay).await;
+                let _ = entity.update(cx, |entity, cx| {
+                    let retry_is_current = entity
+                        .reconnect_requeue_states
+                        .get(&retry_node_id)
+                        .is_some_and(|state| state.generation == generation);
+                    if retry_is_current {
+                        entity.push_reconnect_schedule_action(
+                            ReconnectScheduleAction::StartReconnectPipeline {
+                                node_id: retry_node_id,
+                                expected_connection_id,
+                            },
+                            cx,
+                        );
+                    }
+                });
+            })
+            .detach();
+            return ReconnectPipelineClaim::Requeued;
+        }
+
+        self.reconnect_pipeline_active_node = Some(node_id.clone());
+        self.reconnect_requeue_states.remove(node_id);
+        ReconnectPipelineClaim::Acquired
+    }
+
+    pub(in crate::workspace) fn release_reconnect_pipeline(&mut self, node_id: &NodeId) {
+        if self
+            .reconnect_pipeline_active_node
+            .as_ref()
+            .is_some_and(|active_node_id| active_node_id == node_id)
+        {
+            self.reconnect_pipeline_active_node = None;
+        }
+        self.reconnect_requeue_states.remove(node_id);
+    }
+
+    pub(in crate::workspace) fn cancel_reconnect_retry(&mut self, node_id: &NodeId) {
+        self.reconnect_requeue_states.remove(node_id);
+    }
+
+    pub(in crate::workspace) fn replace_reconnect_cascade(
+        &mut self,
+        node_ids: impl IntoIterator<Item = NodeId>,
+    ) {
+        self.pending_reconnect_cascade_nodes = node_ids.into_iter().collect();
+        self.reconnect_cascade_generation = self.reconnect_cascade_generation.wrapping_add(1);
+    }
+
+    pub(in crate::workspace) fn clear_reconnect_cascade(&mut self) {
+        self.pending_reconnect_cascade_nodes.clear();
+        // Invalidate a delayed continuation when its owning cascade is cleared.
+        self.reconnect_cascade_generation = self.reconnect_cascade_generation.wrapping_add(1);
+    }
+
+    pub(in crate::workspace) fn schedule_next_reconnect_cascade(
+        &mut self,
+        delay: Duration,
+        cx: &mut Context<Self>,
+    ) {
+        if self.pending_reconnect_cascade_nodes.is_empty() {
+            return;
+        }
+        self.reconnect_cascade_generation = self.reconnect_cascade_generation.wrapping_add(1);
+        let generation = self.reconnect_cascade_generation;
+        cx.spawn(async move |entity, cx| {
+            Timer::after(delay).await;
+            let _ = entity.update(cx, |entity, cx| {
+                if entity.reconnect_cascade_generation == generation
+                    && !entity.pending_reconnect_cascade_nodes.is_empty()
+                {
+                    entity.push_reconnect_schedule_action(
+                        ReconnectScheduleAction::ContinueReconnectCascade,
+                        cx,
+                    );
+                }
+            });
+        })
+        .detach();
+    }
+
+    pub(in crate::workspace) fn take_next_reconnect_cascade_node(&mut self) -> Option<NodeId> {
+        self.pending_reconnect_cascade_nodes.pop_front()
+    }
+
+    pub(in crate::workspace) fn schedule_reconnect_action(
+        &self,
+        action: ReconnectScheduleAction,
+        delay: Duration,
+        cx: &mut Context<Self>,
+    ) {
+        cx.spawn(async move |entity, cx| {
+            Timer::after(delay).await;
+            let _ = entity.update(cx, |entity, cx| {
+                entity.push_reconnect_schedule_action(action, cx);
+            });
+        })
+        .detach();
+    }
+
+    pub(in crate::workspace) fn take_reconnect_schedule_actions(
+        &mut self,
+    ) -> VecDeque<ReconnectScheduleAction> {
+        std::mem::take(&mut self.reconnect_schedule_actions)
+    }
+
+    fn cancel_reconnect_scheduler_nodes(&mut self, node_ids: &[NodeId]) {
+        self.reconnect_requeue_states
+            .retain(|node_id, _| !node_ids.contains(node_id));
+        self.pending_reconnect_cascade_nodes
+            .retain(|node_id| !node_ids.contains(node_id));
+        self.reconnect_schedule_actions
+            .retain(|action| !reconnect_schedule_action_targets_any(action, node_ids));
+        if self
+            .reconnect_pipeline_active_node
+            .as_ref()
+            .is_some_and(|active_node_id| node_ids.contains(active_node_id))
+        {
+            self.reconnect_pipeline_active_node = None;
+        }
+        self.reconnect_cascade_generation = self.reconnect_cascade_generation.wrapping_add(1);
+    }
+
+    fn push_reconnect_schedule_action(
+        &mut self,
+        action: ReconnectScheduleAction,
+        cx: &mut Context<Self>,
+    ) {
+        self.reconnect_schedule_actions.push_back(action);
+        cx.emit(WorkspaceRuntimeEvent::ReconnectScheduleReady);
     }
 
     fn schedule_worker_delivery(&self, cx: &mut Context<Self>) {
@@ -314,6 +522,21 @@ impl WorkspaceRuntimeEntity {
     }
 }
 
+fn reconnect_schedule_action_targets_any(
+    action: &ReconnectScheduleAction,
+    node_ids: &[NodeId],
+) -> bool {
+    match action {
+        ReconnectScheduleAction::ContinueReconnectCascade => false,
+        ReconnectScheduleAction::ContinueConnectionChain { node_id }
+        | ReconnectScheduleAction::StartReconnectPipeline { node_id, .. }
+        | ReconnectScheduleAction::RetryNodeConnect { node_id, .. }
+        | ReconnectScheduleAction::CleanupReconnectJob { node_id, .. } => {
+            node_ids.contains(node_id)
+        }
+    }
+}
+
 fn drain_node_event_mailbox(receiver: &NodeEventReceiver) -> (Vec<NodeStateEvent>, bool) {
     let started_at = Instant::now();
     let mut events = Vec::new();
@@ -415,7 +638,12 @@ mod tests {
             .send(SshConnectionWorkerResult::Test { result: Ok(()) })
             .expect("SSH worker delivery");
         reconnect_tx
-            .send(ReconnectWorkerResult::ContinueReconnectCascade)
+            .send(ReconnectWorkerResult::GraceExpired {
+                node_id: NodeId::new("node-a"),
+                connection_id: "connection-a".to_string(),
+                detail: "test timeout".to_string(),
+                job_id: "job-a".to_string(),
+            })
             .expect("reconnect worker delivery");
 
         cx.run_until_parked();
@@ -428,7 +656,7 @@ mod tests {
             ));
             assert!(matches!(
                 reconnect_results.front(),
-                Some(ReconnectWorkerResult::ContinueReconnectCascade)
+                Some(ReconnectWorkerResult::GraceExpired { .. })
             ));
         });
 
@@ -638,5 +866,143 @@ mod tests {
             assert!(entity.pending_reconnect_node_ids.is_empty());
             assert!(entity.reconnect_debounce_generation > scheduled_generation);
         });
+    }
+
+    #[gpui::test]
+    fn reconnect_pipeline_is_single_owner_and_requeue_is_bounded(cx: &mut TestAppContext) {
+        let entity = test_runtime_entity(cx);
+        entity.update(cx, |entity, cx| {
+            let active_node_id = NodeId::new("node-a");
+            let waiting_node_id = NodeId::new("node-b");
+            assert_eq!(
+                entity.claim_reconnect_pipeline(
+                    &active_node_id,
+                    Some("connection-a".to_string()),
+                    Duration::from_secs(60),
+                    cx,
+                ),
+                ReconnectPipelineClaim::Acquired
+            );
+            assert_eq!(
+                entity.claim_reconnect_pipeline(
+                    &waiting_node_id,
+                    Some("connection-b".to_string()),
+                    Duration::from_secs(60),
+                    cx,
+                ),
+                ReconnectPipelineClaim::Requeued
+            );
+            entity
+                .reconnect_requeue_states
+                .get_mut(&waiting_node_id)
+                .expect("waiting reconnect state")
+                .attempt = RECONNECT_MAX_REQUEUE;
+            assert_eq!(
+                entity.claim_reconnect_pipeline(
+                    &waiting_node_id,
+                    Some("connection-b".to_string()),
+                    Duration::from_secs(60),
+                    cx,
+                ),
+                ReconnectPipelineClaim::Exhausted
+            );
+            assert!(
+                !entity
+                    .reconnect_requeue_states
+                    .contains_key(&waiting_node_id)
+            );
+
+            entity.release_reconnect_pipeline(&active_node_id);
+            assert_eq!(
+                entity.claim_reconnect_pipeline(
+                    &waiting_node_id,
+                    None,
+                    Duration::from_secs(60),
+                    cx,
+                ),
+                ReconnectPipelineClaim::Acquired
+            );
+        });
+    }
+
+    #[gpui::test]
+    fn reconnect_scheduler_cancel_clears_owned_state_and_actions(cx: &mut TestAppContext) {
+        let entity = test_runtime_entity(cx);
+        entity.update(cx, |entity, cx| {
+            let active_node_id = NodeId::new("node-a");
+            let child_node_id = NodeId::new("node-b");
+            assert_eq!(
+                entity
+                    .claim_reconnect_pipeline(&active_node_id, None, Duration::from_secs(60), cx,),
+                ReconnectPipelineClaim::Acquired
+            );
+            entity.replace_reconnect_cascade([active_node_id.clone(), child_node_id.clone()]);
+            entity.reconnect_schedule_actions.push_back(
+                ReconnectScheduleAction::ContinueConnectionChain {
+                    node_id: child_node_id.clone(),
+                },
+            );
+
+            entity.cancel_queued_reconnects(&[active_node_id.clone(), child_node_id]);
+
+            assert!(entity.reconnect_pipeline_active_node.is_none());
+            assert!(entity.pending_reconnect_cascade_nodes.is_empty());
+            assert!(entity.reconnect_schedule_actions.is_empty());
+        });
+    }
+
+    #[gpui::test]
+    fn reconnect_cascade_preserves_fifo_order(cx: &mut TestAppContext) {
+        let entity = test_runtime_entity(cx);
+        entity.update(cx, |entity, _cx| {
+            let first_node_id = NodeId::new("node-a");
+            let second_node_id = NodeId::new("node-b");
+            entity.replace_reconnect_cascade([first_node_id.clone(), second_node_id.clone()]);
+
+            assert_eq!(
+                entity.take_next_reconnect_cascade_node(),
+                Some(first_node_id)
+            );
+            assert_eq!(
+                entity.take_next_reconnect_cascade_node(),
+                Some(second_node_id)
+            );
+            assert_eq!(entity.take_next_reconnect_cascade_node(), None);
+        });
+    }
+
+    #[gpui::test]
+    fn delayed_reconnect_actions_emit_without_worker_delivery(cx: &mut TestAppContext) {
+        let entity = test_runtime_entity(cx);
+        let schedule_event_seen = Arc::new(AtomicBool::new(false));
+        let schedule_event_flag = schedule_event_seen.clone();
+        let _event_subscription = entity.update(cx, |_, cx| {
+            cx.subscribe(&entity, move |_, _, event: &WorkspaceRuntimeEvent, _cx| {
+                if *event == WorkspaceRuntimeEvent::ReconnectScheduleReady {
+                    schedule_event_flag.store(true, Ordering::Release);
+                }
+            })
+        });
+        entity.update(cx, |entity, cx| {
+            entity.schedule_reconnect_action(
+                ReconnectScheduleAction::ContinueConnectionChain {
+                    node_id: NodeId::new("node-a"),
+                },
+                Duration::ZERO,
+                cx,
+            );
+        });
+
+        cx.run_until_parked();
+
+        entity.update(cx, |entity, _cx| {
+            assert!(matches!(
+                entity.take_reconnect_schedule_actions().front(),
+                Some(ReconnectScheduleAction::ContinueConnectionChain { .. })
+            ));
+            let (_ssh_results, reconnect_results) = entity.take_worker_results();
+            assert!(reconnect_results.is_empty());
+        });
+        assert!(schedule_event_seen.load(Ordering::Acquire));
     }
 }

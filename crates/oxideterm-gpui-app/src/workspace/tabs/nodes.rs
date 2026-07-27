@@ -11,7 +11,7 @@ use super::nodes_reconnect_helpers::{
 };
 use super::*;
 
-const RECONNECT_MAX_REQUEUE: u32 = 120;
+const RECONNECT_CASCADE_DELAY: Duration = Duration::from_millis(100);
 const RECONNECT_AUTO_CLEANUP_DELAY_MS: u64 = 30_000;
 
 impl WorkspaceApp {
@@ -47,6 +47,16 @@ impl WorkspaceApp {
                     let _ = cx.update_window(window_handle, |_, _window, cx| {
                         weak.update(cx, |workspace, cx| {
                             workspace.start_workspace_runtime_reconnect_roots(cx);
+                        })
+                    });
+                })
+                .detach();
+            }
+            runtime_entity::WorkspaceRuntimeEvent::ReconnectScheduleReady => {
+                cx.spawn(async move |weak, cx| {
+                    let _ = cx.update_window(window_handle, |_, _window, cx| {
+                        weak.update(cx, |workspace, cx| {
+                            workspace.apply_workspace_runtime_reconnect_schedule(cx);
                         })
                     });
                 })
@@ -90,6 +100,99 @@ impl WorkspaceApp {
             .update(cx, |runtime, _cx| runtime.take_reconnect_roots());
         for node_id in roots {
             self.start_grace_period_reconnect(&node_id, cx);
+        }
+    }
+
+    fn apply_workspace_runtime_reconnect_schedule(&mut self, cx: &mut Context<Self>) {
+        let actions = self
+            .workspace_runtime
+            .update(cx, |runtime, _cx| runtime.take_reconnect_schedule_actions());
+        let mut changed = false;
+        for action in actions {
+            match action {
+                runtime_entity::ReconnectScheduleAction::ContinueConnectionChain { node_id } => {
+                    if self.connection_chain_waits_after_node(&node_id) {
+                        self.start_next_connection_chain_node(cx);
+                        changed = true;
+                    }
+                }
+                runtime_entity::ReconnectScheduleAction::ContinueReconnectCascade => {
+                    if self.start_next_reconnect_cascade_node(cx) {
+                        changed = true;
+                    }
+                }
+                runtime_entity::ReconnectScheduleAction::StartReconnectPipeline {
+                    node_id,
+                    expected_connection_id,
+                } => {
+                    if expected_connection_id.as_ref().is_some_and(|expected| {
+                        self.node_router.connection_id_for_node(&node_id).as_ref() != Some(expected)
+                    }) {
+                        self.workspace_runtime.update(cx, |runtime, _cx| {
+                            runtime.cancel_reconnect_retry(&node_id);
+                        });
+                        continue;
+                    }
+                    self.start_grace_period_reconnect(&node_id, cx);
+                    changed = true;
+                }
+                runtime_entity::ReconnectScheduleAction::CleanupReconnectJob {
+                    node_id,
+                    started_at,
+                } => {
+                    if self
+                        .reconnect_orchestrator
+                        .cleanup_terminal_job(&node_id.0, started_at)
+                    {
+                        changed = true;
+                    }
+                }
+                runtime_entity::ReconnectScheduleAction::RetryNodeConnect { node_id, job_id } => {
+                    if !self.reconnect_worker_result_is_current(&node_id, Some(&job_id)) {
+                        continue;
+                    }
+                    if let Some(job) = self.reconnect_orchestrator.job(&node_id.0)
+                        && job.ended_at.is_none()
+                    {
+                        if !self.node_still_needs_reconnect(&node_id) {
+                            let _ = self.reconnect_orchestrator.complete_phase(
+                                &node_id.0,
+                                PhaseResult::Ok,
+                                Some("node recovered before retry".to_string()),
+                            );
+                            self.finish_reconnect_job(&node_id, Ok(0), cx);
+                            changed = true;
+                            continue;
+                        }
+                        let _ = self.reconnect_orchestrator.complete_phase(
+                            &node_id.0,
+                            PhaseResult::Ok,
+                            Some(format!(
+                                "starting retry {}/{}",
+                                job.attempt, job.max_attempts
+                            )),
+                        );
+                        let _ = self
+                            .reconnect_orchestrator
+                            .advance(&node_id.0, ReconnectPhase::SshConnect);
+                        self.log_reconnect_phase(
+                            &node_id,
+                            ReconnectPhase::SshConnect,
+                            Some(format!(
+                                "starting retry {}/{}",
+                                job.attempt, job.max_attempts
+                            )),
+                        );
+                        let _ = self.reconnect_orchestrator.begin_ssh_attempt(&node_id.0);
+                        self.start_reconnect_cascade_after_grace_expired(&node_id, cx);
+                        changed = true;
+                    }
+                }
+            }
+        }
+        if changed {
+            self.persist_session_tree_snapshot();
+            cx.notify();
         }
     }
 
@@ -185,18 +288,8 @@ impl WorkspaceApp {
             self.abort_connection_chain_for_node(node_id);
             self.reconnect_orchestrator.cancel(&node_id.0);
             self.cancel_forward_restore_token(node_id);
-            self.reconnect_requeue_counts.remove(node_id);
-            self.pending_reconnect_cascade_nodes
-                .retain(|pending_node_id| pending_node_id != node_id);
             let _ =
                 self.interrupt_sftp_transfers_by_node(node_id, "Connection removed".to_string());
-        }
-        if self
-            .reconnect_pipeline_active_node
-            .as_ref()
-            .is_some_and(|active_node_id| nodes_to_remove.contains(active_node_id))
-        {
-            self.reconnect_pipeline_active_node = None;
         }
         self.cleanup_temporary_session_tree_node(cleanup_root);
         self.persist_session_tree_snapshot();
@@ -360,7 +453,9 @@ impl WorkspaceApp {
                     if !connection_chain_node {
                         self.connecting_node_locks.remove(&node_id);
                     } else {
-                        self.pending_reconnect_cascade_nodes.clear();
+                        self.workspace_runtime.update(cx, |runtime, _cx| {
+                            runtime.clear_reconnect_cascade();
+                        });
                     }
                     self.finish_connection_trace_failed(&node_id, Some(error.clone()));
                     self.fail_active_proxy_connect_for_node(&node_id, error.clone(), cx);
@@ -395,7 +490,6 @@ impl WorkspaceApp {
                                     retry.attempt, retry.max_attempts, retry.delay
                                 )),
                             );
-                            let tx = self.reconnect_worker_sender(cx);
                             let retry_node_id = node_id.clone();
                             let retry_job_id = job_id.clone().unwrap_or_else(|| {
                                 self.reconnect_orchestrator
@@ -403,12 +497,15 @@ impl WorkspaceApp {
                                     .map(|job| job.job_id)
                                     .unwrap_or_default()
                             });
-                            self.forwarding_runtime.spawn(async move {
-                                tokio::time::sleep(retry.delay).await;
-                                let _ = tx.send(ReconnectWorkerResult::RetryNodeConnect {
-                                    node_id: retry_node_id,
-                                    job_id: retry_job_id,
-                                });
+                            self.workspace_runtime.update(cx, |runtime, cx| {
+                                runtime.schedule_reconnect_action(
+                                    runtime_entity::ReconnectScheduleAction::RetryNodeConnect {
+                                        node_id: retry_node_id,
+                                        job_id: retry_job_id,
+                                    },
+                                    retry.delay,
+                                    cx,
+                                );
                             });
                             self.persist_session_tree_snapshot();
                             changed = true;
@@ -457,81 +554,6 @@ impl WorkspaceApp {
                     }
                     self.persist_session_tree_snapshot();
                     changed = true;
-                }
-                ReconnectWorkerResult::ContinueConnectionChain { node_id } => {
-                    if self.connection_chain_waits_after_node(&node_id) {
-                        self.start_next_connection_chain_node(cx);
-                        changed = true;
-                    }
-                }
-                ReconnectWorkerResult::ContinueReconnectCascade => {
-                    if self.start_next_reconnect_cascade_node(cx) {
-                        changed = true;
-                    }
-                }
-                ReconnectWorkerResult::StartReconnectPipeline {
-                    node_id,
-                    expected_connection_id,
-                } => {
-                    if expected_connection_id.as_ref().is_some_and(|expected| {
-                        self.node_router.connection_id_for_node(&node_id).as_ref() != Some(expected)
-                    }) {
-                        continue;
-                    }
-                    self.start_grace_period_reconnect(&node_id, cx);
-                    changed = true;
-                }
-                ReconnectWorkerResult::CleanupReconnectJob {
-                    node_id,
-                    started_at,
-                } => {
-                    if self
-                        .reconnect_orchestrator
-                        .cleanup_terminal_job(&node_id.0, started_at)
-                    {
-                        changed = true;
-                    }
-                }
-                ReconnectWorkerResult::RetryNodeConnect { node_id, job_id } => {
-                    if !self.reconnect_worker_result_is_current(&node_id, Some(&job_id)) {
-                        continue;
-                    }
-                    if let Some(job) = self.reconnect_orchestrator.job(&node_id.0)
-                        && job.ended_at.is_none()
-                    {
-                        if !self.node_still_needs_reconnect(&node_id) {
-                            let _ = self.reconnect_orchestrator.complete_phase(
-                                &node_id.0,
-                                PhaseResult::Ok,
-                                Some("node recovered before retry".to_string()),
-                            );
-                            self.finish_reconnect_job(&node_id, Ok(0), cx);
-                            changed = true;
-                            continue;
-                        }
-                        let _ = self.reconnect_orchestrator.complete_phase(
-                            &node_id.0,
-                            PhaseResult::Ok,
-                            Some(format!(
-                                "starting retry {}/{}",
-                                job.attempt, job.max_attempts
-                            )),
-                        );
-                        let _ = self
-                            .reconnect_orchestrator
-                            .advance(&node_id.0, ReconnectPhase::SshConnect);
-                        self.log_reconnect_phase(
-                            &node_id,
-                            ReconnectPhase::SshConnect,
-                            Some(format!(
-                                "starting retry {}/{}",
-                                job.attempt, job.max_attempts
-                            )),
-                        );
-                        let _ = self.reconnect_orchestrator.begin_ssh_attempt(&node_id.0);
-                        self.start_reconnect_cascade_after_grace_expired(&node_id, cx);
-                        changed = true;
-                    }
                 }
                 ReconnectWorkerResult::GraceRecovered {
                     node_id,
@@ -1306,7 +1328,7 @@ impl WorkspaceApp {
         node_id: &NodeId,
         result: PhaseResult,
         detail: String,
-        cx: &App,
+        cx: &mut Context<Self>,
     ) {
         if !self
             .reconnect_orchestrator
@@ -1378,16 +1400,19 @@ impl WorkspaceApp {
         if self.has_active_reconnect_job_for_ancestor(node_id) {
             return;
         }
-        if self
-            .reconnect_pipeline_active_node
-            .as_ref()
-            .is_some_and(|active_node_id| active_node_id != node_id)
-        {
-            self.requeue_reconnect_pipeline(node_id, cx);
-            return;
+        let expected_connection_id = self.node_router.connection_id_for_node(node_id);
+        let retry_delay = self.reconnect_orchestrator.retry_delay_for_attempt(1);
+        let pipeline_claim = self.workspace_runtime.update(cx, |runtime, cx| {
+            runtime.claim_reconnect_pipeline(node_id, expected_connection_id, retry_delay, cx)
+        });
+        match pipeline_claim {
+            runtime_entity::ReconnectPipelineClaim::Acquired => {}
+            runtime_entity::ReconnectPipelineClaim::Requeued => return,
+            runtime_entity::ReconnectPipelineClaim::Exhausted => {
+                self.finish_reconnect_job(node_id, Err("Pipeline queue exhausted".to_string()), cx);
+                return;
+            }
         }
-        self.reconnect_pipeline_active_node = Some(node_id.clone());
-        self.reconnect_requeue_counts.remove(node_id);
 
         let mut affected_nodes = self.node_runtime_store.subtree_postorder(node_id);
         affected_nodes.reverse();
@@ -1582,27 +1607,30 @@ impl WorkspaceApp {
         });
     }
 
-    fn start_reconnect_cascade_after_grace_expired(&mut self, root_node_id: &NodeId, cx: &App) {
+    fn start_reconnect_cascade_after_grace_expired(
+        &mut self,
+        root_node_id: &NodeId,
+        cx: &mut Context<Self>,
+    ) {
         let mut affected_nodes = self.node_runtime_store.subtree_postorder(root_node_id);
         affected_nodes.reverse();
         if affected_nodes.is_empty() {
             affected_nodes.push(root_node_id.clone());
         }
 
-        self.pending_reconnect_cascade_nodes.clear();
-        for affected_node_id in affected_nodes
+        let cascade_node_ids = affected_nodes
             .iter()
             .filter(|affected_node_id| *affected_node_id != root_node_id)
-        {
-            if self
-                .ssh_nodes
-                .get(affected_node_id)
-                .is_some_and(|node| reconnect_cascade_child_should_start(&node.readiness))
-            {
-                self.pending_reconnect_cascade_nodes
-                    .push_back(affected_node_id.clone());
-            }
-        }
+            .filter(|affected_node_id| {
+                self.ssh_nodes
+                    .get(affected_node_id)
+                    .is_some_and(|node| reconnect_cascade_child_should_start(&node.readiness))
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+        self.workspace_runtime.update(cx, |runtime, _cx| {
+            runtime.replace_reconnect_cascade(cascade_node_ids);
+        });
 
         if let Some(node) = self.ssh_nodes.get_mut(root_node_id) {
             node.readiness = NodeReadiness::Connecting;
@@ -1613,24 +1641,22 @@ impl WorkspaceApp {
             "grace expired",
         );
         if !self.ensure_node_connection_started(root_node_id, cx) {
-            self.pending_reconnect_cascade_nodes.clear();
+            self.workspace_runtime.update(cx, |runtime, _cx| {
+                runtime.clear_reconnect_cascade();
+            });
         }
     }
 
-    fn schedule_next_reconnect_cascade_node(&self, cx: &App) {
-        if self.pending_reconnect_cascade_nodes.is_empty() {
-            return;
-        }
-        let tx = self.reconnect_worker_sender(cx);
-        let runtime = self.forwarding_runtime.clone();
-        runtime.spawn(async move {
-            tokio::time::sleep(Duration::from_millis(100)).await;
-            let _ = tx.send(ReconnectWorkerResult::ContinueReconnectCascade);
+    fn schedule_next_reconnect_cascade_node(&self, cx: &mut Context<Self>) {
+        self.workspace_runtime.update(cx, |runtime, cx| {
+            runtime.schedule_next_reconnect_cascade(RECONNECT_CASCADE_DELAY, cx);
         });
     }
 
-    fn start_next_reconnect_cascade_node(&mut self, cx: &App) -> bool {
-        while let Some(node_id) = self.pending_reconnect_cascade_nodes.pop_front() {
+    fn start_next_reconnect_cascade_node(&mut self, cx: &mut Context<Self>) -> bool {
+        while let Some(node_id) = self.workspace_runtime.update(cx, |runtime, _cx| {
+            runtime.take_next_reconnect_cascade_node()
+        }) {
             let parent_ready = self
                 .node_runtime_store
                 .metadata_snapshot(&node_id)
@@ -1650,7 +1676,12 @@ impl WorkspaceApp {
         false
     }
 
-    fn finish_reconnect_job(&mut self, node_id: &NodeId, result: Result<u32, String>, cx: &App) {
+    fn finish_reconnect_job(
+        &mut self,
+        node_id: &NodeId,
+        result: Result<u32, String>,
+        cx: &mut Context<Self>,
+    ) {
         self.cancel_forward_restore_token(node_id);
         let notice = match &result {
             Ok(restored_count) => Some((
@@ -1686,55 +1717,24 @@ impl WorkspaceApp {
                 }
                 self.push_reconnect_notice(title, detail, variant);
             }
-            self.clear_reconnect_pipeline_active(node_id);
+            self.workspace_runtime.update(cx, |runtime, _cx| {
+                runtime.release_reconnect_pipeline(node_id);
+            });
             self.reconnect_orchestrator
                 .enforce_terminal_job_cap(MAX_RETAINED_RECONNECT_JOBS);
-            let tx = self.reconnect_worker_sender(cx);
             let cleanup_node_id = node_id.clone();
             let started_at = job.started_at;
-            self.forwarding_runtime.spawn(async move {
-                tokio::time::sleep(Duration::from_millis(RECONNECT_AUTO_CLEANUP_DELAY_MS)).await;
-                let _ = tx.send(ReconnectWorkerResult::CleanupReconnectJob {
-                    node_id: cleanup_node_id,
-                    started_at,
-                });
+            self.workspace_runtime.update(cx, |runtime, cx| {
+                runtime.schedule_reconnect_action(
+                    runtime_entity::ReconnectScheduleAction::CleanupReconnectJob {
+                        node_id: cleanup_node_id,
+                        started_at,
+                    },
+                    Duration::from_millis(RECONNECT_AUTO_CLEANUP_DELAY_MS),
+                    cx,
+                );
             });
         }
-    }
-
-    fn requeue_reconnect_pipeline(&mut self, node_id: &NodeId, cx: &App) {
-        let count = self
-            .reconnect_requeue_counts
-            .entry(node_id.clone())
-            .and_modify(|count| *count = count.saturating_add(1))
-            .or_insert(1);
-        if *count > RECONNECT_MAX_REQUEUE {
-            self.reconnect_requeue_counts.remove(node_id);
-            self.finish_reconnect_job(node_id, Err("Pipeline queue exhausted".to_string()), cx);
-            return;
-        }
-        let tx = self.reconnect_worker_sender(cx);
-        let expected_connection_id = self.node_router.connection_id_for_node(node_id);
-        let node_id = node_id.clone();
-        let delay = self.reconnect_orchestrator.retry_delay_for_attempt(1);
-        self.forwarding_runtime.spawn(async move {
-            tokio::time::sleep(delay).await;
-            let _ = tx.send(ReconnectWorkerResult::StartReconnectPipeline {
-                node_id,
-                expected_connection_id,
-            });
-        });
-    }
-
-    pub(in crate::workspace) fn clear_reconnect_pipeline_active(&mut self, node_id: &NodeId) {
-        if self
-            .reconnect_pipeline_active_node
-            .as_ref()
-            .is_some_and(|active_node_id| active_node_id == node_id)
-        {
-            self.reconnect_pipeline_active_node = None;
-        }
-        self.reconnect_requeue_counts.remove(node_id);
     }
 
     fn reconnect_worker_result_is_current(
@@ -2037,7 +2037,11 @@ impl WorkspaceApp {
         true
     }
 
-    fn advance_connection_chain_after_node_connected(&mut self, node_id: &NodeId, cx: &App) {
+    fn advance_connection_chain_after_node_connected(
+        &mut self,
+        node_id: &NodeId,
+        cx: &mut Context<Self>,
+    ) {
         let Some(run) = self.active_connection_chain.as_mut() else {
             return;
         };
@@ -2054,12 +2058,15 @@ impl WorkspaceApp {
             self.schedule_next_reconnect_cascade_node(cx);
             return;
         }
-        let tx = self.reconnect_worker_sender(cx);
-        let node_id = node_id.clone();
-        let runtime = self.forwarding_runtime.clone();
-        runtime.spawn(async move {
-            tokio::time::sleep(Duration::from_millis(100)).await;
-            let _ = tx.send(ReconnectWorkerResult::ContinueConnectionChain { node_id });
+        let completed_node_id = node_id.clone();
+        self.workspace_runtime.update(cx, |runtime, cx| {
+            runtime.schedule_reconnect_action(
+                runtime_entity::ReconnectScheduleAction::ContinueConnectionChain {
+                    node_id: completed_node_id,
+                },
+                RECONNECT_CASCADE_DELAY,
+                cx,
+            );
         });
     }
 

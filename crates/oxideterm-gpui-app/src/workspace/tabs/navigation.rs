@@ -540,16 +540,6 @@ impl WorkspaceApp {
             self.abort_connection_chain_for_node(affected_node_id);
             self.reconnect_orchestrator.cancel(&affected_node_id.0);
             self.cancel_forward_restore_token(affected_node_id);
-            self.reconnect_requeue_counts.remove(affected_node_id);
-            self.pending_reconnect_cascade_nodes
-                .retain(|pending_node_id| pending_node_id != affected_node_id);
-            if self
-                .reconnect_pipeline_active_node
-                .as_ref()
-                .is_some_and(|active_node_id| active_node_id == affected_node_id)
-            {
-                self.reconnect_pipeline_active_node = None;
-            }
             let _ = self.interrupt_sftp_transfers_by_node(
                 affected_node_id,
                 "Connection closed".to_string(),

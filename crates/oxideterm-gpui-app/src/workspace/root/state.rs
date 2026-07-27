@@ -31,22 +31,6 @@ pub(in crate::workspace) enum ReconnectWorkerResult {
         error: String,
         job_id: Option<String>,
     },
-    ContinueConnectionChain {
-        node_id: NodeId,
-    },
-    ContinueReconnectCascade,
-    StartReconnectPipeline {
-        node_id: NodeId,
-        expected_connection_id: Option<String>,
-    },
-    RetryNodeConnect {
-        node_id: NodeId,
-        job_id: String,
-    },
-    CleanupReconnectJob {
-        node_id: NodeId,
-        started_at: SystemTime,
-    },
     GraceRecovered {
         node_id: NodeId,
         connection_id: String,
