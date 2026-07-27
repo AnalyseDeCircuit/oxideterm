@@ -252,9 +252,9 @@ impl WorkspaceApp {
             return;
         }
 
-        let group_id = self.alloc_pane_id();
-        let pane_id = self.alloc_pane_id();
-        let session_id = self.alloc_session_id();
+        let group_id = self.alloc_pane_id(cx);
+        let pane_id = self.alloc_pane_id(cx);
+        let session_id = self.alloc_session_id(cx);
         let tab_kind = self.tabs[active_index].kind.clone();
         let preferences = self.prepare_terminal_preferences_for_tab_kind(&tab_kind, cx);
         let local_config =

@@ -23,7 +23,7 @@ impl WorkspaceApp {
         {
             tab.id
         } else {
-            let tab_id = self.alloc_tab_id();
+            let tab_id = self.alloc_tab_id(cx);
             self.tabs.push(Tab {
                 id: tab_id,
                 kind: TabKind::FileManager,
@@ -1698,9 +1698,9 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let tab_id = self.alloc_tab_id();
-        let pane_id = self.alloc_pane_id();
-        let session_id = self.alloc_session_id();
+        let tab_id = self.alloc_tab_id(cx);
+        let pane_id = self.alloc_pane_id(cx);
+        let session_id = self.alloc_session_id(cx);
         let mut terminal_config = self.local_terminal_config();
         terminal_config.cwd = Some(PathBuf::from(self.file_manager.path.clone()));
         let preferences =

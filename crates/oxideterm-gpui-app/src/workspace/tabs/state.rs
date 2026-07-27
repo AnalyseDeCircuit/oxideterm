@@ -1,22 +1,19 @@
 use super::*;
 
 impl WorkspaceApp {
-    pub(in crate::workspace) fn alloc_tab_id(&mut self) -> TabId {
-        let id = TabId(self.next_tab_id);
-        self.next_tab_id += 1;
-        id
+    pub(in crate::workspace) fn alloc_tab_id(&mut self, cx: &mut App) -> TabId {
+        self.tab_host
+            .update(cx, |tab_host, _| tab_host.alloc_tab_id())
     }
 
-    pub(in crate::workspace) fn alloc_pane_id(&mut self) -> PaneId {
-        let id = PaneId(self.next_pane_id);
-        self.next_pane_id += 1;
-        id
+    pub(in crate::workspace) fn alloc_pane_id(&mut self, cx: &mut App) -> PaneId {
+        self.tab_host
+            .update(cx, |tab_host, _| tab_host.alloc_pane_id())
     }
 
-    pub(in crate::workspace) fn alloc_session_id(&mut self) -> TerminalSessionId {
-        let id = TerminalSessionId(self.next_session_id);
-        self.next_session_id += 1;
-        id
+    pub(in crate::workspace) fn alloc_session_id(&mut self, cx: &mut App) -> TerminalSessionId {
+        self.tab_host
+            .update(cx, |tab_host, _| tab_host.alloc_session_id())
     }
 
     pub(in crate::workspace) fn active_tab_index(&self) -> Option<usize> {

@@ -68,9 +68,9 @@ impl WorkspaceApp {
     ) -> Result<()> {
         // Shell Launcher selections must use the same tab and pane lifecycle as
         // the default-shell shortcut; only the PTY configuration differs.
-        let tab_id = self.alloc_tab_id();
-        let pane_id = self.alloc_pane_id();
-        let session_id = self.alloc_session_id();
+        let tab_id = self.alloc_tab_id(cx);
+        let pane_id = self.alloc_pane_id(cx);
+        let session_id = self.alloc_session_id(cx);
         let preferences =
             self.prepare_terminal_preferences_for_tab_kind(&TabKind::LocalTerminal, cx);
         let pane = cx.new(|cx| {
@@ -109,9 +109,9 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Result<TerminalSessionId> {
-        let tab_id = self.alloc_tab_id();
-        let pane_id = self.alloc_pane_id();
-        let session_id = self.alloc_session_id();
+        let tab_id = self.alloc_tab_id(cx);
+        let pane_id = self.alloc_pane_id(cx);
+        let session_id = self.alloc_session_id(cx);
         let preferences =
             self.prepare_terminal_preferences_for_tab_kind(&TabKind::LocalTerminal, cx);
         let title = format!("Telnet {}", config.endpoint_label());
@@ -149,9 +149,9 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Result<TerminalSessionId> {
-        let tab_id = self.alloc_tab_id();
-        let pane_id = self.alloc_pane_id();
-        let session_id = self.alloc_session_id();
+        let tab_id = self.alloc_tab_id(cx);
+        let pane_id = self.alloc_pane_id(cx);
+        let session_id = self.alloc_session_id(cx);
         let preferences =
             self.prepare_terminal_preferences_for_tab_kind(&TabKind::LocalTerminal, cx);
         let title = format!("Serial {}", config.port_path);
@@ -539,9 +539,9 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Result<TerminalSessionId> {
-        let tab_id = self.alloc_tab_id();
-        let pane_id = self.alloc_pane_id();
-        let session_id = self.alloc_session_id();
+        let tab_id = self.alloc_tab_id(cx);
+        let pane_id = self.alloc_pane_id(cx);
+        let session_id = self.alloc_session_id(cx);
         let node_id = node_id.unwrap_or_else(|| {
             let id = NodeId::new(format!("ssh-{}", self.next_ssh_node_id));
             self.next_ssh_node_id += 1;
@@ -796,8 +796,8 @@ impl WorkspaceApp {
             ));
         }
 
-        let pane_id = self.alloc_pane_id();
-        let session_id = self.alloc_session_id();
+        let pane_id = self.alloc_pane_id(cx);
+        let session_id = self.alloc_session_id(cx);
         self.register_existing_ssh_terminal_session(node_id, session_id)?;
 
         // Tauri remounts terminal tabs by replacing the old session id in the
@@ -839,7 +839,7 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Result<TerminalSessionId> {
-        let tab_id = self.alloc_tab_id();
+        let tab_id = self.alloc_tab_id(cx);
         let (pane_id, session_id) = self.create_ssh_terminal_pane_for_existing_node(
             node_id,
             post_connect_command,
@@ -1161,7 +1161,7 @@ impl WorkspaceApp {
         let tab_id = if let Some(tab) = self.tabs.iter().find(|tab| tab.kind == TabKind::Settings) {
             tab.id
         } else {
-            let tab_id = self.alloc_tab_id();
+            let tab_id = self.alloc_tab_id(cx);
             self.tabs.push(Tab {
                 id: tab_id,
                 kind: TabKind::Settings,

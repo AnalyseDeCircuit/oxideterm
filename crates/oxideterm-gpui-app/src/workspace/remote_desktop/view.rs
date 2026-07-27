@@ -65,7 +65,7 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let tab_id = self.alloc_tab_id();
+        let tab_id = self.alloc_tab_id(cx);
         let frame_slot = RemoteDesktopFrameDeliverySlot::new();
         let certificate_store_path =
             oxideterm_remote_desktop::RemoteDesktopCertificateStore::path_next_to_settings(

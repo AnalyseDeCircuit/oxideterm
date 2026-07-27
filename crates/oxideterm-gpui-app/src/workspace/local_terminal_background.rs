@@ -162,8 +162,8 @@ impl WorkspaceApp {
         let Some(detached) = self.detached_local_terminals.remove(&session_id) else {
             return;
         };
-        let tab_id = self.alloc_tab_id();
-        let pane_id = self.alloc_pane_id();
+        let tab_id = self.alloc_tab_id(cx);
+        let pane_id = self.alloc_pane_id(cx);
         let title = detached.title.clone();
         let preferences =
             self.prepare_terminal_preferences_for_tab_kind(&TabKind::LocalTerminal, cx);

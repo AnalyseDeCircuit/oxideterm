@@ -241,7 +241,7 @@ impl WorkspaceApp {
         let tab_id_value = if let Some(existing_tab_id) = existing_tab_id {
             existing_tab_id
         } else {
-            let tab_id_value = self.alloc_tab_id();
+            let tab_id_value = self.alloc_tab_id(cx);
             self.tabs.push(Tab {
                 id: tab_id_value,
                 kind: TabKind::Plugin {

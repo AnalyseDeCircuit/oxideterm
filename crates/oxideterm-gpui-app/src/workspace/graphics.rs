@@ -305,7 +305,7 @@ impl WorkspaceApp {
         let tab_id = if let Some(tab) = self.tabs.iter().find(|tab| tab.kind == TabKind::Graphics) {
             tab.id
         } else {
-            let tab_id = self.alloc_tab_id();
+            let tab_id = self.alloc_tab_id(cx);
             self.tabs.push(Tab {
                 id: tab_id,
                 kind: TabKind::Graphics,

@@ -64,7 +64,7 @@ impl WorkspaceApp {
         let tab_id = if let Some(tab_id) = self.forwarding.read(cx).tab_for_node(&node_id) {
             tab_id
         } else {
-            let tab_id = self.alloc_tab_id();
+            let tab_id = self.alloc_tab_id(cx);
             self.tabs.push(Tab {
                 id: tab_id,
                 kind: TabKind::Forwards,

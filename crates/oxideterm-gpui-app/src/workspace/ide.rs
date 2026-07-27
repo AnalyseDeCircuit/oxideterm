@@ -92,7 +92,7 @@ impl WorkspaceApp {
             }
             *tab_id
         } else {
-            let tab_id = self.alloc_tab_id();
+            let tab_id = self.alloc_tab_id(cx);
             let fs = self.ai_entity.read(cx).agent_fs().clone();
             let tokens = self.tokens;
             let labels = self.ide_labels();
@@ -225,7 +225,7 @@ impl WorkspaceApp {
             }
             *tab_id
         } else {
-            let tab_id = self.alloc_tab_id();
+            let tab_id = self.alloc_tab_id(cx);
             let fs = self.ai_entity.read(cx).agent_fs().clone();
             let tokens = self.tokens;
             let labels = self.ide_labels();

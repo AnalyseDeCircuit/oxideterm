@@ -243,6 +243,7 @@ impl WorkspaceApp {
             crate::workspace::settings::settings_store_modified_time(settings_store.path());
         let connection_store_last_modified =
             crate::workspace::settings::settings_store_modified_time(connection_store.path());
+        let tab_host = cx.new(|_| tabs::WorkspaceTabHostEntity::new());
         let mut workspace = Self {
             focus_handle,
             tabs: Vec::new(),
@@ -260,9 +261,7 @@ impl WorkspaceApp {
             terminal_pane_subscriptions: HashMap::new(),
             pending_auto_close_terminal_sessions: HashSet::new(),
             auto_close_terminal_sessions_scheduled: false,
-            next_tab_id: 1,
-            next_pane_id: 1,
-            next_session_id: 1,
+            tab_host,
             search: SearchBarState::default(),
             terminal_command_bar_focused: false,
             terminal_command_input_collapsed: false,
