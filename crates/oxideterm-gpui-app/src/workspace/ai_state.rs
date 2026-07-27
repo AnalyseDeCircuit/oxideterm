@@ -2255,7 +2255,7 @@ mod entity_tests {
                 base_ids: Vec::new(),
                 plan: None,
                 summary: "summary".to_string(),
-                stream_error: None,
+                failed: false,
                 resume_after: None,
                 silent: false,
             })

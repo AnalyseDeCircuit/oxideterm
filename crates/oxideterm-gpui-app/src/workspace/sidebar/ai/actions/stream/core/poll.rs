@@ -430,7 +430,7 @@ impl WorkspaceApp {
                             delivery.base_ids,
                             plan,
                             delivery.summary,
-                            delivery.stream_error,
+                            delivery.failed,
                             delivery.resume_after,
                             delivery.silent,
                             cx,
@@ -442,7 +442,7 @@ impl WorkspaceApp {
                         delivery.conversation_id,
                         delivery.base_ids,
                         delivery.summary,
-                        delivery.stream_error,
+                        delivery.failed,
                         cx,
                     );
                 }

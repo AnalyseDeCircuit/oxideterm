@@ -62,6 +62,92 @@ mod ai_turn_order_tests {
     }
 
     #[test]
+    fn persisted_tool_arguments_use_key_aware_secret_redaction() {
+        let arguments = serde_json::json!({
+            "command": "curl https://example.test",
+            "apiKey": "short",
+            "headers": {
+                "Authorization": "Bearer opaque-value",
+            },
+        })
+        .to_string();
+
+        let sanitized = sanitize_ai_tool_arguments_for_persistence(&arguments);
+
+        assert!(sanitized.contains("curl https://example.test"));
+        assert!(!sanitized.contains("\"short\""));
+        assert!(!sanitized.contains("opaque-value"));
+        assert!(sanitized.contains("[REDACTED]"));
+    }
+
+    #[test]
+    fn ai_delivery_redacts_tool_payloads_and_classifies_provider_errors() {
+        let (tx, rx) = crate::workspace::delivery::ActiveDeliverySender::channel();
+        let call = AiToolCall {
+            id: "tool-secret".to_string(),
+            name: "run_command".to_string(),
+            arguments: serde_json::json!({
+                "command": "echo visible",
+                "apiKey": "short-secret",
+            })
+            .to_string(),
+        };
+
+        send_ai_tool_status_with_payload(
+            &tx,
+            1,
+            "conversation-1",
+            "assistant-1",
+            &call,
+            "completed",
+            Some(serde_json::json!({
+                "output": "export TOKEN=result-secret-value",
+            })),
+            Some("execute".to_string()),
+            Some("password=summary-secret-value".to_string()),
+            false,
+            Some("raw-secret-value".to_string()),
+            None,
+            None,
+        )
+        .expect("tool status");
+        let delivery = rx.recv().expect("tool delivery");
+        let AiStreamDeliveryEvent::ToolStatus {
+            arguments,
+            result,
+            summary,
+            raw_text,
+            ..
+        } = delivery.event
+        else {
+            panic!("expected tool status");
+        };
+        let retained = format!("{arguments}{result:?}{summary:?}{raw_text:?}");
+        assert!(!retained.contains("short-secret"));
+        assert!(!retained.contains("result-secret-value"));
+        assert!(!retained.contains("summary-secret-value"));
+        assert!(!retained.contains("raw-secret-value"));
+        assert!(retained.contains("[REDACTED]"));
+
+        send_ai_stream_delivery(
+            &tx,
+            1,
+            "conversation-1",
+            "assistant-1",
+            AiStreamDeliveryEvent::Stream(AiStreamEvent::Error(
+                "Authorization: Bearer provider-secret-value".to_string(),
+            )),
+        )
+        .expect("provider error");
+        let delivery = rx.recv().expect("error delivery");
+        assert!(matches!(
+            delivery.event,
+            AiStreamDeliveryEvent::Stream(AiStreamEvent::Error(ref error))
+                if error == "stream_failed"
+        ));
+    }
+
+    #[test]
     fn model_visible_settings_projection_excludes_secret_bearing_configuration() {
         let mut settings = oxideterm_settings::PersistedSettings::default();
         settings.ai.custom_system_prompt = "private-system-prompt".to_string();

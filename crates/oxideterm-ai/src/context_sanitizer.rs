@@ -1,8 +1,9 @@
 use std::sync::LazyLock;
 
 use regex::Regex;
+use serde_json::Value;
 
-use crate::AiChatMessage;
+use crate::{AiChatMessage, AiChatState};
 
 const REDACTED: &str = "[REDACTED]";
 
@@ -119,6 +120,126 @@ pub fn sanitize_for_ai(text: &str) -> String {
     CONNECTION_PASSWORD
         .replace_all(&result, format!("${{1}}{REDACTED}${{3}}"))
         .into_owned()
+}
+
+pub fn sanitize_json_for_ai(value: &Value) -> Value {
+    match value {
+        Value::Object(object) => Value::Object(
+            object
+                .iter()
+                .map(|(key, value)| {
+                    let sanitized = if value.is_string() && is_sensitive_json_key(key) {
+                        Value::String(REDACTED.to_string())
+                    } else if let Some(value) = value.as_str()
+                        && is_embedded_json_key(key)
+                    {
+                        Value::String(sanitize_json_text_for_ai(value))
+                    } else {
+                        sanitize_json_for_ai(value)
+                    };
+                    (key.clone(), sanitized)
+                })
+                .collect(),
+        ),
+        Value::Array(values) => Value::Array(values.iter().map(sanitize_json_for_ai).collect()),
+        Value::String(value) => Value::String(sanitize_for_ai(value)),
+        other => other.clone(),
+    }
+}
+
+pub fn sanitize_json_text_for_ai(text: &str) -> String {
+    serde_json::from_str::<Value>(text)
+        .map(|value| sanitize_json_for_ai(&value).to_string())
+        .unwrap_or_else(|_| sanitize_for_ai(text))
+}
+
+pub fn sanitize_chat_state_for_persistence(state: &mut AiChatState) {
+    for conversation in &mut state.conversations {
+        conversation.title = sanitize_for_ai(&conversation.title);
+        if let Some(metadata) = conversation.session_metadata.as_mut() {
+            *metadata = sanitize_json_for_ai(metadata);
+        }
+        for message in &mut conversation.messages {
+            sanitize_chat_message_for_persistence(message);
+        }
+    }
+}
+
+fn sanitize_chat_message_for_persistence(message: &mut AiChatMessage) {
+    // Persisted conversation projections can replay into prompts and
+    // diagnostics, including nested branch and compaction snapshots.
+    message.content = sanitize_for_ai(&message.content);
+    if let Some(context) = message.context.as_mut() {
+        *context = sanitize_for_ai(context);
+    }
+    if let Some(thinking) = message.thinking_content.as_mut() {
+        *thinking = sanitize_for_ai(thinking);
+    }
+    for tool_call in &mut message.tool_calls {
+        *tool_call = sanitize_json_for_ai(tool_call);
+    }
+    for value in [
+        &mut message.turn,
+        &mut message.transcript_ref,
+        &mut message.summary_ref,
+    ] {
+        if let Some(value) = value.as_mut() {
+            *value = sanitize_json_for_ai(value);
+        }
+    }
+    for suggestion in &mut message.suggestions {
+        suggestion.text = sanitize_for_ai(&suggestion.text);
+    }
+    if let Some(metadata) = message.metadata.as_mut()
+        && let Some(original_messages) = metadata.original_messages.as_mut()
+    {
+        for original in original_messages {
+            sanitize_chat_message_for_persistence(original);
+        }
+    }
+    if let Some(branches) = message.branches.as_mut() {
+        for tail in branches.tails.values_mut() {
+            for branch_message in tail {
+                sanitize_chat_message_for_persistence(branch_message);
+            }
+        }
+    }
+}
+
+fn is_sensitive_json_key(key: &str) -> bool {
+    // JSON payloads lose the surrounding key when string values are sanitized
+    // independently, so credential-bearing keys need an explicit boundary.
+    let normalized = key
+        .chars()
+        .filter(|character| character.is_ascii_alphanumeric())
+        .flat_map(char::to_lowercase)
+        .collect::<String>();
+    normalized.contains("apikey")
+        || normalized.contains("accesskey")
+        || normalized.contains("privatekey")
+        || normalized.contains("secretkey")
+        || normalized.contains("signingkey")
+        || normalized.contains("encryptionkey")
+        || normalized.contains("password")
+        || normalized.contains("passwd")
+        || normalized.contains("passphrase")
+        || normalized.contains("secret")
+        || normalized == "token"
+        || normalized.ends_with("authtoken")
+        || normalized.ends_with("accesstoken")
+        || normalized.ends_with("refreshtoken")
+        || normalized.contains("credential")
+        || normalized == "authorization"
+        || normalized == "proxyauthorization"
+}
+
+fn is_embedded_json_key(key: &str) -> bool {
+    let normalized = key
+        .chars()
+        .filter(|character| character.is_ascii_alphanumeric())
+        .flat_map(char::to_lowercase)
+        .collect::<String>();
+    matches!(normalized.as_str(), "arguments" | "argumentstext")
 }
 
 fn is_tauri_type_annotation_value(prefix: &str, value: &str) -> bool {

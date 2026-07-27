@@ -52,6 +52,9 @@ pub(in crate::workspace) fn send_ai_guardrail(
     message: impl Into<String>,
     raw_text: Option<String>,
 ) -> Result<(), std::sync::mpsc::SendError<AiStreamDelivery>> {
+    let raw_text = raw_text
+        .as_deref()
+        .map(oxideterm_ai::sanitize_for_ai);
     send_ai_stream_delivery(
         ui_tx,
         generation,
@@ -105,6 +108,8 @@ pub(in crate::workspace) fn send_ai_round_summary(
     text: String,
     metadata: serde_json::Value,
 ) -> Result<(), std::sync::mpsc::SendError<AiStreamDelivery>> {
+    let text = oxideterm_ai::sanitize_for_ai(&text);
+    let metadata = oxideterm_ai::sanitize_json_for_ai(&metadata);
     send_ai_stream_delivery(
         ui_tx,
         generation,
@@ -205,6 +210,15 @@ pub(in crate::workspace) fn send_ai_stream_delivery(
     assistant_id: &str,
     event: AiStreamDeliveryEvent,
 ) -> Result<(), std::sync::mpsc::SendError<AiStreamDelivery>> {
+    let event = match event {
+        // Provider and protocol errors may contain response bodies, process
+        // paths, or request metadata. The UI maps this stable category to a
+        // localized message.
+        AiStreamDeliveryEvent::Stream(AiStreamEvent::Error(_)) => {
+            AiStreamDeliveryEvent::Stream(AiStreamEvent::Error("stream_failed".to_string()))
+        }
+        other => other,
+    };
     ui_tx.send(AiStreamDelivery {
         generation,
         conversation_id: conversation_id.to_string(),
@@ -253,10 +267,17 @@ pub(in crate::workspace) fn send_ai_tool_status_with_payload(
     risk: Option<String>,
     summary: Option<String>,
     synthetic_denied: bool,
-    raw_text: Option<String>,
+    _raw_text: Option<String>,
     round_id: Option<String>,
     round_number: Option<i64>,
 ) -> Result<(), std::sync::mpsc::SendError<AiStreamDelivery>> {
+    let arguments = sanitize_ai_tool_arguments_for_persistence(&call.arguments);
+    let result = result
+        .as_ref()
+        .map(oxideterm_ai::sanitize_json_for_ai);
+    let summary = summary
+        .as_deref()
+        .map(oxideterm_ai::sanitize_for_ai);
     send_ai_stream_delivery(
         ui_tx,
         generation,
@@ -265,13 +286,13 @@ pub(in crate::workspace) fn send_ai_tool_status_with_payload(
         AiStreamDeliveryEvent::ToolStatus {
             tool_call_id: call.id.clone(),
             name: call.name.clone(),
-            arguments: call.arguments.clone(),
+            arguments,
             status: status.to_string(),
             result,
             risk,
             summary,
             synthetic_denied,
-            raw_text,
+            raw_text: None,
             round_id,
             round_number,
         },

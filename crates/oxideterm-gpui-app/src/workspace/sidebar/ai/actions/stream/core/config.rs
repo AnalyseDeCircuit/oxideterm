@@ -544,7 +544,7 @@ impl WorkspaceApp {
             return;
         };
         self.forwarding_runtime.spawn_blocking(move || {
-            if let Err(error) = store.append_transcript_entries(&conversation_id, &entries) {
+            if let Err(error) = store.append_transcript_entries(&conversation_id, entries) {
                 eprintln!("[AiChatStore] Failed to persist transcript entries: {error}");
             }
         });
@@ -562,7 +562,7 @@ impl WorkspaceApp {
             return;
         };
         self.forwarding_runtime.spawn_blocking(move || {
-            if let Err(error) = store.append_diagnostic_events(&conversation_id, &events) {
+            if let Err(error) = store.append_diagnostic_events(&conversation_id, events) {
                 eprintln!("[AiChatStore] Failed to persist diagnostic events: {error}");
             }
         });

@@ -768,9 +768,11 @@ pub(in crate::workspace) async fn run_ai_chat_tool_loop(
                         AiStreamDeliveryEvent::ToolApprovalRequested {
                             tool_call_id: call.id.clone(),
                             name: call.name.clone(),
-                            arguments: call.arguments.clone(),
+                            arguments: sanitize_ai_tool_arguments_for_persistence(
+                                &call.arguments,
+                            ),
                             risk: risk.clone(),
-                            summary: summary.clone(),
+                            summary: oxideterm_ai::sanitize_for_ai(&summary),
                             sender: approval_tx,
                         },
                     )
@@ -1210,9 +1212,11 @@ async fn handle_acp_visible_terminal_tool_call(
                 AiStreamDeliveryEvent::ToolApprovalRequested {
                     tool_call_id: call.id.clone(),
                     name: call.name.clone(),
-                    arguments: status_call.arguments.clone(),
+                    arguments: sanitize_ai_tool_arguments_for_persistence(
+                        &status_call.arguments,
+                    ),
                     risk: risk.clone(),
-                    summary: policy_summary.clone(),
+                    summary: oxideterm_ai::sanitize_for_ai(&policy_summary),
                     sender: approval_tx,
                 },
             )

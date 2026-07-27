@@ -5,21 +5,24 @@ impl WorkspaceApp {
         base_ids: Vec<String>,
         plan: AiCompactionPlan,
         summary: String,
-        stream_error: Option<String>,
+        failed: bool,
         resume_after: Option<AiPendingChatStream>,
         silent: bool,
         cx: &mut Context<Self>,
     ) {
         self.ai_entity
             .update(cx, |ai, _cx| ai.finish_compaction(&conversation_id));
-        if let Some(error) = stream_error {
+        if failed {
             if silent {
                 self.ai_entity.update(cx, |ai, cx| {
                     ai.clear_compaction_notice_for(&conversation_id, cx);
                 });
             }
             if !silent {
-                self.push_ai_settings_toast(error, TerminalNoticeVariant::Error);
+                self.push_ai_settings_toast(
+                    self.i18n.t("settings_view.ai.acp_agent_error_unknown"),
+                    TerminalNoticeVariant::Error,
+                );
             }
             self.resume_ai_chat_after_pre_send_compaction(resume_after, cx);
             cx.notify();
@@ -194,14 +197,17 @@ impl WorkspaceApp {
         conversation_id: String,
         base_ids: Vec<String>,
         summary: String,
-        stream_error: Option<String>,
+        failed: bool,
         cx: &mut Context<Self>,
     ) {
         self.ai_entity
             .update(cx, |ai, _cx| ai.finish_compaction(&conversation_id));
         self.ai.chat.loading = false;
-        if let Some(error) = stream_error {
-            self.push_ai_settings_toast(error, TerminalNoticeVariant::Error);
+        if failed {
+            self.push_ai_settings_toast(
+                self.i18n.t("settings_view.ai.acp_agent_error_unknown"),
+                TerminalNoticeVariant::Error,
+            );
             cx.notify();
             return;
         }

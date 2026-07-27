@@ -244,7 +244,7 @@ impl WorkspaceApp {
             oxideterm_ai::AiChatPersistenceStore::next_projection_persist_at();
         self.forwarding_runtime.spawn_blocking(move || {
             if let Err(error) =
-                store.save_state_with_projection_updated_at(&state, projection_updated_at)
+                store.save_state_with_projection_updated_at(state, projection_updated_at)
             {
                 eprintln!("[AiChatStore] Failed to persist conversation: {error}");
             }

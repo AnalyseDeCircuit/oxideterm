@@ -14,7 +14,7 @@ pub(in crate::workspace) struct AiCompactionDelivery {
     pub(in crate::workspace) base_ids: Vec<String>,
     pub(in crate::workspace) plan: Option<AiCompactionPlan>,
     pub(in crate::workspace) summary: String,
-    pub(in crate::workspace) stream_error: Option<String>,
+    pub(in crate::workspace) failed: bool,
     pub(in crate::workspace) resume_after: Option<AiPendingChatStream>,
     pub(in crate::workspace) silent: bool,
 }

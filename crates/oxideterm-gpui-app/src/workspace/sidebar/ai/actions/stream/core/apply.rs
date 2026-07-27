@@ -56,6 +56,14 @@ pub(in crate::workspace) fn apply_ai_acp_session_started_to_conversations(
     true
 }
 
+pub(in crate::workspace) fn sanitize_ai_tool_arguments_for_persistence(
+    arguments: &str,
+) -> String {
+    // Parsed JSON needs key-aware redaction because short or opaque tokens may
+    // not carry enough structure for text-only credential detection.
+    oxideterm_ai::sanitize_json_text_for_ai(arguments)
+}
+
 impl WorkspaceApp {
     pub(in crate::workspace) fn apply_ai_acp_session_started(
         &mut self,
@@ -128,12 +136,26 @@ impl WorkspaceApp {
                 name,
                 arguments,
             } => {
+                let persisted_arguments =
+                    sanitize_ai_tool_arguments_for_persistence(&arguments);
                 self.ai.chat.conversation_state.update_message(
                     conversation_id,
                     message_id,
                     |message| {
-                        upsert_ai_tool_call(message, &id, &name, &arguments, "running");
-                        upsert_ai_turn_tool_call(message, &id, &name, &arguments, "partial");
+                        upsert_ai_tool_call(
+                            message,
+                            &id,
+                            &name,
+                            &persisted_arguments,
+                            "running",
+                        );
+                        upsert_ai_turn_tool_call(
+                            message,
+                            &id,
+                            &name,
+                            &persisted_arguments,
+                            "partial",
+                        );
                     },
                 );
             }
@@ -142,12 +164,26 @@ impl WorkspaceApp {
                 name,
                 arguments,
             } => {
+                let persisted_arguments =
+                    sanitize_ai_tool_arguments_for_persistence(&arguments);
                 self.ai.chat.conversation_state.update_message(
                     conversation_id,
                     message_id,
                     |message| {
-                        upsert_ai_tool_call(message, &id, &name, &arguments, "pending");
-                        upsert_ai_turn_tool_call(message, &id, &name, &arguments, "complete");
+                        upsert_ai_tool_call(
+                            message,
+                            &id,
+                            &name,
+                            &persisted_arguments,
+                            "pending",
+                        );
+                        upsert_ai_turn_tool_call(
+                            message,
+                            &id,
+                            &name,
+                            &persisted_arguments,
+                            "complete",
+                        );
                     },
                 );
             }
@@ -172,19 +208,23 @@ impl WorkspaceApp {
                 self.persist_ai_chat_state();
                 self.maybe_start_ai_auto_compaction(conversation_id, cx);
             }
-            AiStreamEvent::Error(error) => {
+            AiStreamEvent::Error(_error) => {
+                // Provider errors may contain response bodies or request
+                // metadata. Only a localized stable category reaches the
+                // conversation, diagnostics, notifications, and persistence.
+                let safe_error = self.i18n.t("settings_view.ai.acp_agent_error_unknown");
                 self.ai.chat.conversation_state.update_message(
                     conversation_id,
                     message_id,
                     |message| {
                         message.is_streaming = false;
                         if message.content.is_empty() {
-                            message.content = error.clone();
+                            message.content = safe_error.clone();
                         } else {
                             message.content.push_str("\n\n");
-                            message.content.push_str(&error);
+                            message.content.push_str(&safe_error);
                         }
-                        append_ai_turn_error_part(message, &error);
+                        append_ai_turn_error_part(message, &safe_error);
                         set_ai_turn_status(message, "error");
                     },
                 );
@@ -200,7 +240,7 @@ impl WorkspaceApp {
                         ai_now_ms(),
                         self.ai_diagnostic_base(serde_json::json!({
                             "requestKind": "chat",
-                            "message": error,
+                            "message": safe_error.as_str(),
                         })),
                     )],
                 );
@@ -209,7 +249,7 @@ impl WorkspaceApp {
                 });
                 self.ai.chat.loading = false;
                 self.persist_ai_chat_state();
-                self.push_ai_settings_toast(error, TerminalNoticeVariant::Error);
+                self.push_ai_settings_toast(safe_error, TerminalNoticeVariant::Error);
             }
         }
         cx.notify();
@@ -357,7 +397,7 @@ impl WorkspaceApp {
         risk: Option<String>,
         summary: Option<String>,
         synthetic_denied: bool,
-        raw_text: Option<String>,
+        _raw_text: Option<String>,
         round_id_override: Option<String>,
         round_number_override: Option<i64>,
         cx: &mut Context<Self>,
@@ -369,6 +409,13 @@ impl WorkspaceApp {
         {
             return;
         }
+        let persisted_arguments = sanitize_ai_tool_arguments_for_persistence(arguments);
+        let persisted_result = result
+            .as_ref()
+            .map(oxideterm_ai::sanitize_json_for_ai);
+        let persisted_summary = summary
+            .as_deref()
+            .map(oxideterm_ai::sanitize_for_ai);
         let should_persist = result.is_some()
             || matches!(
                 status,
@@ -384,11 +431,11 @@ impl WorkspaceApp {
                     message,
                     tool_call_id,
                     name,
-                    arguments,
+                    &persisted_arguments,
                     status,
-                    result.clone(),
+                    persisted_result.clone(),
                     risk.clone(),
-                    summary,
+                    persisted_summary,
                     round_id_override.as_deref(),
                     round_number_override,
                 );
@@ -425,7 +472,7 @@ impl WorkspaceApp {
                 let mut call_payload = serde_json::json!({
                     "id": tool_call_id,
                     "name": name,
-                    "argumentsText": arguments,
+                    "argumentsText": persisted_arguments.as_str(),
                     "roundId": round_id_value,
                 });
                 if let Some(object) = call_payload.as_object_mut()
@@ -453,20 +500,20 @@ impl WorkspaceApp {
                         "logicalRound": round_number_value,
                         "toolCallId": tool_call_id,
                         "toolName": name,
-                        "arguments": arguments,
+                        "arguments": persisted_arguments.as_str(),
                         "syntheticDenied": synthetic_denied,
                     })),
                 ));
             }
             if matches!(status, "rejected" | "completed" | "error") {
                 let success = status == "completed";
-                let output = result
+                let output = persisted_result
                     .as_ref()
                     .and_then(|value| value.get("output"))
                     .and_then(serde_json::Value::as_str)
                     .unwrap_or_default()
                     .to_string();
-                let error = result
+                let error = persisted_result
                     .as_ref()
                     .and_then(|value| value.get("error"))
                     .cloned();
@@ -481,9 +528,6 @@ impl WorkspaceApp {
                 if let Some(object) = result_payload.as_object_mut() {
                     if synthetic_denied {
                         object.insert("syntheticDenied".to_string(), serde_json::json!(true));
-                    }
-                    if let Some(raw_text) = raw_text.as_deref() {
-                        object.insert("rawText".to_string(), serde_json::json!(raw_text));
                     }
                 }
                 transcript_entries.push(ai_transcript_entry(
@@ -860,11 +904,19 @@ impl WorkspaceApp {
         {
             return;
         }
+        let persisted_raw_text = raw_text
+            .as_deref()
+            .map(oxideterm_ai::sanitize_for_ai);
         self.ai.chat.conversation_state.update_message(
             conversation_id,
             message_id,
             |message_value| {
-                append_ai_turn_guardrail_part(message_value, code, message, raw_text.as_deref());
+                append_ai_turn_guardrail_part(
+                    message_value,
+                    code,
+                    message,
+                    persisted_raw_text.as_deref(),
+                );
             },
         );
         let now = ai_now_ms();
@@ -877,7 +929,6 @@ impl WorkspaceApp {
                 serde_json::json!({
                     "code": code,
                     "message": message,
-                    "rawText": raw_text,
                 }),
                 Some(message_id.to_string()),
                 Some(message_id.to_string()),

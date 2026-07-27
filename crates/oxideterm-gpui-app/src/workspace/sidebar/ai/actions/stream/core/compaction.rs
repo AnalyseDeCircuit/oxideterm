@@ -322,7 +322,7 @@ impl WorkspaceApp {
             .spawn(stream_chat_completion(config, summary_messages, tx));
         self.forwarding_runtime.spawn(async move {
             let mut summary = String::new();
-            let mut stream_error = None;
+            let mut failed = false;
             while let Some(event) = rx.recv().await {
                 match event {
                     AiStreamEvent::Content(chunk) => {
@@ -332,8 +332,11 @@ impl WorkspaceApp {
                     | AiStreamEvent::ToolCall { .. }
                     | AiStreamEvent::ToolCallComplete { .. } => {}
                     AiStreamEvent::Done => break,
-                    AiStreamEvent::Error(error) => {
-                        stream_error = Some(error);
+                    AiStreamEvent::Error(_error) => {
+                        // Provider details can include response bodies or
+                        // request metadata; only a failure category crosses
+                        // the compaction worker boundary.
+                        failed = true;
                         break;
                     }
                 }
@@ -344,7 +347,7 @@ impl WorkspaceApp {
                 base_ids,
                 plan,
                 summary,
-                stream_error,
+                failed,
                 resume_after,
                 silent,
             });
