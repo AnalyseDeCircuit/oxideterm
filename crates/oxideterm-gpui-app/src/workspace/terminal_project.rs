@@ -3,7 +3,7 @@
 
 use oxideterm_environment::{
     ProjectProbeKey, ProjectProbeOutcome, ProjectProbeScope, ProjectSnapshot, ProjectTask,
-    current_directory_cd_command, remote_project_cwd_source_is_trusted,
+    remote_project_cwd_source_is_trusted,
 };
 
 use super::*;
@@ -19,13 +19,13 @@ pub(in crate::workspace) enum TerminalProjectDelivery {
 
 #[derive(Default)]
 pub(in crate::workspace) struct TerminalProjectPanelState {
-    pub open: bool,
-    pub query: String,
-    pub highlighted_task_id: Option<String>,
+    pub(super) open: bool,
+    pub(super) query: String,
+    pub(super) highlighted_task_id: Option<String>,
 }
 
 impl TerminalProjectPanelState {
-    fn close(&mut self) {
+    pub(super) fn close(&mut self) {
         *self = Self::default();
     }
 }
@@ -53,9 +53,6 @@ impl WorkspaceApp {
             terminal.set_project_tasks_enabled(project_tasks_enabled, cx);
         });
         if !project_tasks_enabled {
-            if self.close_terminal_project_panel() {
-                cx.notify();
-            }
             return;
         }
         let Some(key) = self.active_terminal_project_key(cx) else {
@@ -66,9 +63,9 @@ impl WorkspaceApp {
     }
 
     pub(in crate::workspace) fn open_terminal_project_panel(&mut self, cx: &mut Context<Self>) {
-        if self.active_terminal_project_key(cx).is_none() {
+        let Some(key) = self.active_terminal_project_key(cx) else {
             return;
-        }
+        };
         self.dismiss_terminal_broadcast_menu(cx);
         self.close_terminal_quick_commands_popover();
         self.close_terminal_cwd_picker();
@@ -76,45 +73,17 @@ impl WorkspaceApp {
         self.terminal_command_suggestions_open = false;
         self.terminal_command_suggestion_highlighted = None;
         self.terminal_command_bar_focused = false;
-        self.terminal_project_panel.open = true;
-        self.ensure_terminal_project_task_highlight(cx);
+        self.terminal
+            .update(cx, |terminal, _cx| terminal.open_project_panel(&key));
         cx.notify();
     }
 
-    pub(in crate::workspace) fn close_terminal_project_panel(&mut self) -> bool {
-        let was_open = self.terminal_project_panel.open;
-        if was_open {
-            self.terminal_project_panel.close();
-        }
-        was_open
-    }
-
-    pub(in crate::workspace) fn visible_terminal_project_tasks(
-        &self,
+    pub(in crate::workspace) fn close_terminal_project_panel(
+        &mut self,
         cx: &mut Context<Self>,
-    ) -> Vec<ProjectTask> {
-        let Some(snapshot) = self.active_terminal_project_snapshot(cx) else {
-            return Vec::new();
-        };
-        let query = self
-            .terminal_project_panel
-            .query
-            .trim()
-            .to_ascii_lowercase();
-        snapshot
-            .tasks()
-            .into_iter()
-            .filter(|task| {
-                query.is_empty()
-                    || task.label().to_ascii_lowercase().contains(&query)
-                    || task.command().to_ascii_lowercase().contains(&query)
-                    || task
-                        .source()
-                        .display_name()
-                        .to_ascii_lowercase()
-                        .contains(&query)
-            })
-            .collect()
+    ) -> bool {
+        self.terminal
+            .update(cx, |terminal, _cx| terminal.close_project_panel())
     }
 
     pub(in crate::workspace) fn run_terminal_project_task(
@@ -122,20 +91,19 @@ impl WorkspaceApp {
         task: ProjectTask,
         cx: &mut Context<Self>,
     ) {
-        let Some(snapshot) = self.active_terminal_project_snapshot(cx) else {
+        let Some(key) = self.active_terminal_project_key(cx) else {
             return;
         };
-        let Some(cd_command) = current_directory_cd_command(snapshot.root_path()) else {
+        let Some(command) = self.terminal.read(cx).project_task_command(&key, &task) else {
             return;
         };
-        let command = format!("{cd_command} && {}", task.command());
         let Some(pane) = self.active_pane(cx) else {
             return;
         };
         // Project tasks must be visible terminal actions so failures, prompts,
         // and long-running dev servers stay under the active shell lifecycle.
         pane.update(cx, |pane, cx| pane.send_command_line(&command, cx));
-        self.close_terminal_project_panel();
+        self.close_terminal_project_panel(cx);
         cx.notify();
     }
 
@@ -144,7 +112,7 @@ impl WorkspaceApp {
         event: &KeyDownEvent,
         cx: &mut Context<Self>,
     ) -> bool {
-        if !self.terminal_project_panel.open {
+        if !self.terminal.read(cx).project_panel_open() {
             return false;
         }
         let key = event.keystroke.key.as_str();
@@ -155,37 +123,50 @@ impl WorkspaceApp {
 
         match key {
             "escape" => {
-                self.close_terminal_project_panel();
+                self.close_terminal_project_panel(cx);
                 cx.notify();
                 true
             }
             "up" | "arrowup" => {
-                self.step_terminal_project_task_highlight(false, cx);
+                if let Some(key) = self.active_terminal_project_key(cx) {
+                    self.terminal.update(cx, |terminal, _cx| {
+                        terminal.step_project_task_highlight(&key, false);
+                    });
+                }
                 cx.notify();
                 true
             }
             "down" | "arrowdown" => {
-                self.step_terminal_project_task_highlight(true, cx);
+                if let Some(key) = self.active_terminal_project_key(cx) {
+                    self.terminal.update(cx, |terminal, _cx| {
+                        terminal.step_project_task_highlight(&key, true);
+                    });
+                }
                 cx.notify();
                 true
             }
             "home" => {
-                self.highlight_terminal_project_task_edge(false, cx);
+                if let Some(key) = self.active_terminal_project_key(cx) {
+                    self.terminal.update(cx, |terminal, _cx| {
+                        terminal.highlight_project_task_edge(&key, false);
+                    });
+                }
                 cx.notify();
                 true
             }
             "end" => {
-                self.highlight_terminal_project_task_edge(true, cx);
+                if let Some(key) = self.active_terminal_project_key(cx) {
+                    self.terminal.update(cx, |terminal, _cx| {
+                        terminal.highlight_project_task_edge(&key, true);
+                    });
+                }
                 cx.notify();
                 true
             }
             "enter" => {
-                let tasks = self.visible_terminal_project_tasks(cx);
                 let task = self
-                    .terminal_project_panel
-                    .highlighted_task_id
-                    .as_deref()
-                    .and_then(|id| tasks.into_iter().find(|task| task.id() == id));
+                    .active_terminal_project_key(cx)
+                    .and_then(|key| self.terminal.read(cx).selected_project_task(&key));
                 if let Some(task) = task {
                     self.run_terminal_project_task(task, cx);
                     return true;
@@ -196,7 +177,10 @@ impl WorkspaceApp {
         }
     }
 
-    fn active_terminal_project_key(&self, cx: &mut Context<Self>) -> Option<ProjectProbeKey> {
+    pub(in crate::workspace) fn active_terminal_project_key(
+        &self,
+        cx: &mut Context<Self>,
+    ) -> Option<ProjectProbeKey> {
         if !self.terminal_project_tasks_enabled() {
             return None;
         }
@@ -212,45 +196,5 @@ impl WorkspaceApp {
             }
         };
         ProjectProbeKey::new(scope, snapshot.path().to_string())
-    }
-
-    pub(in crate::workspace) fn ensure_terminal_project_task_highlight(
-        &mut self,
-        cx: &mut Context<Self>,
-    ) {
-        let tasks = self.visible_terminal_project_tasks(cx);
-        if tasks.iter().any(|task| {
-            Some(task.id()) == self.terminal_project_panel.highlighted_task_id.as_deref()
-        }) {
-            return;
-        }
-        self.terminal_project_panel.highlighted_task_id =
-            tasks.first().map(|task| task.id().to_string());
-    }
-
-    fn step_terminal_project_task_highlight(&mut self, forward: bool, cx: &mut Context<Self>) {
-        let tasks = self.visible_terminal_project_tasks(cx);
-        if tasks.is_empty() {
-            self.terminal_project_panel.highlighted_task_id = None;
-            return;
-        }
-        let current = self
-            .terminal_project_panel
-            .highlighted_task_id
-            .as_deref()
-            .and_then(|id| tasks.iter().position(|task| task.id() == id));
-        let next = match (current, forward) {
-            (Some(index), true) => (index + 1).min(tasks.len() - 1),
-            (Some(index), false) => index.saturating_sub(1),
-            (None, true) => 0,
-            (None, false) => tasks.len() - 1,
-        };
-        self.terminal_project_panel.highlighted_task_id = Some(tasks[next].id().to_string());
-    }
-
-    fn highlight_terminal_project_task_edge(&mut self, last: bool, cx: &mut Context<Self>) {
-        let tasks = self.visible_terminal_project_tasks(cx);
-        self.terminal_project_panel.highlighted_task_id =
-            if last { tasks.last() } else { tasks.first() }.map(|task| task.id().to_string());
     }
 }

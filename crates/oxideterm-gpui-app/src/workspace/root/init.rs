@@ -289,7 +289,6 @@ impl WorkspaceApp {
             terminal_git_action_tx,
             terminal_git_action_rx,
             terminal_git_branch_picker: terminal_git::TerminalGitBranchPickerState::default(),
-            terminal_project_panel: terminal_project::TerminalProjectPanelState::default(),
             detached_local_terminals: HashMap::new(),
             detached_local_terminal_order: Vec::new(),
             serial_terminal_configs: HashMap::new(),

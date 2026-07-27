@@ -681,7 +681,7 @@ impl WorkspaceApp {
             return Some(WorkspaceImeTarget::TerminalGitBranchSearch);
         }
 
-        if self.terminal_project_panel.open {
+        if self.terminal.read(cx).project_panel_open() {
             return Some(WorkspaceImeTarget::TerminalProjectSearch);
         }
 
@@ -1435,10 +1435,12 @@ impl WorkspaceApp {
                 .terminal_git_branch_picker
                 .open
                 .then(|| self.terminal_git_branch_picker.query.clone()),
-            WorkspaceImeTarget::TerminalProjectSearch => self
-                .terminal_project_panel
-                .open
-                .then(|| self.terminal_project_panel.query.clone()),
+            WorkspaceImeTarget::TerminalProjectSearch => {
+                let terminal = self.terminal.read(cx);
+                terminal
+                    .project_panel_open()
+                    .then(|| terminal.project_query().to_string())
+            }
             WorkspaceImeTarget::TerminalCastSearch => self
                 .terminal_cast_player
                 .as_ref()
@@ -2251,14 +2253,12 @@ impl WorkspaceApp {
                 }
             }
             WorkspaceImeTarget::TerminalProjectSearch => {
-                if self.terminal_project_panel.open {
-                    replace_utf16(
-                        &mut self.terminal_project_panel.query,
-                        replacement_range,
-                        text,
-                    );
-                    self.terminal_project_panel.highlighted_task_id = None;
-                    self.ensure_terminal_project_task_highlight(cx);
+                if self.terminal.read(cx).project_panel_open()
+                    && let Some(key) = self.active_terminal_project_key(cx)
+                    && self.terminal.update(cx, |terminal, _cx| {
+                        terminal.replace_project_query(&key, replacement_range, text)
+                    })
+                {
                     self.new_connection_caret_visible = true;
                     cx.notify();
                 }

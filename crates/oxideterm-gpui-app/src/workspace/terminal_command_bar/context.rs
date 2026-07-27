@@ -837,7 +837,7 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
-        let active = self.terminal_project_panel.open;
+        let active = self.terminal.read(cx).project_panel_open();
         let workspace = cx.entity();
         let label = snapshot.display_label();
         let task_count = snapshot.tasks().len();
@@ -893,8 +893,8 @@ impl WorkspaceApp {
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(|this, _event, _window, cx| {
-                    if this.terminal_project_panel.open {
-                        this.close_terminal_project_panel();
+                    if this.terminal.read(cx).project_panel_open() {
+                        this.close_terminal_project_panel(cx);
                         cx.notify();
                     } else {
                         this.open_terminal_project_panel(cx);
@@ -952,7 +952,10 @@ impl WorkspaceApp {
             panel = panel.child(
                 self.render_terminal_project_header(&snapshot, git_root_disagreement.as_deref()),
             );
-            let tasks = self.visible_terminal_project_tasks(cx);
+            let tasks = self
+                .active_terminal_project_key(cx)
+                .map(|key| self.terminal.read(cx).visible_project_tasks(&key))
+                .unwrap_or_default();
             if tasks.is_empty() {
                 self.render_terminal_project_message(
                     LucideIcon::Search,
@@ -1026,19 +1029,22 @@ impl WorkspaceApp {
     pub(super) fn render_terminal_project_search(&self, cx: &mut Context<Self>) -> AnyElement {
         let target = WorkspaceImeTarget::TerminalProjectSearch;
         let workspace = cx.entity();
+        let selected_range = self.ime_selected_range_for_target(target, cx);
+        let marked_text = self.marked_text_for_target(target, cx);
+        let terminal = self.terminal.read(cx);
         text_input_anchor_probe(
             target.anchor_id(),
             text_input(
                 &self.tokens,
                 TextInputView {
-                    value: &self.terminal_project_panel.query,
+                    value: terminal.project_query(),
                     placeholder: self.i18n.t("terminal.project.search_tasks"),
-                    focused: self.terminal_project_panel.open,
+                    focused: terminal.project_panel_open(),
                     caret_visible: self.new_connection_caret_visible,
                     secret: false,
                     selected_all: false,
-                    selected_range: self.ime_selected_range_for_target(target, cx),
-                    marked_text: self.marked_text_for_target(target, cx),
+                    selected_range,
+                    marked_text,
                 },
             )
             .h(px(32.0))
@@ -1117,7 +1123,7 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
-        let active = self.terminal_project_panel.highlighted_task_id.as_deref() == Some(task.id());
+        let active = self.terminal.read(cx).project_task_highlighted(task.id());
         let task_id = task.id().to_string();
         let task_label = task.label().to_string();
         let task_command = task.command().to_string();
@@ -1167,10 +1173,9 @@ impl WorkspaceApp {
         .on_mouse_move(cx.listener({
             let task_id = task_id;
             move |this, _event: &MouseMoveEvent, _window, cx| {
-                if this.terminal_project_panel.highlighted_task_id.as_deref()
-                    != Some(task_id.as_str())
-                {
-                    this.terminal_project_panel.highlighted_task_id = Some(task_id.clone());
+                if this.terminal.update(cx, |terminal, _cx| {
+                    terminal.set_project_task_highlight(&task_id)
+                }) {
                     cx.notify();
                 }
             }
@@ -1178,7 +1183,9 @@ impl WorkspaceApp {
         .on_mouse_down(
             MouseButton::Left,
             cx.listener(move |this, event: &MouseDownEvent, _window, cx| {
-                this.terminal_project_panel.highlighted_task_id = Some(row_task.id().to_string());
+                this.terminal.update(cx, |terminal, _cx| {
+                    terminal.set_project_task_highlight(row_task.id());
+                });
                 if event.click_count >= 2 {
                     this.run_terminal_project_task(row_task.clone(), cx);
                 } else {

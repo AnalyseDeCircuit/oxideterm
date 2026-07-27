@@ -662,7 +662,7 @@ impl WorkspaceApp {
             || (anchor.id == SelectAnchorId::TerminalGitBranchMenu
                 && self.terminal_git_branch_picker.open)
             || (anchor.id == SelectAnchorId::TerminalProjectMenu
-                && self.terminal_project_panel.open)
+                && self.terminal.read(cx).project_panel_open())
             || (anchor.id == SelectAnchorId::SessionManagerViewMode
                 && self.session_manager.view_mode_menu_open)
             || (anchor.id == SelectAnchorId::SessionManagerSort

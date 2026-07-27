@@ -615,7 +615,7 @@ impl WorkspaceApp {
             return true;
         }
 
-        if self.close_terminal_project_panel() {
+        if self.close_terminal_project_panel(cx) {
             cx.notify();
             return true;
         }
@@ -669,7 +669,7 @@ impl WorkspaceApp {
             self.close_terminal_quick_commands_popover();
             self.close_terminal_cwd_picker();
             self.close_terminal_git_branch_picker();
-            self.close_terminal_project_panel();
+            self.close_terminal_project_panel(cx);
             self.terminal_command_suggestions_open = false;
             self.terminal_command_suggestion_highlighted = None;
             self.terminal.update(cx, |terminal, _cx| {

@@ -2,14 +2,16 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use super::*;
+use oxideterm_editor_core::utf16::replace_utf16;
 use oxideterm_environment::{
     GitProbeError, GitProbeKey, GitProbeOutcome, GitProbeScope, GitRepositorySnapshot,
     GitStatusStore, ProjectProbeError, ProjectProbeKey, ProjectProbeOutcome, ProjectProbeScope,
-    ProjectSnapshot, ProjectStatusStore, parse_remote_shell_project_probe_output,
-    parse_shell_probe_output, probe_local_project, remote_shell_probe_command,
-    remote_shell_project_probe_command,
+    ProjectSnapshot, ProjectStatusStore, ProjectTask, current_directory_cd_command,
+    parse_remote_shell_project_probe_output, parse_shell_probe_output, probe_local_project,
+    remote_shell_probe_command, remote_shell_project_probe_command,
 };
 use std::{
+    ops::Range,
     sync::{Arc, Mutex},
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
@@ -70,6 +72,7 @@ pub(in crate::workspace) struct WorkspaceTerminalEntity {
     project_rx: std::sync::mpsc::Receiver<terminal_project::TerminalProjectDelivery>,
     project_store: ProjectStatusStore,
     project_tasks_enabled: bool,
+    project_panel: terminal_project::TerminalProjectPanelState,
     broadcast: TerminalBroadcastState,
     node_router: NodeRouter,
     runtime: Arc<tokio::runtime::Runtime>,
@@ -129,6 +132,7 @@ impl WorkspaceTerminalEntity {
             project_rx,
             project_store: ProjectStatusStore::default(),
             project_tasks_enabled: false,
+            project_panel: terminal_project::TerminalProjectPanelState::default(),
             broadcast: TerminalBroadcastState::default(),
             node_router,
             runtime,
@@ -227,6 +231,143 @@ impl WorkspaceTerminalEntity {
         self.project_store.snapshot(key).cloned()
     }
 
+    pub(in crate::workspace) fn project_panel_open(&self) -> bool {
+        self.project_panel.open
+    }
+
+    pub(in crate::workspace) fn project_query(&self) -> &str {
+        &self.project_panel.query
+    }
+
+    pub(in crate::workspace) fn project_task_highlighted(&self, task_id: &str) -> bool {
+        self.project_panel.highlighted_task_id.as_deref() == Some(task_id)
+    }
+
+    pub(in crate::workspace) fn open_project_panel(&mut self, key: &ProjectProbeKey) {
+        self.project_panel.open = true;
+        self.ensure_project_task_highlight(key);
+    }
+
+    pub(in crate::workspace) fn close_project_panel(&mut self) -> bool {
+        let was_open = self.project_panel.open;
+        if was_open {
+            self.project_panel.close();
+        }
+        was_open
+    }
+
+    pub(in crate::workspace) fn visible_project_tasks(
+        &self,
+        key: &ProjectProbeKey,
+    ) -> Vec<ProjectTask> {
+        let Some(snapshot) = self.project_store.snapshot(key) else {
+            return Vec::new();
+        };
+        let query = self.project_panel.query.trim().to_ascii_lowercase();
+        snapshot
+            .tasks()
+            .into_iter()
+            .filter(|task| {
+                query.is_empty()
+                    || task.label().to_ascii_lowercase().contains(&query)
+                    || task.command().to_ascii_lowercase().contains(&query)
+                    || task
+                        .source()
+                        .display_name()
+                        .to_ascii_lowercase()
+                        .contains(&query)
+            })
+            .collect()
+    }
+
+    pub(in crate::workspace) fn replace_project_query(
+        &mut self,
+        key: &ProjectProbeKey,
+        replacement_range: Option<Range<usize>>,
+        text: &str,
+    ) -> bool {
+        if !self.project_panel.open {
+            return false;
+        }
+        replace_utf16(&mut self.project_panel.query, replacement_range, text);
+        self.project_panel.highlighted_task_id = None;
+        self.ensure_project_task_highlight(key);
+        true
+    }
+
+    pub(in crate::workspace) fn ensure_project_task_highlight(&mut self, key: &ProjectProbeKey) {
+        let tasks = self.visible_project_tasks(key);
+        if tasks
+            .iter()
+            .any(|task| Some(task.id()) == self.project_panel.highlighted_task_id.as_deref())
+        {
+            return;
+        }
+        self.project_panel.highlighted_task_id = tasks.first().map(|task| task.id().to_string());
+    }
+
+    pub(in crate::workspace) fn step_project_task_highlight(
+        &mut self,
+        key: &ProjectProbeKey,
+        forward: bool,
+    ) {
+        let tasks = self.visible_project_tasks(key);
+        if tasks.is_empty() {
+            self.project_panel.highlighted_task_id = None;
+            return;
+        }
+        let current = self
+            .project_panel
+            .highlighted_task_id
+            .as_deref()
+            .and_then(|id| tasks.iter().position(|task| task.id() == id));
+        let next = match (current, forward) {
+            (Some(index), true) => (index + 1).min(tasks.len() - 1),
+            (Some(index), false) => index.saturating_sub(1),
+            (None, true) => 0,
+            (None, false) => tasks.len() - 1,
+        };
+        self.project_panel.highlighted_task_id = Some(tasks[next].id().to_string());
+    }
+
+    pub(in crate::workspace) fn highlight_project_task_edge(
+        &mut self,
+        key: &ProjectProbeKey,
+        last: bool,
+    ) {
+        let tasks = self.visible_project_tasks(key);
+        self.project_panel.highlighted_task_id =
+            if last { tasks.last() } else { tasks.first() }.map(|task| task.id().to_string());
+    }
+
+    pub(in crate::workspace) fn set_project_task_highlight(&mut self, task_id: &str) -> bool {
+        if self.project_task_highlighted(task_id) {
+            return false;
+        }
+        self.project_panel.highlighted_task_id = Some(task_id.to_string());
+        true
+    }
+
+    pub(in crate::workspace) fn selected_project_task(
+        &self,
+        key: &ProjectProbeKey,
+    ) -> Option<ProjectTask> {
+        let highlighted_task_id = self.project_panel.highlighted_task_id.as_deref()?;
+        self.visible_project_tasks(key)
+            .into_iter()
+            .find(|task| task.id() == highlighted_task_id)
+    }
+
+    pub(in crate::workspace) fn project_task_command(
+        &self,
+        key: &ProjectProbeKey,
+        task: &ProjectTask,
+    ) -> Option<String> {
+        let snapshot = self.project_store.snapshot(key)?;
+        let cd_command = current_directory_cd_command(snapshot.root_path())?;
+        Some(format!("{cd_command} && {}", task.command()))
+    }
+
     pub(in crate::workspace) fn git_snapshot(
         &self,
         key: &GitProbeKey,
@@ -272,6 +413,7 @@ impl WorkspaceTerminalEntity {
             // Disabling invalidates in-flight generations so late completions
             // cannot leave a permanently loading cache entry.
             self.project_store.retain_keys(|_| false);
+            self.project_panel.close();
             cx.emit(WorkspaceTerminalEvent::ProjectMetadataChanged);
         }
     }
@@ -510,6 +652,7 @@ fn terminal_project_now_ms() -> u64 {
 mod tests {
     use super::*;
     use gpui::TestAppContext;
+    use oxideterm_environment::{ProjectFacet, ProjectFacetKind, ProjectTaskGroup};
 
     struct TerminalEventRecorder {
         notices: Vec<TerminalNoticeBatchRequest>,
@@ -593,6 +736,91 @@ mod tests {
         terminal.read_with(cx, |terminal, _cx| {
             assert!(!terminal.broadcast_enabled());
             assert!(terminal.broadcast_targets_empty());
+        });
+    }
+
+    #[gpui::test]
+    fn project_panel_state_actions_and_filtering_are_entity_owned(cx: &mut TestAppContext) {
+        let terminal = new_terminal_entity(cx);
+        let key =
+            ProjectProbeKey::new(ProjectProbeScope::Local, "/repo").expect("project probe key");
+        let develop_task = ProjectTask::new(
+            ProjectFacetKind::Cargo,
+            ProjectTaskGroup::Develop,
+            "cargo-dev",
+            "Run development server",
+            "cargo run",
+        )
+        .expect("development task");
+        let test_task = ProjectTask::new(
+            ProjectFacetKind::Cargo,
+            ProjectTaskGroup::Test,
+            "cargo-test",
+            "Unit tests",
+            "cargo test",
+        )
+        .expect("test task");
+        let snapshot = ProjectSnapshot::new(
+            "/repo",
+            vec![
+                ProjectFacet::new(
+                    ProjectFacetKind::Cargo,
+                    "/repo",
+                    "/repo/Cargo.toml",
+                    vec![develop_task, test_task],
+                )
+                .expect("project facet"),
+            ],
+        )
+        .expect("project snapshot");
+
+        terminal.update(cx, |terminal, cx| {
+            terminal.set_project_tasks_enabled(true, cx);
+            let generation = terminal
+                .project_store
+                .mark_loading(key.clone(), terminal_project_now_ms());
+            assert!(terminal.project_store.finish_probe(
+                &key,
+                generation,
+                ProjectProbeOutcome::Ready(snapshot),
+                terminal_project_now_ms(),
+            ));
+            terminal.open_project_panel(&key);
+        });
+        terminal.read_with(cx, |terminal, _cx| {
+            assert!(terminal.project_panel_open());
+            assert!(terminal.project_task_highlighted("cargo-dev"));
+        });
+
+        terminal.update(cx, |terminal, _cx| {
+            assert!(terminal.replace_project_query(&key, None, "unit"));
+        });
+        terminal.read_with(cx, |terminal, _cx| {
+            let tasks = terminal.visible_project_tasks(&key);
+            assert_eq!(tasks.len(), 1);
+            assert_eq!(tasks[0].id(), "cargo-test");
+            assert!(terminal.project_task_highlighted("cargo-test"));
+            assert_eq!(
+                terminal.project_task_command(&key, &tasks[0]),
+                current_directory_cd_command("/repo")
+                    .map(|change_directory| format!("{change_directory} && cargo test"))
+            );
+        });
+
+        terminal.update(cx, |terminal, _cx| {
+            assert!(terminal.replace_project_query(&key, Some(0..4), ""));
+            terminal.step_project_task_highlight(&key, true);
+        });
+        terminal.read_with(cx, |terminal, _cx| {
+            assert!(terminal.project_task_highlighted("cargo-test"));
+        });
+
+        terminal.update(cx, |terminal, cx| {
+            terminal.set_project_tasks_enabled(false, cx);
+        });
+        terminal.read_with(cx, |terminal, _cx| {
+            assert!(!terminal.project_panel_open());
+            assert!(terminal.project_snapshot(&key).is_none());
         });
     }
 

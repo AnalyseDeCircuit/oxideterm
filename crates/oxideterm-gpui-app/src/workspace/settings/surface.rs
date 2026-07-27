@@ -1157,7 +1157,7 @@ impl WorkspaceApp {
             .apply_settings(sftp_runtime_settings_from_settings(&settings));
         if !settings.terminal.command_bar.enabled || !settings.terminal.command_bar.project_tasks {
             // Close stale project task UI when the owning awareness feature is disabled.
-            self.close_terminal_project_panel();
+            self.close_terminal_project_panel(cx);
         }
         if !settings.terminal.command_bar.enabled
             || !settings.terminal.command_bar.current_directory_awareness

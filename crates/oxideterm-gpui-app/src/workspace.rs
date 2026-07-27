@@ -750,7 +750,6 @@ pub(crate) struct WorkspaceApp {
     terminal_git_action_tx: delivery::ActiveDeliverySender<terminal_git::TerminalGitDelivery>,
     terminal_git_action_rx: std::sync::mpsc::Receiver<terminal_git::TerminalGitDelivery>,
     terminal_git_branch_picker: terminal_git::TerminalGitBranchPickerState,
-    terminal_project_panel: terminal_project::TerminalProjectPanelState,
     detached_local_terminals: HashMap<TerminalSessionId, DetachedLocalTerminalSession>,
     detached_local_terminal_order: Vec<TerminalSessionId>,
     serial_terminal_configs: HashMap<TerminalSessionId, SerialSessionConfig>,

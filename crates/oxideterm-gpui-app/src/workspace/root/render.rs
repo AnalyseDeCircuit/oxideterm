@@ -1686,7 +1686,11 @@ impl WorkspaceApp {
                 cx.notify();
             }
             WorkspaceTerminalEvent::ProjectMetadataChanged => {
-                self.ensure_terminal_project_task_highlight(cx);
+                if let Some(key) = self.active_terminal_project_key(cx) {
+                    self.terminal.update(cx, |terminal, _cx| {
+                        terminal.ensure_project_task_highlight(&key);
+                    });
+                }
                 cx.notify();
             }
         }

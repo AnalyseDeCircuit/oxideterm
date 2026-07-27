@@ -251,7 +251,7 @@ impl WorkspaceApp {
                 |bar| bar.child(self.render_terminal_cwd_picker(cx)),
             )
             .when(
-                project_tasks_enabled && self.terminal_project_panel.open,
+                project_tasks_enabled && self.terminal.read(cx).project_panel_open(),
                 |bar| bar.child(self.render_terminal_project_panel(cx)),
             )
             .child(
@@ -307,7 +307,7 @@ impl WorkspaceApp {
                                             this.terminal_command_suggestion_highlighted = None;
                                             this.close_terminal_quick_commands_popover();
                                             this.close_terminal_cwd_picker();
-                                            this.close_terminal_project_panel();
+                                            this.close_terminal_project_panel(cx);
                                         }
                                         this.clear_workspace_tooltip(input_toggle_tooltip_id, cx);
                                         cx.stop_propagation();
