@@ -19,6 +19,28 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) {
         match event {
+            ai_state::AiWorkspaceEvent::AcpAgentProbeDeliveryReady => {
+                let intents = self
+                    .ai_entity
+                    .update(cx, |ai, _cx| ai.take_acp_agent_probe_intents());
+                self.edit_settings(
+                    move |settings| {
+                        for intent in intents {
+                            if let Some(agent) = settings
+                                .ai
+                                .acp_agents
+                                .iter_mut()
+                                .find(|agent| agent.id == intent.agent_id)
+                            {
+                                agent.auth.status = intent.auth_status;
+                                agent.status.state = intent.runtime_state;
+                                agent.status.last_error_kind = intent.last_error_kind;
+                            }
+                        }
+                    },
+                    cx,
+                );
+            }
             ai_state::AiWorkspaceEvent::ModelRefreshDeliveryReady => {
                 let intents = self
                     .ai_entity

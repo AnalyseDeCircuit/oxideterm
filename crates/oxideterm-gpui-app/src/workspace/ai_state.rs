@@ -1,9 +1,17 @@
 use super::*;
 
 pub(in crate::workspace) enum AiWorkspaceEvent {
+    AcpAgentProbeDeliveryReady,
     ModelRefreshDeliveryReady,
     ProviderKeyStatusChanged,
     SelectorProviderStatusChanged,
+}
+
+pub(in crate::workspace) struct AiAcpAgentProbeIntent {
+    pub(in crate::workspace) agent_id: String,
+    pub(in crate::workspace) runtime_state: oxideterm_settings::AcpAgentRuntimeState,
+    pub(in crate::workspace) auth_status: oxideterm_settings::AcpAgentAuthStatus,
+    pub(in crate::workspace) last_error_kind: Option<String>,
 }
 
 pub(in crate::workspace) enum AiModelRefreshIntent {
@@ -36,6 +44,17 @@ struct AiModelSelectorProbeDelivery {
     online: bool,
 }
 
+struct AiAcpAgentProbeDelivery {
+    agent_id: String,
+    result: AiAcpAgentProbeResult,
+}
+
+struct AiAcpAgentProbeResult {
+    runtime_state: oxideterm_settings::AcpAgentRuntimeState,
+    auth_status: oxideterm_settings::AcpAgentAuthStatus,
+    last_error_kind: Option<String>,
+}
+
 /// Owns AI worker delivery slices as they move out of the workspace root.
 pub(in crate::workspace) struct AiWorkspaceEntity {
     task_runtime: Arc<tokio::runtime::Runtime>,
@@ -60,6 +79,10 @@ pub(in crate::workspace) struct AiWorkspaceEntity {
     selector_probe_rx: std::sync::mpsc::Receiver<AiModelSelectorProbeDelivery>,
     selector_probe_pending: usize,
     next_selector_probe_generation: u64,
+    acp_agent_probe_pending: HashSet<String>,
+    acp_agent_probe_tx: crate::workspace::delivery::ActiveDeliverySender<AiAcpAgentProbeDelivery>,
+    acp_agent_probe_rx: std::sync::mpsc::Receiver<AiAcpAgentProbeDelivery>,
+    acp_agent_probe_intents: VecDeque<AiAcpAgentProbeIntent>,
 }
 
 impl AiWorkspaceEntity {
@@ -73,6 +96,8 @@ impl AiWorkspaceEntity {
         let (provider_key_status_tx, provider_key_status_rx) =
             crate::workspace::delivery::ActiveDeliverySender::channel();
         let (selector_probe_tx, selector_probe_rx) =
+            crate::workspace::delivery::ActiveDeliverySender::channel();
+        let (acp_agent_probe_tx, acp_agent_probe_rx) =
             crate::workspace::delivery::ActiveDeliverySender::channel();
         let entity = Self {
             task_runtime,
@@ -94,10 +119,15 @@ impl AiWorkspaceEntity {
             selector_probe_rx,
             selector_probe_pending: 0,
             next_selector_probe_generation: 0,
+            acp_agent_probe_pending: HashSet::new(),
+            acp_agent_probe_tx,
+            acp_agent_probe_rx,
+            acp_agent_probe_intents: VecDeque::new(),
         };
         entity.schedule_model_refresh_delivery(cx);
         entity.schedule_provider_key_status_delivery(cx);
         entity.schedule_selector_probe_delivery(cx);
+        entity.schedule_acp_agent_probe_delivery(cx);
         entity
     }
 
@@ -272,6 +302,83 @@ impl AiWorkspaceEntity {
                 online,
             });
         });
+    }
+
+    pub(in crate::workspace) fn acp_agent_probe_is_pending(&self, agent_id: &str) -> bool {
+        self.acp_agent_probe_pending.contains(agent_id)
+    }
+
+    pub(in crate::workspace) fn request_acp_agent_probe(
+        &mut self,
+        agent: oxideterm_settings::AcpAgentConfig,
+    ) -> bool {
+        if self.acp_agent_probe_pending.contains(&agent.id) {
+            return false;
+        }
+        let agent_id = agent.id.clone();
+        let capability_policy = oxideterm_ai::AcpHostCapabilityPolicy {
+            fs_read_text_file: agent.capability_policy.fs_read_text_file,
+            fs_write_text_file: agent.capability_policy.fs_write_text_file,
+            terminal: agent.capability_policy.terminal,
+        };
+        // Move args and env into the zeroizing launch config. They may contain
+        // local agent tokens and must not be cloned for worker convenience.
+        let launch_config = oxideterm_ai::AcpLaunchConfig {
+            id: agent.id,
+            display_name: agent.display_name,
+            command: agent.command,
+            args: agent.args,
+            env: agent.env,
+            cwd: agent.cwd.map(std::path::PathBuf::from),
+        };
+        self.acp_agent_probe_pending.insert(agent_id.clone());
+        let worker_tx = self.acp_agent_probe_tx.clone();
+        self.task_runtime.spawn(async move {
+            let result = match oxideterm_ai::build_acp_stdio_launcher(launch_config) {
+                Ok(launcher) => {
+                    if !oxideterm_ai::acp_launch_command_available(launcher.config())
+                        .unwrap_or(false)
+                    {
+                        ai_acp_probe_error_result("command_not_found")
+                    } else {
+                        match oxideterm_ai::initialize_acp_agent(
+                            launcher,
+                            env!("CARGO_PKG_VERSION").to_string(),
+                            capability_policy,
+                        )
+                        .await
+                        {
+                            Ok(response) => {
+                                let auth_required = !response.auth_methods.is_empty();
+                                AiAcpAgentProbeResult {
+                                    runtime_state: if auth_required {
+                                        oxideterm_settings::AcpAgentRuntimeState::AuthRequired
+                                    } else {
+                                        oxideterm_settings::AcpAgentRuntimeState::Ready
+                                    },
+                                    auth_status: if auth_required {
+                                        oxideterm_settings::AcpAgentAuthStatus::Required
+                                    } else {
+                                        oxideterm_settings::AcpAgentAuthStatus::NotRequired
+                                    },
+                                    last_error_kind: None,
+                                }
+                            }
+                            Err(_) => ai_acp_probe_error_result("initialize"),
+                        }
+                    }
+                }
+                Err(_) => ai_acp_probe_error_result("config"),
+            };
+            let _ = worker_tx.send(AiAcpAgentProbeDelivery { agent_id, result });
+        });
+        true
+    }
+
+    pub(in crate::workspace) fn take_acp_agent_probe_intents(
+        &mut self,
+    ) -> VecDeque<AiAcpAgentProbeIntent> {
+        std::mem::take(&mut self.acp_agent_probe_intents)
     }
 
     fn begin_model_refresh(&mut self, provider_id: &str) -> Option<u64> {
@@ -459,6 +566,67 @@ impl AiWorkspaceEntity {
         }
         drain.outcome.backlog_remaining
     }
+
+    fn schedule_acp_agent_probe_delivery(&self, cx: &mut Context<Self>) {
+        let delivery_wake = self.acp_agent_probe_tx.wake();
+        let release_wake = delivery_wake.clone();
+        cx.on_release(move |_, _| {
+            // The ACP child process owns its runtime lifetime independently.
+            release_wake.stop();
+        })
+        .detach();
+        cx.spawn(async move |entity, cx| {
+            loop {
+                delivery_wake.wait().await;
+                let should_drain = delivery_wake.take();
+                let stopped = delivery_wake.is_stopped();
+                if should_drain {
+                    let backlog_remaining = entity
+                        .update(cx, |entity, cx| entity.drain_acp_agent_probe_results(cx))
+                        .unwrap_or(false);
+                    if backlog_remaining {
+                        delivery_wake.mark();
+                    }
+                }
+                if stopped {
+                    break;
+                }
+            }
+        })
+        .detach();
+    }
+
+    fn drain_acp_agent_probe_results(&mut self, cx: &mut Context<Self>) -> bool {
+        let drain = crate::workspace::delivery::drain_channel(
+            &self.acp_agent_probe_rx,
+            crate::workspace::delivery::USER_ACTION_DELIVERY_BUDGET,
+        );
+        for delivery in drain.items {
+            self.acp_agent_probe_pending.remove(&delivery.agent_id);
+            self.acp_agent_probe_intents
+                .push_back(AiAcpAgentProbeIntent {
+                    agent_id: delivery.agent_id,
+                    runtime_state: delivery.result.runtime_state,
+                    auth_status: delivery.result.auth_status,
+                    last_error_kind: delivery.result.last_error_kind,
+                });
+        }
+        if !self.acp_agent_probe_intents.is_empty() {
+            cx.emit(AiWorkspaceEvent::AcpAgentProbeDeliveryReady);
+            cx.notify();
+        }
+        drain.outcome.backlog_remaining
+    }
+}
+
+fn ai_acp_probe_error_result(kind: &'static str) -> AiAcpAgentProbeResult {
+    // Only stable categories cross the worker boundary; process errors may
+    // include args, env values, or local authentication material.
+    AiAcpAgentProbeResult {
+        runtime_state: oxideterm_settings::AcpAgentRuntimeState::Error,
+        auth_status: oxideterm_settings::AcpAgentAuthStatus::Unknown,
+        last_error_kind: Some(kind.to_string()),
+    }
 }
 
 impl gpui::EventEmitter<AiWorkspaceEvent> for AiWorkspaceEntity {}
@@ -544,10 +712,6 @@ pub(super) struct AiRuntimeWorkspaceState {
     pub(super) agent_fs: NodeAgentIdeFileSystem,
     pub(super) mcp_registry: oxideterm_ai::McpRegistry,
     pub(super) acp_runtime_registry: oxideterm_ai::AcpRuntimeRegistry,
-    pub(super) acp_agent_probe_pending: HashSet<String>,
-    pub(super) acp_agent_probe_tx:
-        Option<crate::workspace::delivery::ActiveDeliverySender<AcpAgentProbeDelivery>>,
-    pub(super) acp_agent_probe_rx: Option<std::sync::mpsc::Receiver<AcpAgentProbeDelivery>>,
 }
 
 /// Owns provider/model settings and selector state not yet extracted into the AI Entity.
@@ -680,9 +844,6 @@ impl AiRuntimeWorkspaceState {
             agent_fs,
             mcp_registry,
             acp_runtime_registry: oxideterm_ai::AcpRuntimeRegistry::default(),
-            acp_agent_probe_pending: HashSet::new(),
-            acp_agent_probe_tx: None,
-            acp_agent_probe_rx: None,
         }
     }
 }
@@ -922,16 +1083,62 @@ mod entity_tests {
     }
 
     #[gpui::test]
+    fn acp_agent_probe_state_and_safe_intent_are_entity_owned(cx: &mut TestAppContext) {
+        let entity = cx.new(|cx| {
+            AiWorkspaceEntity::new(test_runtime(), oxideterm_ai::AiProviderKeyStore::new(), cx)
+        });
+        let worker_tx = entity.update(cx, |entity, _cx| {
+            entity.acp_agent_probe_pending.insert("agent-a".to_string());
+            entity.acp_agent_probe_tx.clone()
+        });
+        worker_tx
+            .send(AiAcpAgentProbeDelivery {
+                agent_id: "agent-a".to_string(),
+                result: AiAcpAgentProbeResult {
+                    runtime_state: oxideterm_settings::AcpAgentRuntimeState::AuthRequired,
+                    auth_status: oxideterm_settings::AcpAgentAuthStatus::Required,
+                    last_error_kind: None,
+                },
+            })
+            .unwrap();
+
+        cx.run_until_parked();
+
+        let intents = entity.update(cx, |entity, _cx| {
+            assert!(!entity.acp_agent_probe_is_pending("agent-a"));
+            entity.take_acp_agent_probe_intents()
+        });
+        assert_eq!(intents.len(), 1);
+        let intent = intents.front().expect("ACP probe intent");
+        assert_eq!(intent.agent_id, "agent-a");
+        assert_eq!(
+            intent.runtime_state,
+            oxideterm_settings::AcpAgentRuntimeState::AuthRequired
+        );
+        assert_eq!(
+            intent.auth_status,
+            oxideterm_settings::AcpAgentAuthStatus::Required
+        );
+        assert!(intent.last_error_kind.is_none());
+    }
+
+    #[gpui::test]
     fn entity_release_stops_all_entity_delivery_waiters(cx: &mut TestAppContext) {
         let entity = cx.new(|cx| {
             AiWorkspaceEntity::new(test_runtime(), oxideterm_ai::AiProviderKeyStore::new(), cx)
         });
-        let (model_refresh_wake, provider_key_status_wake, selector_probe_wake) = cx.read(|cx| {
+        let (
+            model_refresh_wake,
+            provider_key_status_wake,
+            selector_probe_wake,
+            acp_agent_probe_wake,
+        ) = cx.read(|cx| {
             let entity = entity.read(cx);
             (
                 entity.model_refresh_tx.wake(),
                 entity.provider_key_status_tx.wake(),
                 entity.selector_probe_tx.wake(),
+                entity.acp_agent_probe_tx.wake(),
             )
         });
 
@@ -943,5 +1150,6 @@ mod entity_tests {
         assert!(model_refresh_wake.is_stopped());
         assert!(provider_key_status_wake.is_stopped());
         assert!(selector_probe_wake.is_stopped());
+        assert!(acp_agent_probe_wake.is_stopped());
     }
 }

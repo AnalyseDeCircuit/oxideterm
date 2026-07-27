@@ -1220,19 +1220,6 @@ struct TerminalFontSizeHud {
 }
 
 #[derive(Clone, Debug)]
-struct AcpAgentProbeDelivery {
-    agent_id: String,
-    result: AcpAgentProbeResult,
-}
-
-#[derive(Clone, Debug)]
-struct AcpAgentProbeResult {
-    runtime_state: oxideterm_settings::AcpAgentRuntimeState,
-    auth_status: oxideterm_settings::AcpAgentAuthStatus,
-    last_error_kind: Option<String>,
-}
-
-#[derive(Clone, Debug)]
 struct AcpModelDiscoveryDelivery {
     conversation_id: String,
     agent_id: String,

@@ -37,6 +37,7 @@ use tokio::{
     io::AsyncReadExt as _,
     sync::{Mutex, mpsc, oneshot, watch},
 };
+use zeroize::{Zeroize, ZeroizeOnDrop};
 
 #[cfg(windows)]
 use async_process::windows::CommandExt as AsyncProcessCommandExt;
@@ -54,6 +55,29 @@ pub struct AcpLaunchConfig {
     pub args: Vec<String>,
     pub env: BTreeMap<String, String>,
     pub cwd: Option<PathBuf>,
+}
+
+impl Zeroize for AcpLaunchConfig {
+    fn zeroize(&mut self) {
+        // Commands, args, and env values may embed tokens for local agents.
+        self.id.zeroize();
+        self.display_name.zeroize();
+        self.command.zeroize();
+        self.args.zeroize();
+        for value in self.env.values_mut() {
+            value.zeroize();
+        }
+        self.env.clear();
+        self.cwd = None;
+    }
+}
+
+impl ZeroizeOnDrop for AcpLaunchConfig {}
+
+impl Drop for AcpLaunchConfig {
+    fn drop(&mut self) {
+        self.zeroize();
+    }
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -2034,6 +2058,20 @@ mod tests {
             env: BTreeMap::from([("API_KEY".to_string(), "env-secret".to_string())]),
             cwd: None,
         }
+    }
+
+    #[test]
+    fn launch_config_zeroizes_token_bearing_worker_fields() {
+        let mut config = launch_config();
+
+        config.zeroize();
+
+        assert!(config.id.is_empty());
+        assert!(config.display_name.is_empty());
+        assert!(config.command.is_empty());
+        assert!(config.args.is_empty());
+        assert!(config.env.is_empty());
+        assert!(config.cwd.is_none());
     }
 
     #[test]

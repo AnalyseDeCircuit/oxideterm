@@ -108,7 +108,10 @@ impl WorkspaceApp {
         agent: &oxideterm_settings::AcpAgentConfig,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let testing = self.ai.runtime.acp_agent_probe_pending.contains(&agent.id);
+        let testing = self
+            .ai_entity
+            .read(cx)
+            .acp_agent_probe_is_pending(&agent.id);
         div()
             .w_full()
             .min_w(px(0.0))
@@ -604,12 +607,14 @@ impl WorkspaceApp {
 
     pub(in crate::workspace) fn ai_acp_agent_test_button(
         &self,
-        index: usize,
+        _index: usize,
         agent: &oxideterm_settings::AcpAgentConfig,
         testing: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let agent_for_probe = agent.clone();
+        // Capture only the stable id. Cloning the whole config here would keep
+        // token-bearing args and env alive for the lifetime of the render tree.
+        let agent_id = agent.id.clone();
         let mut options = ToolbarButtonOptions::compact_text(
             ButtonVariant::Outline,
             ButtonRadius::Md,
@@ -634,7 +639,7 @@ impl WorkspaceApp {
             )),
             options,
             cx.listener(move |this, _event, _window, cx| {
-                this.test_ai_acp_agent(index, agent_for_probe.clone(), cx);
+                this.test_ai_acp_agent(agent_id.clone(), cx);
                 cx.stop_propagation();
             }),
         )
@@ -643,136 +648,33 @@ impl WorkspaceApp {
 
     pub(in crate::workspace) fn test_ai_acp_agent(
         &mut self,
-        _index: usize,
-        agent: oxideterm_settings::AcpAgentConfig,
+        agent_id: String,
         cx: &mut Context<Self>,
     ) {
-        if self.ai.runtime.acp_agent_probe_pending.contains(&agent.id) {
+        if self
+            .ai_entity
+            .read(cx)
+            .acp_agent_probe_is_pending(&agent_id)
+        {
             cx.notify();
             return;
         }
-
-        let agent_id = agent.id.clone();
-        self.ai
-            .runtime
-            .acp_agent_probe_pending
-            .insert(agent_id.clone());
-        if self.ai.runtime.acp_agent_probe_tx.is_none() {
-            let (tx, rx) = crate::workspace::delivery::ActiveDeliverySender::channel_with_wake(
-                self.ai.delivery_wake.clone(),
-            );
-            self.ai.runtime.acp_agent_probe_tx = Some(tx);
-            self.ai.runtime.acp_agent_probe_rx = Some(rx);
-        }
-        let Some(ui_tx) = self.ai.runtime.acp_agent_probe_tx.as_ref().cloned() else {
-            self.ai.runtime.acp_agent_probe_pending.remove(&agent_id);
+        let Some(agent) = self
+            .settings_store
+            .settings()
+            .ai
+            .acp_agents
+            .iter()
+            .find(|agent| agent.id == agent_id)
+            .cloned()
+        else {
             cx.notify();
             return;
         };
-
-        let launch_config = ai_acp_launch_config_from_settings(&agent);
-        let capability_policy = ai_acp_capability_policy_from_settings(&agent.capability_policy);
-        // ACP probe uses the shared backend runtime because launching a stdio
-        // agent needs Tokio process IO. The UI receives only redacted status.
-        self.forwarding_runtime.spawn(async move {
-            let result = match oxideterm_ai::build_acp_stdio_launcher(launch_config) {
-                Ok(launcher) => {
-                    if !oxideterm_ai::acp_launch_command_available(launcher.config())
-                        .unwrap_or(false)
-                    {
-                        ai_acp_probe_error_result("command_not_found")
-                    } else {
-                        let initialize_result = oxideterm_ai::initialize_acp_agent(
-                            launcher,
-                            env!("CARGO_PKG_VERSION").to_string(),
-                            capability_policy,
-                        )
-                        .await;
-                        match initialize_result {
-                            Ok(response) => {
-                                let auth_required = !response.auth_methods.is_empty();
-                                AcpAgentProbeResult {
-                                    runtime_state: if auth_required {
-                                        oxideterm_settings::AcpAgentRuntimeState::AuthRequired
-                                    } else {
-                                        oxideterm_settings::AcpAgentRuntimeState::Ready
-                                    },
-                                    auth_status: if auth_required {
-                                        oxideterm_settings::AcpAgentAuthStatus::Required
-                                    } else {
-                                        oxideterm_settings::AcpAgentAuthStatus::NotRequired
-                                    },
-                                    last_error_kind: None,
-                                }
-                            }
-                            Err(_) => ai_acp_probe_error_result("initialize"),
-                        }
-                    }
-                }
-                Err(_) => ai_acp_probe_error_result("config"),
-            };
-            let _ = ui_tx.send(AcpAgentProbeDelivery { agent_id, result });
+        self.ai_entity.update(cx, |ai, _cx| {
+            ai.request_acp_agent_probe(agent);
         });
         cx.notify();
-    }
-
-    pub(in crate::workspace) fn poll_ai_acp_agent_probe_results(
-        &mut self,
-        cx: &mut Context<Self>,
-    ) -> bool {
-        let Some(rx) = self.ai.runtime.acp_agent_probe_rx.take() else {
-            return false;
-        };
-        let mut keep_rx = true;
-        let mut source_exhausted = false;
-        let started_at = Instant::now();
-        let mut processed = 0usize;
-        while crate::workspace::delivery::USER_ACTION_DELIVERY_BUDGET
-            .allows_next(processed, started_at.elapsed())
-        {
-            match rx.try_recv() {
-                Ok(delivery) => {
-                    processed += 1;
-                    self.ai
-                        .runtime
-                        .acp_agent_probe_pending
-                        .remove(&delivery.agent_id);
-                    self.edit_settings(
-                        |settings| {
-                            if let Some(agent) = settings
-                                .ai
-                                .acp_agents
-                                .iter_mut()
-                                .find(|agent| agent.id == delivery.agent_id)
-                            {
-                                agent.auth.status = delivery.result.auth_status.clone();
-                                agent.status.state = delivery.result.runtime_state.clone();
-                                agent.status.last_error_kind =
-                                    delivery.result.last_error_kind.clone();
-                            }
-                        },
-                        cx,
-                    );
-                }
-                Err(std::sync::mpsc::TryRecvError::Empty) => {
-                    source_exhausted = true;
-                    break;
-                }
-                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
-                    source_exhausted = true;
-                    keep_rx = false;
-                    self.ai.runtime.acp_agent_probe_tx = None;
-                    self.ai.runtime.acp_agent_probe_pending.clear();
-                    break;
-                }
-            }
-        }
-        if keep_rx && !self.ai.runtime.acp_agent_probe_pending.is_empty() {
-            self.ai.runtime.acp_agent_probe_rx = Some(rx);
-        } else if self.ai.runtime.acp_agent_probe_pending.is_empty() {
-            self.ai.runtime.acp_agent_probe_tx = None;
-        }
-        keep_rx && !self.ai.runtime.acp_agent_probe_pending.is_empty() && !source_exhausted
     }
 
     pub(in crate::workspace) fn ai_acp_agent_capabilities(
@@ -1917,38 +1819,5 @@ pub(in crate::workspace) fn acp_agent_error_kind_key(kind: &str) -> &'static str
         "config" => "settings_view.ai.acp_agent_error_config",
         "initialize" => "settings_view.ai.acp_agent_error_initialize",
         _ => "settings_view.ai.acp_agent_error_unknown",
-    }
-}
-
-pub(in crate::workspace) fn ai_acp_launch_config_from_settings(
-    agent: &oxideterm_settings::AcpAgentConfig,
-) -> oxideterm_ai::AcpLaunchConfig {
-    oxideterm_ai::AcpLaunchConfig {
-        id: agent.id.clone(),
-        display_name: agent.display_name.clone(),
-        command: agent.command.clone(),
-        args: agent.args.clone(),
-        env: agent.env.clone(),
-        cwd: agent.cwd.as_ref().map(std::path::PathBuf::from),
-    }
-}
-
-pub(in crate::workspace) fn ai_acp_capability_policy_from_settings(
-    policy: &oxideterm_settings::AcpAgentCapabilityPolicy,
-) -> oxideterm_ai::AcpHostCapabilityPolicy {
-    oxideterm_ai::AcpHostCapabilityPolicy {
-        fs_read_text_file: policy.fs_read_text_file,
-        fs_write_text_file: policy.fs_write_text_file,
-        terminal: policy.terminal,
-    }
-}
-
-pub(in crate::workspace) fn ai_acp_probe_error_result(kind: &'static str) -> AcpAgentProbeResult {
-    // Probe failures store only stable categories. Raw process errors can
-    // contain command args, env values, or auth material from local agents.
-    AcpAgentProbeResult {
-        runtime_state: oxideterm_settings::AcpAgentRuntimeState::Error,
-        auth_status: oxideterm_settings::AcpAgentAuthStatus::Unknown,
-        last_error_kind: Some(kind.to_string()),
     }
 }
