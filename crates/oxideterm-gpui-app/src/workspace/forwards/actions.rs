@@ -5,8 +5,8 @@ use super::{
     FORWARDS_PORT_SCAN_INTERVAL, FORWARDS_STATS_REFRESH_INTERVAL, ForwardEvent, ForwardInput,
     ForwardRule, ForwardStatus, ForwardType, ForwardUpdate, ForwardingDeliveryIntent,
     ForwardingManager, ForwardingRegistry, ForwardingWorkerResult, ForwardingWorkspaceEvent,
-    Instant, KeyDownEvent, NodeId, NodeReadiness, NodeRouter, PortDetectionSnapshot, TabId,
-    TerminalNotice, TerminalNoticeVariant, WorkspaceApp, thread,
+    KeyDownEvent, NodeId, NodeReadiness, NodeRouter, PortDetectionSnapshot, TabId, TerminalNotice,
+    TerminalNoticeVariant, WorkspaceApp, thread,
 };
 impl WorkspaceApp {
     pub(super) fn submit_forward_create(
@@ -15,34 +15,49 @@ impl WorkspaceApp {
         node_id: NodeId,
         cx: &mut Context<Self>,
     ) {
-        let forward_type = self.forwarding_view.forward_type;
-        let bind_port_value = self.forwarding_view.bind_port.clone();
-        let target_port_value = self.forwarding_view.target_port.clone();
+        let (
+            forward_type,
+            bind_address,
+            bind_port_value,
+            target_host,
+            target_port_value,
+            skip_health_check,
+        ) = {
+            let view = self.forwarding.read(cx).view();
+            (
+                view.forward_type,
+                view.bind_address.clone(),
+                view.bind_port.clone(),
+                view.target_host.clone(),
+                view.target_port.clone(),
+                view.skip_health_check,
+            )
+        };
         let Some((bind_port, target_port)) =
-            self.validate_forward_form(forward_type, &bind_port_value, &target_port_value)
+            self.validate_forward_form(forward_type, &bind_port_value, &target_port_value, cx)
         else {
             cx.notify();
             return;
         };
         let rule = match forward_type {
             ForwardType::Local => ForwardRule::local(
-                self.forwarding_view.bind_address.clone(),
+                bind_address.clone(),
                 bind_port,
-                self.forwarding_view.target_host.clone(),
+                target_host.clone(),
                 target_port.unwrap_or(0),
             ),
             ForwardType::Remote => ForwardRule::remote(
-                self.forwarding_view.bind_address.clone(),
+                bind_address.clone(),
                 bind_port,
-                self.forwarding_view.target_host.clone(),
+                target_host,
                 target_port.unwrap_or(0),
             ),
             ForwardType::Dynamic => ForwardRule {
                 target_host: "0.0.0.0".to_string(),
-                ..ForwardRule::dynamic(self.forwarding_view.bind_address.clone(), bind_port)
+                ..ForwardRule::dynamic(bind_address, bind_port)
             },
         };
-        let check_health = !self.forwarding_view.skip_health_check;
+        let check_health = !skip_health_check;
         let persist = self.forward_persist_context_for_node(&node_id);
         let registry = self.forwarding_registry.clone();
         self.start_forward_operation(
@@ -124,9 +139,6 @@ impl WorkspaceApp {
     }
 
     pub(super) fn dismiss_detected_port(&mut self, port: u16, cx: &mut Context<Self>) {
-        self.forwarding_view
-            .new_ports
-            .retain(|detected| detected.port != port);
         if let Some(tab_id) = self.main_window_tabs.active_tab_id
             && let Some(node_id) = self.forward_tab_nodes.get(&tab_id)
         {
@@ -150,22 +162,32 @@ impl WorkspaceApp {
         node_id: NodeId,
         cx: &mut Context<Self>,
     ) {
-        let Some(editing) = self.forwarding_view.editing_forward.clone() else {
-            return;
+        let (editing, edit_bind_address, edit_bind_port, edit_target_host, edit_target_port) = {
+            let view = self.forwarding.read(cx).view();
+            let Some(editing) = view.editing_forward.clone() else {
+                return;
+            };
+            (
+                editing,
+                view.edit_bind_address.clone(),
+                view.edit_bind_port.clone(),
+                view.edit_target_host.clone(),
+                view.edit_target_port.clone(),
+            )
         };
-        let edit_bind_port = self.forwarding_view.edit_bind_port.clone();
-        let edit_target_port = self.forwarding_view.edit_target_port.clone();
-        let Some((bind_port, target_port)) =
-            self.validate_forward_form(editing.forward_type, &edit_bind_port, &edit_target_port)
-        else {
+        let Some((bind_port, target_port)) = self.validate_forward_form(
+            editing.forward_type,
+            &edit_bind_port,
+            &edit_target_port,
+            cx,
+        ) else {
             cx.notify();
             return;
         };
         let update = ForwardUpdate {
-            bind_address: Some(self.forwarding_view.edit_bind_address.clone()),
+            bind_address: Some(edit_bind_address),
             bind_port: Some(bind_port),
-            target_host: (editing.forward_type != ForwardType::Dynamic)
-                .then(|| self.forwarding_view.edit_target_host.clone()),
+            target_host: (editing.forward_type != ForwardType::Dynamic).then_some(edit_target_host),
             target_port,
             ..ForwardUpdate::default()
         };
@@ -201,28 +223,35 @@ impl WorkspaceApp {
         forward_type: ForwardType,
         bind_port: &str,
         target_port: &str,
+        cx: &mut Context<Self>,
     ) -> Option<(u16, Option<u16>)> {
         let Some(bind_port) = parse_port(bind_port) else {
-            self.forwarding_view.error = Some(self.i18n.t(if bind_port.trim().is_empty() {
+            let error = self.i18n.t(if bind_port.trim().is_empty() {
                 "forwards.form.port_required"
             } else {
                 "forwards.form.port_invalid"
-            }));
+            });
+            self.forwarding
+                .update(cx, |forwarding, _cx| forwarding.set_error(error));
             return None;
         };
         if forward_type == ForwardType::Dynamic {
-            self.forwarding_view.error = None;
+            self.forwarding
+                .update(cx, |forwarding, _cx| forwarding.clear_error());
             return Some((bind_port, None));
         }
         let Some(target_port) = parse_port(target_port) else {
-            self.forwarding_view.error = Some(self.i18n.t(if target_port.trim().is_empty() {
+            let error = self.i18n.t(if target_port.trim().is_empty() {
                 "forwards.form.port_required"
             } else {
                 "forwards.form.port_invalid"
-            }));
+            });
+            self.forwarding
+                .update(cx, |forwarding, _cx| forwarding.set_error(error));
             return None;
         };
-        self.forwarding_view.error = None;
+        self.forwarding
+            .update(cx, |forwarding, _cx| forwarding.clear_error());
         Some((bind_port, Some(target_port)))
     }
 
@@ -250,12 +279,14 @@ impl WorkspaceApp {
         // commands require an existing forwarding manager; opening this surface
         // must not become an implicit SSH connect action.
         if !self.node_is_ready_for_forwarding(&node_id) {
-            self.forwarding_view.error = Some(self.i18n.t("forwards.messages.node_not_ready"));
+            let error = self.i18n.t("forwards.messages.node_not_ready");
+            self.forwarding
+                .update(cx, |forwarding, _cx| forwarding.set_error(error));
             cx.notify();
             return;
         }
-        self.forwarding_view.pending = true;
-        self.forwarding_view.error = None;
+        self.forwarding
+            .update(cx, |forwarding, _cx| forwarding.begin_operation());
         let session_id = self.forwarding_session_id_for_node(&node_id);
         let owner_connection_id = self
             .ssh_nodes
@@ -346,12 +377,10 @@ impl WorkspaceApp {
         {
             return;
         }
-        let due = self
-            .forwarding_view
-            .last_stats_refresh
-            .is_none_or(|last| last.elapsed() >= FORWARDS_STATS_REFRESH_INTERVAL);
+        let due = self.forwarding.update(cx, |forwarding, _cx| {
+            forwarding.mark_stats_refreshed_if_due(FORWARDS_STATS_REFRESH_INTERVAL)
+        });
         if due {
-            self.forwarding_view.last_stats_refresh = Some(Instant::now());
             cx.notify();
         }
     }
@@ -478,7 +507,8 @@ impl WorkspaceApp {
                     result,
                 } => {
                     self.remember_forwarding_binding(binding);
-                    self.forwarding_view.pending = false;
+                    self.forwarding
+                        .update(cx, |forwarding, _cx| forwarding.finish_operation());
                     match result {
                         Ok(()) => {
                             if sync_saved_forwards_on_success {
@@ -488,21 +518,27 @@ impl WorkspaceApp {
                             }
                             if self.forwards_tab_is_visible(tab_id) {
                                 let _ = message_key;
-                                self.forwarding_view.error = None;
-                                if self.forwarding_view.show_new_form {
+                                let (show_new_form, editing_forward) = {
+                                    let view = self.forwarding.read(cx).view();
+                                    (view.show_new_form, view.editing_forward.is_some())
+                                };
+                                if show_new_form {
                                     self.begin_forward_create_form_exit(cx);
                                 }
-                                self.forwarding_view.skip_health_check = false;
-                                if self.forwarding_view.editing_forward.is_some() {
+                                if editing_forward {
                                     self.begin_forward_edit_form_exit(cx);
                                 }
-                                self.forwarding_view.focused_input = None;
+                                self.forwarding.update(cx, |forwarding, _cx| {
+                                    forwarding.reset_completed_operation_form();
+                                });
                                 changed = true;
                             }
                         }
                         Err(error) => {
                             if self.forwards_tab_is_visible(tab_id) {
-                                self.forwarding_view.error = Some(error);
+                                self.forwarding.update(cx, |forwarding, _cx| {
+                                    forwarding.set_error(error);
+                                });
                                 changed = true;
                             } else {
                                 self.push_forward_status_notice(
@@ -731,22 +767,10 @@ impl WorkspaceApp {
         connection_id
     }
 
-    fn sync_forwarding_view_port_detection(&mut self, node_id: &NodeId, cx: &App) {
-        let Some(state) = self.forwarding.read(cx).port_detection_state(node_id) else {
-            self.forwarding_view.detected_ports.clear();
-            self.forwarding_view.new_ports.clear();
-            self.forwarding_view.has_scanned_ports = false;
-            self.forwarding_view.port_scan_pending = false;
-            self.forwarding_view.port_scan_error = None;
-            self.forwarding_view.last_port_scan_started = None;
-            return;
-        };
-        self.forwarding_view.detected_ports = state.detected_ports;
-        self.forwarding_view.new_ports = state.new_ports;
-        self.forwarding_view.has_scanned_ports = state.has_scanned_ports;
-        self.forwarding_view.port_scan_pending = state.port_scan_pending;
-        self.forwarding_view.port_scan_error = state.port_scan_error;
-        self.forwarding_view.last_port_scan_started = state.last_port_scan_started;
+    fn sync_forwarding_view_port_detection(&mut self, node_id: &NodeId, cx: &mut Context<Self>) {
+        self.forwarding.update(cx, |forwarding, _cx| {
+            forwarding.sync_active_port_detection(node_id);
+        });
     }
 
     pub(super) fn forwarding_manager_for_node_readonly(
@@ -901,14 +925,8 @@ impl WorkspaceApp {
     }
 
     pub(super) fn open_forward_edit_form(&mut self, rule: ForwardRule, cx: &mut Context<Self>) {
-        self.forwarding_view.edit_bind_address = rule.bind_address.clone();
-        self.forwarding_view.edit_bind_port = rule.bind_port.to_string();
-        self.forwarding_view.edit_target_host = rule.target_host.clone();
-        self.forwarding_view.edit_target_port = rule.target_port.to_string();
-        self.forwarding_view.editing_forward = Some(rule);
-        self.forwarding_view.edit_form_presence.reopen();
-        self.forwarding_view.error = None;
-        self.forwarding_view.focused_input = None;
+        self.forwarding
+            .update(cx, |forwarding, _cx| forwarding.open_edit_form(rule));
         cx.notify();
     }
 
@@ -917,7 +935,7 @@ impl WorkspaceApp {
         event: &KeyDownEvent,
         cx: &mut Context<Self>,
     ) -> bool {
-        let Some(input) = self.forwarding_view.focused_input else {
+        let Some(input) = self.forwarding.read(cx).view().focused_input else {
             return false;
         };
         let key = event.keystroke.key.as_str();
@@ -926,14 +944,16 @@ impl WorkspaceApp {
         }
         match key {
             "escape" => {
-                self.forwarding_view.focused_input = None;
+                self.forwarding
+                    .update(cx, |forwarding, _cx| forwarding.clear_input_focus());
                 self.ime_marked_text = None;
                 cx.notify();
                 true
             }
             "backspace" => {
-                let changed = self.forward_input_value_mut(input).pop().is_some()
-                    || self.forwarding_view.error.take().is_some();
+                let changed = self
+                    .forwarding
+                    .update(cx, |forwarding, _cx| forwarding.backspace_input(input));
                 if changed {
                     // Empty Backspace is only visible if it also clears an
                     // existing validation error.
@@ -945,32 +965,11 @@ impl WorkspaceApp {
         }
     }
 
-    pub(in crate::workspace) fn forward_input_value(&self, input: ForwardInput) -> &str {
-        match input {
-            ForwardInput::CreateBindAddress => &self.forwarding_view.bind_address,
-            ForwardInput::CreateBindPort => &self.forwarding_view.bind_port,
-            ForwardInput::CreateTargetHost => &self.forwarding_view.target_host,
-            ForwardInput::CreateTargetPort => &self.forwarding_view.target_port,
-            ForwardInput::EditBindAddress => &self.forwarding_view.edit_bind_address,
-            ForwardInput::EditBindPort => &self.forwarding_view.edit_bind_port,
-            ForwardInput::EditTargetHost => &self.forwarding_view.edit_target_host,
-            ForwardInput::EditTargetPort => &self.forwarding_view.edit_target_port,
-        }
-    }
-
-    pub(in crate::workspace) fn forward_input_value_mut(
-        &mut self,
+    pub(in crate::workspace) fn forward_input_value<'a>(
+        &self,
         input: ForwardInput,
-    ) -> &mut String {
-        match input {
-            ForwardInput::CreateBindAddress => &mut self.forwarding_view.bind_address,
-            ForwardInput::CreateBindPort => &mut self.forwarding_view.bind_port,
-            ForwardInput::CreateTargetHost => &mut self.forwarding_view.target_host,
-            ForwardInput::CreateTargetPort => &mut self.forwarding_view.target_port,
-            ForwardInput::EditBindAddress => &mut self.forwarding_view.edit_bind_address,
-            ForwardInput::EditBindPort => &mut self.forwarding_view.edit_bind_port,
-            ForwardInput::EditTargetHost => &mut self.forwarding_view.edit_target_host,
-            ForwardInput::EditTargetPort => &mut self.forwarding_view.edit_target_port,
-        }
+        cx: &'a App,
+    ) -> &'a str {
+        self.forwarding.read(cx).input_value(input)
     }
 }

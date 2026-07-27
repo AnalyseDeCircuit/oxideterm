@@ -35,6 +35,7 @@ pub(in crate::workspace) enum ForwardingWorkspaceEvent {
 
 /// Owns forwarding UI delivery and sampling state without owning tunnel lifetime.
 pub(in crate::workspace) struct ForwardingWorkspaceEntity {
+    pub(super) view: ForwardsViewState,
     pub(super) section_list_state: ListState,
     pub(super) section_list_cache: RefCell<VirtualListSignatureCache>,
     pub(super) table_row_list_state: ListState,
@@ -43,11 +44,30 @@ pub(in crate::workspace) struct ForwardingWorkspaceEntity {
     worker_rx: std::sync::mpsc::Receiver<ForwardingWorkerResult>,
     runtime_event_rx: std::sync::mpsc::Receiver<ForwardEvent>,
     delivery_intents: VecDeque<ForwardingDeliveryIntent>,
-    port_detection_by_node: HashMap<NodeId, PortDetectionViewState>,
+    pub(super) port_detection_by_node: HashMap<NodeId, PortDetectionViewState>,
     port_profiler_nodes: std::collections::HashSet<NodeId>,
 }
 
 impl ForwardingWorkspaceEntity {
+    #[cfg(test)]
+    pub(super) fn test_fixture() -> Self {
+        let (worker_tx, worker_rx) = delivery::ActiveDeliverySender::channel();
+        let (_runtime_tx, runtime_event_rx) = std::sync::mpsc::channel();
+        Self {
+            view: ForwardsViewState::default(),
+            section_list_state: ListState::new(0, ListAlignment::Top, px(0.0)),
+            section_list_cache: RefCell::new(VirtualListSignatureCache::default()),
+            table_row_list_state: ListState::new(0, ListAlignment::Top, px(0.0)),
+            table_row_list_cache: RefCell::new(VirtualListSignatureCache::default()),
+            worker_tx,
+            worker_rx,
+            runtime_event_rx,
+            delivery_intents: VecDeque::new(),
+            port_detection_by_node: HashMap::new(),
+            port_profiler_nodes: std::collections::HashSet::new(),
+        }
+    }
+
     pub(in crate::workspace) fn new(
         worker_tx: delivery::ActiveDeliverySender<ForwardingWorkerResult>,
         worker_rx: std::sync::mpsc::Receiver<ForwardingWorkerResult>,
@@ -55,6 +75,7 @@ impl ForwardingWorkspaceEntity {
         cx: &mut Context<Self>,
     ) -> Self {
         let entity = Self {
+            view: ForwardsViewState::default(),
             section_list_state: ListState::new(
                 FORWARDS_SECTION_LIST_INITIAL_ITEM_COUNT,
                 ListAlignment::Top,
@@ -100,6 +121,7 @@ impl ForwardingWorkspaceEntity {
         std::mem::take(&mut self.delivery_intents)
     }
 
+    #[cfg(test)]
     pub(in crate::workspace) fn port_detection_state(
         &self,
         node_id: &NodeId,
@@ -161,6 +183,7 @@ impl ForwardingWorkspaceEntity {
     }
 
     pub(in crate::workspace) fn dismiss_detected_port(&mut self, node_id: &NodeId, port: u16) {
+        self.view.new_ports.retain(|detected| detected.port != port);
         if let Some(state) = self.port_detection_by_node.get_mut(node_id) {
             state.new_ports.retain(|detected| detected.port != port);
         }
@@ -312,20 +335,7 @@ mod tests {
 
     #[test]
     fn connection_handoff_discards_previous_detection_state() {
-        let (worker_tx, worker_rx) = delivery::ActiveDeliverySender::channel();
-        let (_runtime_tx, runtime_rx) = std::sync::mpsc::channel();
-        let mut entity = ForwardingWorkspaceEntity {
-            section_list_state: ListState::new(0, ListAlignment::Top, px(0.0)),
-            section_list_cache: RefCell::new(VirtualListSignatureCache::default()),
-            table_row_list_state: ListState::new(0, ListAlignment::Top, px(0.0)),
-            table_row_list_cache: RefCell::new(VirtualListSignatureCache::default()),
-            worker_tx,
-            worker_rx,
-            runtime_event_rx: runtime_rx,
-            delivery_intents: VecDeque::new(),
-            port_detection_by_node: HashMap::new(),
-            port_profiler_nodes: std::collections::HashSet::new(),
-        };
+        let mut entity = ForwardingWorkspaceEntity::test_fixture();
         let node_id = NodeId::new("forward-test");
         entity.apply_port_detection_result(
             &node_id,

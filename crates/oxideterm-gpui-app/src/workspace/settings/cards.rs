@@ -833,7 +833,10 @@ impl WorkspaceApp {
             self.ime_marked_text = None;
             changed = true;
         }
-        if self.forwarding_view.focused_input.take().is_some() {
+        if self
+            .forwarding
+            .update(cx, |forwarding, _cx| forwarding.clear_input_focus())
+        {
             self.ime_marked_text = None;
             changed = true;
         }

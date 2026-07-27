@@ -503,7 +503,7 @@ impl Render for WorkspaceApp {
                 } else if this
                     .active_tab()
                     .is_some_and(|tab| tab.kind == TabKind::Forwards)
-                    && this.forwarding_view.focused_input.is_some()
+                    && this.forwarding.read(cx).view().focused_input.is_some()
                 {
                     let _ = this.handle_forwards_key(event, cx);
                     window.prevent_default();

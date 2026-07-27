@@ -8,14 +8,14 @@ use super::helpers::{
     forwards_transparent,
 };
 use super::{
-    ActiveSurface, AnyElement, Arc, ButtonOptions, ButtonRadius, ButtonSize, ClipboardItem,
+    ActiveSurface, AnyElement, App, Arc, ButtonOptions, ButtonRadius, ButtonSize, ClipboardItem,
     Context, DefaultHasher, Duration, FORWARDS_PAGE_PADDING, FORWARDS_SECTION_GAP,
     FORWARDS_SECTION_LIST_ESTIMATED_HEIGHT, FORWARDS_SECTION_LIST_OVERSCAN,
     FORWARDS_TABLE_HEADER_H, FORWARDS_TABLE_ROW_H, FORWARDS_TABLE_ROW_LIST_OVERSCAN,
     FORWARDS_TW_ALPHA_30, FORWARDS_TW_ALPHA_50, ForwardRule, ForwardStats, ForwardStatus,
     ForwardType, ForwardingManager, Hash, Hasher, LucideIcon, MouseButton, NodeId, NodeReadiness,
     TW_BLUE_500, TW_CYAN_500, TW_GREEN_400, TW_ORANGE_400, TW_ORANGE_500, Tab, TabId, TabKind,
-    TabTitleSource, TauriVirtualListSpec, Timer, ToolbarButtonOptions, UiButtonVariant, Window,
+    TabTitleSource, TauriVirtualListSpec, ToolbarButtonOptions, UiButtonVariant, Window,
     WorkspaceApp, div, px, rgb, rounded_shell_child_radius, settings_ui_font_family,
     sync_tauri_variable_list_state_by_signatures, tauri_virtual_list,
 };
@@ -88,7 +88,8 @@ impl WorkspaceApp {
         self.active_ssh_node_id = Some(node_id.clone());
         // Tauri opens the forwarding surface against the selected node but
         // leaves connection establishment to the explicit connect path.
-        self.forwarding_view.error = None;
+        self.forwarding
+            .update(cx, |forwarding, _cx| forwarding.clear_error());
         self.start_port_profiler_for_node(node_id, cx);
         cx.notify();
     }
@@ -151,7 +152,7 @@ impl WorkspaceApp {
     ) {
         let spec = self.forwards_section_list_spec();
         let identity = format!("forwards:{}:{}", tab_id.0, node_id.0);
-        let signatures = self.forwards_section_signatures(node_id);
+        let signatures = self.forwards_section_signatures(node_id, cx);
         self.forwarding.update(cx, |forwarding, _cx| {
             sync_tauri_variable_list_state_by_signatures(
                 &forwarding.section_list_state,
@@ -170,9 +171,10 @@ impl WorkspaceApp {
         )
     }
 
-    fn forwards_sections(&self) -> Vec<ForwardsSection> {
+    fn forwards_sections(&self, cx: &App) -> Vec<ForwardsSection> {
+        let forwarding_view = self.forwarding.read(cx).view();
         let mut sections = Vec::new();
-        if !self.forwarding_view.new_ports.is_empty() {
+        if !forwarding_view.new_ports.is_empty() {
             sections.push(ForwardsSection::PortDetection);
         }
         sections.extend([
@@ -180,21 +182,21 @@ impl WorkspaceApp {
             ForwardsSection::Separator,
             ForwardsSection::Table,
         ]);
-        if self.forwarding_view.show_new_form {
+        if forwarding_view.show_new_form {
             sections.push(ForwardsSection::CreateForm);
         }
-        if self.forwarding_view.error.is_some() {
+        if forwarding_view.error.is_some() {
             sections.push(ForwardsSection::Error);
         }
         sections.extend([ForwardsSection::Separator, ForwardsSection::RemotePorts]);
         sections
     }
 
-    fn forwards_section_signatures(&self, node_id: &NodeId) -> Vec<u64> {
-        self.forwards_sections()
+    fn forwards_section_signatures(&self, node_id: &NodeId, cx: &App) -> Vec<u64> {
+        self.forwards_sections(cx)
             .into_iter()
             .enumerate()
-            .map(|(index, section)| self.forwards_section_signature(index, section, node_id))
+            .map(|(index, section)| self.forwards_section_signature(index, section, node_id, cx))
             .collect()
     }
 
@@ -203,7 +205,9 @@ impl WorkspaceApp {
         index: usize,
         section: ForwardsSection,
         node_id: &NodeId,
+        cx: &App,
     ) -> u64 {
+        let forwarding_view = self.forwarding.read(cx).view();
         let mut hasher = DefaultHasher::new();
         // Forward rows, detected ports, and form/error visibility all affect
         // section height. Hash those states so GPUI ListState remeasures after
@@ -213,7 +217,7 @@ impl WorkspaceApp {
         node_id.hash(&mut hasher);
         match section {
             ForwardsSection::PortDetection => {
-                self.forwarding_view.new_ports.len().hash(&mut hasher);
+                forwarding_view.new_ports.len().hash(&mut hasher);
             }
             ForwardsSection::QuickActions => {
                 self.ssh_nodes
@@ -232,11 +236,11 @@ impl WorkspaceApp {
                 }
             }
             ForwardsSection::CreateForm => {
-                format!("{:?}", self.forwarding_view.forward_type).hash(&mut hasher);
-                self.forwarding_view.skip_health_check.hash(&mut hasher);
+                format!("{:?}", forwarding_view.forward_type).hash(&mut hasher);
+                forwarding_view.skip_health_check.hash(&mut hasher);
             }
             ForwardsSection::Error => {
-                self.forwarding_view.error.hash(&mut hasher);
+                forwarding_view.error.hash(&mut hasher);
             }
             ForwardsSection::Separator => {}
         }
@@ -250,7 +254,7 @@ impl WorkspaceApp {
         node_id: NodeId,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let Some(section) = self.forwards_sections().get(index).copied() else {
+        let Some(section) = self.forwards_sections(cx).get(index).copied() else {
             return div().into_any_element();
         };
         let has_background = self.background_surface_active("forwards");
@@ -263,7 +267,7 @@ impl WorkspaceApp {
         if index == 0 {
             inner = inner.pt(px(FORWARDS_PAGE_PADDING));
         }
-        if index + 1 == self.forwards_sections().len() {
+        if index + 1 == self.forwards_sections(cx).len() {
             inner = inner.pb(px(FORWARDS_PAGE_PADDING));
         }
 
@@ -302,7 +306,7 @@ impl WorkspaceApp {
             ForwardsSection::PortDetection => self.render_port_detection_banner(
                 node_id,
                 tab_id,
-                self.forwarding_view.new_ports.clone(),
+                self.forwarding.read(cx).view().new_ports.clone(),
                 has_background,
                 cx,
             ),
@@ -326,7 +330,9 @@ impl WorkspaceApp {
                 self.render_forward_create_form(node_id, tab_id, has_background, cx)
             }
             ForwardsSection::Error => self
-                .forwarding_view
+                .forwarding
+                .read(cx)
+                .view()
                 .error
                 .as_ref()
                 .map(|error| self.render_forwards_error(error))
@@ -489,6 +495,7 @@ impl WorkspaceApp {
     ) -> AnyElement {
         let theme = self.tokens.ui;
         let forward_count = forwards.len();
+        let show_new_form = self.forwarding.read(cx).view().show_new_form;
         self.sync_forwards_table_row_list_state(&forwards, cx);
         let table_row_state = self.forwarding.read(cx).table_row_list_state.clone();
         let table_row_spec = self.forwards_table_row_list_spec();
@@ -525,7 +532,7 @@ impl WorkspaceApp {
                                 self.render_forward_button(
                                     self.i18n.t("forwards.actions.new_forward"),
                                     Some(LucideIcon::Plus),
-                                    if self.forwarding_view.show_new_form {
+                                    if show_new_form {
                                         ForwardButtonVariant::Secondary
                                     } else {
                                         ForwardButtonVariant::Primary
@@ -533,13 +540,18 @@ impl WorkspaceApp {
                                     true,
                                     has_background,
                                     cx.listener(|this, _event, _window, cx| {
-                                        if this.forwarding_view.show_new_form {
+                                        let show_new_form =
+                                            this.forwarding.read(cx).view().show_new_form;
+                                        if show_new_form {
                                             this.begin_forward_create_form_exit(cx);
                                         } else {
-                                            this.forwarding_view.show_new_form = true;
-                                            this.forwarding_view.new_form_presence.reopen();
+                                            this.forwarding.update(cx, |forwarding, _cx| {
+                                                forwarding.open_create_form();
+                                            });
                                         }
-                                        this.forwarding_view.error = None;
+                                        this.forwarding.update(cx, |forwarding, _cx| {
+                                            forwarding.clear_error();
+                                        });
                                         cx.notify();
                                         cx.stop_propagation();
                                     }),
@@ -811,8 +823,9 @@ impl WorkspaceApp {
                     theme.text_muted,
                     has_background,
                     move |this, _event, _window, cx| {
-                        this.forwarding_view.pending_delete_forward = Some(rule_for_delete.clone());
-                        this.forwarding_view.error = None;
+                        this.forwarding.update(cx, |forwarding, _cx| {
+                            forwarding.request_delete(rule_for_delete.clone());
+                        });
                         cx.notify();
                         cx.stop_propagation();
                     },
@@ -836,7 +849,8 @@ impl WorkspaceApp {
         }
 
         let forward_id = rule.id.clone();
-        let copied = self.forwarding_view.copied_forward_id.as_deref() == Some(&forward_id);
+        let copied =
+            self.forwarding.read(cx).view().copied_forward_id.as_deref() == Some(&forward_id);
         self.forward_cell_element(
             1.35,
             div()
@@ -869,22 +883,13 @@ impl WorkspaceApp {
                     MouseButton::Left,
                     cx.listener(move |this, _event, _window, cx| {
                         cx.write_to_clipboard(ClipboardItem::new_string(address.clone()));
-                        this.forwarding_view.copied_forward_id = Some(forward_id.clone());
-                        cx.notify();
-
-                        let copied_forward_id = forward_id.clone();
-                        cx.spawn(async move |weak, cx| {
-                            Timer::after(Duration::from_secs(2)).await;
-                            let _ = weak.update(cx, |this, cx| {
-                                if this.forwarding_view.copied_forward_id.as_deref()
-                                    == Some(copied_forward_id.as_str())
-                                {
-                                    this.forwarding_view.copied_forward_id = None;
-                                    cx.notify();
-                                }
-                            });
-                        })
-                        .detach();
+                        this.forwarding.update(cx, |forwarding, cx| {
+                            forwarding.mark_forward_copied(
+                                forward_id.clone(),
+                                Duration::from_secs(2),
+                                cx,
+                            );
+                        });
                         let _ = tab_id;
                         cx.stop_propagation();
                     }),

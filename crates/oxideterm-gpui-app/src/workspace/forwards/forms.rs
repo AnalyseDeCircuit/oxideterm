@@ -21,8 +21,17 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
-        let form_visible = self.forwarding_view.new_form_presence.phase()
-            == oxideterm_gpui_ui::motion::ExitPhase::Visible;
+        let (form_visible, forward_type, error, pending, skip_health_check) = {
+            let forwarding_view = self.forwarding.read(cx).view();
+            (
+                forwarding_view.new_form_presence.phase()
+                    == oxideterm_gpui_ui::motion::ExitPhase::Visible,
+                forwarding_view.forward_type,
+                forwarding_view.error.clone(),
+                forwarding_view.pending,
+                forwarding_view.skip_health_check,
+            )
+        };
         let form = div()
             .relative()
             .rounded(px(self.tokens.radii.xs))
@@ -59,7 +68,8 @@ impl WorkspaceApp {
                             has_background,
                             cx.listener(|this, _event, _window, cx| {
                                 this.begin_forward_create_form_exit(cx);
-                                this.forwarding_view.error = None;
+                                this.forwarding
+                                    .update(cx, |forwarding, _cx| forwarding.clear_error());
                                 cx.stop_propagation();
                             }),
                         )
@@ -70,16 +80,15 @@ impl WorkspaceApp {
             )
             .child(self.render_forward_type_picker(has_background, cx))
             .child(self.render_forward_address_form(false, has_background, cx))
-            .when(
-                self.forwarding_view.forward_type != ForwardType::Dynamic,
-                |form| form.child(self.render_forward_skip_health_check(has_background, cx)),
-            )
-            .when_some(self.forwarding_view.error.as_ref(), |form, error| {
+            .when(forward_type != ForwardType::Dynamic, |form| {
+                form.child(self.render_forward_skip_health_check(has_background, cx))
+            })
+            .when_some(error.as_ref(), |form, error| {
                 form.child(self.render_forwards_error(error))
             })
             .child(div().flex().justify_end().child(self.render_forward_button(
-                if self.forwarding_view.pending {
-                    if self.forwarding_view.skip_health_check {
+                if pending {
+                    if skip_health_check {
                         self.i18n.t("forwards.form.creating")
                     } else {
                         self.i18n.t("forwards.form.checking_port")
@@ -89,7 +98,7 @@ impl WorkspaceApp {
                 },
                 None,
                 ForwardButtonVariant::Primary,
-                !self.forwarding_view.pending,
+                !pending,
                 has_background,
                 cx.listener(move |this, _event, _window, cx| {
                     this.submit_forward_create(tab_id, node_id.clone(), cx);
@@ -127,11 +136,19 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
-        let Some(editing) = self.forwarding_view.editing_forward.as_ref() else {
+        let (editing, form_visible, error, pending) = {
+            let forwarding_view = self.forwarding.read(cx).view();
+            (
+                forwarding_view.editing_forward.clone(),
+                forwarding_view.edit_form_presence.phase()
+                    == oxideterm_gpui_ui::motion::ExitPhase::Visible,
+                forwarding_view.error.clone(),
+                forwarding_view.pending,
+            )
+        };
+        let Some(editing) = editing else {
             return div().into_any_element();
         };
-        let form_visible = self.forwarding_view.edit_form_presence.phase()
-            == oxideterm_gpui_ui::motion::ExitPhase::Visible;
 
         div()
             .absolute()
@@ -204,7 +221,7 @@ impl WorkspaceApp {
                             ),
                     )
                     .child(self.render_forward_address_form(true, has_background, cx))
-                    .when_some(self.forwarding_view.error.as_ref(), |modal, error| {
+                    .when_some(error.as_ref(), |modal, error| {
                         modal.child(self.render_forwards_error(error))
                     })
                     .child(
@@ -227,7 +244,7 @@ impl WorkspaceApp {
                                 self.i18n.t("forwards.form.save_changes"),
                                 None,
                                 ForwardButtonVariant::Primary,
-                                !self.forwarding_view.pending,
+                                !pending,
                                 has_background,
                                 cx.listener(move |this, _event, _window, cx| {
                                     this.submit_forward_edit(tab_id, node_id.clone(), cx);
@@ -255,66 +272,23 @@ impl WorkspaceApp {
     }
 
     pub(super) fn begin_forward_create_form_exit(&mut self, cx: &mut Context<Self>) -> bool {
-        let Some(generation) = self.forwarding_view.new_form_presence.begin_exit() else {
-            return false;
-        };
-        self.forwarding_view.focused_input = None;
-        self.schedule_forward_form_exit(generation, true, cx);
-        true
-    }
-
-    pub(super) fn begin_forward_edit_form_exit(&mut self, cx: &mut Context<Self>) -> bool {
-        let Some(generation) = self.forwarding_view.edit_form_presence.begin_exit() else {
-            return false;
-        };
-        self.forwarding_view.focused_input = None;
-        self.schedule_forward_form_exit(generation, false, cx);
-        true
-    }
-
-    fn schedule_forward_form_exit(
-        &mut self,
-        generation: u64,
-        create_form: bool,
-        cx: &mut Context<Self>,
-    ) {
         let delay = oxideterm_gpui_ui::motion::duration(
             &self.tokens,
             oxideterm_gpui_ui::motion::MotionDuration::Overlay,
         );
-        if delay.is_zero() {
-            self.finish_forward_form_exit(generation, create_form);
-            cx.notify();
-            return;
-        }
-        cx.spawn(async move |weak, cx| {
-            gpui::Timer::after(delay).await;
-            let _ = weak.update(cx, |this, cx| {
-                if this.finish_forward_form_exit(generation, create_form) {
-                    cx.notify();
-                }
-            });
+        self.forwarding.update(cx, |forwarding, cx| {
+            forwarding.begin_create_form_exit(delay, cx)
         })
-        .detach();
-        cx.notify();
     }
 
-    fn finish_forward_form_exit(&mut self, generation: u64, create_form: bool) -> bool {
-        let presence = if create_form {
-            &mut self.forwarding_view.new_form_presence
-        } else {
-            &mut self.forwarding_view.edit_form_presence
-        };
-        if !presence.finish_exit(generation) {
-            return false;
-        }
-        presence.reopen();
-        if create_form {
-            self.forwarding_view.show_new_form = false;
-        } else {
-            self.forwarding_view.editing_forward = None;
-        }
-        true
+    pub(super) fn begin_forward_edit_form_exit(&mut self, cx: &mut Context<Self>) -> bool {
+        let delay = oxideterm_gpui_ui::motion::duration(
+            &self.tokens,
+            oxideterm_gpui_ui::motion::MotionDuration::Overlay,
+        );
+        self.forwarding.update(cx, |forwarding, cx| {
+            forwarding.begin_edit_form_exit(delay, cx)
+        })
     }
 
     pub(in crate::workspace) fn render_forward_delete_confirm(
@@ -324,7 +298,13 @@ impl WorkspaceApp {
         _has_background: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let Some(rule) = self.forwarding_view.pending_delete_forward.as_ref() else {
+        let Some(rule) = self
+            .forwarding
+            .read(cx)
+            .view()
+            .pending_delete_forward
+            .as_ref()
+        else {
             return div().into_any_element();
         };
         let forward_id = rule.id.clone();
@@ -350,12 +330,14 @@ impl WorkspaceApp {
                     .into_any_element(),
             },
             cx.listener(|this, _event, _window, cx| {
-                this.forwarding_view.pending_delete_forward = None;
+                this.forwarding
+                    .update(cx, |forwarding, _cx| forwarding.clear_pending_delete());
                 cx.notify();
                 cx.stop_propagation();
             }),
             cx.listener(move |this, _event, _window, cx| {
-                this.forwarding_view.pending_delete_forward = None;
+                this.forwarding
+                    .update(cx, |forwarding, _cx| forwarding.clear_pending_delete());
                 let registry = this.forwarding_registry.clone();
                 let delete_id = confirm_id.clone();
                 this.start_forward_operation(
@@ -414,7 +396,7 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
-        let selected = self.forwarding_view.forward_type == forward_type;
+        let selected = self.forwarding.read(cx).view().forward_type == forward_type;
         let label = self.i18n.t(label_key);
         div()
             .flex()
@@ -444,11 +426,9 @@ impl WorkspaceApp {
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |this, _event, _window, cx| {
-                    this.forwarding_view.forward_type = forward_type;
-                    this.forwarding_view.error = None;
-                    if forward_type == ForwardType::Dynamic {
-                        this.forwarding_view.skip_health_check = false;
-                    }
+                    this.forwarding.update(cx, |forwarding, _cx| {
+                        forwarding.select_forward_type(forward_type);
+                    });
                     cx.notify();
                     cx.stop_propagation();
                 }),
@@ -462,7 +442,7 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
-        let checked = self.forwarding_view.skip_health_check;
+        let checked = self.forwarding.read(cx).view().skip_health_check;
         div()
             .flex()
             .items_center()
@@ -501,9 +481,9 @@ impl WorkspaceApp {
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(|this, _event, _window, cx| {
-                    this.forwarding_view.skip_health_check =
-                        !this.forwarding_view.skip_health_check;
-                    this.forwarding_view.error = None;
+                    this.forwarding.update(cx, |forwarding, _cx| {
+                        forwarding.toggle_skip_health_check();
+                    });
                     cx.notify();
                     cx.stop_propagation();
                 }),
@@ -518,14 +498,15 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
+        let forwarding_view = self.forwarding.read(cx).view();
         let forward_type = if editing {
-            self.forwarding_view
+            forwarding_view
                 .editing_forward
                 .as_ref()
                 .map(|rule| rule.forward_type)
                 .unwrap_or(ForwardType::Local)
         } else {
-            self.forwarding_view.forward_type
+            forwarding_view.forward_type
         };
 
         div()
@@ -641,8 +622,8 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let workspace = cx.entity();
-        let focused = self.forwarding_view.focused_input == Some(input);
-        let value = self.forward_input_value(input);
+        let focused = self.forwarding.read(cx).view().focused_input == Some(input);
+        let value = self.forward_input_value(input, cx);
         let target = WorkspaceImeTarget::Forwards(input);
         text_input_anchor_probe(
             target.anchor_id(),
@@ -665,7 +646,8 @@ impl WorkspaceApp {
                 .on_mouse_down(
                     MouseButton::Left,
                     cx.listener(move |this, event: &gpui::MouseDownEvent, window, cx| {
-                        this.forwarding_view.focused_input = Some(input);
+                        this.forwarding
+                            .update(cx, |forwarding, _cx| forwarding.focus_input(input));
                         this.ime_marked_text = None;
                         this.needs_active_pane_focus = false;
                         window.focus(&this.focus_handle, cx);

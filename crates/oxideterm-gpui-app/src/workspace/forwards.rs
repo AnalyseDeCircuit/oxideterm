@@ -49,6 +49,7 @@ mod entity;
 mod forms;
 mod helpers;
 mod surface;
+mod view_state;
 
 pub(in crate::workspace) use entity::*;
 
@@ -130,7 +131,7 @@ impl ForwardInput {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub(super) struct ForwardsViewState {
     show_new_form: bool,
     new_form_presence: oxideterm_gpui_ui::motion::ExitPresence,

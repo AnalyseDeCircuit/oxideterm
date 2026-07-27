@@ -692,7 +692,7 @@ impl WorkspaceApp {
         if self
             .active_tab()
             .is_some_and(|tab| tab.kind == oxideterm_workspace::TabKind::Forwards)
-            && let Some(input) = self.forwarding_view.focused_input
+            && let Some(input) = self.forwarding.read(cx).view().focused_input
         {
             return Some(WorkspaceImeTarget::Forwards(input));
         }
@@ -1548,8 +1548,8 @@ impl WorkspaceApp {
                 }
             }
             WorkspaceImeTarget::Forwards(input) => {
-                if self.forwarding_view.focused_input == Some(input) {
-                    Some(self.forward_input_value(input).to_string())
+                if self.forwarding.read(cx).view().focused_input == Some(input) {
+                    Some(self.forward_input_value(input, cx).to_string())
                 } else {
                     None
                 }
@@ -2440,9 +2440,10 @@ impl WorkspaceApp {
                 }
             }
             WorkspaceImeTarget::Forwards(input) => {
-                if self.forwarding_view.focused_input == Some(input) {
-                    replace_utf16(self.forward_input_value_mut(input), replacement_range, text);
-                    self.forwarding_view.error = None;
+                if self.forwarding.read(cx).view().focused_input == Some(input) {
+                    self.forwarding.update(cx, |forwarding, _cx| {
+                        forwarding.replace_input_text(input, replacement_range, text);
+                    });
                     self.new_connection_caret_visible = true;
                     cx.notify();
                 }
