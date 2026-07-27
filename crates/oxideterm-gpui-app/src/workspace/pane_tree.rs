@@ -517,7 +517,7 @@ impl WorkspaceApp {
                                 {
                                     tab.active_pane_id = Some(pane_id);
                                     if !this.detached_tabs.contains(&tab_id) {
-                                        this.main_window_tabs.active_tab_id = Some(tab_id);
+                                        this.set_main_window_active_tab(Some(tab_id), cx);
                                     }
                                 } else if let Some(tab) = this.active_tab_mut() {
                                     tab.active_pane_id = Some(pane_id);

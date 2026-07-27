@@ -621,10 +621,6 @@ impl LocalTerminalCloseCheck {
 struct WorkspaceWindowTabState {
     active_tab_id: Option<TabId>,
     active_tab_index_cache: Cell<Option<(TabId, usize)>>,
-    navigation_history: Vec<TabId>,
-    navigation_index: Option<usize>,
-    navigation_replaying: bool,
-    navigation_observed_tab: Option<TabId>,
     drag: Option<TabDragState>,
     context_menu: Option<TabContextMenu>,
     close_confirm: Option<TabCloseConfirm>,
@@ -677,10 +673,6 @@ impl WorkspaceWindowTabState {
         Self {
             active_tab_id: None,
             active_tab_index_cache: Cell::new(None),
-            navigation_history: Vec::new(),
-            navigation_index: None,
-            navigation_replaying: false,
-            navigation_observed_tab: None,
             drag: None,
             context_menu: None,
             close_confirm: None,

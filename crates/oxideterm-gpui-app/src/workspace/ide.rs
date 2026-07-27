@@ -124,7 +124,7 @@ impl WorkspaceApp {
             return;
         }
         if !self.detached_tabs.contains(&tab_id) {
-            self.main_window_tabs.active_tab_id = Some(tab_id);
+            self.set_main_window_active_tab(Some(tab_id), cx);
             self.active_surface = oxideterm_gpui_settings_view::ActiveSurface::Terminal;
         }
         self.active_ssh_node_id = Some(node_id.clone());
@@ -256,7 +256,7 @@ impl WorkspaceApp {
         };
 
         if !self.detached_tabs.contains(&tab_id) {
-            self.main_window_tabs.active_tab_id = Some(tab_id);
+            self.set_main_window_active_tab(Some(tab_id), cx);
             self.active_surface = oxideterm_gpui_settings_view::ActiveSurface::Terminal;
         }
         self.active_ssh_node_id = Some(target_node_id.clone());
@@ -606,7 +606,7 @@ impl WorkspaceApp {
             // Picker cancellation is not a user project-close action. Pick the
             // nearest visible tab without recording an IDE last-closed marker,
             // so reconnect restore remains governed only by real project tabs.
-            self.main_window_tabs.active_tab_id = self
+            let next_active_tab_id = self
                 .tabs
                 .iter()
                 .enumerate()
@@ -621,6 +621,7 @@ impl WorkspaceApp {
                         .find(|(_, tab)| !self.detached_tabs.contains(&tab.id))
                 })
                 .map(|(_, tab)| tab.id);
+            self.set_main_window_active_tab(next_active_tab_id, cx);
         }
 
         self.sync_active_tab_surface(cx);

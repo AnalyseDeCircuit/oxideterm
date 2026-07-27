@@ -319,7 +319,7 @@ impl WorkspaceApp {
         if self.focus_detached_tab_window(tab_id, cx) {
             return;
         }
-        self.main_window_tabs.active_tab_id = Some(tab_id);
+        self.set_main_window_active_tab(Some(tab_id), cx);
         self.active_surface = ActiveSurface::Terminal;
         self.needs_active_pane_focus = false;
         self.start_graphics_load_if_needed(false);

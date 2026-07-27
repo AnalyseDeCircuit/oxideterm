@@ -63,112 +63,32 @@ fn attach_terminal_to_existing_ssh_node(
 }
 
 impl WorkspaceApp {
-    pub(in crate::workspace) fn observe_active_tab_for_history(&mut self) {
-        let active_tab_id = self.main_window_tabs.active_tab_id;
-        if self.main_window_tabs.navigation_observed_tab == active_tab_id {
-            return;
-        }
-        self.main_window_tabs.navigation_observed_tab = active_tab_id;
-
-        let Some(tab_id) = active_tab_id else {
-            return;
-        };
-        if self.main_window_tabs.navigation_replaying {
-            self.main_window_tabs.navigation_replaying = false;
-            return;
-        }
-
-        if let Some(index) = self.main_window_tabs.navigation_index {
-            self.main_window_tabs
-                .navigation_history
-                .truncate(index.saturating_add(1));
-        }
-        if self.main_window_tabs.navigation_history.last().copied() != Some(tab_id) {
-            self.main_window_tabs.navigation_history.push(tab_id);
-        }
-        const MAX_TAB_HISTORY: usize = 50;
-        if self.main_window_tabs.navigation_history.len() > MAX_TAB_HISTORY {
-            let overflow = self.main_window_tabs.navigation_history.len() - MAX_TAB_HISTORY;
-            self.main_window_tabs.navigation_history.drain(0..overflow);
-        }
-        self.main_window_tabs.navigation_index = self
-            .main_window_tabs
-            .navigation_history
-            .len()
-            .checked_sub(1);
-    }
-
     pub(in crate::workspace) fn navigate_tab_history(
         &mut self,
         forward: bool,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.prune_tab_navigation_history();
-        let Some(mut index) = self.main_window_tabs.navigation_index else {
-            return;
-        };
-
-        loop {
-            if forward {
-                if index + 1 >= self.main_window_tabs.navigation_history.len() {
-                    return;
-                }
-                index += 1;
-            } else if index == 0 {
-                return;
-            } else {
-                index -= 1;
-            }
-
-            let tab_id = self.main_window_tabs.navigation_history[index];
-            if self
-                .tabs
-                .iter()
-                .any(|tab| tab.id == tab_id && !self.detached_tabs.contains(&tab.id))
-            {
-                self.main_window_tabs.navigation_index = Some(index);
-                self.main_window_tabs.navigation_replaying = true;
-                self.main_window_tabs.active_tab_id = Some(tab_id);
-                self.sync_active_tab_surface(cx);
-                self.needs_active_pane_focus = self.active_tab().is_some_and(|tab| {
-                    matches!(tab.kind, TabKind::LocalTerminal | TabKind::SshTerminal)
-                });
-                self.focus_active_tab_keyboard_owner(window, cx);
-                self.reveal_active_tab(window);
-                cx.notify();
-                return;
-            }
-        }
-    }
-
-    fn prune_tab_navigation_history(&mut self) {
-        let existing = self
+        let existing_tab_ids = self
             .tabs
             .iter()
             .filter(|tab| !self.detached_tabs.contains(&tab.id))
             .map(|tab| tab.id)
             .collect::<HashSet<_>>();
-        let current = self
-            .main_window_tabs
-            .navigation_index
-            .and_then(|index| self.main_window_tabs.navigation_history.get(index).copied());
-        self.main_window_tabs
-            .navigation_history
-            .retain(|tab_id| existing.contains(tab_id));
-        self.main_window_tabs.navigation_index = current
-            .and_then(|tab_id| {
-                self.main_window_tabs
-                    .navigation_history
-                    .iter()
-                    .position(|candidate| *candidate == tab_id)
-            })
-            .or_else(|| {
-                self.main_window_tabs
-                    .navigation_history
-                    .len()
-                    .checked_sub(1)
-            });
+        let Some(tab_id) = self.tab_host.update(cx, |tab_host, _| {
+            tab_host.navigate_history(forward, &existing_tab_ids)
+        }) else {
+            return;
+        };
+
+        self.set_main_window_active_tab(Some(tab_id), cx);
+        self.sync_active_tab_surface(cx);
+        self.needs_active_pane_focus = self
+            .active_tab()
+            .is_some_and(|tab| matches!(tab.kind, TabKind::LocalTerminal | TabKind::SshTerminal));
+        self.focus_active_tab_keyboard_owner(window, cx);
+        self.reveal_active_tab(window);
+        cx.notify();
     }
 
     pub(in crate::workspace) fn set_active_tab(
@@ -193,7 +113,7 @@ impl WorkspaceApp {
                 // on the remote host while the user works elsewhere.
                 self.release_remote_desktop_inputs_for_tab(previous_tab_id, cx);
             }
-            self.main_window_tabs.active_tab_id = Some(tab_id);
+            self.set_main_window_active_tab(Some(tab_id), cx);
             self.resume_remote_desktop_frame_delivery(tab_id, cx);
             self.sync_active_tab_surface(cx);
             self.needs_active_pane_focus = self.active_tab().is_some_and(|tab| {
@@ -437,7 +357,7 @@ impl WorkspaceApp {
             // focus its existing owner so session-tree activation still works.
             return self.focus_detached_tab_window(location.tab_id, cx);
         }
-        self.main_window_tabs.active_tab_id = Some(location.tab_id);
+        self.set_main_window_active_tab(Some(location.tab_id), cx);
         if let Some(tab) = self.tab_mut_by_id(location.tab_id) {
             tab.active_pane_id = Some(location.pane_id);
         }
@@ -945,7 +865,7 @@ impl WorkspaceApp {
             }
         }
 
-        self.main_window_tabs.active_tab_id = if self.tabs.is_empty() {
+        let next_active_tab_id = if self.tabs.is_empty() {
             None
         } else if !removed_was_active
             && old_active_tab_id.is_some_and(|tab_id| {
@@ -971,6 +891,7 @@ impl WorkspaceApp {
                 })
                 .map(|(_, tab)| tab.id)
         };
+        self.set_main_window_active_tab(next_active_tab_id, cx);
         self.sync_active_tab_surface(cx);
         self.needs_active_pane_focus = self
             .active_tab()
@@ -1111,7 +1032,7 @@ impl WorkspaceApp {
         } else {
             current - 1
         };
-        self.main_window_tabs.active_tab_id = Some(visible_tabs[next]);
+        self.set_main_window_active_tab(Some(visible_tabs[next]), cx);
         self.sync_active_tab_surface(cx);
         self.needs_active_pane_focus = self
             .active_tab()
@@ -1134,7 +1055,7 @@ impl WorkspaceApp {
             .nth(index)
             .map(|tab| tab.id)
         {
-            self.main_window_tabs.active_tab_id = Some(tab_id);
+            self.set_main_window_active_tab(Some(tab_id), cx);
             self.sync_active_tab_surface(cx);
             self.needs_active_pane_focus = self.active_tab().is_some_and(|tab| {
                 matches!(tab.kind, TabKind::LocalTerminal | TabKind::SshTerminal)

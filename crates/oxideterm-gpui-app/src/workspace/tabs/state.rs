@@ -16,6 +16,18 @@ impl WorkspaceApp {
             .update(cx, |tab_host, _| tab_host.alloc_session_id())
     }
 
+    /// Keeps root window focus state and Entity-owned navigation history in one write path.
+    pub(in crate::workspace) fn set_main_window_active_tab(
+        &mut self,
+        active_tab_id: Option<TabId>,
+        cx: &mut App,
+    ) {
+        self.main_window_tabs.active_tab_id = active_tab_id;
+        self.tab_host.update(cx, |tab_host, _| {
+            tab_host.observe_active_tab(active_tab_id);
+        });
+    }
+
     pub(in crate::workspace) fn active_tab_index(&self) -> Option<usize> {
         let active = self.main_window_tabs.active_tab_id?;
         if let Some((cached_id, cached_index)) = self.main_window_tabs.active_tab_index_cache.get()

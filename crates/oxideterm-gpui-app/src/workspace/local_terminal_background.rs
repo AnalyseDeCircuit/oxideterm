@@ -136,7 +136,7 @@ impl WorkspaceApp {
         for pane_id in pane_ids {
             self.remove_terminal_pane(&pane_id);
         }
-        self.main_window_tabs.active_tab_id = if self.tabs.is_empty() {
+        let next_active_tab_id = if self.tabs.is_empty() {
             None
         } else if !removed_was_active
             && old_active_tab_id.is_some_and(|tab_id| self.tabs.iter().any(|tab| tab.id == tab_id))
@@ -145,6 +145,7 @@ impl WorkspaceApp {
         } else {
             Some(self.tabs[index.min(self.tabs.len() - 1)].id)
         };
+        self.set_main_window_active_tab(next_active_tab_id, cx);
         self.sync_active_tab_surface(cx);
         self.needs_active_pane_focus = self
             .active_tab()
@@ -184,7 +185,7 @@ impl WorkspaceApp {
             active_pane_id: Some(pane_id),
         });
         self.bind_terminal_location(tab_id, pane_id, detached.session_id);
-        self.main_window_tabs.active_tab_id = Some(tab_id);
+        self.set_main_window_active_tab(Some(tab_id), cx);
         self.active_surface = ActiveSurface::Terminal;
         self.needs_active_pane_focus = true;
         if self.detached_local_terminals.is_empty() {

@@ -129,7 +129,6 @@ impl Render for WorkspaceApp {
         if self.ai_sidebar_visible() || self.ai_entity.read(cx).terminal_inline_panel().open {
             self.ensure_ai_model_selector_mount_statuses(cx);
         }
-        self.observe_active_tab_for_history();
         let window_opacity =
             normalized_window_opacity(self.settings_store.settings().appearance.window_opacity);
         if self.applied_window_opacity != window_opacity {

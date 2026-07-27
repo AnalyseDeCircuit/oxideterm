@@ -196,7 +196,7 @@ impl WorkspaceApp {
             }
             Err(_) => {
                 self.detached_tabs.remove(&tab_id);
-                self.main_window_tabs.active_tab_id = Some(tab_id);
+                self.set_main_window_active_tab(Some(tab_id), cx);
             }
         }
         self.sync_active_tab_surface(cx);
@@ -240,7 +240,7 @@ impl WorkspaceApp {
     ) {
         if self.detached_tabs.remove(&tab_id) {
             self.detached_tab_windows.remove(&tab_id);
-            self.main_window_tabs.active_tab_id = Some(tab_id);
+            self.set_main_window_active_tab(Some(tab_id), cx);
             self.detached_tab_return_drag = None;
             self.sync_active_tab_surface(cx);
             cx.notify();
@@ -1123,10 +1123,10 @@ impl WorkspaceApp {
             return;
         }
         let Some(detached_index) = self.tab_index_by_id(detached_tab_id) else {
-            self.main_window_tabs.active_tab_id = None;
+            self.set_main_window_active_tab(None, cx);
             return;
         };
-        self.main_window_tabs.active_tab_id = self
+        let next_active_tab_id = self
             .tabs
             .iter()
             .enumerate()
@@ -1141,6 +1141,7 @@ impl WorkspaceApp {
                     .find(|(_, tab)| !self.detached_tabs.contains(&tab.id))
             })
             .map(|(_, tab)| tab.id);
+        self.set_main_window_active_tab(next_active_tab_id, cx);
         self.sync_active_tab_surface(cx);
         self.focus_active_pane(window, cx);
     }

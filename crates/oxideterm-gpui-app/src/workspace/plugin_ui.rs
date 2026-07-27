@@ -258,7 +258,7 @@ impl WorkspaceApp {
         if self.focus_detached_tab_window(tab_id_value, cx) {
             return Ok(());
         }
-        self.main_window_tabs.active_tab_id = Some(tab_id_value);
+        self.set_main_window_active_tab(Some(tab_id_value), cx);
         self.active_surface = ActiveSurface::Terminal;
         self.needs_active_pane_focus = false;
         self.persist_sidebar_settings();

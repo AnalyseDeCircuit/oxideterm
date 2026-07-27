@@ -94,7 +94,7 @@ impl WorkspaceApp {
             active_pane_id: Some(pane_id),
         });
         self.bind_terminal_location(tab_id, pane_id, session_id);
-        self.main_window_tabs.active_tab_id = Some(tab_id);
+        self.set_main_window_active_tab(Some(tab_id), cx);
         self.active_surface = ActiveSurface::Terminal;
         self.needs_active_pane_focus = true;
         pane.update(cx, |pane, cx| pane.focus(window, cx));
@@ -134,7 +134,7 @@ impl WorkspaceApp {
             active_pane_id: Some(pane_id),
         });
         self.bind_terminal_location(tab_id, pane_id, session_id);
-        self.main_window_tabs.active_tab_id = Some(tab_id);
+        self.set_main_window_active_tab(Some(tab_id), cx);
         self.active_surface = ActiveSurface::Terminal;
         self.needs_active_pane_focus = true;
         pane.update(cx, |pane, cx| pane.focus(window, cx));
@@ -175,7 +175,7 @@ impl WorkspaceApp {
             active_pane_id: Some(pane_id),
         });
         self.bind_terminal_location(tab_id, pane_id, session_id);
-        self.main_window_tabs.active_tab_id = Some(tab_id);
+        self.set_main_window_active_tab(Some(tab_id), cx);
         self.active_surface = ActiveSurface::Terminal;
         self.needs_active_pane_focus = true;
         pane.update(cx, |pane, cx| pane.focus(window, cx));
@@ -641,7 +641,7 @@ impl WorkspaceApp {
             active_pane_id: Some(pane_id),
         });
         self.bind_terminal_location(tab_id, pane_id, session_id);
-        self.main_window_tabs.active_tab_id = Some(tab_id);
+        self.set_main_window_active_tab(Some(tab_id), cx);
         self.active_surface = ActiveSurface::Terminal;
         if self.sidebar_collapsed {
             self.set_sidebar_collapsed_with_motion(false, cx);
@@ -855,7 +855,7 @@ impl WorkspaceApp {
             active_pane_id: Some(pane_id),
         });
         self.bind_terminal_location(tab_id, pane_id, session_id);
-        self.main_window_tabs.active_tab_id = Some(tab_id);
+        self.set_main_window_active_tab(Some(tab_id), cx);
         self.active_surface = ActiveSurface::Terminal;
         if self.sidebar_collapsed {
             self.set_sidebar_collapsed_with_motion(false, cx);
@@ -1175,7 +1175,7 @@ impl WorkspaceApp {
         if self.focus_detached_tab_window(tab_id, cx) {
             return;
         }
-        self.main_window_tabs.active_tab_id = Some(tab_id);
+        self.set_main_window_active_tab(Some(tab_id), cx);
         self.active_surface = ActiveSurface::Settings;
         self.needs_active_pane_focus = false;
         if self.sidebar_collapsed {

@@ -114,7 +114,7 @@ impl WorkspaceApp {
             root_pane: None,
             active_pane_id: None,
         });
-        self.main_window_tabs.active_tab_id = Some(tab_id);
+        self.set_main_window_active_tab(Some(tab_id), cx);
         self.active_surface = ActiveSurface::Terminal;
         self.needs_active_pane_focus = false;
         self.focus_remote_desktop_keyboard(window, cx);

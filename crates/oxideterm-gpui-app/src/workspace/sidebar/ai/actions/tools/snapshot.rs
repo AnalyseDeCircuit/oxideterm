@@ -2139,7 +2139,7 @@ impl WorkspaceApp {
         // AI terminal tools must act on the same pane the user can see. The
         // model may target a non-active session from context, so make that tab
         // and pane visible before writing input or reading command output.
-        self.main_window_tabs.active_tab_id = Some(tab_id);
+        self.set_main_window_active_tab(Some(tab_id), cx);
         if let Some(tab) = self.tab_mut_by_id(tab_id) {
             tab.active_pane_id = Some(pane_id);
         }
