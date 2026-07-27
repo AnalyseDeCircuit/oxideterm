@@ -141,49 +141,62 @@ impl WorkspaceApp {
                     started_at,
                 } => {
                     if self
-                        .reconnect_orchestrator
+                        .workspace_runtime
+                        .read(cx)
+                        .reconnect_orchestrator()
                         .cleanup_terminal_job(&node_id.0, started_at)
                     {
                         changed = true;
                     }
                 }
                 runtime_entity::ReconnectScheduleAction::RetryNodeConnect { node_id, job_id } => {
-                    if !self.reconnect_worker_result_is_current(&node_id, Some(&job_id)) {
+                    if !self.reconnect_worker_result_is_current(&node_id, Some(&job_id), cx) {
                         continue;
                     }
-                    if let Some(job) = self.reconnect_orchestrator.job(&node_id.0)
-                        && job.ended_at.is_none()
+                    if let Some((attempt, max_attempts)) = self
+                        .workspace_runtime
+                        .read(cx)
+                        .reconnect_orchestrator()
+                        .active_attempt(&node_id.0)
                     {
                         if !self.node_still_needs_reconnect(&node_id) {
-                            let _ = self.reconnect_orchestrator.complete_phase(
-                                &node_id.0,
-                                PhaseResult::Ok,
-                                Some("node recovered before retry".to_string()),
-                            );
+                            let _ = self
+                                .workspace_runtime
+                                .read(cx)
+                                .reconnect_orchestrator()
+                                .complete_phase(
+                                    &node_id.0,
+                                    PhaseResult::Ok,
+                                    Some("node recovered before retry".to_string()),
+                                );
                             self.finish_reconnect_job(&node_id, Ok(0), cx);
                             changed = true;
                             continue;
                         }
-                        let _ = self.reconnect_orchestrator.complete_phase(
-                            &node_id.0,
-                            PhaseResult::Ok,
-                            Some(format!(
-                                "starting retry {}/{}",
-                                job.attempt, job.max_attempts
-                            )),
-                        );
                         let _ = self
-                            .reconnect_orchestrator
+                            .workspace_runtime
+                            .read(cx)
+                            .reconnect_orchestrator()
+                            .complete_phase(
+                                &node_id.0,
+                                PhaseResult::Ok,
+                                Some(format!("starting retry {}/{}", attempt, max_attempts)),
+                            );
+                        let _ = self
+                            .workspace_runtime
+                            .read(cx)
+                            .reconnect_orchestrator()
                             .advance(&node_id.0, ReconnectPhase::SshConnect);
                         self.log_reconnect_phase(
                             &node_id,
                             ReconnectPhase::SshConnect,
-                            Some(format!(
-                                "starting retry {}/{}",
-                                job.attempt, job.max_attempts
-                            )),
+                            Some(format!("starting retry {}/{}", attempt, max_attempts)),
                         );
-                        let _ = self.reconnect_orchestrator.begin_ssh_attempt(&node_id.0);
+                        let _ = self
+                            .workspace_runtime
+                            .read(cx)
+                            .reconnect_orchestrator()
+                            .begin_ssh_attempt(&node_id.0);
                         self.start_reconnect_cascade_after_grace_expired(&node_id, cx);
                         changed = true;
                     }
@@ -286,7 +299,10 @@ impl WorkspaceApp {
             // or transfer records. Clear those owners before dropping the tree.
             self.close_tabs_for_node(node_id, window, cx);
             self.abort_connection_chain_for_node(node_id);
-            self.reconnect_orchestrator.cancel(&node_id.0);
+            self.workspace_runtime
+                .read(cx)
+                .reconnect_orchestrator()
+                .cancel(&node_id.0);
             let _ =
                 self.interrupt_sftp_transfers_by_node(node_id, "Connection removed".to_string());
         }
@@ -309,16 +325,16 @@ impl WorkspaceApp {
                     connection_id,
                     job_id,
                 } => {
-                    if !self.reconnect_worker_result_is_current(&node_id, job_id.as_deref()) {
+                    if !self.reconnect_worker_result_is_current(&node_id, job_id.as_deref(), cx) {
                         self.drop_stale_node_connection(&node_id, &connection_id);
                         changed = true;
                         continue;
                     }
                     self.finish_connection_trace_success(&node_id);
                     if self
-                        .reconnect_orchestrator
-                        .job(&node_id.0)
-                        .is_some_and(|job| job.ended_at.is_none())
+                        .workspace_runtime
+                        .read(cx)
+                        .has_active_reconnect_job(&node_id)
                     {
                         self.log_connection_event(
                             &node_id,
@@ -329,26 +345,34 @@ impl WorkspaceApp {
                             "connect_node",
                         );
                         self.resolve_connection_notifications_for_node(&node_id);
-                        let _ = self.reconnect_orchestrator.complete_phase(
-                            &node_id.0,
-                            PhaseResult::Ok,
-                            Some(format!("reconnected as {connection_id}")),
-                        );
                         let _ = self
-                            .reconnect_orchestrator
+                            .workspace_runtime
+                            .read(cx)
+                            .reconnect_orchestrator()
+                            .complete_phase(
+                                &node_id.0,
+                                PhaseResult::Ok,
+                                Some(format!("reconnected as {connection_id}")),
+                            );
+                        let _ = self
+                            .workspace_runtime
+                            .read(cx)
+                            .reconnect_orchestrator()
                             .advance(&node_id.0, ReconnectPhase::AwaitTerminal);
                         self.log_reconnect_phase(&node_id, ReconnectPhase::AwaitTerminal, None);
                         let remounted =
                             self.remount_terminal_panes_for_reconnect(&node_id, window, cx);
                         let terminal_message =
                             format!("fixed {remounted} terminal pane(s) through native remount");
-                        let _ = self.reconnect_orchestrator.complete_phase(
-                            &node_id.0,
-                            PhaseResult::Ok,
-                            Some(terminal_message),
-                        );
                         let _ = self
-                            .reconnect_orchestrator
+                            .workspace_runtime
+                            .read(cx)
+                            .reconnect_orchestrator()
+                            .complete_phase(&node_id.0, PhaseResult::Ok, Some(terminal_message));
+                        let _ = self
+                            .workspace_runtime
+                            .read(cx)
+                            .reconnect_orchestrator()
                             .advance(&node_id.0, ReconnectPhase::RestoreForwards);
                         self.log_reconnect_phase(&node_id, ReconnectPhase::RestoreForwards, None);
                     }
@@ -377,22 +401,29 @@ impl WorkspaceApp {
                     let _ = self.drain_ready_pending_ssh_terminal_opens(window, cx);
                     self.restore_forwarding_rules_for_reconnect(&node_id, cx);
                     if self
-                        .reconnect_orchestrator
-                        .job(&node_id.0)
-                        .is_some_and(|job| job.ended_at.is_none())
+                        .workspace_runtime
+                        .read(cx)
+                        .has_active_reconnect_job(&node_id)
                     {
                         let has_forward_snapshot = self
-                            .reconnect_orchestrator
-                            .job(&node_id.0)
-                            .is_some_and(|job| !job.snapshot.forward_rules.is_empty());
+                            .workspace_runtime
+                            .read(cx)
+                            .reconnect_orchestrator()
+                            .has_forward_snapshot(&node_id.0);
                         if !has_forward_snapshot {
-                            let _ = self.reconnect_orchestrator.complete_phase(
-                                &node_id.0,
-                                PhaseResult::Skipped,
-                                Some("no forward rules in snapshot".to_string()),
-                            );
                             let _ = self
-                                .reconnect_orchestrator
+                                .workspace_runtime
+                                .read(cx)
+                                .reconnect_orchestrator()
+                                .complete_phase(
+                                    &node_id.0,
+                                    PhaseResult::Skipped,
+                                    Some("no forward rules in snapshot".to_string()),
+                                );
+                            let _ = self
+                                .workspace_runtime
+                                .read(cx)
+                                .reconnect_orchestrator()
                                 .advance(&node_id.0, ReconnectPhase::ResumeTransfers);
                             self.log_reconnect_phase(
                                 &node_id,
@@ -434,13 +465,13 @@ impl WorkspaceApp {
                     error,
                     job_id,
                 } => {
-                    if !self.reconnect_worker_result_is_current(&node_id, job_id.as_deref()) {
+                    if !self.reconnect_worker_result_is_current(&node_id, job_id.as_deref(), cx) {
                         continue;
                     }
                     let active_reconnect_job = self
-                        .reconnect_orchestrator
-                        .job(&node_id.0)
-                        .is_some_and(|job| job.ended_at.is_none());
+                        .workspace_runtime
+                        .read(cx)
+                        .has_active_reconnect_job(&node_id);
                     let connection_chain_node = self
                         .active_connection_chain
                         .as_ref()
@@ -472,14 +503,17 @@ impl WorkspaceApp {
                             WorkspaceNotificationScope::Node(node_id.0.clone()),
                             Some(format!("reconnect-failed:{}", node_id.0)),
                         );
-                        let _ = self.reconnect_orchestrator.complete_phase(
-                            &node_id.0,
-                            PhaseResult::Failed,
-                            Some(error.clone()),
-                        );
+                        let _ = self
+                            .workspace_runtime
+                            .read(cx)
+                            .reconnect_orchestrator()
+                            .complete_phase(&node_id.0, PhaseResult::Failed, Some(error.clone()));
                         if !reconnect_error_is_non_retryable(&error)
-                            && let Some(retry) =
-                                self.reconnect_orchestrator.schedule_retry(&node_id.0)
+                            && let Some(retry) = self
+                                .workspace_runtime
+                                .read(cx)
+                                .reconnect_orchestrator()
+                                .schedule_retry(&node_id.0)
                         {
                             self.log_reconnect_phase(
                                 &node_id,
@@ -491,9 +525,10 @@ impl WorkspaceApp {
                             );
                             let retry_node_id = node_id.clone();
                             let retry_job_id = job_id.clone().unwrap_or_else(|| {
-                                self.reconnect_orchestrator
-                                    .job(&node_id.0)
-                                    .map(|job| job.job_id)
+                                self.workspace_runtime
+                                    .read(cx)
+                                    .reconnect_orchestrator()
+                                    .active_job_id(&node_id.0)
                                     .unwrap_or_default()
                             });
                             self.workspace_runtime.update(cx, |runtime, cx| {
@@ -560,16 +595,20 @@ impl WorkspaceApp {
                     recovered_connections,
                     job_id,
                 } => {
-                    if !self.reconnect_worker_result_is_current(&node_id, Some(&job_id)) {
+                    if !self.reconnect_worker_result_is_current(&node_id, Some(&job_id), cx) {
                         continue;
                     }
-                    let _ = self.reconnect_orchestrator.complete_phase(
-                        &node_id.0,
-                        PhaseResult::Ok,
-                        Some(format!(
-                            "connection {connection_id} recovered during grace period"
-                        )),
-                    );
+                    let _ = self
+                        .workspace_runtime
+                        .read(cx)
+                        .reconnect_orchestrator()
+                        .complete_phase(
+                            &node_id.0,
+                            PhaseResult::Ok,
+                            Some(format!(
+                                "connection {connection_id} recovered during grace period"
+                            )),
+                        );
                     self.finish_reconnect_job(&node_id, Ok(0), cx);
                     self.push_reconnect_notice(
                         self.i18n.t("connections.reconnect.recovered"),
@@ -621,14 +660,14 @@ impl WorkspaceApp {
                     detail,
                     job_id,
                 } => {
-                    if !self.reconnect_worker_result_is_current(&node_id, Some(&job_id)) {
+                    if !self.reconnect_worker_result_is_current(&node_id, Some(&job_id), cx) {
                         continue;
                     }
-                    let _ = self.reconnect_orchestrator.complete_phase(
-                        &node_id.0,
-                        PhaseResult::Failed,
-                        Some(detail.clone()),
-                    );
+                    let _ = self
+                        .workspace_runtime
+                        .read(cx)
+                        .reconnect_orchestrator()
+                        .complete_phase(&node_id.0, PhaseResult::Failed, Some(detail.clone()));
                     if let Some(node) = self.ssh_nodes.get_mut(&node_id) {
                         node.readiness = NodeReadiness::Connecting;
                     }
@@ -642,10 +681,16 @@ impl WorkspaceApp {
                         self.emit_node_event(event);
                     }
                     let _ = self
-                        .reconnect_orchestrator
+                        .workspace_runtime
+                        .read(cx)
+                        .reconnect_orchestrator()
                         .advance(&node_id.0, ReconnectPhase::SshConnect);
                     self.log_reconnect_phase(&node_id, ReconnectPhase::SshConnect, Some(detail));
-                    let _ = self.reconnect_orchestrator.begin_ssh_attempt(&node_id.0);
+                    let _ = self
+                        .workspace_runtime
+                        .read(cx)
+                        .reconnect_orchestrator()
+                        .begin_ssh_attempt(&node_id.0);
                     // Tauri falls back from grace-period probing to a full
                     // reconnectCascade(root): root reconnect first, and
                     // descendants marked link-down reconnect once their parent
@@ -659,11 +704,13 @@ impl WorkspaceApp {
                     detail,
                     job_id,
                 } => {
-                    if !self.reconnect_worker_result_is_current(&node_id, Some(&job_id)) {
+                    if !self.reconnect_worker_result_is_current(&node_id, Some(&job_id), cx) {
                         continue;
                     }
                     let _ = self
-                        .reconnect_orchestrator
+                        .workspace_runtime
+                        .read(cx)
+                        .reconnect_orchestrator()
                         .update_snapshot(&node_id.0, |snapshot| {
                             snapshot.inflight_sftp_transfer_ids = transfers_by_node
                                 .iter()
@@ -672,17 +719,19 @@ impl WorkspaceApp {
                             snapshot.incomplete_sftp_transfers_by_node = transfers_by_node;
                         });
                     if self
-                        .reconnect_orchestrator
-                        .job(&node_id.0)
-                        .is_some_and(|job| job.ended_at.is_none())
+                        .workspace_runtime
+                        .read(cx)
+                        .has_active_reconnect_job(&node_id)
                     {
-                        let _ = self.reconnect_orchestrator.complete_phase(
-                            &node_id.0,
-                            PhaseResult::Ok,
-                            Some(detail),
-                        );
                         let _ = self
-                            .reconnect_orchestrator
+                            .workspace_runtime
+                            .read(cx)
+                            .reconnect_orchestrator()
+                            .complete_phase(&node_id.0, PhaseResult::Ok, Some(detail));
+                        let _ = self
+                            .workspace_runtime
+                            .read(cx)
+                            .reconnect_orchestrator()
                             .advance(&node_id.0, ReconnectPhase::GracePeriod);
                         self.log_reconnect_phase(&node_id, ReconnectPhase::GracePeriod, None);
                     }
@@ -697,7 +746,7 @@ impl WorkspaceApp {
                     created_forwards,
                     bindings,
                 } => {
-                    if !self.reconnect_worker_result_is_current(&node_id, Some(&job_id)) {
+                    if !self.reconnect_worker_result_is_current(&node_id, Some(&job_id), cx) {
                         self.release_stale_reconnect_forward_bindings(bindings);
                         self.cleanup_stale_reconnect_forward_restores(created_forwards);
                         changed = true;
@@ -710,22 +759,24 @@ impl WorkspaceApp {
                         self.remember_forwarding_binding(Some(binding));
                     }
                     if self
-                        .reconnect_orchestrator
-                        .job(&node_id.0)
-                        .is_some_and(|job| job.ended_at.is_none())
+                        .workspace_runtime
+                        .read(cx)
+                        .has_active_reconnect_job(&node_id)
                     {
-                        let _ = self.reconnect_orchestrator.complete_phase(
-                            &node_id.0,
-                            result,
-                            Some(detail.clone()),
-                        );
+                        let _ = self
+                            .workspace_runtime
+                            .read(cx)
+                            .reconnect_orchestrator()
+                            .complete_phase(&node_id.0, result, Some(detail.clone()));
                         if result == PhaseResult::Failed {
                             self.finish_reconnect_job(&node_id, Err(detail), cx);
                             changed = true;
                             continue;
                         }
                         let _ = self
-                            .reconnect_orchestrator
+                            .workspace_runtime
+                            .read(cx)
+                            .reconnect_orchestrator()
                             .advance(&node_id.0, ReconnectPhase::ResumeTransfers);
                         self.log_reconnect_phase(&node_id, ReconnectPhase::ResumeTransfers, None);
                         let queued = self.resume_sftp_transfers_for_reconnect(&node_id, cx);
@@ -1120,17 +1171,10 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> usize {
         let old_session_ids = self
-            .reconnect_orchestrator
-            .job(&node_id.0)
-            .and_then(|job| {
-                job.snapshot
-                    .terminal_sessions_by_node
-                    .iter()
-                    .find(|entry| entry.node_id == node_id.0)
-                    .map(|entry| entry.old_terminal_session_ids.clone())
-                    .or_else(|| Some(job.snapshot.old_terminal_session_ids))
-            })
-            .unwrap_or_default();
+            .workspace_runtime
+            .read(cx)
+            .reconnect_orchestrator()
+            .terminal_session_ids_for_node(&node_id.0);
         let mut remounted = 0;
         for old_session_id in old_session_ids {
             let Ok(raw_old_session_id) = old_session_id.parse::<u64>() else {
@@ -1193,10 +1237,10 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> usize {
         let transfers_by_node = self
-            .reconnect_orchestrator
-            .job(&node_id.0)
-            .map(|job| job.snapshot.incomplete_sftp_transfers_by_node)
-            .unwrap_or_default();
+            .workspace_runtime
+            .read(cx)
+            .reconnect_orchestrator()
+            .incomplete_sftp_transfers(&node_id.0);
         let candidates = transfers_by_node.into_iter().flat_map(|entry| {
             let entry_node_id = NodeId::new(entry.node_id);
             entry
@@ -1244,19 +1288,21 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) {
         if !self
-            .reconnect_orchestrator
-            .job(&node_id.0)
-            .is_some_and(|job| job.ended_at.is_none())
+            .workspace_runtime
+            .read(cx)
+            .has_active_reconnect_job(node_id)
         {
             return;
         }
-        let _ = self.reconnect_orchestrator.complete_phase(
-            &node_id.0,
-            transfer_result,
-            Some(transfer_detail),
-        );
         let _ = self
-            .reconnect_orchestrator
+            .workspace_runtime
+            .read(cx)
+            .reconnect_orchestrator()
+            .complete_phase(&node_id.0, transfer_result, Some(transfer_detail));
+        let _ = self
+            .workspace_runtime
+            .read(cx)
+            .reconnect_orchestrator()
             .advance(&node_id.0, ReconnectPhase::RestoreIde);
         self.log_reconnect_phase(node_id, ReconnectPhase::RestoreIde, None);
         self.workspace_runtime.update(cx, |runtime, _cx| {
@@ -1291,18 +1337,20 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) {
         if !self
-            .reconnect_orchestrator
-            .job(&node_id.0)
-            .is_some_and(|job| job.ended_at.is_none())
+            .workspace_runtime
+            .read(cx)
+            .has_active_reconnect_job(node_id)
         {
             self.workspace_runtime.update(cx, |runtime, _cx| {
                 runtime.clear_ide_restore_transfer_count(node_id);
             });
             return;
         }
-        let _ =
-            self.reconnect_orchestrator
-                .complete_phase(&node_id.0, result, Some(detail.clone()));
+        let _ = self
+            .workspace_runtime
+            .read(cx)
+            .reconnect_orchestrator()
+            .complete_phase(&node_id.0, result, Some(detail.clone()));
         if result == PhaseResult::Failed {
             self.workspace_runtime.update(cx, |runtime, _cx| {
                 runtime.clear_ide_restore_transfer_count(node_id);
@@ -1311,14 +1359,20 @@ impl WorkspaceApp {
             return;
         }
         let _ = self
-            .reconnect_orchestrator
+            .workspace_runtime
+            .read(cx)
+            .reconnect_orchestrator()
             .advance(&node_id.0, ReconnectPhase::Verify);
         self.log_reconnect_phase(node_id, ReconnectPhase::Verify, None);
-        let _ = self.reconnect_orchestrator.complete_phase(
-            &node_id.0,
-            PhaseResult::Ok,
-            Some(self.verify_forward_rules_for_reconnect(node_id)),
-        );
+        let _ = self
+            .workspace_runtime
+            .read(cx)
+            .reconnect_orchestrator()
+            .complete_phase(
+                &node_id.0,
+                PhaseResult::Ok,
+                Some(self.verify_forward_rules_for_reconnect(node_id, cx)),
+            );
         let (restored_forwards, restored_transfers) =
             self.workspace_runtime.update(cx, |runtime, _cx| {
                 runtime.complete_reconnect_restore_counts(node_id)
@@ -1331,9 +1385,9 @@ impl WorkspaceApp {
             return;
         }
         if self
-            .reconnect_orchestrator
-            .job(&node_id.0)
-            .is_some_and(|job| job.ended_at.is_none())
+            .workspace_runtime
+            .read(cx)
+            .has_active_reconnect_job(node_id)
         {
             return;
         }
@@ -1351,17 +1405,21 @@ impl WorkspaceApp {
             return;
         };
         if self
-            .reconnect_orchestrator
-            .job(&node_id.0)
-            .is_some_and(|job| job.ended_at.is_none())
+            .workspace_runtime
+            .read(cx)
+            .has_active_reconnect_job(node_id)
         {
             return;
         }
-        if self.has_active_reconnect_job_for_ancestor(node_id) {
+        if self.has_active_reconnect_job_for_ancestor(node_id, cx) {
             return;
         }
         let expected_connection_id = self.node_router.connection_id_for_node(node_id);
-        let retry_delay = self.reconnect_orchestrator.retry_delay_for_attempt(1);
+        let retry_delay = self
+            .workspace_runtime
+            .read(cx)
+            .reconnect_orchestrator()
+            .retry_delay_for_attempt(1);
         let pipeline_claim = self.workspace_runtime.update(cx, |runtime, cx| {
             runtime.claim_reconnect_pipeline(node_id, expected_connection_id, retry_delay, cx)
         });
@@ -1429,9 +1487,11 @@ impl WorkspaceApp {
             snapshot_at: Some(SystemTime::now()),
             ..ReconnectSnapshot::default()
         };
-        let reconnect_job =
-            self.reconnect_orchestrator
-                .schedule(node_id.0.clone(), node_title, snapshot);
+        let reconnect_job = self
+            .workspace_runtime
+            .read(cx)
+            .reconnect_orchestrator()
+            .schedule(node_id.0.clone(), node_title, snapshot);
         self.push_reconnect_notice(
             self.i18n_with(
                 "connections.reconnect.starting",
@@ -1446,7 +1506,9 @@ impl WorkspaceApp {
             Some("scheduled after link-down debounce".to_string()),
         );
         let _ = self
-            .reconnect_orchestrator
+            .workspace_runtime
+            .read(cx)
+            .reconnect_orchestrator()
             .advance(&node_id.0, ReconnectPhase::Snapshot);
         self.log_reconnect_phase(node_id, ReconnectPhase::Snapshot, None);
 
@@ -1462,7 +1524,11 @@ impl WorkspaceApp {
         let progress_store = self.sftp_progress_store.clone();
         let registry = self.ssh_registry.clone();
         let tx = self.reconnect_worker_sender(cx);
-        let timing = self.reconnect_orchestrator.timing();
+        let timing = self
+            .workspace_runtime
+            .read(cx)
+            .reconnect_orchestrator()
+            .timing();
         let runtime = self.forwarding_runtime.clone();
         let reconnect_job_id = reconnect_job.job_id;
         runtime.spawn(async move {
@@ -1662,7 +1728,12 @@ impl WorkspaceApp {
                 Some(error.clone()),
             )),
         };
-        if let Some(job) = self.reconnect_orchestrator.finish(&node_id.0, result) {
+        if let Some(job) = self
+            .workspace_runtime
+            .read(cx)
+            .reconnect_orchestrator()
+            .finish(&node_id.0, result)
+        {
             if let Some((title, variant, phase, detail)) = notice {
                 self.log_reconnect_phase(node_id, phase, detail.clone());
                 if let Some(error) = detail.clone() {
@@ -1682,7 +1753,9 @@ impl WorkspaceApp {
             self.workspace_runtime.update(cx, |runtime, _cx| {
                 runtime.release_reconnect_pipeline(node_id);
             });
-            self.reconnect_orchestrator
+            self.workspace_runtime
+                .read(cx)
+                .reconnect_orchestrator()
                 .enforce_terminal_job_cap(MAX_RETAINED_RECONNECT_JOBS);
             let cleanup_node_id = node_id.clone();
             let started_at = job.started_at;
@@ -1703,13 +1776,14 @@ impl WorkspaceApp {
         &self,
         node_id: &NodeId,
         worker_job_id: Option<&str>,
+        cx: &App,
     ) -> bool {
         let Some(worker_job_id) = worker_job_id else {
             return true;
         };
-        self.reconnect_orchestrator
-            .job(&node_id.0)
-            .is_some_and(|job| job.ended_at.is_none() && job.job_id == worker_job_id)
+        self.workspace_runtime
+            .read(cx)
+            .reconnect_job_is_current(node_id, worker_job_id)
     }
 
     fn cleanup_stale_reconnect_forward_restores(&self, created_forwards: Vec<(String, String)>) {
@@ -1798,16 +1872,16 @@ impl WorkspaceApp {
             })
     }
 
-    fn has_active_reconnect_job_for_ancestor(&self, node_id: &NodeId) -> bool {
+    fn has_active_reconnect_job_for_ancestor(&self, node_id: &NodeId, cx: &App) -> bool {
         let mut cursor = self
             .node_runtime_store
             .metadata_snapshot(node_id)
             .and_then(|snapshot| snapshot.parent_id);
         while let Some(parent_id) = cursor {
             if self
-                .reconnect_orchestrator
-                .job(&parent_id.0)
-                .is_some_and(|job| job.ended_at.is_none())
+                .workspace_runtime
+                .read(cx)
+                .has_active_reconnect_job(&parent_id)
             {
                 return true;
             }
@@ -1825,9 +1899,9 @@ impl WorkspaceApp {
         cx: &App,
     ) -> bool {
         let trace_mode = if self
-            .reconnect_orchestrator
-            .job(&node_id.0)
-            .is_some_and(|job| job.ended_at.is_none())
+            .workspace_runtime
+            .read(cx)
+            .has_active_reconnect_job(node_id)
         {
             ConnectionTraceMode::Reconnect
         } else {
@@ -2163,10 +2237,10 @@ impl WorkspaceApp {
         let router = self.node_router.clone();
         let tx = self.reconnect_worker_sender(cx);
         let worker_job_id = self
-            .reconnect_orchestrator
-            .job(&node_id.0)
-            .filter(|job| job.ended_at.is_none())
-            .map(|job| job.job_id);
+            .workspace_runtime
+            .read(cx)
+            .reconnect_orchestrator()
+            .active_job_id(&node_id.0);
         let node_id = node_id.clone();
         let node_handle = handle;
         let prompt_handler =
@@ -2254,20 +2328,24 @@ impl WorkspaceApp {
     }
 
     fn restore_forwarding_rules_for_reconnect(&mut self, node_id: &NodeId, cx: &mut Context<Self>) {
-        let Some(job) = self.reconnect_orchestrator.job(&node_id.0) else {
+        let Some(restore_plan) = self
+            .workspace_runtime
+            .read(cx)
+            .reconnect_orchestrator()
+            .forward_restore_plan(&node_id.0)
+        else {
             return;
         };
-        if job.snapshot.forward_rules.is_empty() {
+        if restore_plan.forward_rules.is_empty() {
             return;
         }
 
-        let job_id = job.job_id.clone();
-        let snapshots = job.snapshot.forward_rules.clone();
+        let job_id = restore_plan.job_id;
+        let snapshots = restore_plan.forward_rules;
         let restore_token = self
             .workspace_runtime
             .update(cx, |runtime, _cx| runtime.begin_forward_restore(node_id));
-        let old_connection_ids_by_node = job
-            .snapshot
+        let old_connection_ids_by_node = restore_plan
             .old_connections_by_node
             .iter()
             .map(|entry| (entry.node_id.clone(), entry.old_connection_id.clone()))
@@ -2442,12 +2520,17 @@ impl WorkspaceApp {
             .collect()
     }
 
-    fn verify_forward_rules_for_reconnect(&self, node_id: &NodeId) -> String {
-        let Some(job) = self.reconnect_orchestrator.job(&node_id.0) else {
+    fn verify_forward_rules_for_reconnect(&self, node_id: &NodeId, cx: &App) -> String {
+        let forward_rule_snapshots = self
+            .workspace_runtime
+            .read(cx)
+            .reconnect_orchestrator()
+            .forward_rule_snapshots(&node_id.0);
+        if forward_rule_snapshots.is_empty() {
             return "native node reconnect verified".to_string();
-        };
+        }
         let mut drifts = Vec::new();
-        for entry in job.snapshot.forward_rules {
+        for entry in forward_rule_snapshots {
             let entry_node_id = NodeId::new(entry.node_id.clone());
             let expected = entry.rules.len();
             let live = self

@@ -52,10 +52,11 @@ pub use oxideterm_sftp::{
     TransferDirection, TransferProgress, TransferState,
 };
 pub use reconnect::{
-    MAX_RETAINED_RECONNECT_JOBS, PhaseEvent, PhaseResult, ReconnectForwardRule,
-    ReconnectForwardRuleSnapshot, ReconnectIdeSnapshot, ReconnectJob,
+    MAX_RETAINED_RECONNECT_JOBS, PhaseEvent, PhaseResult, ReconnectForwardRestorePlan,
+    ReconnectForwardRule, ReconnectForwardRuleSnapshot, ReconnectIdeSnapshot, ReconnectJob,
     ReconnectNodeConnectionSnapshot, ReconnectNodeTerminalSnapshot, ReconnectNodeTransferSnapshot,
-    ReconnectOrchestratorStore, ReconnectPhase, ReconnectSnapshot, ReconnectTiming,
+    ReconnectOrchestratorStore, ReconnectPhase, ReconnectProgress, ReconnectSnapshot,
+    ReconnectTiming,
 };
 pub use router::{
     FlatNode, NodeEventEmitter, NodeEventReceiver, NodeEventSequencer, NodeEventSubscription,

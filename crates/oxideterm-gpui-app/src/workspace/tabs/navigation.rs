@@ -538,7 +538,10 @@ impl WorkspaceApp {
         for affected_node_id in &nodes_to_disconnect {
             self.cancel_connection_trace_for_node(affected_node_id);
             self.abort_connection_chain_for_node(affected_node_id);
-            self.reconnect_orchestrator.cancel(&affected_node_id.0);
+            self.workspace_runtime
+                .read(cx)
+                .reconnect_orchestrator()
+                .cancel(&affected_node_id.0);
             let _ = self.interrupt_sftp_transfers_by_node(
                 affected_node_id,
                 "Connection closed".to_string(),

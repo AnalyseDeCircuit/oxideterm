@@ -962,10 +962,14 @@ impl WorkspaceApp {
         );
     }
 
-    pub(in crate::workspace) fn has_active_reconnect_job(&self, node_id: &NodeId) -> bool {
-        self.reconnect_orchestrator
-            .job(&node_id.0)
-            .is_some_and(|job| job.ended_at.is_none())
+    pub(in crate::workspace) fn has_active_reconnect_job(
+        &self,
+        node_id: &NodeId,
+        cx: &App,
+    ) -> bool {
+        self.workspace_runtime
+            .read(cx)
+            .has_active_reconnect_job(node_id)
     }
 
     pub(in crate::workspace) fn cancel_reconnect_for_node(
@@ -983,7 +987,9 @@ impl WorkspaceApp {
         let mut cancelled = 0_u32;
         for affected_node_id in affected_nodes {
             if self
-                .reconnect_orchestrator
+                .workspace_runtime
+                .read(cx)
+                .reconnect_orchestrator()
                 .cancel(&affected_node_id.0)
                 .is_some()
             {

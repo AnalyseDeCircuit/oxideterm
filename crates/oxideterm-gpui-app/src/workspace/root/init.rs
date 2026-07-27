@@ -96,6 +96,7 @@ impl WorkspaceApp {
                 forwarding_runtime.clone(),
                 settings.reconnect.enabled,
                 reconnect_timing_from_settings(&settings),
+                reconnect_max_attempts_from_settings(&settings),
                 cx,
             )
         });
@@ -528,10 +529,6 @@ impl WorkspaceApp {
             sftp_progress_store,
             node_runtime_store,
             node_router,
-            reconnect_orchestrator: ReconnectOrchestratorStore::new(
-                reconnect_timing_from_settings(&settings),
-                reconnect_max_attempts_from_settings(&settings),
-            ),
             active_connection_chain: None,
             connecting_node_locks: HashSet::new(),
             notification_center: NotificationCenterState::default(),

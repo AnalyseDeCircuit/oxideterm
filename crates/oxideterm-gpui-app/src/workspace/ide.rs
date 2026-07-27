@@ -159,10 +159,12 @@ impl WorkspaceApp {
         node_id: &NodeId,
         cx: &mut Context<Self>,
     ) -> IdeReconnectRestoreStatus {
-        let Some(job) = self.reconnect_orchestrator.job(&node_id.0) else {
-            return IdeReconnectRestoreStatus::Skipped;
-        };
-        let Some(ide_snapshot) = job.snapshot.ide_snapshot else {
+        let Some((ide_snapshot, snapshot_at)) = self
+            .workspace_runtime
+            .read(cx)
+            .reconnect_orchestrator()
+            .ide_snapshot(&node_id.0)
+        else {
             return IdeReconnectRestoreStatus::Skipped;
         };
         let target_node_id = NodeId::new(ide_snapshot.connection_id.clone());
@@ -173,7 +175,7 @@ impl WorkspaceApp {
             self.ide_last_closed_at_by_node
                 .get(&target_node_id)
                 .copied(),
-            job.snapshot.snapshot_at,
+            snapshot_at,
         ) {
             return IdeReconnectRestoreStatus::Skipped;
         }

@@ -34,7 +34,7 @@ impl WorkspaceApp {
             return self.render_empty_sessions_sidebar_content(cx);
         }
 
-        self.sync_active_session_sidebar_list_state(&rows, ActiveSessionSidebarViewMode::Tree);
+        self.sync_active_session_sidebar_list_state(&rows, ActiveSessionSidebarViewMode::Tree, cx);
         let state = self.active_session_sidebar_list_state.clone();
         let spec = self.active_session_sidebar_list_spec(ActiveSessionSidebarViewMode::Tree);
         let workspace = cx.entity();
@@ -67,6 +67,7 @@ impl WorkspaceApp {
         self.sync_active_session_sidebar_list_state(
             &visible_rows,
             ActiveSessionSidebarViewMode::Focus,
+            cx,
         );
 
         let state = self.active_session_sidebar_list_state.clone();
@@ -151,10 +152,11 @@ impl WorkspaceApp {
         &mut self,
         rows: &[ActiveSessionSidebarRow],
         view_mode: ActiveSessionSidebarViewMode,
+        cx: &App,
     ) {
         let signatures = rows
             .iter()
-            .map(|row| self.active_session_sidebar_row_signature(row, view_mode))
+            .map(|row| self.active_session_sidebar_row_signature(row, view_mode, cx))
             .collect::<Vec<_>>();
         sync_tauri_variable_list_state_by_signatures(
             &self.active_session_sidebar_list_state,
@@ -201,6 +203,7 @@ impl WorkspaceApp {
         &self,
         row: &ActiveSessionSidebarRow,
         view_mode: ActiveSessionSidebarViewMode,
+        cx: &App,
     ) -> u64 {
         let mut hasher = DefaultHasher::new();
         // This virtual row owns the node header plus expanded action/terminal
@@ -220,7 +223,7 @@ impl WorkspaceApp {
         self.expanded_ssh_nodes
             .contains(&row.node_id)
             .hash(&mut hasher);
-        self.has_active_reconnect_job(&row.node_id)
+        self.has_active_reconnect_job(&row.node_id, cx)
             .hash(&mut hasher);
         (self.active_ssh_node_id.as_ref() == Some(&row.node_id)).hash(&mut hasher);
         hasher.finish()
@@ -814,7 +817,7 @@ impl WorkspaceApp {
         }
 
         if selected
-            && !self.has_active_reconnect_job(&row.node_id)
+            && !self.has_active_reconnect_job(&row.node_id, cx)
             && session_status_can_remove_from_sidebar(row.node_view.status())
         {
             let node_id = row.node_id.clone();
@@ -1038,7 +1041,7 @@ impl WorkspaceApp {
         let mut children = Vec::new();
 
         if expanded {
-            if self.has_active_reconnect_job(&node_id) {
+            if self.has_active_reconnect_job(&node_id, cx) {
                 let listener = cx.listener({
                     let node_id = node_id.clone();
                     move |this, _event, _window, cx| {

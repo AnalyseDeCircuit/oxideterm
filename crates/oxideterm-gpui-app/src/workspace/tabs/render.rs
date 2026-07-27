@@ -135,10 +135,12 @@ impl WorkspaceApp {
                     ) != drag.from_index
             });
             let reconnect_node_id = self.reconnect_node_id_for_tab(tab, cx);
-            let reconnect_job = reconnect_node_id
-                .as_ref()
-                .and_then(|node_id| self.reconnect_orchestrator.job(&node_id.0))
-                .filter(|job| job.ended_at.is_none());
+            let reconnect_job = reconnect_node_id.as_ref().and_then(|node_id| {
+                self.workspace_runtime
+                    .read(cx)
+                    .reconnect_orchestrator()
+                    .active_progress(&node_id.0)
+            });
             let show_reconnect_progress = reconnect_job.is_some();
             let icon = tab_kind_icon(self, &tab.kind, cx);
             let tab_text = self.tab_display_title(tab);
@@ -693,7 +695,7 @@ impl WorkspaceApp {
                 session_ids
                     .into_iter()
                     .filter_map(|session_id| self.terminal_ssh_nodes.get(&session_id))
-                    .find(|node_id| self.has_active_reconnect_job(node_id))
+                    .find(|node_id| self.has_active_reconnect_job(node_id, cx))
                     .cloned()
                     .or_else(|| {
                         tab.root_pane.as_ref().and_then(|root| {
@@ -710,24 +712,24 @@ impl WorkspaceApp {
                 .sftp_tab_nodes
                 .get(&tab.id)
                 .cloned()
-                .filter(|node_id| self.has_active_reconnect_job(node_id)),
+                .filter(|node_id| self.has_active_reconnect_job(node_id, cx)),
             TabKind::Forwards => self
                 .forwarding
                 .read(cx)
                 .node_for_tab(tab.id)
-                .filter(|node_id| self.has_active_reconnect_job(node_id)),
+                .filter(|node_id| self.has_active_reconnect_job(node_id, cx)),
             TabKind::Ide => self
                 .ide_tab_nodes
                 .get(&tab.id)
                 .cloned()
-                .filter(|node_id| self.has_active_reconnect_job(node_id)),
+                .filter(|node_id| self.has_active_reconnect_job(node_id, cx)),
             _ => None,
         }
     }
 
     fn render_tab_reconnect_indicator(
         &self,
-        job: &ReconnectJob,
+        job: &ReconnectProgress,
         node_id: NodeId,
         cx: &mut Context<Self>,
     ) -> AnyElement {
@@ -800,7 +802,7 @@ impl WorkspaceApp {
             .into_any_element()
     }
 
-    fn render_reconnect_phase_strip(&self, job: &ReconnectJob) -> AnyElement {
+    fn render_reconnect_phase_strip(&self, job: &ReconnectProgress) -> AnyElement {
         let phases = [
             ReconnectPhase::Snapshot,
             ReconnectPhase::GracePeriod,

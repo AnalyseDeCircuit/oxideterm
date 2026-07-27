@@ -225,10 +225,10 @@ use oxideterm_ssh::{
     NodeEventSubscription, NodeId, NodeOrigin, NodeReadiness, NodeRouter, NodeRuntimeStore,
     NodeState, NodeStateEvent, NodeTreeExpansion, NodeTreePersistenceSnapshot, NodeTreeSnapshot,
     NodeTreeSnapshotNode, PhaseResult, ProbeConnectionStatus, ProxyHopConfig, ReconnectForwardRule,
-    ReconnectForwardRuleSnapshot, ReconnectJob, ReconnectNodeConnectionSnapshot,
-    ReconnectNodeTerminalSnapshot, ReconnectNodeTransferSnapshot, ReconnectOrchestratorStore,
-    ReconnectPhase, ReconnectSnapshot, SshAlgorithmDiagnosticKind, SshConfig,
-    SshConnectionRegistry, SshTransportClient, TerminalEndpoint, UpstreamProxyConfig,
+    ReconnectForwardRuleSnapshot, ReconnectNodeConnectionSnapshot, ReconnectNodeTerminalSnapshot,
+    ReconnectNodeTransferSnapshot, ReconnectOrchestratorStore, ReconnectPhase, ReconnectProgress,
+    ReconnectSnapshot, SshAlgorithmDiagnosticKind, SshConfig, SshConnectionRegistry,
+    SshTransportClient, TerminalEndpoint, UpstreamProxyConfig,
 };
 use oxideterm_ssh_launch::TemporarySshLaunch;
 use oxideterm_terminal::{
@@ -938,7 +938,6 @@ pub(crate) struct WorkspaceApp {
     sftp_progress_store: Arc<dyn ProgressStore>,
     node_runtime_store: NodeRuntimeStore,
     node_router: NodeRouter,
-    reconnect_orchestrator: ReconnectOrchestratorStore,
     active_connection_chain: Option<ConnectionChainRun>,
     connecting_node_locks: HashSet<NodeId>,
     notification_center: NotificationCenterState,

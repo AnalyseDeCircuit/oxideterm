@@ -86,6 +86,7 @@ pub(in crate::workspace) struct WorkspaceRuntimeEntity {
     pending_ide_restore_transfer_counts: HashMap<NodeId, u32>,
     reconnect_forward_restore_totals: HashMap<NodeId, u32>,
     reconnect_forward_restore_tokens: HashMap<NodeId, Arc<AtomicBool>>,
+    reconnect_orchestrator: ReconnectOrchestratorStore,
     ssh_registry: SshConnectionRegistry,
     task_runtime: Arc<tokio::runtime::Runtime>,
     reconnect_timing: ReconnectTiming,
@@ -101,6 +102,7 @@ impl WorkspaceRuntimeEntity {
         task_runtime: Arc<tokio::runtime::Runtime>,
         reconnect_enabled: bool,
         reconnect_timing: ReconnectTiming,
+        reconnect_max_attempts: u32,
         cx: &mut Context<Self>,
     ) -> Self {
         let runtime_wake = delivery::ActiveDeliveryWake::default();
@@ -144,6 +146,10 @@ impl WorkspaceRuntimeEntity {
             pending_ide_restore_transfer_counts: HashMap::new(),
             reconnect_forward_restore_totals: HashMap::new(),
             reconnect_forward_restore_tokens: HashMap::new(),
+            reconnect_orchestrator: ReconnectOrchestratorStore::new(
+                reconnect_timing,
+                reconnect_max_attempts,
+            ),
             ssh_registry,
             task_runtime,
             reconnect_timing,
@@ -159,6 +165,7 @@ impl WorkspaceRuntimeEntity {
         &mut self,
         reconnect_enabled: bool,
         reconnect_timing: ReconnectTiming,
+        reconnect_max_attempts: u32,
         cx: &mut Context<Self>,
     ) {
         self.reconnect_enabled = reconnect_enabled;
@@ -167,8 +174,35 @@ impl WorkspaceRuntimeEntity {
             // Invalidate timers scheduled under the previous settings.
             self.reconnect_debounce_generation = self.reconnect_debounce_generation.wrapping_add(1);
         }
+        self.reconnect_orchestrator
+            .configure(reconnect_timing, reconnect_max_attempts);
         self.reconnect_timing = reconnect_timing;
         self.schedule_active_probe_after(ACTIVE_PROBE_START_DELAY, cx);
+    }
+
+    pub(in crate::workspace) fn reconnect_orchestrator(&self) -> &ReconnectOrchestratorStore {
+        // The domain store owns job transitions; this Entity owns its workspace lifetime.
+        &self.reconnect_orchestrator
+    }
+
+    pub(in crate::workspace) fn has_active_reconnect_job(&self, node_id: &NodeId) -> bool {
+        self.reconnect_orchestrator.is_active(&node_id.0)
+    }
+
+    pub(in crate::workspace) fn reconnect_job_is_current(
+        &self,
+        node_id: &NodeId,
+        job_id: &str,
+    ) -> bool {
+        self.reconnect_orchestrator.is_current(&node_id.0, job_id)
+    }
+
+    pub(in crate::workspace) fn active_reconnect_node_ids(&self) -> Vec<NodeId> {
+        self.reconnect_orchestrator
+            .active_node_ids()
+            .into_iter()
+            .map(NodeId::new)
+            .collect()
     }
 
     pub(in crate::workspace) fn ssh_worker_sender(
@@ -771,6 +805,7 @@ mod tests {
                 task_runtime,
                 true,
                 ReconnectTiming::default(),
+                3,
                 cx,
             )
         })
@@ -867,11 +902,34 @@ mod tests {
 
             let mut reconnect_timing = ReconnectTiming::default();
             reconnect_timing.ssh_keepalive_interval = Duration::from_secs(37);
-            entity.configure_reconnect(true, reconnect_timing, cx);
+            entity.configure_reconnect(true, reconnect_timing, 4, cx);
             assert_eq!(
                 entity.reconnect_timing.ssh_keepalive_interval,
                 Duration::from_secs(37)
             );
+        });
+    }
+
+    #[gpui::test]
+    fn reconnect_jobs_and_configuration_are_entity_owned(cx: &mut TestAppContext) {
+        let entity = test_runtime_entity(cx);
+        let node_id = NodeId::new("node-a");
+
+        entity.update(cx, |entity, cx| {
+            entity.configure_reconnect(true, ReconnectTiming::default(), 4, cx);
+            let job = entity.reconnect_orchestrator().schedule(
+                node_id.0.clone(),
+                "Node A",
+                ReconnectSnapshot::default(),
+            );
+
+            assert_eq!(job.max_attempts, 4);
+            assert!(entity.has_active_reconnect_job(&node_id));
+            assert!(entity.reconnect_job_is_current(&node_id, &job.job_id));
+            assert_eq!(entity.active_reconnect_node_ids(), vec![node_id.clone()]);
+
+            entity.reconnect_orchestrator().finish(&node_id.0, Ok(0));
+            assert!(!entity.has_active_reconnect_job(&node_id));
         });
     }
 
@@ -891,6 +949,7 @@ mod tests {
                 task_runtime,
                 true,
                 ReconnectTiming::default(),
+                3,
                 cx,
             )
         });
@@ -920,6 +979,7 @@ mod tests {
                 task_runtime,
                 true,
                 ReconnectTiming::default(),
+                3,
                 cx,
             )
         });
@@ -991,6 +1051,7 @@ mod tests {
                 task_runtime,
                 true,
                 ReconnectTiming::default(),
+                3,
                 cx,
             )
         });
@@ -1014,7 +1075,7 @@ mod tests {
             let scheduled_generation = entity.reconnect_debounce_generation;
             assert!(!entity.pending_reconnect_node_ids.is_empty());
 
-            entity.configure_reconnect(false, ReconnectTiming::default(), cx);
+            entity.configure_reconnect(false, ReconnectTiming::default(), 3, cx);
 
             assert!(entity.pending_reconnect_node_ids.is_empty());
             assert!(entity.reconnect_debounce_generation > scheduled_generation);

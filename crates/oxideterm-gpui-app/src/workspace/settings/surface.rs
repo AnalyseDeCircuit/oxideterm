@@ -1170,14 +1170,11 @@ impl WorkspaceApp {
         self.ssh_registry.set_idle_timeout(Some(Duration::from_secs(
             settings.connection_pool.idle_timeout_secs as u64,
         )));
-        self.reconnect_orchestrator.configure(
-            reconnect_timing_from_settings(&settings),
-            reconnect_max_attempts_from_settings(&settings),
-        );
         self.workspace_runtime.update(cx, |runtime, cx| {
             runtime.configure_reconnect(
                 settings.reconnect.enabled,
                 reconnect_timing_from_settings(&settings),
+                reconnect_max_attempts_from_settings(&settings),
                 cx,
             );
         });

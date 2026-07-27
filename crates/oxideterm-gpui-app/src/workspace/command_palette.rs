@@ -598,13 +598,7 @@ impl WorkspaceApp {
     }
 
     pub(super) fn cancel_all_reconnects_from_palette(&mut self, cx: &mut Context<Self>) {
-        let active_jobs = self
-            .reconnect_orchestrator
-            .jobs()
-            .into_iter()
-            .filter(|job| job.ended_at.is_none())
-            .map(|job| NodeId::new(job.node_id))
-            .collect::<Vec<_>>();
+        let active_jobs = self.workspace_runtime.read(cx).active_reconnect_node_ids();
         for node_id in active_jobs {
             self.cancel_reconnect_for_node(&node_id, cx);
         }

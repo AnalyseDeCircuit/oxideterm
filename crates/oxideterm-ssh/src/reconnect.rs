@@ -189,6 +189,23 @@ pub struct ReconnectRetry {
     pub delay: Duration,
 }
 
+/// Lightweight reconnect state for frequently rendered progress surfaces.
+#[derive(Clone, Debug)]
+pub struct ReconnectProgress {
+    pub status: ReconnectPhase,
+    pub attempt: u32,
+    pub max_attempts: u32,
+    pub phase_history: Vec<PhaseEvent>,
+}
+
+/// The reconnect data needed to rebuild forwarding without cloning unrelated snapshots.
+#[derive(Clone, Debug)]
+pub struct ReconnectForwardRestorePlan {
+    pub job_id: String,
+    pub forward_rules: Vec<ReconnectForwardRuleSnapshot>,
+    pub old_connections_by_node: Vec<ReconnectNodeConnectionSnapshot>,
+}
+
 #[derive(Debug)]
 pub struct ReconnectOrchestratorStore {
     jobs: DashMap<String, ReconnectJob>,
@@ -336,6 +353,111 @@ impl ReconnectOrchestratorStore {
 
     pub fn job(&self, node_id: &str) -> Option<ReconnectJob> {
         self.jobs.get(node_id).map(|job| job.clone())
+    }
+
+    pub fn is_active(&self, node_id: &str) -> bool {
+        self.jobs
+            .get(node_id)
+            .is_some_and(|job| job.ended_at.is_none())
+    }
+
+    pub fn is_current(&self, node_id: &str, job_id: &str) -> bool {
+        self.jobs
+            .get(node_id)
+            .is_some_and(|job| job.ended_at.is_none() && job.job_id == job_id)
+    }
+
+    pub fn active_node_ids(&self) -> Vec<String> {
+        self.jobs
+            .iter()
+            .filter(|job| job.ended_at.is_none())
+            .map(|job| job.node_id.clone())
+            .collect()
+    }
+
+    pub fn active_attempt(&self, node_id: &str) -> Option<(u32, u32)> {
+        // Keep retry scheduling from cloning terminal, transfer, IDE, and forwarding snapshots.
+        self.jobs.get(node_id).and_then(|job| {
+            job.ended_at
+                .is_none()
+                .then_some((job.attempt, job.max_attempts))
+        })
+    }
+
+    pub fn active_job_id(&self, node_id: &str) -> Option<String> {
+        self.jobs
+            .get(node_id)
+            .and_then(|job| job.ended_at.is_none().then(|| job.job_id.clone()))
+    }
+
+    pub fn active_progress(&self, node_id: &str) -> Option<ReconnectProgress> {
+        // Renderers must never clone the full job because it can contain unsaved IDE contents.
+        self.jobs.get(node_id).and_then(|job| {
+            job.ended_at.is_none().then(|| ReconnectProgress {
+                status: job.status.clone(),
+                attempt: job.attempt,
+                max_attempts: job.max_attempts,
+                phase_history: job.phase_history.clone(),
+            })
+        })
+    }
+
+    pub fn has_forward_snapshot(&self, node_id: &str) -> bool {
+        self.jobs
+            .get(node_id)
+            .is_some_and(|job| !job.snapshot.forward_rules.is_empty())
+    }
+
+    pub fn terminal_session_ids_for_node(&self, node_id: &str) -> Vec<String> {
+        // Prefer the node-scoped snapshot while retaining the legacy fallback.
+        self.jobs
+            .get(node_id)
+            .map(|job| {
+                job.snapshot
+                    .terminal_sessions_by_node
+                    .iter()
+                    .find(|entry| entry.node_id == node_id)
+                    .map(|entry| entry.old_terminal_session_ids.clone())
+                    .unwrap_or_else(|| job.snapshot.old_terminal_session_ids.clone())
+            })
+            .unwrap_or_default()
+    }
+
+    pub fn incomplete_sftp_transfers(&self, node_id: &str) -> Vec<ReconnectNodeTransferSnapshot> {
+        self.jobs
+            .get(node_id)
+            .map(|job| job.snapshot.incomplete_sftp_transfers_by_node.clone())
+            .unwrap_or_default()
+    }
+
+    pub fn ide_snapshot(
+        &self,
+        node_id: &str,
+    ) -> Option<(ReconnectIdeSnapshot, Option<SystemTime>)> {
+        // The timestamp preserves the user-close guard without copying unrelated restore state.
+        self.jobs.get(node_id).and_then(|job| {
+            job.snapshot
+                .ide_snapshot
+                .clone()
+                .map(|snapshot| (snapshot, job.snapshot.snapshot_at))
+        })
+    }
+
+    pub fn forward_restore_plan(&self, node_id: &str) -> Option<ReconnectForwardRestorePlan> {
+        self.jobs
+            .get(node_id)
+            .map(|job| ReconnectForwardRestorePlan {
+                job_id: job.job_id.clone(),
+                forward_rules: job.snapshot.forward_rules.clone(),
+                old_connections_by_node: job.snapshot.old_connections_by_node.clone(),
+            })
+    }
+
+    pub fn forward_rule_snapshots(&self, node_id: &str) -> Vec<ReconnectForwardRuleSnapshot> {
+        self.jobs
+            .get(node_id)
+            .map(|job| job.snapshot.forward_rules.clone())
+            .unwrap_or_default()
     }
 
     pub fn update_snapshot<F>(&self, node_id: &str, update: F) -> Option<ReconnectJob>
@@ -487,6 +609,67 @@ mod tests {
 
         assert_eq!(first.job_id, second.job_id);
         assert_eq!(store.jobs().len(), 1);
+    }
+
+    #[test]
+    fn narrow_active_queries_do_not_require_job_snapshots() {
+        let store = ReconnectOrchestratorStore::default();
+        let snapshot = ReconnectSnapshot {
+            terminal_sessions_by_node: vec![ReconnectNodeTerminalSnapshot {
+                node_id: "node-a".to_string(),
+                old_terminal_session_ids: vec!["terminal-a".to_string()],
+            }],
+            forward_rules: vec![ReconnectForwardRuleSnapshot {
+                node_id: "node-a".to_string(),
+                rules: vec![ReconnectForwardRule::default()],
+            }],
+            incomplete_sftp_transfers_by_node: vec![ReconnectNodeTransferSnapshot {
+                node_id: "node-a".to_string(),
+                transfer_ids: vec!["transfer-a".to_string()],
+            }],
+            ide_snapshot: Some(ReconnectIdeSnapshot {
+                connection_id: "node-a".to_string(),
+                ..ReconnectIdeSnapshot::default()
+            }),
+            ..ReconnectSnapshot::default()
+        };
+        let job = store.schedule("node-a", "Node A", snapshot);
+
+        assert!(store.is_active("node-a"));
+        assert!(store.is_current("node-a", &job.job_id));
+        assert_eq!(store.active_node_ids(), vec!["node-a".to_string()]);
+        assert_eq!(store.active_attempt("node-a"), Some((0, 5)));
+        assert_eq!(store.active_job_id("node-a"), Some(job.job_id.clone()));
+        assert_eq!(
+            store.active_progress("node-a").unwrap().status,
+            ReconnectPhase::Queued
+        );
+        assert!(store.has_forward_snapshot("node-a"));
+        assert_eq!(
+            store.terminal_session_ids_for_node("node-a"),
+            vec!["terminal-a".to_string()]
+        );
+        assert_eq!(store.incomplete_sftp_transfers("node-a").len(), 1);
+        let (ide_snapshot, snapshot_at) = store.ide_snapshot("node-a").unwrap();
+        assert_eq!(ide_snapshot.connection_id, "node-a");
+        assert!(snapshot_at.is_some());
+        assert_eq!(
+            store
+                .forward_restore_plan("node-a")
+                .unwrap()
+                .forward_rules
+                .len(),
+            1
+        );
+        assert_eq!(store.forward_rule_snapshots("node-a").len(), 1);
+
+        store.finish("node-a", Ok(0)).unwrap();
+        assert!(!store.is_active("node-a"));
+        assert!(!store.is_current("node-a", &job.job_id));
+        assert!(store.active_node_ids().is_empty());
+        assert!(store.active_attempt("node-a").is_none());
+        assert!(store.active_job_id("node-a").is_none());
+        assert!(store.active_progress("node-a").is_none());
     }
 
     #[test]
