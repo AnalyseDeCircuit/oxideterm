@@ -135,7 +135,7 @@ impl WorkspaceApp {
                 .on_mouse_down(
                     MouseButton::Left,
                     cx.listener(|this, _event, window, cx| {
-                        this.close_ai_model_selector();
+                        this.close_ai_model_selector(cx);
                         this.open_ai_settings(window, cx);
                         cx.stop_propagation();
                     }),

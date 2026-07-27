@@ -125,7 +125,8 @@ impl WorkspaceApp {
                 cx.notify();
             }
             ai_state::AiWorkspaceEvent::ProviderKeyStatusChanged
-            | ai_state::AiWorkspaceEvent::SelectorProviderStatusChanged => cx.notify(),
+            | ai_state::AiWorkspaceEvent::SelectorProviderStatusChanged
+            | ai_state::AiWorkspaceEvent::TerminalInlineDeliveryReady => cx.notify(),
         }
     }
 

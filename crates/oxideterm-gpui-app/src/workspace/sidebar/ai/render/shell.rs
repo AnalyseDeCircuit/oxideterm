@@ -911,7 +911,7 @@ window.focus(&this.focus_handle, cx);
             }),
             cx.listener(|this, _event, _window, cx| {
                 if this.begin_ai_clear_all_confirm_exit(cx) {
-                    this.clear_ai_conversations();
+                    this.clear_ai_conversations(cx);
                 }
                 cx.stop_propagation();
                 cx.notify();

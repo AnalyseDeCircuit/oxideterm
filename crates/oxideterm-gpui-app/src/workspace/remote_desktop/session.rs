@@ -769,7 +769,7 @@ impl WorkspaceApp {
             || self.ai.chat.footer_focus.is_some()
             || self.ai.models.selector_open
             || self.ai.models.selector_search_focused;
-        self.clear_ai_sidebar_keyboard_focus();
+        self.clear_ai_sidebar_keyboard_focus(cx);
         changed |= ai_focus_changed;
 
         if self.terminal_command_bar_focused

@@ -139,7 +139,7 @@ impl WorkspaceApp {
         section: SidebarSection,
         cx: &mut Context<Self>,
     ) {
-        self.clear_ai_sidebar_keyboard_focus();
+        self.clear_ai_sidebar_keyboard_focus(cx);
         if section != SidebarSection::Connections
             && self.session_manager.focused_input == Some(SessionManagerInput::SavedSearch)
         {
@@ -295,13 +295,13 @@ impl WorkspaceApp {
         } else {
             // Non-AI context panels share the old right-sidebar shell, but must
             // not keep AI-specific focus or floating popovers alive.
-            self.close_ai_sidebar_popovers();
+            self.close_ai_sidebar_popovers(cx);
             self.host_tools.update(cx, |host_tools, cx| {
                 host_tools.reset_active_tool(cx);
             });
         }
         self.sync_host_tools_lifecycle(panel == ContextSidebarPanel::HostTools, cx);
-        self.clear_ai_sidebar_keyboard_focus();
+        self.clear_ai_sidebar_keyboard_focus(cx);
         self.persist_sidebar_settings_store();
         cx.notify();
         true
@@ -316,8 +316,8 @@ impl WorkspaceApp {
         self.ai.chat.sidebar_resizing = false;
         self.sidebar_resize_hotzone_hovered = false;
         self.sync_host_tools_lifecycle(false, cx);
-        self.clear_ai_sidebar_keyboard_focus();
-        self.close_ai_sidebar_popovers();
+        self.clear_ai_sidebar_keyboard_focus(cx);
+        self.close_ai_sidebar_popovers(cx);
         self.persist_sidebar_settings_store();
         cx.notify();
     }

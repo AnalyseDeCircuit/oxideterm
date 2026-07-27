@@ -7,6 +7,7 @@ pub(in crate::workspace) enum AiWorkspaceEvent {
     ModelRefreshDeliveryReady,
     ProviderKeyStatusChanged,
     SelectorProviderStatusChanged,
+    TerminalInlineDeliveryReady,
 }
 
 pub(in crate::workspace) struct AiAcpAgentProbeIntent {
@@ -78,6 +79,16 @@ enum AiKnowledgeReindexDelivery {
     Finished { failed: bool },
 }
 
+enum AiTerminalInlineDelivery {
+    KeyStatus { generation: u64, has_key: bool },
+    Content { generation: u64, chunk: String },
+    Done { generation: u64 },
+    Error { generation: u64, message: String },
+}
+
+const AI_TERMINAL_INLINE_DELIVERY_BUDGET: crate::workspace::delivery::DeliveryBudget =
+    crate::workspace::delivery::DeliveryBudget::new(128, Duration::from_millis(4));
+
 /// Owns AI worker delivery slices as they move out of the workspace root.
 pub(in crate::workspace) struct AiWorkspaceEntity {
     task_runtime: Arc<tokio::runtime::Runtime>,
@@ -118,6 +129,9 @@ pub(in crate::workspace) struct AiWorkspaceEntity {
         crate::workspace::delivery::ActiveDeliverySender<AiKnowledgeReindexDelivery>,
     knowledge_reindex_rx: std::sync::mpsc::Receiver<AiKnowledgeReindexDelivery>,
     knowledge_reindex_intents: VecDeque<AiKnowledgeReindexIntent>,
+    terminal_inline_panel: AiInlinePanelState,
+    terminal_inline_tx: crate::workspace::delivery::ActiveDeliverySender<AiTerminalInlineDelivery>,
+    terminal_inline_rx: std::sync::mpsc::Receiver<AiTerminalInlineDelivery>,
 }
 
 impl AiWorkspaceEntity {
@@ -137,6 +151,8 @@ impl AiWorkspaceEntity {
         let (acp_model_discovery_tx, acp_model_discovery_rx) =
             crate::workspace::delivery::ActiveDeliverySender::channel();
         let (knowledge_reindex_tx, knowledge_reindex_rx) =
+            crate::workspace::delivery::ActiveDeliverySender::channel();
+        let (terminal_inline_tx, terminal_inline_rx) =
             crate::workspace::delivery::ActiveDeliverySender::channel();
         let entity = Self {
             task_runtime,
@@ -172,6 +188,9 @@ impl AiWorkspaceEntity {
             knowledge_reindex_tx,
             knowledge_reindex_rx,
             knowledge_reindex_intents: VecDeque::new(),
+            terminal_inline_panel: AiInlinePanelState::default(),
+            terminal_inline_tx,
+            terminal_inline_rx,
         };
         entity.schedule_model_refresh_delivery(cx);
         entity.schedule_provider_key_status_delivery(cx);
@@ -179,6 +198,7 @@ impl AiWorkspaceEntity {
         entity.schedule_acp_agent_probe_delivery(cx);
         entity.schedule_acp_model_discovery_delivery(cx);
         entity.schedule_knowledge_reindex_delivery(cx);
+        entity.schedule_terminal_inline_delivery(cx);
         entity
     }
 
@@ -583,6 +603,187 @@ impl AiWorkspaceEntity {
         std::mem::take(&mut self.knowledge_reindex_intents)
     }
 
+    pub(in crate::workspace) fn terminal_inline_panel(&self) -> &AiInlinePanelState {
+        &self.terminal_inline_panel
+    }
+
+    pub(in crate::workspace) fn terminal_inline_panel_mut(&mut self) -> &mut AiInlinePanelState {
+        &mut self.terminal_inline_panel
+    }
+
+    pub(in crate::workspace) fn open_terminal_inline_panel(&mut self, selection_context: String) {
+        let panel = &mut self.terminal_inline_panel;
+        panel.open = true;
+        panel.prompt.clear();
+        panel.response.clear();
+        panel.error = None;
+        panel.loading = false;
+        panel.copied = false;
+        panel.prompt_focused = true;
+        panel.has_api_key = None;
+        panel.has_selection = !selection_context.trim().is_empty();
+        panel.selection_context = selection_context;
+        panel.generation = panel.generation.wrapping_add(1);
+    }
+
+    pub(in crate::workspace) fn close_terminal_inline_panel(&mut self) {
+        let panel = &mut self.terminal_inline_panel;
+        panel.open = false;
+        panel.prompt_focused = false;
+        panel.loading = false;
+        panel.error = None;
+        panel.generation = panel.generation.wrapping_add(1);
+    }
+
+    pub(in crate::workspace) fn terminal_inline_request_context(&self) -> Option<(String, String)> {
+        let panel = &self.terminal_inline_panel;
+        if panel.loading || panel.prompt.trim().is_empty() {
+            return None;
+        }
+        Some((
+            oxideterm_ai::sanitize_for_ai(&panel.prompt),
+            panel.selection_context.clone(),
+        ))
+    }
+
+    pub(in crate::workspace) fn request_terminal_inline(
+        &mut self,
+        config_result: Result<oxideterm_ai::AiChatStreamConfig, String>,
+        messages: Vec<oxideterm_ai::AiChatMessage>,
+        api_key_not_found: String,
+        failed_to_get_key: String,
+        stream_failed: String,
+    ) -> bool {
+        if self.terminal_inline_panel.loading || self.terminal_inline_panel.prompt.trim().is_empty()
+        {
+            return false;
+        }
+        let panel = &mut self.terminal_inline_panel;
+        let generation = panel.generation.wrapping_add(1);
+        panel.generation = generation;
+        panel.response.clear();
+        panel.error = None;
+        panel.copied = false;
+        panel.loading = true;
+        panel.has_api_key = None;
+
+        let mut config = match config_result {
+            Ok(config) => config,
+            Err(message) => {
+                panel.loading = false;
+                panel.error = Some(message);
+                return true;
+            }
+        };
+        let requires_key = oxideterm_ai::provider_chat_requires_key(&config.provider_type);
+        let provider_id = config.provider_id.clone();
+        let key_store = self.key_store.clone();
+        let worker_tx = self.terminal_inline_tx.clone();
+        self.task_runtime.spawn(async move {
+            if let Some(provider_id) = provider_id {
+                let key_result =
+                    tokio::task::spawn_blocking(move || key_store.get_provider_key(&provider_id))
+                        .await
+                        .ok()
+                        .and_then(Result::ok);
+                match key_result {
+                    Some(api_key) => {
+                        let has_key = api_key.as_ref().is_some_and(|key| !key.trim().is_empty());
+                        let _ = worker_tx.send(AiTerminalInlineDelivery::KeyStatus {
+                            generation,
+                            has_key,
+                        });
+                        if requires_key && !has_key {
+                            let _ = worker_tx.send(AiTerminalInlineDelivery::Error {
+                                generation,
+                                message: api_key_not_found,
+                            });
+                            return;
+                        }
+                        config.api_key = api_key;
+                    }
+                    None if requires_key => {
+                        let _ = worker_tx.send(AiTerminalInlineDelivery::Error {
+                            generation,
+                            message: failed_to_get_key,
+                        });
+                        return;
+                    }
+                    None => {}
+                }
+            }
+
+            let (stream_tx, mut stream_rx) = tokio::sync::mpsc::unbounded_channel();
+            tokio::spawn(oxideterm_ai::stream_chat_completion(
+                config,
+                oxideterm_ai::sanitize_api_messages_for_provider(messages),
+                stream_tx,
+            ));
+            while let Some(event) = stream_rx.recv().await {
+                match event {
+                    oxideterm_ai::AiStreamEvent::Content(chunk) => {
+                        let _ =
+                            worker_tx.send(AiTerminalInlineDelivery::Content { generation, chunk });
+                    }
+                    oxideterm_ai::AiStreamEvent::Done => {
+                        let _ = worker_tx.send(AiTerminalInlineDelivery::Done { generation });
+                        break;
+                    }
+                    oxideterm_ai::AiStreamEvent::Error(_) => {
+                        // Provider errors may contain response bodies or request
+                        // metadata, so only localized safe copy reaches the UI.
+                        let _ = worker_tx.send(AiTerminalInlineDelivery::Error {
+                            generation,
+                            message: stream_failed,
+                        });
+                        break;
+                    }
+                    oxideterm_ai::AiStreamEvent::Thinking(_)
+                    | oxideterm_ai::AiStreamEvent::ToolCall { .. }
+                    | oxideterm_ai::AiStreamEvent::ToolCallComplete { .. } => {}
+                }
+            }
+        });
+        true
+    }
+
+    pub(in crate::workspace) fn refresh_terminal_inline_key_status(
+        &mut self,
+        config_result: Result<oxideterm_ai::AiChatStreamConfig, String>,
+    ) {
+        let config = match config_result {
+            Ok(config) => config,
+            Err(_) => {
+                self.terminal_inline_panel.has_api_key = Some(false);
+                return;
+            }
+        };
+        let requires_key = oxideterm_ai::provider_chat_requires_key(&config.provider_type);
+        let Some(provider_id) = config.provider_id else {
+            self.terminal_inline_panel.has_api_key = Some(!requires_key);
+            return;
+        };
+        if !requires_key {
+            self.terminal_inline_panel.has_api_key = Some(true);
+            return;
+        }
+        let generation = self.terminal_inline_panel.generation;
+        let key_store = self.key_store.clone();
+        let worker_tx = self.terminal_inline_tx.clone();
+        self.task_runtime.spawn(async move {
+            // Opening the inline panel only checks presence, avoiding a secret
+            // read and biometric prompt before the user submits anything.
+            let has_key =
+                tokio::task::spawn_blocking(move || key_store.has_provider_key(&provider_id))
+                    .await
+                    .unwrap_or(false);
+            let _ = worker_tx.send(AiTerminalInlineDelivery::KeyStatus {
+                generation,
+                has_key,
+            });
+        });
+    }
+
     fn begin_model_refresh(&mut self, provider_id: &str) -> Option<u64> {
         if self.refreshing_models.contains(provider_id) {
             return None;
@@ -933,6 +1134,80 @@ impl AiWorkspaceEntity {
         }
         drain.outcome.backlog_remaining
     }
+
+    fn schedule_terminal_inline_delivery(&self, cx: &mut Context<Self>) {
+        let delivery_wake = self.terminal_inline_tx.wake();
+        let release_wake = delivery_wake.clone();
+        cx.on_release(move |_, _| {
+            // The workspace runtime owns an in-flight provider request; entity
+            // release only stops delivery into a destroyed UI owner.
+            release_wake.stop();
+        })
+        .detach();
+        cx.spawn(async move |entity, cx| {
+            loop {
+                delivery_wake.wait().await;
+                let should_drain = delivery_wake.take();
+                let stopped = delivery_wake.is_stopped();
+                if should_drain {
+                    let backlog_remaining = entity
+                        .update(cx, |entity, cx| entity.drain_terminal_inline_results(cx))
+                        .unwrap_or(false);
+                    if backlog_remaining {
+                        delivery_wake.mark();
+                    }
+                }
+                if stopped {
+                    break;
+                }
+            }
+        })
+        .detach();
+    }
+
+    fn drain_terminal_inline_results(&mut self, cx: &mut Context<Self>) -> bool {
+        let drain = crate::workspace::delivery::drain_channel(
+            &self.terminal_inline_rx,
+            AI_TERMINAL_INLINE_DELIVERY_BUDGET,
+        );
+        let mut changed = false;
+        for delivery in drain.items {
+            let panel = &mut self.terminal_inline_panel;
+            match delivery {
+                AiTerminalInlineDelivery::KeyStatus {
+                    generation,
+                    has_key,
+                } if generation == panel.generation => {
+                    panel.has_api_key = Some(has_key);
+                    changed = true;
+                }
+                AiTerminalInlineDelivery::Content { generation, chunk }
+                    if generation == panel.generation =>
+                {
+                    panel.response.push_str(&chunk);
+                    changed = true;
+                }
+                AiTerminalInlineDelivery::Done { generation } if generation == panel.generation => {
+                    panel.loading = false;
+                    changed = true;
+                }
+                AiTerminalInlineDelivery::Error {
+                    generation,
+                    message,
+                } if generation == panel.generation => {
+                    panel.loading = false;
+                    panel.error = Some(message);
+                    changed = true;
+                }
+                _ => {}
+            }
+        }
+        if changed {
+            cx.emit(AiWorkspaceEvent::TerminalInlineDeliveryReady);
+            cx.notify();
+        }
+        drain.outcome.backlog_remaining
+    }
 }
 
 fn ai_acp_probe_error_result(kind: &'static str) -> AiAcpAgentProbeResult {
@@ -977,7 +1252,6 @@ pub(super) struct AiChatWorkspaceState {
     pub(super) persistence_store: Option<oxideterm_ai::AiChatPersistenceStore>,
     pub(super) initialized: bool,
     pub(super) initialization_error: Option<AiChatInitializationError>,
-    pub(super) inline_panel: AiInlinePanelState,
     pub(super) conversation_list_open: bool,
     pub(super) menu_open: bool,
     pub(super) reasoning_menu_open: bool,
@@ -1098,7 +1372,6 @@ impl AiChatWorkspaceState {
             persistence_store: None,
             initialized: false,
             initialization_error: None,
-            inline_panel: AiInlinePanelState::default(),
             conversation_list_open: false,
             menu_open: false,
             reasoning_menu_open: false,
@@ -1512,6 +1785,64 @@ mod entity_tests {
     }
 
     #[gpui::test]
+    fn terminal_inline_stream_state_and_delivery_are_entity_owned(cx: &mut TestAppContext) {
+        let entity = cx.new(|cx| {
+            AiWorkspaceEntity::new(test_runtime(), oxideterm_ai::AiProviderKeyStore::new(), cx)
+        });
+        let worker_tx = entity.update(cx, |entity, _cx| {
+            entity.terminal_inline_panel.open = true;
+            entity.terminal_inline_panel.loading = true;
+            entity.terminal_inline_panel.generation = 7;
+            entity.terminal_inline_tx.clone()
+        });
+        worker_tx
+            .send(AiTerminalInlineDelivery::Content {
+                generation: 6,
+                chunk: "stale".to_string(),
+            })
+            .unwrap();
+        worker_tx
+            .send(AiTerminalInlineDelivery::KeyStatus {
+                generation: 7,
+                has_key: true,
+            })
+            .unwrap();
+        worker_tx
+            .send(AiTerminalInlineDelivery::Content {
+                generation: 7,
+                chunk: "safe output".to_string(),
+            })
+            .unwrap();
+        worker_tx
+            .send(AiTerminalInlineDelivery::Done { generation: 7 })
+            .unwrap();
+
+        cx.run_until_parked();
+
+        entity.read_with(cx, |entity, _cx| {
+            let panel = entity.terminal_inline_panel();
+            assert_eq!(panel.response, "safe output");
+            assert_eq!(panel.has_api_key, Some(true));
+            assert!(!panel.loading);
+        });
+
+        entity.update(cx, |entity, _cx| entity.close_terminal_inline_panel());
+        worker_tx
+            .send(AiTerminalInlineDelivery::Content {
+                generation: 7,
+                chunk: "late output".to_string(),
+            })
+            .unwrap();
+        cx.run_until_parked();
+        entity.read_with(cx, |entity, _cx| {
+            let panel = entity.terminal_inline_panel();
+            assert!(!panel.open);
+            assert_eq!(panel.generation, 8);
+            assert_eq!(panel.response, "safe output");
+        });
+    }
+
+    #[gpui::test]
     fn entity_release_stops_all_entity_delivery_waiters(cx: &mut TestAppContext) {
         let entity = cx.new(|cx| {
             AiWorkspaceEntity::new(test_runtime(), oxideterm_ai::AiProviderKeyStore::new(), cx)
@@ -1523,6 +1854,7 @@ mod entity_tests {
             acp_agent_probe_wake,
             acp_model_discovery_wake,
             knowledge_reindex_wake,
+            terminal_inline_wake,
         ) = cx.read(|cx| {
             let entity = entity.read(cx);
             (
@@ -1532,6 +1864,7 @@ mod entity_tests {
                 entity.acp_agent_probe_tx.wake(),
                 entity.acp_model_discovery_tx.wake(),
                 entity.knowledge_reindex_tx.wake(),
+                entity.terminal_inline_tx.wake(),
             )
         });
 
@@ -1546,5 +1879,6 @@ mod entity_tests {
         assert!(acp_agent_probe_wake.is_stopped());
         assert!(acp_model_discovery_wake.is_stopped());
         assert!(knowledge_reindex_wake.is_stopped());
+        assert!(terminal_inline_wake.is_stopped());
     }
 }

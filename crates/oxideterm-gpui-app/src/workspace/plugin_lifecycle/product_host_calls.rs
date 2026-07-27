@@ -269,7 +269,7 @@ impl WorkspaceApp {
                 }
             }
             "clearConversations" => {
-                self.clear_ai_conversations();
+                self.clear_ai_conversations(cx);
                 cx.notify();
             }
             _ => {}

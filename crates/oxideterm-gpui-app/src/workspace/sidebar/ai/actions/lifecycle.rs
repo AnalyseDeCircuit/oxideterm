@@ -37,30 +37,33 @@ impl WorkspaceApp {
         });
     }
 
-    pub(in crate::workspace) fn clear_ai_sidebar_keyboard_focus(&mut self) {
+    pub(in crate::workspace) fn clear_ai_sidebar_keyboard_focus(
+        &mut self,
+        cx: &mut App,
+    ) {
         self.ai.chat.input_focused = false;
         self.ai.chat.footer_focus = None;
-        self.close_ai_model_selector();
+        self.close_ai_model_selector(cx);
         self.ime_marked_text = None;
     }
 
-    pub(in crate::workspace) fn close_ai_sidebar_popovers(&mut self) {
+    pub(in crate::workspace) fn close_ai_sidebar_popovers(&mut self, cx: &mut App) {
         self.ai.chat.conversation_list_open = false;
         self.ai.chat.menu_open = false;
         self.ai.chat.reasoning_menu_open = false;
         self.ai.chat.safety_menu_open = false;
         self.ai.chat.context_popover_open = false;
-        self.close_ai_model_selector();
+        self.close_ai_model_selector(cx);
     }
 
-    pub(in crate::workspace) fn close_ai_model_selector(&mut self) {
+    pub(in crate::workspace) fn close_ai_model_selector(&mut self, cx: &mut App) {
         // The compact model selector behaves like a browser/Radix Select with a
         // searchable input owner. Closing it must clear popup state, keyboard
         // focus origin, highlighted option, and any marked text together so Esc,
         // outside click, Tab, footer navigation, and row activation do not drift.
         let restore_terminal_inline_prompt = self.ai.models.selector_scope
             == Some(AiModelSelectorScope::TerminalInline)
-            && self.ai.chat.inline_panel.open;
+            && self.ai_entity.read(cx).terminal_inline_panel().open;
         self.ai.models.selector_open = false;
         self.ai.models.selector_scope = None;
         self.ai.models.selector_focus_origin = None;
@@ -72,7 +75,9 @@ impl WorkspaceApp {
             // Tauri's inline command bar returns focus to its prompt after a
             // nested model picker closes; otherwise the next typed key appears
             // to vanish into the terminal surface.
-            self.ai.chat.inline_panel.prompt_focused = true;
+            self.ai_entity.update(cx, |ai, _cx| {
+                ai.terminal_inline_panel_mut().prompt_focused = true;
+            });
         }
     }
 
@@ -186,12 +191,12 @@ impl WorkspaceApp {
         self.persist_ai_chat_state();
     }
 
-    pub(in crate::workspace) fn clear_ai_conversations(&mut self) {
+    pub(in crate::workspace) fn clear_ai_conversations(&mut self, cx: &mut App) {
         self.ai.chat.conversation_state.clear_conversations();
         self.ai.chat.safety_bypass_conversations.clear();
         self.ai.chat.thinking_expansion_state.clear();
         self.ai.chat.tool_call_expansion_state.clear();
-        self.close_ai_sidebar_popovers();
+        self.close_ai_sidebar_popovers(cx);
         self.ai.chat.clear_all_confirm_open = false;
         self.cancel_ai_chat_stream_without_notify();
         self.persist_ai_chat_state();

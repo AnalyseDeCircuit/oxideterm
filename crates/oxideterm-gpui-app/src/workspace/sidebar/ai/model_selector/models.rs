@@ -83,7 +83,7 @@ impl WorkspaceApp {
                 MouseButton::Left,
                 cx.listener(|this, _event, _window, cx| {
                     let next_open = !this.ai.chat.reasoning_menu_open;
-                    this.close_ai_sidebar_popovers();
+                    this.close_ai_sidebar_popovers(cx);
                     this.ai.chat.reasoning_menu_open = next_open;
                     cx.stop_propagation();
                     cx.notify();
@@ -253,7 +253,7 @@ impl WorkspaceApp {
                     .on_mouse_down(
                         MouseButton::Left,
                         cx.listener(|this, _event, window, cx| {
-                            this.close_ai_model_selector();
+                            this.close_ai_model_selector(cx);
                             this.open_ai_settings(window, cx);
                             cx.stop_propagation();
                         }),

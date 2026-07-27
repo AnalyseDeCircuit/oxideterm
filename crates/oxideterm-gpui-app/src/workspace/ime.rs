@@ -729,14 +729,15 @@ impl WorkspaceApp {
             return Some(WorkspaceImeTarget::Sftp(input));
         }
 
-        if (self.ai_sidebar_visible() || self.ai.chat.inline_panel.open)
+        let terminal_inline_panel = self.ai_entity.read(cx).terminal_inline_panel();
+        if (self.ai_sidebar_visible() || terminal_inline_panel.open)
             && self.ai.models.selector_open
             && self.ai.models.selector_search_focused
         {
             return Some(WorkspaceImeTarget::AiModelSelectorSearch);
         }
 
-        if self.ai.chat.inline_panel.open && self.ai.chat.inline_panel.prompt_focused {
+        if terminal_inline_panel.open && terminal_inline_panel.prompt_focused {
             return Some(WorkspaceImeTarget::AiInlinePrompt);
         }
 
@@ -1580,12 +1581,10 @@ impl WorkspaceApp {
                 .models
                 .selector_search_focused
                 .then(|| self.ai.models.selector_search_query.clone()),
-            WorkspaceImeTarget::AiInlinePrompt => self
-                .ai
-                .chat
-                .inline_panel
-                .prompt_focused
-                .then(|| self.ai.chat.inline_panel.prompt.clone()),
+            WorkspaceImeTarget::AiInlinePrompt => {
+                let panel = self.ai_entity.read(cx).terminal_inline_panel();
+                panel.prompt_focused.then(|| panel.prompt.clone())
+            }
             WorkspaceImeTarget::AiChatInput => self
                 .ai
                 .chat
@@ -2500,13 +2499,16 @@ impl WorkspaceApp {
                 }
             }
             WorkspaceImeTarget::AiInlinePrompt => {
-                if self.ai.chat.inline_panel.prompt_focused {
-                    replace_utf16(
-                        &mut self.ai.chat.inline_panel.prompt,
-                        replacement_range,
-                        text,
-                    );
-                    self.ai.chat.inline_panel.error = None;
+                let changed = self.ai_entity.update(cx, |ai, _cx| {
+                    let panel = ai.terminal_inline_panel_mut();
+                    if !panel.prompt_focused {
+                        return false;
+                    }
+                    replace_utf16(&mut panel.prompt, replacement_range, text);
+                    panel.error = None;
+                    true
+                });
+                if changed {
                     self.new_connection_caret_visible = true;
                     cx.notify();
                 }

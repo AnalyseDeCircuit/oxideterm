@@ -369,7 +369,7 @@ impl WorkspaceApp {
             self.context_sidebar_rendered = false;
             settings.sidebar_ui.collapsed = true;
             settings.sidebar_ui.ai_sidebar_collapsed = true;
-            self.clear_ai_sidebar_keyboard_focus();
+            self.clear_ai_sidebar_keyboard_focus(cx);
             const ZEN_HINT_TTL: Duration = Duration::from_millis(2500);
             self.zen_hint_expires_at = Some(Instant::now() + ZEN_HINT_TTL);
             cx.spawn(async move |weak, cx| {
@@ -457,8 +457,9 @@ impl WorkspaceApp {
             return false;
         }
 
-        let terminal_panel_open =
-            self.search.visible || self.ai.chat.inline_panel.open || self.context_sidebar_visible();
+        let terminal_panel_open = self.search.visible
+            || self.ai_entity.read(cx).terminal_inline_panel().open
+            || self.context_sidebar_visible();
         if !crate::keybindings::action_allowed_by_terminal_behavior(
             definition,
             &combo,
@@ -577,7 +578,7 @@ impl WorkspaceApp {
             self.close_search(window, cx);
             return;
         }
-        if self.ai.chat.inline_panel.open {
+        if self.ai_entity.read(cx).terminal_inline_panel().open {
             self.close_terminal_ai_inline_panel(window, cx);
             return;
         }
@@ -1308,7 +1309,7 @@ impl WorkspaceApp {
                 }
                 Some(ConfirmKeyboardAction::Confirm) => {
                     if self.begin_ai_clear_all_confirm_exit(cx) {
-                        self.clear_ai_conversations();
+                        self.clear_ai_conversations(cx);
                     }
                     cx.notify();
                     true

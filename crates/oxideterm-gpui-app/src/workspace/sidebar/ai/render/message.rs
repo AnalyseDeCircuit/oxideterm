@@ -1621,7 +1621,7 @@ window.focus(&this.focus_handle, cx);
                                     MouseButton::Left,
                                     cx.listener(|this, _event, _window, cx| {
                                         let next_open = !this.ai.chat.conversation_list_open;
-                                        this.close_ai_sidebar_popovers();
+                                        this.close_ai_sidebar_popovers(cx);
                                         this.ai.chat.conversation_list_open = next_open;
                                         cx.stop_propagation();
                                         cx.notify();
@@ -1687,7 +1687,7 @@ window.focus(&this.focus_handle, cx);
                         }
                         Some(AiHeaderAction::Settings) => {
                             let next_open = !this.ai.chat.menu_open;
-                            this.close_ai_sidebar_popovers();
+                            this.close_ai_sidebar_popovers(cx);
                             this.ai.chat.menu_open = next_open;
 window.focus(&this.focus_handle, cx);
                             cx.notify();

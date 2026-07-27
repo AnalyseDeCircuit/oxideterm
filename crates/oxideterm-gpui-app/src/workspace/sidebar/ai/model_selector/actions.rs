@@ -150,7 +150,7 @@ impl WorkspaceApp {
     ) {
         let next_open =
             !(self.ai.models.selector_open && self.ai.models.selector_scope == Some(scope));
-        self.close_ai_sidebar_popovers();
+        self.close_ai_sidebar_popovers(cx);
         self.ai.models.selector_open = next_open;
         self.ai.models.selector_scope = next_open.then_some(scope);
         if self.ai.models.selector_open {
@@ -173,11 +173,13 @@ impl WorkspaceApp {
             self.ai.models.selector_search_focused = true;
             self.ai.models.selector_highlighted_model = None;
             self.ai.chat.input_focused = false;
-            self.ai.chat.inline_panel.prompt_focused = false;
+            self.ai_entity.update(cx, |ai, _cx| {
+                ai.terminal_inline_panel_mut().prompt_focused = false;
+            });
             self.refresh_ai_model_selector_provider_statuses(cx);
             window.focus(&self.focus_handle, cx);
         } else {
-            self.close_ai_model_selector();
+            self.close_ai_model_selector(cx);
         }
         self.ime_marked_text = None;
         cx.notify();
@@ -417,7 +419,7 @@ impl WorkspaceApp {
                 },
                 cx,
             );
-            self.close_ai_model_selector();
+            self.close_ai_model_selector(cx);
             cx.notify();
             return;
         }
@@ -436,7 +438,7 @@ impl WorkspaceApp {
         if previous_model.as_deref() != Some(model.as_str()) {
             self.update_ai_model_switch_warning(&provider_id, &model);
         }
-        self.close_ai_model_selector();
+        self.close_ai_model_selector(cx);
         cx.notify();
     }
 
@@ -589,7 +591,7 @@ impl WorkspaceApp {
             cx,
         );
         self.persist_ai_chat_state();
-        self.close_ai_model_selector();
+        self.close_ai_model_selector(cx);
         cx.notify();
     }
 

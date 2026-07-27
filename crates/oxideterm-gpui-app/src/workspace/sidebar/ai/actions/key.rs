@@ -10,7 +10,7 @@ impl WorkspaceApp {
             }
             match event.keystroke.key.as_str() {
                 "escape" => {
-                    self.close_ai_model_selector();
+                    self.close_ai_model_selector(cx);
                     cx.notify();
                     true
                 }
@@ -18,7 +18,7 @@ impl WorkspaceApp {
                     // Browser focus leaves the model selector on Tab. Native
                     // does not yet expose all footer/button targets, so close
                     // the Radix-style dropdown rather than trapping focus.
-                    self.close_ai_model_selector();
+                    self.close_ai_model_selector(cx);
                     cx.notify();
                     true
                 }

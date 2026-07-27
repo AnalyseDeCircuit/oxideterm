@@ -284,7 +284,7 @@ impl WorkspaceApp {
     }
 
     pub(in crate::workspace) fn focus_active_pane(&mut self, window: &mut Window, cx: &mut App) {
-        self.clear_ai_sidebar_keyboard_focus();
+        self.clear_ai_sidebar_keyboard_focus(cx);
         if self.session_manager.focused_input
             == Some(crate::workspace::session_manager::SessionManagerInput::SavedSearch)
         {

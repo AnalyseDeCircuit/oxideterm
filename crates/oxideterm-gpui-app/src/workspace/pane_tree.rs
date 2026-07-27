@@ -538,9 +538,10 @@ impl WorkspaceApp {
                             .bottom_0()
                             .child(pane),
                     )
-                    .when(active && self.ai.chat.inline_panel.open, |pane_frame| {
-                        pane_frame.child(self.render_terminal_ai_inline_panel(cx))
-                    })
+                    .when(
+                        active && self.ai_entity.read(cx).terminal_inline_panel().open,
+                        |pane_frame| pane_frame.child(self.render_terminal_ai_inline_panel(cx)),
+                    )
                     .when(active && has_split_panes, |pane_frame| {
                         let accent = self.tokens.ui.accent;
                         let active_shadow = vec![gpui::BoxShadow {

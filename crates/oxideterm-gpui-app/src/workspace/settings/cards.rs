@@ -869,12 +869,19 @@ impl WorkspaceApp {
             self.ime_marked_text = None;
             changed = true;
         }
-        if self.ai.chat.inline_panel.prompt_focused {
+        if self
+            .ai_entity
+            .read(cx)
+            .terminal_inline_panel()
+            .prompt_focused
+        {
             // The inline AI prompt is rendered inside the terminal pane rather
             // than as a normal form control, so it must explicitly join the
             // shared blur path or it remains the active IME target after an
             // outside click.
-            self.ai.chat.inline_panel.prompt_focused = false;
+            self.ai_entity.update(cx, |ai, _cx| {
+                ai.terminal_inline_panel_mut().prompt_focused = false;
+            });
             self.ime_marked_text = None;
             changed = true;
         }

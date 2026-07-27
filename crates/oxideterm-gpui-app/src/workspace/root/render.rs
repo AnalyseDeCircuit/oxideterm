@@ -126,7 +126,7 @@ impl Render for WorkspaceApp {
         self.begin_selectable_text_frame();
         self.schedule_pending_auto_close_terminal_sessions(window, cx);
         self.refresh_workspace_toast_expirations(cx);
-        if self.ai_sidebar_visible() || self.ai.chat.inline_panel.open {
+        if self.ai_sidebar_visible() || self.ai_entity.read(cx).terminal_inline_panel().open {
             self.ensure_ai_model_selector_mount_statuses(cx);
         }
         self.observe_active_tab_for_history();
@@ -181,7 +181,7 @@ impl Render for WorkspaceApp {
             && let Some(pane) = self.active_pane()
         {
             self.needs_active_pane_focus = false;
-            self.clear_ai_sidebar_keyboard_focus();
+            self.clear_ai_sidebar_keyboard_focus(cx);
             window.on_next_frame(move |window, cx| {
                 pane.update(cx, |pane, cx| pane.focus(window, cx));
             });

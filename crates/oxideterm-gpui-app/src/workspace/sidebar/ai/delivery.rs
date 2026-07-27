@@ -29,9 +29,7 @@ impl WorkspaceApp {
                             let stream_backlog =
                                 workspace.poll_ai_chat_stream_events(Some(window), cx);
                             let compaction_backlog = workspace.poll_ai_compaction_results(cx);
-                            let inline_backlog =
-                                workspace.poll_terminal_ai_inline_delivery(cx);
-                            stream_backlog || compaction_backlog || inline_backlog
+                            stream_backlog || compaction_backlog
                         })
                     },
                 ) else {
