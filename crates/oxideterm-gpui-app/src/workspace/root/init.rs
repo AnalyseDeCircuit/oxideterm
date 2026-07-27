@@ -224,6 +224,14 @@ impl WorkspaceApp {
                 workspace.handle_ai_workspace_event(event, ai_window_handle, cx);
             },
         );
+        let plugin_entity =
+            cx.new(|cx| plugin_entity::PluginWorkspaceEntity::new(forwarding_runtime.clone(), cx));
+        let plugin_entity_subscription = cx.subscribe(
+            &plugin_entity,
+            |workspace, _plugin_entity, event: &plugin_entity::PluginWorkspaceEvent, cx| {
+                workspace.handle_plugin_workspace_event(event, cx);
+            },
+        );
         let settings_store_last_modified =
             crate::workspace::settings::settings_store_modified_time(settings_store.path());
         let connection_store_last_modified =
@@ -364,6 +372,8 @@ impl WorkspaceApp {
             detached_local_terminal_list_cache: RefCell::new(VirtualListSignatureCache::default()),
             native_plugin_manager: plugin_manager::NativePluginManagerState::new(),
             native_plugin_ui: plugin_ui::NativePluginUiState::default(),
+            plugin_entity,
+            _plugin_entity_subscription: plugin_entity_subscription,
             split_drag: None,
             sidebar_resizing: false,
             sidebar_resize_hotzone_hovered: false,

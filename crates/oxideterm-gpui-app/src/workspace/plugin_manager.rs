@@ -9,9 +9,9 @@ use oxideterm_gpui_ui::{
     },
 };
 use oxideterm_plugin_runtime_install as runtime_install;
-use std::{process::Command, sync::mpsc};
+use std::process::Command;
+use zeroize::Zeroizing;
 
-const PLUGIN_MANAGER_DELIVERY_POLL_INTERVAL: Duration = Duration::from_millis(50);
 const PLUGIN_MANAGER_SECTION_LIST_ITEM_COUNT: usize = 5;
 const PLUGIN_MANAGER_TABBED_CONTENT_SECTION_INDEX: usize = 3;
 const PLUGIN_MANAGER_SECTION_LIST_ESTIMATED_HEIGHT: f32 = 220.0;
@@ -44,11 +44,22 @@ pub(super) enum NativePluginManagerOperationStatus {
     Error(String),
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(PartialEq, Eq)]
 pub(super) struct NativePluginPendingOverwrite {
     pub plugin_id: String,
-    pub download_url: String,
+    pub download_url: Zeroizing<String>,
     pub checksum: Option<String>,
+}
+
+impl std::fmt::Debug for NativePluginPendingOverwrite {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("NativePluginPendingOverwrite")
+            .field("plugin_id", &self.plugin_id)
+            .field("download_url", &"<redacted>")
+            .field("checksum_present", &self.checksum.is_some())
+            .finish()
+    }
 }
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
@@ -69,14 +80,20 @@ impl From<&plugin_host::NativePluginDiagnostic> for NativePluginDiagnosticKey {
     }
 }
 
-pub(super) enum NativePluginManagerDelivery {
+pub(in crate::workspace) enum NativePluginManagerDelivery {
     Install {
-        download_url: String,
+        download_url: Zeroizing<String>,
         checksum: Option<String>,
-        result: Result<plugin_host::NativePluginUrlInstallResult, String>,
+        outcome: NativePluginInstallOutcome,
     },
-    CheckUpdates(Result<Vec<plugin_host::NativePluginRegistryEntry>, String>),
-    InstallWasmRuntime(Result<runtime_install::WasmRuntimeInstallResult, String>),
+    CheckUpdates(Option<Vec<plugin_host::NativePluginRegistryEntry>>),
+    InstallWasmRuntime(Option<runtime_install::WasmRuntimeInstallResult>),
+}
+
+pub(in crate::workspace) enum NativePluginInstallOutcome {
+    Installed(plugin_host::NativePluginUrlInstallResult),
+    Conflict { plugin_id: String },
+    Failed,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -109,8 +126,6 @@ pub(super) struct NativePluginManagerState {
     pub(super) available_updates: Vec<plugin_host::NativePluginRegistryEntry>,
     pub(super) operation_status: NativePluginManagerOperationStatus,
     pub(super) pending_overwrite: Option<NativePluginPendingOverwrite>,
-    pub(super) delivery_rx: Option<mpsc::Receiver<NativePluginManagerDelivery>>,
-    pub(super) delivery_polling: bool,
     pub(super) expanded_plugin_ids: HashSet<String>,
     dismissed_diagnostic_keys: HashSet<NativePluginDiagnosticKey>,
     pub(super) active_sidebar_panel: Option<plugin_ui::NativePluginSidebarPanelSelection>,
@@ -139,8 +154,6 @@ impl NativePluginManagerState {
             available_updates: Vec::new(),
             operation_status: NativePluginManagerOperationStatus::Idle,
             pending_overwrite: None,
-            delivery_rx: None,
-            delivery_polling: false,
             expanded_plugin_ids: HashSet::new(),
             dismissed_diagnostic_keys: HashSet::new(),
             active_sidebar_panel: None,
@@ -798,11 +811,13 @@ impl WorkspaceApp {
                                     .trim()
                                     .is_empty(),
                                 cx.listener(|this, _event, _window, cx| {
-                                    let download_url =
-                                        this.native_plugin_manager.install_url_draft.clone();
+                                    let download_url = Zeroizing::new(std::mem::take(
+                                        &mut this.native_plugin_manager.install_url_draft,
+                                    ));
                                     let checksum = normalized_optional_string(
                                         &this.native_plugin_manager.install_checksum_draft,
                                     );
+                                    this.native_plugin_manager.install_checksum_draft.clear();
                                     this.start_native_plugin_package_install(
                                         download_url,
                                         checksum,
@@ -843,8 +858,6 @@ impl WorkspaceApp {
             .when_some(
                 self.native_plugin_manager.pending_overwrite.as_ref(),
                 |panel, pending| {
-                    let confirm_download_url = pending.download_url.clone();
-                    let confirm_checksum = pending.checksum.clone();
                     panel.child(
                         div()
                             .w_full()
@@ -881,10 +894,15 @@ impl WorkspaceApp {
                                     self.render_native_plugin_manager_text_button(
                                         self.i18n.t("plugin.url_conflict_confirm"),
                                         busy,
-                                        cx.listener(move |this, _event, _window, cx| {
+                                        cx.listener(|this, _event, _window, cx| {
+                                            let Some(pending) =
+                                                this.native_plugin_manager.pending_overwrite.take()
+                                            else {
+                                                return;
+                                            };
                                             this.start_native_plugin_package_install(
-                                                confirm_download_url.clone(),
-                                                confirm_checksum.clone(),
+                                                pending.download_url,
+                                                pending.checksum,
                                                 true,
                                                 cx,
                                             );
@@ -1297,8 +1315,10 @@ impl WorkspaceApp {
                     self.i18n.t("plugin.update"),
                     busy,
                     cx.listener(move |this, _event, _window, cx| {
+                        // Registry entries remain visible after a click; copy
+                        // only this public package URL into the zeroizing worker boundary.
                         this.start_native_plugin_package_install(
-                            download_url.clone(),
+                            Zeroizing::new(download_url.clone()),
                             checksum.clone(),
                             false,
                             cx,
@@ -1341,19 +1361,18 @@ impl WorkspaceApp {
 
     fn start_native_plugin_package_install(
         &mut self,
-        download_url: String,
+        download_url: Zeroizing<String>,
         checksum: Option<String>,
         overwrite: bool,
         cx: &mut Context<Self>,
     ) {
-        let download_url = download_url.trim().to_string();
-        if download_url.is_empty() {
+        if download_url.trim().is_empty() {
             self.native_plugin_manager.operation_status =
                 NativePluginManagerOperationStatus::Error(self.i18n.t("plugin.url_invalid"));
             cx.notify();
             return;
         }
-        if self.native_plugin_manager.delivery_rx.is_some() {
+        if self.plugin_entity.read(cx).manager_operation_in_flight() {
             self.native_plugin_manager.operation_status =
                 NativePluginManagerOperationStatus::Busy(self.i18n.t("plugin.installing"));
             cx.notify();
@@ -1361,45 +1380,28 @@ impl WorkspaceApp {
         }
 
         let settings_path = self.settings_store.path().to_path_buf();
-        let (tx, rx) = mpsc::channel();
-        self.native_plugin_manager.delivery_rx = Some(rx);
         self.native_plugin_manager.operation_status =
             NativePluginManagerOperationStatus::Busy(self.i18n.t("plugin.installing"));
         if overwrite {
             self.native_plugin_manager.pending_overwrite = None;
         }
-        self.schedule_native_plugin_manager_delivery_poll(cx);
-        let delivery_download_url = download_url.clone();
-        let delivery_checksum = checksum.clone();
-        self.forwarding_runtime.spawn(async move {
-            let result = plugin_host::NativePluginRegistry::install_plugin_package_from_url(
-                &settings_path,
-                &download_url,
-                checksum.as_deref(),
-                overwrite,
-            )
-            .await;
-            let _ = tx.send(NativePluginManagerDelivery::Install {
-                download_url: delivery_download_url,
-                checksum: delivery_checksum,
-                result,
-            });
+        let started = self.plugin_entity.update(cx, |plugins, _cx| {
+            plugins.start_package_install(settings_path, download_url, checksum, overwrite)
         });
+        debug_assert!(started, "manager operation gate changed before start");
     }
 
     fn start_native_plugin_update_check(&mut self, cx: &mut Context<Self>) {
-        let registry_url = self
-            .native_plugin_manager
-            .registry_url_draft
-            .trim()
-            .to_string();
-        if registry_url.is_empty() {
+        let registry_url = Zeroizing::new(std::mem::take(
+            &mut self.native_plugin_manager.registry_url_draft,
+        ));
+        if registry_url.trim().is_empty() {
             self.native_plugin_manager.operation_status =
                 NativePluginManagerOperationStatus::Error(self.i18n.t("plugin.registry_error"));
             cx.notify();
             return;
         }
-        if self.native_plugin_manager.delivery_rx.is_some() {
+        if self.plugin_entity.read(cx).manager_operation_in_flight() {
             self.native_plugin_manager.operation_status =
                 NativePluginManagerOperationStatus::Busy(self.i18n.t("plugin.loading_registry"));
             cx.notify();
@@ -1416,26 +1418,16 @@ impl WorkspaceApp {
                 version: plugin.manifest.version.clone(),
             })
             .collect::<Vec<_>>();
-        let (tx, rx) = mpsc::channel();
-        self.native_plugin_manager.delivery_rx = Some(rx);
         self.native_plugin_manager.operation_status =
             NativePluginManagerOperationStatus::Busy(self.i18n.t("plugin.loading_registry"));
-        self.schedule_native_plugin_manager_delivery_poll(cx);
-        self.forwarding_runtime.spawn(async move {
-            let result =
-                match plugin_host::NativePluginRegistry::fetch_plugin_registry(&registry_url).await
-                {
-                    Ok(index) => Ok(plugin_host::NativePluginRegistry::check_plugin_updates(
-                        index, &installed,
-                    )),
-                    Err(error) => Err(error),
-                };
-            let _ = tx.send(NativePluginManagerDelivery::CheckUpdates(result));
+        let started = self.plugin_entity.update(cx, |plugins, _cx| {
+            plugins.start_update_check(registry_url, installed)
         });
+        debug_assert!(started, "manager operation gate changed before start");
     }
 
     fn start_wasm_runtime_sidecar_install(&mut self, cx: &mut Context<Self>) {
-        if self.native_plugin_manager.delivery_rx.is_some() {
+        if self.plugin_entity.read(cx).manager_operation_in_flight() {
             self.native_plugin_manager.operation_status =
                 NativePluginManagerOperationStatus::Busy(self.i18n.t("plugin.installing"));
             cx.notify();
@@ -1443,62 +1435,27 @@ impl WorkspaceApp {
         }
 
         let settings_path = self.settings_store.path().to_path_buf();
-        let (tx, rx) = mpsc::channel();
-        self.native_plugin_manager.delivery_rx = Some(rx);
         self.native_plugin_manager.operation_status =
             NativePluginManagerOperationStatus::Busy(self.i18n.t("plugin.wasm_runtime_installing"));
-        self.schedule_native_plugin_manager_delivery_poll(cx);
-        self.forwarding_runtime.spawn(async move {
-            let result = runtime_install::install_wasm_runtime_sidecar(&settings_path).await;
-            let _ = tx.send(NativePluginManagerDelivery::InstallWasmRuntime(result));
+        let started = self.plugin_entity.update(cx, |plugins, _cx| {
+            plugins.start_wasm_runtime_install(settings_path)
         });
+        debug_assert!(started, "manager operation gate changed before start");
     }
 
-    fn schedule_native_plugin_manager_delivery_poll(&mut self, cx: &mut Context<Self>) {
-        if self.native_plugin_manager.delivery_polling {
-            return;
+    pub(in crate::workspace) fn handle_plugin_workspace_event(
+        &mut self,
+        event: &plugin_entity::PluginWorkspaceEvent,
+        cx: &mut Context<Self>,
+    ) {
+        match event {
+            plugin_entity::PluginWorkspaceEvent::ManagerDeliveryReady => {}
         }
-        self.native_plugin_manager.delivery_polling = true;
-        cx.spawn(async move |weak, cx| {
-            loop {
-                Timer::after(PLUGIN_MANAGER_DELIVERY_POLL_INTERVAL).await;
-                let keep_polling = weak
-                    .update(cx, |this, cx| {
-                        this.poll_native_plugin_manager_delivery(cx);
-                        this.native_plugin_manager.delivery_polling
-                    })
-                    .unwrap_or(false);
-                if !keep_polling {
-                    break;
-                }
-            }
-        })
-        .detach();
-    }
-
-    fn poll_native_plugin_manager_delivery(&mut self, cx: &mut Context<Self>) {
-        let Some(rx) = self.native_plugin_manager.delivery_rx.as_ref() else {
-            self.native_plugin_manager.delivery_polling = false;
-            return;
-        };
-        let mut deliveries = Vec::new();
-        let mut disconnected = false;
-        loop {
-            match rx.try_recv() {
-                Ok(delivery) => deliveries.push(delivery),
-                Err(mpsc::TryRecvError::Empty) => break,
-                Err(mpsc::TryRecvError::Disconnected) => {
-                    disconnected = true;
-                    break;
-                }
-            }
-        }
+        let deliveries = self
+            .plugin_entity
+            .update(cx, |plugins, _cx| plugins.take_manager_deliveries());
         for delivery in deliveries {
             self.handle_native_plugin_manager_delivery(delivery, cx);
-        }
-        if disconnected {
-            self.native_plugin_manager.delivery_rx = None;
-            self.native_plugin_manager.delivery_polling = false;
         }
         cx.notify();
     }
@@ -1512,10 +1469,10 @@ impl WorkspaceApp {
             NativePluginManagerDelivery::Install {
                 download_url,
                 checksum,
-                result,
-            } => self.handle_native_plugin_install_result(download_url, checksum, result, cx),
+                outcome,
+            } => self.handle_native_plugin_install_result(download_url, checksum, outcome, cx),
             NativePluginManagerDelivery::CheckUpdates(result) => match result {
-                Ok(updates) => {
+                Some(updates) => {
                     let update_count = updates.len();
                     self.native_plugin_manager.available_updates = updates;
                     self.native_plugin_manager.operation_status =
@@ -1524,13 +1481,15 @@ impl WorkspaceApp {
                             self.i18n.t("plugin.updates")
                         ));
                 }
-                Err(error) => {
+                None => {
                     self.native_plugin_manager.operation_status =
-                        NativePluginManagerOperationStatus::Error(error);
+                        NativePluginManagerOperationStatus::Error(
+                            self.i18n.t("plugin.registry_error"),
+                        );
                 }
             },
             NativePluginManagerDelivery::InstallWasmRuntime(result) => match result {
-                Ok(result) => {
+                Some(result) => {
                     self.bootstrap_native_plugin_runtime(cx);
                     self.native_plugin_manager.operation_status =
                         NativePluginManagerOperationStatus::Success(
@@ -1539,9 +1498,11 @@ impl WorkspaceApp {
                                 .replace("{{version}}", &result.version),
                         );
                 }
-                Err(error) => {
+                None => {
                     self.native_plugin_manager.operation_status =
-                        NativePluginManagerOperationStatus::Error(error);
+                        NativePluginManagerOperationStatus::Error(
+                            self.i18n.t("plugin.install_error"),
+                        );
                 }
             },
         }
@@ -1549,13 +1510,13 @@ impl WorkspaceApp {
 
     fn handle_native_plugin_install_result(
         &mut self,
-        download_url: String,
+        download_url: Zeroizing<String>,
         checksum: Option<String>,
-        result: Result<plugin_host::NativePluginUrlInstallResult, String>,
+        outcome: NativePluginInstallOutcome,
         cx: &mut Context<Self>,
     ) {
-        match result {
-            Ok(result) => {
+        match outcome {
+            NativePluginInstallOutcome::Installed(result) => {
                 let installed_id = result.manifest.id.clone();
                 self.native_plugin_runtime.registry =
                     plugin_host::NativePluginRegistry::discover(self.settings_store.path());
@@ -1571,25 +1532,21 @@ impl WorkspaceApp {
                             .replace("{{name}}", &result.manifest.name),
                     );
             }
-            Err(error) => {
-                if let Some(plugin_id) = plugin_host::native_plugin_conflict_id(&error) {
-                    // Tauri asks before overwriting an existing package. Native
-                    // keeps the pending request so the confirmation button can
-                    // retry with the same URL/checksum without retyping.
-                    self.native_plugin_manager.pending_overwrite =
-                        Some(NativePluginPendingOverwrite {
-                            plugin_id,
-                            download_url,
-                            checksum,
-                        });
-                    self.native_plugin_manager.operation_status =
-                        NativePluginManagerOperationStatus::Error(
-                            self.i18n.t("plugin.url_conflict_title"),
-                        );
-                } else {
-                    self.native_plugin_manager.operation_status =
-                        NativePluginManagerOperationStatus::Error(error);
-                }
+            NativePluginInstallOutcome::Conflict { plugin_id } => {
+                // The retry owns the only URL value that left the input draft.
+                self.native_plugin_manager.pending_overwrite = Some(NativePluginPendingOverwrite {
+                    plugin_id,
+                    download_url,
+                    checksum,
+                });
+                self.native_plugin_manager.operation_status =
+                    NativePluginManagerOperationStatus::Error(
+                        self.i18n.t("plugin.url_conflict_title"),
+                    );
+            }
+            NativePluginInstallOutcome::Failed => {
+                self.native_plugin_manager.operation_status =
+                    NativePluginManagerOperationStatus::Error(self.i18n.t("plugin.install_error"));
             }
         }
         cx.notify();
@@ -2535,6 +2492,23 @@ mod tests {
 
         let entry = registry_entry_with_capabilities(Some(Vec::new()));
         assert!(native_plugin_registry_capabilities_label(&i18n, &entry).is_none());
+    }
+
+    #[test]
+    fn pending_overwrite_debug_redacts_package_url() {
+        let pending = NativePluginPendingOverwrite {
+            plugin_id: "com.example.demo".to_string(),
+            download_url: Zeroizing::new(
+                "https://token@example.invalid/demo.zip?auth=secret".to_string(),
+            ),
+            checksum: Some("sha256:abc".to_string()),
+        };
+
+        let debug = format!("{pending:?}");
+        assert!(debug.contains("com.example.demo"));
+        assert!(debug.contains("<redacted>"));
+        assert!(!debug.contains("token"));
+        assert!(!debug.contains("secret"));
     }
 
     #[test]

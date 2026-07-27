@@ -24,6 +24,7 @@ mod notification_center;
 mod onboarding;
 mod pane_tree;
 mod path_completion;
+mod plugin_entity;
 mod plugin_host;
 mod plugin_lifecycle;
 mod plugin_manager;
@@ -824,6 +825,8 @@ pub(crate) struct WorkspaceApp {
     detached_local_terminal_list_cache: RefCell<VirtualListSignatureCache>,
     native_plugin_manager: plugin_manager::NativePluginManagerState,
     native_plugin_ui: plugin_ui::NativePluginUiState,
+    plugin_entity: Entity<plugin_entity::PluginWorkspaceEntity>,
+    _plugin_entity_subscription: Subscription,
     split_drag: Option<SplitDrag>,
     sidebar_resizing: bool,
     sidebar_resize_hotzone_hovered: bool,
