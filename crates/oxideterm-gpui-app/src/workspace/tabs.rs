@@ -11,7 +11,9 @@ mod nodes_reconnect_helpers;
 mod render;
 mod state;
 
-pub(in crate::workspace) use entity::WorkspaceTabHostEntity;
+pub(in crate::workspace) use entity::{
+    TabCloseProcessProbe, WorkspaceTabHostEntity, WorkspaceTabHostEvent,
+};
 
 // The main tab strip keeps a thin visual thumb while exposing a larger drag target.
 const TABBAR_SCROLLBAR_HEIGHT: f32 = 3.0;

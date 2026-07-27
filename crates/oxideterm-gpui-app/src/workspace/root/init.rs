@@ -244,6 +244,13 @@ impl WorkspaceApp {
         let connection_store_last_modified =
             crate::workspace::settings::settings_store_modified_time(connection_store.path());
         let tab_host = cx.new(|_| tabs::WorkspaceTabHostEntity::new());
+        let tab_host_window_handle = window.window_handle();
+        let tab_host_subscription = cx.subscribe(
+            &tab_host,
+            move |workspace, _tab_host, event: &tabs::WorkspaceTabHostEvent, cx| {
+                workspace.handle_tab_host_event(event, tab_host_window_handle, cx);
+            },
+        );
         let mut workspace = Self {
             focus_handle,
             tabs: Vec::new(),
@@ -262,6 +269,7 @@ impl WorkspaceApp {
             pending_auto_close_terminal_sessions: HashSet::new(),
             auto_close_terminal_sessions_scheduled: false,
             tab_host,
+            _tab_host_subscription: tab_host_subscription,
             search: SearchBarState::default(),
             terminal_command_bar_focused: false,
             terminal_command_input_collapsed: false,

@@ -14,6 +14,25 @@ pub(in crate::workspace) struct WorkspaceTabHostEntity {
     navigation_index: Option<usize>,
     navigation_replaying: bool,
     navigation_observed_tab: Option<TabId>,
+    process_close_check_generation: u64,
+    process_close_completion: Option<TabCloseProcessCompletion>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(in crate::workspace) enum WorkspaceTabHostEvent {
+    CloseProcessCheckReady,
+}
+
+pub(in crate::workspace) struct TabCloseProcessProbe {
+    pub(in crate::workspace) pane_id: PaneId,
+    pub(in crate::workspace) probe: Option<oxideterm_terminal::TerminalProcessProbe>,
+    pub(in crate::workspace) cached: oxideterm_terminal::TerminalProcessInfo,
+}
+
+pub(in crate::workspace) struct TabCloseProcessCompletion {
+    pub(in crate::workspace) request: LocalTerminalCloseCheck,
+    pub(in crate::workspace) results: Vec<(PaneId, oxideterm_terminal::TerminalProcessInfo)>,
+    pub(in crate::workspace) has_foreground_child: bool,
 }
 
 impl WorkspaceTabHostEntity {
@@ -26,6 +45,8 @@ impl WorkspaceTabHostEntity {
             navigation_index: None,
             navigation_replaying: false,
             navigation_observed_tab: None,
+            process_close_check_generation: 0,
+            process_close_completion: None,
         }
     }
 
@@ -117,11 +138,78 @@ impl WorkspaceTabHostEntity {
             })
             .or_else(|| self.navigation_history.len().checked_sub(1));
     }
+
+    pub(in crate::workspace) fn start_close_process_check(
+        &mut self,
+        request: LocalTerminalCloseCheck,
+        probes: Vec<TabCloseProcessProbe>,
+        cx: &mut Context<Self>,
+    ) {
+        self.process_close_check_generation = self.process_close_check_generation.wrapping_add(1);
+        // A newer user request invalidates a completion that has not reached the window adapter.
+        self.process_close_completion = None;
+        let generation = self.process_close_check_generation;
+        let probe_task = cx.background_executor().spawn(async move {
+            // Each probe owns its duplicated PTY descriptor, so no terminal mutex is held while
+            // platform process and cwd commands run on the background executor.
+            probes
+                .into_iter()
+                .map(|probe| {
+                    let info = probe
+                        .probe
+                        .map(|probe| probe.collect_foreground_only())
+                        .unwrap_or(probe.cached);
+                    (probe.pane_id, info)
+                })
+                .collect::<Vec<_>>()
+        });
+
+        cx.spawn(async move |entity, cx| {
+            let results = probe_task.await;
+            let _ = entity.update(cx, |entity, cx| {
+                if entity.process_close_check_generation != generation {
+                    return;
+                }
+                let has_foreground_child = results
+                    .iter()
+                    .any(|(_, info)| terminal_process_info_has_foreground_child_process(info));
+                entity.process_close_completion = Some(TabCloseProcessCompletion {
+                    request,
+                    results,
+                    has_foreground_child,
+                });
+                cx.emit(WorkspaceTabHostEvent::CloseProcessCheckReady);
+            });
+        })
+        .detach();
+    }
+
+    pub(in crate::workspace) fn take_close_process_completion(
+        &mut self,
+    ) -> Option<TabCloseProcessCompletion> {
+        self.process_close_completion.take()
+    }
 }
+
+fn terminal_process_info_has_foreground_child_process(
+    info: &oxideterm_terminal::TerminalProcessInfo,
+) -> bool {
+    let Some(shell_pid) = info.shell_pid else {
+        return false;
+    };
+    info.foreground_process_group_id
+        .is_some_and(|foreground_group| foreground_group != shell_pid)
+        || info
+            .foreground_pid
+            .is_some_and(|foreground_pid| foreground_pid != shell_pid)
+}
+
+impl gpui::EventEmitter<WorkspaceTabHostEvent> for WorkspaceTabHostEntity {}
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use gpui::TestAppContext;
 
     #[test]
     fn typed_workspace_ids_are_monotonic_and_independent() {
@@ -176,5 +264,60 @@ mod tests {
         let existing = HashSet::from([first, third, replacement]);
         assert_eq!(tab_host.navigate_history(true, &existing), None);
         assert_eq!(tab_host.navigate_history(false, &existing), Some(first));
+    }
+
+    #[test]
+    fn local_close_warning_detects_foreground_child_process() {
+        let shell_only = oxideterm_terminal::TerminalProcessInfo {
+            shell_pid: Some(10),
+            foreground_pid: Some(10),
+            foreground_process_group_id: Some(10),
+            ..Default::default()
+        };
+        assert!(!terminal_process_info_has_foreground_child_process(
+            &shell_only
+        ));
+
+        let foreground_child = oxideterm_terminal::TerminalProcessInfo {
+            shell_pid: Some(10),
+            foreground_pid: Some(42),
+            foreground_process_group_id: Some(42),
+            ..Default::default()
+        };
+        assert!(terminal_process_info_has_foreground_child_process(
+            &foreground_child
+        ));
+    }
+
+    #[gpui::test]
+    fn newer_close_process_check_rejects_stale_completion(cx: &mut TestAppContext) {
+        let tab_host = cx.new(|_| WorkspaceTabHostEntity::new());
+        tab_host.update(cx, |tab_host, cx| {
+            tab_host.start_close_process_check(
+                LocalTerminalCloseCheck::Single { tab_id: TabId(1) },
+                Vec::new(),
+                cx,
+            );
+            tab_host.start_close_process_check(
+                LocalTerminalCloseCheck::Batch {
+                    tab_ids: vec![TabId(2), TabId(3)],
+                },
+                Vec::new(),
+                cx,
+            );
+        });
+        cx.run_until_parked();
+
+        let completion = tab_host
+            .update(cx, |tab_host, _| tab_host.take_close_process_completion())
+            .expect("latest close process completion");
+        assert_eq!(
+            completion.request,
+            LocalTerminalCloseCheck::Batch {
+                tab_ids: vec![TabId(2), TabId(3)]
+            }
+        );
+        assert!(completion.results.is_empty());
+        assert!(!completion.has_foreground_child);
     }
 }

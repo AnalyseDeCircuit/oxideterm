@@ -63,6 +63,26 @@ fn attach_terminal_to_existing_ssh_node(
 }
 
 impl WorkspaceApp {
+    pub(in crate::workspace) fn handle_tab_host_event(
+        &mut self,
+        event: &WorkspaceTabHostEvent,
+        window_handle: AnyWindowHandle,
+        cx: &mut Context<Self>,
+    ) {
+        match event {
+            WorkspaceTabHostEvent::CloseProcessCheckReady => {
+                cx.spawn(async move |weak, cx| {
+                    let _ = cx.update_window(window_handle, |_root, window, cx| {
+                        weak.update(cx, |workspace, cx| {
+                            workspace.apply_tab_close_process_completion(window, cx);
+                        })
+                    });
+                })
+                .detach();
+            }
+        }
+    }
+
     pub(in crate::workspace) fn navigate_tab_history(
         &mut self,
         forward: bool,
@@ -636,7 +656,11 @@ impl WorkspaceApp {
             .filter(|pane_id| seen_panes.insert(*pane_id))
             .filter_map(|pane_id| {
                 let pane = self.panes.get(&pane_id)?.read(cx);
-                Some((pane_id, pane.process_info_probe(), pane.process_info()))
+                Some(TabCloseProcessProbe {
+                    pane_id,
+                    probe: pane.process_info_probe(),
+                    cached: pane.process_info(),
+                })
             })
             .collect::<Vec<_>>();
 
@@ -656,74 +680,52 @@ impl WorkspaceApp {
             return;
         }
 
-        self.main_window_tabs.process_close_check_generation = self
-            .main_window_tabs
-            .process_close_check_generation
-            .wrapping_add(1);
-        let generation = self.main_window_tabs.process_close_check_generation;
-        let window_handle = window.window_handle();
-        let probe_task = cx.background_executor().spawn(async move {
-            // Each probe owns its duplicated PTY descriptor, so no terminal mutex is held while
-            // platform process and cwd commands run on the background executor.
-            probes
-                .into_iter()
-                .map(|(pane_id, probe, cached)| {
-                    let info = probe
-                        .map(|probe| probe.collect_foreground_only())
-                        .unwrap_or(cached);
-                    (pane_id, info)
-                })
-                .collect::<Vec<_>>()
+        self.tab_host.update(cx, |tab_host, cx| {
+            tab_host.start_close_process_check(request, probes, cx);
         });
+    }
 
-        cx.spawn(async move |weak, cx| {
-            let results = probe_task.await;
-            let _ = cx.update_window(window_handle, |_root, window, cx| {
-                let _ = weak.update(cx, |this, cx| {
-                    if this.main_window_tabs.process_close_check_generation != generation {
-                        return;
-                    }
-                    let has_foreground_child = results
-                        .iter()
-                        .any(|(_, info)| terminal_process_info_has_foreground_child_process(info));
-                    for (pane_id, info) in results {
-                        if let Some(pane) = this.panes.get(&pane_id) {
-                            pane.update(cx, |pane, _cx| {
-                                let _ = pane.apply_process_info(info);
-                            });
-                        }
-                    }
-
-                    match request {
-                        LocalTerminalCloseCheck::Single { tab_id } => {
-                            if has_foreground_child {
-                                this.main_window_tabs.close_confirm =
-                                    Some(TabCloseConfirm::LocalChildProcess { tab_id });
-                                this.tab_close_confirm_presence.reopen();
-                                this.reset_standard_confirm_focus();
-                                cx.notify();
-                            } else {
-                                this.close_tab_by_id(tab_id, window, cx);
-                            }
-                        }
-                        LocalTerminalCloseCheck::Batch { tab_ids } => {
-                            if has_foreground_child {
-                                this.main_window_tabs.close_confirm =
-                                    Some(TabCloseConfirm::LocalChildProcessBatch { tab_ids });
-                                this.tab_close_confirm_presence.reopen();
-                                this.reset_standard_confirm_focus();
-                                cx.notify();
-                            } else {
-                                for tab_id in tab_ids {
-                                    this.close_tab_by_id(tab_id, window, cx);
-                                }
-                            }
-                        }
-                    }
+    fn apply_tab_close_process_completion(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(completion) = self
+            .tab_host
+            .update(cx, |tab_host, _| tab_host.take_close_process_completion())
+        else {
+            return;
+        };
+        for (pane_id, info) in completion.results {
+            if let Some(pane) = self.panes.get(&pane_id) {
+                pane.update(cx, |pane, _cx| {
+                    let _ = pane.apply_process_info(info);
                 });
-            });
-        })
-        .detach();
+            }
+        }
+
+        match completion.request {
+            LocalTerminalCloseCheck::Single { tab_id } => {
+                if completion.has_foreground_child {
+                    self.main_window_tabs.close_confirm =
+                        Some(TabCloseConfirm::LocalChildProcess { tab_id });
+                    self.tab_close_confirm_presence.reopen();
+                    self.reset_standard_confirm_focus();
+                    cx.notify();
+                } else {
+                    self.close_tab_by_id(tab_id, window, cx);
+                }
+            }
+            LocalTerminalCloseCheck::Batch { tab_ids } => {
+                if completion.has_foreground_child {
+                    self.main_window_tabs.close_confirm =
+                        Some(TabCloseConfirm::LocalChildProcessBatch { tab_ids });
+                    self.tab_close_confirm_presence.reopen();
+                    self.reset_standard_confirm_focus();
+                    cx.notify();
+                } else {
+                    for tab_id in tab_ids {
+                        self.close_tab_by_id(tab_id, window, cx);
+                    }
+                }
+            }
+        }
     }
 
     pub(in crate::workspace) fn cancel_tab_close_confirm(&mut self, cx: &mut Context<Self>) {
@@ -1433,46 +1435,9 @@ impl WorkspaceApp {
     }
 }
 
-fn terminal_process_info_has_foreground_child_process(
-    process: &oxideterm_terminal::TerminalProcessInfo,
-) -> bool {
-    let Some(shell_pid) = process.shell_pid else {
-        return false;
-    };
-    process
-        .foreground_process_group_id
-        .is_some_and(|foreground_group| foreground_group != shell_pid)
-        || process
-            .foreground_pid
-            .is_some_and(|foreground_pid| foreground_pid != shell_pid)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn local_close_warning_detects_foreground_child_process() {
-        let shell_only = oxideterm_terminal::TerminalProcessInfo {
-            shell_pid: Some(10),
-            foreground_pid: Some(10),
-            foreground_process_group_id: Some(10),
-            ..Default::default()
-        };
-        assert!(!terminal_process_info_has_foreground_child_process(
-            &shell_only
-        ));
-
-        let foreground_child = oxideterm_terminal::TerminalProcessInfo {
-            shell_pid: Some(10),
-            foreground_pid: Some(42),
-            foreground_process_group_id: Some(42),
-            ..Default::default()
-        };
-        assert!(terminal_process_info_has_foreground_child_process(
-            &foreground_child
-        ));
-    }
 
     #[test]
     fn tab_drag_reorder_requires_horizontal_browser_axis() {
