@@ -14,6 +14,7 @@ pub(in crate::workspace) enum WorkspaceRuntimeEvent {
     NodeEventsReady,
     ReconnectRootsReady,
     ReconnectScheduleReady,
+    ConnectionTraceEventsReady,
     ActiveConnectionsChanged,
 }
 
@@ -108,6 +109,9 @@ pub(in crate::workspace) struct WorkspaceRuntimeEntity {
     reconnect_orchestrator: ReconnectOrchestratorStore,
     active_connection_chain: Option<ConnectionChainRun>,
     connecting_node_locks: HashSet<NodeId>,
+    connection_trace_state: ConnectionTraceState,
+    connection_trace_events: VecDeque<ConnectionTraceEvent>,
+    connection_trace_delivery_pending: bool,
     ssh_registry: SshConnectionRegistry,
     task_runtime: Arc<tokio::runtime::Runtime>,
     reconnect_timing: ReconnectTiming,
@@ -173,6 +177,9 @@ impl WorkspaceRuntimeEntity {
             ),
             active_connection_chain: None,
             connecting_node_locks: HashSet::new(),
+            connection_trace_state: ConnectionTraceState::default(),
+            connection_trace_events: VecDeque::new(),
+            connection_trace_delivery_pending: false,
             ssh_registry,
             task_runtime,
             reconnect_timing,
@@ -339,6 +346,205 @@ impl WorkspaceRuntimeEntity {
             for node_id in &run.trace_plan.node_ids {
                 self.connecting_node_locks.remove(node_id);
             }
+        }
+    }
+
+    pub(in crate::workspace) fn plan_connection_trace(
+        &mut self,
+        mode: ConnectionTraceMode,
+        path: &[(NodeId, bool)],
+    ) -> Option<ConnectionTracePlan> {
+        self.connection_trace_state.plan_for_path(mode, path)
+    }
+
+    pub(in crate::workspace) fn new_connection_trace_plan(
+        &mut self,
+        mode: ConnectionTraceMode,
+        node_ids: Vec<NodeId>,
+    ) -> ConnectionTracePlan {
+        ConnectionTracePlan {
+            attempt_id: self.connection_trace_state.next_attempt_id(),
+            mode,
+            node_ids,
+        }
+    }
+
+    pub(in crate::workspace) fn begin_connection_trace(
+        &mut self,
+        node_id: &NodeId,
+        label: Option<String>,
+        plan: Option<&ConnectionTracePlan>,
+        parent_id: Option<&NodeId>,
+        cx: &mut Context<Self>,
+    ) {
+        self.connection_trace_state
+            .begin(node_id.clone(), label, plan);
+        self.push_connection_trace_event(
+            node_id,
+            ConnectionTraceStage::Queued,
+            ConnectionTraceStatus::Running,
+            5.0,
+            None,
+            cx,
+        );
+        self.push_connection_trace_event(
+            node_id,
+            ConnectionTraceStage::Preparing,
+            ConnectionTraceStatus::Running,
+            15.0,
+            None,
+            cx,
+        );
+        self.push_connection_trace_event(
+            node_id,
+            ConnectionTraceStage::OpeningTransport,
+            ConnectionTraceStatus::Running,
+            28.0,
+            None,
+            cx,
+        );
+        self.push_connection_trace_event(
+            node_id,
+            ConnectionTraceStage::HostKey,
+            ConnectionTraceStatus::Running,
+            38.0,
+            None,
+            cx,
+        );
+        self.push_connection_trace_event(
+            node_id,
+            ConnectionTraceStage::SshHandshake,
+            ConnectionTraceStatus::Running,
+            48.0,
+            parent_id.map(|parent_id| format!("via {}", parent_id.0)),
+            cx,
+        );
+        self.push_connection_trace_event(
+            node_id,
+            ConnectionTraceStage::Authentication,
+            ConnectionTraceStatus::Running,
+            62.0,
+            None,
+            cx,
+        );
+    }
+
+    pub(in crate::workspace) fn finish_connection_trace_success(
+        &mut self,
+        node_id: &NodeId,
+        cx: &mut Context<Self>,
+    ) {
+        if !self.connection_trace_state.contains(node_id) {
+            return;
+        }
+        self.push_connection_trace_event(
+            node_id,
+            ConnectionTraceStage::Pty,
+            ConnectionTraceStatus::Running,
+            86.0,
+            None,
+            cx,
+        );
+        self.push_connection_trace_event(
+            node_id,
+            ConnectionTraceStage::ShellReady,
+            ConnectionTraceStatus::Running,
+            96.0,
+            None,
+            cx,
+        );
+        self.push_connection_trace_event(
+            node_id,
+            ConnectionTraceStage::Ready,
+            ConnectionTraceStatus::Ready,
+            100.0,
+            None,
+            cx,
+        );
+        self.connection_trace_state.finish(node_id);
+    }
+
+    pub(in crate::workspace) fn finish_connection_trace_failed(
+        &mut self,
+        node_id: &NodeId,
+        detail: Option<String>,
+        cx: &mut Context<Self>,
+    ) {
+        if !self.connection_trace_state.contains(node_id) {
+            return;
+        }
+        let stage = oxideterm_ssh::connection_trace_failure_stage(detail.as_deref());
+        self.push_connection_trace_event(
+            node_id,
+            stage,
+            ConnectionTraceStatus::Failed,
+            100.0,
+            detail,
+            cx,
+        );
+        self.connection_trace_state.finish(node_id);
+    }
+
+    pub(in crate::workspace) fn cancel_connection_trace(
+        &mut self,
+        node_id: &NodeId,
+        cx: &mut Context<Self>,
+    ) {
+        if !self.connection_trace_state.contains(node_id) {
+            return;
+        }
+        self.push_connection_trace_event(
+            node_id,
+            ConnectionTraceStage::Authentication,
+            ConnectionTraceStatus::Cancelled,
+            100.0,
+            None,
+            cx,
+        );
+        self.connection_trace_state.finish(node_id);
+    }
+
+    pub(in crate::workspace) fn take_connection_trace_events(
+        &mut self,
+        cx: &mut Context<Self>,
+    ) -> Vec<ConnectionTraceEvent> {
+        let budget = delivery::NOTIFICATION_DELIVERY_BUDGET;
+        let started_at = Instant::now();
+        let mut events = Vec::new();
+        while budget.allows_next(events.len(), started_at.elapsed()) {
+            let Some(event) = self.connection_trace_events.pop_front() else {
+                break;
+            };
+            events.push(event);
+        }
+        if self.connection_trace_events.is_empty() {
+            self.connection_trace_delivery_pending = false;
+        } else {
+            // Continue a bounded reliable drain without involving a root waiter or heartbeat.
+            cx.emit(WorkspaceRuntimeEvent::ConnectionTraceEventsReady);
+        }
+        events
+    }
+
+    fn push_connection_trace_event(
+        &mut self,
+        node_id: &NodeId,
+        stage: ConnectionTraceStage,
+        status: ConnectionTraceStatus,
+        progress: f32,
+        detail: Option<String>,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(event) = self
+            .connection_trace_state
+            .event(node_id, stage, status, progress, detail)
+        else {
+            return;
+        };
+        self.connection_trace_events.push_back(event);
+        if !self.connection_trace_delivery_pending {
+            self.connection_trace_delivery_pending = true;
+            cx.emit(WorkspaceRuntimeEvent::ConnectionTraceEventsReady);
         }
     }
 
@@ -1150,6 +1356,95 @@ mod tests {
             assert!(entity.try_lock_connecting_node(&chain_node_id));
             assert!(!entity.try_lock_connecting_node(&unrelated_node_id));
         });
+    }
+
+    #[gpui::test]
+    fn connection_trace_transitions_and_delivery_are_entity_owned(cx: &mut TestAppContext) {
+        let entity = test_runtime_entity(cx);
+        let node_id = NodeId::new("node-a");
+        let ready_events = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let ready_event_count = Arc::clone(&ready_events);
+        let _subscription = entity.update(cx, |_, cx| {
+            cx.subscribe(&entity, move |_, _, event: &WorkspaceRuntimeEvent, _cx| {
+                if *event == WorkspaceRuntimeEvent::ConnectionTraceEventsReady {
+                    ready_event_count.fetch_add(1, Ordering::AcqRel);
+                }
+            })
+        });
+
+        entity.update(cx, |entity, cx| {
+            let plan = entity
+                .new_connection_trace_plan(ConnectionTraceMode::Connect, vec![node_id.clone()]);
+            entity.begin_connection_trace(
+                &node_id,
+                Some("Node A".to_string()),
+                Some(&plan),
+                None,
+                cx,
+            );
+        });
+        assert_eq!(ready_events.load(Ordering::Acquire), 1);
+
+        let started_events =
+            entity.update(cx, |entity, cx| entity.take_connection_trace_events(cx));
+        assert_eq!(started_events.len(), 6);
+        assert_eq!(
+            started_events.first().map(|event| event.stage),
+            Some(ConnectionTraceStage::Queued)
+        );
+        assert_eq!(
+            started_events.last().map(|event| event.stage),
+            Some(ConnectionTraceStage::Authentication)
+        );
+
+        entity.update(cx, |entity, cx| {
+            entity.finish_connection_trace_success(&node_id, cx);
+        });
+        let finished_events =
+            entity.update(cx, |entity, cx| entity.take_connection_trace_events(cx));
+        assert_eq!(finished_events.len(), 3);
+        assert_eq!(
+            finished_events.last().map(|event| event.status),
+            Some(ConnectionTraceStatus::Ready)
+        );
+
+        entity.update(cx, |entity, cx| {
+            entity.finish_connection_trace_success(&node_id, cx);
+        });
+        assert!(
+            entity
+                .update(cx, |entity, cx| entity.take_connection_trace_events(cx))
+                .is_empty()
+        );
+    }
+
+    #[gpui::test]
+    fn connection_trace_failure_and_cancel_are_terminal_once(cx: &mut TestAppContext) {
+        let entity = test_runtime_entity(cx);
+        let failed_node_id = NodeId::new("node-failed");
+        let cancelled_node_id = NodeId::new("node-cancelled");
+
+        entity.update(cx, |entity, cx| {
+            entity.begin_connection_trace(&failed_node_id, None, None, None, cx);
+            entity.begin_connection_trace(&cancelled_node_id, None, None, None, cx);
+            let _ = entity.take_connection_trace_events(cx);
+            entity.finish_connection_trace_failed(
+                &failed_node_id,
+                Some("connection timed out".to_string()),
+                cx,
+            );
+            entity.cancel_connection_trace(&cancelled_node_id, cx);
+        });
+
+        let terminal_events =
+            entity.update(cx, |entity, cx| entity.take_connection_trace_events(cx));
+        assert_eq!(terminal_events.len(), 2);
+        assert!(terminal_events.iter().any(|event| {
+            event.node_id == failed_node_id && event.status == ConnectionTraceStatus::Failed
+        }));
+        assert!(terminal_events.iter().any(|event| {
+            event.node_id == cancelled_node_id && event.status == ConnectionTraceStatus::Cancelled
+        }));
     }
 
     #[gpui::test]

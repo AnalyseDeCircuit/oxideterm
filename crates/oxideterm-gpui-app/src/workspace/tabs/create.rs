@@ -566,7 +566,9 @@ impl WorkspaceApp {
         }
         let starting_node_connection = self.node_router.connection_id_for_node(&node_id).is_none();
         let trace_plan = starting_node_connection
-            .then(|| self.connection_trace_plan_for_node(&node_id, ConnectionTraceMode::Connect))
+            .then(|| {
+                self.connection_trace_plan_for_node(&node_id, ConnectionTraceMode::Connect, cx)
+            })
             .flatten();
         let trace_parent_id = self
             .node_runtime_store
@@ -599,6 +601,7 @@ impl WorkspaceApp {
                 &node_id,
                 trace_plan.as_ref(),
                 trace_parent_id.as_ref(),
+                cx,
             );
         }
         let preferences = self.prepare_terminal_preferences_for_tab_kind(&TabKind::SshTerminal, cx);

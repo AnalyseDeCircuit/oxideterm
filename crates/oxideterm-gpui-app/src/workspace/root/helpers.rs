@@ -777,6 +777,7 @@ impl WorkspaceApp {
         &mut self,
         node_id: &NodeId,
         mode: ConnectionTraceMode,
+        cx: &mut Context<Self>,
     ) -> Option<ConnectionTracePlan> {
         let mut path = Vec::new();
         let mut current = Some(node_id.clone());
@@ -795,7 +796,9 @@ impl WorkspaceApp {
                 (candidate, ready)
             })
             .collect::<Vec<_>>();
-        self.connection_trace_state.plan_for_path(mode, &path)
+        self.workspace_runtime.update(cx, |runtime, _cx| {
+            runtime.plan_connection_trace(mode, &path)
+        })
     }
 
     pub(in crate::workspace) fn connection_trace_node_is_ready(&self, node_id: &NodeId) -> bool {
@@ -819,104 +822,12 @@ impl WorkspaceApp {
         node_id: &NodeId,
         plan: Option<&ConnectionTracePlan>,
         parent_id: Option<&NodeId>,
+        cx: &mut Context<Self>,
     ) {
         let label = self.ssh_nodes.get(node_id).map(|node| node.title.clone());
-        self.connection_trace_state
-            .begin(node_id.clone(), label, plan);
-        self.emit_connection_trace_stage(node_id, ConnectionTraceStage::Queued, 5.0, None);
-        self.emit_connection_trace_stage(node_id, ConnectionTraceStage::Preparing, 15.0, None);
-        self.emit_connection_trace_stage(
-            node_id,
-            ConnectionTraceStage::OpeningTransport,
-            28.0,
-            None,
-        );
-        self.emit_connection_trace_stage(node_id, ConnectionTraceStage::HostKey, 38.0, None);
-        self.emit_connection_trace_stage(
-            node_id,
-            ConnectionTraceStage::SshHandshake,
-            48.0,
-            parent_id.map(|parent_id| format!("via {}", parent_id.0)),
-        );
-        self.emit_connection_trace_stage(node_id, ConnectionTraceStage::Authentication, 62.0, None);
-    }
-
-    pub(in crate::workspace) fn emit_connection_trace_stage(
-        &self,
-        node_id: &NodeId,
-        stage: ConnectionTraceStage,
-        progress: f32,
-        detail: Option<String>,
-    ) {
-        self.emit_connection_trace_event(
-            node_id,
-            stage,
-            ConnectionTraceStatus::Running,
-            progress,
-            detail,
-        );
-    }
-
-    pub(in crate::workspace) fn finish_connection_trace_success(&mut self, node_id: &NodeId) {
-        if self.connection_trace_state.contains(node_id) {
-            self.emit_connection_trace_stage(node_id, ConnectionTraceStage::Pty, 86.0, None);
-            self.emit_connection_trace_stage(node_id, ConnectionTraceStage::ShellReady, 96.0, None);
-            self.emit_connection_trace_event(
-                node_id,
-                ConnectionTraceStage::Ready,
-                ConnectionTraceStatus::Ready,
-                100.0,
-                None,
-            );
-            self.connection_trace_state.finish(node_id);
-        }
-    }
-
-    pub(in crate::workspace) fn finish_connection_trace_failed(
-        &mut self,
-        node_id: &NodeId,
-        detail: Option<String>,
-    ) {
-        if self.connection_trace_state.contains(node_id) {
-            let stage = oxideterm_ssh::connection_trace_failure_stage(detail.as_deref());
-            self.emit_connection_trace_event(
-                node_id,
-                stage,
-                ConnectionTraceStatus::Failed,
-                100.0,
-                detail,
-            );
-            self.connection_trace_state.finish(node_id);
-        }
-    }
-
-    pub(in crate::workspace) fn cancel_connection_trace_for_node(&mut self, node_id: &NodeId) {
-        if self.connection_trace_state.contains(node_id) {
-            self.emit_connection_trace_event(
-                node_id,
-                ConnectionTraceStage::Authentication,
-                ConnectionTraceStatus::Cancelled,
-                100.0,
-                None,
-            );
-            self.connection_trace_state.finish(node_id);
-        }
-    }
-
-    pub(in crate::workspace) fn emit_connection_trace_event(
-        &self,
-        node_id: &NodeId,
-        stage: ConnectionTraceStage,
-        status: ConnectionTraceStatus,
-        progress: f32,
-        detail: Option<String>,
-    ) {
-        if let Some(event) = self
-            .connection_trace_state
-            .event(node_id, stage, status, progress, detail)
-        {
-            let _ = self.connection_trace_tx.send(event);
-        }
+        self.workspace_runtime.update(cx, |runtime, cx| {
+            runtime.begin_connection_trace(node_id, label, plan, parent_id, cx);
+        });
     }
 
     pub(in crate::workspace) fn log_reconnect_phase(

@@ -778,7 +778,9 @@ impl WorkspaceApp {
         };
         let nodes_to_cleanup = self.node_runtime_store.subtree_postorder(&cleanup_root);
         for node_id in &nodes_to_cleanup {
-            self.cancel_connection_trace_for_node(node_id);
+            self.workspace_runtime.update(cx, |runtime, cx| {
+                runtime.cancel_connection_trace(node_id, cx);
+            });
             self.workspace_runtime
                 .update(cx, |runtime, _cx| runtime.unlock_connecting_node(node_id));
             self.remove_pending_ssh_terminal_opens_for_node(node_id);

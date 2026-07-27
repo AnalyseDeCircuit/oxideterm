@@ -62,6 +62,16 @@ impl WorkspaceApp {
                 })
                 .detach();
             }
+            runtime_entity::WorkspaceRuntimeEvent::ConnectionTraceEventsReady => {
+                cx.spawn(async move |weak, cx| {
+                    let _ = cx.update_window(window_handle, |_, _window, cx| {
+                        weak.update(cx, |workspace, cx| {
+                            workspace.apply_workspace_runtime_connection_trace_events(cx);
+                        })
+                    });
+                })
+                .detach();
+            }
             runtime_entity::WorkspaceRuntimeEvent::ActiveConnectionsChanged => {
                 self.refresh_ssh_terminal_input_locks(cx);
                 cx.notify();
@@ -256,7 +266,9 @@ impl WorkspaceApp {
             nodes_to_cleanup.push(cleanup_root.clone());
         }
         for node_id in &nodes_to_cleanup {
-            self.cancel_connection_trace_for_node(node_id);
+            self.workspace_runtime.update(cx, |runtime, cx| {
+                runtime.cancel_connection_trace(node_id, cx);
+            });
             self.workspace_runtime
                 .update(cx, |runtime, _cx| runtime.unlock_connecting_node(node_id));
             self.remove_pending_ssh_terminal_opens_for_node(node_id);
@@ -341,7 +353,9 @@ impl WorkspaceApp {
                         changed = true;
                         continue;
                     }
-                    self.finish_connection_trace_success(&node_id);
+                    self.workspace_runtime.update(cx, |runtime, cx| {
+                        runtime.finish_connection_trace_success(&node_id, cx);
+                    });
                     if self
                         .workspace_runtime
                         .read(cx)
@@ -504,7 +518,9 @@ impl WorkspaceApp {
                             runtime.clear_reconnect_cascade();
                         });
                     }
-                    self.finish_connection_trace_failed(&node_id, Some(error.clone()));
+                    self.workspace_runtime.update(cx, |runtime, cx| {
+                        runtime.finish_connection_trace_failed(&node_id, Some(error.clone()), cx);
+                    });
                     self.fail_active_proxy_connect_for_node(&node_id, error.clone(), cx);
                     if active_reconnect_job {
                         self.log_reconnect_phase(
@@ -862,9 +878,13 @@ impl WorkspaceApp {
                     // Registry readiness, not shell lifetime, restores shared
                     // forwards and completes the connection trace.
                     self.restore_forwarding_session_for_node(&node_id, cx);
-                    self.finish_connection_trace_success(&node_id);
+                    self.workspace_runtime.update(cx, |runtime, cx| {
+                        runtime.finish_connection_trace_success(&node_id, cx);
+                    });
                 } else if node_readiness_became_unavailable(previous.as_ref(), &state) {
-                    self.finish_connection_trace_failed(&node_id, Some(reason.clone()));
+                    self.workspace_runtime.update(cx, |runtime, cx| {
+                        runtime.finish_connection_trace_failed(&node_id, Some(reason.clone()), cx);
+                    });
                 }
                 let event_severity = event_log_severity_for_connection_status(&status);
                 let affected_children_count = affected_children.len();
@@ -990,9 +1010,13 @@ impl WorkspaceApp {
                 }
                 if node_readiness_became_ready(previous.as_ref(), &state) {
                     self.restore_forwarding_session_for_node(&node_id, cx);
-                    self.finish_connection_trace_success(&node_id);
+                    self.workspace_runtime.update(cx, |runtime, cx| {
+                        runtime.finish_connection_trace_success(&node_id, cx);
+                    });
                 } else if node_readiness_became_unavailable(previous.as_ref(), &state) {
-                    self.finish_connection_trace_failed(&node_id, Some(reason.clone()));
+                    self.workspace_runtime.update(cx, |runtime, cx| {
+                        runtime.finish_connection_trace_failed(&node_id, Some(reason.clone()), cx);
+                    });
                 }
                 if matches!(previous, Some(NodeReadiness::Ready))
                     && matches!(state, NodeReadiness::Error | NodeReadiness::Disconnected)
@@ -1954,11 +1978,9 @@ impl WorkspaceApp {
         {
             return false;
         }
-        let trace_plan = ConnectionTracePlan {
-            attempt_id: self.connection_trace_state.next_attempt_id(),
-            mode: trace_mode,
-            node_ids: vec![node_id.clone()],
-        };
+        let trace_plan = self.workspace_runtime.update(cx, |runtime, _cx| {
+            runtime.new_connection_trace_plan(trace_mode, vec![node_id.clone()])
+        });
         if !self.ensure_single_node_connection_started_with_trace(node_id, Some(&trace_plan), cx) {
             self.workspace_runtime
                 .update(cx, |runtime, _cx| runtime.unlock_connecting_node(node_id));
@@ -2009,11 +2031,9 @@ impl WorkspaceApp {
             return true;
         };
         let nodes_to_connect = path_node_ids[start_index..].to_vec();
-        let trace_plan = ConnectionTracePlan {
-            attempt_id: self.connection_trace_state.next_attempt_id(),
-            mode: trace_mode,
-            node_ids: nodes_to_connect.clone(),
-        };
+        let trace_plan = self.workspace_runtime.update(cx, |runtime, _cx| {
+            runtime.new_connection_trace_plan(trace_mode, nodes_to_connect.clone())
+        });
         if !self.workspace_runtime.update(cx, |runtime, _cx| {
             runtime.try_begin_connection_chain(trace_plan)
         }) {
@@ -2102,7 +2122,7 @@ impl WorkspaceApp {
         &mut self,
         node_id: &NodeId,
         trace_plan: Option<&ConnectionTracePlan>,
-        cx: &App,
+        cx: &mut Context<Self>,
     ) -> bool {
         let Some(node) = self.ssh_nodes.get(node_id).cloned() else {
             return false;
@@ -2158,7 +2178,7 @@ impl WorkspaceApp {
             && !self.node_is_ready_for_terminal(parent_id)
         {
             let error = format!("Parent node {} has no SSH connection", parent_id.0);
-            self.begin_connection_trace_for_node(node_id, trace_plan, Some(parent_id));
+            self.begin_connection_trace_for_node(node_id, trace_plan, Some(parent_id), cx);
             if let Some(node) = self.ssh_nodes.get_mut(node_id) {
                 node.readiness = NodeReadiness::Error;
             }
@@ -2169,10 +2189,12 @@ impl WorkspaceApp {
             ) {
                 self.emit_node_event(event);
             }
-            self.finish_connection_trace_failed(node_id, Some(error));
+            self.workspace_runtime.update(cx, |runtime, cx| {
+                runtime.finish_connection_trace_failed(node_id, Some(error), cx);
+            });
             return false;
         }
-        self.begin_connection_trace_for_node(node_id, trace_plan, parent_id.as_ref());
+        self.begin_connection_trace_for_node(node_id, trace_plan, parent_id.as_ref(), cx);
         if let Some(connection_id) = stale_connection_id.as_deref() {
             self.drop_stale_node_connection(node_id, connection_id);
         }

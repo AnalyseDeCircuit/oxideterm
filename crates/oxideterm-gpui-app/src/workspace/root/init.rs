@@ -138,7 +138,6 @@ impl WorkspaceApp {
             delivery::ActiveDeliverySender::channel_with_wake(terminal_metadata_wake.clone());
         let (terminal_project_tx, terminal_project_rx) =
             delivery::ActiveDeliverySender::channel_with_wake(terminal_metadata_wake);
-        let (connection_trace_tx, connection_trace_rx) = delivery::ActiveDeliverySender::channel();
         let (profiler_update_tx, profiler_update_rx) = tokio::sync::mpsc::unbounded_channel();
         let host_tools_messages = HostToolsMessages::from_i18n(&i18n);
         let host_tools = cx.new(|cx| {
@@ -699,10 +698,7 @@ impl WorkspaceApp {
             workspace_toast_next_id: 1,
             workspace_toasts: Vec::new(),
             plugin_progress_toasts: HashMap::new(),
-            connection_trace_tx,
-            connection_trace_rx,
             connection_trace_toasts: HashMap::new(),
-            connection_trace_state: ConnectionTraceState::default(),
             zen_hint_expires_at: None,
             terminal_font_size_hud: None,
             terminal_font_size_hud_generation: 0,
@@ -746,7 +742,6 @@ impl WorkspaceApp {
         workspace.sync_ssh_config_sync_service();
         workspace.restore_session_tree_snapshot();
         workspace.schedule_terminal_notice_delivery(cx);
-        workspace.schedule_connection_trace_delivery(cx);
         workspace.schedule_launcher_worker_delivery(cx);
         workspace.schedule_terminal_metadata_delivery(cx);
         workspace.schedule_native_update_delivery(cx);

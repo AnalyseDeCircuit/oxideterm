@@ -536,7 +536,9 @@ impl WorkspaceApp {
             runtime.cancel_queued_reconnects(&nodes_to_disconnect);
         });
         for affected_node_id in &nodes_to_disconnect {
-            self.cancel_connection_trace_for_node(affected_node_id);
+            self.workspace_runtime.update(cx, |runtime, cx| {
+                runtime.cancel_connection_trace(affected_node_id, cx);
+            });
             self.workspace_runtime.update(cx, |runtime, _cx| {
                 runtime.abort_connection_chain_for_node(affected_node_id);
             });
