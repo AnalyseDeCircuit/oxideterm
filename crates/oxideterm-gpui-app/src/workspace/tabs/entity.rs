@@ -16,6 +16,7 @@ pub(in crate::workspace) struct WorkspaceTabHostEntity {
     navigation_observed_tab: Option<TabId>,
     process_close_check_generation: u64,
     process_close_completion: Option<TabCloseProcessCompletion>,
+    close_confirm: Option<TabCloseConfirm>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -47,6 +48,7 @@ impl WorkspaceTabHostEntity {
             navigation_observed_tab: None,
             process_close_check_generation: 0,
             process_close_completion: None,
+            close_confirm: None,
         }
     }
 
@@ -189,6 +191,23 @@ impl WorkspaceTabHostEntity {
     ) -> Option<TabCloseProcessCompletion> {
         self.process_close_completion.take()
     }
+
+    pub(in crate::workspace) fn open_close_confirm(&mut self, confirm: TabCloseConfirm) {
+        self.close_confirm = Some(confirm);
+    }
+
+    pub(in crate::workspace) fn close_confirm(&self) -> Option<&TabCloseConfirm> {
+        self.close_confirm.as_ref()
+    }
+
+    pub(in crate::workspace) fn close_confirm_cloned(&self) -> Option<TabCloseConfirm> {
+        // The exit animation retains the original while the window executes the accepted action.
+        self.close_confirm.clone()
+    }
+
+    pub(in crate::workspace) fn clear_close_confirm(&mut self) {
+        self.close_confirm = None;
+    }
 }
 
 fn terminal_process_info_has_foreground_child_process(
@@ -319,5 +338,18 @@ mod tests {
         );
         assert!(completion.results.is_empty());
         assert!(!completion.has_foreground_child);
+    }
+
+    #[test]
+    fn close_confirmation_state_is_opened_and_cleared_by_tab_host() {
+        let mut tab_host = WorkspaceTabHostEntity::new();
+        let confirm = TabCloseConfirm::Other {
+            tab_ids: vec![TabId(2), TabId(3)],
+        };
+
+        tab_host.open_close_confirm(confirm.clone());
+        assert_eq!(tab_host.close_confirm(), Some(&confirm));
+        tab_host.clear_close_confirm();
+        assert!(tab_host.close_confirm().is_none());
     }
 }

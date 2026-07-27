@@ -110,14 +110,14 @@ impl WorkspaceApp {
             oxideterm_gpui_ui::motion::MotionDuration::Control,
         );
         if delay.is_zero() {
-            self.finish_simple_confirm_exit(target, generation);
+            self.finish_simple_confirm_exit(target, generation, cx);
             return;
         }
         // Each target retains only the read-only payload needed for its exit frame.
         cx.spawn(async move |weak, cx| {
             Timer::after(delay).await;
             let _ = weak.update(cx, |this, cx| {
-                if this.finish_simple_confirm_exit(target, generation) {
+                if this.finish_simple_confirm_exit(target, generation, cx) {
                     cx.notify();
                 }
             });
@@ -129,6 +129,7 @@ impl WorkspaceApp {
         &mut self,
         target: SimpleConfirmExitTarget,
         generation: u64,
+        cx: &mut App,
     ) -> bool {
         match target {
             SimpleConfirmExitTarget::AiClearAll
@@ -153,7 +154,8 @@ impl WorkspaceApp {
             SimpleConfirmExitTarget::TabClose
                 if self.tab_close_confirm_presence.finish_exit(generation) =>
             {
-                self.main_window_tabs.close_confirm = None;
+                self.tab_host
+                    .update(cx, |tab_host, _| tab_host.clear_close_confirm());
             }
             SimpleConfirmExitTarget::SettingsDataDirectory
                 if self
@@ -1183,7 +1185,7 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
-        if self.main_window_tabs.close_confirm.is_none() {
+        if self.tab_host.read(cx).close_confirm().is_none() {
             return false;
         }
         if self.tab_close_confirm_presence.phase() == oxideterm_gpui_ui::motion::ExitPhase::Exiting

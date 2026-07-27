@@ -629,24 +629,31 @@ impl WorkspaceApp {
         &self,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let Some(confirm) = self.main_window_tabs.close_confirm.as_ref() else {
+        let Some((title_key, description_key, other_tab_count)) = ({
+            let tab_host = self.tab_host.read(cx);
+            tab_host.close_confirm().map(|confirm| match confirm {
+                TabCloseConfirm::Single { .. } => (
+                    "tabbar.confirm_close_terminal_title",
+                    Some("tabbar.confirm_close_terminal_desc"),
+                    None,
+                ),
+                TabCloseConfirm::LocalChildProcess { .. }
+                | TabCloseConfirm::LocalChildProcessBatch { .. } => {
+                    ("tabbar.child_process_warning", None, None)
+                }
+                TabCloseConfirm::Other { tab_ids } => (
+                    "tabbar.confirm_close_other_title",
+                    Some("tabbar.confirm_close_other_desc"),
+                    Some(tab_ids.len()),
+                ),
+            })
+        }) else {
             return div().into_any_element();
         };
-        let (title_key, description) = match confirm {
-            TabCloseConfirm::Single { .. } => (
-                "tabbar.confirm_close_terminal_title",
-                self.i18n.t("tabbar.confirm_close_terminal_desc"),
-            ),
-            TabCloseConfirm::LocalChildProcess { .. }
-            | TabCloseConfirm::LocalChildProcessBatch { .. } => {
-                ("tabbar.child_process_warning", String::new())
-            }
-            TabCloseConfirm::Other { tab_ids } => (
-                "tabbar.confirm_close_other_title",
-                self.i18n
-                    .t("tabbar.confirm_close_other_desc")
-                    .replace("{{count}}", &tab_ids.len().to_string()),
-            ),
+        let description = match (description_key, other_tab_count) {
+            (Some(key), Some(count)) => self.i18n.t(key).replace("{{count}}", &count.to_string()),
+            (Some(key), None) => self.i18n.t(key),
+            (None, _) => String::new(),
         };
         oxideterm_gpui_ui::confirm::confirm_dialog_with_focus_motion(
             &self.tokens,

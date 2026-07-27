@@ -550,7 +550,9 @@ impl WorkspaceApp {
         if self.tabs[index].kind == TabKind::SshTerminal {
             // Tauri confirms user-initiated SSH terminal tab closes while
             // still allowing backend/session cleanup paths to close directly.
-            self.main_window_tabs.close_confirm = Some(TabCloseConfirm::Single { tab_id });
+            self.tab_host.update(cx, |tab_host, _| {
+                tab_host.open_close_confirm(TabCloseConfirm::Single { tab_id });
+            });
             self.tab_close_confirm_presence.reopen();
             self.reset_standard_confirm_focus();
             cx.notify();
@@ -611,7 +613,9 @@ impl WorkspaceApp {
             return;
         }
         if self.tab_close_ids_include_ssh_terminal(&tab_ids) {
-            self.main_window_tabs.close_confirm = Some(TabCloseConfirm::Other { tab_ids });
+            self.tab_host.update(cx, |tab_host, _| {
+                tab_host.open_close_confirm(TabCloseConfirm::Other { tab_ids });
+            });
             self.tab_close_confirm_presence.reopen();
             self.reset_standard_confirm_focus();
             cx.notify();
@@ -703,8 +707,9 @@ impl WorkspaceApp {
         match completion.request {
             LocalTerminalCloseCheck::Single { tab_id } => {
                 if completion.has_foreground_child {
-                    self.main_window_tabs.close_confirm =
-                        Some(TabCloseConfirm::LocalChildProcess { tab_id });
+                    self.tab_host.update(cx, |tab_host, _| {
+                        tab_host.open_close_confirm(TabCloseConfirm::LocalChildProcess { tab_id });
+                    });
                     self.tab_close_confirm_presence.reopen();
                     self.reset_standard_confirm_focus();
                     cx.notify();
@@ -714,8 +719,11 @@ impl WorkspaceApp {
             }
             LocalTerminalCloseCheck::Batch { tab_ids } => {
                 if completion.has_foreground_child {
-                    self.main_window_tabs.close_confirm =
-                        Some(TabCloseConfirm::LocalChildProcessBatch { tab_ids });
+                    self.tab_host.update(cx, |tab_host, _| {
+                        tab_host.open_close_confirm(TabCloseConfirm::LocalChildProcessBatch {
+                            tab_ids,
+                        });
+                    });
                     self.tab_close_confirm_presence.reopen();
                     self.reset_standard_confirm_focus();
                     cx.notify();
@@ -739,7 +747,7 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(confirm) = self.main_window_tabs.close_confirm.clone() else {
+        let Some(confirm) = self.tab_host.read(cx).close_confirm_cloned() else {
             return;
         };
         if !self.begin_tab_close_confirm_exit(cx) {

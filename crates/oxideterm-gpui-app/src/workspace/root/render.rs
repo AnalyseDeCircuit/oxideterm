@@ -288,7 +288,7 @@ impl Render for WorkspaceApp {
             .capture_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
                 // A modal close confirmation owns Enter/Escape even when the
                 // terminal or an IME target retained focus behind the dialog.
-                if this.main_window_tabs.close_confirm.is_some()
+                if this.tab_host.read(cx).close_confirm().is_some()
                     && this.handle_tab_close_confirm_key(event, window, cx)
                 {
                     window.prevent_default();
@@ -1013,7 +1013,7 @@ impl Render for WorkspaceApp {
             .when(self.node_disconnect_confirm.is_some(), |root| {
                 root.child(self.render_node_disconnect_confirm_dialog(cx))
             })
-            .when(self.main_window_tabs.close_confirm.is_some(), |root| {
+            .when(self.tab_host.read(cx).close_confirm().is_some(), |root| {
                 root.child(self.render_tab_close_confirm_dialog(cx))
             })
             .when_some(
