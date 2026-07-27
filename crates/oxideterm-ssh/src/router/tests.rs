@@ -179,6 +179,46 @@ mod tests {
     }
 
     #[test]
+    fn minimal_subtree_roots_drop_descendant_candidates_without_config_snapshots() {
+        let store = NodeRuntimeStore::default();
+        let root = NodeId::new("root");
+        let child = NodeId::new("child");
+        let sibling = NodeId::new("sibling");
+        store.upsert_node(
+            root.clone(),
+            SshConfig {
+                host: "root.example.test".to_string(),
+                auth: crate::AuthMethod::Agent,
+                ..SshConfig::default()
+            },
+        );
+        store
+            .upsert_child_node(
+                root.clone(),
+                child.clone(),
+                SshConfig {
+                    host: "child.example.test".to_string(),
+                    auth: crate::AuthMethod::Agent,
+                    ..SshConfig::default()
+                },
+            )
+            .unwrap();
+        store.upsert_node(
+            sibling.clone(),
+            SshConfig {
+                host: "sibling.example.test".to_string(),
+                auth: crate::AuthMethod::Agent,
+                ..SshConfig::default()
+            },
+        );
+
+        assert_eq!(
+            store.minimal_subtree_roots([child, sibling.clone(), root.clone()]),
+            vec![root, sibling]
+        );
+    }
+
+    #[test]
     fn removing_primary_terminal_elects_another_endpoint() {
         let router = NodeRouter::new(SshConnectionRegistry::default());
         let node = NodeId::new("node-a");

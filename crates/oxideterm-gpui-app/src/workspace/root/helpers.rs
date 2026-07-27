@@ -977,6 +977,9 @@ impl WorkspaceApp {
         if affected_nodes.is_empty() {
             affected_nodes.push(node_id.clone());
         }
+        self.workspace_runtime.update(cx, |runtime, _cx| {
+            runtime.cancel_queued_reconnects(&affected_nodes);
+        });
         let mut cancelled = 0_u32;
         for affected_node_id in affected_nodes {
             if self
@@ -987,7 +990,6 @@ impl WorkspaceApp {
                 cancelled = cancelled.saturating_add(1);
             }
             self.cancel_forward_restore_token(&affected_node_id);
-            self.pending_reconnect_node_ids.remove(&affected_node_id);
             self.reconnect_requeue_counts.remove(&affected_node_id);
             self.pending_reconnect_transfer_resumes
                 .remove(&affected_node_id);

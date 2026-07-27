@@ -532,12 +532,14 @@ impl WorkspaceApp {
         if nodes_to_disconnect.is_empty() {
             nodes_to_disconnect.push(node_id.clone());
         }
+        self.workspace_runtime.update(cx, |runtime, _cx| {
+            runtime.cancel_queued_reconnects(&nodes_to_disconnect);
+        });
         for affected_node_id in &nodes_to_disconnect {
             self.cancel_connection_trace_for_node(affected_node_id);
             self.abort_connection_chain_for_node(affected_node_id);
             self.reconnect_orchestrator.cancel(&affected_node_id.0);
             self.cancel_forward_restore_token(affected_node_id);
-            self.pending_reconnect_node_ids.remove(affected_node_id);
             self.reconnect_requeue_counts.remove(affected_node_id);
             self.pending_reconnect_cascade_nodes
                 .retain(|pending_node_id| pending_node_id != affected_node_id);

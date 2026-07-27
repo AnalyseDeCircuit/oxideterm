@@ -35,9 +35,6 @@ pub(in crate::workspace) enum ReconnectWorkerResult {
         node_id: NodeId,
     },
     ContinueReconnectCascade,
-    FlushPendingReconnect {
-        generation: u64,
-    },
     StartReconnectPipeline {
         node_id: NodeId,
         expected_connection_id: Option<String>,

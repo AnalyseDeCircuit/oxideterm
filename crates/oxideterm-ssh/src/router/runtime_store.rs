@@ -420,6 +420,49 @@ impl NodeRuntimeStore {
         self.root_ids.read().clone()
     }
 
+    /// Selects non-overlapping existing roots without cloning node configs.
+    pub fn minimal_subtree_roots(
+        &self,
+        candidate_node_ids: impl IntoIterator<Item = NodeId>,
+    ) -> Vec<NodeId> {
+        let mut candidates = candidate_node_ids
+            .into_iter()
+            .filter(|node_id| self.nodes.contains_key(node_id))
+            .collect::<Vec<_>>();
+        candidates.sort_by_key(|node_id| {
+            self.nodes
+                .get(node_id)
+                .map(|node| (node.depth, node_id.0.clone()))
+                .unwrap_or((u32::MAX, node_id.0.clone()))
+        });
+
+        let mut roots = Vec::new();
+        for node_id in candidates {
+            if roots
+                .iter()
+                .any(|root_id| self.node_is_descendant_or_same(&node_id, root_id))
+            {
+                continue;
+            }
+            roots.push(node_id);
+        }
+        roots
+    }
+
+    fn node_is_descendant_or_same(&self, node_id: &NodeId, ancestor_id: &NodeId) -> bool {
+        let mut current_id = Some(node_id.clone());
+        while let Some(candidate_id) = current_id {
+            if &candidate_id == ancestor_id {
+                return true;
+            }
+            current_id = self
+                .nodes
+                .get(&candidate_id)
+                .and_then(|node| node.parent_id.clone());
+        }
+        false
+    }
+
     pub fn metadata_snapshots(&self) -> Vec<NodeMetadataSnapshot> {
         let mut nodes = self
             .nodes

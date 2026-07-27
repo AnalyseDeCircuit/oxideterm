@@ -5,11 +5,13 @@ use super::*;
 use oxideterm_ssh::ReconnectTiming;
 
 const ACTIVE_PROBE_START_DELAY: Duration = Duration::from_millis(530);
+const RECONNECT_DEBOUNCE_DELAY: Duration = Duration::from_millis(500);
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(in crate::workspace) enum WorkspaceRuntimeEvent {
     WorkerResultsReady,
     NodeEventsReady,
+    ReconnectRootsReady,
     ActiveConnectionsChanged,
 }
 
@@ -27,6 +29,11 @@ pub(in crate::workspace) struct WorkspaceRuntimeEntity {
     reconnect_results: VecDeque<ReconnectWorkerResult>,
     node_events: VecDeque<NodeStateEvent>,
     node_event_generations: HashMap<NodeId, u64>,
+    node_runtime_store: NodeRuntimeStore,
+    reconnect_enabled: bool,
+    pending_reconnect_node_ids: HashSet<NodeId>,
+    reconnect_debounce_generation: u64,
+    ready_reconnect_roots: VecDeque<NodeId>,
     ssh_registry: SshConnectionRegistry,
     task_runtime: Arc<tokio::runtime::Runtime>,
     reconnect_timing: ReconnectTiming,
@@ -37,8 +44,10 @@ pub(in crate::workspace) struct WorkspaceRuntimeEntity {
 impl WorkspaceRuntimeEntity {
     pub(in crate::workspace) fn new(
         ssh_registry: SshConnectionRegistry,
+        node_runtime_store: NodeRuntimeStore,
         node_event_emitter: NodeEventEmitter,
         task_runtime: Arc<tokio::runtime::Runtime>,
+        reconnect_enabled: bool,
         reconnect_timing: ReconnectTiming,
         cx: &mut Context<Self>,
     ) -> Self {
@@ -68,6 +77,11 @@ impl WorkspaceRuntimeEntity {
             reconnect_results: VecDeque::new(),
             node_events: VecDeque::new(),
             node_event_generations: HashMap::new(),
+            node_runtime_store,
+            reconnect_enabled,
+            pending_reconnect_node_ids: HashSet::new(),
+            reconnect_debounce_generation: 0,
+            ready_reconnect_roots: VecDeque::new(),
             ssh_registry,
             task_runtime,
             reconnect_timing,
@@ -79,11 +93,18 @@ impl WorkspaceRuntimeEntity {
         entity
     }
 
-    pub(in crate::workspace) fn configure_reconnect_timing(
+    pub(in crate::workspace) fn configure_reconnect(
         &mut self,
+        reconnect_enabled: bool,
         reconnect_timing: ReconnectTiming,
         cx: &mut Context<Self>,
     ) {
+        self.reconnect_enabled = reconnect_enabled;
+        if !reconnect_enabled {
+            self.pending_reconnect_node_ids.clear();
+            // Invalidate timers scheduled under the previous settings.
+            self.reconnect_debounce_generation = self.reconnect_debounce_generation.wrapping_add(1);
+        }
         self.reconnect_timing = reconnect_timing;
         self.schedule_active_probe_after(ACTIVE_PROBE_START_DELAY, cx);
     }
@@ -116,6 +137,37 @@ impl WorkspaceRuntimeEntity {
 
     pub(in crate::workspace) fn take_node_events(&mut self) -> VecDeque<NodeStateEvent> {
         std::mem::take(&mut self.node_events)
+    }
+
+    pub(in crate::workspace) fn queue_reconnect_root(
+        &mut self,
+        node_id: NodeId,
+        cx: &mut Context<Self>,
+    ) {
+        if !self.reconnect_enabled {
+            return;
+        }
+        self.pending_reconnect_node_ids.insert(node_id);
+        self.reconnect_debounce_generation = self.reconnect_debounce_generation.wrapping_add(1);
+        let generation = self.reconnect_debounce_generation;
+        cx.spawn(async move |entity, cx| {
+            Timer::after(RECONNECT_DEBOUNCE_DELAY).await;
+            let _ = entity.update(cx, |entity, cx| {
+                entity.flush_reconnect_roots(generation, cx);
+            });
+        })
+        .detach();
+    }
+
+    pub(in crate::workspace) fn take_reconnect_roots(&mut self) -> VecDeque<NodeId> {
+        std::mem::take(&mut self.ready_reconnect_roots)
+    }
+
+    pub(in crate::workspace) fn cancel_queued_reconnects(&mut self, node_ids: &[NodeId]) {
+        self.pending_reconnect_node_ids
+            .retain(|node_id| !node_ids.contains(node_id));
+        self.ready_reconnect_roots
+            .retain(|node_id| !node_ids.contains(node_id));
     }
 
     fn schedule_worker_delivery(&self, cx: &mut Context<Self>) {
@@ -243,6 +295,23 @@ impl WorkspaceRuntimeEntity {
         self.node_event_generations.insert(node_id, generation);
         true
     }
+
+    fn flush_reconnect_roots(&mut self, generation: u64, cx: &mut Context<Self>) {
+        if generation != self.reconnect_debounce_generation {
+            return;
+        }
+        if !self.reconnect_enabled {
+            self.pending_reconnect_node_ids.clear();
+            return;
+        }
+        let pending = self.pending_reconnect_node_ids.drain().collect::<Vec<_>>();
+        let roots = self.node_runtime_store.minimal_subtree_roots(pending);
+        if roots.is_empty() {
+            return;
+        }
+        self.ready_reconnect_roots.extend(roots);
+        cx.emit(WorkspaceRuntimeEvent::ReconnectRootsReady);
+    }
 }
 
 fn drain_node_event_mailbox(receiver: &NodeEventReceiver) -> (Vec<NodeStateEvent>, bool) {
@@ -321,8 +390,10 @@ mod tests {
         cx.new(|cx| {
             WorkspaceRuntimeEntity::new(
                 ssh_registry,
+                NodeRuntimeStore::default(),
                 NodeEventEmitter::default(),
                 task_runtime,
+                true,
                 ReconnectTiming::default(),
                 cx,
             )
@@ -415,7 +486,7 @@ mod tests {
 
             let mut reconnect_timing = ReconnectTiming::default();
             reconnect_timing.ssh_keepalive_interval = Duration::from_secs(37);
-            entity.configure_reconnect_timing(reconnect_timing, cx);
+            entity.configure_reconnect(true, reconnect_timing, cx);
             assert_eq!(
                 entity.reconnect_timing.ssh_keepalive_interval,
                 Duration::from_secs(37)
@@ -434,8 +505,10 @@ mod tests {
         let entity = cx.new(|cx| {
             WorkspaceRuntimeEntity::new(
                 entity_registry,
+                NodeRuntimeStore::default(),
                 NodeEventEmitter::default(),
                 task_runtime,
+                true,
                 ReconnectTiming::default(),
                 cx,
             )
@@ -461,8 +534,10 @@ mod tests {
         let entity = cx.new(|cx| {
             WorkspaceRuntimeEntity::new(
                 ssh_registry,
+                NodeRuntimeStore::default(),
                 entity_emitter,
                 task_runtime,
+                true,
                 ReconnectTiming::default(),
                 cx,
             )
@@ -513,6 +588,55 @@ mod tests {
                 entity.node_event_generations.get(&NodeId::new("node-a")),
                 Some(&3)
             );
+        });
+    }
+
+    #[gpui::test]
+    fn reconnect_debounce_selects_minimal_runtime_subtrees(cx: &mut TestAppContext) {
+        let ssh_registry = SshConnectionRegistry::new(ConnectionPoolConfig::default());
+        let node_runtime_store = NodeRuntimeStore::default();
+        let root = NodeId::new("root");
+        let child = NodeId::new("child");
+        node_runtime_store.upsert_node(root.clone(), SshConfig::default());
+        node_runtime_store
+            .upsert_child_node(root.clone(), child.clone(), SshConfig::default())
+            .unwrap();
+        let task_runtime = test_task_runtime();
+        let entity = cx.new(|cx| {
+            WorkspaceRuntimeEntity::new(
+                ssh_registry,
+                node_runtime_store,
+                NodeEventEmitter::default(),
+                task_runtime,
+                true,
+                ReconnectTiming::default(),
+                cx,
+            )
+        });
+
+        entity.update(cx, |entity, cx| {
+            entity.pending_reconnect_node_ids.insert(child);
+            entity.pending_reconnect_node_ids.insert(root.clone());
+            entity.reconnect_debounce_generation = 7;
+            entity.flush_reconnect_roots(6, cx);
+            assert!(entity.ready_reconnect_roots.is_empty());
+            entity.flush_reconnect_roots(7, cx);
+            assert_eq!(entity.take_reconnect_roots(), VecDeque::from([root]));
+        });
+    }
+
+    #[gpui::test]
+    fn disabling_reconnect_clears_pending_debounce_state(cx: &mut TestAppContext) {
+        let entity = test_runtime_entity(cx);
+        entity.update(cx, |entity, cx| {
+            entity.queue_reconnect_root(NodeId::new("node-a"), cx);
+            let scheduled_generation = entity.reconnect_debounce_generation;
+            assert!(!entity.pending_reconnect_node_ids.is_empty());
+
+            entity.configure_reconnect(false, ReconnectTiming::default(), cx);
+
+            assert!(entity.pending_reconnect_node_ids.is_empty());
+            assert!(entity.reconnect_debounce_generation > scheduled_generation);
         });
     }
 }

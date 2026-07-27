@@ -56,6 +56,13 @@ impl NodeRouter {
         self.runtime.root_node_ids()
     }
 
+    pub fn minimal_subtree_roots(
+        &self,
+        candidate_node_ids: impl IntoIterator<Item = NodeId>,
+    ) -> Vec<NodeId> {
+        self.runtime.minimal_subtree_roots(candidate_node_ids)
+    }
+
     pub fn apply_tree_snapshot(&self, snapshot: NodeTreeSnapshot) -> Result<(), RouteError> {
         self.runtime.apply_snapshot(snapshot)
     }

@@ -11,7 +11,6 @@ use super::nodes_reconnect_helpers::{
 };
 use super::*;
 
-const RECONNECT_DEBOUNCE_MS: u64 = 500;
 const RECONNECT_MAX_REQUEUE: u32 = 120;
 const RECONNECT_AUTO_CLEANUP_DELAY_MS: u64 = 30_000;
 
@@ -161,6 +160,16 @@ impl WorkspaceApp {
                 })
                 .detach();
             }
+            runtime_entity::WorkspaceRuntimeEvent::ReconnectRootsReady => {
+                cx.spawn(async move |weak, cx| {
+                    let _ = cx.update_window(window_handle, |_, _window, cx| {
+                        weak.update(cx, |workspace, cx| {
+                            workspace.start_workspace_runtime_reconnect_roots(cx);
+                        })
+                    });
+                })
+                .detach();
+            }
             runtime_entity::WorkspaceRuntimeEvent::ActiveConnectionsChanged => {
                 self.refresh_ssh_terminal_input_locks(cx);
                 cx.notify();
@@ -190,6 +199,15 @@ impl WorkspaceApp {
         if changed {
             self.refresh_ssh_terminal_input_locks(cx);
             cx.notify();
+        }
+    }
+
+    fn start_workspace_runtime_reconnect_roots(&mut self, cx: &mut Context<Self>) {
+        let roots = self
+            .workspace_runtime
+            .update(cx, |runtime, _cx| runtime.take_reconnect_roots());
+        for node_id in roots {
+            self.start_grace_period_reconnect(&node_id, cx);
         }
     }
 
@@ -275,6 +293,9 @@ impl WorkspaceApp {
         if nodes_to_remove.is_empty() {
             nodes_to_remove.push(cleanup_root.clone());
         }
+        self.workspace_runtime.update(cx, |runtime, _cx| {
+            runtime.cancel_queued_reconnects(&nodes_to_remove);
+        });
         for node_id in &nodes_to_remove {
             // A failed node can still own stale tabs, reconnect jobs, forwards,
             // or transfer records. Clear those owners before dropping the tree.
@@ -282,7 +303,6 @@ impl WorkspaceApp {
             self.abort_connection_chain_for_node(node_id);
             self.reconnect_orchestrator.cancel(&node_id.0);
             self.cancel_forward_restore_token(node_id);
-            self.pending_reconnect_node_ids.remove(node_id);
             self.reconnect_requeue_counts.remove(node_id);
             self.pending_reconnect_cascade_nodes
                 .retain(|pending_node_id| pending_node_id != node_id);
@@ -566,10 +586,6 @@ impl WorkspaceApp {
                     if self.start_next_reconnect_cascade_node(cx) {
                         changed = true;
                     }
-                }
-                ReconnectWorkerResult::FlushPendingReconnect { generation } => {
-                    self.flush_pending_reconnects(generation, cx);
-                    changed = true;
                 }
                 ReconnectWorkerResult::StartReconnectPipeline {
                     node_id,
@@ -1439,54 +1455,9 @@ impl WorkspaceApp {
         {
             return;
         }
-        self.pending_reconnect_node_ids.insert(node_id.clone());
-        self.reconnect_debounce_generation = self.reconnect_debounce_generation.saturating_add(1);
-        let generation = self.reconnect_debounce_generation;
-        self.reconnect_debounce_scheduled = true;
-        let tx = self.reconnect_worker_sender(cx);
-        self.forwarding_runtime.spawn(async move {
-            tokio::time::sleep(Duration::from_millis(RECONNECT_DEBOUNCE_MS)).await;
-            let _ = tx.send(ReconnectWorkerResult::FlushPendingReconnect { generation });
+        self.workspace_runtime.update(cx, |runtime, cx| {
+            runtime.queue_reconnect_root(node_id.clone(), cx);
         });
-        cx.notify();
-    }
-
-    fn flush_pending_reconnects(&mut self, generation: u64, cx: &mut Context<Self>) {
-        if generation != self.reconnect_debounce_generation {
-            return;
-        }
-        self.reconnect_debounce_scheduled = false;
-        if !self.settings_store.settings().reconnect.enabled {
-            self.pending_reconnect_node_ids.clear();
-            return;
-        }
-
-        let pending = self.pending_reconnect_node_ids.drain().collect::<Vec<_>>();
-        let mut roots = pending
-            .into_iter()
-            .filter(|node_id| self.ssh_nodes.contains_key(node_id))
-            .collect::<Vec<_>>();
-        roots.sort_by_key(|node_id| {
-            self.node_runtime_store
-                .snapshot(node_id)
-                .map(|snapshot| (snapshot.depth, node_id.0.clone()))
-                .unwrap_or((u32::MAX, node_id.0.clone()))
-        });
-
-        let mut selected_roots: Vec<NodeId> = Vec::new();
-        for node_id in roots {
-            if selected_roots
-                .iter()
-                .any(|root_id| self.node_is_descendant_of(&node_id, root_id))
-            {
-                continue;
-            }
-            selected_roots.push(node_id);
-        }
-
-        for node_id in selected_roots {
-            self.start_grace_period_reconnect(&node_id, cx);
-        }
     }
 
     fn start_grace_period_reconnect(&mut self, node_id: &NodeId, cx: &mut Context<Self>) {
@@ -1977,26 +1948,6 @@ impl WorkspaceApp {
                         | ConnectionState::Error(_)
                 )
             })
-    }
-
-    fn node_is_descendant_of(&self, node_id: &NodeId, ancestor_id: &NodeId) -> bool {
-        if node_id == ancestor_id {
-            return true;
-        }
-        let mut cursor = self
-            .node_runtime_store
-            .snapshot(node_id)
-            .and_then(|snapshot| snapshot.parent_id);
-        while let Some(parent_id) = cursor {
-            if &parent_id == ancestor_id {
-                return true;
-            }
-            cursor = self
-                .node_runtime_store
-                .snapshot(&parent_id)
-                .and_then(|snapshot| snapshot.parent_id);
-        }
-        false
     }
 
     fn has_active_reconnect_job_for_ancestor(&self, node_id: &NodeId) -> bool {

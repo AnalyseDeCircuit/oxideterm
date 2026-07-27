@@ -91,8 +91,10 @@ impl WorkspaceApp {
         let workspace_runtime = cx.new(|cx| {
             runtime_entity::WorkspaceRuntimeEntity::new(
                 ssh_registry.clone(),
+                node_runtime_store.clone(),
                 node_router.emitter().clone(),
                 forwarding_runtime.clone(),
+                settings.reconnect.enabled,
                 reconnect_timing_from_settings(&settings),
                 cx,
             )
@@ -530,9 +532,6 @@ impl WorkspaceApp {
                 reconnect_timing_from_settings(&settings),
                 reconnect_max_attempts_from_settings(&settings),
             ),
-            pending_reconnect_node_ids: HashSet::new(),
-            reconnect_debounce_scheduled: false,
-            reconnect_debounce_generation: 0,
             reconnect_pipeline_active_node: None,
             reconnect_requeue_counts: HashMap::new(),
             active_connection_chain: None,
