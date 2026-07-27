@@ -1462,6 +1462,9 @@ impl WorkspaceApp {
             plugin_entity::PluginWorkspaceEvent::RuntimeRequestsReady => {
                 self.schedule_native_plugin_runtime_request_apply(window_handle, cx);
             }
+            plugin_entity::PluginWorkspaceEvent::RuntimeSubscriptionSampleDue => {
+                self.sample_native_plugin_subscriptions(cx);
+            }
         }
     }
 

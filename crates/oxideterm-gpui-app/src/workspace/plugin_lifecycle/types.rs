@@ -1,10 +1,7 @@
 // Copyright (C) 2026 AnalyseDeCircuit
 // SPDX-License-Identifier: GPL-3.0-only
 
-use std::{
-    sync::{Arc, mpsc},
-    time::Instant,
-};
+use std::sync::{Arc, mpsc};
 
 use oxideterm_connections::{
     SavedConnectionsConflictStrategy, SavedConnectionsSyncSnapshot,
@@ -20,25 +17,6 @@ use crate::workspace::{plugin_host, plugin_runtime};
 pub(in crate::workspace) struct NativePluginRuntimeState {
     pub(in crate::workspace) registry: plugin_host::NativePluginRegistry,
     pub(in crate::workspace) host: Arc<tokio::sync::Mutex<plugin_runtime::NativePluginRuntimeHost>>,
-    pub(in crate::workspace) services_started: bool,
-    pub(in crate::workspace) layout_snapshot: Value,
-    pub(in crate::workspace) layout_polling: bool,
-    pub(in crate::workspace) session_tree_snapshot: Value,
-    pub(in crate::workspace) session_polling: bool,
-    pub(in crate::workspace) saved_forwards_snapshot: Value,
-    pub(in crate::workspace) saved_forwards_polling: bool,
-    pub(in crate::workspace) transfer_snapshot: Value,
-    pub(in crate::workspace) transfer_polling: bool,
-    pub(in crate::workspace) transfer_progress_last_emitted: Option<Instant>,
-    pub(in crate::workspace) profiler_snapshot: Value,
-    pub(in crate::workspace) profiler_polling: bool,
-    pub(in crate::workspace) profiler_last_emitted: Option<Instant>,
-    pub(in crate::workspace) ide_snapshot: Value,
-    pub(in crate::workspace) ide_polling: bool,
-    pub(in crate::workspace) ai_snapshot: Value,
-    pub(in crate::workspace) ai_polling: bool,
-    pub(in crate::workspace) event_log_last_id: u64,
-    pub(in crate::workspace) event_log_polling: bool,
 }
 
 impl NativePluginRuntimeState {
@@ -48,25 +26,6 @@ impl NativePluginRuntimeState {
             host: Arc::new(tokio::sync::Mutex::new(
                 plugin_runtime::NativePluginRuntimeHost::default(),
             )),
-            services_started: false,
-            layout_snapshot: Value::Null,
-            layout_polling: false,
-            session_tree_snapshot: Value::Null,
-            session_polling: false,
-            saved_forwards_snapshot: Value::Null,
-            saved_forwards_polling: false,
-            transfer_snapshot: Value::Null,
-            transfer_polling: false,
-            transfer_progress_last_emitted: None,
-            profiler_snapshot: Value::Null,
-            profiler_polling: false,
-            profiler_last_emitted: None,
-            ide_snapshot: Value::Null,
-            ide_polling: false,
-            ai_snapshot: Value::Null,
-            ai_polling: false,
-            event_log_last_id: 0,
-            event_log_polling: false,
         }
     }
 }

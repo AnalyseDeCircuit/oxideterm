@@ -2,7 +2,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use super::*;
-use std::time::Instant;
+use gpui::Task;
+use std::time::{Duration, Instant};
 use zeroize::Zeroizing;
 
 use super::plugin_lifecycle::{
@@ -15,6 +16,19 @@ use super::plugin_lifecycle::{NativePluginSyncAction, NativePluginTerminalAction
 pub(in crate::workspace) enum PluginWorkspaceEvent {
     ManagerDeliveryReady,
     RuntimeRequestsReady,
+    RuntimeSubscriptionSampleDue,
+}
+
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub(in crate::workspace) enum PluginSubscriptionSample {
+    Layout,
+    Sessions,
+    SavedForwards,
+    Transfers,
+    Profiler,
+    Ide,
+    Ai,
+    EventLog,
 }
 
 /// Producer endpoints shared by one native plugin host resolver.
@@ -42,6 +56,15 @@ pub(in crate::workspace) struct PluginWorkspaceEntity {
     sync_tx: delivery::ActiveDeliverySender<NativePluginSyncRequest>,
     sync_rx: std::sync::mpsc::Receiver<NativePluginSyncRequest>,
     product_ui_effects: VecDeque<NativePluginProductUiEffect>,
+    runtime_services_started: bool,
+    subscription_samples: Vec<PluginSubscriptionSample>,
+    subscription_snapshots: HashMap<PluginSubscriptionSample, serde_json::Value>,
+    subscription_sampler_generation: u64,
+    subscription_sampler_running: bool,
+    subscription_sampler_task: Option<Task<()>>,
+    transfer_progress_last_emitted: Option<Instant>,
+    profiler_last_emitted: Option<Instant>,
+    event_log_last_id: u64,
 }
 
 impl PluginWorkspaceEntity {
@@ -73,6 +96,15 @@ impl PluginWorkspaceEntity {
             sync_tx,
             sync_rx,
             product_ui_effects: VecDeque::new(),
+            runtime_services_started: false,
+            subscription_samples: Vec::new(),
+            subscription_snapshots: HashMap::new(),
+            subscription_sampler_generation: 0,
+            subscription_sampler_running: false,
+            subscription_sampler_task: None,
+            transfer_progress_last_emitted: None,
+            profiler_last_emitted: None,
+            event_log_last_id: 0,
         };
         entity.schedule_manager_delivery(cx);
         entity.schedule_runtime_request_delivery(cx);
@@ -266,6 +298,111 @@ impl PluginWorkspaceEntity {
 
     pub(in crate::workspace) fn mark_runtime_requests_ready(&self) {
         self.runtime_request_wake.mark();
+    }
+
+    pub(in crate::workspace) fn start_runtime_services(&mut self) -> bool {
+        if self.runtime_services_started {
+            return false;
+        }
+        self.runtime_services_started = true;
+        true
+    }
+
+    pub(in crate::workspace) fn configure_subscription_samples(
+        &mut self,
+        samples: Vec<(PluginSubscriptionSample, serde_json::Value)>,
+        event_log_last_id: Option<u64>,
+        cx: &mut Context<Self>,
+    ) {
+        let sample_kinds = samples.iter().map(|(kind, _)| *kind).collect::<Vec<_>>();
+        self.subscription_samples = sample_kinds;
+        self.subscription_snapshots = samples.into_iter().collect();
+        if let Some(last_id) = event_log_last_id {
+            self.event_log_last_id = last_id;
+        }
+
+        if self.subscription_samples.is_empty() {
+            self.subscription_sampler_running = false;
+            self.subscription_sampler_generation =
+                self.subscription_sampler_generation.wrapping_add(1);
+            self.subscription_sampler_task.take();
+            return;
+        }
+        if self.subscription_sampler_running {
+            return;
+        }
+
+        self.subscription_sampler_running = true;
+        self.subscription_sampler_generation = self.subscription_sampler_generation.wrapping_add(1);
+        let generation = self.subscription_sampler_generation;
+        self.subscription_sampler_task = Some(cx.spawn(async move |entity, cx| {
+            loop {
+                Timer::after(
+                    super::plugin_lifecycle::constants::NATIVE_PLUGIN_DELIVERY_POLL_INTERVAL,
+                )
+                .await;
+                let keep_running = entity
+                    .update(cx, |entity, cx| {
+                        if !entity.subscription_sampler_running
+                            || entity.subscription_sampler_generation != generation
+                        {
+                            return false;
+                        }
+                        cx.emit(PluginWorkspaceEvent::RuntimeSubscriptionSampleDue);
+                        true
+                    })
+                    .unwrap_or(false);
+                if !keep_running {
+                    break;
+                }
+            }
+        }));
+    }
+
+    pub(in crate::workspace) fn subscription_samples(&self) -> Vec<PluginSubscriptionSample> {
+        self.subscription_samples.clone()
+    }
+
+    pub(in crate::workspace) fn update_subscription_snapshot(
+        &mut self,
+        kind: PluginSubscriptionSample,
+        next: serde_json::Value,
+    ) -> (Option<serde_json::Value>, serde_json::Value) {
+        let Some(previous) = self.subscription_snapshots.get_mut(&kind) else {
+            return (None, next);
+        };
+        if *previous == next {
+            return (None, next);
+        }
+        let retained = next.clone();
+        let previous = std::mem::replace(previous, retained);
+        (Some(previous), next)
+    }
+
+    pub(in crate::workspace) fn transfer_progress_due(&mut self, interval: Duration) -> bool {
+        let due = self
+            .transfer_progress_last_emitted
+            .map(|last_emitted| last_emitted.elapsed() >= interval)
+            .unwrap_or(true);
+        if due {
+            self.transfer_progress_last_emitted = Some(Instant::now());
+        }
+        due
+    }
+
+    pub(in crate::workspace) fn profiler_metrics_due(&mut self, interval: Duration) -> bool {
+        let due = self
+            .profiler_last_emitted
+            .map(|last_emitted| last_emitted.elapsed() >= interval)
+            .unwrap_or(true);
+        if due {
+            self.profiler_last_emitted = Some(Instant::now());
+        }
+        due
+    }
+
+    pub(in crate::workspace) fn advance_event_log_last_id(&mut self, next_last_id: u64) -> u64 {
+        std::mem::replace(&mut self.event_log_last_id, next_last_id)
     }
 
     fn schedule_manager_delivery(&self, cx: &mut Context<Self>) {
@@ -494,5 +631,56 @@ mod tests {
         // Releasing the Entity ends UI delivery without cancelling backend work.
         assert!(manager_wake.is_stopped());
         assert!(runtime_request_wake.is_stopped());
+    }
+
+    #[gpui::test]
+    fn subscription_sampling_state_and_lifecycle_are_entity_owned(cx: &mut TestAppContext) {
+        let runtime = Arc::new(
+            tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .expect("plugin entity test runtime"),
+        );
+        let entity = cx.new(|cx| PluginWorkspaceEntity::new(runtime, cx));
+        let initial_layout = serde_json::json!({"tabCount": 1});
+        entity.update(cx, |entity, cx| {
+            assert!(entity.start_runtime_services());
+            assert!(!entity.start_runtime_services());
+            entity.configure_subscription_samples(
+                vec![(PluginSubscriptionSample::Layout, initial_layout.clone())],
+                Some(7),
+                cx,
+            );
+            assert!(entity.subscription_sampler_running);
+            assert_eq!(
+                entity.subscription_samples(),
+                vec![PluginSubscriptionSample::Layout]
+            );
+
+            let (previous, unchanged) = entity.update_subscription_snapshot(
+                PluginSubscriptionSample::Layout,
+                initial_layout.clone(),
+            );
+            assert!(previous.is_none());
+            assert_eq!(unchanged, initial_layout);
+
+            let next_layout = serde_json::json!({"tabCount": 2});
+            let (previous, current) = entity.update_subscription_snapshot(
+                PluginSubscriptionSample::Layout,
+                next_layout.clone(),
+            );
+            assert_eq!(previous, Some(serde_json::json!({"tabCount": 1})));
+            assert_eq!(current, next_layout);
+
+            assert!(entity.transfer_progress_due(Duration::from_secs(1)));
+            assert!(!entity.transfer_progress_due(Duration::from_secs(1)));
+            assert!(entity.profiler_metrics_due(Duration::from_secs(1)));
+            assert!(!entity.profiler_metrics_due(Duration::from_secs(1)));
+            assert_eq!(entity.advance_event_log_last_id(9), 7);
+
+            entity.configure_subscription_samples(Vec::new(), None, cx);
+            assert!(!entity.subscription_sampler_running);
+            assert!(entity.subscription_samples().is_empty());
+        });
     }
 }

@@ -21,11 +21,11 @@ use zeroize::Zeroizing;
 
 use super::{
     TabKind, TelnetSessionConfig, TerminalInputInterceptor, TerminalOutputProcessor,
-    TerminalSessionId, WorkspaceApp, WorkspaceToast, delivery, plugin_host, plugin_runtime,
-    plugin_runtime::PluginResponseResult,
+    TerminalSessionId, WorkspaceApp, WorkspaceToast, delivery, plugin_entity, plugin_host,
+    plugin_runtime, plugin_runtime::PluginResponseResult,
 };
 
-mod constants;
+pub(in crate::workspace) mod constants;
 mod forwarding;
 mod host_api_snapshot;
 mod ide;
@@ -73,14 +73,13 @@ use oxideterm_plugin_host_api::{
 impl WorkspaceApp {
     pub(super) fn start_native_plugin_runtime_services_if_needed(
         &mut self,
-        _cx: &mut Context<Self>,
+        cx: &mut Context<Self>,
     ) {
-        if self.native_plugin_runtime.services_started {
-            return;
-        }
-        self.native_plugin_runtime.services_started = true;
-        // Request queues share the workspace plugin wake installed at startup.
-        // Starting services enables producers without starting polling timers.
+        let _started = self
+            .plugin_entity
+            .update(cx, |plugins, _cx| plugins.start_runtime_services());
+        // The Entity owns request and subscription lifecycles; this adapter
+        // only ensures producers are enabled once for the workspace.
     }
 
     fn promote_native_plugin_confirm(&mut self, cx: &mut Context<Self>) {
@@ -695,27 +694,6 @@ impl WorkspaceApp {
         )
     }
 
-    pub(super) fn start_native_plugin_layout_polling(&mut self, cx: &mut Context<Self>) {
-        if self.native_plugin_runtime.layout_polling {
-            return;
-        }
-        self.native_plugin_runtime.layout_polling = true;
-        cx.spawn(async move |weak, cx| {
-            loop {
-                Timer::after(NATIVE_PLUGIN_DELIVERY_POLL_INTERVAL).await;
-                if weak
-                    .update(cx, |this, cx| {
-                        this.emit_native_plugin_layout_if_changed(cx);
-                    })
-                    .is_err()
-                {
-                    break;
-                }
-            }
-        })
-        .detach();
-    }
-
     pub(super) fn native_plugin_layout_snapshot(&self) -> Value {
         native_plugin_layout_snapshot(
             self.sidebar_collapsed,
@@ -726,50 +704,8 @@ impl WorkspaceApp {
         )
     }
 
-    pub(super) fn start_native_plugin_session_polling(&mut self, cx: &mut Context<Self>) {
-        if self.native_plugin_runtime.session_polling {
-            return;
-        }
-        self.native_plugin_runtime.session_polling = true;
-        cx.spawn(async move |weak, cx| {
-            loop {
-                Timer::after(NATIVE_PLUGIN_DELIVERY_POLL_INTERVAL).await;
-                if weak
-                    .update(cx, |this, cx| {
-                        this.emit_native_plugin_sessions_if_changed(cx);
-                    })
-                    .is_err()
-                {
-                    break;
-                }
-            }
-        })
-        .detach();
-    }
-
     pub(super) fn native_plugin_session_tree_snapshot(&self) -> Value {
         json!(self.native_plugin_session_tree_snapshot_values())
-    }
-
-    pub(super) fn start_native_plugin_saved_forwards_polling(&mut self, cx: &mut Context<Self>) {
-        if self.native_plugin_runtime.saved_forwards_polling {
-            return;
-        }
-        self.native_plugin_runtime.saved_forwards_polling = true;
-        cx.spawn(async move |weak, cx| {
-            loop {
-                Timer::after(NATIVE_PLUGIN_DELIVERY_POLL_INTERVAL).await;
-                if weak
-                    .update(cx, |this, cx| {
-                        this.emit_native_plugin_saved_forwards_if_changed(cx);
-                    })
-                    .is_err()
-                {
-                    break;
-                }
-            }
-        })
-        .detach();
     }
 
     pub(super) fn native_plugin_saved_forwards_snapshot(&self) -> Value {
@@ -777,50 +713,8 @@ impl WorkspaceApp {
             .unwrap_or_else(|_| json!([]))
     }
 
-    pub(super) fn start_native_plugin_transfer_polling(&mut self, cx: &mut Context<Self>) {
-        if self.native_plugin_runtime.transfer_polling {
-            return;
-        }
-        self.native_plugin_runtime.transfer_polling = true;
-        cx.spawn(async move |weak, cx| {
-            loop {
-                Timer::after(NATIVE_PLUGIN_DELIVERY_POLL_INTERVAL).await;
-                if weak
-                    .update(cx, |this, cx| {
-                        this.emit_native_plugin_transfers_if_changed(cx);
-                    })
-                    .is_err()
-                {
-                    break;
-                }
-            }
-        })
-        .detach();
-    }
-
     pub(super) fn native_plugin_transfer_snapshot(&self) -> Value {
         native_plugin_transfer_snapshot_array(&self.sftp_transfer_manager, None)
-    }
-
-    pub(super) fn start_native_plugin_profiler_polling(&mut self, cx: &mut Context<Self>) {
-        if self.native_plugin_runtime.profiler_polling {
-            return;
-        }
-        self.native_plugin_runtime.profiler_polling = true;
-        cx.spawn(async move |weak, cx| {
-            loop {
-                Timer::after(NATIVE_PLUGIN_DELIVERY_POLL_INTERVAL).await;
-                if weak
-                    .update(cx, |this, cx| {
-                        this.emit_native_plugin_profiler_if_changed(cx);
-                    })
-                    .is_err()
-                {
-                    break;
-                }
-            }
-        })
-        .detach();
     }
 
     pub(super) fn native_plugin_profiler_snapshot(&self, cx: &mut Context<Self>) -> Value {
@@ -828,27 +722,6 @@ impl WorkspaceApp {
             self.host_tools.read(cx).profiler_registry(),
             &native_plugin_profiler_node_connection_ids(self),
         )
-    }
-
-    pub(super) fn start_native_plugin_ide_polling(&mut self, cx: &mut Context<Self>) {
-        if self.native_plugin_runtime.ide_polling {
-            return;
-        }
-        self.native_plugin_runtime.ide_polling = true;
-        cx.spawn(async move |weak, cx| {
-            loop {
-                Timer::after(NATIVE_PLUGIN_DELIVERY_POLL_INTERVAL).await;
-                if weak
-                    .update(cx, |this, cx| {
-                        this.emit_native_plugin_ide_if_changed(cx);
-                    })
-                    .is_err()
-                {
-                    break;
-                }
-            }
-        })
-        .detach();
     }
 
     pub(super) fn native_plugin_ide_snapshot(&self, cx: &mut Context<Self>) -> Value {
@@ -864,27 +737,6 @@ impl WorkspaceApp {
             })
     }
 
-    pub(super) fn start_native_plugin_ai_polling(&mut self, cx: &mut Context<Self>) {
-        if self.native_plugin_runtime.ai_polling {
-            return;
-        }
-        self.native_plugin_runtime.ai_polling = true;
-        cx.spawn(async move |weak, cx| {
-            loop {
-                Timer::after(NATIVE_PLUGIN_DELIVERY_POLL_INTERVAL).await;
-                if weak
-                    .update(cx, |this, cx| {
-                        this.emit_native_plugin_ai_if_changed(cx);
-                    })
-                    .is_err()
-                {
-                    break;
-                }
-            }
-        })
-        .detach();
-    }
-
     pub(super) fn native_plugin_ai_snapshot(&self, cx: &App) -> Value {
         let settings = self.settings_store.settings();
         native_plugin_ai_snapshot_value(
@@ -893,27 +745,6 @@ impl WorkspaceApp {
             settings.ai.active_provider_id.as_deref(),
             &settings.ai.model_context_windows,
         )
-    }
-
-    pub(super) fn start_native_plugin_event_log_polling(&mut self, cx: &mut Context<Self>) {
-        if self.native_plugin_runtime.event_log_polling {
-            return;
-        }
-        self.native_plugin_runtime.event_log_polling = true;
-        cx.spawn(async move |weak, cx| {
-            loop {
-                Timer::after(NATIVE_PLUGIN_DELIVERY_POLL_INTERVAL).await;
-                if weak
-                    .update(cx, |this, cx| {
-                        this.emit_native_plugin_event_log_entries(cx);
-                    })
-                    .is_err()
-                {
-                    break;
-                }
-            }
-        })
-        .detach();
     }
 
     pub(super) fn native_plugin_last_event_log_id(&self) -> u64 {
@@ -926,27 +757,32 @@ impl WorkspaceApp {
     }
 
     pub(super) fn refresh_native_plugin_event_polling(&mut self, cx: &mut Context<Self>) {
+        let mut samples = Vec::new();
         if self.has_native_plugin_subscription(
             super::plugin_host::NATIVE_PLUGIN_UI_LAYOUT_CHANGED_EVENT,
         ) {
-            self.native_plugin_runtime.layout_snapshot = self.native_plugin_layout_snapshot();
-            self.start_native_plugin_layout_polling(cx);
+            samples.push((
+                plugin_entity::PluginSubscriptionSample::Layout,
+                self.native_plugin_layout_snapshot(),
+            ));
         }
         if self.has_native_plugin_subscription(
             super::plugin_host::NATIVE_PLUGIN_SESSION_TREE_CHANGED_EVENT,
         ) || self.has_native_plugin_subscription(
             super::plugin_host::NATIVE_PLUGIN_SESSION_NODE_STATE_CHANGED_EVENT,
         ) {
-            self.native_plugin_runtime.session_tree_snapshot =
-                self.native_plugin_session_tree_snapshot();
-            self.start_native_plugin_session_polling(cx);
+            samples.push((
+                plugin_entity::PluginSubscriptionSample::Sessions,
+                self.native_plugin_session_tree_snapshot(),
+            ));
         }
         if self.has_native_plugin_subscription(
             super::plugin_host::NATIVE_PLUGIN_FORWARD_SAVED_FORWARDS_CHANGED_EVENT,
         ) {
-            self.native_plugin_runtime.saved_forwards_snapshot =
-                self.native_plugin_saved_forwards_snapshot();
-            self.start_native_plugin_saved_forwards_polling(cx);
+            samples.push((
+                plugin_entity::PluginSubscriptionSample::SavedForwards,
+                self.native_plugin_saved_forwards_snapshot(),
+            ));
         }
         if self.has_native_plugin_subscription(
             super::plugin_host::NATIVE_PLUGIN_TRANSFER_PROGRESS_EVENT,
@@ -955,14 +791,18 @@ impl WorkspaceApp {
         ) || self
             .has_native_plugin_subscription(super::plugin_host::NATIVE_PLUGIN_TRANSFER_ERROR_EVENT)
         {
-            self.native_plugin_runtime.transfer_snapshot = self.native_plugin_transfer_snapshot();
-            self.start_native_plugin_transfer_polling(cx);
+            samples.push((
+                plugin_entity::PluginSubscriptionSample::Transfers,
+                self.native_plugin_transfer_snapshot(),
+            ));
         }
         if self.has_native_plugin_subscription(
             super::plugin_host::NATIVE_PLUGIN_PROFILER_METRICS_EVENT,
         ) {
-            self.native_plugin_runtime.profiler_snapshot = self.native_plugin_profiler_snapshot(cx);
-            self.start_native_plugin_profiler_polling(cx);
+            samples.push((
+                plugin_entity::PluginSubscriptionSample::Profiler,
+                self.native_plugin_profiler_snapshot(cx),
+            ));
         }
         if self
             .has_native_plugin_subscription(super::plugin_host::NATIVE_PLUGIN_IDE_FILE_OPEN_EVENT)
@@ -973,18 +813,63 @@ impl WorkspaceApp {
                 super::plugin_host::NATIVE_PLUGIN_IDE_ACTIVE_FILE_CHANGED_EVENT,
             )
         {
-            self.native_plugin_runtime.ide_snapshot = self.native_plugin_ide_snapshot(cx);
-            self.start_native_plugin_ide_polling(cx);
+            samples.push((
+                plugin_entity::PluginSubscriptionSample::Ide,
+                self.native_plugin_ide_snapshot(cx),
+            ));
         }
         if self.has_native_plugin_subscription(super::plugin_host::NATIVE_PLUGIN_AI_MESSAGE_EVENT) {
-            self.native_plugin_runtime.ai_snapshot = self.native_plugin_ai_snapshot(cx);
-            self.start_native_plugin_ai_polling(cx);
+            samples.push((
+                plugin_entity::PluginSubscriptionSample::Ai,
+                self.native_plugin_ai_snapshot(cx),
+            ));
         }
-        if self
+        let event_log_last_id = self
             .has_native_plugin_subscription(super::plugin_host::NATIVE_PLUGIN_EVENT_LOG_ENTRY_EVENT)
-        {
-            self.native_plugin_runtime.event_log_last_id = self.native_plugin_last_event_log_id();
-            self.start_native_plugin_event_log_polling(cx);
+            .then(|| self.native_plugin_last_event_log_id());
+        if event_log_last_id.is_some() {
+            samples.push((
+                plugin_entity::PluginSubscriptionSample::EventLog,
+                Value::Null,
+            ));
+        }
+        self.plugin_entity.update(cx, move |plugins, cx| {
+            plugins.configure_subscription_samples(samples, event_log_last_id, cx);
+        });
+    }
+
+    pub(in crate::workspace) fn sample_native_plugin_subscriptions(
+        &mut self,
+        cx: &mut Context<Self>,
+    ) {
+        let sample_kinds = self.plugin_entity.read(cx).subscription_samples();
+        for kind in sample_kinds {
+            match kind {
+                plugin_entity::PluginSubscriptionSample::Layout => {
+                    self.emit_native_plugin_layout_if_changed(cx)
+                }
+                plugin_entity::PluginSubscriptionSample::Sessions => {
+                    self.emit_native_plugin_sessions_if_changed(cx)
+                }
+                plugin_entity::PluginSubscriptionSample::SavedForwards => {
+                    self.emit_native_plugin_saved_forwards_if_changed(cx)
+                }
+                plugin_entity::PluginSubscriptionSample::Transfers => {
+                    self.emit_native_plugin_transfers_if_changed(cx)
+                }
+                plugin_entity::PluginSubscriptionSample::Profiler => {
+                    self.emit_native_plugin_profiler_if_changed(cx)
+                }
+                plugin_entity::PluginSubscriptionSample::Ide => {
+                    self.emit_native_plugin_ide_if_changed(cx)
+                }
+                plugin_entity::PluginSubscriptionSample::Ai => {
+                    self.emit_native_plugin_ai_if_changed(cx)
+                }
+                plugin_entity::PluginSubscriptionSample::EventLog => {
+                    self.emit_native_plugin_event_log_entries(cx)
+                }
+            }
         }
     }
 
@@ -1025,11 +910,15 @@ impl WorkspaceApp {
 
     fn emit_native_plugin_layout_if_changed(&mut self, cx: &mut Context<Self>) {
         let layout = self.native_plugin_layout_snapshot();
-        if layout == self.native_plugin_runtime.layout_snapshot {
+        let (previous, layout) = self.plugin_entity.update(cx, |plugins, _cx| {
+            plugins.update_subscription_snapshot(
+                plugin_entity::PluginSubscriptionSample::Layout,
+                layout,
+            )
+        });
+        if previous.is_none() {
             return;
         }
-
-        self.native_plugin_runtime.layout_snapshot = layout.clone();
         let has_subscribers = !self
             .native_plugin_runtime
             .registry
@@ -1052,14 +941,18 @@ impl WorkspaceApp {
 
     fn emit_native_plugin_sessions_if_changed(&mut self, cx: &mut Context<Self>) {
         let tree = self.native_plugin_session_tree_snapshot();
-        if tree == self.native_plugin_runtime.session_tree_snapshot {
+        let (previous_tree, tree) = self.plugin_entity.update(cx, |plugins, _cx| {
+            plugins.update_subscription_snapshot(
+                plugin_entity::PluginSubscriptionSample::Sessions,
+                tree,
+            )
+        });
+        let Some(previous_tree) = previous_tree else {
             return;
-        }
+        };
 
-        let previous_states =
-            native_plugin_session_state_map(&self.native_plugin_runtime.session_tree_snapshot);
+        let previous_states = native_plugin_session_state_map(&previous_tree);
         let next_states = native_plugin_session_state_map(&tree);
-        self.native_plugin_runtime.session_tree_snapshot = tree.clone();
 
         let has_tree_subscribers = !self
             .native_plugin_runtime
@@ -1118,10 +1011,15 @@ impl WorkspaceApp {
 
     fn emit_native_plugin_saved_forwards_if_changed(&mut self, cx: &mut Context<Self>) {
         let saved_forwards = self.native_plugin_saved_forwards_snapshot();
-        if saved_forwards == self.native_plugin_runtime.saved_forwards_snapshot {
+        let (previous, saved_forwards) = self.plugin_entity.update(cx, |plugins, _cx| {
+            plugins.update_subscription_snapshot(
+                plugin_entity::PluginSubscriptionSample::SavedForwards,
+                saved_forwards,
+            )
+        });
+        if previous.is_none() {
             return;
         }
-        self.native_plugin_runtime.saved_forwards_snapshot = saved_forwards.clone();
 
         let has_subscribers = !self
             .native_plugin_runtime
@@ -1145,13 +1043,18 @@ impl WorkspaceApp {
 
     fn emit_native_plugin_transfers_if_changed(&mut self, cx: &mut Context<Self>) {
         let transfers = self.native_plugin_transfer_snapshot();
-        let previous_states =
-            native_plugin_transfer_state_map(&self.native_plugin_runtime.transfer_snapshot);
+        let (previous_transfers, transfers) = self.plugin_entity.update(cx, |plugins, _cx| {
+            plugins.update_subscription_snapshot(
+                plugin_entity::PluginSubscriptionSample::Transfers,
+                transfers,
+            )
+        });
+        let previous_states = previous_transfers
+            .as_ref()
+            .map(native_plugin_transfer_state_map)
+            .unwrap_or_default();
         let next_states = native_plugin_transfer_state_map(&transfers);
-        let changed = transfers != self.native_plugin_runtime.transfer_snapshot;
-        if changed {
-            self.native_plugin_runtime.transfer_snapshot = transfers.clone();
-        }
+        let changed = previous_transfers.is_some();
 
         let has_progress_subscribers = !self
             .native_plugin_runtime
@@ -1162,15 +1065,12 @@ impl WorkspaceApp {
             )
             .is_empty();
         if has_progress_subscribers
-            && native_plugin_transfer_progress_due(
-                self.native_plugin_runtime.transfer_progress_last_emitted,
-                NATIVE_PLUGIN_TRANSFER_PROGRESS_INTERVAL,
-            )
+            && self.plugin_entity.update(cx, |plugins, _cx| {
+                plugins.transfer_progress_due(NATIVE_PLUGIN_TRANSFER_PROGRESS_INTERVAL)
+            })
         {
             // Tauri's transfer progress bridge is throttled to 500ms. Native keeps
             // the same throttle while polling the backend-owned SFTP transfer map.
-            self.native_plugin_runtime.transfer_progress_last_emitted =
-                Some(std::time::Instant::now());
             for transfer in
                 native_plugin_transfer_values_by_state(&transfers, BackgroundTransferState::Active)
             {
@@ -1233,13 +1133,17 @@ impl WorkspaceApp {
 
     fn emit_native_plugin_profiler_if_changed(&mut self, cx: &mut Context<Self>) {
         let metrics = self.native_plugin_profiler_snapshot(cx);
-        if metrics == self.native_plugin_runtime.profiler_snapshot {
+        let (previous_metrics, metrics) = self.plugin_entity.update(cx, |plugins, _cx| {
+            plugins.update_subscription_snapshot(
+                plugin_entity::PluginSubscriptionSample::Profiler,
+                metrics,
+            )
+        });
+        let Some(previous_metrics) = previous_metrics else {
             return;
-        }
-        let previous_timestamps =
-            native_plugin_profiler_timestamp_map(&self.native_plugin_runtime.profiler_snapshot);
+        };
+        let previous_timestamps = native_plugin_profiler_timestamp_map(&previous_metrics);
         let next_timestamps = native_plugin_profiler_timestamp_map(&metrics);
-        self.native_plugin_runtime.profiler_snapshot = metrics.clone();
 
         let subscriptions = self
             .native_plugin_runtime
@@ -1248,10 +1152,12 @@ impl WorkspaceApp {
             .runtime_event_subscriptions_for(
                 super::plugin_host::NATIVE_PLUGIN_PROFILER_METRICS_EVENT,
             );
-        if subscriptions.is_empty() || !native_plugin_profiler_metrics_due(self) {
+        let metrics_due = self.plugin_entity.update(cx, |plugins, _cx| {
+            plugins.profiler_metrics_due(NATIVE_PLUGIN_PROFILER_METRICS_INTERVAL)
+        });
+        if subscriptions.is_empty() || !metrics_due {
             return;
         }
-        self.native_plugin_runtime.profiler_last_emitted = Some(std::time::Instant::now());
 
         for entry in native_plugin_profiler_changed_metric_entries(
             &metrics,
@@ -1291,15 +1197,16 @@ impl WorkspaceApp {
 
     fn emit_native_plugin_ide_if_changed(&mut self, cx: &mut Context<Self>) {
         let next = self.native_plugin_ide_snapshot(cx);
-        if next == self.native_plugin_runtime.ide_snapshot {
+        let (previous, next) = self.plugin_entity.update(cx, |plugins, _cx| {
+            plugins.update_subscription_snapshot(plugin_entity::PluginSubscriptionSample::Ide, next)
+        });
+        let Some(previous) = previous else {
             return;
-        }
-        let previous_files = native_plugin_ide_file_map(&self.native_plugin_runtime.ide_snapshot);
+        };
+        let previous_files = native_plugin_ide_file_map(&previous);
         let next_files = native_plugin_ide_file_map(&next);
-        let previous_active =
-            native_plugin_ide_active_file_path(&self.native_plugin_runtime.ide_snapshot);
+        let previous_active = native_plugin_ide_active_file_path(&previous);
         let next_active = native_plugin_ide_active_file_path(&next);
-        self.native_plugin_runtime.ide_snapshot = next.clone();
 
         for (path, file) in &next_files {
             if !previous_files.contains_key(path) {
@@ -1333,12 +1240,13 @@ impl WorkspaceApp {
 
     fn emit_native_plugin_ai_if_changed(&mut self, cx: &mut Context<Self>) {
         let next = self.native_plugin_ai_snapshot(cx);
-        if next == self.native_plugin_runtime.ai_snapshot {
+        let (previous, next) = self.plugin_entity.update(cx, |plugins, _cx| {
+            plugins.update_subscription_snapshot(plugin_entity::PluginSubscriptionSample::Ai, next)
+        });
+        let Some(previous) = previous else {
             return;
-        }
-        let previous_counts =
-            native_plugin_ai_message_count_map(&self.native_plugin_runtime.ai_snapshot);
-        self.native_plugin_runtime.ai_snapshot = next.clone();
+        };
+        let previous_counts = native_plugin_ai_message_count_map(&previous);
 
         for event in native_plugin_ai_new_message_events(&next, &previous_counts) {
             // AI message events intentionally omit message content; plugins can
@@ -1352,7 +1260,10 @@ impl WorkspaceApp {
     }
 
     fn emit_native_plugin_event_log_entries(&mut self, cx: &mut Context<Self>) {
-        let last_seen = self.native_plugin_runtime.event_log_last_id;
+        let next_last_id = self.native_plugin_last_event_log_id();
+        let last_seen = self.plugin_entity.update(cx, |plugins, _cx| {
+            plugins.advance_event_log_last_id(next_last_id)
+        });
         let new_entries = self
             .notification_center
             .event_log
@@ -1361,7 +1272,6 @@ impl WorkspaceApp {
             .filter(|entry| entry.id > last_seen)
             .cloned()
             .collect::<Vec<_>>();
-        self.native_plugin_runtime.event_log_last_id = self.native_plugin_last_event_log_id();
         if new_entries.is_empty() {
             return;
         }
