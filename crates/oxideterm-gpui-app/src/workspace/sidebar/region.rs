@@ -389,8 +389,9 @@ impl WorkspaceApp {
                     .active_sidebar_panel
                     .as_ref()
                     .and_then(|selection| {
-                        self.native_plugin_runtime
-                            .registry
+                        self.plugin_entity
+                            .read(cx)
+                            .registry()
                             .contributions()
                             .runtime_sidebar_panels()
                             .into_iter()

@@ -346,14 +346,17 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
-        let plugin_count = self.native_plugin_runtime.registry.plugins().len();
-        let active_count = self
-            .native_plugin_runtime
-            .registry
-            .plugins()
-            .iter()
-            .filter(|plugin| plugin.state == plugin_host::NativePluginState::Active)
-            .count();
+        let (plugin_count, active_count) = {
+            let plugins = self.plugin_entity.read(cx);
+            let plugin_rows = plugins.registry().plugins();
+            (
+                plugin_rows.len(),
+                plugin_rows
+                    .iter()
+                    .filter(|plugin| plugin.state == plugin_host::NativePluginState::Active)
+                    .count(),
+            )
+        };
         self.native_plugin_card_surface(has_background)
             .flex()
             .flex_col()
@@ -461,10 +464,12 @@ impl WorkspaceApp {
                                 NativePluginManagerActionButtonTone::Muted,
                                 false,
                                 cx.listener(|this, _event, _window, cx| {
-                                    this.native_plugin_runtime.registry =
-                                        plugin_host::NativePluginRegistry::discover(
-                                            this.settings_store.path(),
-                                        );
+                                    let registry = plugin_host::NativePluginRegistry::discover(
+                                        this.settings_store.path(),
+                                    );
+                                    this.plugin_entity.update(cx, |plugins, _cx| {
+                                        plugins.replace_registry(registry);
+                                    });
                                     this.native_plugin_manager.operation_status =
                                         NativePluginManagerOperationStatus::Success(
                                             this.i18n.t("plugin.refresh"),
@@ -497,7 +502,7 @@ impl WorkspaceApp {
         has_background: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let plugin_count = self.native_plugin_runtime.registry.plugins().len();
+        let plugin_count = self.plugin_entity.read(cx).registry().plugins().len();
         let update_count = self.native_plugin_manager.available_updates.len();
         let items = vec![
             self.render_native_plugin_tab_button(
@@ -621,20 +626,24 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
-        let plugin_rows = self.native_plugin_runtime.registry.plugins().to_vec();
-        let diagnostics = self
-            .native_plugin_runtime
-            .registry
-            .diagnostics()
-            .iter()
-            .filter(|diagnostic| {
-                native_plugin_diagnostic_is_visible(
-                    diagnostic,
-                    &self.native_plugin_manager.dismissed_diagnostic_keys,
-                )
-            })
-            .cloned()
-            .collect::<Vec<_>>();
+        let (plugin_rows, diagnostics) = {
+            let plugins = self.plugin_entity.read(cx);
+            let registry = plugins.registry();
+            (
+                registry.plugins().to_vec(),
+                registry
+                    .diagnostics()
+                    .iter()
+                    .filter(|diagnostic| {
+                        native_plugin_diagnostic_is_visible(
+                            diagnostic,
+                            &self.native_plugin_manager.dismissed_diagnostic_keys,
+                        )
+                    })
+                    .cloned()
+                    .collect::<Vec<_>>(),
+            )
+        };
         let card = self
             .native_plugin_card_surface(has_background)
             .flex()
@@ -1130,7 +1139,7 @@ impl WorkspaceApp {
         let display_value = if focused {
             self.settings_input_draft.clone()
         } else {
-            self.current_settings_input_value(input)
+            self.current_settings_input_value(input, cx)
         };
         let target = WorkspaceImeTarget::Settings(input);
         let workspace = cx.entity();
@@ -1159,7 +1168,7 @@ impl WorkspaceApp {
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |this, event: &gpui::MouseDownEvent, window, cx| {
-                    let current = this.current_settings_input_value(input);
+                    let current = this.current_settings_input_value(input, cx);
                     this.focus_settings_input(input, current, cx);
                     this.ime_marked_text = None;
                     window.focus(&this.focus_handle, cx);
@@ -1409,8 +1418,9 @@ impl WorkspaceApp {
         }
 
         let installed = self
-            .native_plugin_runtime
-            .registry
+            .plugin_entity
+            .read(cx)
+            .registry()
             .plugins()
             .iter()
             .map(|plugin| plugin_host::NativePluginInstalledInfo {
@@ -1464,6 +1474,9 @@ impl WorkspaceApp {
             }
             plugin_entity::PluginWorkspaceEvent::RuntimeSubscriptionSampleDue => {
                 self.sample_native_plugin_subscriptions(cx);
+            }
+            plugin_entity::PluginWorkspaceEvent::RuntimeIntentsReady => {
+                self.apply_native_plugin_runtime_intents(cx);
             }
         }
     }
@@ -1526,8 +1539,10 @@ impl WorkspaceApp {
         match outcome {
             NativePluginInstallOutcome::Installed(result) => {
                 let installed_id = result.manifest.id.clone();
-                self.native_plugin_runtime.registry =
+                let registry =
                     plugin_host::NativePluginRegistry::discover(self.settings_store.path());
+                self.plugin_entity
+                    .update(cx, |plugins, _cx| plugins.replace_registry(registry));
                 self.bootstrap_native_plugin_runtime(cx);
                 self.native_plugin_manager
                     .available_updates
@@ -1571,6 +1586,7 @@ impl WorkspaceApp {
             .plugin_id
             .clone()
             .unwrap_or_else(|| diagnostic.plugin_dir.display().to_string());
+        let message = native_plugin_diagnostic_message(&self.i18n, &diagnostic.message);
         div()
             .w_full()
             .rounded(px(self.tokens.radii.md))
@@ -1602,7 +1618,7 @@ impl WorkspaceApp {
                             .text_size(px(self.tokens.metrics.ui_text_xs))
                             .line_height(px(18.0))
                             .text_color(rgb(theme.error))
-                            .child(diagnostic.message.clone()),
+                            .child(message),
                     )
                     .into_any_element(),
                 vec![self.render_native_plugin_row_icon_button(
@@ -1785,10 +1801,12 @@ impl WorkspaceApp {
                                 LucideIcon::RefreshCw,
                                 theme.text_muted,
                                 Some(cx.listener(move |this, _event, _window, cx| {
-                                    this.native_plugin_runtime.registry =
-                                        plugin_host::NativePluginRegistry::discover(
-                                            this.settings_store.path(),
-                                        );
+                                    let registry = plugin_host::NativePluginRegistry::discover(
+                                        this.settings_store.path(),
+                                    );
+                                    this.plugin_entity.update(cx, |plugins, _cx| {
+                                        plugins.replace_registry(registry);
+                                    });
                                     this.bootstrap_native_plugin_runtime(cx);
                                     let success_template = this.i18n.t("plugin.reload_success");
                                     this.native_plugin_manager.operation_status =
@@ -1804,16 +1822,17 @@ impl WorkspaceApp {
                             LucideIcon::Power,
                             toggle_color,
                             Some(cx.listener(move |this, _event, _window, cx| {
-                                if let Err(error) = this
-                                    .native_plugin_runtime
-                                    .registry
-                                    .set_plugin_enabled(&plugin_id, next_enabled)
-                                {
+                                let result = this.plugin_entity.update(cx, |plugins, _cx| {
+                                    plugins.set_plugin_enabled(&plugin_id, next_enabled)
+                                });
+                                if let Err(error) = result {
                                     this.native_plugin_manager.operation_status =
                                         NativePluginManagerOperationStatus::Error(error.clone());
-                                    this.native_plugin_runtime
-                                        .registry
-                                        .record_manager_error(plugin_id.clone(), error);
+                                    this.plugin_entity.update(cx, |plugins, _cx| {
+                                        plugins
+                                            .registry_mut()
+                                            .record_manager_error(plugin_id.clone(), error);
+                                    });
                                 } else {
                                     if next_enabled {
                                         this.bootstrap_native_plugin_runtime(cx);
@@ -1841,14 +1860,16 @@ impl WorkspaceApp {
                                 // Tauri's row deletes through the plugin API and leaves
                                 // storage cleanup to the manager flow. Native mirrors the
                                 // file removal path while preserving settings for now.
-                                if let Err(error) = this
-                                    .native_plugin_runtime
-                                    .registry
-                                    .uninstall_plugin(&uninstall_plugin_id, false)
-                                {
-                                    this.native_plugin_runtime
-                                        .registry
-                                        .record_manager_error(uninstall_plugin_id.clone(), error);
+                                let result = this.plugin_entity.update(cx, |plugins, _cx| {
+                                    plugins.uninstall_plugin(&uninstall_plugin_id, false)
+                                });
+                                if let Err(error) = result {
+                                    this.plugin_entity.update(cx, |plugins, _cx| {
+                                        plugins.registry_mut().record_manager_error(
+                                            uninstall_plugin_id.clone(),
+                                            error,
+                                        );
+                                    });
                                 }
                                 cx.stop_propagation();
                                 cx.notify();
@@ -2339,7 +2360,23 @@ fn native_plugin_visible_error(
     ) {
         return Some(i18n.t("plugin.wasm_runtime_missing"));
     }
+    if error == plugin_entity::NATIVE_PLUGIN_RUNTIME_FAILURE_DIAGNOSTIC {
+        return Some(i18n.t("plugin.runtime_failure"));
+    }
     Some(error.to_string())
+}
+
+fn native_plugin_diagnostic_message(i18n: &I18n, message: &str) -> String {
+    if plugin_host::native_plugin_error_has_code(
+        message,
+        plugin_runtime::WASM_RUNTIME_NOT_INSTALLED_CODE,
+    ) {
+        return i18n.t("plugin.wasm_runtime_missing");
+    }
+    if message == plugin_entity::NATIVE_PLUGIN_RUNTIME_FAILURE_DIAGNOSTIC {
+        return i18n.t("plugin.runtime_failure");
+    }
+    message.to_string()
 }
 
 fn native_plugin_is_wasm_runtime_missing(plugin: &plugin_host::NativePluginInfo) -> bool {
@@ -2500,6 +2537,19 @@ mod tests {
 
         let entry = registry_entry_with_capabilities(Some(Vec::new()));
         assert!(native_plugin_registry_capabilities_label(&i18n, &entry).is_none());
+    }
+
+    #[test]
+    fn runtime_failure_diagnostics_use_localized_copy() {
+        let i18n = I18n::new(Locale::En);
+
+        assert_eq!(
+            native_plugin_diagnostic_message(
+                &i18n,
+                plugin_entity::NATIVE_PLUGIN_RUNTIME_FAILURE_DIAGNOSTIC,
+            ),
+            "Plugin runtime operation failed."
+        );
     }
 
     #[test]

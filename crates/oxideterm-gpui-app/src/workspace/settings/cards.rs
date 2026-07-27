@@ -1059,6 +1059,7 @@ impl WorkspaceApp {
     pub(in crate::workspace) fn current_settings_input_value(
         &self,
         input: SettingsInput,
+        cx: &Context<Self>,
     ) -> String {
         let settings = self.settings_store.settings();
         if let Some(value) = persisted_settings_input_value(settings, input) {
@@ -1120,14 +1121,16 @@ impl WorkspaceApp {
                 self.settings_local_privilege_draft.prompt_patterns.clone()
             }
             SettingsInput::PluginSetting(index) => self
-                .native_plugin_runtime
-                .registry
+                .plugin_entity
+                .read(cx)
+                .registry()
                 .contributions()
                 .settings
                 .get(index)
                 .and_then(|setting| {
-                    self.native_plugin_runtime
-                        .registry
+                    self.plugin_entity
+                        .read(cx)
+                        .registry()
                         .plugin_setting_value(&setting.plugin_id, &setting.definition.id)
                 })
                 .map(|value| plugin_setting_input_value(&value))
@@ -1296,8 +1299,9 @@ impl WorkspaceApp {
             }
             SettingsInput::PluginSetting(index) => {
                 let Some(setting) = self
-                    .native_plugin_runtime
-                    .registry
+                    .plugin_entity
+                    .read(cx)
+                    .registry()
                     .contributions()
                     .settings
                     .get(index)
@@ -1312,9 +1316,11 @@ impl WorkspaceApp {
                 ) {
                     Ok(value) => value,
                     Err(error) => {
-                        self.native_plugin_runtime
-                            .registry
-                            .record_manager_error(setting.plugin_id.clone(), error);
+                        self.plugin_entity.update(cx, |plugins, _cx| {
+                            plugins
+                                .registry_mut()
+                                .record_manager_error(setting.plugin_id.clone(), error);
+                        });
                         cx.notify();
                         return;
                     }
@@ -1325,9 +1331,11 @@ impl WorkspaceApp {
                     value,
                     cx,
                 ) {
-                    self.native_plugin_runtime
-                        .registry
-                        .record_manager_error(setting.plugin_id.clone(), error);
+                    self.plugin_entity.update(cx, |plugins, _cx| {
+                        plugins
+                            .registry_mut()
+                            .record_manager_error(setting.plugin_id.clone(), error);
+                    });
                 }
                 cx.notify();
             }

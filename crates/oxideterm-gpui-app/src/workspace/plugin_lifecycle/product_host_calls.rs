@@ -90,10 +90,14 @@ impl WorkspaceApp {
                         self.run_quick_command(&command, window, cx);
                     }
                 }
-                _ => self.native_plugin_runtime.registry.record_manager_error(
-                    effect.plugin_id,
-                    "Unsupported queued product plugin effect".to_string(),
-                ),
+                _ => {
+                    self.plugin_entity.update(cx, |plugins, _cx| {
+                        plugins.registry_mut().record_manager_error(
+                            effect.plugin_id,
+                            "Unsupported queued product plugin effect".to_string(),
+                        );
+                    });
+                }
             }
         }
         backlog_remaining

@@ -831,6 +831,7 @@
     "enable_success": "{{name}} activé.",
     "disable_success": "{{name}} désactivé.",
     "load_failed_default": "Échec du chargement du plugin.",
+    "runtime_failure": "L’opération d’exécution du plugin a échoué.",
     "error_copied": "Erreur du plugin copiée.",
     "open_dir_create_failed": "Impossible de créer le dossier des plugins : {{message}}",
     "open_dir_failed": "Impossible d’ouvrir le dossier des plugins : {{message}}",

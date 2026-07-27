@@ -28,7 +28,7 @@ pub(super) fn test_terminal_hook(
 
 pub(super) fn test_host_api_snapshot() -> NativePluginHostApiSnapshot {
     NativePluginHostApiSnapshot {
-        registry: super::super::plugin_host::NativePluginRegistry::default(),
+        registry: super::super::plugin_host::NativePluginRegistry::default().into(),
         i18n: I18n::new(oxideterm_i18n::Locale::ZhCn),
         settings: serde_json::to_value(oxideterm_settings::PersistedSettings::default()).unwrap(),
         locale: "zh-CN".to_string(),
@@ -298,7 +298,7 @@ pub(super) fn test_host_api_snapshot_with_declared_setting() -> NativePluginHost
     let registry = super::super::plugin_host::NativePluginRegistry::discover(&settings_path);
     let _ = std::fs::remove_dir_all(&temp_dir);
     NativePluginHostApiSnapshot {
-        registry,
+        registry: registry.into(),
         ..test_host_api_snapshot()
     }
 }
@@ -334,7 +334,7 @@ pub(super) fn test_host_api_snapshot_with_declared_api_commands() -> NativePlugi
     let registry = super::super::plugin_host::NativePluginRegistry::discover(&settings_path);
     let _ = std::fs::remove_dir_all(&temp_dir);
     NativePluginHostApiSnapshot {
-        registry,
+        registry: registry.into(),
         ..test_host_api_snapshot()
     }
 }

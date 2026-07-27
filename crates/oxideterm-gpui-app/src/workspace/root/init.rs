@@ -224,8 +224,10 @@ impl WorkspaceApp {
                 workspace.handle_ai_workspace_event(event, ai_window_handle, cx);
             },
         );
-        let plugin_entity =
-            cx.new(|cx| plugin_entity::PluginWorkspaceEntity::new(forwarding_runtime.clone(), cx));
+        let plugin_task_runtime = forwarding_runtime.clone();
+        let plugin_entity = cx.new(move |cx| {
+            plugin_entity::PluginWorkspaceEntity::new(plugin_task_runtime, plugin_registry, cx)
+        });
         let plugin_window_handle = window.window_handle();
         let plugin_entity_subscription = cx.subscribe(
             &plugin_entity,
@@ -630,7 +632,6 @@ impl WorkspaceApp {
             ssh_config_sync_service: None,
             settings_store_last_modified,
             connection_store_last_modified,
-            native_plugin_runtime: plugin_lifecycle::NativePluginRuntimeState::new(plugin_registry),
             session_manager: SessionManagerState::default(),
             remote_desktop,
             // .oxide export can contain many saved connections. Keep the

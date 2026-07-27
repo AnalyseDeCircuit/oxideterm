@@ -104,7 +104,7 @@ pub(super) fn native_plugin_host_api_snapshot_from_workspace(
         );
 
     NativePluginHostApiSnapshot {
-        registry: workspace.native_plugin_runtime.registry.clone(),
+        registry: workspace.plugin_entity.read(cx).registry_snapshot(),
         i18n: workspace.i18n.clone(),
         settings: serde_json::to_value(settings).unwrap_or_else(|_| json!({})),
         locale: settings.general.language.as_str().to_string(),

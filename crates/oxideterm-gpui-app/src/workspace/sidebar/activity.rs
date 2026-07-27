@@ -124,15 +124,17 @@ impl WorkspaceApp {
             cx,
         ));
         let plugin_activity_items = self
-            .native_plugin_runtime
-            .registry
+            .plugin_entity
+            .read(cx)
+            .registry()
             .contributions()
             .runtime_activity_bar_items();
         // Tauri inserts plugin-provided sidebar panels as independent activity
         // buttons immediately after the built-in Plugin Manager tab button.
         for panel in self
-            .native_plugin_runtime
-            .registry
+            .plugin_entity
+            .read(cx)
+            .registry()
             .contributions()
             .runtime_sidebar_panels()
         {

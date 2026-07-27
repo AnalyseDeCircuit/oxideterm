@@ -1,7 +1,7 @@
 // Copyright (C) 2026 AnalyseDeCircuit
 // SPDX-License-Identifier: GPL-3.0-only
 
-use std::sync::{Arc, mpsc};
+use std::sync::mpsc;
 
 use oxideterm_connections::{
     SavedConnectionsConflictStrategy, SavedConnectionsSyncSnapshot,
@@ -11,29 +11,16 @@ use oxideterm_plugin_host_api::sync::NativePluginOxideImportOptions;
 use serde_json::Value;
 use zeroize::Zeroizing;
 
-use crate::workspace::{plugin_host, plugin_runtime};
-
-/// Owns native plugin runtime coordination and emitted host snapshots.
-pub(in crate::workspace) struct NativePluginRuntimeState {
-    pub(in crate::workspace) registry: plugin_host::NativePluginRegistry,
-    pub(in crate::workspace) host: Arc<tokio::sync::Mutex<plugin_runtime::NativePluginRuntimeHost>>,
-}
-
-impl NativePluginRuntimeState {
-    pub(in crate::workspace) fn new(registry: plugin_host::NativePluginRegistry) -> Self {
-        Self {
-            registry,
-            host: Arc::new(tokio::sync::Mutex::new(
-                plugin_runtime::NativePluginRuntimeHost::default(),
-            )),
-        }
-    }
-}
+use crate::workspace::plugin_runtime;
 
 pub(in crate::workspace) enum NativePluginRuntimeDelivery {
     Activation {
         plugin_id: String,
         result: Result<plugin_runtime::NativePluginRuntimeActivation, plugin_runtime::PluginError>,
+    },
+    Deactivation {
+        plugin_id: String,
+        result: Result<plugin_runtime::PluginResponse, plugin_runtime::PluginError>,
     },
     CommandDispatch {
         plugin_id: String,
@@ -45,7 +32,6 @@ pub(in crate::workspace) enum NativePluginRuntimeDelivery {
         result:
             Result<plugin_runtime::NativePluginRuntimeEventDispatch, plugin_runtime::PluginError>,
     },
-    Finished,
 }
 
 pub(in crate::workspace) struct NativePluginConfirmRequest {

@@ -831,6 +831,7 @@
     "enable_success": "{{name}} を有効化しました。",
     "disable_success": "{{name}} を無効化しました。",
     "load_failed_default": "プラグインの読み込みに失敗しました。",
+    "runtime_failure": "プラグインのランタイム処理に失敗しました。",
     "error_copied": "プラグインエラーをコピーしました。",
     "open_dir_create_failed": "プラグインディレクトリを作成できませんでした: {{message}}",
     "open_dir_failed": "プラグインディレクトリを開けませんでした: {{message}}",

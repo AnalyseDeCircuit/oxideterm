@@ -524,7 +524,7 @@ impl WorkspaceApp {
                             "settings_view.network.update_port",
                             "settings_view.network.update_port_hint",
                             SettingsInput::UpdateProxyPort,
-                            self.current_settings_input_value(SettingsInput::UpdateProxyPort),
+                            self.current_settings_input_value(SettingsInput::UpdateProxyPort, cx),
                             "7890".to_string(),
                             true,
                             cx,
@@ -535,7 +535,7 @@ impl WorkspaceApp {
                 "settings_view.network.update_host",
                 "settings_view.network.update_host_hint",
                 SettingsInput::UpdateProxyHost,
-                self.current_settings_input_value(SettingsInput::UpdateProxyHost),
+                self.current_settings_input_value(SettingsInput::UpdateProxyHost, cx),
                 "127.0.0.1".to_string(),
                 true,
                 cx,
@@ -544,7 +544,7 @@ impl WorkspaceApp {
                 "settings_view.network.update_no_proxy",
                 "settings_view.network.update_no_proxy_hint",
                 SettingsInput::UpdateProxyNoProxy,
-                self.current_settings_input_value(SettingsInput::UpdateProxyNoProxy),
+                self.current_settings_input_value(SettingsInput::UpdateProxyNoProxy, cx),
                 "localhost,127.0.0.1".to_string(),
                 true,
                 cx,
@@ -808,7 +808,7 @@ impl WorkspaceApp {
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |this, event: &gpui::MouseDownEvent, window, cx| {
-                    let current = this.current_settings_input_value(input);
+                    let current = this.current_settings_input_value(input, cx);
                     this.focus_settings_input(input, current, cx);
                     this.ime_marked_text = None;
                     window.focus(&this.focus_handle, cx);

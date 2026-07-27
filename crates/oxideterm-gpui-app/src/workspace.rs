@@ -1015,7 +1015,6 @@ pub(crate) struct WorkspaceApp {
     ssh_config_sync_service: Option<SshConfigSyncService>,
     settings_store_last_modified: Option<SystemTime>,
     connection_store_last_modified: Option<SystemTime>,
-    native_plugin_runtime: plugin_lifecycle::NativePluginRuntimeState,
     session_manager: SessionManagerState,
     remote_desktop: Entity<remote_desktop::RemoteDesktopWorkspaceEntity>,
     oxide_export_connection_list_state: ListState,

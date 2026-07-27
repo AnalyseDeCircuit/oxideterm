@@ -582,6 +582,22 @@ printf '%s\n' '{"protocolVersion":1,"requestId":"activate:com.example.runtime","
     assert!(registry.contributions().runtime_commands.is_empty());
 }
 
+#[tokio::test]
+async fn runtime_host_deactivation_always_releases_permission_snapshots() {
+    let mut host = NativePluginRuntimeHost::default();
+    host.process_permissions.insert(
+        "com.example.runtime".to_string(),
+        PluginPermissionSet {
+            capabilities: Vec::new(),
+            allowed_host_apis: vec!["ui.showToast".to_string()],
+        },
+    );
+
+    host.deactivate_plugin("com.example.runtime").await.unwrap();
+
+    assert!(!host.process_permissions.contains_key("com.example.runtime"));
+}
+
 #[cfg(unix)]
 #[tokio::test]
 async fn runtime_host_dispatches_registered_command_over_process_rpc() {

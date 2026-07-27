@@ -3,7 +3,7 @@
 
 use std::time::Duration;
 
-pub(super) const NATIVE_PLUGIN_LIFECYCLE_TIMEOUT: Duration = Duration::from_secs(5);
+pub(in crate::workspace) const NATIVE_PLUGIN_LIFECYCLE_TIMEOUT: Duration = Duration::from_secs(5);
 pub(super) const NATIVE_PLUGIN_TERMINAL_HOOK_TIMEOUT: Duration = Duration::from_millis(5);
 pub(in crate::workspace) const NATIVE_PLUGIN_DELIVERY_POLL_INTERVAL: Duration =
     Duration::from_millis(80);

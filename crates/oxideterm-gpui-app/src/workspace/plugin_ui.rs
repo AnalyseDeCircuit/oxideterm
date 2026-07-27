@@ -183,8 +183,9 @@ impl WorkspaceApp {
     ) -> Result<(), String> {
         self.bootstrap_native_plugin_runtime(cx);
         let contribution = self
-            .native_plugin_runtime
-            .registry
+            .plugin_entity
+            .read(cx)
+            .registry()
             .contributions()
             .tab_contribution(plugin_id, tab_id)
             .ok_or_else(|| format!("Plugin tab \"{plugin_id}:{tab_id}\" is not declared"))?;
@@ -232,13 +233,15 @@ impl WorkspaceApp {
         self.bootstrap_native_plugin_runtime(cx);
         let theme = self.tokens.ui;
         let contribution = self
-            .native_plugin_runtime
-            .registry
+            .plugin_entity
+            .read(cx)
+            .registry()
             .contributions()
             .tab_contribution(plugin_id, tab_id);
         let runtime_view = self
-            .native_plugin_runtime
-            .registry
+            .plugin_entity
+            .read(cx)
+            .registry()
             .contributions()
             .runtime_tab_view(plugin_id, tab_id);
         let title = runtime_view
@@ -301,8 +304,9 @@ impl WorkspaceApp {
             return self.render_plugin_sidebar_placeholder();
         };
         let panels = self
-            .native_plugin_runtime
-            .registry
+            .plugin_entity
+            .read(cx)
+            .registry()
             .contributions()
             .runtime_sidebar_panels();
         let Some(panel) = panels.iter().find(|panel| {
@@ -1313,7 +1317,7 @@ impl WorkspaceApp {
             };
             native_plugin_password_event_value(
                 password,
-                self.native_plugin_ui_secret_event_is_approved(&context.plugin_id),
+                self.native_plugin_ui_secret_event_is_approved(&context.plugin_id, cx),
             )
         } else {
             let Some(value) = self.native_plugin_ui.value(key) else {
@@ -1326,9 +1330,14 @@ impl WorkspaceApp {
         self.dispatch_native_plugin_ui_control_event(context, "input", value, cx);
     }
 
-    fn native_plugin_ui_secret_event_is_approved(&self, plugin_id: &str) -> bool {
-        self.native_plugin_runtime
-            .registry
+    fn native_plugin_ui_secret_event_is_approved(
+        &self,
+        plugin_id: &str,
+        cx: &Context<Self>,
+    ) -> bool {
+        self.plugin_entity
+            .read(cx)
+            .registry()
             .plugins()
             .iter()
             .find(|plugin| plugin.manifest.id == plugin_id)

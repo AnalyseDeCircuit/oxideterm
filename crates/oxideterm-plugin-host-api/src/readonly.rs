@@ -3,7 +3,7 @@
 
 //! Read-only plugin host API snapshots and returnable call routing.
 
-use std::collections::HashMap;
+use std::{collections::HashMap, sync::Arc};
 
 use chrono::{SecondsFormat, Utc};
 use oxideterm_i18n::I18n;
@@ -31,7 +31,7 @@ use crate::{
 
 #[derive(Clone)]
 pub struct NativePluginHostApiSnapshot {
-    pub registry: NativePluginRegistry,
+    pub registry: Arc<NativePluginRegistry>,
     pub i18n: I18n,
     pub settings: Value,
     pub locale: String,
@@ -76,7 +76,7 @@ fn native_plugin_ui_registration_preflight_response(
     let request_id = call.request_id.clone();
     match native_plugin_ui_registration_from_args(plugin_id, kind, &call.args).and_then(
         |registration| {
-            let mut registry = snapshot.registry.clone();
+            let mut registry = snapshot.registry.as_ref().clone();
             registry.apply_runtime_registration(registration)
         },
     ) {
@@ -906,7 +906,7 @@ mod tests {
 
     fn sample_snapshot() -> NativePluginHostApiSnapshot {
         NativePluginHostApiSnapshot {
-            registry: NativePluginRegistry::default(),
+            registry: NativePluginRegistry::default().into(),
             i18n: I18n::new(Locale::ZhCn),
             settings: json!({
                 "terminal": {

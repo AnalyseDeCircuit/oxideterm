@@ -3,7 +3,11 @@ use super::*;
 
 use gpui::StatefulInteractiveElement;
 
-fn tab_kind_icon(workspace: &WorkspaceApp, kind: &TabKind) -> LucideIcon {
+fn tab_kind_icon(
+    workspace: &WorkspaceApp,
+    kind: &TabKind,
+    cx: &Context<WorkspaceApp>,
+) -> LucideIcon {
     match kind {
         TabKind::LocalTerminal => LucideIcon::Square,
         TabKind::SshTerminal => LucideIcon::Terminal,
@@ -19,8 +23,9 @@ fn tab_kind_icon(workspace: &WorkspaceApp, kind: &TabKind) -> LucideIcon {
         TabKind::SessionManager => LucideIcon::LayoutList,
         TabKind::PluginManager => LucideIcon::Puzzle,
         TabKind::Plugin { plugin_id, tab_id } => workspace
-            .native_plugin_runtime
-            .registry
+            .plugin_entity
+            .read(cx)
+            .registry()
             .contributions()
             .tab_contribution(plugin_id, tab_id)
             .map(|contribution| LucideIcon::from_plugin_name(&contribution.definition.icon))
@@ -91,7 +96,8 @@ impl WorkspaceApp {
                 .iter()
                 .find(|exiting| exiting.visual_index == visual_index)
             {
-                scroll_viewport = scroll_viewport.child(self.render_exiting_tab_visual(exiting));
+                scroll_viewport =
+                    scroll_viewport.child(self.render_exiting_tab_visual(exiting, cx));
                 continue;
             }
             if !placeholder_rendered
@@ -99,9 +105,12 @@ impl WorkspaceApp {
                     .is_some_and(|placeholder| placeholder.visible_index == visible_tab_index)
                 && let Some(tab) = returning_tab
             {
-                scroll_viewport = scroll_viewport.child(
-                    self.render_detached_return_tab_placeholder(tab, self.tab_visual_width(tab)),
-                );
+                scroll_viewport =
+                    scroll_viewport.child(self.render_detached_return_tab_placeholder(
+                        tab,
+                        self.tab_visual_width(tab),
+                        cx,
+                    ));
                 placeholder_rendered = true;
                 continue;
             }
@@ -131,7 +140,7 @@ impl WorkspaceApp {
                 .and_then(|node_id| self.reconnect_orchestrator.job(&node_id.0))
                 .filter(|job| job.ended_at.is_none());
             let show_reconnect_progress = reconnect_job.is_some();
-            let icon = tab_kind_icon(self, &tab.kind);
+            let icon = tab_kind_icon(self, &tab.kind, cx);
             let tab_text = self.tab_display_title(tab);
             let tab_tooltip_label = tab_text.clone();
             let tab_tooltip_id = format!("workspace-tab-title-{}", tab_id.0);
@@ -327,7 +336,12 @@ impl WorkspaceApp {
             .into_any_element()
     }
 
-    fn render_detached_return_tab_placeholder(&self, tab: &Tab, tab_width: f32) -> AnyElement {
+    fn render_detached_return_tab_placeholder(
+        &self,
+        tab: &Tab,
+        tab_width: f32,
+        cx: &Context<Self>,
+    ) -> AnyElement {
         let theme = self.tokens.ui;
         let accent = theme.accent;
         let placeholder = div()
@@ -343,7 +357,7 @@ impl WorkspaceApp {
             .bg(rgba((accent << 8) | 0x18))
             .text_color(rgba((theme.text << 8) | 0xcc))
             .child(Self::render_lucide_icon(
-                tab_kind_icon(self, &tab.kind),
+                tab_kind_icon(self, &tab.kind, cx),
                 self.tokens.metrics.tab_icon_size,
                 rgba((accent << 8) | 0xcc),
             ))
@@ -503,7 +517,11 @@ impl WorkspaceApp {
         }
     }
 
-    fn render_exiting_tab_visual(&self, exiting: &ExitingTabVisual) -> AnyElement {
+    fn render_exiting_tab_visual(
+        &self,
+        exiting: &ExitingTabVisual,
+        cx: &Context<Self>,
+    ) -> AnyElement {
         let theme = self.tokens.ui;
         let tab = div()
             .h_full()
@@ -538,7 +556,7 @@ impl WorkspaceApp {
                 )
             })
             .child(Self::render_lucide_icon(
-                tab_kind_icon(self, &exiting.kind),
+                tab_kind_icon(self, &exiting.kind, cx),
                 self.tokens.metrics.tab_icon_size,
                 rgb(if exiting.was_active {
                     theme.text

@@ -228,7 +228,10 @@ impl WorkspaceApp {
                             self.i18n.t("settings_view.ai.acp_agent_args"),
                             self.i18n.t("settings_view.ai.acp_agent_args_placeholder"),
                             self.i18n.t("settings_view.ai.acp_agent_args_placeholder"),
-                            self.current_settings_input_value(SettingsInput::AiAcpAgentArgs(index)),
+                            self.current_settings_input_value(
+                                SettingsInput::AiAcpAgentArgs(index),
+                                cx,
+                            ),
                             AI_ACP_AGENT_TEXTAREA_MIN_H,
                             cx,
                         ),
@@ -240,7 +243,10 @@ impl WorkspaceApp {
                             self.i18n.t("settings_view.ai.acp_agent_env"),
                             self.i18n.t("settings_view.ai.acp_agent_env_placeholder"),
                             self.i18n.t("settings_view.ai.acp_agent_env_placeholder"),
-                            self.current_settings_input_value(SettingsInput::AiAcpAgentEnv(index)),
+                            self.current_settings_input_value(
+                                SettingsInput::AiAcpAgentEnv(index),
+                                cx,
+                            ),
                             AI_ACP_AGENT_TEXTAREA_MIN_H,
                             cx,
                         ),
@@ -547,7 +553,7 @@ impl WorkspaceApp {
             )
             .child(self.settings_text_input_control(
                 input,
-                self.current_settings_input_value(input),
+                self.current_settings_input_value(input, cx),
                 placeholder,
                 240.0,
                 cx,
@@ -1348,7 +1354,7 @@ impl WorkspaceApp {
         .on_mouse_down(
             MouseButton::Left,
             cx.listener(move |this, event: &gpui::MouseDownEvent, window, cx| {
-                let current = this.current_settings_input_value(input);
+                let current = this.current_settings_input_value(input, cx);
                 this.focus_settings_input(input, current, cx);
                 this.ime_marked_text = None;
                 window.focus(&this.focus_handle, cx);
@@ -1619,7 +1625,7 @@ impl WorkspaceApp {
             ),
             self.settings_text_input_control(
                 input,
-                self.current_settings_input_value(input),
+                self.current_settings_input_value(input, cx),
                 "Auto".to_string(),
                 AI_CONTEXT_NUMBER_W,
                 cx,
@@ -1646,7 +1652,10 @@ impl WorkspaceApp {
             format!("{model}:"),
             self.settings_text_input_control(
                 SettingsInput::AiActiveModelMaxResponseTokens,
-                self.current_settings_input_value(SettingsInput::AiActiveModelMaxResponseTokens),
+                self.current_settings_input_value(
+                    SettingsInput::AiActiveModelMaxResponseTokens,
+                    cx,
+                ),
                 "Auto".to_string(),
                 128.0,
                 cx,

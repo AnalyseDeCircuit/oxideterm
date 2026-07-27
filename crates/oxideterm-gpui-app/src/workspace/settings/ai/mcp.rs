@@ -727,7 +727,7 @@ impl WorkspaceApp {
                     self.i18n.t("settings_view.mcp.args"),
                     String::new(),
                     "--flag value".to_string(),
-                    self.current_settings_input_value(SettingsInput::AiMcpArgs),
+                    self.current_settings_input_value(SettingsInput::AiMcpArgs, cx),
                     AI_MCP_ARGS_TEXTAREA_MIN_H,
                     cx,
                 ),
@@ -801,7 +801,7 @@ impl WorkspaceApp {
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |this, event: &gpui::MouseDownEvent, window, cx| {
-                    let current = this.current_settings_input_value(input);
+                    let current = this.current_settings_input_value(input, cx);
                     this.focus_settings_input(input, current, cx);
                     this.ime_marked_text = None;
                     window.focus(&this.focus_handle, cx);
@@ -848,7 +848,7 @@ impl WorkspaceApp {
             )
             .child(self.ai_mcp_text_input_control(
                 input,
-                self.current_settings_input_value(input),
+                self.current_settings_input_value(input, cx),
                 placeholder,
                 false,
                 cx,
@@ -928,7 +928,7 @@ impl WorkspaceApp {
                             .min_w(px(0.0))
                             .child(self.ai_mcp_text_input_control(
                                 key_input,
-                                self.current_settings_input_value(key_input),
+                                self.current_settings_input_value(key_input, cx),
                                 if env {
                                     self.i18n.t("settings_view.mcp.env_key_placeholder")
                                 } else {
@@ -944,7 +944,7 @@ impl WorkspaceApp {
                             .min_w(px(0.0))
                             .child(self.ai_mcp_text_input_control(
                                 value_input,
-                                self.current_settings_input_value(value_input),
+                                self.current_settings_input_value(value_input, cx),
                                 if env {
                                     self.i18n.t("settings_view.mcp.env_value_placeholder")
                                 } else {
@@ -1060,7 +1060,7 @@ impl WorkspaceApp {
                             .min_w(px(0.0))
                             .child(self.ai_mcp_text_input_control(
                                 input,
-                                self.current_settings_input_value(input),
+                                self.current_settings_input_value(input, cx),
                                 self.i18n.t("settings_view.mcp.auth_token_placeholder"),
                                 secret,
                                 cx,

@@ -233,14 +233,14 @@ impl WorkspaceApp {
                 self.execute_selected_command_palette_item(window, cx);
             }
             "arrowdown" | "down" => {
-                let count = self.filtered_command_palette_items().len();
+                let count = self.filtered_command_palette_items(cx).len();
                 if count > 0 {
                     let next = (self.command_palette.selected_index + 1).min(count - 1);
                     if self.command_palette.selected_index != next {
                         // Boundary navigation is a no-op; avoid repainting the
                         // whole palette when the browser selection would stay put.
                         self.command_palette.selected_index = next;
-                        self.scroll_selected_command_palette_item_into_view();
+                        self.scroll_selected_command_palette_item_into_view(cx);
                         cx.notify();
                     }
                 }
@@ -249,17 +249,17 @@ impl WorkspaceApp {
                 let next = self.command_palette.selected_index.saturating_sub(1);
                 if self.command_palette.selected_index != next {
                     self.command_palette.selected_index = next;
-                    self.scroll_selected_command_palette_item_into_view();
+                    self.scroll_selected_command_palette_item_into_view(cx);
                     cx.notify();
                 }
             }
             "pagedown" => {
-                let count = self.filtered_command_palette_items().len();
+                let count = self.filtered_command_palette_items(cx).len();
                 if count > 0 {
                     let next = (self.command_palette.selected_index + 8).min(count - 1);
                     if self.command_palette.selected_index != next {
                         self.command_palette.selected_index = next;
-                        self.scroll_selected_command_palette_item_into_view();
+                        self.scroll_selected_command_palette_item_into_view(cx);
                         cx.notify();
                     }
                 }
@@ -268,24 +268,24 @@ impl WorkspaceApp {
                 let next = self.command_palette.selected_index.saturating_sub(8);
                 if self.command_palette.selected_index != next {
                     self.command_palette.selected_index = next;
-                    self.scroll_selected_command_palette_item_into_view();
+                    self.scroll_selected_command_palette_item_into_view(cx);
                     cx.notify();
                 }
             }
             "home" => {
                 if self.command_palette.selected_index != 0 {
                     self.command_palette.selected_index = 0;
-                    self.scroll_selected_command_palette_item_into_view();
+                    self.scroll_selected_command_palette_item_into_view(cx);
                     cx.notify();
                 }
             }
             "end" => {
-                let count = self.filtered_command_palette_items().len();
+                let count = self.filtered_command_palette_items(cx).len();
                 if count > 0 {
                     let next = count - 1;
                     if self.command_palette.selected_index != next {
                         self.command_palette.selected_index = next;
-                        self.scroll_selected_command_palette_item_into_view();
+                        self.scroll_selected_command_palette_item_into_view(cx);
                         cx.notify();
                     }
                 }
@@ -319,8 +319,8 @@ impl WorkspaceApp {
         cx.notify();
     }
 
-    fn scroll_selected_command_palette_item_into_view(&self) {
-        let ranked_items = self.ranked_command_palette_items();
+    fn scroll_selected_command_palette_item_into_view(&self, cx: &Context<Self>) {
+        let ranked_items = self.ranked_command_palette_items(cx);
         if let Some(child_index) =
             command_palette_scroll_child_index(&ranked_items, self.command_palette.selected_index)
         {
@@ -453,7 +453,7 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let items = self.filtered_command_palette_items();
+        let items = self.filtered_command_palette_items(cx);
         let Some(item) = items.get(self.command_palette.selected_index).cloned() else {
             return;
         };
@@ -872,14 +872,14 @@ impl WorkspaceApp {
         self.edit_settings(|settings| settings.terminal.theme = next_theme, cx);
     }
 
-    fn filtered_command_palette_items(&self) -> Vec<PaletteItem> {
-        self.ranked_command_palette_items()
+    fn filtered_command_palette_items(&self, cx: &Context<Self>) -> Vec<PaletteItem> {
+        self.ranked_command_palette_items(cx)
             .into_iter()
             .map(|ranked| ranked.item)
             .collect()
     }
 
-    fn ranked_command_palette_items(&self) -> Vec<RankedItem> {
+    fn ranked_command_palette_items(&self, cx: &Context<Self>) -> Vec<RankedItem> {
         let (mode, query) = parse_command_palette_query(&self.command_palette.raw_query);
         let mut ranked = Vec::new();
 
@@ -897,7 +897,7 @@ impl WorkspaceApp {
         let session_items = self.command_palette_session_items();
         let mut connection_items = self.command_palette_connection_items();
         connection_items.extend(self.command_palette_ssh_config_items());
-        let plugin_items = self.command_palette_plugin_items();
+        let plugin_items = self.command_palette_plugin_items(cx);
         let help_items = self.command_palette_help_items();
 
         if mode == PaletteMode::All && query.is_empty() {
@@ -1128,8 +1128,9 @@ impl WorkspaceApp {
             .collect()
     }
 
-    fn command_palette_plugin_items(&self) -> Vec<PaletteItem> {
-        let contributions = self.native_plugin_runtime.registry.contributions();
+    fn command_palette_plugin_items(&self, cx: &Context<Self>) -> Vec<PaletteItem> {
+        let plugin_entity = self.plugin_entity.read(cx);
+        let contributions = plugin_entity.registry().contributions();
         let mut items = Vec::new();
         items.extend(contributions.api_commands.iter().map(|command| {
             // Phase 2 mirrors Tauri command registry visibility without
@@ -1235,7 +1236,7 @@ impl WorkspaceApp {
     }
 
     pub(super) fn render_command_palette(&self, cx: &mut Context<Self>) -> AnyElement {
-        let ranked_items = self.ranked_command_palette_items();
+        let ranked_items = self.ranked_command_palette_items(cx);
         let (mode, _) = parse_command_palette_query(&self.command_palette.raw_query);
         let query_text = if self.command_palette.raw_query.is_empty() {
             self.i18n.t(command_palette_placeholder_key(mode))

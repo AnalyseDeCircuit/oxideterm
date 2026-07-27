@@ -595,7 +595,7 @@ impl WorkspaceApp {
                 self.i18n
                     .t("settings_view.knowledge.auto_embedding_provider")
             });
-        let model_value = self.current_settings_input_value(SettingsInput::AiEmbeddingModel);
+        let model_value = self.current_settings_input_value(SettingsInput::AiEmbeddingModel, cx);
         let status = match resolved.reason {
             oxideterm_ai::AiEmbeddingProviderReason::Ready => resolved
                 .provider

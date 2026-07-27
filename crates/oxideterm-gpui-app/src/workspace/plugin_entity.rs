@@ -8,7 +8,7 @@ use zeroize::Zeroizing;
 
 use super::plugin_lifecycle::{
     NativePluginConfirmDialog, NativePluginConfirmRequest, NativePluginProductUiEffect,
-    NativePluginSyncRequest, NativePluginTerminalRequest,
+    NativePluginRuntimeDelivery, NativePluginSyncRequest, NativePluginTerminalRequest,
 };
 #[cfg(test)]
 use super::plugin_lifecycle::{NativePluginSyncAction, NativePluginTerminalAction};
@@ -17,6 +17,7 @@ pub(in crate::workspace) enum PluginWorkspaceEvent {
     ManagerDeliveryReady,
     RuntimeRequestsReady,
     RuntimeSubscriptionSampleDue,
+    RuntimeIntentsReady,
 }
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -38,9 +39,50 @@ pub(in crate::workspace) struct PluginRuntimeRequestSenders {
     pub(in crate::workspace) sync: delivery::ActiveDeliverySender<NativePluginSyncRequest>,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(in crate::workspace) enum PluginRuntimeAdapterRefresh {
+    TerminalHooks,
+    TerminalInputInterceptors,
+    All,
+}
+
+pub(in crate::workspace) enum PluginRuntimeIntent {
+    ApplyEffects {
+        plugin_id: String,
+        effects: Vec<plugin_runtime::PluginOutboundEffect>,
+        refresh: PluginRuntimeAdapterRefresh,
+    },
+    StateChanged,
+}
+
+pub(in crate::workspace) const NATIVE_PLUGIN_RUNTIME_FAILURE_DIAGNOSTIC: &str =
+    "native_plugin_runtime_failure";
+
+fn native_plugin_runtime_failure_message(error: plugin_runtime::PluginError) -> String {
+    let plugin_runtime::PluginError {
+        code,
+        message,
+        recoverable: _,
+    } = error;
+    // Runtime text is plugin-controlled and may echo request data. Keep only
+    // known host codes and erase the raw text at the delivery boundary.
+    let _sensitive_message = Zeroizing::new(message);
+    if code == plugin_runtime::WASM_RUNTIME_NOT_INSTALLED_CODE {
+        code
+    } else {
+        NATIVE_PLUGIN_RUNTIME_FAILURE_DIAGNOSTIC.to_string()
+    }
+}
+
 /// Owns plugin workers and reliable delivery independently from plugin page visibility.
 pub(in crate::workspace) struct PluginWorkspaceEntity {
     task_runtime: Arc<tokio::runtime::Runtime>,
+    registry: Arc<plugin_host::NativePluginRegistry>,
+    runtime_host: Arc<tokio::sync::Mutex<plugin_runtime::NativePluginRuntimeHost>>,
+    runtime_delivery_tx: delivery::ActiveDeliverySender<NativePluginRuntimeDelivery>,
+    runtime_delivery_rx: std::sync::mpsc::Receiver<NativePluginRuntimeDelivery>,
+    runtime_intents: VecDeque<PluginRuntimeIntent>,
+    active_runtime_plugin_ids: HashSet<String>,
     manager_operation_in_flight: bool,
     manager_delivery_tx:
         delivery::ActiveDeliverySender<plugin_manager::NativePluginManagerDelivery>,
@@ -70,8 +112,10 @@ pub(in crate::workspace) struct PluginWorkspaceEntity {
 impl PluginWorkspaceEntity {
     pub(in crate::workspace) fn new(
         task_runtime: Arc<tokio::runtime::Runtime>,
+        registry: plugin_host::NativePluginRegistry,
         cx: &mut Context<Self>,
     ) -> Self {
+        let (runtime_delivery_tx, runtime_delivery_rx) = delivery::ActiveDeliverySender::channel();
         let (manager_delivery_tx, manager_delivery_rx) = delivery::ActiveDeliverySender::channel();
         let runtime_request_wake = delivery::ActiveDeliveryWake::default();
         let (confirm_tx, confirm_rx) =
@@ -82,6 +126,14 @@ impl PluginWorkspaceEntity {
             delivery::ActiveDeliverySender::channel_with_wake(runtime_request_wake.clone());
         let entity = Self {
             task_runtime,
+            registry: Arc::new(registry),
+            runtime_host: Arc::new(tokio::sync::Mutex::new(
+                plugin_runtime::NativePluginRuntimeHost::default(),
+            )),
+            runtime_delivery_tx,
+            runtime_delivery_rx,
+            runtime_intents: VecDeque::new(),
+            active_runtime_plugin_ids: HashSet::new(),
             manager_operation_in_flight: false,
             manager_delivery_tx,
             manager_delivery_rx,
@@ -106,6 +158,7 @@ impl PluginWorkspaceEntity {
             profiler_last_emitted: None,
             event_log_last_id: 0,
         };
+        entity.schedule_runtime_delivery(cx);
         entity.schedule_manager_delivery(cx);
         entity.schedule_runtime_request_delivery(cx);
         entity
@@ -113,6 +166,216 @@ impl PluginWorkspaceEntity {
 
     pub(in crate::workspace) fn manager_operation_in_flight(&self) -> bool {
         self.manager_operation_in_flight
+    }
+
+    pub(in crate::workspace) fn registry(&self) -> &plugin_host::NativePluginRegistry {
+        &self.registry
+    }
+
+    pub(in crate::workspace) fn registry_mut(&mut self) -> &mut plugin_host::NativePluginRegistry {
+        Arc::make_mut(&mut self.registry)
+    }
+
+    pub(in crate::workspace) fn registry_snapshot(&self) -> Arc<plugin_host::NativePluginRegistry> {
+        Arc::clone(&self.registry)
+    }
+
+    pub(in crate::workspace) fn replace_registry(
+        &mut self,
+        registry: plugin_host::NativePluginRegistry,
+    ) {
+        let enabled_runtime_plugin_ids = registry
+            .plugins()
+            .iter()
+            .filter(|plugin| {
+                matches!(
+                    plugin.state,
+                    plugin_host::NativePluginState::ReadyProcess
+                        | plugin_host::NativePluginState::ReadyWasm
+                        | plugin_host::NativePluginState::Loading
+                        | plugin_host::NativePluginState::Active
+                )
+            })
+            .map(|plugin| plugin.manifest.id.as_str())
+            .collect::<HashSet<_>>();
+        let stale_runtime_plugin_ids = self
+            .active_runtime_plugin_ids
+            .iter()
+            .filter(|plugin_id| !enabled_runtime_plugin_ids.contains(plugin_id.as_str()))
+            .cloned()
+            .collect::<Vec<_>>();
+        self.registry = Arc::new(registry);
+        for plugin_id in stale_runtime_plugin_ids {
+            self.start_runtime_deactivation(plugin_id);
+        }
+    }
+
+    pub(in crate::workspace) fn set_plugin_enabled(
+        &mut self,
+        plugin_id: &str,
+        enabled: bool,
+    ) -> Result<(), String> {
+        self.registry_mut().set_plugin_enabled(plugin_id, enabled)?;
+        if !enabled {
+            self.start_runtime_deactivation(plugin_id.to_string());
+        }
+        Ok(())
+    }
+
+    pub(in crate::workspace) fn uninstall_plugin(
+        &mut self,
+        plugin_id: &str,
+        remove_storage: bool,
+    ) -> Result<(), String> {
+        self.registry_mut()
+            .uninstall_plugin(plugin_id, remove_storage)?;
+        self.start_runtime_deactivation(plugin_id.to_string());
+        Ok(())
+    }
+
+    pub(in crate::workspace) fn runtime_host(
+        &self,
+    ) -> Arc<tokio::sync::Mutex<plugin_runtime::NativePluginRuntimeHost>> {
+        self.runtime_host.clone()
+    }
+
+    pub(in crate::workspace) fn start_runtime_bootstrap(
+        &mut self,
+        host_api_resolver: plugin_runtime::NativeHostApiResolver,
+        wasm_sidecar_path: Option<PathBuf>,
+    ) -> bool {
+        let process_plans = self.registry.process_activation_plans();
+        let wasm_plans = self.registry.wasm_activation_plans();
+        if process_plans.is_empty() && wasm_plans.is_empty() {
+            return false;
+        }
+        self.start_runtime_services();
+        for plan in &process_plans {
+            let _ = self.registry_mut().mark_runtime_loading(&plan.plugin_id);
+        }
+        for plan in &wasm_plans {
+            let _ = self.registry_mut().mark_runtime_loading(&plan.plugin_id);
+        }
+
+        let host = self.runtime_host.clone();
+        let delivery_tx = self.runtime_delivery_tx.clone();
+        self.task_runtime.spawn(async move {
+            let mut host = host.lock().await;
+            host.set_wasm_sidecar_path(wasm_sidecar_path);
+            host.set_host_api_resolver(host_api_resolver);
+            // Preserve deterministic activation order across process and WASM runtimes.
+            for plan in process_plans {
+                let plugin_id = plan.plugin_id.clone();
+                let result = match super::plugin_lifecycle::native_plugin_permissions(
+                    &plan.manifest,
+                    true,
+                ) {
+                    Ok(permissions) => {
+                        host.activate_process_plugin(
+                            plan.manifest,
+                            plan.install_dir,
+                            plan.entry,
+                            permissions,
+                            super::plugin_lifecycle::constants::NATIVE_PLUGIN_LIFECYCLE_TIMEOUT,
+                        )
+                        .await
+                    }
+                    Err(error) => Err(error),
+                };
+                if delivery_tx
+                    .send(NativePluginRuntimeDelivery::Activation { plugin_id, result })
+                    .is_err()
+                {
+                    return;
+                }
+            }
+            for plan in wasm_plans {
+                let plugin_id = plan.plugin_id.clone();
+                let result =
+                    match super::plugin_lifecycle::native_plugin_permissions(&plan.manifest, false)
+                    {
+                        Ok(permissions) => {
+                            host.activate_wasm_plugin(
+                                plan.manifest,
+                                plan.install_dir,
+                                plan.entry,
+                                permissions,
+                                super::plugin_lifecycle::constants::NATIVE_PLUGIN_LIFECYCLE_TIMEOUT,
+                            )
+                            .await
+                        }
+                        Err(error) => Err(error),
+                    };
+                if delivery_tx
+                    .send(NativePluginRuntimeDelivery::Activation { plugin_id, result })
+                    .is_err()
+                {
+                    return;
+                }
+            }
+        });
+        true
+    }
+
+    pub(in crate::workspace) fn start_runtime_command(
+        &self,
+        plugin_id: String,
+        command: String,
+        host_api_resolver: plugin_runtime::NativeHostApiResolver,
+    ) {
+        let host = self.runtime_host.clone();
+        let delivery_tx = self.runtime_delivery_tx.clone();
+        self.task_runtime.spawn(async move {
+            let mut host = host.lock().await;
+            host.set_host_api_resolver(host_api_resolver);
+            let result = host
+                .dispatch_command(
+                    &plugin_id,
+                    command,
+                    serde_json::Value::Null,
+                    super::plugin_lifecycle::constants::NATIVE_PLUGIN_LIFECYCLE_TIMEOUT,
+                )
+                .await;
+            let _ = delivery_tx
+                .send(NativePluginRuntimeDelivery::CommandDispatch { plugin_id, result });
+        });
+    }
+
+    pub(in crate::workspace) fn start_runtime_event(
+        &self,
+        plugin_id: String,
+        event: plugin_runtime::PluginEvent,
+        host_api_resolver: plugin_runtime::NativeHostApiResolver,
+    ) {
+        let host = self.runtime_host.clone();
+        let delivery_tx = self.runtime_delivery_tx.clone();
+        self.task_runtime.spawn(async move {
+            let mut host = host.lock().await;
+            host.set_host_api_resolver(host_api_resolver);
+            let result = host
+                .dispatch_event(
+                    &plugin_id,
+                    event,
+                    super::plugin_lifecycle::constants::NATIVE_PLUGIN_LIFECYCLE_TIMEOUT,
+                )
+                .await;
+            let _ =
+                delivery_tx.send(NativePluginRuntimeDelivery::EventDispatch { plugin_id, result });
+        });
+    }
+
+    fn start_runtime_deactivation(&self, plugin_id: String) {
+        let host = self.runtime_host.clone();
+        let delivery_tx = self.runtime_delivery_tx.clone();
+        self.task_runtime.spawn(async move {
+            let result = host.lock().await.deactivate_plugin(&plugin_id).await;
+            let _ =
+                delivery_tx.send(NativePluginRuntimeDelivery::Deactivation { plugin_id, result });
+        });
+    }
+
+    pub(in crate::workspace) fn take_runtime_intents(&mut self) -> VecDeque<PluginRuntimeIntent> {
+        std::mem::take(&mut self.runtime_intents)
     }
 
     pub(in crate::workspace) fn start_package_install(
@@ -405,6 +668,278 @@ impl PluginWorkspaceEntity {
         std::mem::replace(&mut self.event_log_last_id, next_last_id)
     }
 
+    fn schedule_runtime_delivery(&self, cx: &mut Context<Self>) {
+        let delivery_wake = self.runtime_delivery_tx.wake();
+        let release_wake = delivery_wake.clone();
+        cx.on_release(move |_, _| {
+            // Runtime workers may finish independently, but this UI waiter is workspace-scoped.
+            release_wake.stop();
+        })
+        .detach();
+        cx.spawn(async move |entity, cx| {
+            loop {
+                delivery_wake.wait().await;
+                let should_drain = delivery_wake.take();
+                let stopped = delivery_wake.is_stopped();
+                if should_drain {
+                    let backlog_remaining = entity
+                        .update(cx, |entity, cx| entity.drain_runtime_deliveries(cx))
+                        .unwrap_or(false);
+                    if backlog_remaining {
+                        delivery_wake.mark();
+                    }
+                }
+                if stopped {
+                    break;
+                }
+            }
+        })
+        .detach();
+    }
+
+    fn drain_runtime_deliveries(&mut self, cx: &mut Context<Self>) -> bool {
+        let drain = delivery::drain_channel(
+            &self.runtime_delivery_rx,
+            delivery::LIFECYCLE_DELIVERY_BUDGET,
+        );
+        if !drain.items.is_empty() {
+            for delivery in drain.items {
+                let intent = self.apply_runtime_delivery(delivery);
+                self.runtime_intents.push_back(intent);
+            }
+            cx.emit(PluginWorkspaceEvent::RuntimeIntentsReady);
+            cx.notify();
+        }
+        drain.outcome.backlog_remaining
+    }
+
+    fn apply_runtime_delivery(
+        &mut self,
+        delivery: NativePluginRuntimeDelivery,
+    ) -> PluginRuntimeIntent {
+        match delivery {
+            NativePluginRuntimeDelivery::Activation { plugin_id, result } => {
+                self.apply_activation_result(plugin_id, result)
+            }
+            NativePluginRuntimeDelivery::Deactivation { plugin_id, result } => {
+                self.apply_deactivation_result(plugin_id, result)
+            }
+            NativePluginRuntimeDelivery::CommandDispatch { plugin_id, result } => {
+                self.apply_command_dispatch_result(plugin_id, result)
+            }
+            NativePluginRuntimeDelivery::EventDispatch { plugin_id, result } => {
+                self.apply_event_dispatch_result(plugin_id, result)
+            }
+        }
+    }
+
+    fn apply_activation_result(
+        &mut self,
+        plugin_id: String,
+        result: Result<plugin_runtime::NativePluginRuntimeActivation, plugin_runtime::PluginError>,
+    ) -> PluginRuntimeIntent {
+        let activation = match result {
+            Ok(activation) => activation,
+            Err(error) => {
+                let message = native_plugin_runtime_failure_message(error);
+                let _ = self.registry_mut().mark_runtime_error(&plugin_id, message);
+                return PluginRuntimeIntent::StateChanged;
+            }
+        };
+
+        let plugin_runtime::NativePluginRuntimeActivation {
+            plugin_id: activated_plugin_id,
+            response,
+            messages,
+            effects,
+        } = activation;
+        if activated_plugin_id != plugin_id {
+            self.start_runtime_deactivation(activated_plugin_id.clone());
+            let _ = self.registry_mut().mark_runtime_error(
+                &plugin_id,
+                format!(
+                    "Runtime activated plugin \"{}\" while loading \"{}\"",
+                    activated_plugin_id, plugin_id
+                ),
+            );
+            return PluginRuntimeIntent::StateChanged;
+        }
+
+        for message in &messages {
+            if let Err(error) = self
+                .registry_mut()
+                .apply_runtime_outbound_message(&plugin_id, message)
+            {
+                self.registry_mut()
+                    .cleanup_runtime_plugin_contributions(&plugin_id);
+                let _ = self.registry_mut().mark_runtime_error(&plugin_id, error);
+                self.start_runtime_deactivation(plugin_id);
+                return PluginRuntimeIntent::StateChanged;
+            }
+        }
+
+        match response.result {
+            plugin_runtime::PluginResponseResult::Ok { .. } => {
+                let _ = self.registry_mut().mark_runtime_active(&plugin_id);
+                self.active_runtime_plugin_ids.insert(plugin_id.clone());
+            }
+            plugin_runtime::PluginResponseResult::Error { error } => {
+                self.registry_mut()
+                    .cleanup_runtime_plugin_contributions(&plugin_id);
+                let message = native_plugin_runtime_failure_message(error);
+                let _ = self.registry_mut().mark_runtime_error(&plugin_id, message);
+                self.start_runtime_deactivation(plugin_id.clone());
+            }
+        }
+
+        PluginRuntimeIntent::ApplyEffects {
+            plugin_id,
+            effects,
+            refresh: PluginRuntimeAdapterRefresh::TerminalHooks,
+        }
+    }
+
+    fn apply_deactivation_result(
+        &mut self,
+        plugin_id: String,
+        result: Result<plugin_runtime::PluginResponse, plugin_runtime::PluginError>,
+    ) -> PluginRuntimeIntent {
+        self.active_runtime_plugin_ids.remove(&plugin_id);
+        self.registry_mut()
+            .cleanup_runtime_plugin_contributions(&plugin_id);
+        match result {
+            Ok(response) => {
+                if let plugin_runtime::PluginResponseResult::Error { error } = response.result {
+                    let message = native_plugin_runtime_failure_message(error);
+                    self.registry_mut()
+                        .record_manager_error(plugin_id.clone(), message);
+                }
+            }
+            Err(error) => {
+                let message = native_plugin_runtime_failure_message(error);
+                self.registry_mut()
+                    .record_manager_error(plugin_id.clone(), message);
+            }
+        }
+        PluginRuntimeIntent::ApplyEffects {
+            plugin_id,
+            effects: Vec::new(),
+            refresh: PluginRuntimeAdapterRefresh::All,
+        }
+    }
+
+    fn apply_command_dispatch_result(
+        &mut self,
+        plugin_id: String,
+        result: Result<
+            plugin_runtime::NativePluginRuntimeCommandDispatch,
+            plugin_runtime::PluginError,
+        >,
+    ) -> PluginRuntimeIntent {
+        let dispatch = match result {
+            Ok(dispatch) => dispatch,
+            Err(error) => {
+                let message = native_plugin_runtime_failure_message(error);
+                self.registry_mut().record_manager_error(plugin_id, message);
+                return PluginRuntimeIntent::StateChanged;
+            }
+        };
+
+        let plugin_runtime::NativePluginRuntimeCommandDispatch {
+            plugin_id: dispatched_plugin_id,
+            command: _command,
+            response,
+            messages,
+            effects,
+        } = dispatch;
+        if dispatched_plugin_id != plugin_id {
+            self.registry_mut().record_manager_error(
+                plugin_id,
+                NATIVE_PLUGIN_RUNTIME_FAILURE_DIAGNOSTIC.to_string(),
+            );
+            return PluginRuntimeIntent::StateChanged;
+        }
+
+        for message in &messages {
+            if let Err(error) = self
+                .registry_mut()
+                .apply_runtime_outbound_message(&dispatched_plugin_id, message)
+            {
+                self.registry_mut().record_manager_error(
+                    dispatched_plugin_id.clone(),
+                    format!("Native plugin command contribution update failed: {error}"),
+                );
+            }
+        }
+        if let plugin_runtime::PluginResponseResult::Error { error } = response.result {
+            let message = native_plugin_runtime_failure_message(error);
+            self.registry_mut()
+                .record_manager_error(dispatched_plugin_id.clone(), message);
+        }
+
+        PluginRuntimeIntent::ApplyEffects {
+            plugin_id: dispatched_plugin_id,
+            effects,
+            refresh: PluginRuntimeAdapterRefresh::TerminalHooks,
+        }
+    }
+
+    fn apply_event_dispatch_result(
+        &mut self,
+        plugin_id: String,
+        result: Result<
+            plugin_runtime::NativePluginRuntimeEventDispatch,
+            plugin_runtime::PluginError,
+        >,
+    ) -> PluginRuntimeIntent {
+        let dispatch = match result {
+            Ok(dispatch) => dispatch,
+            Err(error) => {
+                let message = native_plugin_runtime_failure_message(error);
+                self.registry_mut().record_manager_error(plugin_id, message);
+                return PluginRuntimeIntent::StateChanged;
+            }
+        };
+
+        let plugin_runtime::NativePluginRuntimeEventDispatch {
+            plugin_id: dispatched_plugin_id,
+            event: _event,
+            response,
+            messages,
+            effects,
+        } = dispatch;
+        if dispatched_plugin_id != plugin_id {
+            self.registry_mut().record_manager_error(
+                plugin_id,
+                NATIVE_PLUGIN_RUNTIME_FAILURE_DIAGNOSTIC.to_string(),
+            );
+            return PluginRuntimeIntent::StateChanged;
+        }
+
+        for message in &messages {
+            if let Err(error) = self
+                .registry_mut()
+                .apply_runtime_outbound_message(&dispatched_plugin_id, message)
+            {
+                self.registry_mut().record_manager_error(
+                    dispatched_plugin_id.clone(),
+                    format!("Native plugin event contribution update failed: {error}"),
+                );
+            }
+        }
+        if let plugin_runtime::PluginResponseResult::Error { error } = response.result {
+            let message = native_plugin_runtime_failure_message(error);
+            self.registry_mut()
+                .record_manager_error(dispatched_plugin_id.clone(), message);
+        }
+
+        PluginRuntimeIntent::ApplyEffects {
+            plugin_id: dispatched_plugin_id,
+            effects,
+            refresh: PluginRuntimeAdapterRefresh::TerminalInputInterceptors,
+        }
+    }
+
     fn schedule_manager_delivery(&self, cx: &mut Context<Self>) {
         let delivery_wake = self.manager_delivery_tx.wake();
         let release_wake = delivery_wake.clone();
@@ -491,7 +1026,9 @@ mod tests {
                 .build()
                 .expect("plugin entity test runtime"),
         );
-        let entity = cx.new(|cx| PluginWorkspaceEntity::new(runtime, cx));
+        let entity = cx.new(|cx| {
+            PluginWorkspaceEntity::new(runtime, plugin_host::NativePluginRegistry::default(), cx)
+        });
         let delivery_tx = entity.update(cx, |entity, _cx| {
             entity.manager_operation_in_flight = true;
             entity.manager_delivery_tx.clone()
@@ -523,7 +1060,9 @@ mod tests {
                 .build()
                 .expect("plugin entity test runtime"),
         );
-        let entity = cx.new(|cx| PluginWorkspaceEntity::new(runtime, cx));
+        let entity = cx.new(|cx| {
+            PluginWorkspaceEntity::new(runtime, plugin_host::NativePluginRegistry::default(), cx)
+        });
         let senders = entity.read_with(cx, |entity, _cx| entity.runtime_request_senders());
         let (first_confirm_tx, first_confirm_rx) = std::sync::mpsc::channel();
         let (second_confirm_tx, _second_confirm_rx) = std::sync::mpsc::channel();
@@ -608,6 +1147,91 @@ mod tests {
     }
 
     #[gpui::test]
+    fn runtime_delivery_is_entity_owned_and_redacts_plugin_error_text(cx: &mut TestAppContext) {
+        let runtime = Arc::new(
+            tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .expect("plugin entity test runtime"),
+        );
+        let entity = cx.new(|cx| {
+            PluginWorkspaceEntity::new(runtime, plugin_host::NativePluginRegistry::default(), cx)
+        });
+        let delivery_tx = entity.read_with(cx, |entity, _cx| entity.runtime_delivery_tx.clone());
+        let sensitive_marker = "token=must-not-reach-diagnostics";
+        delivery_tx
+            .send(NativePluginRuntimeDelivery::CommandDispatch {
+                plugin_id: "plugin.test".to_string(),
+                result: Err(plugin_runtime::PluginError::runtime(
+                    "command_failed",
+                    sensitive_marker,
+                )),
+            })
+            .expect("runtime delivery");
+
+        cx.run_until_parked();
+
+        entity.update(cx, |entity, _cx| {
+            assert!(matches!(
+                entity.take_runtime_intents().pop_front(),
+                Some(PluginRuntimeIntent::StateChanged)
+            ));
+            let diagnostic = entity
+                .registry()
+                .diagnostics()
+                .last()
+                .expect("sanitized runtime diagnostic");
+            assert_eq!(diagnostic.message, NATIVE_PLUGIN_RUNTIME_FAILURE_DIAGNOSTIC);
+            assert!(!diagnostic.message.contains(sensitive_marker));
+        });
+    }
+
+    #[gpui::test]
+    fn deactivation_releases_entity_runtime_ownership_and_refreshes_adapters(
+        cx: &mut TestAppContext,
+    ) {
+        let runtime = Arc::new(
+            tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .expect("plugin entity test runtime"),
+        );
+        let entity = cx.new(|cx| {
+            PluginWorkspaceEntity::new(runtime, plugin_host::NativePluginRegistry::default(), cx)
+        });
+
+        entity.update(cx, |entity, _cx| {
+            let plugin_id = "plugin.test".to_string();
+            entity.active_runtime_plugin_ids.insert(plugin_id.clone());
+            let intent = entity.apply_deactivation_result(
+                plugin_id.clone(),
+                Err(plugin_runtime::PluginError::runtime(
+                    "deactivate_failed",
+                    "credential-like runtime text",
+                )),
+            );
+
+            assert!(!entity.active_runtime_plugin_ids.contains(&plugin_id));
+            assert!(matches!(
+                intent,
+                PluginRuntimeIntent::ApplyEffects {
+                    refresh: PluginRuntimeAdapterRefresh::All,
+                    ..
+                }
+            ));
+            assert_eq!(
+                entity
+                    .registry()
+                    .diagnostics()
+                    .last()
+                    .expect("deactivation diagnostic")
+                    .message,
+                NATIVE_PLUGIN_RUNTIME_FAILURE_DIAGNOSTIC
+            );
+        });
+    }
+
+    #[gpui::test]
     fn entity_release_stops_plugin_delivery_waiters(cx: &mut TestAppContext) {
         let runtime = Arc::new(
             tokio::runtime::Builder::new_current_thread()
@@ -615,11 +1239,14 @@ mod tests {
                 .build()
                 .expect("plugin entity test runtime"),
         );
-        let entity = cx.new(|cx| PluginWorkspaceEntity::new(runtime, cx));
-        let (manager_wake, runtime_request_wake) = cx.read(|cx| {
+        let entity = cx.new(|cx| {
+            PluginWorkspaceEntity::new(runtime, plugin_host::NativePluginRegistry::default(), cx)
+        });
+        let (manager_wake, runtime_delivery_wake, runtime_request_wake) = cx.read(|cx| {
             let entity = entity.read(cx);
             (
                 entity.manager_delivery_tx.wake(),
+                entity.runtime_delivery_tx.wake(),
                 entity.runtime_request_wake.clone(),
             )
         });
@@ -630,6 +1257,7 @@ mod tests {
 
         // Releasing the Entity ends UI delivery without cancelling backend work.
         assert!(manager_wake.is_stopped());
+        assert!(runtime_delivery_wake.is_stopped());
         assert!(runtime_request_wake.is_stopped());
     }
 
@@ -641,7 +1269,9 @@ mod tests {
                 .build()
                 .expect("plugin entity test runtime"),
         );
-        let entity = cx.new(|cx| PluginWorkspaceEntity::new(runtime, cx));
+        let entity = cx.new(|cx| {
+            PluginWorkspaceEntity::new(runtime, plugin_host::NativePluginRegistry::default(), cx)
+        });
         let initial_layout = serde_json::json!({"tabCount": 1});
         entity.update(cx, |entity, cx| {
             assert!(entity.start_runtime_services());

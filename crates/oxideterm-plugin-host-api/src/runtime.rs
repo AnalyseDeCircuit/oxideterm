@@ -492,34 +492,36 @@ impl NativePluginRuntimeHost {
         // contributions are cleaned by WorkspaceApp after this call so registry
         // mutation stays on the UI thread.
         let response = if let Some(mut runtime) = self.process_runtimes.remove(plugin_id) {
-            runtime.deactivate().await?
+            runtime.deactivate().await
         } else if let Some(mut runtime) = self.sidecar_wasm_runtimes.remove(plugin_id) {
-            runtime.deactivate().await?
+            runtime.deactivate().await
         } else {
             #[cfg(feature = "wasm-runtime")]
             {
                 if let Some(mut runtime) = self.wasm_runtimes.remove(plugin_id) {
-                    runtime.deactivate().await?
+                    runtime.deactivate().await
                 } else {
-                    PluginResponse::ok(
+                    Ok(PluginResponse::ok(
                         format!("deactivate:{plugin_id}"),
                         serde_json::json!({ "state": "not-running" }),
-                    )
+                    ))
                 }
             }
             #[cfg(not(feature = "wasm-runtime"))]
             {
-                PluginResponse::ok(
+                Ok(PluginResponse::ok(
                     format!("deactivate:{plugin_id}"),
                     serde_json::json!({ "state": "not-running" }),
-                )
+                ))
             }
         };
+        // Permission snapshots must not outlive the runtime even when its
+        // deactivation callback reports an error.
         self.process_permissions.remove(plugin_id);
         self.sidecar_wasm_permissions.remove(plugin_id);
         #[cfg(feature = "wasm-runtime")]
         self.wasm_permissions.remove(plugin_id);
-        Ok(response)
+        response
     }
 }
 
