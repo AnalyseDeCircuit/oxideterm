@@ -134,77 +134,6 @@ impl WorkspaceApp {
         }
     }
 
-    pub(in crate::workspace) fn poll_node_events(
-        &mut self,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> bool {
-        let started_at = Instant::now();
-        let mut events = Vec::new();
-        let mut source_exhausted = false;
-        while delivery::LIFECYCLE_DELIVERY_BUDGET.allows_next(events.len(), started_at.elapsed()) {
-            match self.node_event_rx.try_recv() {
-                Ok(event) => events.push(event),
-                Err(
-                    std::sync::mpsc::TryRecvError::Empty
-                    | std::sync::mpsc::TryRecvError::Disconnected,
-                ) => {
-                    source_exhausted = true;
-                    break;
-                }
-            }
-        }
-
-        let mut changed = false;
-        for event in events {
-            changed |= self.apply_node_event(event, window, cx);
-        }
-        if changed {
-            self.refresh_ssh_terminal_input_locks(cx);
-            cx.notify();
-        }
-        !source_exhausted
-    }
-
-    pub(in crate::workspace) fn schedule_node_event_delivery(
-        &self,
-        window_handle: AnyWindowHandle,
-        cx: &mut Context<Self>,
-    ) {
-        let event_wake = self.node_event_wake.clone();
-        let release_wake = event_wake.clone();
-        cx.on_release(move |_, _| {
-            // The router owns node lifecycles; workspace release only stops its UI waiter.
-            release_wake.stop();
-        })
-        .detach();
-        cx.spawn(async move |weak, cx| {
-            loop {
-                event_wake.wait().await;
-                let should_drain = event_wake.take();
-                let stopped = event_wake.is_stopped();
-                if !should_drain {
-                    if stopped {
-                        break;
-                    }
-                    continue;
-                }
-                let Ok(Ok(backlog_remaining)) = cx.update_window(window_handle, |_, window, cx| {
-                    weak.update(cx, |workspace, cx| workspace.poll_node_events(window, cx))
-                }) else {
-                    break;
-                };
-                if backlog_remaining {
-                    // Continue a bounded lifecycle batch without waiting for the heartbeat.
-                    event_wake.mark();
-                } else if stopped {
-                    break;
-                }
-            }
-        })
-        .detach();
-    }
-
     pub(in crate::workspace) fn handle_workspace_runtime_event(
         &mut self,
         event: &runtime_entity::WorkspaceRuntimeEvent,
@@ -217,6 +146,16 @@ impl WorkspaceApp {
                     let _ = cx.update_window(window_handle, |_, window, cx| {
                         weak.update(cx, |workspace, cx| {
                             workspace.apply_workspace_runtime_worker_results(window, cx);
+                        })
+                    });
+                })
+                .detach();
+            }
+            runtime_entity::WorkspaceRuntimeEvent::NodeEventsReady => {
+                cx.spawn(async move |weak, cx| {
+                    let _ = cx.update_window(window_handle, |_, window, cx| {
+                        weak.update(cx, |workspace, cx| {
+                            workspace.apply_workspace_runtime_node_events(window, cx);
                         })
                     });
                 })
@@ -239,6 +178,19 @@ impl WorkspaceApp {
             .update(cx, |runtime, _cx| runtime.take_worker_results());
         self.apply_ssh_worker_results(ssh_results, window, cx);
         self.apply_reconnect_worker_results(reconnect_results, window, cx);
+    }
+
+    fn apply_workspace_runtime_node_events(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let events = self
+            .workspace_runtime
+            .update(cx, |runtime, _cx| runtime.take_node_events());
+        let changed = events.into_iter().fold(false, |changed, event| {
+            self.apply_node_event(event, window, cx) || changed
+        });
+        if changed {
+            self.refresh_ssh_terminal_input_locks(cx);
+            cx.notify();
+        }
     }
 
     fn refresh_ssh_terminal_input_locks(&mut self, cx: &mut Context<Self>) {
@@ -1005,22 +957,17 @@ impl WorkspaceApp {
             }
             NodeStateEvent::ConnectionStateChanged {
                 node_id,
-                generation,
+                generation: _,
                 state,
                 reason,
             } => {
                 let node_id = NodeId::new(node_id);
-                if self.is_stale_node_event(&node_id, generation) {
-                    return false;
-                }
                 self.ensure_workspace_ssh_node_from_runtime(&node_id);
                 let _ = self.node_router.sync_node_readiness_event(
                     &node_id,
                     state.clone(),
                     reason.clone(),
                 );
-                self.node_event_generations
-                    .insert(node_id.clone(), generation);
                 let previous = self
                     .ssh_nodes
                     .get(&node_id)
@@ -1119,16 +1066,11 @@ impl WorkspaceApp {
             }
             NodeStateEvent::SftpReady {
                 node_id,
-                generation,
+                generation: _,
                 ready,
                 cwd,
             } => {
                 let node_id = NodeId::new(node_id);
-                if self.is_stale_node_event(&node_id, generation) {
-                    return false;
-                }
-                self.node_event_generations
-                    .insert(node_id.clone(), generation);
                 self.apply_sftp_ready_event(&node_id, ready, cwd);
                 true
             }
@@ -1232,12 +1174,6 @@ impl WorkspaceApp {
             });
         }
         affected.len()
-    }
-
-    fn is_stale_node_event(&self, node_id: &NodeId, generation: u64) -> bool {
-        self.node_event_generations
-            .get(node_id)
-            .is_some_and(|seen| generation <= *seen)
     }
 
     fn remount_terminal_panes_for_reconnect(

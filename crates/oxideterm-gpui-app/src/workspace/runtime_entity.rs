@@ -9,6 +9,7 @@ const ACTIVE_PROBE_START_DELAY: Duration = Duration::from_millis(530);
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(in crate::workspace) enum WorkspaceRuntimeEvent {
     WorkerResultsReady,
+    NodeEventsReady,
     ActiveConnectionsChanged,
 }
 
@@ -20,8 +21,12 @@ pub(in crate::workspace) struct WorkspaceRuntimeEntity {
     reconnect_worker_rx: std::sync::mpsc::Receiver<ReconnectWorkerResult>,
     active_probe_tx: delivery::ActiveDeliverySender<usize>,
     active_probe_rx: std::sync::mpsc::Receiver<usize>,
+    _node_event_subscription: NodeEventSubscription,
+    node_event_rx: NodeEventReceiver,
     ssh_results: VecDeque<SshConnectionWorkerResult>,
     reconnect_results: VecDeque<ReconnectWorkerResult>,
+    node_events: VecDeque<NodeStateEvent>,
+    node_event_generations: HashMap<NodeId, u64>,
     ssh_registry: SshConnectionRegistry,
     task_runtime: Arc<tokio::runtime::Runtime>,
     reconnect_timing: ReconnectTiming,
@@ -32,6 +37,7 @@ pub(in crate::workspace) struct WorkspaceRuntimeEntity {
 impl WorkspaceRuntimeEntity {
     pub(in crate::workspace) fn new(
         ssh_registry: SshConnectionRegistry,
+        node_event_emitter: NodeEventEmitter,
         task_runtime: Arc<tokio::runtime::Runtime>,
         reconnect_timing: ReconnectTiming,
         cx: &mut Context<Self>,
@@ -42,7 +48,13 @@ impl WorkspaceRuntimeEntity {
         let (reconnect_worker_tx, reconnect_worker_rx) =
             delivery::ActiveDeliverySender::channel_with_wake(runtime_wake.clone());
         let (active_probe_tx, active_probe_rx) =
-            delivery::ActiveDeliverySender::channel_with_wake(runtime_wake);
+            delivery::ActiveDeliverySender::channel_with_wake(runtime_wake.clone());
+        // Node state is a latest-value stream. Its bounded mailbox may retain
+        // reliable lifecycle events beyond capacity, while the shared wake
+        // lets this Entity drain every runtime source without a root waiter.
+        let emitter_wake = runtime_wake.clone();
+        let (node_event_subscription, node_event_rx) = node_event_emitter
+            .subscribe_bounded_with_wake(256, Some(Arc::new(move || emitter_wake.mark())));
         let mut entity = Self {
             ssh_worker_tx,
             ssh_worker_rx,
@@ -50,8 +62,12 @@ impl WorkspaceRuntimeEntity {
             reconnect_worker_rx,
             active_probe_tx,
             active_probe_rx,
+            _node_event_subscription: node_event_subscription,
+            node_event_rx,
             ssh_results: VecDeque::new(),
             reconnect_results: VecDeque::new(),
+            node_events: VecDeque::new(),
+            node_event_generations: HashMap::new(),
             ssh_registry,
             task_runtime,
             reconnect_timing,
@@ -96,6 +112,10 @@ impl WorkspaceRuntimeEntity {
             std::mem::take(&mut self.ssh_results),
             std::mem::take(&mut self.reconnect_results),
         )
+    }
+
+    pub(in crate::workspace) fn take_node_events(&mut self) -> VecDeque<NodeStateEvent> {
+        std::mem::take(&mut self.node_events)
     }
 
     fn schedule_worker_delivery(&self, cx: &mut Context<Self>) {
@@ -172,10 +192,19 @@ impl WorkspaceRuntimeEntity {
         );
         let active_probe_batch =
             delivery::drain_channel(&self.active_probe_rx, delivery::LIFECYCLE_DELIVERY_BUDGET);
+        let (node_event_items, node_event_backlog_remaining) =
+            drain_node_event_mailbox(&self.node_event_rx);
         let received_ssh_results = !ssh_batch.items.is_empty();
         self.ssh_results.extend(ssh_batch.items);
         let received_reconnect_results = !reconnect_batch.items.is_empty();
         self.reconnect_results.extend(reconnect_batch.items);
+        let mut received_node_events = false;
+        for event in node_event_items {
+            if self.accept_node_event(&event) {
+                self.node_events.push_back(event);
+                received_node_events = true;
+            }
+        }
         let active_probe_completed = !active_probe_batch.items.is_empty();
         let active_connections_changed = active_probe_batch
             .items
@@ -188,12 +217,68 @@ impl WorkspaceRuntimeEntity {
         if received_ssh_results || received_reconnect_results {
             cx.emit(WorkspaceRuntimeEvent::WorkerResultsReady);
         }
+        if received_node_events {
+            cx.emit(WorkspaceRuntimeEvent::NodeEventsReady);
+        }
         if active_connections_changed {
             cx.emit(WorkspaceRuntimeEvent::ActiveConnectionsChanged);
         }
         ssh_batch.outcome.backlog_remaining
             || reconnect_batch.outcome.backlog_remaining
             || active_probe_batch.outcome.backlog_remaining
+            || node_event_backlog_remaining
+    }
+
+    fn accept_node_event(&mut self, event: &NodeStateEvent) -> bool {
+        let Some((node_id, generation)) = node_event_generation(event) else {
+            return true;
+        };
+        if self
+            .node_event_generations
+            .get(&node_id)
+            .is_some_and(|seen| generation <= *seen)
+        {
+            return false;
+        }
+        self.node_event_generations.insert(node_id, generation);
+        true
+    }
+}
+
+fn drain_node_event_mailbox(receiver: &NodeEventReceiver) -> (Vec<NodeStateEvent>, bool) {
+    let started_at = Instant::now();
+    let mut events = Vec::new();
+    while delivery::LIFECYCLE_DELIVERY_BUDGET.allows_next(events.len(), started_at.elapsed()) {
+        match receiver.try_recv() {
+            Ok(event) => events.push(event),
+            Err(
+                std::sync::mpsc::TryRecvError::Empty | std::sync::mpsc::TryRecvError::Disconnected,
+            ) => return (events, false),
+        }
+    }
+    // Re-marking once when the budget ends on an empty mailbox is harmless and
+    // avoids consuming an extra lifecycle event merely to detect backlog.
+    (events, true)
+}
+
+fn node_event_generation(event: &NodeStateEvent) -> Option<(NodeId, u64)> {
+    match event {
+        NodeStateEvent::ConnectionStatusChanged { .. } => None,
+        NodeStateEvent::ConnectionStateChanged {
+            node_id,
+            generation,
+            ..
+        }
+        | NodeStateEvent::SftpReady {
+            node_id,
+            generation,
+            ..
+        }
+        | NodeStateEvent::TerminalEndpointChanged {
+            node_id,
+            generation,
+            ..
+        } => Some((NodeId::new(node_id.clone()), *generation)),
     }
 }
 
@@ -234,7 +319,13 @@ mod tests {
         let ssh_registry = SshConnectionRegistry::new(ConnectionPoolConfig::default());
         let task_runtime = test_task_runtime();
         cx.new(|cx| {
-            WorkspaceRuntimeEntity::new(ssh_registry, task_runtime, ReconnectTiming::default(), cx)
+            WorkspaceRuntimeEntity::new(
+                ssh_registry,
+                NodeEventEmitter::default(),
+                task_runtime,
+                ReconnectTiming::default(),
+                cx,
+            )
         })
     }
 
@@ -343,6 +434,7 @@ mod tests {
         let entity = cx.new(|cx| {
             WorkspaceRuntimeEntity::new(
                 entity_registry,
+                NodeEventEmitter::default(),
                 task_runtime,
                 ReconnectTiming::default(),
                 cx,
@@ -358,5 +450,69 @@ mod tests {
             .info();
         assert_eq!(connection_info.ref_count, 1);
         assert_eq!(connection_info.consumers, vec![node_consumer]);
+    }
+
+    #[gpui::test]
+    fn node_event_delivery_filters_stale_generations_inside_entity(cx: &mut TestAppContext) {
+        let ssh_registry = SshConnectionRegistry::new(ConnectionPoolConfig::default());
+        let node_event_emitter = NodeEventEmitter::default();
+        let entity_emitter = node_event_emitter.clone();
+        let task_runtime = test_task_runtime();
+        let entity = cx.new(|cx| {
+            WorkspaceRuntimeEntity::new(
+                ssh_registry,
+                entity_emitter,
+                task_runtime,
+                ReconnectTiming::default(),
+                cx,
+            )
+        });
+        let node_events_ready = Arc::new(AtomicBool::new(false));
+        let node_events_ready_flag = node_events_ready.clone();
+        let _event_subscription = entity.update(cx, |_, cx| {
+            cx.subscribe(&entity, move |_, _, event: &WorkspaceRuntimeEvent, _cx| {
+                if *event == WorkspaceRuntimeEvent::NodeEventsReady {
+                    node_events_ready_flag.store(true, Ordering::Release);
+                }
+            })
+        });
+
+        node_event_emitter.emit(NodeStateEvent::ConnectionStateChanged {
+            node_id: "node-a".to_string(),
+            generation: 2,
+            state: NodeReadiness::Ready,
+            reason: String::new(),
+        });
+        node_event_emitter.emit(NodeStateEvent::SftpReady {
+            node_id: "node-a".to_string(),
+            generation: 1,
+            ready: true,
+            cwd: Some("/tmp".to_string()),
+        });
+        node_event_emitter.emit(NodeStateEvent::TerminalEndpointChanged {
+            node_id: "node-a".to_string(),
+            generation: 3,
+            available: true,
+        });
+
+        cx.run_until_parked();
+        assert!(node_events_ready.load(Ordering::Acquire));
+
+        entity.update(cx, |entity, _cx| {
+            let events = entity.take_node_events();
+            assert_eq!(events.len(), 2);
+            assert!(matches!(
+                events.front(),
+                Some(NodeStateEvent::ConnectionStateChanged { generation: 2, .. })
+            ));
+            assert!(matches!(
+                events.back(),
+                Some(NodeStateEvent::TerminalEndpointChanged { generation: 3, .. })
+            ));
+            assert_eq!(
+                entity.node_event_generations.get(&NodeId::new("node-a")),
+                Some(&3)
+            );
+        });
     }
 }

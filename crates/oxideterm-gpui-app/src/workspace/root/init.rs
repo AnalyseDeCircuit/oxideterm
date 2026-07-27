@@ -91,6 +91,7 @@ impl WorkspaceApp {
         let workspace_runtime = cx.new(|cx| {
             runtime_entity::WorkspaceRuntimeEntity::new(
                 ssh_registry.clone(),
+                node_router.emitter().clone(),
                 forwarding_runtime.clone(),
                 reconnect_timing_from_settings(&settings),
                 cx,
@@ -125,13 +126,6 @@ impl WorkspaceApp {
             // forwarding surface without mirroring fields back to the root.
             cx.notify();
         });
-        // Node state is a latest-value stream. Bound and coalesce its mailbox so
-        // a suspended UI cannot retain an unbounded event backlog.
-        let node_event_wake = delivery::ActiveDeliveryWake::default();
-        let emitter_wake = node_event_wake.clone();
-        let (node_event_subscription, node_event_rx) = node_router
-            .emitter()
-            .subscribe_bounded_with_wake(256, Some(Arc::new(move || emitter_wake.mark())));
         let (sftp_worker_tx, mut sftp_worker_rx) = tokio::sync::mpsc::unbounded_channel();
         let (terminal_notice_tx, terminal_notice_rx) = delivery::ActiveDeliverySender::channel();
         let terminal_metadata_wake = delivery::ActiveDeliveryWake::default();
@@ -532,10 +526,6 @@ impl WorkspaceApp {
             sftp_progress_store,
             node_runtime_store,
             node_router,
-            _node_event_subscription: node_event_subscription,
-            node_event_rx,
-            node_event_wake,
-            node_event_generations: HashMap::new(),
             reconnect_orchestrator: ReconnectOrchestratorStore::new(
                 reconnect_timing_from_settings(&settings),
                 reconnect_max_attempts_from_settings(&settings),
@@ -776,7 +766,6 @@ impl WorkspaceApp {
         workspace.schedule_terminal_metadata_delivery(cx);
         workspace.schedule_native_update_delivery(cx);
         let window_handle = window.window_handle();
-        workspace.schedule_node_event_delivery(window_handle, cx);
         workspace.schedule_graphics_worker_delivery(window_handle, cx);
         cx.spawn(async move |weak, cx| {
             loop {
