@@ -938,6 +938,13 @@ impl WorkspaceApp {
         {
             self.main_window_tabs.context_menu = None;
         }
+        if let TabKind::Plugin { plugin_id, tab_id } = &tab.kind {
+            self.plugin_entity.update(cx, |plugins, _cx| {
+                plugins
+                    .ui_state_mut()
+                    .remove_surface(plugin_id, "tab", tab_id);
+            });
+        }
         if tab.kind == TabKind::Graphics {
             self.shutdown_graphics_session();
         }

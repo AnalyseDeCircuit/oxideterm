@@ -111,6 +111,7 @@ pub(in crate::workspace) struct PluginWorkspaceEntity {
     runtime_intents: VecDeque<PluginRuntimeIntent>,
     active_runtime_plugin_ids: HashSet<String>,
     manager_state: plugin_manager::NativePluginManagerState,
+    ui_state: plugin_ui::NativePluginUiState,
     manager_operation_in_flight: bool,
     manager_delivery_tx:
         delivery::ActiveDeliverySender<plugin_manager::NativePluginManagerDelivery>,
@@ -170,6 +171,7 @@ impl PluginWorkspaceEntity {
             runtime_intents: VecDeque::new(),
             active_runtime_plugin_ids: HashSet::new(),
             manager_state: plugin_manager::NativePluginManagerState::new(),
+            ui_state: plugin_ui::NativePluginUiState::default(),
             manager_operation_in_flight: false,
             manager_delivery_tx,
             manager_delivery_rx,
@@ -218,6 +220,27 @@ impl PluginWorkspaceEntity {
         &mut self,
     ) -> &mut plugin_manager::NativePluginManagerState {
         &mut self.manager_state
+    }
+
+    pub(in crate::workspace) fn ui_state(&self) -> &plugin_ui::NativePluginUiState {
+        &self.ui_state
+    }
+
+    pub(in crate::workspace) fn ui_state_mut(&mut self) -> &mut plugin_ui::NativePluginUiState {
+        &mut self.ui_state
+    }
+
+    pub(in crate::workspace) fn select_sidebar_panel(
+        &mut self,
+        selection: plugin_ui::NativePluginSidebarPanelSelection,
+    ) {
+        let previous = self.manager_state.active_sidebar_panel.replace(selection);
+        if let Some(previous) = previous
+            && self.manager_state.active_sidebar_panel.as_ref() != Some(&previous)
+        {
+            self.ui_state
+                .remove_surface(&previous.plugin_id, "sidebarPanel", &previous.panel_id);
+        }
     }
 
     pub(in crate::workspace) fn registry(&self) -> &plugin_host::NativePluginRegistry {
@@ -416,7 +439,9 @@ impl PluginWorkspaceEntity {
         });
     }
 
-    fn start_runtime_deactivation(&self, plugin_id: String) {
+    fn start_runtime_deactivation(&mut self, plugin_id: String) {
+        // Declarative views are no longer valid once their runtime starts deactivating.
+        self.ui_state.remove_plugin(&plugin_id);
         let host = self.runtime_host.clone();
         let delivery_tx = self.runtime_delivery_tx.clone();
         self.task_runtime.spawn(async move {
@@ -1374,6 +1399,78 @@ mod tests {
                 entity.manager_state().operation_status,
                 plugin_manager::NativePluginManagerOperationStatus::Success(_)
             ));
+        });
+    }
+
+    #[gpui::test]
+    fn declarative_ui_control_and_surface_cleanup_are_entity_owned(cx: &mut TestAppContext) {
+        let runtime = Arc::new(
+            tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .expect("plugin entity test runtime"),
+        );
+        let entity = cx.new(|cx| {
+            PluginWorkspaceEntity::new(runtime, plugin_host::NativePluginRegistry::default(), cx)
+        });
+        let control: plugin_host::NativePluginDeclarativeUiControl =
+            serde_json::from_value(serde_json::json!({
+                "kind": "password",
+                "id": "credential",
+                "value": "entity-owned-secret"
+            }))
+            .expect("password control");
+
+        entity.update(cx, |entity, _cx| {
+            let ui = entity.ui_state_mut();
+            let render_generation = ui.begin_surface_render();
+            let key = ui.sync_control(
+                plugin_ui::NativePluginUiControlContext {
+                    plugin_id: "plugin.test".to_string(),
+                    surface_kind: "tab".to_string(),
+                    surface_id: "settings".to_string(),
+                    section_id: "root".to_string(),
+                    control_id: "credential".to_string(),
+                    control_kind: "password".to_string(),
+                },
+                &control,
+                render_generation,
+            );
+            ui.focused_input = Some(key);
+            ui.open_select = Some(key);
+            assert_eq!(ui.text(key), Some("entity-owned-secret"));
+
+            let empty_generation = ui.begin_surface_render();
+            ui.finish_surface_render("plugin.test", "tab", "settings", empty_generation);
+            assert!(ui.context(key).is_none());
+            assert!(ui.focused_input.is_none());
+            assert!(ui.open_select.is_none());
+        });
+
+        entity.update(cx, |entity, _cx| {
+            let render_generation = entity.ui_state_mut().begin_surface_render();
+            let key = entity.ui_state_mut().sync_control(
+                plugin_ui::NativePluginUiControlContext {
+                    plugin_id: "plugin.test".to_string(),
+                    surface_kind: "sidebarPanel".to_string(),
+                    surface_id: "settings".to_string(),
+                    section_id: "root".to_string(),
+                    control_id: "credential".to_string(),
+                    control_kind: "password".to_string(),
+                },
+                &control,
+                render_generation,
+            );
+            entity.manager_state_mut().active_sidebar_panel =
+                Some(plugin_ui::NativePluginSidebarPanelSelection {
+                    plugin_id: "plugin.test".to_string(),
+                    panel_id: "settings".to_string(),
+                });
+            entity.select_sidebar_panel(plugin_ui::NativePluginSidebarPanelSelection {
+                plugin_id: "plugin.other".to_string(),
+                panel_id: "overview".to_string(),
+            });
+            assert!(entity.ui_state().context(key).is_none());
         });
     }
 

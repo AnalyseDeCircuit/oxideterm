@@ -373,7 +373,6 @@ impl WorkspaceApp {
             )
             .measure_all(),
             detached_local_terminal_list_cache: RefCell::new(VirtualListSignatureCache::default()),
-            native_plugin_ui: plugin_ui::NativePluginUiState::default(),
             plugin_entity,
             _plugin_entity_subscription: plugin_entity_subscription,
             split_drag: None,

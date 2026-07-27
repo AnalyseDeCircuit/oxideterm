@@ -517,8 +517,8 @@ impl WorkspaceApp {
                     // Mirrors Tauri's `sidebarActiveSection = "plugin:<id>:<panel>"`
                     // path: choosing a plugin panel switches only the sidebar
                     // content, while Plugin Manager remains a separate tab.
-                    this.update_plugin_manager_state(cx, |manager| {
-                        manager.active_sidebar_panel = Some(selection.clone());
+                    this.plugin_entity.update(cx, |plugins, _cx| {
+                        plugins.select_sidebar_panel(selection.clone());
                     });
                     this.active_sidebar_section = SidebarSection::Extensions;
                     this.active_surface = ActiveSurface::Terminal;
