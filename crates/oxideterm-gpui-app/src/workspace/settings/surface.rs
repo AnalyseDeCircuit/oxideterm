@@ -187,7 +187,7 @@ impl WorkspaceApp {
             self.render_settings_tab_section(self.settings_page.active_tab, section_index, cx)
         };
 
-        self.wrap_settings_section_list_item(index, child)
+        self.wrap_settings_section_list_item(index, child, cx)
     }
 
     pub(in crate::workspace) fn render_settings_ai_section_item(
@@ -201,7 +201,7 @@ impl WorkspaceApp {
             self.render_settings_ai_page_section(index - 1, cx)
         };
 
-        self.wrap_settings_section_list_item(index, item)
+        self.wrap_settings_section_list_item(index, item, cx)
     }
 
     pub(in crate::workspace) fn render_settings_ai_page_section(
@@ -286,6 +286,7 @@ impl WorkspaceApp {
         &self,
         index: usize,
         child: AnyElement,
+        cx: &App,
     ) -> AnyElement {
         let padding = self.tokens.metrics.settings_content_padding;
         let gap = self.tokens.metrics.settings_page_gap;
@@ -299,7 +300,7 @@ impl WorkspaceApp {
         if index == 0 {
             inner = inner.pt(px(padding));
         }
-        if index + 1 == self.settings_section_list_item_count() {
+        if index + 1 == self.settings_section_list_item_count(cx) {
             inner = inner.pb(px(padding));
         }
         div()
@@ -382,7 +383,7 @@ impl WorkspaceApp {
     }
 
     pub(in crate::workspace) fn settings_section_list_signatures(&self, cx: &App) -> Vec<u64> {
-        (0..self.settings_section_list_item_count())
+        (0..self.settings_section_list_item_count(cx))
             .map(|index| self.settings_section_signature(index, cx))
             .collect()
     }
@@ -610,19 +611,20 @@ impl WorkspaceApp {
         hasher.finish()
     }
 
-    pub(in crate::workspace) fn settings_section_list_item_count(&self) -> usize {
+    pub(in crate::workspace) fn settings_section_list_item_count(&self, cx: &App) -> usize {
         settings_model_section_list_item_count(
             self.settings_page.active_tab,
-            self.settings_dynamic_section_counts(),
+            self.settings_dynamic_section_counts(cx),
         )
     }
 
     pub(in crate::workspace) fn settings_dynamic_section_counts(
         &self,
+        cx: &App,
     ) -> SettingsDynamicSectionCounts {
         let knowledge_has_selected_collection =
             if self.settings_page.active_tab == SettingsTab::Knowledge {
-                self.knowledge_has_selected_collection()
+                self.knowledge_has_selected_collection(cx)
             } else {
                 false
             };
@@ -669,10 +671,9 @@ impl WorkspaceApp {
         .count()
     }
 
-    pub(in crate::workspace) fn knowledge_has_selected_collection(&self) -> bool {
-        let collections =
-            oxideterm_ai::rag_list_collections(&self.ai.knowledge.rag_store.get(), None)
-                .unwrap_or_default();
+    pub(in crate::workspace) fn knowledge_has_selected_collection(&self, cx: &App) -> bool {
+        let rag_store = self.ai_entity.read(cx).rag_store();
+        let collections = oxideterm_ai::rag_list_collections(&rag_store, None).unwrap_or_default();
         self.settings_page
             .knowledge_selected_collection_id
             .as_deref()

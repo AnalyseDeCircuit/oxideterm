@@ -11,8 +11,9 @@ impl WorkspaceApp {
             cx.notify();
             return;
         }
+        let rag_store = self.ai_entity.read(cx).rag_store();
         match oxideterm_ai::rag_create_collection(
-            &self.ai.knowledge.rag_store.get(),
+            &rag_store,
             oxideterm_ai::RagCreateCollectionRequest {
                 name,
                 scope: oxideterm_ai::RagDocScopeRequest::Global,
@@ -31,12 +32,13 @@ impl WorkspaceApp {
     }
 
     pub(in crate::workspace) fn knowledge_create_blank_document(&mut self, cx: &mut Context<Self>) {
+        let rag_store = self.ai_entity.read(cx).rag_store();
         let Some(collection_id) = self
             .settings_page
             .knowledge_selected_collection_id
             .clone()
             .or_else(|| {
-                oxideterm_ai::rag_list_collections(&self.ai.knowledge.rag_store.get(), None)
+                oxideterm_ai::rag_list_collections(&rag_store, None)
                     .ok()
                     .and_then(|collections| {
                         collections.first().map(|collection| collection.id.clone())
@@ -56,7 +58,7 @@ impl WorkspaceApp {
             return;
         }
         match oxideterm_ai::rag_create_blank_document(
-            &self.ai.knowledge.rag_store.get(),
+            &rag_store,
             oxideterm_ai::RagCreateBlankDocumentRequest {
                 collection_id,
                 title,
@@ -80,10 +82,8 @@ impl WorkspaceApp {
         collection_id: String,
         cx: &mut Context<Self>,
     ) {
-        match oxideterm_ai::rag_delete_collection(
-            &self.ai.knowledge.rag_store.get(),
-            &collection_id,
-        ) {
+        let rag_store = self.ai_entity.read(cx).rag_store();
+        match oxideterm_ai::rag_delete_collection(&rag_store, &collection_id) {
             Ok(()) => {
                 self.settings_page
                     .clear_deleted_knowledge_collection(&collection_id);
@@ -100,7 +100,8 @@ impl WorkspaceApp {
         document_id: String,
         cx: &mut Context<Self>,
     ) {
-        match oxideterm_ai::rag_remove_document(&self.ai.knowledge.rag_store.get(), &document_id) {
+        let rag_store = self.ai_entity.read(cx).rag_store();
+        match oxideterm_ai::rag_remove_document(&rag_store, &document_id) {
             Ok(()) => {
                 if self
                     .settings_page
@@ -124,7 +125,7 @@ impl WorkspaceApp {
         collection_id: String,
         cx: &mut Context<Self>,
     ) {
-        let store = self.ai.knowledge.rag_store.get();
+        let store = self.ai_entity.read(cx).rag_store();
         let started = self.ai_entity.update(cx, |ai, _cx| {
             ai.request_knowledge_reindex(store, collection_id)
         });
@@ -158,7 +159,7 @@ impl WorkspaceApp {
                 self.i18n.t("settings_view.knowledge.import_files"),
             )),
         });
-        let store = self.ai.knowledge.rag_store.get();
+        let store = self.ai_entity.read(cx).rag_store();
         let error_title = self.i18n.t("settings_view.knowledge.error_import");
         cx.spawn(async move |weak, cx| {
             let Ok(Ok(Some(paths))) = receiver.await else {
@@ -243,7 +244,7 @@ impl WorkspaceApp {
             cx.notify();
             return;
         }
-        let store = self.ai.knowledge.rag_store.get();
+        let store = self.ai_entity.read(cx).rag_store();
         let key_store = self.ai.models.key_store.clone();
         let key_provider_id = provider.id.clone();
         let key_lookup_runtime = self.forwarding_runtime.clone();
@@ -378,23 +379,19 @@ impl WorkspaceApp {
             cx.notify();
             return;
         }
-        let docs = oxideterm_ai::rag_list_collections(&self.ai.knowledge.rag_store.get(), None)
+        let rag_store = self.ai_entity.read(cx).rag_store();
+        let docs = oxideterm_ai::rag_list_collections(&rag_store, None)
             .ok()
             .into_iter()
             .flatten()
             .find_map(|collection| {
-                oxideterm_ai::rag_list_documents(
-                    &self.ai.knowledge.rag_store.get(),
-                    &collection.id,
-                    None,
-                    Some(500),
-                )
-                .ok()
-                .and_then(|page| {
-                    page.documents
-                        .into_iter()
-                        .find(|document| document.id == document_id)
-                })
+                oxideterm_ai::rag_list_documents(&rag_store, &collection.id, None, Some(500))
+                    .ok()
+                    .and_then(|page| {
+                        page.documents
+                            .into_iter()
+                            .find(|document| document.id == document_id)
+                    })
             });
         let Some(document) = docs else {
             self.settings_page
@@ -402,10 +399,7 @@ impl WorkspaceApp {
             cx.notify();
             return;
         };
-        let content = match oxideterm_ai::rag_get_document_content(
-            &self.ai.knowledge.rag_store.get(),
-            &document_id,
-        ) {
+        let content = match oxideterm_ai::rag_get_document_content(&rag_store, &document_id) {
             Ok(content) => content,
             Err(error) => {
                 self.settings_page.set_knowledge_error(format!(
@@ -519,10 +513,8 @@ impl WorkspaceApp {
                 return;
             }
         };
-        match oxideterm_ai::rag_get_document_content(
-            &self.ai.knowledge.rag_store.get(),
-            &edit.doc_id,
-        ) {
+        let rag_store = self.ai_entity.read(cx).rag_store();
+        match oxideterm_ai::rag_get_document_content(&rag_store, &edit.doc_id) {
             Ok(current) if current == content => {
                 let _ = fs::remove_file(&edit.path);
                 self.settings_page.clear_knowledge_external_edit();
@@ -546,7 +538,7 @@ impl WorkspaceApp {
             }
         }
         match oxideterm_ai::rag_update_document(
-            &self.ai.knowledge.rag_store.get(),
+            &rag_store,
             &edit.doc_id,
             content,
             Some(edit.version),

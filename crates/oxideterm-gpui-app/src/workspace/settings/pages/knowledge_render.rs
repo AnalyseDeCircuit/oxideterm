@@ -7,9 +7,8 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         self.ensure_ai_provider_key_statuses(cx);
-        let collections =
-            oxideterm_ai::rag_list_collections(&self.ai.knowledge.rag_store.get(), None)
-                .unwrap_or_default();
+        let rag_store = self.ai_entity.read(cx).rag_store();
+        let collections = oxideterm_ai::rag_list_collections(&rag_store, None).unwrap_or_default();
         let selected_id = self
             .settings_page
             .knowledge_selected_collection_id
@@ -20,18 +19,12 @@ impl WorkspaceApp {
         let selected_collection = selected_id
             .as_deref()
             .and_then(|id| collections.iter().find(|collection| collection.id == id));
-        let selected_documents = selected_id.as_deref().and_then(|id| {
-            oxideterm_ai::rag_list_documents(
-                &self.ai.knowledge.rag_store.get(),
-                id,
-                None,
-                Some(100),
-            )
-            .ok()
-        });
-        let selected_stats = selected_id.as_deref().and_then(|id| {
-            oxideterm_ai::rag_get_collection_stats(&self.ai.knowledge.rag_store.get(), id).ok()
-        });
+        let selected_documents = selected_id
+            .as_deref()
+            .and_then(|id| oxideterm_ai::rag_list_documents(&rag_store, id, None, Some(100)).ok());
+        let selected_stats = selected_id
+            .as_deref()
+            .and_then(|id| oxideterm_ai::rag_get_collection_stats(&rag_store, id).ok());
 
         let mut index = section_index;
         if let Some(error) = self.settings_page.knowledge_error.as_ref() {

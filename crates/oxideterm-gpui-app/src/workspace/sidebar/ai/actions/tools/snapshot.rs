@@ -604,7 +604,7 @@ impl WorkspaceApp {
             sftp_transfer_manager: self.sftp_transfer_manager.clone(),
             agent_fs,
             backend_runtime: self.forwarding_runtime.clone(),
-            rag_store: self.ai.knowledge.rag_store.get(),
+            rag_store: self.ai_entity.read(cx).rag_store(),
             ai_mcp_registry,
             ai_acp_runtime_registry,
             ai_key_store: self.ai.models.key_store.clone(),

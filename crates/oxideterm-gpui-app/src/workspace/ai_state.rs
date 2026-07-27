@@ -135,6 +135,7 @@ pub(in crate::workspace) struct AiWorkspaceEntity {
         crate::workspace::delivery::ActiveDeliverySender<AiAcpModelDiscoveryDelivery>,
     acp_model_discovery_rx: std::sync::mpsc::Receiver<AiAcpModelDiscoveryDelivery>,
     acp_model_discovery_intents: VecDeque<AiAcpModelDiscoveryIntent>,
+    rag_store: LazyAiRagStore,
     knowledge_reindex_progress: Option<(usize, usize)>,
     knowledge_reindex_cancel: Option<Arc<AtomicBool>>,
     knowledge_reindex_tx:
@@ -245,6 +246,7 @@ impl AiWorkspaceEntity {
             acp_model_discovery_tx,
             acp_model_discovery_rx,
             acp_model_discovery_intents: VecDeque::new(),
+            rag_store: LazyAiRagStore::default(),
             knowledge_reindex_progress: None,
             knowledge_reindex_cancel: None,
             knowledge_reindex_tx,
@@ -299,6 +301,10 @@ impl AiWorkspaceEntity {
 
     pub(in crate::workspace) fn conversation_state(&self) -> &oxideterm_ai::AiChatState {
         &self.conversation_state
+    }
+
+    pub(in crate::workspace) fn rag_store(&self) -> Arc<oxideterm_ai::RagStore> {
+        self.rag_store.get()
     }
 
     pub(in crate::workspace) fn conversation_state_mut(
@@ -1902,9 +1908,8 @@ pub(super) struct AiModelWorkspaceState {
     pub(super) key_store: oxideterm_ai::AiProviderKeyStore,
 }
 
-/// Owns lazy RAG storage and the workspace-window observation adapter.
+/// Owns the workspace-window observation adapter for Knowledge external edits.
 pub(super) struct AiKnowledgeWorkspaceState {
-    pub(super) rag_store: LazyAiRagStore,
     pub(super) window_activation_subscription: Option<Subscription>,
 }
 
@@ -2013,7 +2018,6 @@ impl AiModelWorkspaceState {
 impl AiKnowledgeWorkspaceState {
     fn new() -> Self {
         Self {
-            rag_store: LazyAiRagStore::default(),
             window_activation_subscription: None,
         }
     }
