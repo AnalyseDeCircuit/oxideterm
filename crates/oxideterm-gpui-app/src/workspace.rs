@@ -754,9 +754,6 @@ pub(crate) struct WorkspaceApp {
     terminal_git_tx: delivery::ActiveDeliverySender<terminal_git::TerminalGitDelivery>,
     terminal_git_rx: std::sync::mpsc::Receiver<terminal_git::TerminalGitDelivery>,
     terminal_git_branch_picker: terminal_git::TerminalGitBranchPickerState,
-    terminal_project_store: oxideterm_environment::ProjectStatusStore,
-    terminal_project_tx: delivery::ActiveDeliverySender<terminal_project::TerminalProjectDelivery>,
-    terminal_project_rx: std::sync::mpsc::Receiver<terminal_project::TerminalProjectDelivery>,
     terminal_project_panel: terminal_project::TerminalProjectPanelState,
     detached_local_terminals: HashMap<TerminalSessionId, DetachedLocalTerminalSession>,
     detached_local_terminal_order: Vec<TerminalSessionId>,
@@ -995,7 +992,7 @@ pub(crate) struct WorkspaceApp {
     local_shells: Vec<ShellInfo>,
     local_shell_launcher_open: bool,
     local_shell_launcher_selected_id: Option<String>,
-    _terminal: Entity<WorkspaceTerminalEntity>,
+    terminal: Entity<WorkspaceTerminalEntity>,
     _terminal_subscription: Subscription,
     terminal_notice_tx: delivery::ActiveDeliverySender<TerminalNotice>,
     // Standard toasts need stable ids so the close button removes the rendered

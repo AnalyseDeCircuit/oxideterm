@@ -1,20 +1,12 @@
 // Copyright (C) 2026 OxideTerm contributors.
 // SPDX-License-Identifier: GPL-3.0-only
 
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
-
 use oxideterm_environment::{
-    ProjectProbeError, ProjectProbeKey, ProjectProbeOutcome, ProjectProbeScope, ProjectSnapshot,
-    ProjectTask, current_directory_cd_command, parse_remote_shell_project_probe_output,
-    probe_local_project, remote_project_cwd_source_is_trusted, remote_shell_project_probe_command,
+    ProjectProbeKey, ProjectProbeOutcome, ProjectProbeScope, ProjectSnapshot, ProjectTask,
+    current_directory_cd_command, remote_project_cwd_source_is_trusted,
 };
-use oxideterm_ssh::NodeId;
 
 use super::*;
-
-const TERMINAL_PROJECT_PROBE_TTL_MS: u64 = 5_000;
-const TERMINAL_PROJECT_REMOTE_TIMEOUT: Duration = Duration::from_secs(3);
-const TERMINAL_PROJECT_REMOTE_MAX_OUTPUT: usize = 512 * 1024;
 
 #[derive(Clone, Debug)]
 pub(in crate::workspace) enum TerminalProjectDelivery {
@@ -49,78 +41,28 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> Option<ProjectSnapshot> {
         let key = self.active_terminal_project_key(cx)?;
-        self.terminal_project_store.snapshot(&key).cloned()
+        self.terminal.read(cx).project_snapshot(&key)
     }
 
     pub(in crate::workspace) fn maybe_refresh_active_terminal_project(
         &mut self,
         cx: &mut Context<Self>,
     ) {
-        let Some(key) = self.active_terminal_project_key(cx) else {
-            return;
-        };
-        let now_ms = terminal_project_now_ms();
-        if !self
-            .terminal_project_store
-            .should_probe(&key, now_ms, TERMINAL_PROJECT_PROBE_TTL_MS)
-        {
-            return;
-        }
-
-        let generation = self
-            .terminal_project_store
-            .mark_loading(key.clone(), now_ms);
-        match key.scope() {
-            ProjectProbeScope::Local => self.spawn_local_terminal_project_probe(key, generation),
-            ProjectProbeScope::SshNode(node_id) => {
-                let node_id = NodeId::new(node_id.clone());
-                self.spawn_remote_terminal_project_probe(key, generation, node_id, cx);
-            }
-        }
-    }
-
-    pub(in crate::workspace) fn poll_terminal_project_results(
-        &mut self,
-        cx: &mut Context<Self>,
-    ) -> bool {
-        let delivery_batch = delivery::drain_channel(
-            &self.terminal_project_rx,
-            delivery::USER_ACTION_DELIVERY_BUDGET,
-        );
-        if !self.terminal_project_tasks_enabled() {
-            // Drop stale probe results while the feature is disabled so a
-            // completed background probe cannot resurrect the project panel.
-            drop(delivery_batch.items);
+        let project_tasks_enabled = self.terminal_project_tasks_enabled();
+        self.terminal.update(cx, |terminal, cx| {
+            terminal.set_project_tasks_enabled(project_tasks_enabled, cx);
+        });
+        if !project_tasks_enabled {
             if self.close_terminal_project_panel() {
                 cx.notify();
             }
-            return delivery_batch.outcome.backlog_remaining;
+            return;
         }
-
-        let mut changed = false;
-        for delivery in delivery_batch.items {
-            match delivery {
-                TerminalProjectDelivery::Probe {
-                    key,
-                    generation,
-                    outcome,
-                } => {
-                    changed |= self.terminal_project_store.finish_probe(
-                        &key,
-                        generation,
-                        outcome,
-                        terminal_project_now_ms(),
-                    );
-                    if changed {
-                        self.ensure_terminal_project_task_highlight(cx);
-                    }
-                }
-            }
-        }
-        if changed {
-            cx.notify();
-        }
-        delivery_batch.outcome.backlog_remaining
+        let Some(key) = self.active_terminal_project_key(cx) else {
+            return;
+        };
+        self.terminal
+            .update(cx, |terminal, cx| terminal.maybe_refresh_project(key, cx));
     }
 
     pub(in crate::workspace) fn open_terminal_project_panel(&mut self, cx: &mut Context<Self>) {
@@ -272,69 +214,6 @@ impl WorkspaceApp {
         ProjectProbeKey::new(scope, snapshot.path().to_string())
     }
 
-    fn spawn_local_terminal_project_probe(&self, key: ProjectProbeKey, generation: u64) {
-        let tx = self.terminal_project_tx.clone();
-        let cwd = key.cwd().to_string();
-        self.forwarding_runtime.spawn(async move {
-            let outcome = probe_local_project(&cwd);
-            let _ = tx.send(TerminalProjectDelivery::Probe {
-                key,
-                generation,
-                outcome,
-            });
-        });
-    }
-
-    fn spawn_remote_terminal_project_probe(
-        &mut self,
-        key: ProjectProbeKey,
-        generation: u64,
-        node_id: NodeId,
-        cx: &mut Context<Self>,
-    ) {
-        let resolved = self.node_router.resolve_connection_now(&node_id);
-        let handle = match resolved {
-            Ok(resolved) => resolved.handle,
-            Err(_) => {
-                let changed = self.terminal_project_store.finish_probe(
-                    &key,
-                    generation,
-                    ProjectProbeOutcome::Error(ProjectProbeError::new(
-                        "ssh node is not ready for project probing",
-                    )),
-                    terminal_project_now_ms(),
-                );
-                if changed {
-                    cx.notify();
-                }
-                return;
-            }
-        };
-
-        let tx = self.terminal_project_tx.clone();
-        let command = remote_shell_project_probe_command(key.cwd());
-        self.forwarding_runtime.spawn(async move {
-            let outcome = match handle
-                .run_command_capture(
-                    &command,
-                    TERMINAL_PROJECT_REMOTE_TIMEOUT,
-                    TERMINAL_PROJECT_REMOTE_MAX_OUTPUT,
-                )
-                .await
-            {
-                Ok(output) => parse_remote_shell_project_probe_output(&output.stdout),
-                Err(_) => {
-                    ProjectProbeOutcome::Error(ProjectProbeError::new("ssh project probe failed"))
-                }
-            };
-            let _ = tx.send(TerminalProjectDelivery::Probe {
-                key,
-                generation,
-                outcome,
-            });
-        });
-    }
-
     pub(in crate::workspace) fn ensure_terminal_project_task_highlight(
         &mut self,
         cx: &mut Context<Self>,
@@ -374,11 +253,4 @@ impl WorkspaceApp {
         self.terminal_project_panel.highlighted_task_id =
             if last { tasks.last() } else { tasks.first() }.map(|task| task.id().to_string());
     }
-}
-
-fn terminal_project_now_ms() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|duration| duration.as_millis().min(u128::from(u64::MAX)) as u64)
-        .unwrap_or_default()
 }

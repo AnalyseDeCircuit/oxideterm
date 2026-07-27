@@ -748,8 +748,7 @@ impl WorkspaceApp {
                 let Ok(backlog_remaining) = weak.update(cx, |workspace, cx| {
                     let cwd_backlog = workspace.poll_terminal_cwd_results(cx);
                     let git_backlog = workspace.poll_terminal_git_results(cx);
-                    let project_backlog = workspace.poll_terminal_project_results(cx);
-                    cwd_backlog || git_backlog || project_backlog
+                    cwd_backlog || git_backlog
                 }) else {
                     break;
                 };

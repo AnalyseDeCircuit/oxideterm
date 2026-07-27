@@ -1682,6 +1682,10 @@ impl WorkspaceApp {
                     self.push_workspace_terminal_notices(notices, cx);
                 }
             }
+            WorkspaceTerminalEvent::ProjectMetadataChanged => {
+                self.ensure_terminal_project_task_highlight(cx);
+                cx.notify();
+            }
         }
     }
 

@@ -128,7 +128,9 @@ impl WorkspaceApp {
             cx.notify();
         });
         let (sftp_worker_tx, mut sftp_worker_rx) = tokio::sync::mpsc::unbounded_channel();
-        let terminal = cx.new(WorkspaceTerminalEntity::new);
+        let terminal = cx.new(|cx| {
+            WorkspaceTerminalEntity::new(forwarding_runtime.clone(), node_router.clone(), cx)
+        });
         let terminal_notice_tx = terminal.read(cx).notice_sender();
         let terminal_subscription = cx.subscribe(
             &terminal,
@@ -140,8 +142,6 @@ impl WorkspaceApp {
         let (terminal_cwd_tx, terminal_cwd_rx) =
             delivery::ActiveDeliverySender::channel_with_wake(terminal_metadata_wake.clone());
         let (terminal_git_tx, terminal_git_rx) =
-            delivery::ActiveDeliverySender::channel_with_wake(terminal_metadata_wake.clone());
-        let (terminal_project_tx, terminal_project_rx) =
             delivery::ActiveDeliverySender::channel_with_wake(terminal_metadata_wake);
         let (profiler_update_tx, profiler_update_rx) = tokio::sync::mpsc::unbounded_channel();
         let host_tools_messages = HostToolsMessages::from_i18n(&i18n);
@@ -293,9 +293,6 @@ impl WorkspaceApp {
             terminal_git_tx,
             terminal_git_rx,
             terminal_git_branch_picker: terminal_git::TerminalGitBranchPickerState::default(),
-            terminal_project_store: oxideterm_environment::ProjectStatusStore::default(),
-            terminal_project_tx,
-            terminal_project_rx,
             terminal_project_panel: terminal_project::TerminalProjectPanelState::default(),
             detached_local_terminals: HashMap::new(),
             detached_local_terminal_order: Vec::new(),
@@ -701,7 +698,7 @@ impl WorkspaceApp {
             local_shells,
             local_shell_launcher_open: false,
             local_shell_launcher_selected_id: None,
-            _terminal: terminal,
+            terminal,
             _terminal_subscription: terminal_subscription,
             terminal_notice_tx,
             workspace_toast_next_id: 1,
