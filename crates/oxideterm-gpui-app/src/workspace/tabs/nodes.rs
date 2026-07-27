@@ -287,7 +287,6 @@ impl WorkspaceApp {
             self.close_tabs_for_node(node_id, window, cx);
             self.abort_connection_chain_for_node(node_id);
             self.reconnect_orchestrator.cancel(&node_id.0);
-            self.cancel_forward_restore_token(node_id);
             let _ =
                 self.interrupt_sftp_transfers_by_node(node_id, "Connection removed".to_string());
         }
@@ -400,7 +399,7 @@ impl WorkspaceApp {
                                 ReconnectPhase::ResumeTransfers,
                                 Some("no forward rules in snapshot".to_string()),
                             );
-                            let queued = self.resume_sftp_transfers_for_reconnect(&node_id);
+                            let queued = self.resume_sftp_transfers_for_reconnect(&node_id, cx);
                             if queued == 0 {
                                 self.finish_reconnect_after_transfer_resume(
                                     &node_id,
@@ -704,12 +703,12 @@ impl WorkspaceApp {
                         changed = true;
                         continue;
                     }
-                    self.reconnect_forward_restore_tokens.remove(&node_id);
+                    self.workspace_runtime.update(cx, |runtime, _cx| {
+                        runtime.complete_forward_restore(&node_id, restored);
+                    });
                     for binding in bindings {
                         self.remember_forwarding_binding(Some(binding));
                     }
-                    self.reconnect_forward_restore_totals
-                        .insert(node_id.clone(), restored);
                     if self
                         .reconnect_orchestrator
                         .job(&node_id.0)
@@ -729,7 +728,7 @@ impl WorkspaceApp {
                             .reconnect_orchestrator
                             .advance(&node_id.0, ReconnectPhase::ResumeTransfers);
                         self.log_reconnect_phase(&node_id, ReconnectPhase::ResumeTransfers, None);
-                        let queued = self.resume_sftp_transfers_for_reconnect(&node_id);
+                        let queued = self.resume_sftp_transfers_for_reconnect(&node_id, cx);
                         if queued == 0 {
                             self.finish_reconnect_after_transfer_resume(
                                 &node_id,
@@ -1188,38 +1187,29 @@ impl WorkspaceApp {
         remounted
     }
 
-    fn resume_sftp_transfers_for_reconnect(&mut self, node_id: &NodeId) -> usize {
+    fn resume_sftp_transfers_for_reconnect(
+        &mut self,
+        node_id: &NodeId,
+        cx: &mut Context<Self>,
+    ) -> usize {
         let transfers_by_node = self
             .reconnect_orchestrator
             .job(&node_id.0)
             .map(|job| job.snapshot.incomplete_sftp_transfers_by_node)
             .unwrap_or_default();
-        let mut queued = 0;
-        let mut requests = Vec::new();
-        for entry in transfers_by_node {
+        let candidates = transfers_by_node.into_iter().flat_map(|entry| {
             let entry_node_id = NodeId::new(entry.node_id);
-            if entry.transfer_ids.is_empty() {
-                continue;
-            }
-            let pending = self
-                .pending_reconnect_transfer_resumes
-                .entry(node_id.clone())
-                .or_default();
-            for transfer_id in entry.transfer_ids {
-                if pending.insert(transfer_id.clone()) {
-                    requests.push((entry_node_id.clone(), transfer_id));
-                    queued += 1;
-                }
-            }
-        }
+            entry
+                .transfer_ids
+                .into_iter()
+                .map(move |transfer_id| (entry_node_id.clone(), transfer_id))
+        });
+        let requests = self.workspace_runtime.update(cx, |runtime, _cx| {
+            runtime.begin_reconnect_transfer_resumes(node_id, candidates)
+        });
+        let queued = requests.len();
         for (entry_node_id, transfer_id) in requests {
             self.request_sftp_transfer_resume_for_node(entry_node_id, transfer_id);
-        }
-        if queued > 0 {
-            self.reconnect_transfer_resume_totals
-                .insert(node_id.clone(), queued);
-            self.reconnect_transfer_resume_successes
-                .insert(node_id.clone(), 0);
         }
         queued
     }
@@ -1231,41 +1221,15 @@ impl WorkspaceApp {
         success: bool,
         cx: &mut Context<Self>,
     ) {
-        let roots = self
-            .pending_reconnect_transfer_resumes
-            .iter()
-            .filter_map(|(root_id, pending)| {
-                pending.contains(transfer_id).then_some(root_id.clone())
-            })
-            .collect::<Vec<_>>();
-        for root_id in roots {
-            let Some(pending) = self.pending_reconnect_transfer_resumes.get_mut(&root_id) else {
-                continue;
-            };
-            if success {
-                *self
-                    .reconnect_transfer_resume_successes
-                    .entry(root_id.clone())
-                    .or_default() += 1;
-            }
-            pending.remove(transfer_id);
-            if !pending.is_empty() {
-                continue;
-            }
-            self.pending_reconnect_transfer_resumes.remove(&root_id);
-            let _queued = self
-                .reconnect_transfer_resume_totals
-                .remove(&root_id)
-                .unwrap_or_default();
-            let resumed = self
-                .reconnect_transfer_resume_successes
-                .remove(&root_id)
-                .unwrap_or_default();
+        let completions = self.workspace_runtime.update(cx, |runtime, _cx| {
+            runtime.finish_reconnect_transfer_resume(transfer_id, success)
+        });
+        for completion in completions {
             self.finish_reconnect_after_transfer_resume(
-                &root_id,
+                &completion.node_id,
                 PhaseResult::Ok,
-                format!("resumed {resumed} transfer(s)"),
-                resumed as u32,
+                format!("resumed {} transfer(s)", completion.resumed),
+                completion.resumed,
                 cx,
             );
         }
@@ -1295,10 +1259,11 @@ impl WorkspaceApp {
             .reconnect_orchestrator
             .advance(&node_id.0, ReconnectPhase::RestoreIde);
         self.log_reconnect_phase(node_id, ReconnectPhase::RestoreIde, None);
+        self.workspace_runtime.update(cx, |runtime, _cx| {
+            runtime.remember_ide_restore_transfer_count(node_id.clone(), restored_transfers);
+        });
         match self.restore_ide_for_reconnect(node_id, cx) {
             super::ide::IdeReconnectRestoreStatus::Restored => {
-                self.pending_ide_restore_transfer_counts
-                    .insert(node_id.clone(), restored_transfers);
                 self.complete_pending_ide_reconnect_restore(
                     node_id,
                     PhaseResult::Ok,
@@ -1306,13 +1271,8 @@ impl WorkspaceApp {
                     cx,
                 );
             }
-            super::ide::IdeReconnectRestoreStatus::Pending => {
-                self.pending_ide_restore_transfer_counts
-                    .insert(node_id.clone(), restored_transfers);
-            }
+            super::ide::IdeReconnectRestoreStatus::Pending => {}
             super::ide::IdeReconnectRestoreStatus::Skipped => {
-                self.pending_ide_restore_transfer_counts
-                    .insert(node_id.clone(), restored_transfers);
                 self.complete_pending_ide_reconnect_restore(
                     node_id,
                     PhaseResult::Skipped,
@@ -1335,14 +1295,18 @@ impl WorkspaceApp {
             .job(&node_id.0)
             .is_some_and(|job| job.ended_at.is_none())
         {
-            self.pending_ide_restore_transfer_counts.remove(node_id);
+            self.workspace_runtime.update(cx, |runtime, _cx| {
+                runtime.clear_ide_restore_transfer_count(node_id);
+            });
             return;
         }
         let _ =
             self.reconnect_orchestrator
                 .complete_phase(&node_id.0, result, Some(detail.clone()));
         if result == PhaseResult::Failed {
-            self.pending_ide_restore_transfer_counts.remove(node_id);
+            self.workspace_runtime.update(cx, |runtime, _cx| {
+                runtime.clear_ide_restore_transfer_count(node_id);
+            });
             self.finish_reconnect_job(node_id, Err(detail), cx);
             return;
         }
@@ -1355,14 +1319,10 @@ impl WorkspaceApp {
             PhaseResult::Ok,
             Some(self.verify_forward_rules_for_reconnect(node_id)),
         );
-        let restored_forwards = self
-            .reconnect_forward_restore_totals
-            .remove(node_id)
-            .unwrap_or_default();
-        let restored_transfers = self
-            .pending_ide_restore_transfer_counts
-            .remove(node_id)
-            .unwrap_or_default();
+        let (restored_forwards, restored_transfers) =
+            self.workspace_runtime.update(cx, |runtime, _cx| {
+                runtime.complete_reconnect_restore_counts(node_id)
+            });
         self.finish_reconnect_job(node_id, Ok(1 + restored_forwards + restored_transfers), cx);
     }
 
@@ -1682,7 +1642,9 @@ impl WorkspaceApp {
         result: Result<u32, String>,
         cx: &mut Context<Self>,
     ) {
-        self.cancel_forward_restore_token(node_id);
+        self.workspace_runtime.update(cx, |runtime, _cx| {
+            runtime.cancel_forward_restore(node_id);
+        });
         let notice = match &result {
             Ok(restored_count) => Some((
                 self.i18n_with(
@@ -1748,20 +1710,6 @@ impl WorkspaceApp {
         self.reconnect_orchestrator
             .job(&node_id.0)
             .is_some_and(|job| job.ended_at.is_none() && job.job_id == worker_job_id)
-    }
-
-    fn begin_forward_restore_token(&mut self, node_id: &NodeId) -> Arc<AtomicBool> {
-        self.cancel_forward_restore_token(node_id);
-        let token = Arc::new(AtomicBool::new(true));
-        self.reconnect_forward_restore_tokens
-            .insert(node_id.clone(), token.clone());
-        token
-    }
-
-    pub(in crate::workspace) fn cancel_forward_restore_token(&mut self, node_id: &NodeId) {
-        if let Some(token) = self.reconnect_forward_restore_tokens.remove(node_id) {
-            token.store(false, Ordering::Release);
-        }
     }
 
     fn cleanup_stale_reconnect_forward_restores(&self, created_forwards: Vec<(String, String)>) {
@@ -2305,7 +2253,7 @@ impl WorkspaceApp {
         });
     }
 
-    fn restore_forwarding_rules_for_reconnect(&mut self, node_id: &NodeId, cx: &App) {
+    fn restore_forwarding_rules_for_reconnect(&mut self, node_id: &NodeId, cx: &mut Context<Self>) {
         let Some(job) = self.reconnect_orchestrator.job(&node_id.0) else {
             return;
         };
@@ -2315,7 +2263,9 @@ impl WorkspaceApp {
 
         let job_id = job.job_id.clone();
         let snapshots = job.snapshot.forward_rules.clone();
-        let restore_token = self.begin_forward_restore_token(node_id);
+        let restore_token = self
+            .workspace_runtime
+            .update(cx, |runtime, _cx| runtime.begin_forward_restore(node_id));
         let old_connection_ids_by_node = job
             .snapshot
             .old_connections_by_node

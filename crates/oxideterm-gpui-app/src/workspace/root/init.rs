@@ -534,12 +534,6 @@ impl WorkspaceApp {
             ),
             active_connection_chain: None,
             connecting_node_locks: HashSet::new(),
-            pending_reconnect_transfer_resumes: HashMap::new(),
-            reconnect_transfer_resume_totals: HashMap::new(),
-            reconnect_transfer_resume_successes: HashMap::new(),
-            pending_ide_restore_transfer_counts: HashMap::new(),
-            reconnect_forward_restore_totals: HashMap::new(),
-            reconnect_forward_restore_tokens: HashMap::new(),
             notification_center: NotificationCenterState::default(),
             notification_sidebar_list_state: tauri_virtual_list_state(
                 0,

@@ -989,17 +989,6 @@ impl WorkspaceApp {
             {
                 cancelled = cancelled.saturating_add(1);
             }
-            self.cancel_forward_restore_token(&affected_node_id);
-            self.pending_reconnect_transfer_resumes
-                .remove(&affected_node_id);
-            self.reconnect_transfer_resume_totals
-                .remove(&affected_node_id);
-            self.reconnect_transfer_resume_successes
-                .remove(&affected_node_id);
-            self.pending_ide_restore_transfer_counts
-                .remove(&affected_node_id);
-            self.reconnect_forward_restore_totals
-                .remove(&affected_node_id);
         }
         if cancelled > 0 {
             self.push_event_log_entry(

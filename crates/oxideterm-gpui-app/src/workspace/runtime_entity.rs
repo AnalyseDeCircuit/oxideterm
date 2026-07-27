@@ -44,6 +44,12 @@ pub(in crate::workspace) enum ReconnectPipelineClaim {
     Exhausted,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(in crate::workspace) struct ReconnectTransferResumeCompletion {
+    pub(in crate::workspace) node_id: NodeId,
+    pub(in crate::workspace) resumed: u32,
+}
+
 #[derive(Clone, Copy, Debug)]
 struct ReconnectRequeueState {
     attempt: u32,
@@ -74,6 +80,12 @@ pub(in crate::workspace) struct WorkspaceRuntimeEntity {
     pending_reconnect_cascade_nodes: VecDeque<NodeId>,
     reconnect_cascade_generation: u64,
     reconnect_schedule_actions: VecDeque<ReconnectScheduleAction>,
+    // Restore bookkeeping survives page changes and is cancelled only by node lifecycle actions.
+    pending_reconnect_transfer_resumes: HashMap<NodeId, HashSet<String>>,
+    reconnect_transfer_resume_successes: HashMap<NodeId, usize>,
+    pending_ide_restore_transfer_counts: HashMap<NodeId, u32>,
+    reconnect_forward_restore_totals: HashMap<NodeId, u32>,
+    reconnect_forward_restore_tokens: HashMap<NodeId, Arc<AtomicBool>>,
     ssh_registry: SshConnectionRegistry,
     task_runtime: Arc<tokio::runtime::Runtime>,
     reconnect_timing: ReconnectTiming,
@@ -127,6 +139,11 @@ impl WorkspaceRuntimeEntity {
             pending_reconnect_cascade_nodes: VecDeque::new(),
             reconnect_cascade_generation: 0,
             reconnect_schedule_actions: VecDeque::new(),
+            pending_reconnect_transfer_resumes: HashMap::new(),
+            reconnect_transfer_resume_successes: HashMap::new(),
+            pending_ide_restore_transfer_counts: HashMap::new(),
+            reconnect_forward_restore_totals: HashMap::new(),
+            reconnect_forward_restore_tokens: HashMap::new(),
             ssh_registry,
             task_runtime,
             reconnect_timing,
@@ -214,6 +231,9 @@ impl WorkspaceRuntimeEntity {
         self.ready_reconnect_roots
             .retain(|node_id| !node_ids.contains(node_id));
         self.cancel_reconnect_scheduler_nodes(node_ids);
+        for node_id in node_ids {
+            self.clear_reconnect_restore_state(node_id);
+        }
     }
 
     pub(in crate::workspace) fn claim_reconnect_pipeline(
@@ -350,6 +370,139 @@ impl WorkspaceRuntimeEntity {
         &mut self,
     ) -> VecDeque<ReconnectScheduleAction> {
         std::mem::take(&mut self.reconnect_schedule_actions)
+    }
+
+    pub(in crate::workspace) fn begin_reconnect_transfer_resumes(
+        &mut self,
+        reconnect_node_id: &NodeId,
+        candidates: impl IntoIterator<Item = (NodeId, String)>,
+    ) -> Vec<(NodeId, String)> {
+        let mut candidates = candidates.into_iter().peekable();
+        if candidates.peek().is_none() {
+            return Vec::new();
+        }
+        // Register each transfer before dispatch so synchronous completions cannot outrun state.
+        let pending_transfer_ids = self
+            .pending_reconnect_transfer_resumes
+            .entry(reconnect_node_id.clone())
+            .or_default();
+        let requests = candidates
+            .filter(|(_, transfer_id)| pending_transfer_ids.insert(transfer_id.clone()))
+            .collect::<Vec<_>>();
+        if requests.is_empty() {
+            return requests;
+        }
+        self.reconnect_transfer_resume_successes
+            .insert(reconnect_node_id.clone(), 0);
+        requests
+    }
+
+    pub(in crate::workspace) fn finish_reconnect_transfer_resume(
+        &mut self,
+        transfer_id: &str,
+        success: bool,
+    ) -> Vec<ReconnectTransferResumeCompletion> {
+        let reconnect_node_ids = self
+            .pending_reconnect_transfer_resumes
+            .iter()
+            .filter_map(|(node_id, pending)| {
+                pending.contains(transfer_id).then_some(node_id.clone())
+            })
+            .collect::<Vec<_>>();
+        let mut completions = Vec::new();
+        for reconnect_node_id in reconnect_node_ids {
+            let Some(pending_transfer_ids) = self
+                .pending_reconnect_transfer_resumes
+                .get_mut(&reconnect_node_id)
+            else {
+                continue;
+            };
+            if success {
+                *self
+                    .reconnect_transfer_resume_successes
+                    .entry(reconnect_node_id.clone())
+                    .or_default() += 1;
+            }
+            pending_transfer_ids.remove(transfer_id);
+            if !pending_transfer_ids.is_empty() {
+                continue;
+            }
+            self.pending_reconnect_transfer_resumes
+                .remove(&reconnect_node_id);
+            let resumed = self
+                .reconnect_transfer_resume_successes
+                .remove(&reconnect_node_id)
+                .unwrap_or_default() as u32;
+            completions.push(ReconnectTransferResumeCompletion {
+                node_id: reconnect_node_id,
+                resumed,
+            });
+        }
+        completions
+    }
+
+    pub(in crate::workspace) fn remember_ide_restore_transfer_count(
+        &mut self,
+        node_id: NodeId,
+        restored_transfers: u32,
+    ) {
+        self.pending_ide_restore_transfer_counts
+            .insert(node_id, restored_transfers);
+    }
+
+    pub(in crate::workspace) fn clear_ide_restore_transfer_count(&mut self, node_id: &NodeId) {
+        self.pending_ide_restore_transfer_counts.remove(node_id);
+    }
+
+    pub(in crate::workspace) fn complete_reconnect_restore_counts(
+        &mut self,
+        node_id: &NodeId,
+    ) -> (u32, u32) {
+        let restored_forwards = self
+            .reconnect_forward_restore_totals
+            .remove(node_id)
+            .unwrap_or_default();
+        let restored_transfers = self
+            .pending_ide_restore_transfer_counts
+            .remove(node_id)
+            .unwrap_or_default();
+        (restored_forwards, restored_transfers)
+    }
+
+    pub(in crate::workspace) fn begin_forward_restore(
+        &mut self,
+        node_id: &NodeId,
+    ) -> Arc<AtomicBool> {
+        self.cancel_forward_restore(node_id);
+        // The worker receives the only shallow clone; replacement or node cancellation flips it.
+        let cancellation = Arc::new(AtomicBool::new(true));
+        self.reconnect_forward_restore_tokens
+            .insert(node_id.clone(), cancellation.clone());
+        cancellation
+    }
+
+    pub(in crate::workspace) fn complete_forward_restore(
+        &mut self,
+        node_id: &NodeId,
+        restored_forwards: u32,
+    ) {
+        self.reconnect_forward_restore_tokens.remove(node_id);
+        self.reconnect_forward_restore_totals
+            .insert(node_id.clone(), restored_forwards);
+    }
+
+    pub(in crate::workspace) fn cancel_forward_restore(&mut self, node_id: &NodeId) {
+        if let Some(cancellation) = self.reconnect_forward_restore_tokens.remove(node_id) {
+            cancellation.store(false, Ordering::Release);
+        }
+    }
+
+    pub(in crate::workspace) fn clear_reconnect_restore_state(&mut self, node_id: &NodeId) {
+        self.pending_reconnect_transfer_resumes.remove(node_id);
+        self.reconnect_transfer_resume_successes.remove(node_id);
+        self.pending_ide_restore_transfer_counts.remove(node_id);
+        self.reconnect_forward_restore_totals.remove(node_id);
+        self.cancel_forward_restore(node_id);
     }
 
     fn cancel_reconnect_scheduler_nodes(&mut self, node_ids: &[NodeId]) {
@@ -1004,5 +1157,64 @@ mod tests {
             assert!(reconnect_results.is_empty());
         });
         assert!(schedule_event_seen.load(Ordering::Acquire));
+    }
+
+    #[gpui::test]
+    fn reconnect_transfer_resume_state_deduplicates_and_completes(cx: &mut TestAppContext) {
+        let entity = test_runtime_entity(cx);
+        entity.update(cx, |entity, _cx| {
+            let reconnect_node_id = NodeId::new("root");
+            let transfer_node_id = NodeId::new("child");
+            let requests = entity.begin_reconnect_transfer_resumes(
+                &reconnect_node_id,
+                [
+                    (transfer_node_id.clone(), "transfer-a".to_string()),
+                    (transfer_node_id.clone(), "transfer-a".to_string()),
+                    (transfer_node_id, "transfer-b".to_string()),
+                ],
+            );
+            assert_eq!(requests.len(), 2);
+            assert!(
+                entity
+                    .finish_reconnect_transfer_resume("transfer-a", true)
+                    .is_empty()
+            );
+            assert_eq!(
+                entity.finish_reconnect_transfer_resume("transfer-b", false),
+                vec![ReconnectTransferResumeCompletion {
+                    node_id: reconnect_node_id,
+                    resumed: 1,
+                }]
+            );
+        });
+    }
+
+    #[gpui::test]
+    fn reconnect_restore_counts_are_consumed_once(cx: &mut TestAppContext) {
+        let entity = test_runtime_entity(cx);
+        entity.update(cx, |entity, _cx| {
+            let node_id = NodeId::new("node-a");
+            entity.remember_ide_restore_transfer_count(node_id.clone(), 3);
+            entity.complete_forward_restore(&node_id, 2);
+
+            assert_eq!(entity.complete_reconnect_restore_counts(&node_id), (2, 3));
+            assert_eq!(entity.complete_reconnect_restore_counts(&node_id), (0, 0));
+        });
+    }
+
+    #[gpui::test]
+    fn node_cancellation_stops_forward_restore_and_clears_counts(cx: &mut TestAppContext) {
+        let entity = test_runtime_entity(cx);
+        entity.update(cx, |entity, _cx| {
+            let node_id = NodeId::new("node-a");
+            let cancellation = entity.begin_forward_restore(&node_id);
+            entity.remember_ide_restore_transfer_count(node_id.clone(), 4);
+            assert!(cancellation.load(Ordering::Acquire));
+
+            entity.cancel_queued_reconnects(std::slice::from_ref(&node_id));
+
+            assert!(!cancellation.load(Ordering::Acquire));
+            assert_eq!(entity.complete_reconnect_restore_counts(&node_id), (0, 0));
+        });
     }
 }
