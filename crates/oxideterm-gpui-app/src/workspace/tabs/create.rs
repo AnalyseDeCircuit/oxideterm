@@ -1110,7 +1110,7 @@ impl WorkspaceApp {
         self.pending_ssh_terminal_opens.len() != before
     }
 
-    pub(super) fn node_is_ready_for_terminal(&self, node_id: &NodeId) -> bool {
+    pub(in crate::workspace) fn node_is_ready_for_terminal(&self, node_id: &NodeId) -> bool {
         self.ssh_nodes
             .get(node_id)
             .is_some_and(|node| node.readiness == NodeReadiness::Ready)
