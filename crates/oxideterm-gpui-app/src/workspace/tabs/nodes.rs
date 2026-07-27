@@ -120,7 +120,7 @@ impl WorkspaceApp {
             self.schedule_grace_period_reconnect(&node_id, cx);
         }
         for node_id in nodes_to_restore {
-            self.restore_forwarding_session_for_node(&node_id);
+            self.restore_forwarding_session_for_node(&node_id, cx);
         }
         for node_id in trace_ready_nodes {
             self.finish_connection_trace_success(&node_id);
@@ -752,7 +752,7 @@ impl WorkspaceApp {
                             node.readiness = NodeReadiness::Ready;
                         }
                     }
-                    self.restore_forwarding_session_for_node(&node_id);
+                    self.restore_forwarding_session_for_node(&node_id, cx);
                     changed = true;
                 }
                 ReconnectWorkerResult::GraceExpired {
@@ -2549,14 +2549,14 @@ impl WorkspaceApp {
         true
     }
 
-    fn restore_forwarding_session_for_node(&mut self, node_id: &NodeId) {
+    fn restore_forwarding_session_for_node(&mut self, node_id: &NodeId, cx: &mut Context<Self>) {
         let session_id = self.forwarding_session_id_for_node(node_id);
         let consumer = ConnectionConsumer::PortForward(session_id.clone());
         let forwarding_registry = self.forwarding_registry.clone();
         let runtime = self.forwarding_runtime.clone();
         let router = self.node_router.clone();
         let node_id = node_id.clone();
-        let tx = self.forwarding_worker_tx.clone();
+        let tx = self.forwarding.read(cx).worker_sender();
         runtime.spawn(async move {
             let binding = match router
                 .acquire_connection_wait(&node_id, consumer.clone(), Duration::from_secs(15))

@@ -130,7 +130,7 @@ impl WorkspaceApp {
                 self.main_window_tabs.navigation_index = Some(index);
                 self.main_window_tabs.navigation_replaying = true;
                 self.main_window_tabs.active_tab_id = Some(tab_id);
-                self.sync_active_tab_surface();
+                self.sync_active_tab_surface(cx);
                 self.needs_active_pane_focus = self.active_tab().is_some_and(|tab| {
                     matches!(tab.kind, TabKind::LocalTerminal | TabKind::SshTerminal)
                 });
@@ -195,7 +195,7 @@ impl WorkspaceApp {
             }
             self.main_window_tabs.active_tab_id = Some(tab_id);
             self.resume_remote_desktop_frame_delivery(tab_id, cx);
-            self.sync_active_tab_surface();
+            self.sync_active_tab_surface(cx);
             self.needs_active_pane_focus = self.active_tab().is_some_and(|tab| {
                 matches!(tab.kind, TabKind::LocalTerminal | TabKind::SshTerminal)
             });
@@ -205,7 +205,7 @@ impl WorkspaceApp {
         }
     }
 
-    pub(in crate::workspace) fn sync_active_tab_surface(&mut self) {
+    pub(in crate::workspace) fn sync_active_tab_surface(&mut self, cx: &mut Context<Self>) {
         // Tauri keeps the SSH session tree independent from terminal tab focus,
         // but app-level utility tabs still light up their owning activity icon.
         // Keep terminal/SFTP/IDE ownership separate while syncing these sidebar
@@ -221,7 +221,7 @@ impl WorkspaceApp {
                 {
                     self.active_ssh_node_id = Some(node_id.clone());
                     self.expanded_ssh_nodes.insert(node_id.clone());
-                    self.start_port_profiler_for_node_without_notify(node_id);
+                    self.start_port_profiler_for_node_without_notify(node_id, cx);
                 }
             }
             Some(TabKind::Sftp) => {
@@ -453,7 +453,7 @@ impl WorkspaceApp {
             self.active_ssh_node_id = Some(node_id.clone());
             self.expanded_ssh_nodes.insert(node_id.clone());
         }
-        self.sync_active_tab_surface();
+        self.sync_active_tab_surface(cx);
         self.needs_active_pane_focus = true;
         self.focus_active_pane(window, cx);
         self.reveal_active_tab(window);
@@ -561,9 +561,9 @@ impl WorkspaceApp {
             );
         }
         for affected_node_id in &nodes_to_disconnect {
-            self.forwarding_port_profiler_nodes.remove(affected_node_id);
-            self.forwarding_port_detection_by_node
-                .remove(affected_node_id);
+            self.forwarding.update(cx, |forwarding, _cx| {
+                forwarding.untrack_port_profiler(affected_node_id);
+            });
             let forwarding_registry = self.forwarding_registry.clone();
             let forwarding_runtime = self.forwarding_runtime.clone();
             let forwarding_session_id = self.forwarding_session_id_for_node(affected_node_id);
@@ -1008,7 +1008,7 @@ impl WorkspaceApp {
                 })
                 .map(|(_, tab)| tab.id)
         };
-        self.sync_active_tab_surface();
+        self.sync_active_tab_surface(cx);
         self.needs_active_pane_focus = self
             .active_tab()
             .is_some_and(|tab| matches!(tab.kind, TabKind::LocalTerminal | TabKind::SshTerminal));
@@ -1149,7 +1149,7 @@ impl WorkspaceApp {
             current - 1
         };
         self.main_window_tabs.active_tab_id = Some(visible_tabs[next]);
-        self.sync_active_tab_surface();
+        self.sync_active_tab_surface(cx);
         self.needs_active_pane_focus = self
             .active_tab()
             .is_some_and(|tab| matches!(tab.kind, TabKind::LocalTerminal | TabKind::SshTerminal));
@@ -1172,7 +1172,7 @@ impl WorkspaceApp {
             .map(|tab| tab.id)
         {
             self.main_window_tabs.active_tab_id = Some(tab_id);
-            self.sync_active_tab_surface();
+            self.sync_active_tab_surface(cx);
             self.needs_active_pane_focus = self.active_tab().is_some_and(|tab| {
                 matches!(tab.kind, TabKind::LocalTerminal | TabKind::SshTerminal)
             });

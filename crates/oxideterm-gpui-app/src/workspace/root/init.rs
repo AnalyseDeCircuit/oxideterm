@@ -72,6 +72,25 @@ impl WorkspaceApp {
             delivery::ActiveDeliverySender::channel_with_wake(runtime_delivery_wake.clone());
         let (forwarding_worker_tx, forwarding_worker_rx) =
             delivery::ActiveDeliverySender::channel_with_wake(forwarding_delivery_wake);
+        let forwarding = cx.new(|cx| {
+            forwards::ForwardingWorkspaceEntity::new(
+                forwarding_worker_tx,
+                forwarding_worker_rx,
+                forwarding_event_rx,
+                cx,
+            )
+        });
+        let forwarding_subscription = cx.subscribe(
+            &forwarding,
+            |workspace, _forwarding, event: &forwards::ForwardingWorkspaceEvent, cx| {
+                workspace.handle_forwarding_workspace_event(*event, cx);
+            },
+        );
+        let forwarding_observation = cx.observe(&forwarding, |_workspace, _forwarding, cx| {
+            // Entity-owned delivery and sampling state repaint every mounted
+            // forwarding surface without mirroring fields back to the root.
+            cx.notify();
+        });
         // Node state is a latest-value stream. Bound and coalesce its mailbox so
         // a suspended UI cannot retain an unbounded event backlog.
         let node_event_wake = delivery::ActiveDeliveryWake::default();
@@ -545,8 +564,8 @@ impl WorkspaceApp {
             .measure_all(),
             forwards_table_row_list_cache: RefCell::new(VirtualListSignatureCache::default()),
             forwarding_view: forwards::ForwardsViewState::default(),
-            forwarding_port_detection_by_node: HashMap::new(),
-            forwarding_port_profiler_nodes: HashSet::new(),
+            forwarding,
+            _forwarding_subscriptions: vec![forwarding_subscription, forwarding_observation],
             file_manager: FileManagerState::load(settings_store.path()),
             sftp_tab_nodes: HashMap::new(),
             sftp_view_node: None,
@@ -592,9 +611,6 @@ impl WorkspaceApp {
             _host_tools_subscription: host_tools_subscription,
             cloud_sync: cloud_sync::CloudSyncWorkspaceState::new(cloud_sync_store),
             sftp_worker_tx,
-            forwarding_worker_tx,
-            forwarding_worker_rx,
-            forwarding_event_rx,
             i18n,
             tokens,
             detected_graphics,
@@ -751,7 +767,6 @@ impl WorkspaceApp {
         workspace.schedule_launcher_worker_delivery(cx);
         workspace.schedule_terminal_metadata_delivery(cx);
         workspace.schedule_native_update_delivery(cx);
-        workspace.schedule_forwarding_delivery(cx);
         let window_handle = window.window_handle();
         workspace.schedule_node_event_delivery(window_handle, cx);
         workspace.schedule_runtime_worker_delivery(window_handle, cx);

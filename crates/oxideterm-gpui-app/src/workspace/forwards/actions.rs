@@ -1,14 +1,13 @@
 use super::helpers::parse_port;
 use super::{
-    Arc, ConnectionConsumer, ConnectionState, Context, DetectedPort, Duration,
+    App, Arc, ConnectionConsumer, ConnectionState, Context, DetectedPort, Duration,
     FORWARDS_DEFAULT_BIND_ADDRESS, FORWARDS_DEFAULT_TARGET_HOST, FORWARDS_NODE_SESSION_PREFIX,
     FORWARDS_PORT_SCAN_INTERVAL, FORWARDS_STATS_REFRESH_INTERVAL, ForwardEvent, ForwardInput,
-    ForwardRule, ForwardStatus, ForwardType, ForwardUpdate, ForwardingManager, ForwardingRegistry,
-    ForwardingWorkerResult, Instant, KeyDownEvent, NodeId, NodeReadiness, NodeRouter,
-    PortDetectionSnapshot, TabId, TerminalNotice, TerminalNoticeVariant, WorkspaceApp, thread,
+    ForwardRule, ForwardStatus, ForwardType, ForwardUpdate, ForwardingDeliveryIntent,
+    ForwardingManager, ForwardingRegistry, ForwardingWorkerResult, ForwardingWorkspaceEvent,
+    Instant, KeyDownEvent, NodeId, NodeReadiness, NodeRouter, PortDetectionSnapshot, TabId,
+    TerminalNotice, TerminalNoticeVariant, WorkspaceApp, thread,
 };
-use crate::workspace::delivery;
-
 impl WorkspaceApp {
     pub(super) fn submit_forward_create(
         &mut self,
@@ -97,7 +96,7 @@ impl WorkspaceApp {
                     self.i18n.t("forwards.detection.auto")
                 )
             });
-        self.dismiss_detected_port(port.port);
+        self.dismiss_detected_port(port.port, cx);
         let persist = self.forward_persist_context_for_node(&node_id);
         let registry = self.forwarding_registry.clone();
         self.start_forward_operation(
@@ -124,7 +123,7 @@ impl WorkspaceApp {
         );
     }
 
-    pub(super) fn dismiss_detected_port(&mut self, port: u16) {
+    pub(super) fn dismiss_detected_port(&mut self, port: u16, cx: &mut Context<Self>) {
         self.forwarding_view
             .new_ports
             .retain(|detected| detected.port != port);
@@ -132,9 +131,9 @@ impl WorkspaceApp {
             && let Some(node_id) = self.forward_tab_nodes.get(&tab_id)
         {
             let connection_id = self.forwarding_connection_id_for_node(node_id);
-            if let Some(state) = self.forwarding_port_detection_by_node.get_mut(node_id) {
-                state.new_ports.retain(|detected| detected.port != port);
-            }
+            self.forwarding.update(cx, |forwarding, _cx| {
+                forwarding.dismiss_detected_port(node_id, port);
+            });
             if let Some(connection_id) = connection_id {
                 self.forwarding_registry
                     .ignore_detected_port(&connection_id, port);
@@ -264,7 +263,7 @@ impl WorkspaceApp {
             .and_then(|node| node.saved_connection_id.clone());
         let router = self.node_router.clone();
         let registry = self.forwarding_registry.clone();
-        let tx = self.forwarding_worker_tx.clone();
+        let tx = self.forwarding.read(cx).worker_sender();
         let runtime = self.forwarding_runtime.clone();
         thread::spawn(move || {
             let (binding, result) = match runtime.block_on(Self::forwarding_manager_for_node_async(
@@ -298,49 +297,41 @@ impl WorkspaceApp {
         // and leaves it running after the Forwards view unmounts. Native mirrors
         // that lifecycle with a node-owned scanner that emits PortScan results
         // independent of the currently active tab.
-        self.forwarding_port_profiler_nodes.insert(node_id.clone());
-        self.sync_forwarding_view_port_detection(&node_id);
+        self.forwarding.update(cx, |forwarding, _cx| {
+            forwarding.track_port_profiler(node_id.clone());
+        });
+        self.sync_forwarding_view_port_detection(&node_id, cx);
         self.start_port_scan(node_id, true, cx);
     }
 
     pub(in crate::workspace) fn start_port_profiler_for_node_without_notify(
         &mut self,
         node_id: NodeId,
+        cx: &mut Context<Self>,
     ) {
-        self.forwarding_port_profiler_nodes.insert(node_id.clone());
-        self.sync_forwarding_view_port_detection(&node_id);
+        self.forwarding.update(cx, |forwarding, _cx| {
+            forwarding.track_port_profiler(node_id.clone());
+        });
+        self.sync_forwarding_view_port_detection(&node_id, cx);
     }
 
     pub(in crate::workspace) fn maybe_start_forwards_port_scan(&mut self, cx: &mut Context<Self>) {
-        let nodes = self
-            .forwarding_port_profiler_nodes
-            .iter()
-            .cloned()
-            .collect::<Vec<_>>();
+        let nodes = self.forwarding.read(cx).tracked_port_profiler_nodes();
         for node_id in nodes {
             if !self.forwards_node_has_visible_tab(&node_id) {
                 if let Some(connection_id) = self.forwarding_connection_id_for_node(&node_id) {
                     // Hidden forwarding pages stop their profiler without touching tunnel owners.
                     self.forwarding_registry.stop_port_profiler(&connection_id);
                 }
-                if let Some(state) = self.forwarding_port_detection_by_node.get_mut(&node_id)
-                    && !state.port_scan_pending
-                {
-                    // A newly visible mount should restart sampling immediately.
-                    state.last_port_scan_started = None;
-                }
+                self.forwarding.update(cx, |forwarding, _cx| {
+                    forwarding.reset_hidden_port_scan_schedule(&node_id);
+                });
                 continue;
             }
-            let state = self
-                .forwarding_port_detection_by_node
-                .entry(node_id.clone())
-                .or_default();
-            if state.port_scan_pending {
-                continue;
-            }
-            let due = state
-                .last_port_scan_started
-                .is_none_or(|last| last.elapsed() >= FORWARDS_PORT_SCAN_INTERVAL);
+            let due = self
+                .forwarding
+                .read(cx)
+                .port_scan_due(&node_id, FORWARDS_PORT_SCAN_INTERVAL);
             if due {
                 self.start_port_scan(node_id, false, cx);
             }
@@ -371,36 +362,25 @@ impl WorkspaceApp {
         restart_degraded_profiler: bool,
         cx: &mut Context<Self>,
     ) {
-        if self
-            .forwarding_port_detection_by_node
-            .get(&node_id)
-            .is_some_and(|state| state.port_scan_pending)
-        {
+        if self.forwarding.read(cx).port_scan_pending(&node_id) {
             return;
         }
         // Port detection follows the same nodeReady gate as Tauri's
         // usePortDetection hook. A restored Forwards tab should stay passive
         // until the user reconnects the node explicitly.
         if !self.node_is_ready_for_forwarding(&node_id) {
-            self.forwarding_port_detection_by_node
-                .entry(node_id.clone())
-                .or_default()
-                .port_scan_pending = false;
-            self.sync_forwarding_view_port_detection(&node_id);
+            self.forwarding.update(cx, |forwarding, _cx| {
+                forwarding.mark_port_scan_not_ready(node_id.clone());
+            });
+            self.sync_forwarding_view_port_detection(&node_id, cx);
             cx.notify();
             return;
         }
 
-        {
-            let state = self
-                .forwarding_port_detection_by_node
-                .entry(node_id.clone())
-                .or_default();
-            state.port_scan_pending = true;
-            state.port_scan_error = None;
-            state.last_port_scan_started = Some(Instant::now());
-        }
-        self.sync_forwarding_view_port_detection(&node_id);
+        self.forwarding.update(cx, |forwarding, _cx| {
+            forwarding.mark_port_scan_started(node_id.clone());
+        });
+        self.sync_forwarding_view_port_detection(&node_id, cx);
         let session_id = self.forwarding_session_id_for_node(&node_id);
         let owner_connection_id = self
             .ssh_nodes
@@ -408,7 +388,7 @@ impl WorkspaceApp {
             .and_then(|node| node.saved_connection_id.clone());
         let router = self.node_router.clone();
         let registry = self.forwarding_registry.clone();
-        let tx = self.forwarding_worker_tx.clone();
+        let tx = self.forwarding.read(cx).worker_sender();
         let runtime = self.forwarding_runtime.clone();
         thread::spawn(move || {
             let scan_node_id = node_id.clone();
@@ -476,18 +456,21 @@ impl WorkspaceApp {
                 })
     }
 
-    pub(in crate::workspace) fn poll_forwarding_worker_results(
+    pub(in crate::workspace) fn handle_forwarding_workspace_event(
         &mut self,
+        event: ForwardingWorkspaceEvent,
         cx: &mut Context<Self>,
-    ) -> bool {
-        let drain = delivery::drain_channel(
-            &self.forwarding_worker_rx,
-            delivery::USER_ACTION_DELIVERY_BUDGET,
-        );
+    ) {
+        match event {
+            ForwardingWorkspaceEvent::DeliveryReady => {}
+        }
+        let intents = self
+            .forwarding
+            .update(cx, |forwarding, _cx| forwarding.take_delivery_intents());
         let mut changed = false;
-        for result in drain.items {
-            match result {
-                ForwardingWorkerResult::Operation {
+        for intent in intents {
+            match intent {
+                ForwardingDeliveryIntent::Operation {
                     tab_id,
                     message_key,
                     sync_saved_forwards_on_success,
@@ -531,45 +514,23 @@ impl WorkspaceApp {
                         }
                     }
                 }
-                ForwardingWorkerResult::Binding { binding } => {
+                ForwardingDeliveryIntent::Binding { binding } => {
                     self.remember_forwarding_binding(binding);
                     changed = true;
                 }
-                ForwardingWorkerResult::PortScan {
-                    node_id,
-                    connection_id,
-                    binding,
-                    result,
-                } => {
+                ForwardingDeliveryIntent::PortScan { node_id, binding } => {
                     self.remember_forwarding_binding(binding);
-                    self.apply_port_detection_result(&node_id, connection_id, result);
                     if self.active_forwards_tab_matches_node(&node_id) {
-                        self.sync_forwarding_view_port_detection(&node_id);
+                        self.sync_forwarding_view_port_detection(&node_id, cx);
                         changed = true;
                     }
                 }
-            }
-        }
-        if changed {
-            cx.notify();
-        }
-        drain.outcome.backlog_remaining
-    }
-
-    pub(in crate::workspace) fn poll_forwarding_events(&mut self, cx: &mut Context<Self>) -> bool {
-        let drain = delivery::drain_channel(
-            &self.forwarding_event_rx,
-            delivery::LIFECYCLE_DELIVERY_BUDGET,
-        );
-        let mut changed = false;
-        for event in drain.items {
-            match event {
-                ForwardEvent::StatusChanged {
+                ForwardingDeliveryIntent::Runtime(ForwardEvent::StatusChanged {
                     session_id,
                     status,
                     error,
                     ..
-                } => {
+                }) => {
                     let visible = self.active_forwards_tab_matches_session(&session_id);
                     match status {
                         ForwardStatus::Suspended => {
@@ -591,15 +552,18 @@ impl WorkspaceApp {
                     }
                     changed |= visible;
                 }
-                ForwardEvent::StatsUpdated { session_id, .. } => {
+                ForwardingDeliveryIntent::Runtime(ForwardEvent::StatsUpdated {
+                    session_id,
+                    ..
+                }) => {
                     if self.active_forwards_tab_matches_session(&session_id) {
                         changed = true;
                     }
                 }
-                ForwardEvent::SessionSuspended {
+                ForwardingDeliveryIntent::Runtime(ForwardEvent::SessionSuspended {
                     session_id,
                     forward_ids,
-                } => {
+                }) => {
                     let visible = self.active_forwards_tab_matches_session(&session_id);
                     // Tauri handles sessionSuspended as a toast-only runtime
                     // event. Keep inline form errors reserved for create/edit
@@ -615,28 +579,30 @@ impl WorkspaceApp {
                     );
                     changed |= visible;
                 }
-                ForwardEvent::PortDetected {
+                ForwardingDeliveryIntent::Runtime(ForwardEvent::PortDetected {
                     connection_id,
                     new_ports,
                     closed_ports,
                     all_ports,
-                } => {
+                }) => {
                     let Some(node_id) = self.forwarding_node_for_connection_id(&connection_id)
                     else {
                         continue;
                     };
-                    self.apply_port_detection_result(
-                        &node_id,
-                        Some(connection_id),
-                        Ok(PortDetectionSnapshot {
-                            new_ports,
-                            closed_ports,
-                            all_ports,
-                            has_scanned: true,
-                        }),
-                    );
+                    self.forwarding.update(cx, |forwarding, _cx| {
+                        forwarding.apply_port_detection_result(
+                            &node_id,
+                            Some(connection_id),
+                            Ok(PortDetectionSnapshot {
+                                new_ports,
+                                closed_ports,
+                                all_ports,
+                                has_scanned: true,
+                            }),
+                        );
+                    });
                     if self.active_forwards_tab_matches_node(&node_id) {
-                        self.sync_forwarding_view_port_detection(&node_id);
+                        self.sync_forwarding_view_port_detection(&node_id, cx);
                         changed = true;
                     }
                 }
@@ -645,44 +611,6 @@ impl WorkspaceApp {
         if changed {
             cx.notify();
         }
-        drain.outcome.backlog_remaining
-    }
-
-    pub(in crate::workspace) fn schedule_forwarding_delivery(&self, cx: &mut Context<Self>) {
-        let delivery_wake = self.forwarding_worker_tx.wake();
-        let release_wake = delivery_wake.clone();
-        cx.on_release(move |_, _| {
-            // Tunnel managers remain registry-owned; only the workspace UI waiter stops here.
-            release_wake.stop();
-        })
-        .detach();
-        cx.spawn(async move |weak, cx| {
-            loop {
-                delivery_wake.wait().await;
-                let should_drain = delivery_wake.take();
-                let stopped = delivery_wake.is_stopped();
-                if !should_drain {
-                    if stopped {
-                        break;
-                    }
-                    continue;
-                }
-                let backlog_remaining = weak
-                    .update(cx, |workspace, cx| {
-                        let worker_backlog = workspace.poll_forwarding_worker_results(cx);
-                        let event_backlog = workspace.poll_forwarding_events(cx);
-                        worker_backlog || event_backlog
-                    })
-                    .unwrap_or(false);
-                if backlog_remaining {
-                    // Store one continuation permit for the next reliable worker batch.
-                    delivery_wake.mark();
-                } else if stopped {
-                    break;
-                }
-            }
-        })
-        .detach();
     }
 
     fn push_forward_status_notice(
@@ -803,59 +731,8 @@ impl WorkspaceApp {
         connection_id
     }
 
-    fn apply_port_detection_result(
-        &mut self,
-        node_id: &NodeId,
-        connection_id: Option<String>,
-        result: Result<PortDetectionSnapshot, String>,
-    ) {
-        let state = self
-            .forwarding_port_detection_by_node
-            .entry(node_id.clone())
-            .or_default();
-        if connection_id.is_some() && state.connection_id != connection_id {
-            // Tauri's usePortDetection hook is keyed by connectionId and clears
-            // dismissed/new/all port state when reconnect swaps the connection.
-            state.connection_id = connection_id;
-            state.detected_ports.clear();
-            state.new_ports.clear();
-            state.has_scanned_ports = false;
-            state.port_scan_error = None;
-        }
-        state.port_scan_pending = false;
-        match result {
-            Ok(snapshot) => {
-                // Tauri's first ResourceProfiler sample establishes a silent
-                // baseline; only later `port-detected:{connectionId}` events
-                // add visible new ports. Keep the same UI-facing merge rule.
-                state.has_scanned_ports = snapshot.has_scanned;
-                state.detected_ports = snapshot.all_ports;
-                if !snapshot.new_ports.is_empty() {
-                    let existing: std::collections::HashSet<u16> =
-                        state.new_ports.iter().map(|port| port.port).collect();
-                    state.new_ports.extend(
-                        snapshot
-                            .new_ports
-                            .into_iter()
-                            .filter(|port| !existing.contains(&port.port)),
-                    );
-                }
-                if !snapshot.closed_ports.is_empty() {
-                    let closed: std::collections::HashSet<u16> =
-                        snapshot.closed_ports.iter().map(|port| port.port).collect();
-                    state.new_ports.retain(|port| !closed.contains(&port.port));
-                }
-                state.port_scan_error = None;
-            }
-            Err(error) => {
-                let _ = error;
-                state.port_scan_error = None;
-            }
-        }
-    }
-
-    fn sync_forwarding_view_port_detection(&mut self, node_id: &NodeId) {
-        let Some(state) = self.forwarding_port_detection_by_node.get(node_id) else {
+    fn sync_forwarding_view_port_detection(&mut self, node_id: &NodeId, cx: &App) {
+        let Some(state) = self.forwarding.read(cx).port_detection_state(node_id) else {
             self.forwarding_view.detected_ports.clear();
             self.forwarding_view.new_ports.clear();
             self.forwarding_view.has_scanned_ports = false;
@@ -864,11 +741,11 @@ impl WorkspaceApp {
             self.forwarding_view.last_port_scan_started = None;
             return;
         };
-        self.forwarding_view.detected_ports = state.detected_ports.clone();
-        self.forwarding_view.new_ports = state.new_ports.clone();
+        self.forwarding_view.detected_ports = state.detected_ports;
+        self.forwarding_view.new_ports = state.new_ports;
         self.forwarding_view.has_scanned_ports = state.has_scanned_ports;
         self.forwarding_view.port_scan_pending = state.port_scan_pending;
-        self.forwarding_view.port_scan_error = state.port_scan_error.clone();
+        self.forwarding_view.port_scan_error = state.port_scan_error;
         self.forwarding_view.last_port_scan_started = state.last_port_scan_started;
     }
 

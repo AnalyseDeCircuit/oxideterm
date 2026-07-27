@@ -145,7 +145,7 @@ impl WorkspaceApp {
         } else {
             Some(self.tabs[index.min(self.tabs.len() - 1)].id)
         };
-        self.sync_active_tab_surface();
+        self.sync_active_tab_surface(cx);
         self.needs_active_pane_focus = self
             .active_tab()
             .is_some_and(|tab| matches!(tab.kind, TabKind::LocalTerminal | TabKind::SshTerminal));

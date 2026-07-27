@@ -199,7 +199,7 @@ impl WorkspaceApp {
                 self.main_window_tabs.active_tab_id = Some(tab_id);
             }
         }
-        self.sync_active_tab_surface();
+        self.sync_active_tab_surface(cx);
         cx.notify();
     }
 
@@ -242,7 +242,7 @@ impl WorkspaceApp {
             self.detached_tab_windows.remove(&tab_id);
             self.main_window_tabs.active_tab_id = Some(tab_id);
             self.detached_tab_return_drag = None;
-            self.sync_active_tab_surface();
+            self.sync_active_tab_surface(cx);
             cx.notify();
         }
     }
@@ -1141,7 +1141,7 @@ impl WorkspaceApp {
                     .find(|(_, tab)| !self.detached_tabs.contains(&tab.id))
             })
             .map(|(_, tab)| tab.id);
-        self.sync_active_tab_surface();
+        self.sync_active_tab_surface(cx);
         self.focus_active_pane(window, cx);
     }
 }

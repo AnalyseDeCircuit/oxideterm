@@ -2053,7 +2053,7 @@ impl WorkspaceApp {
         if let Some(tab) = self.tab_mut_by_id(tab_id) {
             tab.active_pane_id = Some(pane_id);
         }
-        self.sync_active_tab_surface();
+        self.sync_active_tab_surface(cx);
         self.active_surface = ActiveSurface::Terminal;
         self.needs_active_pane_focus = true;
         self.focus_active_pane(window, cx);

@@ -1,5 +1,5 @@
 use std::{
-    collections::hash_map::DefaultHasher,
+    collections::{HashMap, VecDeque, hash_map::DefaultHasher},
     hash::{Hash, Hasher},
     sync::Arc,
     thread,
@@ -45,9 +45,12 @@ use super::{
 // Real modules keep forwarding UI dependencies and visibility boundaries compiler-checked.
 mod actions;
 mod components;
+mod entity;
 mod forms;
 mod helpers;
 mod surface;
+
+pub(in crate::workspace) use entity::*;
 
 const FORWARDS_PAGE_PADDING: f32 = 16.0; // Tauri p-4
 const FORWARDS_SECTION_GAP: f32 = 24.0; // Tauri space-y-6

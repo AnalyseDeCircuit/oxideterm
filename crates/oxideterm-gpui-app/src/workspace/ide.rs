@@ -619,7 +619,7 @@ impl WorkspaceApp {
                 .map(|(_, tab)| tab.id);
         }
 
-        self.sync_active_tab_surface();
+        self.sync_active_tab_surface(cx);
         cx.notify();
     }
 

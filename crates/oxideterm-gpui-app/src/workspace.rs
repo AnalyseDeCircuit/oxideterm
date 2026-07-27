@@ -149,8 +149,8 @@ use oxideterm_connections::{
     SshConfigSyncService,
 };
 use oxideterm_forwarding::{
-    ForwardEvent, ForwardEventDeliverySender, ForwardRule, ForwardStatus, ForwardType,
-    ForwardingRegistry, SavedForwardStore,
+    ForwardEventDeliverySender, ForwardRule, ForwardStatus, ForwardType, ForwardingRegistry,
+    SavedForwardStore,
 };
 use oxideterm_gpui_ide::IdeSurface;
 use oxideterm_gpui_platform::{
@@ -979,8 +979,8 @@ pub(crate) struct WorkspaceApp {
     forwards_table_row_list_state: ListState,
     forwards_table_row_list_cache: RefCell<VirtualListSignatureCache>,
     forwarding_view: forwards::ForwardsViewState,
-    forwarding_port_detection_by_node: HashMap<NodeId, forwards::PortDetectionViewState>,
-    forwarding_port_profiler_nodes: HashSet<NodeId>,
+    forwarding: Entity<forwards::ForwardingWorkspaceEntity>,
+    _forwarding_subscriptions: Vec<Subscription>,
     file_manager: FileManagerState,
     sftp_tab_nodes: HashMap<TabId, NodeId>,
     sftp_view_node: Option<NodeId>,
@@ -1002,9 +1002,6 @@ pub(crate) struct WorkspaceApp {
     _host_tools_subscription: Subscription,
     cloud_sync: cloud_sync::CloudSyncWorkspaceState,
     sftp_worker_tx: tokio::sync::mpsc::UnboundedSender<sftp::SftpWorkerResult>,
-    forwarding_worker_tx: delivery::ActiveDeliverySender<forwards::ForwardingWorkerResult>,
-    forwarding_worker_rx: std::sync::mpsc::Receiver<forwards::ForwardingWorkerResult>,
-    forwarding_event_rx: std::sync::mpsc::Receiver<ForwardEvent>,
     i18n: I18n,
     tokens: ThemeTokens,
     detected_graphics: DetectedGraphics,

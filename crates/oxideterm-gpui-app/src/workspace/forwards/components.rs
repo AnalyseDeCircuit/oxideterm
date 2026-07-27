@@ -345,7 +345,7 @@ impl WorkspaceApp {
                                 self.tokens.ui.text_muted,
                                 has_background,
                                 move |this, _event, _window, cx| {
-                                    this.dismiss_detected_port(dismiss_port);
+                                    this.dismiss_detected_port(dismiss_port, cx);
                                     cx.notify();
                                     cx.stop_propagation();
                                 },
