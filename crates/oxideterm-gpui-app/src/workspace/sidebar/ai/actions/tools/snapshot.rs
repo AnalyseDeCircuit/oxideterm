@@ -305,6 +305,7 @@ impl WorkspaceApp {
             ));
         }
 
+        let tab_host = self.tab_host.read(cx);
         for tab in &self.tabs {
             let Some(root) = tab.root_pane.as_ref() else {
                 continue;
@@ -315,7 +316,7 @@ impl WorkspaceApp {
                 let Some(session_id) = root.session_id_for_pane(pane_id) else {
                     continue;
                 };
-                let Some(pane) = self.panes.get(&pane_id) else {
+                let Some(pane) = tab_host.panes().get(&pane_id) else {
                     continue;
                 };
                 let serial_config = self.serial_terminal_configs.get(&session_id);
@@ -567,7 +568,7 @@ impl WorkspaceApp {
                 "open": self.tabs.len(),
                 "activeTabId": self.main_window_tabs.active_tab_id.map(|id| id.0.to_string()),
             },
-            "terminalRegistry": { "entries": self.panes.len() },
+            "terminalRegistry": { "entries": self.tab_host.read(cx).panes().len() },
             "localTerminals": {
                 "count": self.visible_local_terminal_session_count() + self.detached_local_terminals.len(),
             },
@@ -2127,7 +2128,7 @@ impl WorkspaceApp {
         let location = self.tab_host.read(cx).terminal_location(session_id)?;
         let tab_id = location.tab_id;
         let pane_id = location.pane_id;
-        let pane = self.panes.get(&pane_id)?.clone();
+        let pane = self.tab_host.read(cx).panes().get(&pane_id)?.clone();
 
         if self.detached_tabs.contains(&tab_id) {
             // The detached window already owns this pane entity. Focus that

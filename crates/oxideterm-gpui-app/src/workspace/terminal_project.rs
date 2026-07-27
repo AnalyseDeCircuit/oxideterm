@@ -187,7 +187,7 @@ impl WorkspaceApp {
             return;
         };
         let command = format!("{cd_command} && {}", task.command());
-        let Some(pane) = self.active_pane() else {
+        let Some(pane) = self.active_pane(cx) else {
             return;
         };
         // Project tasks must be visible terminal actions so failures, prompts,

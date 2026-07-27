@@ -641,7 +641,7 @@ impl WorkspaceApp {
             cx.notify();
             return;
         };
-        let Some(pane) = self.panes.get(&pane_id).cloned() else {
+        let Some(pane) = self.tab_host.read(cx).panes().get(&pane_id).cloned() else {
             self.terminal_git_branch_picker.error = Some(failure_message);
             cx.notify();
             return;
@@ -811,7 +811,8 @@ impl WorkspaceApp {
         let snapshot_cwd = self
             .active_terminal_cwd_snapshot(cx)
             .and_then(|snapshot| git_cwd_from_directory_snapshot(scope, &snapshot));
-        let pane = self.panes.get(&pane_id)?;
+        let tab_host = self.tab_host.read(cx);
+        let pane = tab_host.panes().get(&pane_id)?;
         let pane = pane.read(cx);
         let visible_cwd = matches!(scope, GitProbeScope::Local)
             .then(|| infer_terminal_cwd_from_text(&pane.visible_text_snapshot()))

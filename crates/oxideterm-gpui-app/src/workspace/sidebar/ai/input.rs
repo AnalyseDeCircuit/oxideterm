@@ -949,7 +949,7 @@ window.focus(&this.focus_handle, cx);
         &self,
         cx: &mut Context<Self>,
     ) -> bool {
-        self.ai_active_terminal_context_available()
+        self.ai_active_terminal_context_available(cx)
             || self.ai_active_tab_has_split_panes()
             || self.ai_has_ide_context(cx)
             || self.ai_has_sftp_context()
@@ -960,7 +960,7 @@ window.focus(&this.focus_handle, cx);
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let mut chips = ai_chat_input_chips(&self.tokens);
-        if self.ai_active_terminal_context_available() {
+        if self.ai_active_terminal_context_available(cx) {
             chips = chips.child(
                 ai_context_chip(
                     &self.tokens,

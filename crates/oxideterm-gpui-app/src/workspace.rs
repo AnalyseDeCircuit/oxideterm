@@ -729,8 +729,6 @@ pub(crate) struct WorkspaceApp {
     main_window_tabbar_drop_bounds: Option<Bounds<Pixels>>,
     node_disconnect_confirm: Option<NodeDisconnectConfirm>,
     node_disconnect_confirm_presence: oxideterm_gpui_ui::motion::ExitPresence,
-    panes: HashMap<PaneId, gpui::Entity<TerminalPane>>,
-    terminal_pane_subscriptions: HashMap<PaneId, Subscription>,
     pending_auto_close_terminal_sessions: HashSet<TerminalSessionId>,
     auto_close_terminal_sessions_scheduled: bool,
     tab_host: Entity<tabs::WorkspaceTabHostEntity>,

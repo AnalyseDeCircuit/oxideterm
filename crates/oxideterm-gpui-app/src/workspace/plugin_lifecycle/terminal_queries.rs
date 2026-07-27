@@ -3,7 +3,7 @@
 
 use std::collections::HashMap;
 
-use gpui::Context;
+use gpui::{App, Context};
 use serde_json::{Value, json};
 
 use super::{TabKind, TerminalSessionId, WorkspaceApp};
@@ -22,7 +22,7 @@ pub(super) fn native_plugin_terminal_snapshots(
         let Some(session_id) = node.terminal_ids.first().copied() else {
             continue;
         };
-        let Some(pane) = native_plugin_pane_for_session(workspace, session_id) else {
+        let Some(pane) = native_plugin_pane_for_session(workspace, session_id, cx) else {
             continue;
         };
         let pane = pane.read(cx);
@@ -45,6 +45,7 @@ pub(super) fn native_plugin_terminal_snapshots(
 pub(super) fn native_plugin_pane_for_session(
     workspace: &WorkspaceApp,
     session_id: TerminalSessionId,
+    cx: &App,
 ) -> Option<gpui::Entity<oxideterm_gpui_terminal::TerminalPane>> {
     for tab in &workspace.tabs {
         let Some(root) = tab.root_pane.as_ref() else {
@@ -54,7 +55,7 @@ pub(super) fn native_plugin_pane_for_session(
         root.collect_pane_ids(&mut pane_ids);
         for pane_id in pane_ids {
             if root.session_id_for_pane(pane_id) == Some(session_id) {
-                return workspace.panes.get(&pane_id).cloned();
+                return workspace.tab_host.read(cx).panes().get(&pane_id).cloned();
             }
         }
     }

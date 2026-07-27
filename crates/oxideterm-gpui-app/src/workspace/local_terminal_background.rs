@@ -29,7 +29,7 @@ impl WorkspaceApp {
         let Some(session_id) = root_pane.session_id_for_pane(active_pane_id) else {
             return;
         };
-        let Some(pane) = self.panes.get(&active_pane_id).cloned() else {
+        let Some(pane) = self.tab_host.read(cx).panes().get(&active_pane_id).cloned() else {
             return;
         };
 

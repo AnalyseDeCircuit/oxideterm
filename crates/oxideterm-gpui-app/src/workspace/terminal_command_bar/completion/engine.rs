@@ -128,7 +128,7 @@ impl WorkspaceApp {
             session_id.and_then(|session_id| self.terminal_ssh_nodes.get(&session_id).cloned());
         let cwd = self.terminal_command_context_cwd(pane_id, tab.map(|tab| &tab.kind), cx);
         let cwd_host = pane_id
-            .and_then(|pane_id| self.panes.get(&pane_id))
+            .and_then(|pane_id| self.tab_host.read(cx).panes().get(&pane_id))
             .and_then(|pane| pane.read(cx).current_working_directory_host())
             .filter(|host| !host.trim().is_empty());
         let terminal_type = match tab.map(|tab| &tab.kind) {
@@ -177,7 +177,7 @@ impl WorkspaceApp {
 
         if let Some(identity) = self
             .active_pane_id()
-            .and_then(|pane_id| self.panes.get(&pane_id))
+            .and_then(|pane_id| self.tab_host.read(cx).panes().get(&pane_id))
             .map(|pane| pane.read(cx).visible_text_snapshot())
             .and_then(|text| infer_terminal_ssh_identity_from_buffer(&text))
         {

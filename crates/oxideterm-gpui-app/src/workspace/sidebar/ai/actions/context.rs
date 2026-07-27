@@ -22,7 +22,7 @@ impl WorkspaceApp {
         &self,
         cx: &mut Context<Self>,
     ) -> Option<String> {
-        if !self.ai.chat.include_context || !self.ai_active_terminal_context_available() {
+        if !self.ai.chat.include_context || !self.ai_active_terminal_context_available(cx) {
             return None;
         }
         if self.ai.chat.include_all_panes && self.ai_active_tab_has_split_panes() {
@@ -87,7 +87,10 @@ impl WorkspaceApp {
         parts.push(String::new());
         parts.push("## Runtime State".to_string());
         parts.push(format!("- Open tabs: {}", self.tabs.len()));
-        parts.push(format!("- Runtime terminal sessions: {}", self.panes.len()));
+        parts.push(format!(
+            "- Runtime terminal sessions: {}",
+            self.tab_host.read(cx).panes().len()
+        ));
         parts.push(
             "- Tabs, pane ids, and terminal session ids are memory-only and do not survive an app restart/reload."
                 .to_string(),
@@ -249,7 +252,8 @@ impl WorkspaceApp {
             .iter()
             .map(|record| record.command_id.clone())
             .collect::<HashSet<_>>();
-        for (pane_id, pane) in &self.panes {
+        let tab_host = self.tab_host.read(cx);
+        for (pane_id, pane) in tab_host.panes() {
             let Some(session_id) = self.session_id_for_pane(*pane_id) else {
                 continue;
             };
@@ -503,14 +507,14 @@ impl WorkspaceApp {
         Some((node_id, remote_path, self.sftp_view.selected_remote_files()))
     }
 
-    pub(in crate::workspace) fn ai_active_terminal_context_available(&self) -> bool {
+    pub(in crate::workspace) fn ai_active_terminal_context_available(&self, cx: &App) -> bool {
         let Some(tab) = self.active_tab() else {
             return false;
         };
         matches!(tab.kind, TabKind::LocalTerminal | TabKind::SshTerminal)
             && tab
                 .active_pane_id
-                .is_some_and(|pane_id| self.panes.contains_key(&pane_id))
+                .is_some_and(|pane_id| self.tab_host.read(cx).panes().contains_key(&pane_id))
     }
 
     pub(in crate::workspace) fn ai_active_tab_has_split_panes(&self) -> bool {
@@ -576,7 +580,9 @@ impl WorkspaceApp {
         pane_id: PaneId,
         cx: &mut Context<Self>,
     ) -> Option<String> {
-        self.panes
+        self.tab_host
+            .read(cx)
+            .panes()
             .get(&pane_id)
             .map(|pane| pane.read(cx).visible_text_snapshot())
             .filter(|text| !text.trim().is_empty())
@@ -587,7 +593,9 @@ impl WorkspaceApp {
         pane_id: PaneId,
         cx: &mut Context<Self>,
     ) -> Option<String> {
-        self.panes
+        self.tab_host
+            .read(cx)
+            .panes()
             .get(&pane_id)
             .and_then(|pane| pane.read(cx).selected_text_snapshot())
             .filter(|text| !text.trim().is_empty())

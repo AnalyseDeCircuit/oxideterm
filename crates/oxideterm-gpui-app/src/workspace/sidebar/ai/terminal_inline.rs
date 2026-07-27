@@ -50,7 +50,7 @@ impl WorkspaceApp {
         self.close_ai_model_selector(cx);
 
         let selection = self
-            .active_pane()
+            .active_pane(cx)
             .and_then(|pane| pane.read(cx).selected_text_snapshot())
             .unwrap_or_default();
         let sanitized_selection = truncate_ai_inline_context(
@@ -485,7 +485,7 @@ window.focus(&this.focus_handle, cx);
             AI_INLINE_PANEL_COLLAPSED_HEIGHT
         };
         let anchor = self
-            .active_pane()
+            .active_pane(cx)
             .and_then(|pane| pane.read(cx).cursor_anchor());
         terminal_ai_inline_panel_placement(anchor, estimated_height)
     }
@@ -651,7 +651,7 @@ window.focus(&this.focus_handle, cx);
         if command.trim().is_empty() {
             return;
         }
-        if let Some(pane) = self.active_pane() {
+        if let Some(pane) = self.active_pane(cx) {
             let _ = pane.update(cx, |pane, cx| {
                 pane.send_ai_input_bytes(command.as_bytes(), cx);
             });
@@ -670,7 +670,7 @@ window.focus(&this.focus_handle, cx);
         if command.trim().is_empty() {
             return;
         }
-        if let Some(pane) = self.active_pane() {
+        if let Some(pane) = self.active_pane(cx) {
             let _ = pane.update(cx, |pane, cx| {
                 pane.begin_command_mark(
                     &command,

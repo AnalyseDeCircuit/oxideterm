@@ -35,31 +35,37 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) {
         let window_handle = window.window_handle();
-        let subscription = cx.subscribe(
-            &pane,
-            move |this, _pane, event: &TerminalPaneEvent, cx| match event {
-                TerminalPaneEvent::Exited { .. } => {
-                    this.queue_auto_close_terminal_session(session_id, cx);
-                }
-                TerminalPaneEvent::PrivilegePromptSubmitRequested => this
-                    .deliver_terminal_pane_interaction(
-                        pane_id,
-                        window_handle,
-                        TerminalPaneInteraction::PrivilegePromptSubmit,
-                        cx,
-                    ),
-                TerminalPaneEvent::ContextActionRequested => this
-                    .deliver_terminal_pane_interaction(
-                        pane_id,
-                        window_handle,
-                        TerminalPaneInteraction::ContextAction,
-                        cx,
-                    ),
-            },
-        );
-        self.terminal_pane_subscriptions
-            .insert(pane_id, subscription);
-        self.panes.insert(pane_id, pane);
+        self.tab_host.update(cx, |tab_host, cx| {
+            tab_host.register_terminal_pane(pane_id, session_id, pane, window_handle, cx);
+        });
+    }
+
+    pub(super) fn handle_terminal_pane_delivery(
+        &mut self,
+        pane_id: PaneId,
+        session_id: TerminalSessionId,
+        window_handle: AnyWindowHandle,
+        event: TerminalPaneEvent,
+        cx: &mut Context<Self>,
+    ) {
+        match event {
+            TerminalPaneEvent::Exited { .. } => {
+                self.queue_auto_close_terminal_session(session_id, cx);
+            }
+            TerminalPaneEvent::PrivilegePromptSubmitRequested => self
+                .deliver_terminal_pane_interaction(
+                    pane_id,
+                    window_handle,
+                    TerminalPaneInteraction::PrivilegePromptSubmit,
+                    cx,
+                ),
+            TerminalPaneEvent::ContextActionRequested => self.deliver_terminal_pane_interaction(
+                pane_id,
+                window_handle,
+                TerminalPaneInteraction::ContextAction,
+                cx,
+            ),
+        }
     }
 
     fn deliver_terminal_pane_interaction(
@@ -75,7 +81,9 @@ impl WorkspaceApp {
                 weak.update(cx, |workspace, cx| {
                     if workspace.active_pane_id() != Some(pane_id) {
                         // A request cannot follow focus into another pane.
-                        if let Some(pane) = workspace.panes.get(&pane_id).cloned() {
+                        if let Some(pane) =
+                            workspace.tab_host.read(cx).panes().get(&pane_id).cloned()
+                        {
                             pane.update(cx, |pane, _cx| match interaction {
                                 TerminalPaneInteraction::PrivilegePromptSubmit => {
                                     pane.take_privilege_prompt_submit_request();
@@ -131,7 +139,12 @@ impl WorkspaceApp {
                     .and_then(|root| root.pane_id_for_session(session_id))
             });
             debug_assert_eq!(tree_location, Some(location.pane_id));
-            debug_assert!(self.panes.contains_key(&location.pane_id));
+            debug_assert!(
+                self.tab_host
+                    .read(cx)
+                    .panes()
+                    .contains_key(&location.pane_id)
+            );
         }
     }
 
@@ -140,11 +153,8 @@ impl WorkspaceApp {
         pane_id: &PaneId,
         cx: &mut Context<Self>,
     ) -> Option<gpui::Entity<TerminalPane>> {
-        self.terminal_pane_subscriptions.remove(pane_id);
-        self.tab_host.update(cx, |tab_host, _cx| {
-            tab_host.unbind_terminal_location_for_pane(*pane_id);
-        });
-        self.panes.remove(pane_id)
+        self.tab_host
+            .update(cx, |tab_host, _cx| tab_host.remove_terminal_pane(*pane_id))
     }
 
     pub(super) fn queue_auto_close_terminal_session(
@@ -484,7 +494,7 @@ impl WorkspaceApp {
         match node {
             PaneNode::Leaf { pane_id, .. } => {
                 let active = Some(*pane_id) == active_pane_id;
-                let Some(pane) = self.panes.get(pane_id).cloned() else {
+                let Some(pane) = self.tab_host.read(cx).panes().get(pane_id).cloned() else {
                     return div().size_full().into_any_element();
                 };
                 div()
@@ -510,7 +520,9 @@ impl WorkspaceApp {
                                 } else if let Some(tab) = this.active_tab_mut() {
                                     tab.active_pane_id = Some(pane_id);
                                 }
-                                if let Some(pane) = this.panes.get(&pane_id).cloned() {
+                                if let Some(pane) =
+                                    this.tab_host.read(cx).panes().get(&pane_id).cloned()
+                                {
                                     pane.update(cx, |pane, cx| pane.focus(window, cx));
                                 }
                                 cx.notify();

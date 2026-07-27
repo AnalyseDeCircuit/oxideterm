@@ -177,7 +177,7 @@ impl Render for WorkspaceApp {
             })
             && !self.search.visible
             && self.new_connection_form.is_none()
-            && let Some(pane) = self.active_pane()
+            && let Some(pane) = self.active_pane(cx)
         {
             self.needs_active_pane_focus = false;
             self.clear_ai_sidebar_keyboard_focus(cx);
@@ -911,7 +911,7 @@ impl Render for WorkspaceApp {
                                             .child(content),
                                     )
                                     .when(
-                                        self.search.visible && self.active_pane().is_some(),
+                                        self.search.visible && self.active_pane(cx).is_some(),
                                         |main_content| {
                                             main_content.child(self.render_search_bar(cx))
                                         },

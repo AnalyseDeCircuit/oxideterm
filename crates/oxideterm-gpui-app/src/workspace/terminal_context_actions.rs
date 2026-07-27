@@ -11,7 +11,7 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
-        let Some(active_pane) = self.active_pane() else {
+        let Some(active_pane) = self.active_pane(cx) else {
             return false;
         };
         let Some(action) = active_pane.update(cx, |pane, _cx| pane.take_context_action_request())

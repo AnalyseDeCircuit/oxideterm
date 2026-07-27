@@ -621,7 +621,7 @@ window.focus(&this.focus_handle, cx);
         if command.trim().is_empty() {
             return;
         }
-        if let Some(pane) = self.active_pane() {
+        if let Some(pane) = self.active_pane(cx) {
             let _ = pane.update(cx, |pane, cx| {
                 // Tauri's ai-insert-command writes programmatic terminal input without submitting it.
                 pane.send_ai_input_bytes(command.as_bytes(), cx);

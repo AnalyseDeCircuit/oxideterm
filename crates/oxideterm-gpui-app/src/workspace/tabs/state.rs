@@ -74,9 +74,9 @@ impl WorkspaceApp {
         self.active_tab().and_then(|tab| tab.active_pane_id)
     }
 
-    pub(in crate::workspace) fn active_pane(&self) -> Option<gpui::Entity<TerminalPane>> {
+    pub(in crate::workspace) fn active_pane(&self, cx: &App) -> Option<gpui::Entity<TerminalPane>> {
         self.active_pane_id()
-            .and_then(|pane_id| self.panes.get(&pane_id).cloned())
+            .and_then(|pane_id| self.tab_host.read(cx).panes().get(&pane_id).cloned())
     }
 
     pub(in crate::workspace) fn active_terminal_session_id(&self) -> Option<TerminalSessionId> {

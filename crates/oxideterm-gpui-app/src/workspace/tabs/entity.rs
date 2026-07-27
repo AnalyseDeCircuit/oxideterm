@@ -10,6 +10,8 @@ pub(in crate::workspace) struct WorkspaceTabHostEntity {
     next_tab_id: u64,
     next_pane_id: u64,
     next_session_id: u64,
+    panes: HashMap<PaneId, Entity<TerminalPane>>,
+    pane_subscriptions: HashMap<PaneId, Subscription>,
     terminal_locations: HashMap<TerminalSessionId, TerminalLocation>,
     navigation_history: Vec<TabId>,
     navigation_index: Option<usize>,
@@ -30,6 +32,12 @@ pub(in crate::workspace) struct TerminalLocation {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(in crate::workspace) enum WorkspaceTabHostEvent {
     CloseProcessCheckReady,
+    TerminalPaneDelivery {
+        pane_id: PaneId,
+        session_id: TerminalSessionId,
+        window_handle: AnyWindowHandle,
+        event: TerminalPaneEvent,
+    },
 }
 
 pub(in crate::workspace) struct TabCloseProcessProbe {
@@ -50,6 +58,8 @@ impl WorkspaceTabHostEntity {
             next_tab_id: 1,
             next_pane_id: 1,
             next_session_id: 1,
+            panes: HashMap::new(),
+            pane_subscriptions: HashMap::new(),
             terminal_locations: HashMap::new(),
             navigation_history: Vec::new(),
             navigation_index: None,
@@ -91,6 +101,41 @@ impl WorkspaceTabHostEntity {
             previous.is_none_or(|previous| previous == location),
             "terminal session was rebound without removing its previous location"
         );
+    }
+
+    pub(in crate::workspace) fn register_terminal_pane(
+        &mut self,
+        pane_id: PaneId,
+        session_id: TerminalSessionId,
+        pane: Entity<TerminalPane>,
+        window_handle: AnyWindowHandle,
+        cx: &mut Context<Self>,
+    ) {
+        // TabHost owns pane delivery and its cancellation together with the
+        // registered Entity; the window adapter consumes only typed intents.
+        let subscription = cx.subscribe(&pane, move |_tab_host, _pane, event, cx| {
+            cx.emit(WorkspaceTabHostEvent::TerminalPaneDelivery {
+                pane_id,
+                session_id,
+                window_handle,
+                event: *event,
+            });
+        });
+        self.pane_subscriptions.insert(pane_id, subscription);
+        self.panes.insert(pane_id, pane);
+    }
+
+    pub(in crate::workspace) fn remove_terminal_pane(
+        &mut self,
+        pane_id: PaneId,
+    ) -> Option<Entity<TerminalPane>> {
+        self.pane_subscriptions.remove(&pane_id);
+        self.unbind_terminal_location_for_pane(pane_id);
+        self.panes.remove(&pane_id)
+    }
+
+    pub(in crate::workspace) fn panes(&self) -> &HashMap<PaneId, Entity<TerminalPane>> {
+        &self.panes
     }
 
     pub(in crate::workspace) fn unbind_terminal_location_for_pane(
@@ -272,7 +317,20 @@ impl gpui::EventEmitter<WorkspaceTabHostEvent> for WorkspaceTabHostEntity {}
 #[cfg(test)]
 mod tests {
     use super::*;
-    use gpui::TestAppContext;
+    use gpui::{TestAppContext, div};
+
+    struct TabHostTestRoot;
+
+    impl Render for TabHostTestRoot {
+        fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
+            div()
+        }
+    }
+
+    struct TabHostEventRecorder {
+        events: Vec<WorkspaceTabHostEvent>,
+        _subscription: Option<Subscription>,
+    }
 
     #[test]
     fn typed_workspace_ids_are_monotonic_and_independent() {
@@ -314,6 +372,80 @@ mod tests {
         assert_eq!(
             tab_host.terminal_location(second_session),
             Some(second_location)
+        );
+    }
+
+    #[gpui::test]
+    fn removing_pane_drops_delivery_subscription_and_terminal_location(cx: &mut TestAppContext) {
+        let (_, cx) = cx.add_window_view(|_window, _cx| TabHostTestRoot);
+        let pane = cx.update(|window, cx| {
+            cx.new(|cx| {
+                TerminalPane::new_recording_playback(
+                    80,
+                    24,
+                    oxideterm_gpui_terminal::TerminalUiPreferences::default(),
+                    window,
+                    cx,
+                )
+                .expect("recording pane")
+            })
+        });
+        let window_handle = cx.window_handle();
+        let tab_host = cx.new(|_| WorkspaceTabHostEntity::new());
+        let event_recorder = cx.new(|_| TabHostEventRecorder {
+            events: Vec::new(),
+            _subscription: None,
+        });
+        event_recorder.update(cx, |event_recorder, cx| {
+            event_recorder._subscription = Some(cx.subscribe(
+                &tab_host,
+                |event_recorder, _tab_host, event, _cx| {
+                    event_recorder.events.push(*event);
+                },
+            ));
+        });
+        let pane_id = PaneId(4);
+        let session_id = TerminalSessionId(5);
+
+        tab_host.update(cx, |tab_host, cx| {
+            tab_host.register_terminal_pane(pane_id, session_id, pane.clone(), window_handle, cx);
+            tab_host.bind_terminal_location(
+                session_id,
+                TerminalLocation {
+                    tab_id: TabId(3),
+                    pane_id,
+                },
+            );
+            assert_eq!(tab_host.panes().len(), 1);
+            assert_eq!(tab_host.pane_subscriptions.len(), 1);
+        });
+        pane.update(cx, |_pane, cx| {
+            cx.emit(TerminalPaneEvent::Exited { exit_code: Some(0) });
+        });
+        cx.run_until_parked();
+        assert_eq!(
+            event_recorder.read_with(cx, |event_recorder, _cx| event_recorder.events.clone()),
+            vec![WorkspaceTabHostEvent::TerminalPaneDelivery {
+                pane_id,
+                session_id,
+                window_handle,
+                event: TerminalPaneEvent::Exited { exit_code: Some(0) },
+            }]
+        );
+
+        tab_host.update(cx, |tab_host, _cx| {
+            assert!(tab_host.remove_terminal_pane(pane_id).is_some());
+            assert!(tab_host.panes().is_empty());
+            assert!(tab_host.pane_subscriptions.is_empty());
+            assert!(tab_host.terminal_location(session_id).is_none());
+        });
+        pane.update(cx, |_pane, cx| {
+            cx.emit(TerminalPaneEvent::ContextActionRequested);
+        });
+        cx.run_until_parked();
+        assert_eq!(
+            event_recorder.read_with(cx, |event_recorder, _cx| event_recorder.events.len()),
+            1
         );
     }
 

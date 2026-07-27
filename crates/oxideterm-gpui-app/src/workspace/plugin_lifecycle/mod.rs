@@ -400,7 +400,7 @@ impl WorkspaceApp {
         {
             return false;
         }
-        let Some(pane) = self.active_pane() else {
+        let Some(pane) = self.active_pane(cx) else {
             return false;
         };
         // Plugin writes are routed through the same terminal input method used
@@ -418,7 +418,7 @@ impl WorkspaceApp {
         let Some(session_id) = node.terminal_ids.first().copied() else {
             return;
         };
-        let Some(pane) = native_plugin_pane_for_session(self, session_id) else {
+        let Some(pane) = native_plugin_pane_for_session(self, session_id, cx) else {
             return;
         };
         // Tauri clearBuffer is host-side and void-returning: missing nodes are
@@ -452,7 +452,7 @@ impl WorkspaceApp {
         let Some(session_id) = node.terminal_ids.first().copied() else {
             return false;
         };
-        let Some(pane) = native_plugin_pane_for_session(self, session_id) else {
+        let Some(pane) = native_plugin_pane_for_session(self, session_id, cx) else {
             return false;
         };
         pane.update(cx, |pane, cx| pane.send_ai_input_bytes(text.as_bytes(), cx));
@@ -492,7 +492,15 @@ impl WorkspaceApp {
             }) as TerminalInputInterceptor)
         };
 
-        for pane in self.panes.values() {
+        // Drop the registry borrow before updating pane entities through GPUI.
+        let panes = self
+            .tab_host
+            .read(cx)
+            .panes()
+            .values()
+            .cloned()
+            .collect::<Vec<_>>();
+        for pane in panes {
             pane.update(cx, |pane, _cx| {
                 pane.set_plugin_input_interceptor(interceptor.clone());
             });
@@ -527,7 +535,15 @@ impl WorkspaceApp {
             }) as TerminalOutputProcessor)
         };
 
-        for pane in self.panes.values() {
+        // Drop the registry borrow before updating pane entities through GPUI.
+        let panes = self
+            .tab_host
+            .read(cx)
+            .panes()
+            .values()
+            .cloned()
+            .collect::<Vec<_>>();
+        for pane in panes {
             pane.update(cx, |pane, _cx| {
                 pane.set_plugin_output_processor(processor.clone());
             });

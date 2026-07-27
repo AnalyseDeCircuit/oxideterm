@@ -173,7 +173,7 @@ impl WorkspaceApp {
                     .is_some_and(|root| root.pane_count() < MAX_PANES_PER_TAB)
         });
         let broadcast_targets =
-            self.terminal_broadcast_target_panes(active_pane_id.unwrap_or(PaneId(0)));
+            self.terminal_broadcast_target_panes(active_pane_id.unwrap_or(PaneId(0)), cx);
         let broadcast_label = if self.terminal_broadcast_enabled {
             if self.terminal_broadcast_targets.is_empty() {
                 self.i18n.t("terminal.command_bar.all_targets")
@@ -764,7 +764,7 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
-        let entries = self.terminal_broadcast_entries();
+        let entries = self.terminal_broadcast_entries(cx);
         let active_pane_id = self.active_pane_id();
         let selectable = entries
             .iter()

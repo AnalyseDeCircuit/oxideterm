@@ -231,7 +231,7 @@ impl WorkspaceApp {
             else {
                 continue;
             };
-            if let Some(pane) = self.panes.get(&pane_id) {
+            if let Some(pane) = self.tab_host.read(cx).panes().get(&pane_id).cloned() {
                 pane.update(cx, |pane, cx| pane.set_input_locked(locked, cx));
             }
         }

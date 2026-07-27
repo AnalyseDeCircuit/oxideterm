@@ -80,6 +80,20 @@ impl WorkspaceApp {
                 })
                 .detach();
             }
+            WorkspaceTabHostEvent::TerminalPaneDelivery {
+                pane_id,
+                session_id,
+                window_handle,
+                event,
+            } => {
+                self.handle_terminal_pane_delivery(
+                    *pane_id,
+                    *session_id,
+                    *window_handle,
+                    *event,
+                    cx,
+                );
+            }
         }
     }
 
@@ -242,7 +256,7 @@ impl WorkspaceApp {
             self.terminal_command_suggestion_highlighted = None;
             self.ime_marked_text = None;
         }
-        if let Some(pane) = self.active_pane() {
+        if let Some(pane) = self.active_pane(cx) {
             // A hidden terminal can retain paint operations that reference atlas slots later
             // reused by another surface. Force one fresh frame when the pane becomes active so
             // its unchanged snapshot is reshaped without reconnecting or rebuilding the session.
@@ -644,29 +658,32 @@ impl WorkspaceApp {
     ) {
         let tab_ids = request.tab_ids();
         let mut seen_panes = HashSet::new();
-        let probes = tab_ids
-            .iter()
-            .filter_map(|tab_id| {
-                self.tabs
-                    .iter()
-                    .find(|tab| tab.id == *tab_id && tab.kind == TabKind::LocalTerminal)
-            })
-            .filter_map(|tab| tab.root_pane.as_ref())
-            .flat_map(|root_pane| {
-                let mut pane_ids = Vec::new();
-                root_pane.collect_pane_ids(&mut pane_ids);
-                pane_ids
-            })
-            .filter(|pane_id| seen_panes.insert(*pane_id))
-            .filter_map(|pane_id| {
-                let pane = self.panes.get(&pane_id)?.read(cx);
-                Some(TabCloseProcessProbe {
-                    pane_id,
-                    probe: pane.process_info_probe(),
-                    cached: pane.process_info(),
+        let probes = {
+            let tab_host = self.tab_host.read(cx);
+            tab_ids
+                .iter()
+                .filter_map(|tab_id| {
+                    self.tabs
+                        .iter()
+                        .find(|tab| tab.id == *tab_id && tab.kind == TabKind::LocalTerminal)
                 })
-            })
-            .collect::<Vec<_>>();
+                .filter_map(|tab| tab.root_pane.as_ref())
+                .flat_map(|root_pane| {
+                    let mut pane_ids = Vec::new();
+                    root_pane.collect_pane_ids(&mut pane_ids);
+                    pane_ids
+                })
+                .filter(|pane_id| seen_panes.insert(*pane_id))
+                .filter_map(|pane_id| {
+                    let pane = tab_host.panes().get(&pane_id)?.read(cx);
+                    Some(TabCloseProcessProbe {
+                        pane_id,
+                        probe: pane.process_info_probe(),
+                        cached: pane.process_info(),
+                    })
+                })
+                .collect::<Vec<_>>()
+        };
 
         if probes.is_empty() {
             // Preserve immediate close behavior when the selected tabs do not own a live local
@@ -697,7 +714,7 @@ impl WorkspaceApp {
             return;
         };
         for (pane_id, info) in completion.results {
-            if let Some(pane) = self.panes.get(&pane_id) {
+            if let Some(pane) = self.tab_host.read(cx).panes().get(&pane_id).cloned() {
                 pane.update(cx, |pane, _cx| {
                     let _ = pane.apply_process_info(info);
                 });

@@ -1200,7 +1200,9 @@ impl WorkspaceApp {
         self.ai.chat.sidebar_width = (settings.sidebar_ui.ai_sidebar_width as f32)
             .clamp(AI_SIDEBAR_MIN_WIDTH, AI_SIDEBAR_MAX_WIDTH);
         let panes = self
-            .panes
+            .tab_host
+            .read(cx)
+            .panes()
             .iter()
             .map(|(pane_id, pane)| (*pane_id, pane.clone()))
             .collect::<Vec<_>>();

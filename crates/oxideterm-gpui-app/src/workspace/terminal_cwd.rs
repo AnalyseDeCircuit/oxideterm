@@ -131,7 +131,9 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> Option<String> {
         let (_, pane_id) = self.active_terminal_cwd_scope_and_pane()?;
-        self.panes
+        self.tab_host
+            .read(cx)
+            .panes()
             .get(&pane_id)?
             .read(cx)
             .current_working_directory_host()
@@ -144,7 +146,9 @@ impl WorkspaceApp {
         let Some((_, pane_id)) = self.active_terminal_cwd_scope_and_pane() else {
             return false;
         };
-        self.panes
+        self.tab_host
+            .read(cx)
+            .panes()
             .get(&pane_id)
             .is_some_and(|pane| pane.read(cx).current_working_directory_is_pending())
     }
@@ -204,7 +208,8 @@ impl WorkspaceApp {
         pane_id: PaneId,
         cx: &mut Context<Self>,
     ) -> Option<CurrentDirectorySnapshot> {
-        let pane = self.panes.get(&pane_id)?.read(cx);
+        let tab_host = self.tab_host.read(cx);
+        let pane = tab_host.panes().get(&pane_id)?.read(cx);
 
         let current_cwd = pane.current_working_directory();
         let current_source = pane.current_working_directory_source();
@@ -364,7 +369,7 @@ impl WorkspaceApp {
     }
 
     fn request_terminal_cwd_report(&mut self, pane_id: PaneId, cx: &mut Context<Self>) -> bool {
-        let Some(pane) = self.panes.get(&pane_id) else {
+        let Some(pane) = self.tab_host.read(cx).panes().get(&pane_id).cloned() else {
             return false;
         };
         let command = current_directory_report_command();
@@ -569,7 +574,7 @@ impl WorkspaceApp {
             cx.notify();
             return;
         };
-        let Some(pane) = self.panes.get(&pane_id).cloned() else {
+        let Some(pane) = self.tab_host.read(cx).panes().get(&pane_id).cloned() else {
             self.terminal_cwd_picker.error = Some(self.i18n.t("terminal.cwd.unavailable"));
             cx.notify();
             return;

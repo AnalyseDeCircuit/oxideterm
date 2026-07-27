@@ -263,7 +263,7 @@ impl WorkspaceApp {
         self.terminal_command_suggestion_highlighted = None;
         self.close_terminal_quick_commands_popover();
         window.focus(&self.focus_handle, cx);
-        if let Some(pane) = self.active_pane() {
+        if let Some(pane) = self.active_pane(cx) {
             let query = (!self.search.query.is_empty()).then(|| self.search.query.clone());
             let selected_match = query
                 .as_ref()
@@ -282,7 +282,7 @@ impl WorkspaceApp {
         self.search.visible = false;
         self.search.clear_match_state();
         self.ime_marked_text = None;
-        if let Some(pane) = self.active_pane() {
+        if let Some(pane) = self.active_pane(cx) {
             let _ = pane.update(cx, |pane, cx| pane.set_search_query(None, None, cx));
         }
         self.focus_active_pane(window, cx);
@@ -292,7 +292,7 @@ impl WorkspaceApp {
     pub(super) fn update_search_query(&mut self, cx: &mut Context<Self>) {
         let query = (!self.search.query.is_empty()).then(|| self.search.query.clone());
         self.search.active_match = query.as_ref().map(|_| 0);
-        if let Some(pane) = self.active_pane() {
+        if let Some(pane) = self.active_pane(cx) {
             let status = pane.update(cx, |pane, cx| {
                 pane.set_search_query(query, self.search.active_match, cx)
             });
@@ -304,7 +304,7 @@ impl WorkspaceApp {
     }
 
     pub(super) fn search_next(&mut self, forward: bool, cx: &mut Context<Self>) {
-        if let Some(pane) = self.active_pane() {
+        if let Some(pane) = self.active_pane(cx) {
             let status = pane.update(cx, |pane, cx| pane.select_next_search_result(forward, cx));
             self.search.sync_from_terminal(status);
             cx.notify();
@@ -315,7 +315,7 @@ impl WorkspaceApp {
         if self.copy_remote_desktop(cx) {
             return;
         }
-        if let Some(pane) = self.active_pane() {
+        if let Some(pane) = self.active_pane(cx) {
             let _ = pane.update(cx, |pane, cx| pane.copy_to_clipboard(cx));
         }
     }
@@ -324,7 +324,7 @@ impl WorkspaceApp {
         if self.paste_remote_desktop(cx) {
             return;
         }
-        if let Some(pane) = self.active_pane() {
+        if let Some(pane) = self.active_pane(cx) {
             let _ = pane.update(cx, |pane, cx| pane.paste_from_clipboard(cx));
         }
     }
@@ -336,7 +336,7 @@ impl WorkspaceApp {
         if !terminal_active {
             return false;
         }
-        let Some(pane) = self.active_pane() else {
+        let Some(pane) = self.active_pane(cx) else {
             return false;
         };
         pane.update(cx, |pane, cx| pane.clear_screen(cx));
@@ -344,7 +344,7 @@ impl WorkspaceApp {
     }
 
     pub(super) fn cut(&mut self, cx: &mut Context<Self>) -> bool {
-        let Some(pane) = self.active_pane() else {
+        let Some(pane) = self.active_pane(cx) else {
             return false;
         };
         pane.update(cx, |pane, cx| pane.cut_to_clipboard(cx))
@@ -966,7 +966,7 @@ impl WorkspaceApp {
             return false;
         }
 
-        let Some(pane) = self.active_pane() else {
+        let Some(pane) = self.active_pane(cx) else {
             return false;
         };
         let handled = pane.update(cx, |pane, cx| pane.handle_unfocused_key(event, cx));
@@ -1988,24 +1988,26 @@ impl WorkspaceApp {
         &self,
         cx: &mut Context<Self>,
     ) -> TerminalRecordingStatus {
-        self.active_pane()
+        self.active_pane(cx)
             .map(|pane| pane.read(cx).recording_status())
             .unwrap_or_default()
     }
 
     pub(super) fn any_terminal_recording_active(&self, cx: &mut Context<Self>) -> bool {
-        self.panes
+        self.tab_host
+            .read(cx)
+            .panes()
             .values()
             .any(|pane| pane.read(cx).recording_status().state != TerminalRecordingState::Idle)
     }
 
     pub(super) fn active_terminal_timestamps_enabled(&self, cx: &mut Context<Self>) -> bool {
-        self.active_pane()
+        self.active_pane(cx)
             .is_some_and(|pane| pane.read(cx).terminal_timestamps_enabled())
     }
 
     pub(super) fn toggle_active_terminal_timestamps(&mut self, cx: &mut Context<Self>) {
-        if let Some(pane) = self.active_pane() {
+        if let Some(pane) = self.active_pane(cx) {
             let _ = pane.update(cx, |pane, cx| pane.toggle_terminal_timestamps(cx));
         }
         cx.notify();
@@ -2013,7 +2015,7 @@ impl WorkspaceApp {
 
     pub(super) fn start_active_terminal_recording(&mut self, cx: &mut Context<Self>) {
         let title = self.active_tab().map(|tab| tab.title.clone());
-        if let Some(pane) = self.active_pane() {
+        if let Some(pane) = self.active_pane(cx) {
             let _ = pane.update(cx, |pane, cx| pane.start_recording(title, cx));
             let _ = self.terminal_notice_tx.send(TerminalNotice {
                 title: self.i18n.t("terminal.recording.started"),
@@ -2036,21 +2038,21 @@ impl WorkspaceApp {
     }
 
     pub(super) fn pause_active_terminal_recording(&mut self, cx: &mut Context<Self>) {
-        if let Some(pane) = self.active_pane() {
+        if let Some(pane) = self.active_pane(cx) {
             let _ = pane.update(cx, |pane, cx| pane.pause_recording(cx));
         }
         cx.notify();
     }
 
     pub(super) fn resume_active_terminal_recording(&mut self, cx: &mut Context<Self>) {
-        if let Some(pane) = self.active_pane() {
+        if let Some(pane) = self.active_pane(cx) {
             let _ = pane.update(cx, |pane, cx| pane.resume_recording(cx));
         }
         cx.notify();
     }
 
     pub(super) fn discard_active_terminal_recording(&mut self, cx: &mut Context<Self>) {
-        if let Some(pane) = self.active_pane() {
+        if let Some(pane) = self.active_pane(cx) {
             let _ = pane.update(cx, |pane, cx| pane.discard_recording(cx));
         }
         cx.notify();
@@ -2060,7 +2062,7 @@ impl WorkspaceApp {
         let Some(pane_id) = self.active_pane_id() else {
             return;
         };
-        let Some(pane) = self.panes.get(&pane_id).cloned() else {
+        let Some(pane) = self.tab_host.read(cx).panes().get(&pane_id).cloned() else {
             return;
         };
         let session_label = self
@@ -2139,7 +2141,7 @@ impl WorkspaceApp {
         mark_source: TerminalCommandMarkDetectionSource,
         cx: &mut Context<Self>,
     ) {
-        if let Some(pane) = self.panes.get(&pane_id).cloned() {
+        if let Some(pane) = self.tab_host.read(cx).panes().get(&pane_id).cloned() {
             let _ = pane.update(cx, |pane, cx| {
                 pane.begin_command_mark(command, mark_source, cx);
                 pane.send_command_line(command, cx);
@@ -2157,8 +2159,8 @@ impl WorkspaceApp {
             return;
         }
 
-        self.retain_live_terminal_broadcast_targets();
-        let targets = self.terminal_broadcast_target_panes(source_pane_id);
+        self.retain_live_terminal_broadcast_targets(cx);
+        let targets = self.terminal_broadcast_target_panes(source_pane_id, cx);
         for pane_id in targets {
             self.send_terminal_command_to_pane(
                 pane_id,
@@ -2169,14 +2171,20 @@ impl WorkspaceApp {
         }
     }
 
-    pub(super) fn terminal_broadcast_target_panes(&self, source_pane_id: PaneId) -> Vec<PaneId> {
+    pub(super) fn terminal_broadcast_target_panes(
+        &self,
+        source_pane_id: PaneId,
+        cx: &App,
+    ) -> Vec<PaneId> {
+        let tab_host = self.tab_host.read(cx);
         let mut candidates = Vec::new();
         for tab in &self.tabs {
             if let Some(root) = tab.root_pane.as_ref() {
                 root.collect_pane_ids(&mut candidates);
             }
         }
-        candidates.retain(|pane_id| *pane_id != source_pane_id && self.panes.contains_key(pane_id));
+        candidates
+            .retain(|pane_id| *pane_id != source_pane_id && tab_host.panes().contains_key(pane_id));
 
         if self.terminal_broadcast_targets.is_empty() {
             candidates
@@ -2188,15 +2196,17 @@ impl WorkspaceApp {
         }
     }
 
-    fn retain_live_terminal_broadcast_targets(&mut self) {
-        let panes = &self.panes;
+    fn retain_live_terminal_broadcast_targets(&mut self, cx: &App) {
+        let tab_host = self.tab_host.read(cx);
         self.terminal_broadcast_targets
-            .retain(|pane_id| panes.contains_key(pane_id));
+            .retain(|pane_id| tab_host.panes().contains_key(pane_id));
     }
 
     pub(in crate::workspace) fn terminal_broadcast_entries(
         &self,
+        cx: &App,
     ) -> Vec<(PaneId, String, TabKind)> {
+        let tab_host = self.tab_host.read(cx);
         let mut entries = Vec::new();
         for tab in &self.tabs {
             let Some(root) = tab.root_pane.as_ref() else {
@@ -2205,7 +2215,7 @@ impl WorkspaceApp {
             let mut pane_ids = Vec::new();
             root.collect_pane_ids(&mut pane_ids);
             for pane_id in pane_ids {
-                if !self.panes.contains_key(&pane_id) {
+                if !tab_host.panes().contains_key(&pane_id) {
                     continue;
                 }
                 let label = if root.pane_count() > 1 {

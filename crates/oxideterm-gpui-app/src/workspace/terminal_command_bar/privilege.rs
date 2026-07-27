@@ -120,7 +120,7 @@ impl WorkspaceApp {
             ));
             return None;
         }
-        let Some(active_pane) = self.active_pane() else {
+        let Some(active_pane) = self.active_pane(cx) else {
             log_privilege_prompt_helper(format_args!("state unavailable: no active pane"));
             return None;
         };
@@ -189,7 +189,7 @@ impl WorkspaceApp {
         &mut self,
         cx: &mut Context<Self>,
     ) -> bool {
-        let Some(active_pane) = self.active_pane() else {
+        let Some(active_pane) = self.active_pane(cx) else {
             return false;
         };
         let hint = self.active_privilege_prompt_inline_hint(cx);
@@ -270,7 +270,7 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
-        let Some(active_pane) = self.active_pane() else {
+        let Some(active_pane) = self.active_pane(cx) else {
             return false;
         };
         let requested =
@@ -334,7 +334,7 @@ impl WorkspaceApp {
         // GPUI layer. It is zeroized after the PTY write attempt, matching the
         // Tauri click-only secret handoff without involving command history.
         let secret_line = zeroize::Zeroizing::new(format!("{}\n", secret.expose_secret()));
-        let sent = self.active_pane().is_some_and(|pane| {
+        let sent = self.active_pane(cx).is_some_and(|pane| {
             pane.update(cx, |pane, cx| {
                 pane.send_privilege_secret_input_bytes(secret_line.as_bytes(), cx)
             })
