@@ -1671,17 +1671,33 @@ impl WorkspaceApp {
         }
     }
 
-    pub(in crate::workspace) fn poll_terminal_notices(&mut self, cx: &mut Context<Self>) -> bool {
+    pub(in crate::workspace) fn handle_workspace_terminal_event(
+        &mut self,
+        event: &WorkspaceTerminalEvent,
+        cx: &mut Context<Self>,
+    ) {
+        match event {
+            WorkspaceTerminalEvent::NoticesReady(request) => {
+                if let Some(notices) = request.take() {
+                    self.push_workspace_terminal_notices(notices, cx);
+                }
+            }
+        }
+    }
+
+    fn push_workspace_terminal_notices(
+        &mut self,
+        notices: Vec<TerminalNotice>,
+        cx: &mut Context<Self>,
+    ) {
         const WORKSPACE_TOAST_TTL: Duration = Duration::from_secs(4);
 
+        if notices.is_empty() {
+            return;
+        }
         self.refresh_workspace_toast_expirations(cx);
         let now = Instant::now();
-        let drain = delivery::drain_channel(
-            &self.terminal_notice_rx,
-            delivery::NOTIFICATION_DELIVERY_BUDGET,
-        );
-        let mut added = false;
-        for notice in drain.items {
+        for notice in notices {
             let id = self.next_workspace_toast_id();
             self.workspace_toasts.push(WorkspaceToast {
                 id,
@@ -1689,79 +1705,42 @@ impl WorkspaceApp {
                 expires_at: now + WORKSPACE_TOAST_TTL,
                 presence: oxideterm_gpui_ui::motion::ExitPresence::visible(),
             });
-            added = true;
         }
-
-        if added {
-            cx.spawn(async move |weak, cx| {
-                Timer::after(WORKSPACE_TOAST_TTL).await;
-                let _ = weak.update(cx, |workspace, cx| {
-                    let now = Instant::now();
-                    let expired_toast_ids = workspace
-                        .workspace_toasts
-                        .iter()
-                        .filter(|toast| {
-                            toast.expires_at <= now
-                                && toast.presence.phase()
-                                    == oxideterm_gpui_ui::motion::ExitPhase::Visible
-                        })
-                        .map(|toast| toast.id)
-                        .collect::<Vec<_>>();
-                    for toast_id in expired_toast_ids {
-                        workspace.dismiss_workspace_toast(toast_id, cx);
-                    }
-                    let expired_plugin_toast_keys = workspace
-                        .plugin_progress_toasts
-                        .iter()
-                        .filter(|(_, toast)| {
-                            toast.expires_at <= now
-                                && toast.presence.phase()
-                                    == oxideterm_gpui_ui::motion::ExitPhase::Visible
-                        })
-                        .map(|(key, _)| key.clone())
-                        .collect::<Vec<_>>();
-                    for toast_key in expired_plugin_toast_keys {
-                        workspace.dismiss_plugin_progress_toast(&toast_key, cx);
-                    }
-                    cx.notify();
-                });
-            })
-            .detach();
-        }
-        drain.outcome.backlog_remaining
-    }
-
-    pub(in crate::workspace) fn schedule_terminal_notice_delivery(&self, cx: &mut Context<Self>) {
-        let delivery_wake = self.terminal_notice_tx.wake();
-        let release_wake = delivery_wake.clone();
-        cx.on_release(move |_, _| {
-            // Release stops the waiter even if external terminal sinks still hold senders.
-            release_wake.stop();
-        })
-        .detach();
         cx.spawn(async move |weak, cx| {
-            loop {
-                delivery_wake.wait().await;
-                let should_drain = delivery_wake.take();
-                let stopped = delivery_wake.is_stopped();
-                if !should_drain {
-                    if stopped {
-                        break;
-                    }
-                    continue;
+            Timer::after(WORKSPACE_TOAST_TTL).await;
+            let _ = weak.update(cx, |workspace, cx| {
+                let now = Instant::now();
+                let expired_toast_ids = workspace
+                    .workspace_toasts
+                    .iter()
+                    .filter(|toast| {
+                        toast.expires_at <= now
+                            && toast.presence.phase()
+                                == oxideterm_gpui_ui::motion::ExitPhase::Visible
+                    })
+                    .map(|toast| toast.id)
+                    .collect::<Vec<_>>();
+                for toast_id in expired_toast_ids {
+                    workspace.dismiss_workspace_toast(toast_id, cx);
                 }
-                let backlog_remaining = weak
-                    .update(cx, |workspace, cx| workspace.poll_terminal_notices(cx))
-                    .unwrap_or(false);
-                if backlog_remaining {
-                    // Store one continuation permit for the next bounded notification batch.
-                    delivery_wake.mark();
-                } else if stopped {
-                    break;
+                let expired_plugin_toast_keys = workspace
+                    .plugin_progress_toasts
+                    .iter()
+                    .filter(|(_, toast)| {
+                        toast.expires_at <= now
+                            && toast.presence.phase()
+                                == oxideterm_gpui_ui::motion::ExitPhase::Visible
+                    })
+                    .map(|(key, _)| key.clone())
+                    .collect::<Vec<_>>();
+                for toast_key in expired_plugin_toast_keys {
+                    workspace.dismiss_plugin_progress_toast(&toast_key, cx);
                 }
-            }
+                cx.notify();
+            });
         })
         .detach();
+        cx.notify();
     }
 
     pub(in crate::workspace) fn render_workspace_toasts(

@@ -56,6 +56,7 @@ mod terminal_cast;
 mod terminal_command_bar;
 mod terminal_context_actions;
 mod terminal_cwd;
+mod terminal_entity;
 mod terminal_git;
 mod terminal_project;
 mod version_migration;
@@ -282,6 +283,7 @@ use self::sidebar::{
 use self::sidebar::{AiCompactionDeliveryKind, AiStreamDeliveryEvent};
 use self::tabs::TerminalLocation;
 use self::terminal_cast::TerminalCastPlayerState;
+use self::terminal_entity::{WorkspaceTerminalEntity, WorkspaceTerminalEvent};
 use crate::{
     CloseOtherTabs, ClosePane, CloseSearch, CloseTab, CommandPalette, Copy, Cut, Find, FindNext,
     FindPrev, FontDecrease, FontIncrease, FontReset, GoToTab1, GoToTab2, GoToTab3, GoToTab4,
@@ -993,8 +995,9 @@ pub(crate) struct WorkspaceApp {
     local_shells: Vec<ShellInfo>,
     local_shell_launcher_open: bool,
     local_shell_launcher_selected_id: Option<String>,
+    _terminal: Entity<WorkspaceTerminalEntity>,
+    _terminal_subscription: Subscription,
     terminal_notice_tx: delivery::ActiveDeliverySender<TerminalNotice>,
-    terminal_notice_rx: std::sync::mpsc::Receiver<TerminalNotice>,
     // Standard toasts need stable ids so the close button removes the rendered
     // toast, not whichever item later occupies the same list index.
     workspace_toast_next_id: u64,

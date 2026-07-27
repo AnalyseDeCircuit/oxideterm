@@ -128,7 +128,14 @@ impl WorkspaceApp {
             cx.notify();
         });
         let (sftp_worker_tx, mut sftp_worker_rx) = tokio::sync::mpsc::unbounded_channel();
-        let (terminal_notice_tx, terminal_notice_rx) = delivery::ActiveDeliverySender::channel();
+        let terminal = cx.new(WorkspaceTerminalEntity::new);
+        let terminal_notice_tx = terminal.read(cx).notice_sender();
+        let terminal_subscription = cx.subscribe(
+            &terminal,
+            |workspace, _terminal, event: &WorkspaceTerminalEvent, cx| {
+                workspace.handle_workspace_terminal_event(event, cx);
+            },
+        );
         let terminal_metadata_wake = delivery::ActiveDeliveryWake::default();
         let (terminal_cwd_tx, terminal_cwd_rx) =
             delivery::ActiveDeliverySender::channel_with_wake(terminal_metadata_wake.clone());
@@ -694,8 +701,9 @@ impl WorkspaceApp {
             local_shells,
             local_shell_launcher_open: false,
             local_shell_launcher_selected_id: None,
+            _terminal: terminal,
+            _terminal_subscription: terminal_subscription,
             terminal_notice_tx,
-            terminal_notice_rx,
             workspace_toast_next_id: 1,
             workspace_toasts: Vec::new(),
             plugin_progress_toasts: HashMap::new(),
@@ -742,7 +750,6 @@ impl WorkspaceApp {
         workspace.bootstrap_cloud_sync_controller(cx);
         workspace.sync_ssh_config_sync_service();
         workspace.restore_session_tree_snapshot();
-        workspace.schedule_terminal_notice_delivery(cx);
         workspace.schedule_launcher_worker_delivery(cx);
         workspace.schedule_terminal_metadata_delivery(cx);
         workspace.schedule_native_update_delivery(cx);
