@@ -5,11 +5,12 @@ use super::*;
 
 const MAX_TAB_HISTORY: usize = 50;
 
-/// Owns workspace-wide tab, pane, and terminal identity allocation.
+/// Owns workspace-wide tab identity, terminal mounts, navigation, and close lifecycle.
 pub(in crate::workspace) struct WorkspaceTabHostEntity {
     next_tab_id: u64,
     next_pane_id: u64,
     next_session_id: u64,
+    terminal_locations: HashMap<TerminalSessionId, TerminalLocation>,
     navigation_history: Vec<TabId>,
     navigation_index: Option<usize>,
     navigation_replaying: bool,
@@ -17,6 +18,13 @@ pub(in crate::workspace) struct WorkspaceTabHostEntity {
     process_close_check_generation: u64,
     process_close_completion: Option<TabCloseProcessCompletion>,
     close_confirm: Option<TabCloseConfirm>,
+}
+
+/// Identifies the single tab and pane currently mounting one terminal session.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(in crate::workspace) struct TerminalLocation {
+    pub(in crate::workspace) tab_id: TabId,
+    pub(in crate::workspace) pane_id: PaneId,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -42,6 +50,7 @@ impl WorkspaceTabHostEntity {
             next_tab_id: 1,
             next_pane_id: 1,
             next_session_id: 1,
+            terminal_locations: HashMap::new(),
             navigation_history: Vec::new(),
             navigation_index: None,
             navigation_replaying: false,
@@ -68,6 +77,41 @@ impl WorkspaceTabHostEntity {
         let id = TerminalSessionId(self.next_session_id);
         self.next_session_id += 1;
         id
+    }
+
+    pub(in crate::workspace) fn bind_terminal_location(
+        &mut self,
+        session_id: TerminalSessionId,
+        location: TerminalLocation,
+    ) {
+        // A session may be registered repeatedly at the same mount boundary,
+        // but moving it requires the previous pane lifecycle to unbind first.
+        let previous = self.terminal_locations.insert(session_id, location);
+        debug_assert!(
+            previous.is_none_or(|previous| previous == location),
+            "terminal session was rebound without removing its previous location"
+        );
+    }
+
+    pub(in crate::workspace) fn unbind_terminal_location_for_pane(
+        &mut self,
+        pane_id: PaneId,
+    ) -> Option<TerminalSessionId> {
+        let session_id = self
+            .terminal_locations
+            .iter()
+            .find_map(|(session_id, location)| {
+                (location.pane_id == pane_id).then_some(*session_id)
+            })?;
+        self.terminal_locations.remove(&session_id);
+        Some(session_id)
+    }
+
+    pub(in crate::workspace) fn terminal_location(
+        &self,
+        session_id: TerminalSessionId,
+    ) -> Option<TerminalLocation> {
+        self.terminal_locations.get(&session_id).copied()
     }
 
     pub(in crate::workspace) fn observe_active_tab(&mut self, active_tab_id: Option<TabId>) {
@@ -240,6 +284,37 @@ mod tests {
         assert_eq!(tab_host.alloc_tab_id(), TabId(2));
         assert_eq!(tab_host.alloc_pane_id(), PaneId(2));
         assert_eq!(tab_host.alloc_session_id(), TerminalSessionId(2));
+    }
+
+    #[test]
+    fn terminal_location_lifecycle_is_owned_by_tab_host() {
+        let mut tab_host = WorkspaceTabHostEntity::new();
+        let first_session = TerminalSessionId(1);
+        let second_session = TerminalSessionId(2);
+        let first_location = TerminalLocation {
+            tab_id: TabId(3),
+            pane_id: PaneId(4),
+        };
+        let second_location = TerminalLocation {
+            tab_id: TabId(3),
+            pane_id: PaneId(5),
+        };
+
+        tab_host.bind_terminal_location(first_session, first_location);
+        tab_host.bind_terminal_location(second_session, second_location);
+        assert_eq!(
+            tab_host.terminal_location(first_session),
+            Some(first_location)
+        );
+        assert_eq!(
+            tab_host.unbind_terminal_location_for_pane(first_location.pane_id),
+            Some(first_session)
+        );
+        assert!(tab_host.terminal_location(first_session).is_none());
+        assert_eq!(
+            tab_host.terminal_location(second_session),
+            Some(second_location)
+        );
     }
 
     #[test]

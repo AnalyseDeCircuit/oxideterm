@@ -264,7 +264,6 @@ impl WorkspaceApp {
             node_disconnect_confirm: None,
             node_disconnect_confirm_presence: oxideterm_gpui_ui::motion::ExitPresence::visible(),
             panes: HashMap::new(),
-            terminal_locations: HashMap::new(),
             terminal_pane_subscriptions: HashMap::new(),
             pending_auto_close_terminal_sessions: HashSet::new(),
             auto_close_terminal_sessions_scheduled: false,

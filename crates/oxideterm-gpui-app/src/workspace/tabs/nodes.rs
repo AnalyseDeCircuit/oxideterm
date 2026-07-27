@@ -224,8 +224,9 @@ impl WorkspaceApp {
         for (session_id, node_id) in terminal_nodes {
             let locked = self.ssh_terminal_input_locked_for_node(&node_id);
             let Some(pane_id) = self
-                .terminal_locations
-                .get(&session_id)
+                .tab_host
+                .read(cx)
+                .terminal_location(session_id)
                 .map(|location| location.pane_id)
             else {
                 continue;
@@ -1105,7 +1106,7 @@ impl WorkspaceApp {
                 continue;
             };
             let old_session_id = TerminalSessionId(raw_old_session_id);
-            let Some(location) = self.terminal_locations.get(&old_session_id).copied() else {
+            let Some(location) = self.tab_host.read(cx).terminal_location(old_session_id) else {
                 continue;
             };
             let tab_id = location.tab_id;
@@ -1132,14 +1133,14 @@ impl WorkspaceApp {
                     Some(old)
                 });
             if let Some(replaced_pane_id) = replaced {
-                if let Some(pane) = self.remove_terminal_pane(&replaced_pane_id) {
+                if let Some(pane) = self.remove_terminal_pane(&replaced_pane_id, cx) {
                     let _ = pane.update(cx, |pane, _cx| pane.shutdown());
                 }
-                self.bind_terminal_location(tab_id, new_pane_id, new_session_id);
+                self.bind_terminal_location(tab_id, new_pane_id, new_session_id, cx);
                 self.unregister_ssh_terminal_session(old_session_id);
                 remounted += 1;
             } else {
-                if let Some(pane) = self.remove_terminal_pane(&new_pane_id) {
+                if let Some(pane) = self.remove_terminal_pane(&new_pane_id, cx) {
                     let _ = pane.update(cx, |pane, _cx| pane.shutdown());
                 }
                 self.unregister_ssh_terminal_session(new_session_id);

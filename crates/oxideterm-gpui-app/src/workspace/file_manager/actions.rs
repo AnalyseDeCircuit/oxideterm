@@ -1724,7 +1724,7 @@ impl WorkspaceApp {
             root_pane: Some(PaneNode::leaf(pane_id, session_id)),
             active_pane_id: Some(pane_id),
         });
-        self.bind_terminal_location(tab_id, pane_id, session_id);
+        self.bind_terminal_location(tab_id, pane_id, session_id, cx);
         self.set_main_window_active_tab(Some(tab_id), cx);
         self.active_surface = ActiveSurface::Terminal;
         self.needs_active_pane_focus = true;

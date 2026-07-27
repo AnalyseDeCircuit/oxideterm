@@ -2124,7 +2124,7 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Option<(PaneId, gpui::Entity<oxideterm_gpui_terminal::TerminalPane>)> {
-        let location = self.terminal_locations.get(&session_id).copied()?;
+        let location = self.tab_host.read(cx).terminal_location(session_id)?;
         let tab_id = location.tab_id;
         let pane_id = location.pane_id;
         let pane = self.panes.get(&pane_id)?.clone();

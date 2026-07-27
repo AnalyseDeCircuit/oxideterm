@@ -110,36 +110,21 @@ impl WorkspaceApp {
         tab_id: TabId,
         pane_id: PaneId,
         session_id: TerminalSessionId,
+        cx: &mut Context<Self>,
     ) {
-        let previous = self
-            .terminal_locations
-            .insert(session_id, TerminalLocation { tab_id, pane_id });
-        debug_assert!(
-            previous.is_none_or(|location| location == TerminalLocation { tab_id, pane_id }),
-            "terminal session was rebound without removing its previous location"
-        );
-        self.debug_assert_terminal_location(session_id);
+        self.tab_host.update(cx, |tab_host, _cx| {
+            tab_host.bind_terminal_location(session_id, TerminalLocation { tab_id, pane_id });
+        });
+        self.debug_assert_terminal_location(session_id, cx);
     }
 
-    fn unbind_terminal_location_for_pane(&mut self, pane_id: PaneId) {
-        let session_id = self
-            .terminal_locations
-            .iter()
-            .find_map(|(session_id, location)| {
-                (location.pane_id == pane_id).then_some(*session_id)
-            });
-        if let Some(session_id) = session_id {
-            self.terminal_locations.remove(&session_id);
-        }
-    }
-
-    fn debug_assert_terminal_location(&self, session_id: TerminalSessionId) {
+    fn debug_assert_terminal_location(&self, session_id: TerminalSessionId, cx: &App) {
         // Release builds compile out the invariant checks; consume the ID so
         // release packaging remains warning-free.
         #[cfg(not(debug_assertions))]
-        let _ = session_id;
+        let _ = (session_id, cx);
         #[cfg(debug_assertions)]
-        if let Some(location) = self.terminal_locations.get(&session_id) {
+        if let Some(location) = self.tab_host.read(cx).terminal_location(session_id) {
             let tree_location = self.tab_by_id(location.tab_id).and_then(|tab| {
                 tab.root_pane
                     .as_ref()
@@ -153,9 +138,12 @@ impl WorkspaceApp {
     pub(super) fn remove_terminal_pane(
         &mut self,
         pane_id: &PaneId,
+        cx: &mut Context<Self>,
     ) -> Option<gpui::Entity<TerminalPane>> {
         self.terminal_pane_subscriptions.remove(pane_id);
-        self.unbind_terminal_location_for_pane(*pane_id);
+        self.tab_host.update(cx, |tab_host, _cx| {
+            tab_host.unbind_terminal_location_for_pane(*pane_id);
+        });
         self.panes.remove(pane_id)
     }
 
@@ -275,7 +263,7 @@ impl WorkspaceApp {
         }) {
             tab.active_pane_id = Some(pane_id);
             self.register_terminal_pane(pane_id, session_id, pane.clone(), window, cx);
-            self.bind_terminal_location(tab_id, pane_id, session_id);
+            self.bind_terminal_location(tab_id, pane_id, session_id, cx);
             self.needs_active_pane_focus = true;
             pane.update(cx, |pane, cx| pane.focus(window, cx));
             cx.notify();
@@ -308,7 +296,7 @@ impl WorkspaceApp {
             self.unregister_ssh_terminal_session(session_id);
         }
 
-        if let Some(pane) = self.remove_terminal_pane(&active_pane_id) {
+        if let Some(pane) = self.remove_terminal_pane(&active_pane_id, cx) {
             let _ = pane.update(cx, |pane, _cx| pane.shutdown());
         }
 
@@ -364,7 +352,7 @@ impl WorkspaceApp {
             .into_iter()
             .filter(|pane_id| *pane_id != active_pane_id)
         {
-            if let Some(pane) = self.remove_terminal_pane(&pane_id) {
+            if let Some(pane) = self.remove_terminal_pane(&pane_id, cx) {
                 let _ = pane.update(cx, |pane, _cx| pane.shutdown());
             }
         }

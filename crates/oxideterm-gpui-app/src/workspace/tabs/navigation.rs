@@ -368,7 +368,7 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
-        let Some(location) = self.terminal_locations.get(&session_id).copied() else {
+        let Some(location) = self.tab_host.read(cx).terminal_location(session_id) else {
             return false;
         };
         if self.detached_tabs.contains(&location.tab_id) {
@@ -870,7 +870,7 @@ impl WorkspaceApp {
             self.unregister_ssh_terminal_session(session_id);
         }
         for pane_id in pane_ids {
-            if let Some(pane) = self.remove_terminal_pane(&pane_id) {
+            if let Some(pane) = self.remove_terminal_pane(&pane_id, cx) {
                 let _ = pane.update(cx, |pane, _cx| pane.shutdown());
             }
         }

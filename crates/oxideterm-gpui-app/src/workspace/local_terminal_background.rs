@@ -104,7 +104,7 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.remove_terminal_pane(&active_pane_id);
+        self.remove_terminal_pane(&active_pane_id, cx);
 
         let tab = &mut self.tabs[active_index];
         let Some(root_pane) = tab.root_pane.as_mut() else {
@@ -134,7 +134,7 @@ impl WorkspaceApp {
             root_pane.collect_pane_ids(&mut pane_ids);
         }
         for pane_id in pane_ids {
-            self.remove_terminal_pane(&pane_id);
+            self.remove_terminal_pane(&pane_id, cx);
         }
         let next_active_tab_id = if self.tabs.is_empty() {
             None
@@ -184,7 +184,7 @@ impl WorkspaceApp {
             root_pane: Some(PaneNode::leaf(pane_id, detached.session_id)),
             active_pane_id: Some(pane_id),
         });
-        self.bind_terminal_location(tab_id, pane_id, detached.session_id);
+        self.bind_terminal_location(tab_id, pane_id, detached.session_id, cx);
         self.set_main_window_active_tab(Some(tab_id), cx);
         self.active_surface = ActiveSurface::Terminal;
         self.needs_active_pane_focus = true;

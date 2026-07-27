@@ -280,6 +280,7 @@ use self::sidebar::{
 };
 #[cfg(test)]
 use self::sidebar::{AiCompactionDeliveryKind, AiStreamDeliveryEvent};
+use self::tabs::TerminalLocation;
 use self::terminal_cast::TerminalCastPlayerState;
 use crate::{
     CloseOtherTabs, ClosePane, CloseSearch, CloseTab, CommandPalette, Copy, Cut, Find, FindNext,
@@ -729,7 +730,6 @@ pub(crate) struct WorkspaceApp {
     node_disconnect_confirm: Option<NodeDisconnectConfirm>,
     node_disconnect_confirm_presence: oxideterm_gpui_ui::motion::ExitPresence,
     panes: HashMap<PaneId, gpui::Entity<TerminalPane>>,
-    terminal_locations: HashMap<TerminalSessionId, TerminalLocation>,
     terminal_pane_subscriptions: HashMap<PaneId, Subscription>,
     pending_auto_close_terminal_sessions: HashSet<TerminalSessionId>,
     auto_close_terminal_sessions_scheduled: bool,
@@ -1221,12 +1221,6 @@ struct WorkspaceTooltipPending {
 
 struct WorkspaceTerminalEndpointSession {
     session: SharedTerminalSession,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-struct TerminalLocation {
-    tab_id: TabId,
-    pane_id: PaneId,
 }
 
 #[derive(Clone)]
