@@ -174,8 +174,15 @@ impl WorkspaceApp {
         });
         let broadcast_targets =
             self.terminal_broadcast_target_panes(active_pane_id.unwrap_or(PaneId(0)), cx);
-        let broadcast_label = if self.terminal_broadcast_enabled {
-            if self.terminal_broadcast_targets.is_empty() {
+        let (broadcast_enabled, broadcast_targets_empty) = {
+            let terminal = self.terminal.read(cx);
+            (
+                terminal.broadcast_enabled(),
+                terminal.broadcast_targets_empty(),
+            )
+        };
+        let broadcast_label = if broadcast_enabled {
+            if broadcast_targets_empty {
                 self.i18n.t("terminal.command_bar.all_targets")
             } else {
                 format!("{}", broadcast_targets.len())
@@ -362,7 +369,7 @@ impl WorkspaceApp {
                             .items_center()
                             .gap(px(4.0))
                             .when(
-                                self.terminal_broadcast_enabled && !broadcast_label.is_empty(),
+                                broadcast_enabled && !broadcast_label.is_empty(),
                                 |actions| {
                                     actions.child(
                                         div()
@@ -442,13 +449,13 @@ impl WorkspaceApp {
                                 SelectAnchorId::TerminalBroadcastMenu,
                                 self.terminal_command_action_button(
                                     LucideIcon::Radio,
-                                    if self.terminal_broadcast_enabled {
+                                    if broadcast_enabled {
                                         rgb(theme.accent)
                                     } else {
                                         rgb(theme.text_muted)
                                     },
                                     false,
-                                    Some(if self.terminal_broadcast_enabled {
+                                    Some(if broadcast_enabled {
                                         rgba((theme.accent << 8) | 0x26)
                                     } else {
                                         rgba((theme.bg_hover << 8) | 0x00)
@@ -456,7 +463,7 @@ impl WorkspaceApp {
                                     "terminal-command-broadcast",
                                     self.i18n.t("terminal.broadcast.select_targets"),
                                     |this, _event, _window, cx| {
-                                        this.toggle_terminal_broadcast_menu();
+                                        this.toggle_terminal_broadcast_menu(cx);
                                         cx.stop_propagation();
                                         cx.notify();
                                     },
@@ -714,7 +721,7 @@ impl WorkspaceApp {
                                         cx.listener(|this, _event, _window, cx| {
                                             this.terminal_quick_commands_open =
                                                 !this.terminal_quick_commands_open;
-                                            this.dismiss_terminal_broadcast_menu();
+                                            this.dismiss_terminal_broadcast_menu(cx);
                                             this.close_terminal_cwd_picker();
                                             this.close_terminal_git_branch_picker();
                                             if !this.terminal_quick_commands_open {
@@ -771,10 +778,13 @@ impl WorkspaceApp {
             .filter(|(pane_id, _, _)| Some(*pane_id) != active_pane_id)
             .map(|(pane_id, _, _)| *pane_id)
             .collect::<Vec<_>>();
-        let all_selected = !selectable.is_empty()
-            && selectable
+        let all_selected = !selectable.is_empty() && {
+            let terminal = self.terminal.read(cx);
+            selectable
                 .iter()
-                .all(|pane_id| self.terminal_broadcast_targets.contains(pane_id));
+                .all(|pane_id| terminal.broadcast_target_selected(*pane_id))
+        };
+        let broadcast_enabled = self.terminal.read(cx).broadcast_enabled();
         let anchor_left = self
             .select_anchors
             .get(&SelectAnchorId::TerminalBroadcastMenu)
@@ -830,7 +840,7 @@ impl WorkspaceApp {
         } else {
             for (pane_id, label, kind) in entries {
                 let is_current = Some(pane_id) == active_pane_id;
-                let checked = self.terminal_broadcast_targets.contains(&pane_id);
+                let checked = self.terminal.read(cx).broadcast_target_selected(pane_id);
                 let badge = match kind {
                     TabKind::LocalTerminal => self.i18n.t("terminal.typeLocal"),
                     TabKind::SshTerminal => self.i18n.t("terminal.typeSsh"),
@@ -892,16 +902,10 @@ impl WorkspaceApp {
                     is_current,
                     false,
                     Some(rgb(theme.bg_hover)),
-                    move |this, _event, _window, _cx| {
-                        if this.terminal_broadcast_targets.remove(&pane_id) {
-                            if this.terminal_broadcast_targets.is_empty() {
-                                this.terminal_broadcast_enabled = false;
-                            }
-                        } else {
-                            this.terminal_broadcast_targets.insert(pane_id);
-                            this.terminal_broadcast_enabled = true;
-                        }
-                        this.keep_terminal_broadcast_menu_open();
+                    move |this, _event, _window, cx| {
+                        this.terminal.update(cx, |terminal, _cx| {
+                            terminal.toggle_broadcast_target(pane_id);
+                        });
                     },
                     cx,
                 );
@@ -935,21 +939,19 @@ impl WorkspaceApp {
                             hover_background: None,
                             hover_text_color: Some(rgb(theme.accent)),
                         },
-                        move |this, _event, _window, _cx| {
-                            if all_selected {
-                                this.terminal_broadcast_enabled = false;
-                                this.terminal_broadcast_targets.clear();
-                            } else {
-                                this.terminal_broadcast_targets =
-                                    selectable.iter().copied().collect();
-                                this.terminal_broadcast_enabled =
-                                    !this.terminal_broadcast_targets.is_empty();
-                            }
-                            this.keep_terminal_broadcast_menu_open();
+                        move |this, _event, _window, cx| {
+                            this.terminal.update(cx, |terminal, _cx| {
+                                let targets = if all_selected {
+                                    &[][..]
+                                } else {
+                                    selectable.as_slice()
+                                };
+                                terminal.set_broadcast_targets(targets);
+                            });
                         },
                         cx,
                     ))
-                    .when(self.terminal_broadcast_enabled, |footer| {
+                    .when(broadcast_enabled, |footer| {
                         footer.child(
                             div()
                                 .text_size(px(10.0))

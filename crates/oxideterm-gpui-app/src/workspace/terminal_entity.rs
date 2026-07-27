@@ -51,6 +51,14 @@ enum TerminalGitProbeDelivery {
     },
 }
 
+#[derive(Default)]
+/// Keeps broadcast selection semantics together so stale targets cannot widen a command.
+struct TerminalBroadcastState {
+    enabled: bool,
+    targets: HashSet<PaneId>,
+    menu_open: bool,
+}
+
 /// Owns terminal-wide delivery channels and their foreground cancellation lifecycle.
 pub(in crate::workspace) struct WorkspaceTerminalEntity {
     notice_tx: delivery::ActiveDeliverySender<TerminalNotice>,
@@ -62,6 +70,7 @@ pub(in crate::workspace) struct WorkspaceTerminalEntity {
     project_rx: std::sync::mpsc::Receiver<terminal_project::TerminalProjectDelivery>,
     project_store: ProjectStatusStore,
     project_tasks_enabled: bool,
+    broadcast: TerminalBroadcastState,
     node_router: NodeRouter,
     runtime: Arc<tokio::runtime::Runtime>,
 }
@@ -120,6 +129,7 @@ impl WorkspaceTerminalEntity {
             project_rx,
             project_store: ProjectStatusStore::default(),
             project_tasks_enabled: false,
+            broadcast: TerminalBroadcastState::default(),
             node_router,
             runtime,
         }
@@ -131,6 +141,83 @@ impl WorkspaceTerminalEntity {
         // The root keeps one producer capability for legacy surface adapters;
         // receiver state and foreground delivery remain Entity-owned.
         self.notice_tx.clone()
+    }
+
+    pub(in crate::workspace) fn broadcast_enabled(&self) -> bool {
+        self.broadcast.enabled
+    }
+
+    pub(in crate::workspace) fn broadcast_menu_open(&self) -> bool {
+        self.broadcast.menu_open
+    }
+
+    pub(in crate::workspace) fn broadcast_targets_empty(&self) -> bool {
+        self.broadcast.targets.is_empty()
+    }
+
+    pub(in crate::workspace) fn broadcast_target_selected(&self, pane_id: PaneId) -> bool {
+        self.broadcast.targets.contains(&pane_id)
+    }
+
+    pub(in crate::workspace) fn toggle_broadcast(&mut self) {
+        self.broadcast.enabled = !self.broadcast.enabled;
+        self.broadcast.menu_open = false;
+        if !self.broadcast.enabled {
+            self.broadcast.targets.clear();
+        }
+    }
+
+    pub(in crate::workspace) fn dismiss_broadcast_menu(&mut self) -> bool {
+        let was_open = self.broadcast.menu_open;
+        self.broadcast.menu_open = false;
+        was_open
+    }
+
+    pub(in crate::workspace) fn set_broadcast_menu_open(&mut self, open: bool) {
+        self.broadcast.menu_open = open;
+    }
+
+    pub(in crate::workspace) fn toggle_broadcast_target(&mut self, pane_id: PaneId) {
+        if !self.broadcast.targets.remove(&pane_id) {
+            self.broadcast.targets.insert(pane_id);
+        }
+        self.broadcast.enabled = !self.broadcast.targets.is_empty();
+        self.broadcast.menu_open = true;
+    }
+
+    pub(in crate::workspace) fn set_broadcast_targets(&mut self, targets: &[PaneId]) {
+        self.broadcast.targets.clear();
+        self.broadcast.targets.extend(targets.iter().copied());
+        self.broadcast.enabled = !self.broadcast.targets.is_empty();
+        self.broadcast.menu_open = true;
+    }
+
+    pub(in crate::workspace) fn retain_live_broadcast_targets(
+        &mut self,
+        live_panes: &HashSet<PaneId>,
+    ) {
+        self.broadcast
+            .targets
+            .retain(|pane_id| live_panes.contains(pane_id));
+        if self.broadcast.targets.is_empty() {
+            // An explicitly empty selection means "all" only while enabled.
+            // Disable after pruning so closed targets never widen the command.
+            self.broadcast.enabled = false;
+        }
+    }
+
+    pub(in crate::workspace) fn filter_broadcast_targets(
+        &self,
+        candidates: Vec<PaneId>,
+    ) -> Vec<PaneId> {
+        if self.broadcast.targets.is_empty() {
+            candidates
+        } else {
+            candidates
+                .into_iter()
+                .filter(|pane_id| self.broadcast.targets.contains(pane_id))
+                .collect()
+        }
     }
 
     pub(in crate::workspace) fn project_snapshot(
@@ -441,6 +528,72 @@ mod tests {
         let registry = SshConnectionRegistry::new(ConnectionPoolConfig::default());
         let node_router = NodeRouter::new(registry);
         cx.new(|cx| WorkspaceTerminalEntity::new(runtime, node_router, cx))
+    }
+
+    #[gpui::test]
+    fn broadcast_state_transitions_are_entity_owned(cx: &mut TestAppContext) {
+        let terminal = new_terminal_entity(cx);
+        terminal.update(cx, |terminal, _cx| {
+            terminal.set_broadcast_menu_open(true);
+            terminal.toggle_broadcast_target(PaneId(1));
+        });
+
+        terminal.read_with(cx, |terminal, _cx| {
+            assert!(terminal.broadcast_enabled());
+            assert!(terminal.broadcast_menu_open());
+            assert!(terminal.broadcast_target_selected(PaneId(1)));
+        });
+
+        terminal.update(cx, |terminal, _cx| {
+            terminal.toggle_broadcast_target(PaneId(1));
+        });
+        terminal.read_with(cx, |terminal, _cx| {
+            assert!(!terminal.broadcast_enabled());
+            assert!(terminal.broadcast_menu_open());
+            assert!(terminal.broadcast_targets_empty());
+        });
+
+        terminal.update(cx, |terminal, _cx| terminal.toggle_broadcast());
+        terminal.read_with(cx, |terminal, _cx| {
+            assert!(terminal.broadcast_enabled());
+            assert!(!terminal.broadcast_menu_open());
+        });
+
+        terminal.update(cx, |terminal, _cx| terminal.toggle_broadcast());
+        terminal.read_with(cx, |terminal, _cx| {
+            assert!(!terminal.broadcast_enabled());
+            assert!(terminal.broadcast_targets_empty());
+        });
+    }
+
+    #[gpui::test]
+    fn broadcast_target_filter_and_pruning_are_entity_owned(cx: &mut TestAppContext) {
+        let terminal = new_terminal_entity(cx);
+        terminal.update(cx, |terminal, _cx| {
+            terminal.set_broadcast_targets(&[PaneId(1), PaneId(2)]);
+        });
+
+        let filtered = terminal.read_with(cx, |terminal, _cx| {
+            terminal.filter_broadcast_targets(vec![PaneId(1), PaneId(2), PaneId(3)])
+        });
+        assert_eq!(filtered, vec![PaneId(1), PaneId(2)]);
+
+        terminal.update(cx, |terminal, _cx| {
+            terminal.retain_live_broadcast_targets(&HashSet::from([PaneId(2), PaneId(3)]));
+        });
+        terminal.read_with(cx, |terminal, _cx| {
+            assert!(terminal.broadcast_enabled());
+            assert!(!terminal.broadcast_target_selected(PaneId(1)));
+            assert!(terminal.broadcast_target_selected(PaneId(2)));
+        });
+
+        terminal.update(cx, |terminal, _cx| {
+            terminal.retain_live_broadcast_targets(&HashSet::from([PaneId(3)]));
+        });
+        terminal.read_with(cx, |terminal, _cx| {
+            assert!(!terminal.broadcast_enabled());
+            assert!(terminal.broadcast_targets_empty());
+        });
     }
 
     #[gpui::test]

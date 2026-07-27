@@ -255,7 +255,7 @@ impl WorkspaceApp {
         };
 
         self.close_terminal_quick_commands_popover();
-        self.dismiss_terminal_broadcast_menu();
+        self.dismiss_terminal_broadcast_menu(cx);
         self.close_terminal_cwd_picker();
         self.close_terminal_project_panel();
         self.terminal_command_suggestions_open = false;

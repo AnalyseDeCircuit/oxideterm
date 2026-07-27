@@ -655,7 +655,7 @@ impl WorkspaceApp {
                     | SelectAnchorId::AiContextPopover
             ) && self.has_ai_sidebar_floating_overlay())
             || (anchor.id == SelectAnchorId::TerminalBroadcastMenu
-                && self.terminal_broadcast_menu_open)
+                && self.terminal.read(cx).broadcast_menu_open())
             || (anchor.id == SelectAnchorId::TerminalCommandBar
                 && self.terminal_quick_commands_open)
             || (anchor.id == SelectAnchorId::TerminalCwdMenu && self.terminal_cwd_picker.open)

@@ -69,7 +69,7 @@ impl WorkspaceApp {
         if self.active_terminal_project_key(cx).is_none() {
             return;
         }
-        self.dismiss_terminal_broadcast_menu();
+        self.dismiss_terminal_broadcast_menu(cx);
         self.close_terminal_quick_commands_popover();
         self.close_terminal_cwd_picker();
         self.close_terminal_git_branch_picker();

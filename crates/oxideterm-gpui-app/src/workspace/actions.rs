@@ -594,7 +594,7 @@ impl WorkspaceApp {
         &mut self,
         cx: &mut Context<Self>,
     ) -> bool {
-        if self.dismiss_terminal_broadcast_menu() {
+        if self.dismiss_terminal_broadcast_menu(cx) {
             cx.notify();
             return true;
         }
@@ -643,29 +643,28 @@ impl WorkspaceApp {
     }
 
     pub(super) fn toggle_terminal_broadcast(&mut self, cx: &mut Context<Self>) {
-        self.terminal_broadcast_enabled = !self.terminal_broadcast_enabled;
-        self.dismiss_terminal_broadcast_menu();
-        if !self.terminal_broadcast_enabled {
-            self.terminal_broadcast_targets.clear();
-        }
+        self.terminal
+            .update(cx, |terminal, _cx| terminal.toggle_broadcast());
         cx.notify();
     }
 
-    pub(in crate::workspace) fn dismiss_terminal_broadcast_menu(&mut self) -> bool {
+    pub(in crate::workspace) fn dismiss_terminal_broadcast_menu(
+        &mut self,
+        cx: &mut Context<Self>,
+    ) -> bool {
         // Broadcast target selection is rendered as a Radix-style context menu.
         // Keep Esc, outside click, command overlay close, and toolbar toggles
         // on the same owner path instead of mutating the open flag ad hoc.
-        let was_open = self.terminal_broadcast_menu_open;
-        self.terminal_broadcast_menu_open = false;
-        was_open
+        self.terminal
+            .update(cx, |terminal, _cx| terminal.dismiss_broadcast_menu())
     }
 
-    pub(in crate::workspace) fn toggle_terminal_broadcast_menu(&mut self) {
+    pub(in crate::workspace) fn toggle_terminal_broadcast_menu(&mut self, cx: &mut Context<Self>) {
         // Opening the broadcast target menu replaces sibling terminal command
         // popovers, matching browser overlay ownership where only one floating
         // command surface receives pointer/wheel events at a time.
-        let should_open = !self.terminal_broadcast_menu_open;
-        self.dismiss_terminal_broadcast_menu();
+        let should_open = !self.terminal.read(cx).broadcast_menu_open();
+        self.dismiss_terminal_broadcast_menu(cx);
         if should_open {
             self.close_terminal_quick_commands_popover();
             self.close_terminal_cwd_picker();
@@ -673,15 +672,10 @@ impl WorkspaceApp {
             self.close_terminal_project_panel();
             self.terminal_command_suggestions_open = false;
             self.terminal_command_suggestion_highlighted = None;
-            self.terminal_broadcast_menu_open = true;
+            self.terminal.update(cx, |terminal, _cx| {
+                terminal.set_broadcast_menu_open(true);
+            });
         }
-    }
-
-    pub(in crate::workspace) fn keep_terminal_broadcast_menu_open(&mut self) {
-        // Broadcast target rows are persistent checkbox-style menu items; their
-        // shared action guard runs without closing the menu, so keep ownership
-        // explicit after selection changes.
-        self.terminal_broadcast_menu_open = true;
     }
 
     pub(super) fn handle_workspace_key(
@@ -2155,11 +2149,16 @@ impl WorkspaceApp {
         command: &str,
         cx: &mut Context<Self>,
     ) {
-        if !self.terminal_broadcast_enabled {
+        if !self.terminal.read(cx).broadcast_enabled() {
             return;
         }
 
         self.retain_live_terminal_broadcast_targets(cx);
+        // Pruning the final selected target disables broadcast rather than
+        // reinterpreting the now-empty selection as "all terminals".
+        if !self.terminal.read(cx).broadcast_enabled() {
+            return;
+        }
         let targets = self.terminal_broadcast_target_panes(source_pane_id, cx);
         for pane_id in targets {
             self.send_terminal_command_to_pane(
@@ -2186,20 +2185,15 @@ impl WorkspaceApp {
         candidates
             .retain(|pane_id| *pane_id != source_pane_id && tab_host.panes().contains_key(pane_id));
 
-        if self.terminal_broadcast_targets.is_empty() {
-            candidates
-        } else {
-            candidates
-                .into_iter()
-                .filter(|pane_id| self.terminal_broadcast_targets.contains(pane_id))
-                .collect()
-        }
+        self.terminal.read(cx).filter_broadcast_targets(candidates)
     }
 
-    fn retain_live_terminal_broadcast_targets(&mut self, cx: &App) {
+    fn retain_live_terminal_broadcast_targets(&mut self, cx: &mut Context<Self>) {
         let tab_host = self.tab_host.read(cx);
-        self.terminal_broadcast_targets
-            .retain(|pane_id| tab_host.panes().contains_key(pane_id));
+        let live_panes = tab_host.panes().keys().copied().collect::<HashSet<_>>();
+        self.terminal.update(cx, |terminal, _cx| {
+            terminal.retain_live_broadcast_targets(&live_panes);
+        });
     }
 
     pub(in crate::workspace) fn terminal_broadcast_entries(

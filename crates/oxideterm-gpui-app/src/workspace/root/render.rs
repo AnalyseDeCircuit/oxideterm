@@ -1057,7 +1057,7 @@ impl Render for WorkspaceApp {
                 self.render_ai_sidebar_floating_overlay(window, cx),
                 |root, overlay| root.child(overlay),
             )
-            .when(self.terminal_broadcast_menu_open, |root| {
+            .when(self.terminal.read(cx).broadcast_menu_open(), |root| {
                 let placement = if self.settings_store.settings().terminal.command_bar.enabled {
                     actions::TerminalBroadcastMenuPlacement::Bottom(62.0)
                 } else {

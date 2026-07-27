@@ -1049,7 +1049,7 @@ impl WorkspaceApp {
         if self.dismiss_sftp_context_menu() {
             changed = true;
         }
-        if self.dismiss_terminal_broadcast_menu() {
+        if self.dismiss_terminal_broadcast_menu(cx) {
             changed = true;
         }
         if self.close_terminal_git_branch_picker() {
