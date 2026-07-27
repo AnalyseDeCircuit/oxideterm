@@ -535,34 +535,6 @@ impl WorkspaceApp {
             active_ssh_node_id: None,
             next_ssh_node_id: 1,
             forward_tab_nodes: HashMap::new(),
-            // Forwards is a variable-height browser page with optional banner,
-            // form, error, and remote-port sections. Keep it on the same
-            // ListState section-list path as Settings and Cloud Sync.
-            forwards_section_list_state: ListState::new(
-                FORWARDS_SECTION_LIST_INITIAL_ITEM_COUNT,
-                ListAlignment::Top,
-                TauriVirtualListSpec::new(
-                    px(FORWARDS_SECTION_LIST_ESTIMATED_HEIGHT),
-                    FORWARDS_SECTION_LIST_OVERSCAN,
-                )
-                .overdraw(),
-            )
-            .measure_all(),
-            forwards_section_list_cache: RefCell::new(VirtualListSignatureCache::default()),
-            // The table body is independently virtualized inside the Forwards
-            // page section so a long forwarding registry does not rebuild every
-            // row while the outer section list is measuring page chrome.
-            forwards_table_row_list_state: ListState::new(
-                FORWARDS_TABLE_ROW_LIST_INITIAL_ITEM_COUNT,
-                ListAlignment::Top,
-                TauriVirtualListSpec::new(
-                    px(FORWARDS_TABLE_ROW_LIST_ESTIMATED_HEIGHT),
-                    FORWARDS_TABLE_ROW_LIST_OVERSCAN,
-                )
-                .overdraw(),
-            )
-            .measure_all(),
-            forwards_table_row_list_cache: RefCell::new(VirtualListSignatureCache::default()),
             forwarding_view: forwards::ForwardsViewState::default(),
             forwarding,
             _forwarding_subscriptions: vec![forwarding_subscription, forwarding_observation],

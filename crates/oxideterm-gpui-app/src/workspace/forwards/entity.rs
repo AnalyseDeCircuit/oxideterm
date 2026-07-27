@@ -3,6 +3,12 @@
 
 use super::*;
 use crate::workspace::delivery;
+use crate::workspace::{
+    FORWARDS_SECTION_LIST_INITIAL_ITEM_COUNT, FORWARDS_TABLE_ROW_LIST_ESTIMATED_HEIGHT,
+    FORWARDS_TABLE_ROW_LIST_INITIAL_ITEM_COUNT, VirtualListSignatureCache,
+};
+use gpui::{ListAlignment, ListState};
+use std::cell::RefCell;
 
 pub(in crate::workspace) enum ForwardingDeliveryIntent {
     Operation {
@@ -29,6 +35,10 @@ pub(in crate::workspace) enum ForwardingWorkspaceEvent {
 
 /// Owns forwarding UI delivery and sampling state without owning tunnel lifetime.
 pub(in crate::workspace) struct ForwardingWorkspaceEntity {
+    pub(super) section_list_state: ListState,
+    pub(super) section_list_cache: RefCell<VirtualListSignatureCache>,
+    pub(super) table_row_list_state: ListState,
+    pub(super) table_row_list_cache: RefCell<VirtualListSignatureCache>,
     worker_tx: delivery::ActiveDeliverySender<ForwardingWorkerResult>,
     worker_rx: std::sync::mpsc::Receiver<ForwardingWorkerResult>,
     runtime_event_rx: std::sync::mpsc::Receiver<ForwardEvent>,
@@ -45,6 +55,28 @@ impl ForwardingWorkspaceEntity {
         cx: &mut Context<Self>,
     ) -> Self {
         let entity = Self {
+            section_list_state: ListState::new(
+                FORWARDS_SECTION_LIST_INITIAL_ITEM_COUNT,
+                ListAlignment::Top,
+                TauriVirtualListSpec::new(
+                    px(FORWARDS_SECTION_LIST_ESTIMATED_HEIGHT),
+                    FORWARDS_SECTION_LIST_OVERSCAN,
+                )
+                .overdraw(),
+            )
+            .measure_all(),
+            section_list_cache: RefCell::new(VirtualListSignatureCache::default()),
+            table_row_list_state: ListState::new(
+                FORWARDS_TABLE_ROW_LIST_INITIAL_ITEM_COUNT,
+                ListAlignment::Top,
+                TauriVirtualListSpec::new(
+                    px(FORWARDS_TABLE_ROW_LIST_ESTIMATED_HEIGHT),
+                    FORWARDS_TABLE_ROW_LIST_OVERSCAN,
+                )
+                .overdraw(),
+            )
+            .measure_all(),
+            table_row_list_cache: RefCell::new(VirtualListSignatureCache::default()),
             worker_tx,
             worker_rx,
             runtime_event_rx,
@@ -283,6 +315,10 @@ mod tests {
         let (worker_tx, worker_rx) = delivery::ActiveDeliverySender::channel();
         let (_runtime_tx, runtime_rx) = std::sync::mpsc::channel();
         let mut entity = ForwardingWorkspaceEntity {
+            section_list_state: ListState::new(0, ListAlignment::Top, px(0.0)),
+            section_list_cache: RefCell::new(VirtualListSignatureCache::default()),
+            table_row_list_state: ListState::new(0, ListAlignment::Top, px(0.0)),
+            table_row_list_cache: RefCell::new(VirtualListSignatureCache::default()),
             worker_tx,
             worker_rx,
             runtime_event_rx: runtime_rx,

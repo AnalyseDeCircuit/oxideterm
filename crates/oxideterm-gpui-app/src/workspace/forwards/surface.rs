@@ -114,9 +114,9 @@ impl WorkspaceApp {
         let Some(node_id) = self.forward_tab_nodes.get(&tab_id).cloned() else {
             return self.render_empty_workspace(cx);
         };
-        self.sync_forwards_section_list_state(tab_id, &node_id);
+        self.sync_forwards_section_list_state(tab_id, &node_id, cx);
         let has_background = self.background_surface_active("forwards");
-        let state = self.forwards_section_list_state.clone();
+        let state = self.forwarding.read(cx).section_list_state.clone();
         let workspace = cx.entity();
         let spec = self.forwards_section_list_spec();
         let list_node_id = node_id.clone();
@@ -143,17 +143,24 @@ impl WorkspaceApp {
             .into_any_element()
     }
 
-    fn sync_forwards_section_list_state(&mut self, tab_id: TabId, node_id: &NodeId) {
+    fn sync_forwards_section_list_state(
+        &mut self,
+        tab_id: TabId,
+        node_id: &NodeId,
+        cx: &mut Context<Self>,
+    ) {
         let spec = self.forwards_section_list_spec();
         let identity = format!("forwards:{}:{}", tab_id.0, node_id.0);
         let signatures = self.forwards_section_signatures(node_id);
-        sync_tauri_variable_list_state_by_signatures(
-            &self.forwards_section_list_state,
-            &mut self.forwards_section_list_cache.borrow_mut(),
-            &identity,
-            &signatures,
-            spec,
-        );
+        self.forwarding.update(cx, |forwarding, _cx| {
+            sync_tauri_variable_list_state_by_signatures(
+                &forwarding.section_list_state,
+                &mut forwarding.section_list_cache.borrow_mut(),
+                &identity,
+                &signatures,
+                spec,
+            );
+        });
     }
 
     fn forwards_section_list_spec(&self) -> TauriVirtualListSpec {
@@ -482,8 +489,8 @@ impl WorkspaceApp {
     ) -> AnyElement {
         let theme = self.tokens.ui;
         let forward_count = forwards.len();
-        self.sync_forwards_table_row_list_state(&forwards);
-        let table_row_state = self.forwards_table_row_list_state.clone();
+        self.sync_forwards_table_row_list_state(&forwards, cx);
+        let table_row_state = self.forwarding.read(cx).table_row_list_state.clone();
         let table_row_spec = self.forwards_table_row_list_spec();
         let workspace = cx.entity();
         let row_node_id = node_id;
@@ -619,18 +626,21 @@ impl WorkspaceApp {
             .into_any_element()
     }
 
-    fn sync_forwards_table_row_list_state(&self, forwards: &[ForwardRule]) {
+    fn sync_forwards_table_row_list_state(&self, forwards: &[ForwardRule], cx: &mut Context<Self>) {
         let signatures = forwards
             .iter()
             .map(forward_rule_row_signature)
             .collect::<Vec<_>>();
-        sync_tauri_variable_list_state_by_signatures(
-            &self.forwards_table_row_list_state,
-            &mut self.forwards_table_row_list_cache.borrow_mut(),
-            "forwards-table-rows",
-            &signatures,
-            self.forwards_table_row_list_spec(),
-        );
+        let spec = self.forwards_table_row_list_spec();
+        self.forwarding.update(cx, |forwarding, _cx| {
+            sync_tauri_variable_list_state_by_signatures(
+                &forwarding.table_row_list_state,
+                &mut forwarding.table_row_list_cache.borrow_mut(),
+                "forwards-table-rows",
+                &signatures,
+                spec,
+            );
+        });
     }
 
     fn forwards_table_row_list_spec(&self) -> TauriVirtualListSpec {
