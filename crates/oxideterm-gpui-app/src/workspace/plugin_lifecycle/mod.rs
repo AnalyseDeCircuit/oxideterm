@@ -344,6 +344,7 @@ impl WorkspaceApp {
                 envelope.quick_commands_json.as_deref(),
                 options.import_quick_commands,
                 native_plugin_quick_command_import_strategy(options.quick_command_strategy),
+                cx,
             );
         let imported_plugin_settings = self.apply_oxide_import_plugin_settings(
             &envelope.plugin_settings,

@@ -455,9 +455,10 @@ impl Render for WorkspaceApp {
                 } else if this.handle_help_legal_notice_key(event, cx) {
                     window.prevent_default();
                     cx.stop_propagation();
-                } else if this.terminal_quick_commands_open
-                    && this.quick_commands.focused_input.is_some()
-                {
+                } else if {
+                    let quick_commands = &this.terminal.read(cx).quick_commands;
+                    quick_commands.is_open() && quick_commands.focused_input().is_some()
+                } {
                     this.handle_quick_commands_key(event, cx);
                     window.prevent_default();
                     cx.stop_propagation();

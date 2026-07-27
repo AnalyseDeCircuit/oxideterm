@@ -3,7 +3,15 @@ pub(super) use oxideterm_quick_commands::{
     QuickCommandDraft, QuickCommandIcon, QuickCommandImportResult, QuickCommandImportStrategy,
     QuickCommandsSnapshot, default_quick_command_categories, default_quick_commands, now_ms,
 };
-use std::path::PathBuf;
+use std::{cell::RefCell, path::Path, path::PathBuf};
+
+use gpui::{ListAlignment, ListState, px};
+use zeroize::Zeroizing;
+
+use super::{
+    QUICK_COMMAND_LIST_ESTIMATED_HEIGHT, QUICK_COMMAND_LIST_INITIAL_ITEM_COUNT,
+    QUICK_COMMAND_LIST_OVERSCAN, TauriVirtualListSpec, VirtualListSignatureCache,
+};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub(super) enum QuickCommandInput {
@@ -53,6 +61,40 @@ pub(super) struct QuickCommandsState {
     pub command_editor: Option<QuickCommandDraft>,
     pub category_editor: Option<QuickCommandCategoryDraft>,
     pub last_persist_error: Option<String>,
+}
+
+/// Owns the quick-command store and its complete terminal-surface lifecycle.
+pub(in crate::workspace) struct TerminalQuickCommandsState {
+    pub(super) store: QuickCommandsState,
+    pub(super) open: bool,
+    pub(super) pinned: bool,
+    pub(super) pending_command: Option<Zeroizing<String>>,
+    pub(super) list_state: ListState,
+    pub(super) list_cache: RefCell<VirtualListSignatureCache>,
+}
+
+impl TerminalQuickCommandsState {
+    pub(in crate::workspace) fn load(settings_path: &Path) -> Self {
+        Self {
+            store: QuickCommandsState::load(settings_path),
+            open: false,
+            pinned: false,
+            pending_command: None,
+            // User-defined command sets are unbounded, so the surface owns a
+            // virtual list instead of rebuilding every row on root repaint.
+            list_state: ListState::new(
+                QUICK_COMMAND_LIST_INITIAL_ITEM_COUNT,
+                ListAlignment::Top,
+                TauriVirtualListSpec::new(
+                    px(QUICK_COMMAND_LIST_ESTIMATED_HEIGHT),
+                    QUICK_COMMAND_LIST_OVERSCAN,
+                )
+                .overdraw(),
+            )
+            .measure_all(),
+            list_cache: RefCell::new(VirtualListSignatureCache::default()),
+        }
+    }
 }
 
 #[path = "quick_commands_buttons.rs"]

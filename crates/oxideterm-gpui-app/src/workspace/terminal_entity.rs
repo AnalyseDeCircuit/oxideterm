@@ -12,6 +12,7 @@ use oxideterm_environment::{
 };
 use std::{
     ops::Range,
+    path::Path,
     sync::{Arc, Mutex},
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
@@ -84,6 +85,7 @@ pub(in crate::workspace) struct WorkspaceTerminalEntity {
     pub(super) cast_seek_dragging: bool,
     pub(super) cast_tick_generation: u64,
     pub(super) cast_tick_scheduled: bool,
+    pub(super) quick_commands: quick_commands::TerminalQuickCommandsState,
     broadcast: TerminalBroadcastState,
     pub(super) node_router: NodeRouter,
     pub(super) runtime: Arc<tokio::runtime::Runtime>,
@@ -93,6 +95,7 @@ impl WorkspaceTerminalEntity {
     pub(in crate::workspace) fn new(
         runtime: Arc<tokio::runtime::Runtime>,
         node_router: NodeRouter,
+        settings_path: &Path,
         cx: &mut Context<Self>,
     ) -> Self {
         let delivery_wake = delivery::ActiveDeliveryWake::default();
@@ -158,6 +161,7 @@ impl WorkspaceTerminalEntity {
             cast_seek_dragging: false,
             cast_tick_generation: 0,
             cast_tick_scheduled: false,
+            quick_commands: quick_commands::TerminalQuickCommandsState::load(settings_path),
             broadcast: TerminalBroadcastState::default(),
             node_router,
             runtime,
@@ -685,7 +689,11 @@ mod tests {
         CurrentDirectoryScope, CurrentDirectorySnapshot, CurrentDirectorySource,
         GitBranchListOutcome, GitBranchReference, ProjectFacet, ProjectFacetKind, ProjectTaskGroup,
     };
+    use oxideterm_quick_commands::QuickCommandDraft;
+    use std::sync::atomic::{AtomicU64, Ordering};
     use terminal_git::TerminalGitPanelSection;
+
+    static NEXT_TERMINAL_TEST_SETTINGS_ID: AtomicU64 = AtomicU64::new(1);
 
     struct TerminalEventRecorder {
         notices: Vec<TerminalNoticeBatchRequest>,
@@ -703,7 +711,53 @@ mod tests {
         );
         let registry = SshConnectionRegistry::new(ConnectionPoolConfig::default());
         let node_router = NodeRouter::new(registry);
-        cx.new(|cx| WorkspaceTerminalEntity::new(runtime, node_router, cx))
+        let settings_path = std::env::temp_dir().join(format!(
+            "oxideterm-terminal-entity-tests-{}-{}.json",
+            std::process::id(),
+            NEXT_TERMINAL_TEST_SETTINGS_ID.fetch_add(1, Ordering::Relaxed)
+        ));
+        cx.new(|cx| WorkspaceTerminalEntity::new(runtime, node_router, &settings_path, cx))
+    }
+
+    #[gpui::test]
+    fn quick_command_store_confirmation_and_close_are_entity_owned(cx: &mut TestAppContext) {
+        let terminal = new_terminal_entity(cx);
+        terminal.update(cx, |terminal, _cx| {
+            terminal
+                .quick_commands
+                .store
+                .upsert_command(QuickCommandDraft {
+                    id: Some("entity-owned".to_string()),
+                    name: "Entity owned".to_string(),
+                    command: "command --token test-value".to_string(),
+                    category: "custom".to_string(),
+                    description: String::new(),
+                    host_pattern: String::new(),
+                });
+            terminal
+                .quick_commands
+                .request_confirmation("command --token test-value".to_string());
+        });
+        terminal.read_with(cx, |terminal, _cx| {
+            assert!(terminal.quick_commands.is_open());
+            assert!(terminal.quick_commands.pending_command.is_some());
+            assert!(
+                terminal
+                    .quick_commands
+                    .store
+                    .commands
+                    .iter()
+                    .any(|command| command.id == "entity-owned")
+            );
+        });
+
+        terminal.update(cx, |terminal, _cx| {
+            assert!(terminal.quick_commands.close());
+        });
+        terminal.read_with(cx, |terminal, _cx| {
+            assert!(!terminal.quick_commands.is_open());
+            assert!(terminal.quick_commands.pending_command.is_none());
+        });
     }
 
     #[gpui::test]

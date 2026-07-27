@@ -196,6 +196,7 @@ impl WorkspaceApp {
             .terminal
             .command_bar
             .quick_commands_enabled;
+        let quick_commands_open = self.terminal.read(cx).quick_commands.is_open();
         let recording_status = self.active_terminal_recording_status(cx);
         let recording_active = recording_status.state != TerminalRecordingState::Idle;
         let timestamps_active = self.active_terminal_timestamps_enabled(cx);
@@ -233,7 +234,7 @@ impl WorkspaceApp {
                 |bar| bar.child(self.render_terminal_command_suggestions(&command_suggestions, cx)),
             )
             .when(
-                !input_collapsed && quick_commands_enabled && self.terminal_quick_commands_open,
+                !input_collapsed && quick_commands_enabled && quick_commands_open,
                 |bar| {
                     // Tauri renders QuickCommandsPopover as a child of the relative
                     // TerminalCommandBar (`absolute bottom-full right-3`). Keep the
@@ -305,7 +306,7 @@ impl WorkspaceApp {
                                             this.ime_marked_text = None;
                                             this.terminal_command_suggestions_open = false;
                                             this.terminal_command_suggestion_highlighted = None;
-                                            this.close_terminal_quick_commands_popover();
+                                            this.close_terminal_quick_commands_popover(cx);
                                             this.close_terminal_cwd_picker(cx);
                                             this.close_terminal_project_panel(cx);
                                         }
@@ -705,12 +706,12 @@ impl WorkspaceApp {
                                     .justify_center()
                                     .rounded(px(self.tokens.radii.md))
                                     .cursor_pointer()
-                                    .bg(if self.terminal_quick_commands_open {
+                                    .bg(if quick_commands_open {
                                         rgba((theme.accent << 8) | 0x1a)
                                     } else {
                                         rgba(0x00000000)
                                     })
-                                    .text_color(if self.terminal_quick_commands_open {
+                                    .text_color(if quick_commands_open {
                                         rgb(theme.accent)
                                     } else {
                                         rgb(theme.text_muted)
@@ -719,14 +720,12 @@ impl WorkspaceApp {
                                     .on_mouse_down(
                                         MouseButton::Left,
                                         cx.listener(|this, _event, _window, cx| {
-                                            this.terminal_quick_commands_open =
-                                                !this.terminal_quick_commands_open;
+                                            this.terminal.update(cx, |terminal, _cx| {
+                                                terminal.quick_commands.toggle_open()
+                                            });
                                             this.dismiss_terminal_broadcast_menu(cx);
                                             this.close_terminal_cwd_picker(cx);
                                             this.close_terminal_git_branch_picker(cx);
-                                            if !this.terminal_quick_commands_open {
-                                                this.close_terminal_quick_commands_popover();
-                                            }
                                             cx.stop_propagation();
                                             cx.notify();
                                         }),
@@ -734,7 +733,7 @@ impl WorkspaceApp {
                                     .child(Self::render_lucide_icon(
                                         LucideIcon::Zap,
                                         14.0,
-                                        if self.terminal_quick_commands_open {
+                                        if quick_commands_open {
                                             rgb(theme.accent)
                                         } else {
                                             rgb(theme.text_muted)

@@ -81,7 +81,10 @@ impl WorkspaceApp {
                 ("quickCommands", "execute") => {
                     if let Some(command_id) = string_arg(&effect.args, "id")
                         && let Some(command) = self
+                            .terminal
+                            .read(cx)
                             .quick_commands
+                            .store
                             .commands
                             .iter()
                             .find(|command| command.id == command_id)
@@ -149,22 +152,29 @@ impl WorkspaceApp {
                 let Some(command) = string_arg(args, "command") else {
                     return;
                 };
-                self.quick_commands.upsert_command(QuickCommandDraft {
-                    id: string_arg(args, "id").map(str::to_string),
-                    name: name.to_string(),
-                    command: command.to_string(),
-                    category: string_arg(args, "category").unwrap_or("custom").to_string(),
-                    description: string_arg(args, "description")
-                        .unwrap_or_default()
-                        .to_string(),
-                    host_pattern: string_arg(args, "hostPattern")
-                        .unwrap_or_default()
-                        .to_string(),
+                self.terminal.update(cx, |terminal, _cx| {
+                    terminal
+                        .quick_commands
+                        .store
+                        .upsert_command(QuickCommandDraft {
+                            id: string_arg(args, "id").map(str::to_string),
+                            name: name.to_string(),
+                            command: command.to_string(),
+                            category: string_arg(args, "category").unwrap_or("custom").to_string(),
+                            description: string_arg(args, "description")
+                                .unwrap_or_default()
+                                .to_string(),
+                            host_pattern: string_arg(args, "hostPattern")
+                                .unwrap_or_default()
+                                .to_string(),
+                        });
                 });
             }
             "remove" => {
                 if let Some(id) = string_arg(args, "id") {
-                    self.quick_commands.delete_command(id);
+                    self.terminal.update(cx, |terminal, _cx| {
+                        terminal.quick_commands.delete_command(id)
+                    });
                 }
             }
             _ => return,

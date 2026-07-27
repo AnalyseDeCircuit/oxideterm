@@ -261,7 +261,7 @@ impl WorkspaceApp {
         self.terminal_command_bar_focused = false;
         self.terminal_command_suggestions_open = false;
         self.terminal_command_suggestion_highlighted = None;
-        self.close_terminal_quick_commands_popover();
+        self.close_terminal_quick_commands_popover(cx);
         window.focus(&self.focus_handle, cx);
         if let Some(pane) = self.active_pane(cx) {
             let query = (!self.search.query.is_empty()).then(|| self.search.query.clone());
@@ -599,8 +599,8 @@ impl WorkspaceApp {
             return true;
         }
 
-        if self.terminal_quick_commands_open {
-            self.close_terminal_quick_commands_popover();
+        if self.terminal.read(cx).quick_commands.is_open() {
+            self.close_terminal_quick_commands_popover(cx);
             cx.notify();
             return true;
         }
@@ -666,7 +666,7 @@ impl WorkspaceApp {
         let should_open = !self.terminal.read(cx).broadcast_menu_open();
         self.dismiss_terminal_broadcast_menu(cx);
         if should_open {
-            self.close_terminal_quick_commands_popover();
+            self.close_terminal_quick_commands_popover(cx);
             self.close_terminal_cwd_picker(cx);
             self.close_terminal_git_branch_picker(cx);
             self.close_terminal_project_panel(cx);
@@ -806,7 +806,11 @@ impl WorkspaceApp {
             return;
         }
 
-        if self.terminal_quick_commands_open && self.quick_commands.focused_input.is_some() {
+        let quick_commands_focused = {
+            let quick_commands = &self.terminal.read(cx).quick_commands;
+            quick_commands.is_open() && quick_commands.focused_input().is_some()
+        };
+        if quick_commands_focused {
             self.handle_quick_commands_key(event, cx);
             return;
         }
@@ -934,7 +938,7 @@ impl WorkspaceApp {
 
         if terminal_tab_capture_blocked_by_workspace_ui(
             self.active_ime_target(cx).is_some(),
-            self.terminal_quick_commands_open,
+            self.terminal.read(cx).quick_commands.is_open(),
             self.terminal_command_suggestions_open,
         ) {
             return false;
@@ -1710,7 +1714,7 @@ impl WorkspaceApp {
                     return true;
                 }
                 self.terminal_command_bar_focused = false;
-                self.close_terminal_quick_commands_popover();
+                self.close_terminal_quick_commands_popover(cx);
                 self.ime_marked_text = None;
                 self.focus_active_pane(window, cx);
                 cx.notify();
@@ -1937,8 +1941,11 @@ impl WorkspaceApp {
         let settings = &self.settings_store.settings().terminal.command_bar;
         let risk = classify_command_risk(command);
         if settings.quick_commands_confirm_before_run || risk.is_some() {
-            self.terminal_quick_command_pending = Some(command.to_string());
-            self.terminal_quick_commands_open = true;
+            self.terminal.update(cx, |terminal, _cx| {
+                terminal
+                    .quick_commands
+                    .request_confirmation(command.to_string())
+            });
             cx.notify();
             return;
         }
@@ -1967,7 +1974,7 @@ impl WorkspaceApp {
                 variant: TerminalNoticeVariant::Success,
             });
         }
-        self.finish_terminal_quick_command_execution();
+        self.finish_terminal_quick_command_execution(cx);
         self.terminal_command_bar_draft.clear();
         self.ime_marked_text = None;
         cx.notify();

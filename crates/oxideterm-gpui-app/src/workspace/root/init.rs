@@ -129,7 +129,12 @@ impl WorkspaceApp {
         });
         let (sftp_worker_tx, mut sftp_worker_rx) = tokio::sync::mpsc::unbounded_channel();
         let terminal = cx.new(|cx| {
-            WorkspaceTerminalEntity::new(forwarding_runtime.clone(), node_router.clone(), cx)
+            WorkspaceTerminalEntity::new(
+                forwarding_runtime.clone(),
+                node_router.clone(),
+                settings_store.path(),
+                cx,
+            )
         });
         let terminal_notice_tx = terminal.read(cx).notice_sender();
         let terminal_subscription = cx.subscribe(
@@ -275,9 +280,6 @@ impl WorkspaceApp {
             terminal_command_bar_draft: String::new(),
             terminal_command_suggestions_open: false,
             terminal_command_suggestion_highlighted: None,
-            terminal_quick_commands_open: false,
-            terminal_quick_commands_pinned: false,
-            terminal_quick_command_pending: None,
             detached_local_terminals: HashMap::new(),
             detached_local_terminal_order: Vec::new(),
             serial_terminal_configs: HashMap::new(),
@@ -338,21 +340,6 @@ impl WorkspaceApp {
             settings_local_privilege_draft: PrivilegeCredentialDraft::default(),
             settings_local_privilege_error: None,
             settings_privilege_editor_open: false,
-            quick_commands: QuickCommandsState::load(settings_store.path()),
-            // Quick command popovers can contain user-sized command sets; keep
-            // their rows on the same variable-height list path as migrated
-            // browser popovers instead of constructing every row on each render.
-            quick_command_list_state: ListState::new(
-                QUICK_COMMAND_LIST_INITIAL_ITEM_COUNT,
-                ListAlignment::Top,
-                TauriVirtualListSpec::new(
-                    px(QUICK_COMMAND_LIST_ESTIMATED_HEIGHT),
-                    QUICK_COMMAND_LIST_OVERSCAN,
-                )
-                .overdraw(),
-            )
-            .measure_all(),
-            quick_command_list_cache: RefCell::new(VirtualListSignatureCache::default()),
             // Detached local terminals are a bounded popover list, but the
             // number of retained background shells is user-driven, so keep it
             // on the same ListState path as other browser-style popovers.

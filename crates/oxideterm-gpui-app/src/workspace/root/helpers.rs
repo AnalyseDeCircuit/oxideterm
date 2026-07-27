@@ -991,8 +991,8 @@ impl WorkspaceApp {
             self.detached_local_terminals_popover_open = false;
             changed = true;
         }
-        if self.terminal_quick_commands_open || self.terminal_quick_command_pending.is_some() {
-            self.close_terminal_quick_commands_popover();
+        if self.terminal.read(cx).quick_commands.has_open_or_pending() {
+            self.close_terminal_quick_commands_popover(cx);
             changed = true;
         }
         if self.terminal_command_suggestions_open {

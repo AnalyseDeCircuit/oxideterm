@@ -502,7 +502,10 @@ mod tests {
                 .expect("create test runtime"),
         );
         let registry = SshConnectionRegistry::new(ConnectionPoolConfig::default());
-        cx.new(|cx| WorkspaceTerminalEntity::new(runtime, NodeRouter::new(registry), cx))
+        let settings_path = std::env::temp_dir().join("oxideterm-cast-entity-tests-settings.json");
+        cx.new(|cx| {
+            WorkspaceTerminalEntity::new(runtime, NodeRouter::new(registry), &settings_path, cx)
+        })
     }
 
     fn sample_cast_player() -> TerminalCastPlayerState {

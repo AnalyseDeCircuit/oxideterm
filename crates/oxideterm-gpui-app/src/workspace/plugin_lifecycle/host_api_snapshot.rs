@@ -77,13 +77,15 @@ pub(super) fn native_plugin_host_api_snapshot_from_workspace(
     );
     let notifications =
         native_plugin_notifications_snapshot(&workspace.notification_center.notifications.entries);
+    let terminal = workspace.terminal.read(cx);
+    let quick_command_store = &terminal.quick_commands.store;
     let quick_command_metadata = native_plugin_quick_command_metadata(
-        &workspace.quick_commands.categories,
-        &workspace.quick_commands.commands,
+        &quick_command_store.categories,
+        &quick_command_store.commands,
     );
     let quick_commands = json!({
-        "categories": &workspace.quick_commands.categories,
-        "commands": &workspace.quick_commands.commands,
+        "categories": &quick_command_store.categories,
+        "commands": &quick_command_store.commands,
     });
     let theme_tokens =
         native_plugin_theme_tokens_snapshot(&workspace.tokens, &settings.terminal.theme);

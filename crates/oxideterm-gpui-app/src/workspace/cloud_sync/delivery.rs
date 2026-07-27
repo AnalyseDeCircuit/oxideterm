@@ -1136,7 +1136,7 @@ impl WorkspaceApp {
         self.settings_store = ui_outcome.settings_store;
         match ui_outcome.outcome {
             CloudSyncApplyOutcome::Structured(outcome) => {
-                self.finish_structured_cloud_sync_apply(outcome)
+                self.finish_structured_cloud_sync_apply(outcome, cx)
             }
             CloudSyncApplyOutcome::Legacy {
                 preview,
@@ -1150,11 +1150,14 @@ impl WorkspaceApp {
     pub(super) fn finish_structured_cloud_sync_apply(
         &mut self,
         outcome: ApplyStructuredPreviewOutcome,
+        cx: &mut Context<Self>,
     ) {
         let mut outcome = outcome;
         // Structured apply persists Quick Commands through the domain crate, so refresh the
         // GPUI projection before any later UI edit can overwrite the newly synchronized file.
-        self.quick_commands.reload_from_store();
+        self.terminal.update(cx, |terminal, _cx| {
+            terminal.quick_commands.store.reload_from_store()
+        });
         if let Some(envelope) = outcome.sensitive_credentials_envelope.as_mut() {
             self.apply_oxide_import_portable_secrets(envelope);
         }
@@ -1231,6 +1234,7 @@ impl WorkspaceApp {
                 outcome.envelope.quick_commands_json.as_deref(),
                 selection.import_quick_commands,
                 QuickCommandImportStrategy::Merge,
+                cx,
             );
         self.apply_oxide_import_plugin_settings(
             &outcome.envelope.plugin_settings,

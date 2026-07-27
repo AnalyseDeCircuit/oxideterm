@@ -667,9 +667,14 @@ impl WorkspaceApp {
             });
         }
 
-        if self.terminal_quick_commands_open
-            && let Some(input) = self.quick_commands.focused_input
-        {
+        let quick_command_input = {
+            let quick_commands = &self.terminal.read(cx).quick_commands;
+            quick_commands
+                .is_open()
+                .then(|| quick_commands.focused_input())
+                .flatten()
+        };
+        if let Some(input) = quick_command_input {
             return Some(WorkspaceImeTarget::QuickCommand(input));
         }
 
@@ -1513,7 +1518,7 @@ impl WorkspaceApp {
                 .ui
                 .input_value(HostToolsTextInput::PackageSearch)
                 .map(str::to_string),
-            WorkspaceImeTarget::QuickCommand(input) => self.quick_command_input_value(input),
+            WorkspaceImeTarget::QuickCommand(input) => self.quick_command_input_value(input, cx),
             WorkspaceImeTarget::Settings(input) => {
                 if self.focused_settings_input == Some(input) {
                     Some(self.settings_input_draft.clone())
@@ -2354,17 +2359,11 @@ impl WorkspaceApp {
                 );
             }
             WorkspaceImeTarget::QuickCommand(input) => {
-                if self.quick_commands.focused_input == Some(input) {
-                    replace_utf16(
-                        self.quick_command_input_value_mut(input),
-                        replacement_range,
-                        text,
-                    );
-                    if input == QuickCommandInput::Search {
-                        // Browser filtering invalidates the active option until
-                        // ArrowUp/ArrowDown or hover establishes a fresh row.
-                        self.quick_commands.highlighted_command = None;
-                    }
+                if self.terminal.update(cx, |terminal, _cx| {
+                    terminal
+                        .quick_commands
+                        .replace_input(input, replacement_range, text)
+                }) {
                     self.new_connection_caret_visible = true;
                     cx.notify();
                 }

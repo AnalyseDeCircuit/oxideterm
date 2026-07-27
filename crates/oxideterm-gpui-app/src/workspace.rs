@@ -267,7 +267,6 @@ use self::new_connection::{
 };
 use self::onboarding::OnboardingState;
 use self::pane_tree::SplitDrag;
-use self::quick_commands::QuickCommandsState;
 use self::root::state::{
     PendingSshTerminalOpen, ReconnectWorkerResult, WorkspaceSshNode, WorkspaceSshNodeEndpoint,
 };
@@ -740,9 +739,6 @@ pub(crate) struct WorkspaceApp {
     terminal_command_bar_draft: String,
     terminal_command_suggestions_open: bool,
     terminal_command_suggestion_highlighted: Option<usize>,
-    terminal_quick_commands_open: bool,
-    terminal_quick_commands_pinned: bool,
-    terminal_quick_command_pending: Option<String>,
     detached_local_terminals: HashMap<TerminalSessionId, DetachedLocalTerminalSession>,
     detached_local_terminal_order: Vec<TerminalSessionId>,
     serial_terminal_configs: HashMap<TerminalSessionId, SerialSessionConfig>,
@@ -791,9 +787,6 @@ pub(crate) struct WorkspaceApp {
     settings_local_privilege_error: Option<String>,
     // The editor stays collapsed for populated scopes until the user starts an add or edit flow.
     settings_privilege_editor_open: bool,
-    quick_commands: QuickCommandsState,
-    quick_command_list_state: ListState,
-    quick_command_list_cache: RefCell<VirtualListSignatureCache>,
     detached_local_terminal_list_state: ListState,
     detached_local_terminal_list_cache: RefCell<VirtualListSignatureCache>,
     plugin_entity: Entity<plugin_entity::PluginWorkspaceEntity>,

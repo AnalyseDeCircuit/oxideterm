@@ -26,7 +26,7 @@ impl WorkspaceApp {
             return normalize_terminal_command_suggestions(suggestions);
         }
 
-        suggestions.extend(self.terminal_command_quick_command_suggestions(input, &context));
+        suggestions.extend(self.terminal_command_quick_command_suggestions(input, &context, cx));
         suggestions.extend(terminal_command_fig_suggestions(&parsed, &fig_specs));
         suggestions.extend(self.terminal_command_path_suggestions(
             &parsed,

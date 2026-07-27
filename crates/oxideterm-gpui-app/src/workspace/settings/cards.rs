@@ -657,7 +657,7 @@ impl WorkspaceApp {
             || (anchor.id == SelectAnchorId::TerminalBroadcastMenu
                 && self.terminal.read(cx).broadcast_menu_open())
             || (anchor.id == SelectAnchorId::TerminalCommandBar
-                && self.terminal_quick_commands_open)
+                && self.terminal.read(cx).quick_commands.is_open())
             || (anchor.id == SelectAnchorId::TerminalCwdMenu
                 && self.terminal.read(cx).cwd_picker_open())
             || (anchor.id == SelectAnchorId::TerminalGitBranchMenu
@@ -823,8 +823,8 @@ impl WorkspaceApp {
             self.ime_marked_text = None;
             changed = true;
         }
-        if self.terminal_quick_commands_open || self.terminal_quick_command_pending.is_some() {
-            self.close_terminal_quick_commands_popover();
+        if self.terminal.read(cx).quick_commands.has_open_or_pending() {
+            self.close_terminal_quick_commands_popover(cx);
             changed = true;
         }
         if self.close_terminal_git_branch_picker(cx) {

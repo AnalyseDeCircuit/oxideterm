@@ -782,7 +782,7 @@ impl WorkspaceApp {
             TerminalGitPanelSection::Branches
         };
 
-        self.close_terminal_quick_commands_popover();
+        self.close_terminal_quick_commands_popover(cx);
         self.dismiss_terminal_broadcast_menu(cx);
         self.close_terminal_cwd_picker(cx);
         self.close_terminal_project_panel(cx);
