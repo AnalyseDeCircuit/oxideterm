@@ -1184,21 +1184,18 @@ impl WorkspaceApp {
         if should_store_auth_token {
             let registry = self.ai_entity.read(cx).mcp_registry().clone();
             let runtime = self.forwarding_runtime.clone();
-            let mut restore_draft = draft.clone();
-            // Move the UI token draft into a zeroizing owner before it crosses
-            // into the blocking keychain task. The restore copy is zeroized on
-            // success and retained only when the form must be shown again.
-            let token = zeroize::Zeroizing::new(std::mem::take(&mut draft.auth_token));
+            let mut restore_draft = draft;
+            // Move the only token buffer into the keychain task. On failure the
+            // same zeroizing draft is restored without a token, so retrying
+            // requires explicit re-entry instead of retaining a secret copy.
+            let token = zeroize::Zeroizing::new(std::mem::take(&mut restore_draft.auth_token));
             cx.spawn(async move |weak, cx| {
-                let id_for_store = id.clone();
-                let result = runtime
-                    .spawn_blocking(move || registry.store_auth_token(&id_for_store, token))
+                let stored = runtime
+                    .spawn_blocking(move || registry.store_auth_token(&id, token))
                     .await
-                    .map_err(|error| error.to_string())
-                    .and_then(|result| result.map_err(|error| error.to_string()));
-                let _ = weak.update(cx, |this, cx| match result {
-                    Ok(()) => {
-                        zeroize::Zeroize::zeroize(&mut restore_draft.auth_token);
+                    .is_ok_and(|result| result.is_ok());
+                let _ = weak.update(cx, |this, cx| {
+                    if stored {
                         this.focused_settings_input = None;
                         this.settings_input_draft.clear();
                         this.close_settings_select();
@@ -1208,9 +1205,11 @@ impl WorkspaceApp {
                             },
                             cx,
                         );
-                    }
-                    Err(error) => {
-                        this.push_ai_settings_toast(error, TerminalNoticeVariant::Error);
+                    } else {
+                        this.push_ai_settings_toast(
+                            this.ai_i18n_error("settings_view.ai.save_failed", "keychain"),
+                            TerminalNoticeVariant::Error,
+                        );
                         this.ai_mcp_dialog_presence.reopen();
                         this.ai.models.mcp_add_dialog = Some(restore_draft);
                         cx.notify();
@@ -1301,9 +1300,9 @@ impl WorkspaceApp {
         self.ai_mcp_dialog_presence.reopen();
         if submit {
             self.add_ai_mcp_server_from_draft(cx);
-        } else if let Some(mut draft) = self.ai.models.mcp_add_dialog.take() {
-            // Closing owns the last secret-bearing draft and zeroizes it immediately.
-            zeroize::Zeroize::zeroize(&mut draft.auth_token);
+        } else if let Some(draft) = self.ai.models.mcp_add_dialog.take() {
+            // Closing drops and zeroizes the final secret-bearing draft.
+            drop(draft);
         }
         true
     }

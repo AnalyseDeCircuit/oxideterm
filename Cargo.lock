@@ -8176,6 +8176,7 @@ dependencies = [
  "oxideterm-settings",
  "oxideterm-theme",
  "serde_json",
+ "zeroize",
 ]
 
 [[package]]

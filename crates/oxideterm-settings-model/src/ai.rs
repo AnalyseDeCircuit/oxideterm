@@ -18,6 +18,7 @@ use oxideterm_settings::{
     AcpAgentAuthState, AcpAgentCapabilityPolicy, AcpAgentConfig, AcpAgentRuntimeStatus,
     PersistedSettings,
 };
+use zeroize::{Zeroize, ZeroizeOnDrop};
 
 use crate::SettingsInput;
 
@@ -504,10 +505,8 @@ mod tests {
             "enabled": true
         }));
 
-        let mut draft = AiMcpServerDraft {
-            name: "new-server".to_string(),
-            ..AiMcpServerDraft::default()
-        };
+        let mut draft = AiMcpServerDraft::default();
+        draft.name = "new-server".to_string();
         assert!(ai_mcp_draft_valid(&draft, &settings));
 
         draft.name = "existing".to_string();
@@ -536,30 +535,47 @@ mod tests {
 
     #[test]
     fn ai_mcp_draft_debug_redacts_secret_values() {
-        let draft = AiMcpServerDraft {
-            args: "--api-key=arg-secret --token next-secret".to_string(),
-            env: vec![("API_KEY".to_string(), "env-secret".to_string())],
-            auth_token: "auth-secret".to_string(),
-            headers: vec![("Authorization".to_string(), "header-secret".to_string())],
-            ..AiMcpServerDraft::default()
-        };
+        let mut draft = AiMcpServerDraft::default();
+        draft.command = "command-secret".to_string();
+        draft.args = "positional-secret --api-key=arg-secret".to_string();
+        draft.env = vec![("API_KEY".to_string(), "env-secret".to_string())];
+        draft.url = "https://url-secret@example.test?token=query-secret".to_string();
+        draft.auth_token = "auth-secret".to_string();
+        draft.headers = vec![("Authorization".to_string(), "header-secret".to_string())];
 
         let debug = format!("{draft:?}");
 
         assert!(debug.contains("<redacted>"));
+        assert!(!debug.contains("command-secret"));
+        assert!(!debug.contains("positional-secret"));
         assert!(!debug.contains("arg-secret"));
-        assert!(!debug.contains("next-secret"));
         assert!(!debug.contains("env-secret"));
+        assert!(!debug.contains("url-secret"));
+        assert!(!debug.contains("query-secret"));
         assert!(!debug.contains("auth-secret"));
         assert!(!debug.contains("header-secret"));
     }
 
     #[test]
+    fn ai_mcp_draft_zeroize_clears_all_secret_capable_fields() {
+        let mut draft = AiMcpServerDraft::default();
+        draft.args = "--token arg-secret".to_string();
+        draft.env = vec![("API_KEY".to_string(), "env-secret".to_string())];
+        draft.auth_token = "auth-secret".to_string();
+        draft.headers = vec![("Authorization".to_string(), "header-secret".to_string())];
+
+        draft.zeroize();
+
+        assert!(draft.args.is_empty());
+        assert!(draft.env.is_empty());
+        assert!(draft.auth_token.is_empty());
+        assert!(draft.headers.is_empty());
+    }
+
+    #[test]
     fn ai_mcp_draft_input_adapter_trims_identity_fields_only() {
-        let mut draft = AiMcpServerDraft {
-            env: vec![(String::new(), String::new())],
-            ..AiMcpServerDraft::default()
-        };
+        let mut draft = AiMcpServerDraft::default();
+        draft.env = vec![(String::new(), String::new())];
 
         assert!(apply_ai_mcp_draft_input(
             Some(&mut draft),
@@ -703,7 +719,6 @@ mod tests {
 
 pub const AI_MODEL_REFRESH_MISSING_API_KEY: &str = "__missing_api_key__";
 
-#[derive(Clone)]
 pub struct AiMcpServerDraft {
     pub name: String,
     pub transport: McpTransport,
@@ -719,6 +734,39 @@ pub struct AiMcpServerDraft {
     pub show_auth_token: bool,
 }
 
+impl Zeroize for AiMcpServerDraft {
+    fn zeroize(&mut self) {
+        // Arguments, environment values, headers, and tokens may all contain
+        // credentials supplied by the user.
+        self.name.zeroize();
+        self.command.zeroize();
+        self.args.zeroize();
+        for (key, value) in &mut self.env {
+            key.zeroize();
+            value.zeroize();
+        }
+        self.env.clear();
+        self.url.zeroize();
+        self.auth_header_name.zeroize();
+        self.auth_token.zeroize();
+        for (key, value) in &mut self.headers {
+            key.zeroize();
+            value.zeroize();
+        }
+        self.headers.clear();
+        self.retry_on_disconnect = false;
+        self.show_auth_token = false;
+    }
+}
+
+impl ZeroizeOnDrop for AiMcpServerDraft {}
+
+impl Drop for AiMcpServerDraft {
+    fn drop(&mut self) {
+        self.zeroize();
+    }
+}
+
 impl fmt::Debug for AiMcpServerDraft {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         // MCP drafts may hold auth tokens plus env/header/argument values
@@ -726,65 +774,23 @@ impl fmt::Debug for AiMcpServerDraft {
         // cannot leak them.
         formatter
             .debug_struct("AiMcpServerDraft")
-            .field("name", &self.name)
+            .field("name", &redacted_if_present(&self.name))
             .field("transport", &self.transport)
-            .field("command", &self.command)
-            .field("args", &redacted_args_debug(&self.args))
-            .field("env", &redacted_pairs_debug(&self.env))
-            .field("url", &self.url)
-            .field("auth_header_name", &self.auth_header_name)
+            .field("command", &redacted_if_present(&self.command))
+            .field("args", &redacted_if_present(&self.args))
+            .field("env_entry_count", &self.env.len())
+            .field("url", &redacted_if_present(&self.url))
+            .field(
+                "auth_header_name",
+                &redacted_if_present(&self.auth_header_name),
+            )
             .field("auth_header_mode", &self.auth_header_mode)
             .field("auth_token", &redacted_if_present(&self.auth_token))
-            .field("headers", &redacted_pairs_debug(&self.headers))
+            .field("header_entry_count", &self.headers.len())
             .field("retry_on_disconnect", &self.retry_on_disconnect)
             .field("show_auth_token", &self.show_auth_token)
             .finish()
     }
-}
-
-fn redacted_pairs_debug(values: &[(String, String)]) -> Vec<(&str, &'static str)> {
-    values
-        .iter()
-        .map(|(key, _)| (key.as_str(), "<redacted>"))
-        .collect()
-}
-
-fn redacted_args_debug(args: &str) -> Vec<String> {
-    let mut redact_next = false;
-    args.split_whitespace()
-        .map(|arg| {
-            if redact_next {
-                redact_next = false;
-                return "<redacted>".to_string();
-            }
-
-            if let Some((name, _value)) = arg.split_once('=') {
-                if is_sensitive_arg_name(name) {
-                    return format!("{name}=<redacted>");
-                }
-            }
-
-            if is_sensitive_arg_name(arg) {
-                redact_next = true;
-            }
-            arg.to_string()
-        })
-        .collect()
-}
-
-fn is_sensitive_arg_name(arg: &str) -> bool {
-    let normalized = arg
-        .trim_start_matches('-')
-        .replace('_', "-")
-        .to_ascii_lowercase();
-    normalized == "key"
-        || normalized.ends_with("-key")
-        || normalized.contains("api-key")
-        || normalized.contains("apikey")
-        || normalized.contains("token")
-        || normalized.contains("password")
-        || normalized.contains("passphrase")
-        || normalized.contains("secret")
 }
 
 fn redacted_if_present(value: &str) -> Option<&'static str> {
