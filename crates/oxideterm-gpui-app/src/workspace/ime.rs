@@ -620,10 +620,12 @@ impl WorkspaceApp {
         {
             return Some(WorkspaceImeTarget::Settings(input));
         }
-        if let Some(challenge) = self.keyboard_interactive_challenge.as_ref() {
-            return Some(WorkspaceImeTarget::KeyboardInteractive(
-                challenge.focused_prompt,
-            ));
+        if let Some(focused_prompt) = self
+            .connection_flow
+            .read(cx)
+            .focused_keyboard_interactive_prompt()
+        {
+            return Some(WorkspaceImeTarget::KeyboardInteractive(focused_prompt));
         }
 
         if let Some(form) = self.new_connection_form.as_ref()
@@ -1624,9 +1626,9 @@ impl WorkspaceApp {
                 new_connection_field_value(form, field).map(str::to_string)
             }
             WorkspaceImeTarget::KeyboardInteractive(index) => self
-                .keyboard_interactive_challenge
-                .as_ref()
-                .and_then(|challenge| challenge.responses.get(index).cloned()),
+                .connection_flow
+                .read(cx)
+                .keyboard_interactive_response(index),
         }
     }
 
@@ -2571,11 +2573,15 @@ impl WorkspaceApp {
                 }
             }
             WorkspaceImeTarget::KeyboardInteractive(index) => {
-                if let Some(challenge) = self.keyboard_interactive_challenge.as_mut()
-                    && !challenge.timed_out()
-                    && let Some(response) = challenge.responses.get_mut(index)
-                {
-                    replace_utf16(response, replacement_range, text);
+                let replaced = self.connection_flow.update(cx, |connection_flow, cx| {
+                    connection_flow.replace_keyboard_interactive_response(
+                        index,
+                        replacement_range,
+                        text,
+                        cx,
+                    )
+                });
+                if replaced {
                     self.new_connection_caret_visible = true;
                     cx.notify();
                 }

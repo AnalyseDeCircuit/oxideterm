@@ -498,8 +498,6 @@ impl WorkspaceApp {
             connection_flow,
             _connection_flow_observation: connection_flow_observation,
             active_proxy_connect_run: None,
-            keyboard_interactive_challenge: None,
-            keyboard_interactive_timer_generation: 0,
             workspace_runtime,
             _workspace_runtime_subscription: workspace_runtime_subscription,
             ssh_registry,

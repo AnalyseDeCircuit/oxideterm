@@ -260,10 +260,9 @@ use self::ime::{
 };
 use self::launcher::LauncherState;
 use self::new_connection::{
-    ConnectionFlowEntity, KeyboardInteractiveChallenge, NativeSessionTreeConnectPlan,
-    NativeSshPromptHandler, NewConnectionField, NewConnectionForm, NewConnectionSelect,
-    PrivilegeCredentialDraft, SavedConnectionPromptAction, SshAuthTab, SshConnectionIntent,
-    SshConnectionWorkerResult,
+    ConnectionFlowEntity, NativeSessionTreeConnectPlan, NativeSshPromptHandler, NewConnectionField,
+    NewConnectionForm, NewConnectionSelect, PrivilegeCredentialDraft, SavedConnectionPromptAction,
+    SshAuthTab, SshConnectionIntent, SshConnectionWorkerResult,
 };
 use self::onboarding::OnboardingState;
 use self::pane_tree::SplitDrag;
@@ -891,8 +890,6 @@ pub(crate) struct WorkspaceApp {
     connection_flow: Entity<ConnectionFlowEntity>,
     _connection_flow_observation: Subscription,
     active_proxy_connect_run: Option<NativeProxyConnectRun>,
-    keyboard_interactive_challenge: Option<KeyboardInteractiveChallenge>,
-    keyboard_interactive_timer_generation: u64,
     workspace_runtime: Entity<runtime_entity::WorkspaceRuntimeEntity>,
     _workspace_runtime_subscription: Subscription,
     ssh_registry: SshConnectionRegistry,

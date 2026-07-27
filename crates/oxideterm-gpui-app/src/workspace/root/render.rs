@@ -308,7 +308,11 @@ impl Render for WorkspaceApp {
                 if this.handle_app_lock_dialog_key(event, cx) {
                     window.prevent_default();
                     cx.stop_propagation();
-                } else if this.keyboard_interactive_challenge.is_some() {
+                } else if this
+                    .connection_flow
+                    .read(cx)
+                    .has_keyboard_interactive_challenge()
+                {
                     let _ = this.handle_keyboard_interactive_key(event, window, cx);
                     window.prevent_default();
                     cx.stop_propagation();
@@ -968,9 +972,12 @@ impl Render for WorkspaceApp {
                 self.connection_flow.read(cx).has_host_key_challenge(),
                 |root| root.child(self.render_host_key_dialog(cx)),
             )
-            .when(self.keyboard_interactive_challenge.is_some(), |root| {
-                root.child(self.render_keyboard_interactive_dialog(cx))
-            })
+            .when(
+                self.connection_flow
+                    .read(cx)
+                    .has_keyboard_interactive_challenge(),
+                |root| root.child(self.render_keyboard_interactive_dialog(cx)),
+            )
             .when(self.settings_page.show_ai_enable_confirm, |root| {
                 root.child(self.render_ai_enable_confirm_dialog(cx))
             })

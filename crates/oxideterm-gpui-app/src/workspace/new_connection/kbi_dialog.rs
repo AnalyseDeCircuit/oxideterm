@@ -1,6 +1,6 @@
 use gpui::{
-    AnyElement, Context, KeyDownEvent, MouseButton, ParentElement, Styled, Timer, Window, div,
-    prelude::*, px, rgb, rgba,
+    AnyElement, Context, KeyDownEvent, MouseButton, ParentElement, Styled, Window, div, prelude::*,
+    px, rgb, rgba,
 };
 use oxideterm_ssh::{
     KeyboardInteractivePromptRequest, KeyboardInteractiveResponses, SshPromptError,
@@ -10,6 +10,9 @@ use tokio::sync::oneshot;
 
 use crate::workspace::WorkspaceApp;
 use crate::workspace::ime::{WorkspaceImeTarget, keystroke_uses_text_edit_modifier};
+use crate::workspace::new_connection::entity::{
+    KeyboardInteractiveKeyAction, KeyboardInteractiveSubmitResult,
+};
 use oxideterm_gpui_ui::{
     TextInputView,
     button::{ButtonOptions, ButtonRadius, ButtonSize, ButtonVariant, ToolbarButtonOptions},
@@ -21,16 +24,17 @@ use oxideterm_gpui_ui::{
 const KBI_PROMPT_TIMEOUT_SECS: u64 = 60;
 
 pub(in crate::workspace) struct KeyboardInteractiveChallenge {
-    presence: oxideterm_gpui_ui::motion::ExitPresence,
-    request: KeyboardInteractivePromptRequest,
+    pub(super) presence: oxideterm_gpui_ui::motion::ExitPresence,
+    pub(super) request: KeyboardInteractivePromptRequest,
     pub(in crate::workspace) responses: KeyboardInteractiveResponses,
     pub(in crate::workspace) focused_prompt: usize,
-    expires_at: Instant,
-    response_tx: Option<oneshot::Sender<Result<KeyboardInteractiveResponses, SshPromptError>>>,
+    pub(super) expires_at: Instant,
+    pub(super) response_tx:
+        Option<oneshot::Sender<Result<KeyboardInteractiveResponses, SshPromptError>>>,
 }
 
 impl KeyboardInteractiveChallenge {
-    fn new(
+    pub(super) fn new(
         request: KeyboardInteractivePromptRequest,
         response_tx: oneshot::Sender<Result<KeyboardInteractiveResponses, SshPromptError>>,
     ) -> Self {
@@ -50,13 +54,13 @@ impl KeyboardInteractiveChallenge {
         Instant::now() >= self.expires_at
     }
 
-    fn seconds_left(&self) -> u64 {
+    pub(in crate::workspace) fn seconds_left(&self) -> u64 {
         self.expires_at
             .saturating_duration_since(Instant::now())
             .as_secs()
     }
 
-    fn all_responses_filled(&self) -> bool {
+    pub(super) fn all_responses_filled(&self) -> bool {
         self.responses.iter().all(|response| !response.is_empty())
     }
 }
@@ -69,57 +73,17 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if let Some(existing) = self.keyboard_interactive_challenge.as_ref()
-            && existing.request.flow_id != request.flow_id
-        {
-            // Tauri keeps the active GlobalKbiDialog owner and cancels a
-            // competing auth flow instead of letting a later prompt steal the
-            // dialog from the flow the user is already answering.
-            let _ = response_tx.send(Err(SshPromptError::Cancelled));
+        let opened = self.connection_flow.update(cx, |connection_flow, cx| {
+            connection_flow.open_keyboard_interactive_challenge(request, response_tx, cx)
+        });
+        if !opened {
             return;
         }
-        if let Some(mut existing) = self.keyboard_interactive_challenge.take()
-            && let Some(existing_tx) = existing.response_tx.take()
-        {
-            // A same-flow replacement is unexpected for the native oneshot
-            // bridge, but closing the old sender prevents a stale prompt from
-            // waiting until the transport-side KBI timeout.
-            let _ = existing_tx.send(Err(SshPromptError::Cancelled));
-        }
         self.prepare_modal_interaction_boundary(cx);
-        self.keyboard_interactive_challenge =
-            Some(KeyboardInteractiveChallenge::new(request, response_tx));
-        self.keyboard_interactive_timer_generation =
-            self.keyboard_interactive_timer_generation.wrapping_add(1);
-        self.schedule_keyboard_interactive_timer(self.keyboard_interactive_timer_generation, cx);
         self.new_connection_caret_visible = true;
         self.needs_active_pane_focus = false;
         window.focus(&self.focus_handle, cx);
         cx.notify();
-    }
-
-    fn schedule_keyboard_interactive_timer(&self, generation: u64, cx: &mut Context<Self>) {
-        cx.spawn(async move |weak, cx| {
-            loop {
-                Timer::after(Duration::from_secs(1)).await;
-                let keep_ticking = weak
-                    .update(cx, |this, cx| {
-                        let Some(challenge) = this.keyboard_interactive_challenge.as_ref() else {
-                            return false;
-                        };
-                        if this.keyboard_interactive_timer_generation != generation {
-                            return false;
-                        }
-                        cx.notify();
-                        !challenge.timed_out()
-                    })
-                    .unwrap_or(false);
-                if !keep_ticking {
-                    break;
-                }
-            }
-        })
-        .detach();
     }
 
     pub(in crate::workspace) fn handle_keyboard_interactive_key(
@@ -128,80 +92,51 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
-        let Some(challenge) = self.keyboard_interactive_challenge.as_mut() else {
-            return false;
-        };
-        if challenge.presence.phase() == oxideterm_gpui_ui::motion::ExitPhase::Exiting {
-            return true;
-        }
         let key = event.keystroke.key.as_str();
         let modifiers = event.keystroke.modifiers;
-
-        if keystroke_uses_text_edit_modifier(&event.keystroke) {
-            if key == "v" {
+        let action = self.connection_flow.update(cx, |connection_flow, cx| {
+            connection_flow.handle_keyboard_interactive_key(
+                key,
+                modifiers.shift,
+                keystroke_uses_text_edit_modifier(&event.keystroke),
+                cx,
+            )
+        });
+        match action {
+            KeyboardInteractiveKeyAction::NotHandled => false,
+            KeyboardInteractiveKeyAction::Paste => {
                 self.paste_into_keyboard_interactive_field(cx);
+                true
             }
-            return true;
-        }
-
-        match key {
-            "escape" => {
+            KeyboardInteractiveKeyAction::Cancel => {
                 self.cancel_keyboard_interactive_challenge(cx);
                 true
             }
-            "enter" => {
-                if !challenge.timed_out() && challenge.all_responses_filled() {
-                    self.submit_keyboard_interactive_challenge(window, cx);
-                }
+            KeyboardInteractiveKeyAction::Submit => {
+                self.submit_keyboard_interactive_challenge(window, cx);
                 true
             }
-            "tab" => {
-                if !challenge.responses.is_empty() {
-                    if modifiers.shift {
-                        challenge.focused_prompt = challenge
-                            .focused_prompt
-                            .saturating_sub(1)
-                            .min(challenge.responses.len() - 1);
-                    } else {
-                        challenge.focused_prompt =
-                            (challenge.focused_prompt + 1).min(challenge.responses.len() - 1);
-                    }
-                }
+            KeyboardInteractiveKeyAction::Handled => {
                 self.new_connection_caret_visible = true;
                 cx.notify();
                 true
             }
-            "backspace" => {
-                if !challenge.timed_out()
-                    && let Some(response) = challenge.responses.get_mut(challenge.focused_prompt)
-                    && response.pop().is_some()
-                {
-                    self.new_connection_caret_visible = true;
-                    cx.notify();
-                }
-                true
-            }
-            _ => true,
         }
     }
 
     fn paste_into_keyboard_interactive_field(&mut self, cx: &mut Context<Self>) {
-        let Some(challenge) = self.keyboard_interactive_challenge.as_mut() else {
-            return;
-        };
-        if challenge.timed_out() {
-            return;
-        }
         let Some(text) = cx.read_from_clipboard().and_then(|item| item.text()) else {
             return;
         };
         let normalized = text.replace("\r\n", "\n").replace('\r', "\n");
         let single_line = normalized.lines().collect::<Vec<_>>().join(" ");
-        if let Some(response) = challenge.responses.get_mut(challenge.focused_prompt) {
-            response.push_str(&single_line);
+        let pasted = self.connection_flow.update(cx, |connection_flow, cx| {
+            connection_flow.paste_keyboard_interactive_response(&single_line, cx)
+        });
+        if pasted {
+            self.new_connection_caret_visible = true;
+            cx.notify();
         }
-        self.new_connection_caret_visible = true;
-        cx.notify();
     }
 
     fn submit_keyboard_interactive_challenge(
@@ -209,82 +144,42 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(mut challenge) = self.keyboard_interactive_challenge.take() else {
-            return;
-        };
-        if challenge.timed_out() || !challenge.all_responses_filled() {
-            self.keyboard_interactive_challenge = Some(challenge);
-            cx.notify();
-            return;
-        }
-        self.keyboard_interactive_timer_generation =
-            self.keyboard_interactive_timer_generation.wrapping_add(1);
-        if let Some(response_tx) = challenge.response_tx.take() {
-            let _ = response_tx.send(Ok(challenge.responses));
-        }
-        if self.new_connection_form.is_none() {
+        let result = self.connection_flow.update(cx, |connection_flow, cx| {
+            connection_flow.submit_keyboard_interactive_challenge(cx)
+        });
+        if matches!(result, KeyboardInteractiveSubmitResult::Submitted)
+            && self.new_connection_form.is_none()
+        {
             self.focus_active_pane(window, cx);
         }
-        cx.notify();
     }
 
     pub(in crate::workspace) fn cancel_keyboard_interactive_challenge(
         &mut self,
         cx: &mut Context<Self>,
     ) {
-        let Some(challenge) = self.keyboard_interactive_challenge.as_mut() else {
-            return;
-        };
-        let Some(generation) = challenge.presence.begin_exit() else {
-            return;
-        };
-        self.keyboard_interactive_timer_generation =
-            self.keyboard_interactive_timer_generation.wrapping_add(1);
-        if let Some(response_tx) = challenge.response_tx.take() {
-            let _ = response_tx.send(Err(SshPromptError::Cancelled));
-        }
-        if let Some(form) = self.new_connection_form.as_mut() {
-            form.pending = false;
-            form.error = Some(self.i18n.t("ssh.kbi.cancelled"));
-        }
         let delay = oxideterm_gpui_ui::motion::duration(
             &self.tokens,
             oxideterm_gpui_ui::motion::MotionDuration::Overlay,
         );
-        if delay.is_zero() {
-            self.finish_keyboard_interactive_exit(generation);
-        } else {
-            cx.spawn(async move |weak, cx| {
-                Timer::after(delay).await;
-                let _ = weak.update(cx, |this, cx| {
-                    if this.finish_keyboard_interactive_exit(generation) {
-                        cx.notify();
-                    }
-                });
-            })
-            .detach();
+        let cancelled = self.connection_flow.update(cx, |connection_flow, cx| {
+            connection_flow.cancel_keyboard_interactive_challenge(delay, cx)
+        });
+        if cancelled {
+            if let Some(form) = self.new_connection_form.as_mut() {
+                form.pending = false;
+                form.error = Some(self.i18n.t("ssh.kbi.cancelled"));
+            }
+            cx.notify();
         }
-        cx.notify();
-    }
-
-    fn finish_keyboard_interactive_exit(&mut self, generation: u64) -> bool {
-        if !self
-            .keyboard_interactive_challenge
-            .as_ref()
-            .is_some_and(|challenge| challenge.presence.finish_exit(generation))
-        {
-            return false;
-        }
-        // Dropping the retained payload after the exit zeroizes all secret answers.
-        self.keyboard_interactive_challenge = None;
-        true
     }
 
     pub(in crate::workspace) fn render_keyboard_interactive_dialog(
         &self,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let Some(challenge) = self.keyboard_interactive_challenge.as_ref() else {
+        let connection_flow = self.connection_flow.read(cx);
+        let Some(challenge) = connection_flow.keyboard_interactive_challenge() else {
             return div().into_any_element();
         };
         let dialog_visible =
@@ -334,9 +229,9 @@ impl WorkspaceApp {
                     .on_mouse_down(
                         MouseButton::Left,
                         cx.listener(move |this, event: &gpui::MouseDownEvent, window, cx| {
-                            if let Some(challenge) = this.keyboard_interactive_challenge.as_mut() {
-                                challenge.focused_prompt = index;
-                            }
+                            this.connection_flow.update(cx, |connection_flow, cx| {
+                                connection_flow.focus_keyboard_interactive_prompt(index, cx);
+                            });
                             this.ime_marked_text = None;
                             this.new_connection_caret_visible = true;
                             window.focus(&this.focus_handle, cx);
