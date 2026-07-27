@@ -3,6 +3,7 @@ use super::*;
 pub(in crate::workspace) enum AiWorkspaceEvent {
     ModelRefreshDeliveryReady,
     ProviderKeyStatusChanged,
+    SelectorProviderStatusChanged,
 }
 
 pub(in crate::workspace) enum AiModelRefreshIntent {
@@ -29,6 +30,12 @@ struct AiModelRefreshWorkerDelivery {
     result: Result<oxideterm_ai::ProviderModelRefresh, AiModelRefreshFailure>,
 }
 
+struct AiModelSelectorProbeDelivery {
+    provider_id: String,
+    generation: u64,
+    online: bool,
+}
+
 /// Owns AI worker delivery slices as they move out of the workspace root.
 pub(in crate::workspace) struct AiWorkspaceEntity {
     task_runtime: Arc<tokio::runtime::Runtime>,
@@ -46,6 +53,13 @@ pub(in crate::workspace) struct AiWorkspaceEntity {
     provider_key_status_tx:
         crate::workspace::delivery::ActiveDeliverySender<AiProviderKeyStatusDelivery>,
     provider_key_status_rx: std::sync::mpsc::Receiver<AiProviderKeyStatusDelivery>,
+    selector_provider_online: HashMap<String, bool>,
+    selector_probe_generations: HashMap<String, u64>,
+    selector_probe_tx:
+        crate::workspace::delivery::ActiveDeliverySender<AiModelSelectorProbeDelivery>,
+    selector_probe_rx: std::sync::mpsc::Receiver<AiModelSelectorProbeDelivery>,
+    selector_probe_pending: usize,
+    next_selector_probe_generation: u64,
 }
 
 impl AiWorkspaceEntity {
@@ -57,6 +71,8 @@ impl AiWorkspaceEntity {
         let (model_refresh_tx, model_refresh_rx) =
             crate::workspace::delivery::ActiveDeliverySender::channel();
         let (provider_key_status_tx, provider_key_status_rx) =
+            crate::workspace::delivery::ActiveDeliverySender::channel();
+        let (selector_probe_tx, selector_probe_rx) =
             crate::workspace::delivery::ActiveDeliverySender::channel();
         let entity = Self {
             task_runtime,
@@ -72,9 +88,16 @@ impl AiWorkspaceEntity {
             provider_key_status_pending: HashSet::new(),
             provider_key_status_tx,
             provider_key_status_rx,
+            selector_provider_online: HashMap::new(),
+            selector_probe_generations: HashMap::new(),
+            selector_probe_tx,
+            selector_probe_rx,
+            selector_probe_pending: 0,
+            next_selector_probe_generation: 0,
         };
         entity.schedule_model_refresh_delivery(cx);
         entity.schedule_provider_key_status_delivery(cx);
+        entity.schedule_selector_probe_delivery(cx);
         entity
     }
 
@@ -203,6 +226,52 @@ impl AiWorkspaceEntity {
                 });
             });
         }
+    }
+
+    pub(in crate::workspace) fn selector_provider_is_online(&self, provider_id: &str) -> bool {
+        self.selector_provider_online
+            .get(provider_id)
+            .copied()
+            .unwrap_or(true)
+    }
+
+    pub(in crate::workspace) fn set_selector_provider_online(
+        &mut self,
+        provider_id: String,
+        online: bool,
+    ) {
+        // Direct state transitions supersede any older network probe result.
+        self.selector_probe_generations.remove(&provider_id);
+        self.selector_provider_online.insert(provider_id, online);
+    }
+
+    pub(in crate::workspace) fn invalidate_selector_provider_status(&mut self, provider_id: &str) {
+        self.selector_probe_generations.remove(provider_id);
+        self.selector_provider_online.remove(provider_id);
+    }
+
+    pub(in crate::workspace) fn request_selector_provider_probe(
+        &mut self,
+        provider: oxideterm_ai::AiProviderView,
+        endpoint: &'static str,
+    ) {
+        self.next_selector_probe_generation = self.next_selector_probe_generation.saturating_add(1);
+        let generation = self.next_selector_probe_generation;
+        let provider_id = provider.id.clone();
+        self.selector_probe_generations
+            .insert(provider_id.clone(), generation);
+        self.selector_probe_pending = self.selector_probe_pending.saturating_add(1);
+        let worker_tx = self.selector_probe_tx.clone();
+        self.task_runtime.spawn(async move {
+            let online =
+                oxideterm_ai::check_model_selector_provider_online(&provider.base_url, endpoint)
+                    .await;
+            let _ = worker_tx.send(AiModelSelectorProbeDelivery {
+                provider_id,
+                generation,
+                online,
+            });
+        });
     }
 
     fn begin_model_refresh(&mut self, provider_id: &str) -> Option<u64> {
@@ -336,6 +405,60 @@ impl AiWorkspaceEntity {
         }
         drain.outcome.backlog_remaining
     }
+
+    fn schedule_selector_probe_delivery(&self, cx: &mut Context<Self>) {
+        let delivery_wake = self.selector_probe_tx.wake();
+        let release_wake = delivery_wake.clone();
+        cx.on_release(move |_, _| {
+            // Entity release stops only UI delivery, not the shared AI runtime.
+            release_wake.stop();
+        })
+        .detach();
+        cx.spawn(async move |entity, cx| {
+            loop {
+                delivery_wake.wait().await;
+                let should_drain = delivery_wake.take();
+                let stopped = delivery_wake.is_stopped();
+                if should_drain {
+                    let backlog_remaining = entity
+                        .update(cx, |entity, cx| entity.drain_selector_probe_results(cx))
+                        .unwrap_or(false);
+                    if backlog_remaining {
+                        delivery_wake.mark();
+                    }
+                }
+                if stopped {
+                    break;
+                }
+            }
+        })
+        .detach();
+    }
+
+    fn drain_selector_probe_results(&mut self, cx: &mut Context<Self>) -> bool {
+        let drain = crate::workspace::delivery::drain_channel(
+            &self.selector_probe_rx,
+            crate::workspace::delivery::USER_ACTION_DELIVERY_BUDGET,
+        );
+        let mut changed = false;
+        for delivery in drain.items {
+            self.selector_probe_pending = self.selector_probe_pending.saturating_sub(1);
+            if self.selector_probe_generations.get(&delivery.provider_id)
+                != Some(&delivery.generation)
+            {
+                continue;
+            }
+            let previous = self
+                .selector_provider_online
+                .insert(delivery.provider_id, delivery.online);
+            changed |= previous != Some(delivery.online);
+        }
+        if changed {
+            cx.emit(AiWorkspaceEvent::SelectorProviderStatusChanged);
+            cx.notify();
+        }
+        drain.outcome.backlog_remaining
+    }
 }
 
 impl gpui::EventEmitter<AiWorkspaceEvent> for AiWorkspaceEntity {}
@@ -444,8 +567,6 @@ pub(super) struct AiModelWorkspaceState {
     pub(super) selector_search_query: String,
     pub(super) selector_expanded_providers: HashSet<String>,
     pub(super) selector_highlighted_model: Option<(String, String)>,
-    pub(super) selector_provider_online: HashMap<String, bool>,
-    pub(super) selector_probe_generations: HashMap<String, u64>,
     pub(super) selector_status_signature: u64,
     pub(super) acp_model_options:
         HashMap<(String, String), Vec<oxideterm_ai::AcpSessionConfigOption>>,
@@ -455,11 +576,6 @@ pub(super) struct AiModelWorkspaceState {
     pub(super) acp_model_discovery_rx: Option<std::sync::mpsc::Receiver<AcpModelDiscoveryDelivery>>,
     pub(super) mcp_add_dialog: Option<AiMcpServerDraft>,
     pub(super) key_store: oxideterm_ai::AiProviderKeyStore,
-    pub(super) next_selector_probe_generation: u64,
-    pub(super) selector_probe_rx: Option<std::sync::mpsc::Receiver<AiModelSelectorProbeDelivery>>,
-    pub(super) selector_probe_tx:
-        Option<crate::workspace::delivery::ActiveDeliverySender<AiModelSelectorProbeDelivery>>,
-    pub(super) selector_probe_pending: usize,
 }
 
 /// Owns lazy RAG storage and knowledge reindex delivery state.
@@ -607,8 +723,6 @@ impl AiModelWorkspaceState {
             selector_search_query: String::new(),
             selector_expanded_providers: HashSet::new(),
             selector_highlighted_model: None,
-            selector_provider_online: HashMap::new(),
-            selector_probe_generations: HashMap::new(),
             selector_status_signature: 0,
             acp_model_options: HashMap::new(),
             acp_model_discovery_pending: HashSet::new(),
@@ -616,10 +730,6 @@ impl AiModelWorkspaceState {
             acp_model_discovery_rx: None,
             mcp_add_dialog: None,
             key_store,
-            next_selector_probe_generation: 0,
-            selector_probe_rx: None,
-            selector_probe_tx: None,
-            selector_probe_pending: 0,
         }
     }
 }
@@ -753,15 +863,75 @@ mod entity_tests {
     }
 
     #[gpui::test]
+    fn selector_probe_state_and_delivery_are_entity_owned(cx: &mut TestAppContext) {
+        let entity = cx.new(|cx| {
+            AiWorkspaceEntity::new(test_runtime(), oxideterm_ai::AiProviderKeyStore::new(), cx)
+        });
+        let worker_tx = entity.update(cx, |entity, _cx| {
+            entity
+                .selector_probe_generations
+                .insert("provider-a".to_string(), 7);
+            entity.selector_probe_pending = 1;
+            entity.selector_probe_tx.clone()
+        });
+        worker_tx
+            .send(AiModelSelectorProbeDelivery {
+                provider_id: "provider-a".to_string(),
+                generation: 7,
+                online: false,
+            })
+            .unwrap();
+
+        cx.run_until_parked();
+
+        cx.read(|cx| {
+            let entity = entity.read(cx);
+            assert!(!entity.selector_provider_is_online("provider-a"));
+            assert_eq!(entity.selector_probe_pending, 0);
+        });
+    }
+
+    #[gpui::test]
+    fn direct_selector_status_rejects_stale_probe_completion(cx: &mut TestAppContext) {
+        let entity = cx.new(|cx| {
+            AiWorkspaceEntity::new(test_runtime(), oxideterm_ai::AiProviderKeyStore::new(), cx)
+        });
+        let worker_tx = entity.update(cx, |entity, _cx| {
+            entity
+                .selector_probe_generations
+                .insert("provider-a".to_string(), 7);
+            entity.selector_probe_pending = 1;
+            entity.set_selector_provider_online("provider-a".to_string(), true);
+            entity.selector_probe_tx.clone()
+        });
+        worker_tx
+            .send(AiModelSelectorProbeDelivery {
+                provider_id: "provider-a".to_string(),
+                generation: 7,
+                online: false,
+            })
+            .unwrap();
+
+        cx.run_until_parked();
+
+        cx.read(|cx| {
+            let entity = entity.read(cx);
+            assert!(entity.selector_provider_is_online("provider-a"));
+            assert_eq!(entity.selector_probe_pending, 0);
+        });
+    }
+
+    #[gpui::test]
     fn entity_release_stops_all_entity_delivery_waiters(cx: &mut TestAppContext) {
         let entity = cx.new(|cx| {
             AiWorkspaceEntity::new(test_runtime(), oxideterm_ai::AiProviderKeyStore::new(), cx)
         });
-        let (model_refresh_wake, provider_key_status_wake) = cx.read(|cx| {
+        let (model_refresh_wake, provider_key_status_wake, selector_probe_wake) = cx.read(|cx| {
             let entity = entity.read(cx);
             (
                 entity.model_refresh_tx.wake(),
                 entity.provider_key_status_tx.wake(),
+                entity.selector_probe_tx.wake(),
             )
         });
 
@@ -772,5 +942,6 @@ mod entity_tests {
         // The workspace runtime owns in-flight HTTP work independently.
         assert!(model_refresh_wake.is_stopped());
         assert!(provider_key_status_wake.is_stopped());
+        assert!(selector_probe_wake.is_stopped());
     }
 }

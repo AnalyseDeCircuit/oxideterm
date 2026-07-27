@@ -72,7 +72,7 @@ impl WorkspaceApp {
         let ready = active_provider
             .map(|provider| {
                 self.ai_model_selector_has_key(provider, cx)
-                    && self.ai_model_selector_provider_is_online(provider)
+                    && self.ai_model_selector_provider_is_online(provider, cx)
             })
             .unwrap_or(false);
         let trigger = ai_model_selector_trigger_compact(

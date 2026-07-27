@@ -293,7 +293,7 @@ impl WorkspaceApp {
             })
             .filter(|group| {
                 self.ai_model_selector_has_key(&group.provider, cx)
-                    && self.ai_model_selector_provider_is_online(&group.provider)
+                    && self.ai_model_selector_provider_is_online(&group.provider, cx)
             })
             .flat_map(|group| {
                 let provider_id = group.provider.id;
@@ -376,139 +376,36 @@ impl WorkspaceApp {
                 self.ai_entity.update(cx, |ai, _cx| {
                     ai.set_provider_key_status(provider.id.clone(), true);
                 });
-                self.ai.models.selector_provider_online.insert(
-                    provider.id.clone(),
-                    self.ai_acp_provider_ready(&provider.id),
-                );
                 continue;
             }
             match resolve_model_selector_provider_probe(&provider) {
                 ModelSelectorProviderProbe::Disabled => {
                     self.ai_entity.update(cx, |ai, _cx| {
                         ai.set_provider_key_status(provider.id.clone(), false);
+                        ai.set_selector_provider_online(provider.id.clone(), false);
                     });
-                    self.ai
-                        .models
-                        .selector_provider_online
-                        .insert(provider.id.clone(), false);
                 }
                 ModelSelectorProviderProbe::StoredKey => {
-                    self.ai
-                        .models
-                        .selector_provider_online
-                        .insert(provider.id.clone(), true);
+                    self.ai_entity.update(cx, |ai, _cx| {
+                        ai.set_selector_provider_online(provider.id.clone(), true);
+                    });
                 }
                 ModelSelectorProviderProbe::ImplicitKey { endpoint } => {
                     self.ai_entity.update(cx, |ai, _cx| {
                         ai.set_provider_key_status(provider.id.clone(), true);
                     });
                     if let Some(endpoint) = endpoint {
-                        self.schedule_ai_model_selector_online_probe(
-                            provider.clone(),
-                            endpoint,
-                        );
+                        self.ai_entity.update(cx, |ai, _cx| {
+                            ai.request_selector_provider_probe(provider, endpoint);
+                        });
                     } else {
-                        self.ai
-                            .models
-                            .selector_provider_online
-                            .insert(provider.id.clone(), true);
+                        self.ai_entity.update(cx, |ai, _cx| {
+                            ai.set_selector_provider_online(provider.id, true);
+                        });
                     }
                 }
             }
         }
-    }
-
-    pub(in crate::workspace) fn schedule_ai_model_selector_online_probe(
-        &mut self,
-        provider: AiProviderView,
-        endpoint: &'static str,
-    ) {
-        self.ai.models.next_selector_probe_generation = self
-            .ai
-            .models
-            .next_selector_probe_generation
-            .saturating_add(1);
-        let generation = self.ai.models.next_selector_probe_generation;
-        let provider_id = provider.id.clone();
-        self.ai
-            .models
-            .selector_probe_generations
-            .insert(provider_id.clone(), generation);
-        if self.ai.models.selector_probe_tx.is_none() {
-            let (tx, rx) =
-                crate::workspace::delivery::ActiveDeliverySender::channel_with_wake(
-                    self.ai.delivery_wake.clone(),
-                );
-            self.ai.models.selector_probe_tx = Some(tx);
-            self.ai.models.selector_probe_rx = Some(rx);
-        }
-        let Some(ui_tx) = self.ai.models.selector_probe_tx.as_ref().cloned() else {
-            return;
-        };
-        self.ai.models.selector_probe_pending =
-            self.ai.models.selector_probe_pending.saturating_add(1);
-        self.forwarding_runtime.spawn(async move {
-            let online = check_model_selector_provider_online(&provider.base_url, endpoint).await;
-            let _ = ui_tx.send(AiModelSelectorProbeDelivery {
-                provider_id,
-                generation,
-                online,
-            });
-        });
-    }
-
-    pub(in crate::workspace) fn poll_ai_model_selector_probe_results(
-        &mut self,
-        cx: &mut Context<Self>,
-    ) -> bool {
-        let Some(rx) = self.ai.models.selector_probe_rx.take() else {
-            return false;
-        };
-        let mut keep_rx = true;
-        let mut source_exhausted = false;
-        let started_at = Instant::now();
-        let mut processed = 0usize;
-        while crate::workspace::delivery::USER_ACTION_DELIVERY_BUDGET
-            .allows_next(processed, started_at.elapsed())
-        {
-            match rx.try_recv() {
-                Ok(delivery) => {
-                    processed += 1;
-                    self.ai.models.selector_probe_pending =
-                        self.ai.models.selector_probe_pending.saturating_sub(1);
-                    if self
-                        .ai
-                        .models
-                        .selector_probe_generations
-                        .get(&delivery.provider_id)
-                        == Some(&delivery.generation)
-                    {
-                        self.ai
-                            .models
-                            .selector_provider_online
-                            .insert(delivery.provider_id, delivery.online);
-                        cx.notify();
-                    }
-                }
-                Err(std::sync::mpsc::TryRecvError::Empty) => {
-                    source_exhausted = true;
-                    break;
-                }
-                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
-                    source_exhausted = true;
-                    keep_rx = false;
-                    self.ai.models.selector_probe_tx = None;
-                    self.ai.models.selector_probe_pending = 0;
-                    break;
-                }
-            }
-        }
-        if keep_rx && self.ai.models.selector_probe_pending > 0 {
-            self.ai.models.selector_probe_rx = Some(rx);
-        } else if self.ai.models.selector_probe_pending == 0 {
-            self.ai.models.selector_probe_tx = None;
-        }
-        keep_rx && self.ai.models.selector_probe_pending > 0 && !source_exhausted
     }
 
     pub(in crate::workspace) fn ai_model_selector_has_key(
@@ -529,6 +426,7 @@ impl WorkspaceApp {
     pub(in crate::workspace) fn ai_model_selector_provider_is_online(
         &self,
         provider: &AiProviderView,
+        cx: &App,
     ) -> bool {
         if Self::ai_acp_agent_id_from_provider_id(&provider.id).is_some() {
             return self.ai_acp_provider_ready(&provider.id);
@@ -536,13 +434,9 @@ impl WorkspaceApp {
         match resolve_model_selector_provider_probe(provider) {
             ModelSelectorProviderProbe::Disabled => false,
             ModelSelectorProviderProbe::StoredKey => true,
-            ModelSelectorProviderProbe::ImplicitKey { .. } => self
-                .ai
-                .models
-                .selector_provider_online
-                .get(&provider.id)
-                .copied()
-                .unwrap_or(true),
+            ModelSelectorProviderProbe::ImplicitKey { .. } => {
+                self.ai_entity.read(cx).selector_provider_is_online(&provider.id)
+            }
         }
     }
 
@@ -559,7 +453,7 @@ impl WorkspaceApp {
             cx.notify();
             return;
         }
-        if !self.ai_model_selector_provider_is_online(&provider) {
+        if !self.ai_model_selector_provider_is_online(&provider, cx) {
             self.push_ai_settings_toast(
                 self.i18n.t("ai.model_selector.offline"),
                 TerminalNoticeVariant::Warning,
@@ -919,12 +813,6 @@ pub(in crate::workspace) fn store_ai_acp_model_selection_in_conversation(
     };
     metadata.insert(AI_ACP_SESSION_METADATA_KEY.to_string(), value);
     true
-}
-
-pub(in crate::workspace) struct AiModelSelectorProbeDelivery {
-    pub(in crate::workspace) provider_id: String,
-    pub(in crate::workspace) generation: u64,
-    pub(in crate::workspace) online: bool,
 }
 
 pub(in crate::workspace) fn ai_model_selector_status_signature(

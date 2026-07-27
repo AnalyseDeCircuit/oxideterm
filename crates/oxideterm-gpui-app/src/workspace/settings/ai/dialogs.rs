@@ -635,6 +635,7 @@ impl WorkspaceApp {
         let provider_id = provider_id.to_string();
         self.ai_entity.update(cx, |ai, _cx| {
             ai.invalidate_provider_key_status(&provider_id);
+            ai.invalidate_selector_provider_status(&provider_id);
         });
         self.settings_page
             .remove_ai_provider_page_state(&provider_id);

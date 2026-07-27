@@ -193,8 +193,7 @@ mod state;
 mod titlebar;
 
 pub(in crate::workspace) use ai::{
-    AiCompactionDelivery, AiInlinePanelState, AiModelSelectorProbeDelivery, AiPendingChatStream,
-    AiStreamDelivery,
+    AiCompactionDelivery, AiInlinePanelState, AiPendingChatStream, AiStreamDelivery,
 };
 use helpers::*;
 pub(in crate::workspace) use state::context_sidebar_panel_visible;
