@@ -203,6 +203,23 @@ pub(super) fn event_log_title_for_node_readiness(readiness: &NodeReadiness) -> &
     }
 }
 
+pub(super) fn node_readiness_became_ready(
+    previous: Option<&NodeReadiness>,
+    current: &NodeReadiness,
+) -> bool {
+    !matches!(previous, Some(NodeReadiness::Ready)) && matches!(current, NodeReadiness::Ready)
+}
+
+pub(super) fn node_readiness_became_unavailable(
+    previous: Option<&NodeReadiness>,
+    current: &NodeReadiness,
+) -> bool {
+    !matches!(
+        previous,
+        Some(NodeReadiness::Error | NodeReadiness::Disconnected)
+    ) && matches!(current, NodeReadiness::Error | NodeReadiness::Disconnected)
+}
+
 pub(super) fn reconnect_cascade_child_should_start(readiness: &NodeReadiness) -> bool {
     matches!(readiness, NodeReadiness::Error | NodeReadiness::Connecting)
 }
@@ -231,6 +248,35 @@ mod node_reconnect_helper_tests {
             forward_restore_key_for_snapshot_rule(&service_a),
             forward_restore_key_for_snapshot_rule(&service_b)
         );
+    }
+
+    #[test]
+    fn ready_transition_requires_a_non_ready_previous_state() {
+        assert!(node_readiness_became_ready(
+            Some(&NodeReadiness::Connecting),
+            &NodeReadiness::Ready
+        ));
+        assert!(node_readiness_became_ready(None, &NodeReadiness::Ready));
+        assert!(!node_readiness_became_ready(
+            Some(&NodeReadiness::Ready),
+            &NodeReadiness::Ready
+        ));
+        assert!(!node_readiness_became_ready(
+            Some(&NodeReadiness::Error),
+            &NodeReadiness::Disconnected
+        ));
+        assert!(node_readiness_became_unavailable(
+            Some(&NodeReadiness::Connecting),
+            &NodeReadiness::Error
+        ));
+        assert!(node_readiness_became_unavailable(
+            Some(&NodeReadiness::Ready),
+            &NodeReadiness::Disconnected
+        ));
+        assert!(!node_readiness_became_unavailable(
+            Some(&NodeReadiness::Error),
+            &NodeReadiness::Disconnected
+        ));
     }
 
     #[test]

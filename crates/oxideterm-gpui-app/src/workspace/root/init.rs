@@ -779,7 +779,6 @@ impl WorkspaceApp {
                             workspace.maybe_refresh_connection_monitor(cx);
                             workspace.maybe_refresh_active_terminal_git(cx);
                             workspace.maybe_refresh_active_terminal_project(cx);
-                            workspace.sync_ssh_node_lifecycle(cx);
                             if workspace.any_terminal_recording_active(cx) {
                                 cx.notify();
                             }

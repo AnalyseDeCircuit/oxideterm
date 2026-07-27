@@ -1,10 +1,10 @@
-use super::helpers::readiness_for_connection_state;
 use super::nodes_reconnect_helpers::{
     cleanup_reconnect_created_forwards, event_log_severity_for_connection_status,
     event_log_title_for_node_readiness, forward_restore_failure_label,
     forward_restore_key_for_rule, forward_restore_key_for_snapshot_rule,
     forward_restore_phase_result, forward_restore_result_detail,
-    forward_rule_from_reconnect_snapshot, readiness_for_connection_status,
+    forward_rule_from_reconnect_snapshot, node_readiness_became_ready,
+    node_readiness_became_unavailable, readiness_for_connection_status,
     reason_for_connection_status, reconnect_cascade_child_should_start,
     reconnect_error_is_non_retryable, reconnect_forward_rule_from_rule,
     release_reconnect_forward_bindings,
@@ -15,124 +15,6 @@ const RECONNECT_MAX_REQUEUE: u32 = 120;
 const RECONNECT_AUTO_CLEANUP_DELAY_MS: u64 = 30_000;
 
 impl WorkspaceApp {
-    pub(in crate::workspace) fn sync_ssh_node_lifecycle(&mut self, cx: &mut Context<Self>) {
-        let terminal_nodes = self.terminal_ssh_nodes.clone();
-        let mut changed = false;
-        let mut forwarding_to_suspend = Vec::new();
-        let mut nodes_to_restore = Vec::new();
-        let mut nodes_to_grace = Vec::new();
-        let mut trace_ready_nodes = Vec::new();
-        let mut trace_failed_nodes = Vec::new();
-        for (session_id, node_id) in terminal_nodes {
-            let terminal_snapshot =
-                self.terminal_endpoint_sessions
-                    .get(&session_id)
-                    .map(|endpoint_session| {
-                        // This mirrors Tauri's SessionRegistry boundary: node
-                        // lifecycle is read from the terminal endpoint owner,
-                        // not from the currently mounted GPUI pane. Panes may
-                        // be replaced during reconnect/remount; the endpoint
-                        // owner is the stable terminal-session record.
-                        let terminal = endpoint_session.session.lock();
-                        let readiness = match terminal.lifecycle() {
-                            TerminalLifecycle::Running => NodeReadiness::Ready,
-                            TerminalLifecycle::Exited(_) => NodeReadiness::Error,
-                            TerminalLifecycle::Closed => NodeReadiness::Disconnected,
-                        };
-                        (readiness, terminal.ssh_connection_handle())
-                    });
-            let Some((terminal_readiness, ssh_handle)) = terminal_snapshot else {
-                self.unregister_ssh_terminal_session(session_id);
-                changed = true;
-                continue;
-            };
-            if let Some(handle) = ssh_handle {
-                if let Ok(event) = self
-                    .node_router
-                    .bind_connection(&node_id, handle.connection_id().to_string())
-                {
-                    self.emit_node_event(event);
-                }
-            }
-            let registry_readiness = self
-                .ssh_nodes
-                .get(&node_id)
-                .and_then(|node| self.readiness_for_ssh_node_connection(node));
-            let readiness = registry_readiness.unwrap_or(terminal_readiness);
-            let forwarding_session_id = self.forwarding_session_id_for_node(&node_id);
-            let forwarding_connection_id = self.forwarding_connection_id_for_node(&node_id);
-            if let Some(node) = self.ssh_nodes.get_mut(&node_id)
-                && node.readiness != readiness
-            {
-                if matches!(node.readiness, NodeReadiness::Ready)
-                    && matches!(
-                        readiness,
-                        NodeReadiness::Error | NodeReadiness::Disconnected
-                    )
-                {
-                    forwarding_to_suspend.push((forwarding_session_id, forwarding_connection_id));
-                    if matches!(readiness, NodeReadiness::Error) {
-                        nodes_to_grace.push(node_id.clone());
-                    }
-                }
-                if !matches!(node.readiness, NodeReadiness::Ready)
-                    && matches!(readiness, NodeReadiness::Ready)
-                {
-                    nodes_to_restore.push(node_id.clone());
-                    trace_ready_nodes.push(node_id.clone());
-                }
-                if !matches!(
-                    node.readiness,
-                    NodeReadiness::Error | NodeReadiness::Disconnected
-                ) && matches!(
-                    readiness,
-                    NodeReadiness::Error | NodeReadiness::Disconnected
-                ) {
-                    trace_failed_nodes.push((
-                        node_id.clone(),
-                        match readiness {
-                            NodeReadiness::Error => Some("terminal session exited".to_string()),
-                            NodeReadiness::Disconnected => {
-                                Some("terminal session closed".to_string())
-                            }
-                            _ => None,
-                        },
-                    ));
-                }
-                node.readiness = readiness;
-                changed = true;
-            }
-        }
-        if !forwarding_to_suspend.is_empty() {
-            let forwarding_registry = self.forwarding_service.registry().clone();
-            let forwarding_runtime = self.forwarding_runtime.clone();
-            forwarding_runtime.spawn(async move {
-                for (session_id, connection_id) in forwarding_to_suspend {
-                    if let Some(connection_id) = connection_id {
-                        forwarding_registry.stop_port_profiler(&connection_id);
-                    }
-                    let _ = forwarding_registry.suspend_session(&session_id).await;
-                }
-            });
-        }
-        for node_id in nodes_to_grace {
-            self.schedule_grace_period_reconnect(&node_id, cx);
-        }
-        for node_id in nodes_to_restore {
-            self.restore_forwarding_session_for_node(&node_id, cx);
-        }
-        for node_id in trace_ready_nodes {
-            self.finish_connection_trace_success(&node_id);
-        }
-        for (node_id, detail) in trace_failed_nodes {
-            self.finish_connection_trace_failed(&node_id, detail);
-        }
-        if changed {
-            self.refresh_ssh_terminal_input_locks(cx);
-            cx.notify();
-        }
-    }
-
     pub(in crate::workspace) fn handle_workspace_runtime_event(
         &mut self,
         event: &runtime_entity::WorkspaceRuntimeEvent,
@@ -875,6 +757,10 @@ impl WorkspaceApp {
                 };
                 let reason = reason_for_connection_status(&status);
                 self.ensure_workspace_ssh_node_from_runtime(&node_id);
+                let previous = self
+                    .ssh_nodes
+                    .get(&node_id)
+                    .map(|node| node.readiness.clone());
                 let _ = self.node_router.sync_node_readiness_event(
                     &node_id,
                     state.clone(),
@@ -882,6 +768,14 @@ impl WorkspaceApp {
                 );
                 if let Some(node) = self.ssh_nodes.get_mut(&node_id) {
                     node.readiness = state.clone();
+                }
+                if node_readiness_became_ready(previous.as_ref(), &state) {
+                    // Registry readiness, not shell lifetime, restores shared
+                    // forwards and completes the connection trace.
+                    self.restore_forwarding_session_for_node(&node_id, cx);
+                    self.finish_connection_trace_success(&node_id);
+                } else if node_readiness_became_unavailable(previous.as_ref(), &state) {
+                    self.finish_connection_trace_failed(&node_id, Some(reason.clone()));
                 }
                 let event_severity = event_log_severity_for_connection_status(&status);
                 let affected_children_count = affected_children.len();
@@ -1004,6 +898,12 @@ impl WorkspaceApp {
                 );
                 if let Some(node) = self.ssh_nodes.get_mut(&node_id) {
                     node.readiness = state.clone();
+                }
+                if node_readiness_became_ready(previous.as_ref(), &state) {
+                    self.restore_forwarding_session_for_node(&node_id, cx);
+                    self.finish_connection_trace_success(&node_id);
+                } else if node_readiness_became_unavailable(previous.as_ref(), &state) {
+                    self.finish_connection_trace_failed(&node_id, Some(reason.clone()));
                 }
                 if matches!(previous, Some(NodeReadiness::Ready))
                     && matches!(state, NodeReadiness::Error | NodeReadiness::Disconnected)
@@ -2620,15 +2520,6 @@ impl WorkspaceApp {
                 drifts.join("; ")
             )
         }
-    }
-
-    fn readiness_for_ssh_node_connection(&self, node: &WorkspaceSshNode) -> Option<NodeReadiness> {
-        let connection_key = node.config.connection_key();
-        self.ssh_registry
-            .list()
-            .into_iter()
-            .find(|connection| connection.key == connection_key)
-            .map(|connection| readiness_for_connection_state(&connection.state))
     }
 
     pub(in crate::workspace) fn reconnect_all_link_down_nodes_from_palette(
