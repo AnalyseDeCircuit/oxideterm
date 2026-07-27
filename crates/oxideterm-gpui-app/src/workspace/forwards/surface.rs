@@ -73,7 +73,7 @@ impl WorkspaceApp {
                 active_pane_id: None,
             });
             self.forwarding.update(cx, |forwarding, _cx| {
-                forwarding.map_tab_to_node(tab_id, node_id.clone());
+                forwarding.map_tab_to_node(tab_id, node_id.clone(), _cx);
             });
             tab_id
         };

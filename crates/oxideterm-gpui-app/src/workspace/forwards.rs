@@ -60,6 +60,7 @@ const FORWARDS_TABLE_ROW_H: f32 = 42.0;
 const FORWARDS_TYPE_BADGE_H: f32 = 20.0;
 const FORWARDS_PORT_SCAN_INTERVAL: Duration = Duration::from_secs(12);
 const FORWARDS_STATS_REFRESH_INTERVAL: Duration = Duration::from_secs(5);
+const FORWARDS_SAMPLING_TICK_INTERVAL: Duration = Duration::from_secs(1);
 const FORWARDS_BG_ACTIVE_THEME_ALPHA: u32 = 0x66; // Tauri [data-bg-active] theme bg/panel/card 40%
 const FORWARDS_BG_ACTIVE_HOVER_ALPHA: u32 = 0x80; // Tauri [data-bg-active] bg-hover 50%
 const FORWARDS_BG_ACTIVE_SUNKEN_ALPHA: u32 = 0x59; // Tauri [data-bg-active] bg-sunken 35%

@@ -31,12 +31,14 @@ pub(in crate::workspace) enum ForwardingDeliveryIntent {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(in crate::workspace) enum ForwardingWorkspaceEvent {
     DeliveryReady,
+    SamplingDue,
 }
 
 /// Owns forwarding UI delivery and sampling state without owning tunnel lifetime.
 pub(in crate::workspace) struct ForwardingWorkspaceEntity {
     pub(super) view: ForwardsViewState,
     tab_nodes: HashMap<TabId, NodeId>,
+    sampling_generation: u64,
     pub(super) section_list_state: ListState,
     pub(super) section_list_cache: RefCell<VirtualListSignatureCache>,
     pub(super) table_row_list_state: ListState,
@@ -57,6 +59,7 @@ impl ForwardingWorkspaceEntity {
         Self {
             view: ForwardsViewState::default(),
             tab_nodes: HashMap::new(),
+            sampling_generation: 0,
             section_list_state: ListState::new(0, ListAlignment::Top, px(0.0)),
             section_list_cache: RefCell::new(VirtualListSignatureCache::default()),
             table_row_list_state: ListState::new(0, ListAlignment::Top, px(0.0)),
@@ -79,6 +82,7 @@ impl ForwardingWorkspaceEntity {
         let entity = Self {
             view: ForwardsViewState::default(),
             tab_nodes: HashMap::new(),
+            sampling_generation: 0,
             section_list_state: ListState::new(
                 FORWARDS_SECTION_LIST_INITIAL_ITEM_COUNT,
                 ListAlignment::Top,
@@ -132,17 +136,53 @@ impl ForwardingWorkspaceEntity {
         self.tab_nodes.get(&tab_id) == Some(node_id)
     }
 
-    pub(in crate::workspace) fn map_tab_to_node(&mut self, tab_id: TabId, node_id: NodeId) {
+    pub(in crate::workspace) fn map_tab_to_node(
+        &mut self,
+        tab_id: TabId,
+        node_id: NodeId,
+        cx: &mut Context<Self>,
+    ) {
+        let was_empty = self.tab_nodes.is_empty();
         self.tab_nodes.insert(tab_id, node_id);
+        if was_empty {
+            self.sampling_generation = self.sampling_generation.wrapping_add(1);
+            self.schedule_sampling(self.sampling_generation, cx);
+        }
     }
 
     pub(in crate::workspace) fn unmap_tab(&mut self, tab_id: TabId) -> Option<NodeId> {
         // Removing a view mapping must not release the registry-owned tunnel.
-        self.tab_nodes.remove(&tab_id)
+        let removed = self.tab_nodes.remove(&tab_id);
+        if removed.is_some() && self.tab_nodes.is_empty() {
+            // Invalidate the timer without touching long-lived runtime state.
+            self.sampling_generation = self.sampling_generation.wrapping_add(1);
+        }
+        removed
     }
 
     pub(in crate::workspace) fn tab_node_mappings(&self) -> &HashMap<TabId, NodeId> {
         &self.tab_nodes
+    }
+
+    fn schedule_sampling(&self, generation: u64, cx: &mut Context<Self>) {
+        cx.spawn(async move |entity, cx| {
+            loop {
+                Timer::after(FORWARDS_SAMPLING_TICK_INTERVAL).await;
+                let keep_running = entity
+                    .update(cx, |entity, cx| {
+                        if entity.sampling_generation != generation || entity.tab_nodes.is_empty() {
+                            return false;
+                        }
+                        cx.emit(ForwardingWorkspaceEvent::SamplingDue);
+                        true
+                    })
+                    .unwrap_or(false);
+                if !keep_running {
+                    break;
+                }
+            }
+        })
+        .detach();
     }
 
     pub(in crate::workspace) fn take_delivery_intents(
@@ -394,20 +434,29 @@ mod tests {
         assert!(state.new_ports.is_empty());
     }
 
-    #[test]
-    fn closing_tab_removes_only_the_view_mapping() {
-        let mut entity = ForwardingWorkspaceEntity::test_fixture();
+    #[gpui::test]
+    fn closing_tab_removes_only_the_view_mapping(cx: &mut TestAppContext) {
+        let entity = cx.new(|_cx| ForwardingWorkspaceEntity::test_fixture());
         let tab_id = TabId(7);
         let node_id = NodeId::new("shared-forward");
-        entity.map_tab_to_node(tab_id, node_id.clone());
+        entity.update(cx, |entity, cx| {
+            entity.map_tab_to_node(tab_id, node_id.clone(), cx);
+        });
 
-        assert_eq!(entity.node_for_tab(tab_id), Some(node_id.clone()));
-        assert_eq!(entity.unmap_tab(tab_id), Some(node_id));
-        assert!(entity.node_for_tab(tab_id).is_none());
+        cx.read(|cx| {
+            assert_eq!(entity.read(cx).node_for_tab(tab_id), Some(node_id.clone()));
+            assert_eq!(entity.read(cx).sampling_generation, 1);
+        });
+        let removed = entity.update(cx, |entity, _cx| entity.unmap_tab(tab_id));
+        assert_eq!(removed, Some(node_id));
+        cx.read(|cx| {
+            assert!(entity.read(cx).node_for_tab(tab_id).is_none());
+            assert_eq!(entity.read(cx).sampling_generation, 2);
+        });
 
         // The Entity deliberately has no stop/remove call here; a tab close
         // cannot change registry-owned forwarding lifetime.
-        assert!(entity.delivery_intents.is_empty());
+        cx.read(|cx| assert!(entity.read(cx).delivery_intents.is_empty()));
     }
 
     #[gpui::test]

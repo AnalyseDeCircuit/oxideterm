@@ -494,6 +494,13 @@ impl WorkspaceApp {
     ) {
         match event {
             ForwardingWorkspaceEvent::DeliveryReady => {}
+            ForwardingWorkspaceEvent::SamplingDue => {
+                // The Entity owns cadence; the root only supplies the current
+                // cross-window visibility and runtime adapters.
+                self.maybe_start_forwards_port_scan(cx);
+                self.maybe_refresh_forwards_stats(cx);
+                return;
+            }
         }
         let intents = self
             .forwarding

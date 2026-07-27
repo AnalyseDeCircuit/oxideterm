@@ -758,8 +758,6 @@ impl WorkspaceApp {
                             workspace.maybe_refresh_active_terminal_project(cx);
                             workspace.sync_ssh_node_lifecycle(cx);
                             workspace.maybe_probe_active_ssh_connections(cx);
-                            workspace.maybe_start_forwards_port_scan(cx);
-                            workspace.maybe_refresh_forwards_stats(cx);
                             if workspace.any_terminal_recording_active(cx) {
                                 cx.notify();
                             }
