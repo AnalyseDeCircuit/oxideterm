@@ -282,8 +282,6 @@ impl WorkspaceApp {
             detached_local_terminal_order: Vec::new(),
             serial_terminal_configs: HashMap::new(),
             detached_local_terminals_popover_open: false,
-            terminal_cast_player: None,
-            terminal_cast_seek_dragging: false,
             command_palette: CommandPaletteState {
                 open: false,
                 raw_query: String::new(),

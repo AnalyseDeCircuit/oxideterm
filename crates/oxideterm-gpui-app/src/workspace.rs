@@ -282,7 +282,6 @@ use self::sidebar::{
 #[cfg(test)]
 use self::sidebar::{AiCompactionDeliveryKind, AiStreamDeliveryEvent};
 use self::tabs::TerminalLocation;
-use self::terminal_cast::TerminalCastPlayerState;
 use self::terminal_entity::{WorkspaceTerminalEntity, WorkspaceTerminalEvent};
 use crate::{
     CloseOtherTabs, ClosePane, CloseSearch, CloseTab, CommandPalette, Copy, Cut, Find, FindNext,
@@ -748,8 +747,6 @@ pub(crate) struct WorkspaceApp {
     detached_local_terminal_order: Vec<TerminalSessionId>,
     serial_terminal_configs: HashMap<TerminalSessionId, SerialSessionConfig>,
     detached_local_terminals_popover_open: bool,
-    terminal_cast_player: Option<TerminalCastPlayerState>,
-    terminal_cast_seek_dragging: bool,
     command_palette: CommandPaletteState,
     version_migration: VersionMigrationState,
     onboarding: OnboardingState,

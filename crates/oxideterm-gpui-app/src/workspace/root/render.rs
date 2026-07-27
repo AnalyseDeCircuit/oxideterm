@@ -549,11 +549,7 @@ impl Render for WorkspaceApp {
                     let _ = this.handle_ai_sidebar_key(event, cx);
                     window.prevent_default();
                     cx.stop_propagation();
-                } else if this
-                    .terminal_cast_player
-                    .as_ref()
-                    .is_some_and(|player| player.search_focused)
-                {
+                } else if this.terminal.read(cx).cast_search_focused() {
                     this.handle_terminal_cast_search_key(event, cx);
                     window.prevent_default();
                     cx.stop_propagation();

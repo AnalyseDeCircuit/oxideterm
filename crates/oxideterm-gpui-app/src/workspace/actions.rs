@@ -838,11 +838,7 @@ impl WorkspaceApp {
             return;
         }
 
-        if self
-            .terminal_cast_player
-            .as_ref()
-            .is_some_and(|player| player.search_focused)
-        {
+        if self.terminal.read(cx).cast_search_focused() {
             self.handle_terminal_cast_search_key(event, cx);
             return;
         }
@@ -1874,18 +1870,17 @@ impl WorkspaceApp {
         }
         match key {
             "escape" => {
-                if let Some(player) = self.terminal_cast_player.as_mut() {
-                    player.search_focused = false;
-                }
+                self.terminal
+                    .update(cx, |terminal, _cx| terminal.blur_cast_search());
                 self.ime_marked_text = None;
                 cx.notify();
             }
             "backspace" => {
-                if let Some(player) = self.terminal_cast_player.as_mut() {
-                    if player.search_query.pop().is_some() {
-                        self.update_terminal_cast_search(cx);
-                        cx.notify();
-                    }
+                if self
+                    .terminal
+                    .update(cx, |terminal, cx| terminal.pop_cast_search(cx))
+                {
+                    cx.notify();
                 }
             }
             _ => {}

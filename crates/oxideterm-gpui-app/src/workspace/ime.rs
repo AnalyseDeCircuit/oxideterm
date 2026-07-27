@@ -766,11 +766,7 @@ impl WorkspaceApp {
             return Some(WorkspaceImeTarget::TerminalCommandBar);
         }
 
-        if self
-            .terminal_cast_player
-            .as_ref()
-            .is_some_and(|player| player.search_focused)
-        {
+        if self.terminal.read(cx).cast_search_focused() {
             return Some(WorkspaceImeTarget::TerminalCastSearch);
         }
 
@@ -1446,10 +1442,10 @@ impl WorkspaceApp {
                     .then(|| terminal.project_query().to_string())
             }
             WorkspaceImeTarget::TerminalCastSearch => self
-                .terminal_cast_player
-                .as_ref()
-                .filter(|player| player.search_focused)
-                .map(|player| player.search_query.clone()),
+                .terminal
+                .read(cx)
+                .cast_search_query()
+                .map(str::to_string),
             WorkspaceImeTarget::HostProcessSearch => self
                 .host_tools
                 .read(cx)
@@ -2262,11 +2258,9 @@ impl WorkspaceApp {
                 }
             }
             WorkspaceImeTarget::TerminalCastSearch => {
-                if let Some(player) = self.terminal_cast_player.as_mut()
-                    && player.search_focused
-                {
-                    replace_utf16(&mut player.search_query, replacement_range, text);
-                    self.update_terminal_cast_search(cx);
+                if self.terminal.update(cx, |terminal, cx| {
+                    terminal.replace_cast_search(replacement_range, text, cx)
+                }) {
                     self.new_connection_caret_visible = true;
                     cx.notify();
                 }

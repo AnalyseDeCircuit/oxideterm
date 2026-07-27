@@ -531,7 +531,7 @@ impl WorkspaceApp {
             sftp_queue_resizing: self.sftp_view.queue_resize_active(),
             pane_splitter_dragging: self.split_drag.is_some(),
             settings_slider_dragging: self.settings_slider_drag.is_some(),
-            terminal_cast_seekbar_dragging: self.terminal_cast_seek_dragging,
+            terminal_cast_seekbar_dragging: self.terminal.read(cx).cast_seek_dragging(),
             host_tools_tab_scrollbar_dragging: self.host_tools_tab_scrollbar_drag_active(cx),
             text_selection_dragging: self.ime_drag_selection.is_some(),
             sftp_file_dragging: self.sftp_view.has_drag_capture(),

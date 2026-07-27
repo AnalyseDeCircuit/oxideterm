@@ -816,10 +816,10 @@ impl WorkspaceApp {
             self.ime_marked_text = None;
             changed = true;
         }
-        if let Some(player) = self.terminal_cast_player.as_mut()
-            && player.search_focused
+        if self
+            .terminal
+            .update(cx, |terminal, _cx| terminal.blur_cast_search())
         {
-            player.search_focused = false;
             self.ime_marked_text = None;
             changed = true;
         }
