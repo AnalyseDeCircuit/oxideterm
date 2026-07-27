@@ -402,6 +402,7 @@ impl RemoteDesktopSessionEntity {
 pub(in crate::workspace) enum RemoteDesktopSessionEvent {
     DeliveryReady { generation: u64 },
     FrameApplyReady { generation: u64 },
+    ClipboardTransferFailed,
 }
 
 impl gpui::EventEmitter<RemoteDesktopSessionEvent> for RemoteDesktopSessionEntity {}

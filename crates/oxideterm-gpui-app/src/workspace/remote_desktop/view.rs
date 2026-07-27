@@ -120,8 +120,9 @@ impl WorkspaceApp {
         self.focus_remote_desktop_keyboard(window, cx);
         self.reveal_active_tab(window);
         if let Some(session) = self.remote_desktop_session_entity(tab_id, cx) {
+            let initial_scale_factor = remote_desktop_scale_factor_percent(window.scale_factor());
             session.update(cx, |session, cx| {
-                session.schedule_initial_layout_probe(cx);
+                session.schedule_initial_layout_probe(initial_scale_factor, cx);
             });
         }
         cx.notify();

@@ -538,7 +538,19 @@ impl RemoteDesktopSessionEntity {
         true
     }
 
-    pub(super) fn schedule_initial_layout_probe(&self, cx: &mut Context<Self>) {
+    pub(super) fn schedule_initial_layout_probe(
+        &mut self,
+        initial_scale_factor: u32,
+        cx: &mut Context<Self>,
+    ) {
+        self.last_viewport_scale_factor = Some(initial_scale_factor);
+        if self.schedule_viewport_resize(None, cx) {
+            cx.notify();
+        }
+        if self.request_tx.is_some() {
+            return;
+        }
+
         cx.spawn(async move |session, cx| {
             for _ in 0..REMOTE_DESKTOP_INITIAL_LAYOUT_PROBE_TICKS {
                 Timer::after(REMOTE_DESKTOP_INITIAL_LAYOUT_PROBE_INTERVAL).await;
@@ -547,6 +559,8 @@ impl RemoteDesktopSessionEntity {
                         if session.request_tx.is_some() {
                             return true;
                         }
+                        // The worker must start from the measured viewport even
+                        // before it has any delivery capable of waking the UI.
                         if session.schedule_viewport_resize(None, cx) {
                             cx.notify();
                         }
@@ -557,6 +571,69 @@ impl RemoteDesktopSessionEntity {
                     break;
                 }
             }
+        })
+        .detach();
+    }
+
+    fn schedule_window_event(
+        &self,
+        event: RemoteDesktopSessionEvent,
+        visible: bool,
+        cx: &mut Context<Self>,
+    ) {
+        cx.spawn(async move |session, cx| {
+            let generation = match event {
+                RemoteDesktopSessionEvent::DeliveryReady { generation }
+                | RemoteDesktopSessionEvent::FrameApplyReady { generation } => generation,
+                RemoteDesktopSessionEvent::ClipboardTransferFailed => return,
+            };
+            let window_handle = session
+                .update(cx, |session, _cx| {
+                    (session.worker_generation == generation).then_some(session.window_handle)
+                })
+                .ok()
+                .flatten();
+            let Some(window_handle) = window_handle else {
+                return;
+            };
+
+            let _ = cx.update_window(window_handle, move |_, window, cx| {
+                let _ = session.update(cx, |session, cx| {
+                    if session.worker_generation != generation {
+                        return;
+                    }
+                    match event {
+                        RemoteDesktopSessionEvent::DeliveryReady { .. } => {
+                            let scale_factor =
+                                Some(remote_desktop_scale_factor_percent(window.scale_factor()));
+                            let mut outcome = session.poll_deliveries(visible, window, cx);
+                            outcome.changed |= session.schedule_viewport_resize(scale_factor, cx);
+                            session.sync_monitor_layout(cx);
+                            if outcome.changed {
+                                cx.notify();
+                            }
+                            for intent in outcome.intents {
+                                match intent {
+                                    RemoteDesktopDeliveryIntent::ClipboardTransferFailed => {
+                                        cx.emit(RemoteDesktopSessionEvent::ClipboardTransferFailed);
+                                    }
+                                }
+                            }
+                            if outcome.backlog_remaining
+                                && let Some(worker_wake) = session.worker_wake.as_ref()
+                            {
+                                worker_wake.mark();
+                            }
+                        }
+                        RemoteDesktopSessionEvent::FrameApplyReady { .. } => {
+                            if visible && session.apply_frame_ready(generation, window, cx) {
+                                cx.notify();
+                            }
+                        }
+                        RemoteDesktopSessionEvent::ClipboardTransferFailed => {}
+                    }
+                });
+            });
         })
         .detach();
     }
@@ -589,52 +666,20 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) {
         debug_assert_eq!(session_entity.read(cx).tab_id, tab_id);
-        let generation = match event {
-            RemoteDesktopSessionEvent::DeliveryReady { generation }
-            | RemoteDesktopSessionEvent::FrameApplyReady { generation } => *generation,
-        };
-        let (window_handle, generation_matches) = {
-            let session = session_entity.read(cx);
-            (
-                session.window_handle,
-                session.worker_generation == generation,
-            )
-        };
-        if !generation_matches {
+        if matches!(event, RemoteDesktopSessionEvent::ClipboardTransferFailed) {
+            self.push_command_palette_toast(
+                self.i18n.t("remote_desktop.clipboard_file_failed"),
+                None,
+                TerminalNoticeVariant::Error,
+            );
             return;
         }
 
-        // Session events are routed synchronously through the window that owns
-        // the session's GPUI images and textures.
-        let event = *event;
-        let workspace = cx.entity();
-        let session_entity = session_entity.clone();
-        let _ = cx.update_window(window_handle, move |_, window, cx| {
-            workspace.update(cx, |workspace, cx| match &event {
-                RemoteDesktopSessionEvent::DeliveryReady { generation } => {
-                    if session_entity.read(cx).worker_generation != *generation {
-                        return;
-                    }
-                    let backlog_remaining =
-                        workspace.poll_remote_desktop_worker_results(tab_id, window, cx);
-                    if backlog_remaining
-                        && let Some(worker_wake) =
-                            session_entity.read(cx).worker_wake.as_ref().cloned()
-                    {
-                        worker_wake.mark();
-                    }
-                }
-                RemoteDesktopSessionEvent::FrameApplyReady { generation } => {
-                    let visible = workspace.remote_desktop_tab_visible(tab_id);
-                    if visible
-                        && session_entity.update(cx, |session, cx| {
-                            session.apply_frame_ready(*generation, window, cx)
-                        })
-                    {
-                        cx.notify();
-                    }
-                }
-            });
+        let visible = self.remote_desktop_tab_visible(tab_id);
+        // The root supplies cross-tab visibility, then the Entity owns the
+        // window-affine delivery and lifecycle transition.
+        session_entity.update(cx, |session, cx| {
+            session.schedule_window_event(*event, visible, cx);
         });
     }
 
@@ -659,40 +704,6 @@ impl WorkspaceApp {
                 session.bind_window(window_handle);
             });
         }
-    }
-
-    pub(in crate::workspace) fn poll_remote_desktop_worker_results(
-        &mut self,
-        tab_id: TabId,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> bool {
-        let scale_factor = Some(remote_desktop_scale_factor_percent(window.scale_factor()));
-        let Some(session_entity) = self.remote_desktop_session_entity(tab_id, cx) else {
-            return false;
-        };
-        let visible = self.remote_desktop_tab_visible(tab_id);
-        let outcome = session_entity.update(cx, |session, cx| {
-            let mut outcome = session.poll_deliveries(visible, window, cx);
-            outcome.changed |= session.schedule_viewport_resize(scale_factor, cx);
-            session.sync_monitor_layout(cx);
-            outcome
-        });
-        for intent in outcome.intents {
-            match intent {
-                RemoteDesktopDeliveryIntent::ClipboardTransferFailed => {
-                    self.push_command_palette_toast(
-                        self.i18n.t("remote_desktop.clipboard_file_failed"),
-                        None,
-                        TerminalNoticeVariant::Error,
-                    );
-                }
-            }
-        }
-        if outcome.changed {
-            cx.notify();
-        }
-        outcome.backlog_remaining
     }
 
     pub(in crate::workspace) fn remote_desktop_tab_visible(&self, tab_id: TabId) -> bool {
@@ -1231,13 +1242,92 @@ fn remote_desktop_monitor_layout(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use gpui::TestAppContext;
+    use gpui::{TestAppContext, VisualContext, point, size};
 
     struct RemoteDesktopSessionTestRoot;
 
     impl Render for RemoteDesktopSessionTestRoot {
         fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
             div()
+        }
+    }
+
+    #[gpui::test]
+    fn initial_layout_probe_starts_rdp_and_vnc_before_first_delivery(cx: &mut TestAppContext) {
+        let (_, cx) = cx.add_window_view(|_window, _cx| RemoteDesktopSessionTestRoot);
+        let tokens = ThemeTokens::from_builtin(theme_by_id("default"));
+        let viewport_width = 960;
+        let viewport_height = 540;
+        let initial_scale_factor = 200;
+
+        for (tab_number, protocol) in [
+            (21, RemoteDesktopProtocol::Rdp),
+            (22, RemoteDesktopProtocol::Vnc),
+        ] {
+            let profile = preview_remote_desktop_profile(protocol);
+            let provider = builtin_preview_provider_registry()
+                .unwrap()
+                .get_for_protocol(protocol)
+                .cloned()
+                .unwrap();
+            let window_handle = cx.window_handle();
+            let session = cx.new(|cx| {
+                let session = RemoteDesktopSessionEntity::new(
+                    TabId(tab_number),
+                    profile,
+                    provider,
+                    None,
+                    std::env::temp_dir().join(format!(
+                        "oxideterm-initial-layout-{}-test-certificates.json",
+                        protocol.provider_id()
+                    )),
+                    RemoteDesktopFrameDeliverySlot::new(),
+                    window_handle,
+                );
+                session.install_release_handler(cx);
+                session
+            });
+
+            // The placeholder canvas is the only source of the initial
+            // viewport before either protocol can produce a worker delivery.
+            cx.draw(
+                point(px(0.0), px(0.0)),
+                size(px(viewport_width as f32), px(viewport_height as f32)),
+                |_window, cx| {
+                    let session = session.read(cx);
+                    remote_desktop_surface_with_geometry(
+                        &tokens,
+                        &session.state,
+                        Some(session.geometry.clone()),
+                    )
+                },
+            );
+            assert_eq!(
+                session.read_with(cx, |session, _cx| session.geometry.viewport_size()),
+                Some(RemoteDesktopSize::clamped(viewport_width, viewport_height))
+            );
+            session.update(cx, |session, cx| {
+                session.schedule_initial_layout_probe(initial_scale_factor, cx);
+            });
+            cx.cx.run_until_parked();
+
+            let (worker_started, measured_viewport, recorded_scale_factor) =
+                session.read_with(cx, |session, _cx| {
+                    (
+                        session.request_tx.is_some(),
+                        session.last_viewport_size,
+                        session.last_viewport_scale_factor,
+                    )
+                });
+            assert!(worker_started, "{protocol:?} worker did not start");
+            assert_eq!(
+                measured_viewport,
+                Some(RemoteDesktopSize::clamped(viewport_width, viewport_height))
+            );
+            assert_eq!(recorded_scale_factor, Some(initial_scale_factor));
+
+            drop(session);
+            cx.cx.run_until_parked();
         }
     }
 
@@ -1266,24 +1356,23 @@ mod tests {
         });
 
         // Hidden sessions suppress frame uploads, not reliable lifecycle events.
-        let outcome = window
-            .update(cx, |_root, window, cx| {
-                session.update(cx, |session, cx| {
-                    session
-                        .delivery_tx
-                        .send(RemoteDesktopWorkerDelivery::Event {
-                            tab_id: TabId(11),
-                            generation: 1,
-                            event: RemoteDesktopHelperEvent::Disconnected { reason: None },
-                        })
-                        .unwrap();
-                    session.poll_deliveries(false, window, cx)
+        session.update(cx, |session, cx| {
+            session
+                .delivery_tx
+                .send(RemoteDesktopWorkerDelivery::Event {
+                    tab_id: TabId(11),
+                    generation: 1,
+                    event: RemoteDesktopHelperEvent::Disconnected { reason: None },
                 })
-            })
-            .unwrap();
+                .unwrap();
+            session.schedule_window_event(
+                RemoteDesktopSessionEvent::DeliveryReady { generation: 1 },
+                false,
+                cx,
+            );
+        });
+        cx.run_until_parked();
 
-        assert!(outcome.changed);
-        assert!(!outcome.backlog_remaining);
         let status = cx.read(|cx| session.read(cx).state.snapshot().status);
         assert_eq!(status, RemoteDesktopSessionStatus::Disconnected);
     }
