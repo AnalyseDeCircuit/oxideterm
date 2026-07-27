@@ -2134,21 +2134,6 @@ impl WorkspaceApp {
         else {
             return false;
         };
-        let stale_connection_id =
-            self.node_router
-                .connection_id_for_node(node_id)
-                .filter(|connection_id| {
-                    self.ssh_registry.get(connection_id).is_some_and(|handle| {
-                        matches!(
-                            handle.state(),
-                            ConnectionState::LinkDown
-                                | ConnectionState::Disconnected
-                                | ConnectionState::Disconnecting
-                                | ConnectionState::Error(_)
-                        )
-                    })
-                });
-        let force_reconnect = stale_connection_id.is_some();
         if matches!(readiness, NodeReadiness::Ready | NodeReadiness::Connecting)
             && let Some(connection_id) = self.node_router.connection_id_for_node(node_id)
             && let Some(handle) = self.ssh_registry.get(&connection_id)
@@ -2174,10 +2159,13 @@ impl WorkspaceApp {
             // connection, or replace it when it has been closed.
         }
 
-        let Some(runtime_snapshot) = self.node_router.node_runtime_snapshot(node_id) else {
+        let Some(parent_id) = self
+            .node_router
+            .node_metadata(node_id)
+            .map(|snapshot| snapshot.parent_id)
+        else {
             return false;
         };
-        let parent_id = runtime_snapshot.parent_id;
         if let Some(parent_id) = parent_id.as_ref()
             && !self.node_is_ready_for_terminal(parent_id)
         {
@@ -2199,109 +2187,36 @@ impl WorkspaceApp {
             return false;
         }
         self.begin_connection_trace_for_node(node_id, trace_plan, parent_id.as_ref(), cx);
-        if let Some(connection_id) = stale_connection_id.as_deref() {
-            self.drop_stale_node_connection(node_id, connection_id);
-        }
-
-        let config = runtime_snapshot.config;
-        let consumer = ConnectionConsumer::NodeRouter(node_id.0.clone());
-        let handle = self.ssh_registry.acquire(config.clone(), consumer.clone());
-        let connection_id = handle.connection_id().to_string();
-        let _ = self
-            .ssh_registry
-            .mark_state(&connection_id, ConnectionState::Connecting);
-        if let Ok(event) = self.node_router.bind_connection(node_id, connection_id) {
-            self.emit_node_event(event);
+        let managed_key_resolver =
+            oxideterm_session_adapter::managed_key_resolver_from_store(&self.connection_store);
+        let start_result = self.workspace_runtime.update(cx, |runtime, _cx| {
+            runtime.start_node_transport(node_id, managed_key_resolver)
+        });
+        if let Err(error) = start_result {
+            let detail = match error {
+                runtime_entity::NodeTransportStartError::MissingRuntime => {
+                    "Node runtime configuration is unavailable".to_string()
+                }
+                runtime_entity::NodeTransportStartError::Route(detail) => detail,
+            };
+            if let Some(node) = self.ssh_nodes.get_mut(node_id) {
+                node.readiness = NodeReadiness::Error;
+            }
+            if let Ok(event) = self.node_router.sync_node_readiness_event(
+                node_id,
+                NodeReadiness::Error,
+                detail.clone(),
+            ) {
+                self.emit_node_event(event);
+            }
+            self.workspace_runtime.update(cx, |runtime, cx| {
+                runtime.finish_connection_trace_failed(node_id, Some(detail), cx);
+            });
+            return false;
         }
         if let Some(node) = self.ssh_nodes.get_mut(node_id) {
             node.readiness = NodeReadiness::Connecting;
         }
-
-        let registry = self.ssh_registry.clone();
-        let router = self.node_router.clone();
-        let tx = self.reconnect_worker_sender(cx);
-        let worker_job_id = self
-            .workspace_runtime
-            .read(cx)
-            .reconnect_orchestrator()
-            .active_job_id(&node_id.0);
-        let node_id = node_id.clone();
-        let node_handle = handle;
-        let prompt_handler =
-            std::sync::Arc::new(NativeSshPromptHandler::new(self.ssh_worker_sender(cx)));
-        let managed_key_resolver =
-            oxideterm_session_adapter::managed_key_resolver_from_store(&self.connection_store);
-        let runtime = self.forwarding_runtime.clone();
-        runtime.spawn(async move {
-            // This is the native connect_tree_node path: authenticate the SSH
-            // transport into the registry's physical slot without creating a
-            // terminal shell. SFTP/forwarding then resolve the node through
-            // NodeRouter exactly like Tauri node_* commands.
-            if force_reconnect {
-                node_handle.clear_physical().await;
-            }
-            let client = SshTransportClient::new(config)
-                .with_prompt_handler(prompt_handler)
-                .with_managed_key_resolver(managed_key_resolver);
-            let parent_consumer = parent_id
-                .as_ref()
-                .map(|_| ConnectionConsumer::NodeRouter(format!("{}:ancestor", node_id.0)));
-            let parent_handle = if let Some(parent_id) = parent_id {
-                // Tauri's connect_tree_node waits for the parent path before
-                // dialing a tunneled child. Native must do the same here: a
-                // fast SFTP/terminal open can request the target while the
-                // jump host is still Connecting.
-                match router
-                    .acquire_connection_wait(
-                        &parent_id,
-                        parent_consumer.clone().expect("parent consumer"),
-                        Duration::from_secs(30),
-                    )
-                    .await
-                {
-                    Ok(parent) => Some(parent.handle),
-                    Err(error) => {
-                        let _ = tx.send(ReconnectWorkerResult::NodeConnectFailed {
-                            node_id,
-                            error: error.to_string(),
-                            job_id: worker_job_id.clone(),
-                        });
-                        return;
-                    }
-                }
-            } else {
-                None
-            };
-            let result = if let Some(parent_handle) = parent_handle {
-                client
-                    .connect_child_node_via_parent_with_registry(
-                        registry,
-                        consumer,
-                        node_handle,
-                        parent_handle,
-                        parent_consumer.expect("parent consumer"),
-                    )
-                    .await
-            } else {
-                client
-                    .connect_existing_node_with_registry(registry, consumer, node_handle)
-                    .await
-            }
-            .map(|handle| handle.connection_id().to_string())
-            .map_err(|error| error.to_string());
-            let _ = match result {
-                Ok(connection_id) => tx.send(ReconnectWorkerResult::NodeConnected {
-                    node_id,
-                    connection_id,
-                    job_id: worker_job_id,
-                }),
-                Err(error) => tx.send(ReconnectWorkerResult::NodeConnectFailed {
-                    node_id,
-                    error,
-                    job_id: worker_job_id,
-                }),
-            };
-        });
         true
     }
 

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use super::*;
-use oxideterm_ssh::ReconnectTiming;
+use oxideterm_ssh::{ManagedKeyResolver, ReconnectTiming};
 
 const ACTIVE_PROBE_START_DELAY: Duration = Duration::from_millis(530);
 const RECONNECT_DEBOUNCE_DELAY: Duration = Duration::from_millis(500);
@@ -43,6 +43,12 @@ pub(in crate::workspace) enum ReconnectPipelineClaim {
     Acquired,
     Requeued,
     Exhausted,
+}
+
+#[derive(Debug)]
+pub(in crate::workspace) enum NodeTransportStartError {
+    MissingRuntime,
+    Route(String),
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -90,7 +96,7 @@ pub(in crate::workspace) struct WorkspaceRuntimeEntity {
     reconnect_results: VecDeque<ReconnectWorkerResult>,
     node_events: VecDeque<NodeStateEvent>,
     node_event_generations: HashMap<NodeId, u64>,
-    node_runtime_store: NodeRuntimeStore,
+    node_router: NodeRouter,
     reconnect_enabled: bool,
     pending_reconnect_node_ids: HashSet<NodeId>,
     reconnect_debounce_generation: u64,
@@ -122,8 +128,7 @@ pub(in crate::workspace) struct WorkspaceRuntimeEntity {
 impl WorkspaceRuntimeEntity {
     pub(in crate::workspace) fn new(
         ssh_registry: SshConnectionRegistry,
-        node_runtime_store: NodeRuntimeStore,
-        node_event_emitter: NodeEventEmitter,
+        node_router: NodeRouter,
         task_runtime: Arc<tokio::runtime::Runtime>,
         reconnect_enabled: bool,
         reconnect_timing: ReconnectTiming,
@@ -141,7 +146,8 @@ impl WorkspaceRuntimeEntity {
         // reliable lifecycle events beyond capacity, while the shared wake
         // lets this Entity drain every runtime source without a root waiter.
         let emitter_wake = runtime_wake.clone();
-        let (node_event_subscription, node_event_rx) = node_event_emitter
+        let (node_event_subscription, node_event_rx) = node_router
+            .emitter()
             .subscribe_bounded_with_wake(256, Some(Arc::new(move || emitter_wake.mark())));
         let mut entity = Self {
             ssh_worker_tx,
@@ -156,7 +162,7 @@ impl WorkspaceRuntimeEntity {
             reconnect_results: VecDeque::new(),
             node_events: VecDeque::new(),
             node_event_generations: HashMap::new(),
-            node_runtime_store,
+            node_router,
             reconnect_enabled,
             pending_reconnect_node_ids: HashSet::new(),
             reconnect_debounce_generation: 0,
@@ -217,6 +223,164 @@ impl WorkspaceRuntimeEntity {
 
     pub(in crate::workspace) fn has_active_reconnect_job(&self, node_id: &NodeId) -> bool {
         self.reconnect_orchestrator.is_active(&node_id.0)
+    }
+
+    pub(in crate::workspace) fn start_node_transport(
+        &mut self,
+        node_id: &NodeId,
+        managed_key_resolver: ManagedKeyResolver,
+    ) -> Result<(), NodeTransportStartError> {
+        let runtime_snapshot = self
+            .node_router
+            .node_runtime_snapshot(node_id)
+            .ok_or(NodeTransportStartError::MissingRuntime)?;
+        let stale_connection_id =
+            self.node_router
+                .connection_id_for_node(node_id)
+                .filter(|connection_id| {
+                    self.ssh_registry.get(connection_id).is_some_and(|handle| {
+                        matches!(
+                            handle.state(),
+                            ConnectionState::LinkDown
+                                | ConnectionState::Disconnected
+                                | ConnectionState::Disconnecting
+                                | ConnectionState::Error(_)
+                        )
+                    })
+                });
+        let force_reconnect = stale_connection_id.is_some();
+        if let Some(connection_id) = stale_connection_id.as_deref() {
+            self.drop_stale_node_connection(node_id, connection_id);
+        }
+
+        let parent_id = runtime_snapshot.parent_id;
+        let config = runtime_snapshot.config;
+        let consumer = ConnectionConsumer::NodeRouter(node_id.0.clone());
+        // The registry and the in-flight authentication attempt are distinct
+        // secret owners, so both receive zeroizing SshConfig instances.
+        let node_handle = self.ssh_registry.acquire(config.clone(), consumer.clone());
+        let connection_id = node_handle.connection_id().to_string();
+        let _ = self
+            .ssh_registry
+            .mark_state(&connection_id, ConnectionState::Connecting);
+        self.node_router
+            .bind_connection(node_id, connection_id.clone())
+            .map_err(|error| {
+                self.ssh_registry.release(&connection_id, &consumer);
+                NodeTransportStartError::Route(error.to_string())
+            })?;
+
+        let registry = self.ssh_registry.clone();
+        let router = self.node_router.clone();
+        let reconnect_tx = self.reconnect_worker_tx.clone();
+        let worker_job_id = self.reconnect_orchestrator.active_job_id(&node_id.0);
+        let node_id = node_id.clone();
+        let prompt_handler = Arc::new(NativeSshPromptHandler::new(self.ssh_worker_tx.clone()));
+        self.task_runtime.spawn(async move {
+            // This task owns the node transport independently from terminal panes and pages.
+            if force_reconnect {
+                node_handle.clear_physical().await;
+            }
+            let client = SshTransportClient::new(config)
+                .with_prompt_handler(prompt_handler)
+                .with_managed_key_resolver(managed_key_resolver);
+            let parent = if let Some(parent_id) = parent_id {
+                let parent_consumer =
+                    ConnectionConsumer::NodeRouter(format!("{}:ancestor", node_id.0));
+                match router
+                    .acquire_connection_wait(
+                        &parent_id,
+                        parent_consumer.clone(),
+                        Duration::from_secs(30),
+                    )
+                    .await
+                {
+                    Ok(parent) => Some((parent.handle, parent_consumer)),
+                    Err(error) => {
+                        registry.release(node_handle.connection_id(), &consumer);
+                        let _ = registry.mark_state(
+                            node_handle.connection_id(),
+                            ConnectionState::Error(error.to_string()),
+                        );
+                        let _ = reconnect_tx.send(ReconnectWorkerResult::NodeConnectFailed {
+                            node_id,
+                            error: error.to_string(),
+                            job_id: worker_job_id,
+                        });
+                        return;
+                    }
+                }
+            } else {
+                None
+            };
+            let result = if let Some((parent_handle, parent_consumer)) = parent {
+                client
+                    .connect_child_node_via_parent_with_registry(
+                        registry,
+                        consumer,
+                        node_handle,
+                        parent_handle,
+                        parent_consumer,
+                    )
+                    .await
+            } else {
+                client
+                    .connect_existing_node_with_registry(registry, consumer, node_handle)
+                    .await
+            }
+            .map(|handle| handle.connection_id().to_string())
+            .map_err(|error| error.to_string());
+            let _ = match result {
+                Ok(connection_id) => reconnect_tx.send(ReconnectWorkerResult::NodeConnected {
+                    node_id,
+                    connection_id,
+                    job_id: worker_job_id,
+                }),
+                Err(error) => reconnect_tx.send(ReconnectWorkerResult::NodeConnectFailed {
+                    node_id,
+                    error,
+                    job_id: worker_job_id,
+                }),
+            };
+        });
+        Ok(())
+    }
+
+    fn drop_stale_node_connection(&self, node_id: &NodeId, connection_id: &str) {
+        let consumer = ConnectionConsumer::NodeRouter(node_id.0.clone());
+        self.ssh_registry.release(connection_id, &consumer);
+        self.release_parent_ref_for_child_connection(node_id, connection_id);
+        if let Some(handle) = self.ssh_registry.get(connection_id) {
+            self.task_runtime.spawn(async move {
+                handle.clear_physical().await;
+            });
+        }
+        let _ = self
+            .ssh_registry
+            .mark_state_without_event(connection_id, ConnectionState::Disconnected);
+        self.node_router.emitter().unregister(connection_id);
+        let _ = self.ssh_registry.retire_connection(connection_id);
+    }
+
+    fn release_parent_ref_for_child_connection(
+        &self,
+        child_node_id: &NodeId,
+        child_connection_id: &str,
+    ) {
+        let Some(parent_connection_id) = self
+            .ssh_registry
+            .get(child_connection_id)
+            .and_then(|handle| handle.info().parent_connection_id)
+        else {
+            return;
+        };
+        self.ssh_registry.release(
+            &parent_connection_id,
+            &ConnectionConsumer::NodeRouter(format!("{}:ancestor", child_node_id.0)),
+        );
+        let _ = self
+            .ssh_registry
+            .set_parent_connection_id(child_connection_id, None);
     }
 
     pub(in crate::workspace) fn reconnect_job_is_current(
@@ -1043,7 +1207,7 @@ impl WorkspaceRuntimeEntity {
             return;
         }
         let pending = self.pending_reconnect_node_ids.drain().collect::<Vec<_>>();
-        let roots = self.node_runtime_store.minimal_subtree_roots(pending);
+        let roots = self.node_router.minimal_subtree_roots(pending);
         if roots.is_empty() {
             return;
         }
@@ -1126,6 +1290,7 @@ impl WorkspaceApp {
 mod tests {
     use super::*;
     use gpui::TestAppContext;
+    use oxideterm_ssh::NodeEventEmitter;
     use std::sync::atomic::{AtomicBool, Ordering};
 
     fn test_task_runtime() -> Arc<tokio::runtime::Runtime> {
@@ -1139,18 +1304,26 @@ mod tests {
 
     fn test_runtime_entity(cx: &mut TestAppContext) -> Entity<WorkspaceRuntimeEntity> {
         let ssh_registry = SshConnectionRegistry::new(ConnectionPoolConfig::default());
+        let node_router = NodeRouter::new(ssh_registry.clone());
         let task_runtime = test_task_runtime();
         cx.new(|cx| {
             WorkspaceRuntimeEntity::new(
                 ssh_registry,
-                NodeRuntimeStore::default(),
-                NodeEventEmitter::default(),
+                node_router,
                 task_runtime,
                 true,
                 ReconnectTiming::default(),
                 3,
                 cx,
             )
+        })
+    }
+
+    fn unavailable_managed_key_resolver() -> ManagedKeyResolver {
+        Arc::new(|_| {
+            Err(oxideterm_ssh::SshTransportError::AuthenticationFailed(
+                "managed key unavailable in test".to_string(),
+            ))
         })
     }
 
@@ -1454,12 +1627,12 @@ mod tests {
         let connection_handle = ssh_registry.acquire(SshConfig::default(), node_consumer.clone());
         let connection_id = connection_handle.connection_id().to_string();
         let entity_registry = ssh_registry.clone();
+        let node_router = NodeRouter::new(entity_registry.clone());
         let task_runtime = test_task_runtime();
         let entity = cx.new(|cx| {
             WorkspaceRuntimeEntity::new(
                 entity_registry,
-                NodeRuntimeStore::default(),
-                NodeEventEmitter::default(),
+                node_router,
                 task_runtime,
                 true,
                 ReconnectTiming::default(),
@@ -1480,16 +1653,74 @@ mod tests {
     }
 
     #[gpui::test]
+    fn node_transport_start_requires_entity_owned_runtime_config(cx: &mut TestAppContext) {
+        let entity = test_runtime_entity(cx);
+        entity.update(cx, |entity, _cx| {
+            assert!(matches!(
+                entity.start_node_transport(
+                    &NodeId::new("missing-node"),
+                    unavailable_managed_key_resolver(),
+                ),
+                Err(NodeTransportStartError::MissingRuntime)
+            ));
+        });
+    }
+
+    #[gpui::test]
+    fn node_transport_start_binds_registry_before_worker_delivery(cx: &mut TestAppContext) {
+        let ssh_registry = SshConnectionRegistry::new(ConnectionPoolConfig::default());
+        let node_router = NodeRouter::new(ssh_registry.clone());
+        let node_id = NodeId::new("node-a");
+        node_router.upsert_node(node_id.clone(), SshConfig::default());
+        let task_runtime = test_task_runtime();
+        let entity = cx.new(|cx| {
+            WorkspaceRuntimeEntity::new(
+                ssh_registry.clone(),
+                node_router,
+                task_runtime,
+                true,
+                ReconnectTiming::default(),
+                3,
+                cx,
+            )
+        });
+
+        entity.update(cx, |entity, _cx| {
+            entity
+                .start_node_transport(&node_id, unavailable_managed_key_resolver())
+                .expect("node transport start");
+            let connection_id = entity
+                .node_router
+                .connection_id_for_node(&node_id)
+                .expect("node connection binding");
+            let connection = ssh_registry
+                .get(&connection_id)
+                .expect("registered connection");
+            assert_eq!(connection.state(), ConnectionState::Connecting);
+            assert!(
+                connection
+                    .info()
+                    .consumers
+                    .contains(&ConnectionConsumer::NodeRouter(node_id.0.clone()))
+            );
+        });
+    }
+
+    #[gpui::test]
     fn node_event_delivery_filters_stale_generations_inside_entity(cx: &mut TestAppContext) {
         let ssh_registry = SshConnectionRegistry::new(ConnectionPoolConfig::default());
         let node_event_emitter = NodeEventEmitter::default();
         let entity_emitter = node_event_emitter.clone();
+        let node_router = NodeRouter::with_runtime_store_and_emitter(
+            ssh_registry.clone(),
+            NodeRuntimeStore::default(),
+            entity_emitter,
+        );
         let task_runtime = test_task_runtime();
         let entity = cx.new(|cx| {
             WorkspaceRuntimeEntity::new(
                 ssh_registry,
-                NodeRuntimeStore::default(),
-                entity_emitter,
+                node_router,
                 task_runtime,
                 true,
                 ReconnectTiming::default(),
@@ -1556,12 +1787,12 @@ mod tests {
         node_runtime_store
             .upsert_child_node(root.clone(), child.clone(), SshConfig::default())
             .unwrap();
+        let node_router = NodeRouter::with_runtime_store(ssh_registry.clone(), node_runtime_store);
         let task_runtime = test_task_runtime();
         let entity = cx.new(|cx| {
             WorkspaceRuntimeEntity::new(
                 ssh_registry,
-                node_runtime_store,
-                NodeEventEmitter::default(),
+                node_router,
                 task_runtime,
                 true,
                 ReconnectTiming::default(),

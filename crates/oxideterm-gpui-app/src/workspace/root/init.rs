@@ -80,8 +80,7 @@ impl WorkspaceApp {
         // the router resolves capabilities from this shared node runtime store
         // instead of owning the node lifecycle itself.
         let node_runtime_store = NodeRuntimeStore::default();
-        let node_router =
-            NodeRouter::with_runtime_store(ssh_registry.clone(), node_runtime_store.clone());
+        let node_router = NodeRouter::with_runtime_store(ssh_registry.clone(), node_runtime_store);
         let forwarding_service = forwards::ForwardingRuntimeService::new(
             forwarding_registry,
             ssh_registry.clone(),
@@ -91,8 +90,7 @@ impl WorkspaceApp {
         let workspace_runtime = cx.new(|cx| {
             runtime_entity::WorkspaceRuntimeEntity::new(
                 ssh_registry.clone(),
-                node_runtime_store.clone(),
-                node_router.emitter().clone(),
+                node_router.clone(),
                 forwarding_runtime.clone(),
                 settings.reconnect.enabled,
                 reconnect_timing_from_settings(&settings),
