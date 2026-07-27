@@ -290,7 +290,7 @@ impl WorkspaceApp {
             .ai_sidebar_collapsed = false;
         self.set_context_sidebar_rendered_with_motion(true, cx);
         if panel == ContextSidebarPanel::Assistant {
-            self.ensure_ai_chat_initialized();
+            self.ensure_ai_chat_initialized(cx);
             self.bootstrap_ai_mcp_registry(cx);
         } else {
             // Non-AI context panels share the old right-sidebar shell, but must

@@ -48,9 +48,9 @@ impl WorkspaceApp {
                     .update(cx, |ai, _cx| ai.take_acp_model_discovery_intents());
                 for intent in intents {
                     let conversation_exists = self
-                        .ai
-                        .chat
-                        .conversation_state
+                        .ai_entity
+                        .read(cx)
+                        .conversation_state()
                         .conversations
                         .iter()
                         .any(|conversation| conversation.id == intent.conversation_id);

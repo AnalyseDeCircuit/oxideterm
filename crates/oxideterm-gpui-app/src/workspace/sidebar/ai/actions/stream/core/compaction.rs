@@ -1,9 +1,6 @@
 impl WorkspaceApp {
     pub(in crate::workspace) fn start_ai_compact_conversation(&mut self, cx: &mut Context<Self>) {
-        let Some(conversation_id) = self
-            .ai
-            .chat
-            .conversation_state
+        let Some(conversation_id) = self.ai_entity.read(cx).conversation_state()
             .active_conversation()
             .map(|conversation| conversation.id.clone())
         else {
@@ -17,10 +14,7 @@ impl WorkspaceApp {
         conversation_id: &str,
         cx: &mut Context<Self>,
     ) {
-        if self
-            .ai
-            .chat
-            .conversation_state
+        if self.ai_entity.read(cx).conversation_state()
             .conversations
             .iter()
             .find(|conversation| conversation.id == conversation_id)
@@ -47,29 +41,33 @@ impl WorkspaceApp {
     ) -> Result<(), Option<AiPendingChatStream>> {
         // Return an unconsumed pre-send request when compaction is skipped so
         // its zeroizing provider configuration never needs to be cloned.
-        let conversation = match self
-            .ai
-            .chat
-            .conversation_state
+        let messages = match self
+            .ai_entity
+            .read(cx)
+            .conversation_state()
             .conversations
             .iter()
             .find(|conversation| conversation.id == conversation_id)
         {
-            Some(conversation) if conversation.messages.len() >= 4 => conversation.clone(),
+            // The worker needs owned messages, but not the conversation's
+            // metadata, title, session state, or branch bookkeeping.
+            Some(conversation) if conversation.messages.len() >= 4 => {
+                conversation.messages.clone()
+            }
             _ => return Err(resume_after),
         };
         if !self
             .ai_entity
-            .update(cx, |ai, _cx| ai.begin_compaction(&conversation.id))
+            .update(cx, |ai, _cx| ai.begin_compaction(&conversation_id))
         {
             return Err(resume_after);
         }
 
-        let config = match self.resolve_ai_summary_stream_config(true) {
+        let config = match self.resolve_ai_summary_stream_config(true, cx) {
             Ok(config) => config,
             Err(error) => {
                 self.ai_entity
-                    .update(cx, |ai, _cx| ai.finish_compaction(&conversation.id));
+                    .update(cx, |ai, _cx| ai.finish_compaction(&conversation_id));
                 if !silent {
                     self.push_ai_settings_toast(error, TerminalNoticeVariant::Error);
                 }
@@ -78,11 +76,7 @@ impl WorkspaceApp {
         };
         let context_window = self.ai_active_model_context_window(&config);
         if silent && !force {
-            let total_tokens = conversation
-                .messages
-                .iter()
-                .map(ai_message_estimated_tokens)
-                .sum::<usize>();
+            let total_tokens = messages.iter().map(ai_message_estimated_tokens).sum::<usize>();
             let reserve = ai_response_reserve(context_window);
             let prompt_budget = compute_ai_prompt_budget(context_window, reserve, 0, None);
             let auto_compact_threshold = if prompt_budget.usable_prompt_budget > 0 {
@@ -108,24 +102,22 @@ impl WorkspaceApp {
             });
             if decision.level < 2 {
                 self.ai_entity
-                    .update(cx, |ai, _cx| ai.finish_compaction(&conversation.id));
+                    .update(cx, |ai, _cx| ai.finish_compaction(&conversation_id));
                 return Err(resume_after);
             }
         }
-        let Some(plan) = ai_compaction_plan(&conversation.messages, context_window, silent) else {
+        let Some(plan) = ai_compaction_plan(&messages, context_window, silent) else {
             self.ai_entity
-                .update(cx, |ai, _cx| ai.finish_compaction(&conversation.id));
+                .update(cx, |ai, _cx| ai.finish_compaction(&conversation_id));
             return Err(resume_after);
         };
         if silent {
             self.ai_entity.update(cx, |ai, cx| {
-                ai.set_compaction_notice_running(&conversation.id, cx);
+                ai.set_compaction_notice_running(&conversation_id, cx);
             });
         }
         let summary_messages = ai_compaction_summary_messages(&plan.compact_messages);
-        let conversation_id = conversation.id.clone();
-        let base_ids = conversation
-            .messages
+        let base_ids = messages
             .iter()
             .map(|message| message.id.clone())
             .collect::<Vec<_>>();
@@ -149,36 +141,39 @@ impl WorkspaceApp {
     }
 
     pub(in crate::workspace) fn start_ai_summarize_conversation(&mut self, cx: &mut Context<Self>) {
-        let conversation = match self.ai.chat.conversation_state.active_conversation() {
-            Some(conversation) if conversation.messages.len() >= 4 => conversation.clone(),
-            _ => return,
-        };
+        let (conversation_id, messages) =
+            match self.ai_entity.read(cx).conversation_state().active_conversation() {
+                // Summarization consumes message history only; keep unrelated
+                // conversation metadata inside the Entity.
+                Some(conversation) if conversation.messages.len() >= 4 => {
+                    (conversation.id.clone(), conversation.messages.clone())
+                }
+                _ => return,
+            };
         if !self
             .ai_entity
-            .update(cx, |ai, _cx| ai.begin_compaction(&conversation.id))
+            .update(cx, |ai, _cx| ai.begin_compaction(&conversation_id))
         {
             return;
         }
 
-        let config = match self.resolve_ai_summary_stream_config(false) {
+        let config = match self.resolve_ai_summary_stream_config(false, cx) {
             Ok(config) => config,
             Err(error) => {
                 self.ai_entity
-                    .update(cx, |ai, _cx| ai.finish_compaction(&conversation.id));
+                    .update(cx, |ai, _cx| ai.finish_compaction(&conversation_id));
                 self.push_ai_settings_toast(error, TerminalNoticeVariant::Error);
                 return;
             }
         };
-        let summary_messages = ai_conversation_summary_messages(&conversation.messages);
-        let conversation_id = conversation.id.clone();
-        let base_ids = conversation
-            .messages
+        let summary_messages = ai_conversation_summary_messages(&messages);
+        let base_ids = messages
             .iter()
             .map(|message| message.id.clone())
             .collect::<Vec<_>>();
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
         let ui_tx = self.ai_entity.read(cx).compaction_sender();
-        self.ai.chat.loading = true;
+        self.ai_entity.update(cx, |ai, _cx| ai.set_chat_loading(true));
         self.start_ai_compaction_stream_after_api_key_lookup(
             config,
             AiCompactionDeliveryKind::Summary,
@@ -233,7 +228,7 @@ impl WorkspaceApp {
                     if requires_key && api_key.is_none() {
                         this.ai_entity
                             .update(cx, |ai, _cx| ai.finish_compaction(&conversation_id));
-                        this.ai.chat.loading = false;
+                        this.ai_entity.update(cx, |ai, _cx| ai.set_chat_loading(false));
                         if silent {
                             this.ai_entity.update(cx, |ai, cx| {
                                 ai.clear_compaction_notice_for(&conversation_id, cx);
@@ -267,7 +262,7 @@ impl WorkspaceApp {
                 Err(_) if requires_key => {
                     this.ai_entity
                         .update(cx, |ai, _cx| ai.finish_compaction(&conversation_id));
-                    this.ai.chat.loading = false;
+                    this.ai_entity.update(cx, |ai, _cx| ai.set_chat_loading(false));
                     if silent {
                         this.ai_entity.update(cx, |ai, cx| {
                             ai.clear_compaction_notice_for(&conversation_id, cx);

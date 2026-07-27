@@ -160,7 +160,7 @@ impl WorkspaceApp {
                     _ => {}
                 }
             }
-            let footer_actions = if self.ai_chat_footer_action_enabled() {
+            let footer_actions = if self.ai_chat_footer_action_enabled(cx) {
                 &AI_CHAT_FOOTER_ACTIONS[..]
             } else {
                 &[]
@@ -189,7 +189,7 @@ impl WorkspaceApp {
                     }
                     true
                 }
-                "enter" if !event.keystroke.modifiers.shift && !self.ai.chat.loading => {
+                "enter" if !event.keystroke.modifiers.shift && !self.ai_entity.read(cx).chat_is_loading() => {
                     self.send_ai_chat_draft(cx);
                     true
                 }
@@ -216,8 +216,8 @@ impl WorkspaceApp {
         }
     }
 
-    pub(in crate::workspace) fn ai_chat_footer_action_enabled(&self) -> bool {
-        self.ai.chat.loading || !self.ai.chat.draft.trim().is_empty()
+    pub(in crate::workspace) fn ai_chat_footer_action_enabled(&self, cx: &App) -> bool {
+        self.ai_entity.read(cx).chat_is_loading() || !self.ai.chat.draft.trim().is_empty()
     }
 
     pub(in crate::workspace) fn activate_ai_chat_footer_action(
@@ -226,7 +226,7 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) {
         match action {
-            AiChatFooterAction::Submit if self.ai.chat.loading => self.cancel_ai_chat_stream(cx),
+            AiChatFooterAction::Submit if self.ai_entity.read(cx).chat_is_loading() => self.cancel_ai_chat_stream(cx),
             AiChatFooterAction::Submit if !self.ai.chat.draft.trim().is_empty() => {
                 self.send_ai_chat_draft(cx)
             }

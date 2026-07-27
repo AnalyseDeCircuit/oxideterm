@@ -248,7 +248,7 @@ impl WorkspaceApp {
             }
             "selectConversation" => {
                 if let Some(id) = string_arg(&args, "conversationId") {
-                    self.select_ai_conversation(id.to_string());
+                    self.select_ai_conversation(id.to_string(), cx);
                     cx.notify();
                 }
             }
@@ -264,7 +264,7 @@ impl WorkspaceApp {
             "cancelGeneration" => self.cancel_ai_chat_stream(cx),
             "deleteConversation" => {
                 if let Some(id) = string_arg(&args, "conversationId") {
-                    self.delete_ai_conversation(id);
+                    self.delete_ai_conversation(id, cx);
                     cx.notify();
                 }
             }

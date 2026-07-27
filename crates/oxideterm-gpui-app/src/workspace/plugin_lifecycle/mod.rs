@@ -9,8 +9,8 @@ use std::{
 };
 
 use gpui::{
-    AnyElement, AnyWindowHandle, AppContext, Context, IntoElement, KeyDownEvent, ParentElement,
-    Timer, Window, div,
+    AnyElement, AnyWindowHandle, App, AppContext, Context, IntoElement, KeyDownEvent,
+    ParentElement, Timer, Window, div,
 };
 use oxideterm_connections::{SavedConnectionsConflictStrategy, SavedConnectionsSyncSnapshot};
 use oxideterm_gpui_terminal::{TerminalNotice, TerminalNoticeVariant};
@@ -974,10 +974,10 @@ impl WorkspaceApp {
         .detach();
     }
 
-    pub(super) fn native_plugin_ai_snapshot(&self) -> Value {
+    pub(super) fn native_plugin_ai_snapshot(&self, cx: &App) -> Value {
         let settings = self.settings_store.settings();
         native_plugin_ai_snapshot_value(
-            &self.ai.chat.conversation_state,
+            &self.ai_entity.read(cx).conversation_state(),
             &settings.ai.providers,
             settings.ai.active_provider_id.as_deref(),
             &settings.ai.model_context_windows,
@@ -1066,7 +1066,7 @@ impl WorkspaceApp {
             self.start_native_plugin_ide_polling(cx);
         }
         if self.has_native_plugin_subscription(super::plugin_host::NATIVE_PLUGIN_AI_MESSAGE_EVENT) {
-            self.native_plugin_runtime.ai_snapshot = self.native_plugin_ai_snapshot();
+            self.native_plugin_runtime.ai_snapshot = self.native_plugin_ai_snapshot(cx);
             self.start_native_plugin_ai_polling(cx);
         }
         if self
@@ -1421,7 +1421,7 @@ impl WorkspaceApp {
     }
 
     fn emit_native_plugin_ai_if_changed(&mut self, cx: &mut Context<Self>) {
-        let next = self.native_plugin_ai_snapshot();
+        let next = self.native_plugin_ai_snapshot(cx);
         if next == self.native_plugin_runtime.ai_snapshot {
             return;
         }
@@ -1956,7 +1956,7 @@ impl WorkspaceApp {
         let profiler_registry = self.host_tools.read(cx).profiler_registry().clone();
         let profiler_node_connection_ids = native_plugin_profiler_node_connection_ids(self);
         let ide_snapshot = self.native_plugin_ide_snapshot(cx);
-        let ai_snapshot = self.native_plugin_ai_snapshot();
+        let ai_snapshot = self.native_plugin_ai_snapshot(cx);
         let forward_valid_owner_connection_ids = self
             .connection_store
             .connections()

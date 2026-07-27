@@ -3,11 +3,9 @@ impl WorkspaceApp {
         &self,
         provider: &AiProviderView,
         model: &str,
+        cx: &App,
     ) -> AiReasoningLevel {
-        if let Some(value) = self
-            .ai
-            .chat
-            .conversation_state
+        if let Some(value) = self.ai_entity.read(cx).conversation_state()
             .active_conversation()
             .and_then(|conversation| {
                 ai_conversation_reasoning_effort(conversation, &provider.id, model)
@@ -50,7 +48,7 @@ impl WorkspaceApp {
         if capability.levels.is_empty() {
             return None;
         }
-        let selected = self.active_ai_reasoning_level(provider, &model);
+        let selected = self.active_ai_reasoning_level(provider, &model, cx);
         let open = self.ai.chat.reasoning_menu_open;
         let trigger = div()
             .flex()
@@ -115,7 +113,7 @@ impl WorkspaceApp {
         if capability.levels.is_empty() {
             return None;
         }
-        let selected = self.active_ai_reasoning_level(provider, &model);
+        let selected = self.active_ai_reasoning_level(provider, &model, cx);
         let mut levels = vec![AiReasoningLevel::Auto];
         levels.extend(capability.levels);
         let mut menu = div()
@@ -343,7 +341,7 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let mut panel = ai_model_selector_models_panel(&self.tokens);
-        let session_state = self.active_ai_acp_session_state(&agent_id);
+        let session_state = self.active_ai_acp_session_state(&agent_id, cx);
         let config_options = self.ai_acp_model_options_for_agent(&agent_id, cx);
         let model_option = config_options
             .as_ref()

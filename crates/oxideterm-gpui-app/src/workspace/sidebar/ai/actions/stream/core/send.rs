@@ -1,3 +1,36 @@
+impl AiWorkspaceEntity {
+    fn begin_assistant_turn(
+        &mut self,
+        conversation_id: &str,
+        message: AiChatMessage,
+        budget_level: u8,
+    ) {
+        self.conversation_state_mut()
+            .add_message(conversation_id, message);
+        if let Some(conversation) = self
+            .conversation_state_mut()
+            .conversations
+            .iter_mut()
+            .find(|conversation| conversation.id == conversation_id)
+        {
+            let metadata = conversation.session_metadata.get_or_insert_with(|| {
+                serde_json::json!({ "conversationId": conversation_id })
+            });
+            if let Some(object) = metadata.as_object_mut() {
+                object.insert(
+                    "conversationId".to_string(),
+                    serde_json::json!(conversation_id),
+                );
+                object.insert("origin".to_string(), serde_json::json!("sidebar"));
+                object.insert(
+                    "lastBudgetLevel".to_string(),
+                    serde_json::json!(budget_level),
+                );
+            }
+        }
+    }
+}
+
 impl WorkspaceApp {
     pub(in crate::workspace) fn start_ai_chat_stream_after_rag_lookup(
         &mut self,
@@ -82,6 +115,7 @@ impl WorkspaceApp {
                 request_content.as_deref(),
                 task_system_prompt.as_deref(),
                 rag_system_prompt.as_deref(),
+                cx,
             )
         {
             let pending = AiPendingChatStream {
@@ -120,6 +154,7 @@ impl WorkspaceApp {
             request_content.clone(),
             task_system_prompt.clone(),
             rag_system_prompt.clone(),
+            cx,
         ) else {
             return;
         };
@@ -127,11 +162,8 @@ impl WorkspaceApp {
             self.show_ai_trim_notice(trimmed_count, cx);
         }
         let now = ai_now_ms();
-        let assistant_id = self.next_ai_chat_id(now);
-        let request_message = self
-            .ai
-            .chat
-            .conversation_state
+        let assistant_id = self.next_ai_chat_id(now, cx);
+        let request_message = self.ai_entity.read(cx).conversation_state()
             .conversations
             .iter()
             .find(|conversation| conversation.id == conversation_id)
@@ -147,10 +179,7 @@ impl WorkspaceApp {
             .as_ref()
             .map(|message| message.id.clone())
             .unwrap_or_else(|| format!("{assistant_id}-request"));
-        let (budget_decision, budget_diagnostic_payload) = self
-            .ai
-            .chat
-            .conversation_state
+        let (budget_decision, budget_diagnostic_payload) = self.ai_entity.read(cx).conversation_state()
             .conversations
             .iter()
             .find(|conversation| conversation.id == conversation_id)
@@ -185,9 +214,11 @@ impl WorkspaceApp {
                 });
                 (decision, payload)
             });
-        self.ai.chat.conversation_state.add_message(
-            &conversation_id,
-            AiChatMessage {
+        let budget_level = budget_decision.map(|decision| decision.level).unwrap_or(0);
+        self.ai_entity.update(cx, |ai, _cx| {
+            ai.begin_assistant_turn(
+                &conversation_id,
+                AiChatMessage {
                 id: assistant_id.clone(),
                 role: AiChatRole::Assistant,
                 content: String::new(),
@@ -202,33 +233,12 @@ impl WorkspaceApp {
                 turn: None,
                 transcript_ref: None,
                 summary_ref: None,
-                branches: None,
-                suggestions: Vec::new(),
-            },
-        );
-        if let Some(conversation) = self
-            .ai
-            .chat
-            .conversation_state
-            .conversations
-            .iter_mut()
-            .find(|conversation| conversation.id == conversation_id)
-        {
-            let metadata = conversation
-                .session_metadata
-                .get_or_insert_with(|| serde_json::json!({ "conversationId": conversation_id }));
-            if let Some(object) = metadata.as_object_mut() {
-                object.insert(
-                    "conversationId".to_string(),
-                    serde_json::json!(conversation_id),
-                );
-                object.insert("origin".to_string(), serde_json::json!("sidebar"));
-                object.insert(
-                    "lastBudgetLevel".to_string(),
-                    serde_json::json!(budget_decision.map(|decision| decision.level).unwrap_or(0)),
-                );
-            }
-        }
+                    branches: None,
+                    suggestions: Vec::new(),
+                },
+                budget_level,
+            );
+        });
         let mut transcript_entries = Vec::new();
         let mut diagnostic_events = Vec::new();
         if let Some(request_message) = request_message.as_ref() {
@@ -283,9 +293,13 @@ impl WorkspaceApp {
             now,
             self.ai_diagnostic_base(budget_diagnostic_payload),
         ));
-        self.persist_ai_transcript_entries(conversation_id.clone(), transcript_entries);
-        self.persist_ai_diagnostic_events(conversation_id.clone(), diagnostic_events);
-        self.ai.chat.loading = true;
+        self.persist_ai_transcript_entries(
+            conversation_id.clone(),
+            transcript_entries,
+            cx,
+        );
+        self.persist_ai_diagnostic_events(conversation_id.clone(), diagnostic_events, cx);
+        self.ai_entity.update(cx, |ai, _cx| ai.set_chat_loading(true));
         let (generation, ui_tx) = self
             .ai_entity
             .update(cx, |ai, _cx| ai.begin_chat_stream());

@@ -410,7 +410,7 @@ struct AiCompactionNotice {
     timestamp_ms: i64,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 struct AiChatInitializationError {
     message_key: &'static str,
     can_retry: bool,

@@ -3,7 +3,7 @@ impl WorkspaceApp {
         &mut self,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        self.ensure_ai_chat_initialized();
+        self.ensure_ai_chat_initialized(cx);
         let enabled = self.settings_store.settings().ai.enabled;
         let panel = if !enabled {
             ai_chat_panel(&self.tokens)
@@ -39,7 +39,7 @@ impl WorkspaceApp {
                 .child(self.render_ai_context_warning_banners(cx))
                 .child(self.render_ai_sidebar_model_bar(cx))
                 .child(
-                    self.render_ai_sidebar_input(self.ai.chat.initialization_error.is_none(), cx),
+                    self.render_ai_sidebar_input(self.ai_entity.read(cx).chat_initialization_error().is_none(), cx),
                 )
                 .into_any_element()
         };
@@ -74,13 +74,10 @@ impl WorkspaceApp {
         &mut self,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        if let Some(error) = self.ai.chat.initialization_error.clone() {
+        if let Some(error) = self.ai_entity.read(cx).chat_initialization_error().copied() {
             return self.render_ai_sidebar_initialization_error(error, cx);
         }
-        let Some((conversation_id, items, signatures)) = self
-            .ai
-            .chat
-            .conversation_state
+        let Some((conversation_id, items, signatures)) = self.ai_entity.read(cx).conversation_state()
             .active_conversation()
             .and_then(|conversation| {
                 if conversation.messages.is_empty() {
@@ -135,18 +132,29 @@ impl WorkspaceApp {
         match item {
             AiChatListItem::TrimNotice { count, .. } => self.render_ai_trim_notice(count, cx),
             AiChatListItem::Message { id } => {
-                let Some(conversation) = self.ai.chat.conversation_state.active_conversation()
-                else {
-                    return div().into_any_element();
+                let (message, last_assistant) = {
+                    let ai = self.ai_entity.read(cx);
+                    let Some(conversation) = ai.conversation_state().active_conversation() else {
+                        return div().into_any_element();
+                    };
+                    let Some(message) = conversation
+                        .messages
+                        .iter()
+                        .find(|message| message.id == id)
+                    else {
+                        return div().into_any_element();
+                    };
+                    let last_assistant = conversation
+                        .messages
+                        .iter()
+                        .rev()
+                        .find(|candidate| candidate.role == AiChatRole::Assistant)
+                        .is_some_and(|candidate| candidate.id == message.id);
+                    // Release the Entity read guard before GPUI mutably borrows
+                    // its context; only the visible message is copied.
+                    (message.clone(), last_assistant)
                 };
-                let Some(message) = conversation
-                    .messages
-                    .iter()
-                    .find(|message| message.id == id)
-                else {
-                    return div().into_any_element();
-                };
-                self.render_ai_message(conversation, message, viewport, cx)
+                self.render_ai_message(&message, last_assistant, viewport, cx)
             }
             AiChatListItem::BottomSpacer => div().h(px(16.0)).into_any_element(),
         }
@@ -289,24 +297,28 @@ impl WorkspaceApp {
         &self,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
-        let active_id = self
-            .ai
-            .chat
-            .conversation_state
-            .active_conversation_id
-            .as_deref()?;
-        let ai_entity = self.ai_entity.read(cx);
-        let notice = ai_entity.compaction_notice()?;
-        if notice.conversation_id != active_id {
-            return None;
-        }
-        let running = notice.phase == AiCompactionNoticePhase::Running;
+        let (active_id, running, compacted_count) = {
+            let ai = self.ai_entity.read(cx);
+            let active_id = ai
+                .conversation_state()
+                .active_conversation_id
+                .as_ref()?;
+            let notice = ai.compaction_notice()?;
+            if notice.conversation_id != *active_id {
+                return None;
+            }
+            (
+                active_id.clone(),
+                notice.phase == AiCompactionNoticePhase::Running,
+                notice.compacted_count,
+            )
+        };
         let label = if running {
             self.i18n.t("ai.context.compaction_running")
         } else {
             self.i18n.t("ai.context.compaction_done").replace(
                 "{{count}}",
-                &notice.compacted_count.unwrap_or_default().to_string(),
+                &compacted_count.unwrap_or_default().to_string(),
             )
         };
         Some(
@@ -342,7 +354,7 @@ impl WorkspaceApp {
                         .child(self.render_display_text_with_role(
                             SelectableTextRole::PlainDocument,
                             "ai-compaction-notice",
-                            active_id,
+                            &active_id,
                             label,
                             self.tokens.ui.text_muted,
                             cx,
@@ -633,7 +645,7 @@ window.focus(&this.focus_handle, cx);
                 ),
             );
         }
-        if self.ai_context_danger_warning_active() {
+        if self.ai_context_danger_warning_active(cx) {
             banners = banners.child(self.render_ai_context_warning_banner(
                 self.i18n.t("ai.context.approaching_limit"),
                 false,
@@ -690,7 +702,7 @@ window.focus(&this.focus_handle, cx);
                     .child(self.render_ai_context_warning_button(
                         self.i18n.t("ai.context.compact_button"),
                         LucideIcon::Archive,
-                        self.ai.chat.loading,
+                        self.ai_entity.read(cx).chat_is_loading(),
                         AiContextWarningAction::Compact(model_switch),
                         cx,
                     ))
@@ -698,7 +710,7 @@ window.focus(&this.focus_handle, cx);
                         actions.child(self.render_ai_context_warning_button(
                             self.i18n.t("ai.context.summarize"),
                             LucideIcon::Archive,
-                            self.ai.chat.loading,
+                            self.ai_entity.read(cx).chat_is_loading(),
                             AiContextWarningAction::Summarize,
                             cx,
                         ))
@@ -788,19 +800,19 @@ window.focus(&this.focus_handle, cx);
         .into_any_element()
     }
 
-    pub(in crate::workspace) fn ai_context_danger_warning_active(&self) -> bool {
-        let Some(conversation) = self.ai.chat.conversation_state.active_conversation() else {
+    pub(in crate::workspace) fn ai_context_danger_warning_active(&self, cx: &App) -> bool {
+        let Some(conversation) = self.ai_entity.read(cx).conversation_state().active_conversation() else {
             return false;
         };
         if conversation.messages.len() < 4 {
             return false;
         }
-        let (total_tokens, max_tokens) = self.ai_context_message_usage_counts();
+        let (total_tokens, max_tokens) = self.ai_context_message_usage_counts(cx);
         ai_context_percentage(total_tokens, max_tokens) > AI_CONTEXT_DANGER_PERCENT
     }
 
-    pub(in crate::workspace) fn ai_context_message_usage_counts(&self) -> (usize, usize) {
-        let breakdown = self.ai_context_token_breakdown();
+    pub(in crate::workspace) fn ai_context_message_usage_counts(&self, cx: &App) -> (usize, usize) {
+        let breakdown = self.ai_context_token_breakdown(cx);
         (breakdown.messages, breakdown.max_tokens)
     }
 

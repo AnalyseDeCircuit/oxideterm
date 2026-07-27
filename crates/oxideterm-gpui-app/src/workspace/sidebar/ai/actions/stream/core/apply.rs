@@ -64,6 +64,155 @@ pub(in crate::workspace) fn sanitize_ai_tool_arguments_for_persistence(
     oxideterm_ai::sanitize_json_text_for_ai(arguments)
 }
 
+enum AiStreamApplyOutcome {
+    Applied,
+    Completed,
+    Failed(String),
+    Stale,
+}
+
+impl AiWorkspaceEntity {
+    fn apply_acp_session_started_state(
+        &mut self,
+        generation: u64,
+        conversation_id: &str,
+        session_id: &str,
+        session_metadata: Option<serde_json::Value>,
+        session_config_options: Vec<oxideterm_ai::AcpSessionConfigOption>,
+        agent_id: &str,
+    ) -> bool {
+        let current_generation = self.chat_stream_generation();
+        let applied = apply_ai_acp_session_started_to_conversations(
+            &mut self.conversation_state_mut().conversations,
+            current_generation,
+            generation,
+            conversation_id,
+            session_id,
+            session_metadata,
+            session_config_options,
+            agent_id,
+        );
+        if applied {
+            self.persist_chat_state();
+        }
+        applied
+    }
+
+    fn apply_stream_event_state(
+        &mut self,
+        generation: u64,
+        conversation_id: &str,
+        message_id: &str,
+        event: AiStreamEvent,
+        safe_error: Option<String>,
+    ) -> AiStreamApplyOutcome {
+        if !self.is_chat_stream_generation(generation) {
+            return AiStreamApplyOutcome::Stale;
+        }
+        match event {
+            AiStreamEvent::Content(chunk) => {
+                self.update_chat_message(conversation_id, message_id, |message| {
+                    message.content.push_str(&chunk);
+                    append_ai_turn_text_part(message, "text", &chunk, false);
+                });
+                AiStreamApplyOutcome::Applied
+            }
+            AiStreamEvent::Thinking(chunk) => {
+                self.update_chat_message(conversation_id, message_id, |message| {
+                    message
+                        .thinking_content
+                        .get_or_insert_with(String::new)
+                        .push_str(&chunk);
+                    append_ai_turn_text_part(message, "thinking", &chunk, true);
+                });
+                AiStreamApplyOutcome::Applied
+            }
+            AiStreamEvent::ToolCall {
+                id,
+                name,
+                arguments,
+            } => {
+                let persisted_arguments =
+                    sanitize_ai_tool_arguments_for_persistence(&arguments);
+                self.update_chat_message(conversation_id, message_id, |message| {
+                    upsert_ai_tool_call(
+                        message,
+                        &id,
+                        &name,
+                        &persisted_arguments,
+                        "running",
+                    );
+                    upsert_ai_turn_tool_call(
+                        message,
+                        &id,
+                        &name,
+                        &persisted_arguments,
+                        "partial",
+                    );
+                });
+                AiStreamApplyOutcome::Applied
+            }
+            AiStreamEvent::ToolCallComplete {
+                id,
+                name,
+                arguments,
+            } => {
+                let persisted_arguments =
+                    sanitize_ai_tool_arguments_for_persistence(&arguments);
+                self.update_chat_message(conversation_id, message_id, |message| {
+                    upsert_ai_tool_call(
+                        message,
+                        &id,
+                        &name,
+                        &persisted_arguments,
+                        "pending",
+                    );
+                    upsert_ai_turn_tool_call(
+                        message,
+                        &id,
+                        &name,
+                        &persisted_arguments,
+                        "complete",
+                    );
+                });
+                AiStreamApplyOutcome::Applied
+            }
+            AiStreamEvent::Done => {
+                self.update_chat_message(conversation_id, message_id, |message| {
+                    // Older prompts asked models to append a private evidence block.
+                    // Keep the visible answer and remove only that transport artifact.
+                    strip_ai_evidence_claims(message);
+                    finalize_ai_turn_suggestions(message);
+                    message.is_streaming = false;
+                    set_ai_turn_status(message, "complete");
+                });
+                self.complete_chat_stream(generation);
+                self.set_chat_loading(false);
+                self.persist_chat_state();
+                AiStreamApplyOutcome::Completed
+            }
+            AiStreamEvent::Error(_) => {
+                let safe_error = safe_error.unwrap_or_default();
+                self.update_chat_message(conversation_id, message_id, |message| {
+                    message.is_streaming = false;
+                    if message.content.is_empty() {
+                        message.content = safe_error.clone();
+                    } else {
+                        message.content.push_str("\n\n");
+                        message.content.push_str(&safe_error);
+                    }
+                    append_ai_turn_error_part(message, &safe_error);
+                    set_ai_turn_status(message, "error");
+                });
+                self.complete_chat_stream(generation);
+                self.set_chat_loading(false);
+                self.persist_chat_state();
+                AiStreamApplyOutcome::Failed(safe_error)
+            }
+        }
+    }
+}
+
 impl WorkspaceApp {
     pub(in crate::workspace) fn apply_ai_acp_session_started(
         &mut self,
@@ -73,22 +222,21 @@ impl WorkspaceApp {
         session_metadata: Option<serde_json::Value>,
         session_config_options: Vec<oxideterm_ai::AcpSessionConfigOption>,
         agent_id: &str,
-        cx: &App,
+        cx: &mut App,
     ) -> bool {
-        let current_generation = self.ai_entity.read(cx).chat_stream_generation();
-        if !apply_ai_acp_session_started_to_conversations(
-            &mut self.ai.chat.conversation_state.conversations,
-            current_generation,
-            generation,
-            conversation_id,
-            session_id,
-            session_metadata,
-            session_config_options,
-            agent_id,
-        ) {
+        let applied = self.ai_entity.update(cx, |ai, _cx| {
+            ai.apply_acp_session_started_state(
+                generation,
+                conversation_id,
+                session_id,
+                session_metadata,
+                session_config_options,
+                agent_id,
+            )
+        });
+        if !applied {
             return false;
         }
-        self.persist_ai_chat_state();
         true
     }
 
@@ -100,135 +248,33 @@ impl WorkspaceApp {
         event: AiStreamEvent,
         cx: &mut Context<Self>,
     ) {
-        if !self
-            .ai_entity
-            .read(cx)
-            .is_chat_stream_generation(generation)
-        {
-            return;
-        }
-        match event {
-            AiStreamEvent::Content(chunk) => {
-                self.ai.chat.conversation_state.update_message(
+        let safe_error = matches!(&event, AiStreamEvent::Error(_))
+            .then(|| self.i18n.t("settings_view.ai.acp_agent_error_unknown"));
+        let outcome = self.ai_entity.update(cx, |ai, _cx| {
+            ai.apply_stream_event_state(
+                generation,
+                conversation_id,
+                message_id,
+                event,
+                safe_error,
+            )
+        });
+        match outcome {
+            AiStreamApplyOutcome::Applied => {}
+            AiStreamApplyOutcome::Completed => {
+                self.persist_ai_assistant_turn_end(
                     conversation_id,
                     message_id,
-                    |message| {
-                        message.content.push_str(&chunk);
-                        append_ai_turn_text_part(message, "text", &chunk, false);
-                    },
+                    "complete",
+                    cx,
                 );
-            }
-            AiStreamEvent::Thinking(chunk) => {
-                self.ai.chat.conversation_state.update_message(
-                    conversation_id,
-                    message_id,
-                    |message| {
-                        message
-                            .thinking_content
-                            .get_or_insert_with(String::new)
-                            .push_str(&chunk);
-                        append_ai_turn_text_part(message, "thinking", &chunk, true);
-                    },
-                );
-            }
-            AiStreamEvent::ToolCall {
-                id,
-                name,
-                arguments,
-            } => {
-                let persisted_arguments =
-                    sanitize_ai_tool_arguments_for_persistence(&arguments);
-                self.ai.chat.conversation_state.update_message(
-                    conversation_id,
-                    message_id,
-                    |message| {
-                        upsert_ai_tool_call(
-                            message,
-                            &id,
-                            &name,
-                            &persisted_arguments,
-                            "running",
-                        );
-                        upsert_ai_turn_tool_call(
-                            message,
-                            &id,
-                            &name,
-                            &persisted_arguments,
-                            "partial",
-                        );
-                    },
-                );
-            }
-            AiStreamEvent::ToolCallComplete {
-                id,
-                name,
-                arguments,
-            } => {
-                let persisted_arguments =
-                    sanitize_ai_tool_arguments_for_persistence(&arguments);
-                self.ai.chat.conversation_state.update_message(
-                    conversation_id,
-                    message_id,
-                    |message| {
-                        upsert_ai_tool_call(
-                            message,
-                            &id,
-                            &name,
-                            &persisted_arguments,
-                            "pending",
-                        );
-                        upsert_ai_turn_tool_call(
-                            message,
-                            &id,
-                            &name,
-                            &persisted_arguments,
-                            "complete",
-                        );
-                    },
-                );
-            }
-            AiStreamEvent::Done => {
-                self.ai.chat.conversation_state.update_message(
-                    conversation_id,
-                    message_id,
-                    |message| {
-                        // Older prompts asked models to append a private evidence block.
-                        // Keep the visible answer and remove only that transport artifact.
-                        strip_ai_evidence_claims(message);
-                        finalize_ai_turn_suggestions(message);
-                        message.is_streaming = false;
-                        set_ai_turn_status(message, "complete");
-                    },
-                );
-                self.persist_ai_assistant_turn_end(conversation_id, message_id, "complete");
-                self.ai_entity.update(cx, |ai, _cx| {
-                    ai.complete_chat_stream(generation);
-                });
-                self.ai.chat.loading = false;
-                self.persist_ai_chat_state();
                 self.maybe_start_ai_auto_compaction(conversation_id, cx);
             }
-            AiStreamEvent::Error(_error) => {
+            AiStreamApplyOutcome::Failed(safe_error) => {
                 // Provider errors may contain response bodies or request
                 // metadata. Only a localized stable category reaches the
                 // conversation, diagnostics, notifications, and persistence.
-                let safe_error = self.i18n.t("settings_view.ai.acp_agent_error_unknown");
-                self.ai.chat.conversation_state.update_message(
-                    conversation_id,
-                    message_id,
-                    |message| {
-                        message.is_streaming = false;
-                        if message.content.is_empty() {
-                            message.content = safe_error.clone();
-                        } else {
-                            message.content.push_str("\n\n");
-                            message.content.push_str(&safe_error);
-                        }
-                        append_ai_turn_error_part(message, &safe_error);
-                        set_ai_turn_status(message, "error");
-                    },
-                );
-                self.persist_ai_assistant_turn_end(conversation_id, message_id, "error");
+                self.persist_ai_assistant_turn_end(conversation_id, message_id, "error", cx);
                 self.persist_ai_diagnostic_events(
                     conversation_id.to_string(),
                     vec![ai_diagnostic_event(
@@ -243,14 +289,11 @@ impl WorkspaceApp {
                             "message": safe_error.as_str(),
                         })),
                     )],
+                    cx,
                 );
-                self.ai_entity.update(cx, |ai, _cx| {
-                    ai.complete_chat_stream(generation);
-                });
-                self.ai.chat.loading = false;
-                self.persist_ai_chat_state();
                 self.push_ai_settings_toast(safe_error, TerminalNoticeVariant::Error);
             }
+            AiStreamApplyOutcome::Stale => return,
         }
         cx.notify();
     }
@@ -277,12 +320,11 @@ impl WorkspaceApp {
             return;
         }
 
-        self.ai
-            .chat
-            .conversation_state
-            .update_message(conversation_id, message_id, |message| {
+        self.ai_entity.update(cx, |ai, _cx| {
+            ai.update_chat_message(conversation_id, message_id, |message| {
                 upsert_ai_round_summary(message, round_id, text, metadata.clone());
             });
+        });
 
         let now = ai_now_ms();
         let mut payload = serde_json::json!({
@@ -321,8 +363,9 @@ impl WorkspaceApp {
                 Some(round_id.to_string()),
                 now,
             )],
+            cx,
         );
-        self.persist_ai_chat_state();
+        self.ai_entity.read(cx).persist_chat_state();
         cx.notify();
     }
 
@@ -342,13 +385,12 @@ impl WorkspaceApp {
         {
             return;
         }
-        self.ai
-            .chat
-            .conversation_state
-            .update_message(conversation_id, message_id, |message| {
+        self.ai_entity.update(cx, |ai, _cx| {
+            ai.update_chat_message(conversation_id, message_id, |message| {
                 set_ai_turn_round_stateful_marker(message, round_id, marker.as_deref());
             });
-        self.persist_ai_chat_state();
+        });
+        self.ai_entity.read(cx).persist_chat_state();
         cx.notify();
     }
 
@@ -381,6 +423,7 @@ impl WorkspaceApp {
                 now,
                 self.ai_diagnostic_base(data),
             )],
+            cx,
         );
     }
 
@@ -423,10 +466,8 @@ impl WorkspaceApp {
             );
         let mut round_id = None;
         let mut round_number = None;
-        self.ai
-            .chat
-            .conversation_state
-            .update_message(conversation_id, message_id, |message| {
+        self.ai_entity.update(cx, |ai, _cx| {
+            ai.update_chat_message(conversation_id, message_id, |message| {
                 update_ai_tool_call_status(
                     message,
                     tool_call_id,
@@ -448,6 +489,7 @@ impl WorkspaceApp {
                 round_id = Some(id);
                 round_number = Some(number);
             });
+        });
         if should_persist {
             let now = ai_now_ms();
             let round_id_value = round_id.clone();
@@ -592,9 +634,17 @@ impl WorkspaceApp {
                     );
                 });
             }
-            self.persist_ai_transcript_entries(conversation_id.to_string(), transcript_entries);
-            self.persist_ai_diagnostic_events(conversation_id.to_string(), diagnostic_events);
-            self.persist_ai_chat_state();
+            self.persist_ai_transcript_entries(
+                conversation_id.to_string(),
+                transcript_entries,
+                cx,
+            );
+            self.persist_ai_diagnostic_events(
+                conversation_id.to_string(),
+                diagnostic_events,
+                cx,
+            );
+            self.ai_entity.read(cx).persist_chat_state();
         }
         cx.notify();
     }
@@ -907,18 +957,16 @@ impl WorkspaceApp {
         let persisted_raw_text = raw_text
             .as_deref()
             .map(oxideterm_ai::sanitize_for_ai);
-        self.ai.chat.conversation_state.update_message(
-            conversation_id,
-            message_id,
-            |message_value| {
+        self.ai_entity.update(cx, |ai, _cx| {
+            ai.update_chat_message(conversation_id, message_id, |message_value| {
                 append_ai_turn_guardrail_part(
                     message_value,
                     code,
                     message,
                     persisted_raw_text.as_deref(),
                 );
-            },
-        );
+            });
+        });
         let now = ai_now_ms();
         self.persist_ai_transcript_entries(
             conversation_id.to_string(),
@@ -934,6 +982,7 @@ impl WorkspaceApp {
                 Some(message_id.to_string()),
                 now,
             )],
+            cx,
         );
         self.persist_ai_diagnostic_events(
             conversation_id.to_string(),
@@ -951,8 +1000,9 @@ impl WorkspaceApp {
                     "rawTextLength": raw_text.as_ref().map(|text| text.len()).unwrap_or(0),
                 })),
             )],
+            cx,
         );
-        self.persist_ai_chat_state();
+        self.ai_entity.read(cx).persist_chat_state();
         cx.notify();
     }
 }

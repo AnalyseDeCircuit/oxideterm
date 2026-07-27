@@ -11,6 +11,15 @@ pub(in crate::workspace) const AI_MODEL_SELECTOR_DROPDOWN_WIDTH: f32 = 256.0; //
 pub(in crate::workspace) const AI_REASONING_MENU_WIDTH: f32 = 220.0; // Compact VS Code-style effort menu.
 pub(in crate::workspace) const AI_CONTEXT_POPOVER_WIDTH: f32 = 280.0; // Tauri-sized compact context popover.
 
+struct AiConversationListRow {
+    id: Arc<str>,
+    title: String,
+    cli_origin: bool,
+    message_count: usize,
+    updated_at_ms: i64,
+    active: bool,
+}
+
 impl WorkspaceApp {
     pub(in crate::workspace) fn update_ai_sidebar_overlay_for_window_bounds(
         &mut self,
@@ -218,10 +227,10 @@ impl WorkspaceApp {
         dropdown_width: f32,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let dropdown_height = if self.ai.chat.conversation_state.conversations.is_empty() {
+        let dropdown_height = if self.ai_entity.read(cx).conversation_state().conversations.is_empty() {
             AI_CONVERSATION_EMPTY_HEIGHT
         } else {
-            (self.ai.chat.conversation_state.conversations.len() as f32
+            (self.ai_entity.read(cx).conversation_state().conversations.len() as f32
                 * AI_CONVERSATION_ROW_HEIGHT)
                 .min(AI_CONVERSATION_MAX_HEIGHT)
         };
@@ -238,7 +247,28 @@ impl WorkspaceApp {
             // stays with the overlay and cannot scroll the message/sidebar body.
             .on_scroll_wheel(|_, _, cx| cx.stop_propagation());
 
-        if self.ai.chat.conversation_state.conversations.is_empty() {
+        let conversation_rows = {
+            let ai = self.ai_entity.read(cx);
+            let state = ai.conversation_state();
+            state
+                .conversations
+                .iter()
+                .map(|conversation| AiConversationListRow {
+                    id: Arc::from(conversation.id.as_str()),
+                    title: conversation.title.clone(),
+                    cli_origin: conversation.origin == "cli",
+                    message_count: if conversation.messages_loaded {
+                        conversation.messages.len()
+                    } else {
+                        conversation.message_count
+                    },
+                    updated_at_ms: conversation.updated_at_ms,
+                    active: state.active_conversation_id.as_deref()
+                        == Some(conversation.id.as_str()),
+                })
+                .collect::<Vec<_>>()
+        };
+        if conversation_rows.is_empty() {
             list = list.child(
                 div()
                     .p(px(16.0))
@@ -255,15 +285,8 @@ impl WorkspaceApp {
                     )),
             );
         } else {
-            let conversation_count = self.ai.chat.conversation_state.conversations.len();
-            for (index, conversation) in self
-                .ai
-                .chat
-                .conversation_state
-                .conversations
-                .iter()
-                .enumerate()
-            {
+            let conversation_count = conversation_rows.len();
+            for (index, conversation) in conversation_rows.into_iter().enumerate() {
                 list = list.child(self.render_ai_conversation_item(
                     conversation,
                     index == 0,
@@ -292,30 +315,19 @@ impl WorkspaceApp {
             .into_any_element()
     }
 
-    pub(in crate::workspace) fn render_ai_conversation_item(
+    fn render_ai_conversation_item(
         &self,
-        conversation: &AiConversation,
+        conversation: AiConversationListRow,
         is_first: bool,
         is_last: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let id = conversation.id.clone();
         let delete_id = conversation.id.clone();
-        let is_active = self
-            .ai
-            .chat
-            .conversation_state
-            .active_conversation_id
-            .as_deref()
-            == Some(conversation.id.as_str());
-        let count = if conversation.messages_loaded {
-            conversation.messages.len()
-        } else {
-            conversation.message_count
-        };
+        let id = conversation.id;
+        let is_active = conversation.active;
         let meta = format!(
             "{} · {}",
-            self.ai_messages_count_label(count),
+            self.ai_messages_count_label(conversation.message_count),
             time_label(conversation.updated_at_ms)
         );
         div()
@@ -365,7 +377,7 @@ impl WorkspaceApp {
                             .items_center()
                             .gap(px(6.0))
                             .min_w_0()
-                            .when(conversation.origin == "cli", |row| {
+                            .when(conversation.cli_origin, |row| {
                                 row.child(
                                     div()
                                         .size(px(16.0))
@@ -399,7 +411,7 @@ impl WorkspaceApp {
                                     } else {
                                         rgb(self.tokens.ui.text_muted)
                                     })
-                                    .child(conversation.title.clone()),
+                                    .child(conversation.title),
                             ),
                     )
                     .child(
@@ -431,7 +443,7 @@ impl WorkspaceApp {
                     .on_mouse_down(
                         MouseButton::Left,
                         cx.listener(move |this, _event, _window, cx| {
-                            this.delete_ai_conversation(&delete_id);
+                            this.delete_ai_conversation(delete_id.as_ref(), cx);
                             cx.stop_propagation();
                             cx.notify();
                         }),
@@ -440,7 +452,7 @@ impl WorkspaceApp {
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |this, _event, _window, cx| {
-                    this.select_ai_conversation(id.clone());
+                    this.select_ai_conversation(id.to_string(), cx);
                     cx.stop_propagation();
                     cx.notify();
                 }),

@@ -1,11 +1,9 @@
 impl WorkspaceApp {
-    pub(in crate::workspace) fn active_ai_safety_mode(&self) -> AiSafetyMode {
-        self.ai
-            .chat
-            .conversation_state
+    pub(in crate::workspace) fn active_ai_safety_mode(&self, cx: &App) -> AiSafetyMode {
+        self.ai_entity.read(cx).conversation_state()
             .active_conversation_id
             .as_ref()
-            .filter(|id| self.ai.chat.safety_bypass_conversations.contains(*id))
+            .filter(|id| self.ai_entity.read(cx).safety_bypass_conversations().contains(*id))
             .map(|_| AiSafetyMode::Bypass)
             .unwrap_or(AiSafetyMode::Default)
     }
@@ -178,8 +176,8 @@ window.focus(&this.focus_handle, cx);
         );
         let send_disabled = !enabled || !model_selected || self.ai.chat.draft.trim().is_empty();
         let action_focused = self.ai.chat.footer_focus == Some(AiChatFooterAction::Submit)
-            && (self.ai.chat.loading || !send_disabled);
-        let action = if self.ai.chat.loading {
+            && (self.ai_entity.read(cx).chat_is_loading() || !send_disabled);
+        let action = if self.ai_entity.read(cx).chat_is_loading() {
             ai_stop_button(
                 &self.tokens,
                 self.i18n.t("ai.input.stop"),
@@ -199,7 +197,7 @@ window.focus(&this.focus_handle, cx);
                 frame.child(self.render_ai_autocomplete_popup(&autocomplete_items, cx))
             })
             .child(ai_chat_input_editor(&self.tokens, input));
-        let footer_leading = if self.ai.chat.loading {
+        let footer_leading = if self.ai_entity.read(cx).chat_is_loading() {
             div()
                 .flex()
                 .min_w_0()
@@ -230,7 +228,7 @@ window.focus(&this.focus_handle, cx);
             .flex()
             .items_center()
             .gap(px(6.0))
-            .when(!self.ai.chat.loading, |row| {
+            .when(!self.ai_entity.read(cx).chat_is_loading(), |row| {
                 row.child(
                     div()
                         .text_size(px(9.0))
@@ -242,7 +240,7 @@ window.focus(&this.focus_handle, cx);
                 MouseButton::Left,
                 cx.listener(move |this, _event, _window, cx| {
                     this.ai.chat.footer_focus = None;
-                    if this.ai.chat.loading {
+                    if this.ai_entity.read(cx).chat_is_loading() {
                         this.cancel_ai_chat_stream(cx);
                     } else if !send_disabled {
                         this.send_ai_chat_draft(cx);
@@ -271,7 +269,7 @@ window.focus(&this.focus_handle, cx);
         &self,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let mode = self.active_ai_safety_mode();
+        let mode = self.active_ai_safety_mode(cx);
         let icon = match mode {
             AiSafetyMode::Default => LucideIcon::ShieldCheck,
             AiSafetyMode::Bypass => LucideIcon::ShieldAlert,
@@ -478,7 +476,7 @@ window.focus(&this.focus_handle, cx);
                 match mode {
                     AiSafetyMode::Default => this.set_ai_safety_mode_default(cx),
                     AiSafetyMode::Bypass => {
-                        if this.active_ai_safety_mode() != AiSafetyMode::Bypass {
+                        if this.active_ai_safety_mode(cx) != AiSafetyMode::Bypass {
                             // The safety menu is itself a floating overlay.
                             // Open the confirm dialog after this click/update
                             // cycle so GPUI does not re-enter WorkspaceApp while
@@ -615,7 +613,7 @@ window.focus(&this.focus_handle, cx);
         &self,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let breakdown = self.ai_context_token_breakdown();
+        let breakdown = self.ai_context_token_breakdown(cx);
         let total_tokens = breakdown.total;
         let max_tokens = breakdown.max_tokens;
         let percentage = if max_tokens == 0 {
@@ -667,7 +665,7 @@ window.focus(&this.focus_handle, cx);
         &self,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let breakdown = self.ai_context_token_breakdown();
+        let breakdown = self.ai_context_token_breakdown(cx);
         let total_tokens = breakdown.total;
         let max_tokens = breakdown.max_tokens;
         let percentage = if max_tokens == 0 {
@@ -767,9 +765,7 @@ window.focus(&this.focus_handle, cx);
                     )),
             )
             .when(
-                self.ai
-                    .chat
-                    .conversation_state
+                self.ai_entity.read(cx).conversation_state()
                     .active_conversation()
                     .is_some_and(|conversation| conversation.messages.len() >= 4),
                 |popover| {
@@ -866,7 +862,10 @@ window.focus(&this.focus_handle, cx);
             .into_any_element()
     }
 
-    pub(in crate::workspace) fn ai_context_token_breakdown(&self) -> AiContextTokenBreakdown {
+    pub(in crate::workspace) fn ai_context_token_breakdown(
+        &self,
+        cx: &App,
+    ) -> AiContextTokenBreakdown {
         let settings = self.settings_store.settings();
         let providers = ai_provider_views(&settings.ai.providers);
         let active_provider =
@@ -883,7 +882,7 @@ window.focus(&this.focus_handle, cx);
         )
         .unwrap_or(AI_COMPACTION_DEFAULT_CONTEXT_WINDOW);
         let system_prompt = settings.ai.custom_system_prompt.trim();
-        let conversation = self.ai.chat.conversation_state.active_conversation();
+        let conversation = self.ai_entity.read(cx).conversation_state().active_conversation();
         let cache_key = AiContextTokenBreakdownKey {
             conversation_id: conversation.map(|conversation| conversation.id.clone()),
             conversation_fingerprint: ai_conversation_token_fingerprint(conversation),

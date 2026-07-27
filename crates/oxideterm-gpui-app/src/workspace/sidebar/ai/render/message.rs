@@ -1,8 +1,8 @@
 impl WorkspaceApp {
     pub(in crate::workspace) fn render_ai_message(
         &self,
-        conversation: &AiConversation,
         message: &AiChatMessage,
+        last_assistant: bool,
         viewport: Option<AiMessageViewport>,
         cx: &mut Context<Self>,
     ) -> AnyElement {
@@ -354,12 +354,6 @@ impl WorkspaceApp {
                     ),
             );
         }
-        let last_assistant = conversation
-            .messages
-            .iter()
-            .rev()
-            .find(|candidate| candidate.role == AiChatRole::Assistant)
-            .is_some_and(|candidate| candidate.id == message.id);
         if !user && !message.is_streaming && !editing {
             let content = message.content.clone();
             let delete_id = message.id.clone();
@@ -1548,10 +1542,7 @@ window.focus(&this.focus_handle, cx);
         &self,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let active_title = self
-            .ai
-            .chat
-            .conversation_state
+        let active_title = self.ai_entity.read(cx).conversation_state()
             .active_conversation()
             .map(|conversation| conversation.title.clone());
         div()
@@ -1661,7 +1652,7 @@ window.focus(&this.focus_handle, cx);
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let disabled = matches!(action, Some(AiHeaderAction::NewChat))
-            && self.ai.chat.initialization_error.is_some();
+            && self.ai_entity.read(cx).chat_initialization_error().is_some();
         // Tauri AiChatPanel header buttons are title-backed icon buttons. Route
         // tooltip ownership and disabled New Chat activation through the shared
         // workspace helper so AI header actions match other toolbar buttons.

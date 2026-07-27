@@ -44,7 +44,7 @@ impl WorkspaceApp {
                 .ai
                 .active_acp_agent_id
                 .as_deref()
-                .and_then(|agent_id| self.active_ai_acp_session_state(agent_id))
+                .and_then(|agent_id| self.active_ai_acp_session_state(agent_id, cx))
                 .and_then(|state| {
                     let option = oxideterm_ai::acp_model_config_option(&state.config_options)?;
                     oxideterm_ai::acp_selected_config_choice(

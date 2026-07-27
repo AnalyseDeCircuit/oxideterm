@@ -1,7 +1,7 @@
 use std::{collections::HashMap, sync::Arc};
 
+use crate::workspace::ai_state::{AiChatInitializationOutcome, AiWorkspaceEntity};
 use crate::workspace::ime::WorkspaceImeTarget;
-use crate::workspace::root::init::ai_chat_initialization_error;
 use crate::workspace::*;
 use gpui::{Context, Div, MouseDownEvent, Rgba, Window};
 use oxideterm_ai::stream_state::*;

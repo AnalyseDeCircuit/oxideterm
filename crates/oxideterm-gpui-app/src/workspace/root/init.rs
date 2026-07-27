@@ -745,7 +745,7 @@ impl WorkspaceApp {
         })
         .detach();
         if workspace.ai_sidebar_visible() {
-            workspace.ensure_ai_chat_initialized();
+            workspace.ensure_ai_chat_initialized(cx);
             workspace.bootstrap_ai_mcp_registry(cx);
         }
         if workspace.version_migration.open {

@@ -1,3 +1,40 @@
+impl AiWorkspaceEntity {
+    fn set_active_reasoning_level(
+        &mut self,
+        provider_id: &str,
+        model: &str,
+        level: AiReasoningLevel,
+    ) {
+        if let Some(conversation) = self.conversation_state_mut().active_conversation_mut() {
+            store_ai_reasoning_level_in_conversation(conversation, provider_id, model, level);
+            self.persist_chat_state();
+        }
+    }
+
+    fn set_active_acp_model_selection(
+        &mut self,
+        agent_id: &str,
+        discovered_options: Vec<oxideterm_ai::AcpSessionConfigOption>,
+        config_id: &str,
+        value_id: &str,
+    ) -> bool {
+        let Some(conversation) = self.conversation_state_mut().active_conversation_mut() else {
+            return false;
+        };
+        let stored = store_ai_acp_model_selection_in_conversation(
+            conversation,
+            agent_id,
+            discovered_options,
+            config_id,
+            value_id,
+        );
+        if stored {
+            self.persist_chat_state();
+        }
+        stored
+    }
+}
+
 impl WorkspaceApp {
     pub(in crate::workspace) fn select_ai_reasoning_level(
         &mut self,
@@ -13,15 +50,9 @@ impl WorkspaceApp {
             level.as_str(),
         );
         self.ai.chat.reasoning_menu_open = false;
-        if let Some(conversation) = self.ai.chat.conversation_state.active_conversation_mut() {
-            store_ai_reasoning_level_in_conversation(
-                conversation,
-                &provider_id,
-                &model,
-                level,
-            );
-            self.persist_ai_chat_state();
-        }
+        self.ai_entity.update(cx, |ai, _cx| {
+            ai.set_active_reasoning_level(&provider_id, &model, level);
+        });
         self.edit_settings(
             move |settings| {
                 set_ai_model_reasoning_override(
@@ -41,16 +72,13 @@ impl WorkspaceApp {
         agent_id: &str,
         cx: &App,
     ) -> Option<Vec<oxideterm_ai::AcpSessionConfigOption>> {
-        if let Some(state) = self.active_ai_acp_session_state(agent_id)
+        if let Some(state) = self.active_ai_acp_session_state(agent_id, cx)
             && oxideterm_ai::acp_model_config_option(&state.config_options)
                 .is_some_and(|option| !option.choices.is_empty())
         {
             return Some(state.config_options);
         }
-        let conversation_id = self
-            .ai
-            .chat
-            .conversation_state
+        let conversation_id = self.ai_entity.read(cx).conversation_state()
             .active_conversation()
             .map(|conversation| conversation.id.as_str())?;
         self.ai_entity
@@ -63,10 +91,7 @@ impl WorkspaceApp {
         agent_id: &str,
         cx: &App,
     ) -> bool {
-        let Some(conversation_id) = self
-            .ai
-            .chat
-            .conversation_state
+        let Some(conversation_id) = self.ai_entity.read(cx).conversation_state()
             .active_conversation()
             .map(|conversation| conversation.id.as_str())
         else {
@@ -88,10 +113,7 @@ impl WorkspaceApp {
         {
             return;
         }
-        let Some(conversation_id) = self
-            .ai
-            .chat
-            .conversation_state
+        let Some(conversation_id) = self.ai_entity.read(cx).conversation_state()
             .active_conversation()
             .map(|conversation| conversation.id.clone())
         else {
@@ -436,7 +458,7 @@ impl WorkspaceApp {
             cx,
         );
         if previous_model.as_deref() != Some(model.as_str()) {
-            self.update_ai_model_switch_warning(&provider_id, &model);
+            self.update_ai_model_switch_warning(&provider_id, &model, cx);
         }
         self.close_ai_model_selector(cx);
         cx.notify();
@@ -571,16 +593,15 @@ impl WorkspaceApp {
         let Some(discovered_options) = self.ai_acp_model_options_for_agent(&agent_id, cx) else {
             return;
         };
-        let Some(conversation) = self.ai.chat.conversation_state.active_conversation_mut() else {
-            return;
-        };
-        if !store_ai_acp_model_selection_in_conversation(
-            conversation,
-            &agent_id,
-            discovered_options,
-            &config_id,
-            &value_id,
-        ) {
+        let stored = self.ai_entity.update(cx, |ai, _cx| {
+            ai.set_active_acp_model_selection(
+                &agent_id,
+                discovered_options,
+                &config_id,
+                &value_id,
+            )
+        });
+        if !stored {
             return;
         }
         self.edit_settings(
@@ -590,7 +611,6 @@ impl WorkspaceApp {
             },
             cx,
         );
-        self.persist_ai_chat_state();
         self.close_ai_model_selector(cx);
         cx.notify();
     }
@@ -599,8 +619,9 @@ impl WorkspaceApp {
         &mut self,
         provider_id: &str,
         model: &str,
+        cx: &App,
     ) {
-        let Some(conversation) = self.ai.chat.conversation_state.active_conversation() else {
+        let Some(conversation) = self.ai_entity.read(cx).conversation_state().active_conversation() else {
             return;
         };
         let total_tokens = ai_conversation_message_tokens(conversation);

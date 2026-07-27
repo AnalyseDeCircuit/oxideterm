@@ -1,4 +1,11 @@
 use super::*;
+use crate::workspace::root::init::ai_chat_initialization_error;
+
+pub(in crate::workspace) enum AiChatInitializationOutcome {
+    AlreadyInitialized,
+    Loaded,
+    Failed,
+}
 
 pub(in crate::workspace) enum AiWorkspaceEvent {
     AcpAgentProbeDeliveryReady,
@@ -142,6 +149,13 @@ pub(in crate::workspace) struct AiWorkspaceEntity {
     chat_stream_tx: AiStreamDeliverySender,
     chat_stream_rx: std::sync::mpsc::Receiver<AiStreamDelivery>,
     chat_stream_deliveries: VecDeque<AiStreamDelivery>,
+    conversation_state: oxideterm_ai::AiChatState,
+    persistence_store: Option<oxideterm_ai::AiChatPersistenceStore>,
+    chat_initialized: bool,
+    chat_initialization_error: Option<AiChatInitializationError>,
+    safety_bypass_conversations: HashSet<String>,
+    chat_loading: bool,
+    next_chat_sequence: u64,
     pending_tool_approvals: HashMap<String, tokio::sync::oneshot::Sender<bool>>,
     // Runtime evidence transitions are implemented beside stream application,
     // but these collections remain physically owned by this Entity.
@@ -244,6 +258,13 @@ impl AiWorkspaceEntity {
             chat_stream_tx,
             chat_stream_rx,
             chat_stream_deliveries: VecDeque::new(),
+            conversation_state: oxideterm_ai::AiChatState::default(),
+            persistence_store: None,
+            chat_initialized: false,
+            chat_initialization_error: None,
+            safety_bypass_conversations: HashSet::new(),
+            chat_loading: false,
+            next_chat_sequence: 0,
             pending_tool_approvals: HashMap::new(),
             runtime_epoch: uuid::Uuid::new_v4().to_string(),
             command_record_sequence: 0,
@@ -274,6 +295,226 @@ impl AiWorkspaceEntity {
 
     pub(in crate::workspace) fn model_is_refreshing(&self, provider_id: &str) -> bool {
         self.refreshing_models.contains(provider_id)
+    }
+
+    pub(in crate::workspace) fn conversation_state(&self) -> &oxideterm_ai::AiChatState {
+        &self.conversation_state
+    }
+
+    pub(in crate::workspace) fn conversation_state_mut(
+        &mut self,
+    ) -> &mut oxideterm_ai::AiChatState {
+        &mut self.conversation_state
+    }
+
+    pub(in crate::workspace) fn update_chat_message(
+        &mut self,
+        conversation_id: &str,
+        message_id: &str,
+        update: impl FnOnce(&mut oxideterm_ai::AiChatMessage),
+    ) {
+        self.conversation_state
+            .update_message(conversation_id, message_id, update);
+    }
+
+    pub(in crate::workspace) fn chat_is_loading(&self) -> bool {
+        self.chat_loading
+    }
+
+    pub(in crate::workspace) fn set_chat_loading(&mut self, loading: bool) {
+        self.chat_loading = loading;
+    }
+
+    pub(in crate::workspace) fn chat_initialization_error(
+        &self,
+    ) -> Option<&AiChatInitializationError> {
+        self.chat_initialization_error.as_ref()
+    }
+
+    pub(in crate::workspace) fn safety_bypass_conversations(&self) -> &HashSet<String> {
+        &self.safety_bypass_conversations
+    }
+
+    pub(in crate::workspace) fn ensure_chat_initialized(
+        &mut self,
+        path: PathBuf,
+    ) -> AiChatInitializationOutcome {
+        if self.chat_initialized {
+            return AiChatInitializationOutcome::AlreadyInitialized;
+        }
+        self.chat_initialized = true;
+        self.load_chat_store(path)
+    }
+
+    pub(in crate::workspace) fn retry_chat_initialization(
+        &mut self,
+        path: PathBuf,
+    ) -> AiChatInitializationOutcome {
+        self.chat_initialized = true;
+        self.load_chat_store(path)
+    }
+
+    fn load_chat_store(&mut self, path: PathBuf) -> AiChatInitializationOutcome {
+        match oxideterm_ai::AiChatPersistenceStore::load(path) {
+            Ok((store, state)) => {
+                self.persistence_store = Some(store);
+                self.conversation_state = state;
+                self.chat_initialization_error = None;
+                AiChatInitializationOutcome::Loaded
+            }
+            Err(error) => {
+                // Database errors can contain local paths or serialized data;
+                // retain only the stable presentation category.
+                self.conversation_state = oxideterm_ai::AiChatState::default();
+                self.persistence_store = None;
+                self.chat_initialization_error = Some(ai_chat_initialization_error(&error));
+                AiChatInitializationOutcome::Failed
+            }
+        }
+    }
+
+    pub(in crate::workspace) fn select_conversation(&mut self, id: String) {
+        let previous_index = self
+            .conversation_state
+            .active_conversation_id
+            .as_deref()
+            .filter(|previous| *previous != id.as_str())
+            .and_then(|previous| {
+                self.conversation_state
+                    .conversations
+                    .iter()
+                    .position(|conversation| conversation.id == previous)
+            });
+        if let Some(previous_index) = previous_index {
+            let previous = &mut self.conversation_state.conversations[previous_index];
+            previous.messages.clear();
+            previous.messages_loaded = false;
+        }
+        if let Some(conversation) = self
+            .conversation_state
+            .conversations
+            .iter()
+            .find(|conversation| conversation.id == id)
+            && !conversation.messages_loaded
+            && let Some(store) = self.persistence_store.as_ref()
+            && let Ok(Some(loaded)) = store.load_conversation(&id)
+            && let Some(slot) = self
+                .conversation_state
+                .conversations
+                .iter_mut()
+                .find(|conversation| conversation.id == id)
+        {
+            *slot = loaded;
+        }
+        self.conversation_state.set_active_conversation(id);
+    }
+
+    pub(in crate::workspace) fn delete_conversation(&mut self, id: &str) -> bool {
+        self.conversation_state.delete_conversation(id);
+        self.safety_bypass_conversations.remove(id);
+        !self.conversation_state.conversations.is_empty()
+    }
+
+    pub(in crate::workspace) fn clear_conversations(&mut self) {
+        self.conversation_state.clear_conversations();
+        self.safety_bypass_conversations.clear();
+    }
+
+    pub(in crate::workspace) fn set_active_conversation_safety_bypass(&mut self, bypass: bool) {
+        let Some(conversation_id) = self.conversation_state.active_conversation_id.as_ref() else {
+            return;
+        };
+        if bypass {
+            self.safety_bypass_conversations
+                .insert(conversation_id.clone());
+        } else {
+            self.safety_bypass_conversations.remove(conversation_id);
+        }
+    }
+
+    pub(in crate::workspace) fn persist_chat_state(&self) {
+        let Some(store) = self.persistence_store.as_ref().cloned() else {
+            return;
+        };
+        // The blocking persistence task needs an owned point-in-time projection.
+        // Keep this as the only full conversation-state clone at the boundary.
+        let state = self.conversation_state.clone();
+        let projection_updated_at =
+            oxideterm_ai::AiChatPersistenceStore::next_projection_persist_at();
+        self.task_runtime.spawn_blocking(move || {
+            if store
+                .save_state_with_projection_updated_at(state, projection_updated_at)
+                .is_err()
+            {
+                // Persistence errors may include local paths or serialized data.
+                eprintln!("[AiChatStore] Failed to persist conversation");
+            }
+        });
+    }
+
+    pub(in crate::workspace) fn persist_transcript_entries(
+        &self,
+        conversation_id: String,
+        entries: Vec<oxideterm_ai::PersistedTranscriptEntry>,
+    ) {
+        if entries.is_empty() {
+            return;
+        }
+        let Some(store) = self.persistence_store.as_ref().cloned() else {
+            return;
+        };
+        // The store is a shared handle; only the owned entries cross the worker boundary.
+        self.task_runtime.spawn_blocking(move || {
+            if store
+                .append_transcript_entries(&conversation_id, entries)
+                .is_err()
+            {
+                eprintln!("[AiChatStore] Failed to persist transcript entries");
+            }
+        });
+    }
+
+    pub(in crate::workspace) fn persist_diagnostic_events(
+        &self,
+        conversation_id: String,
+        events: Vec<oxideterm_ai::PersistedDiagnosticEvent>,
+    ) {
+        if events.is_empty() {
+            return;
+        }
+        let Some(store) = self.persistence_store.as_ref().cloned() else {
+            return;
+        };
+        // The store is a shared handle; only the owned events cross the worker boundary.
+        self.task_runtime.spawn_blocking(move || {
+            if store
+                .append_diagnostic_events(&conversation_id, events)
+                .is_err()
+            {
+                eprintln!("[AiChatStore] Failed to persist diagnostic events");
+            }
+        });
+    }
+
+    pub(in crate::workspace) fn cancel_chat_conversation_state(
+        &mut self,
+    ) -> (
+        Option<String>,
+        Vec<oxideterm_ai::stream_state::AiStoppedAssistantTurn>,
+    ) {
+        self.chat_loading = false;
+        let conversation_id = self.conversation_state.active_conversation_id.clone();
+        let stopped_turns = self
+            .conversation_state
+            .active_conversation_mut()
+            .map(oxideterm_ai::stream_state::finalize_streaming_ai_messages_on_cancel)
+            .unwrap_or_default();
+        (conversation_id, stopped_turns)
+    }
+
+    pub(in crate::workspace) fn next_chat_id(&mut self, now_ms: i64) -> String {
+        self.next_chat_sequence = self.next_chat_sequence.saturating_add(1);
+        format!("chat-{now_ms}-{}", self.next_chat_sequence)
     }
 
     pub(in crate::workspace) fn request_model_refresh(
@@ -1607,14 +1848,10 @@ pub(super) struct AiChatWorkspaceState {
     pub(super) sidebar_width: f32,
     pub(super) overlay_window_size: Option<(f32, f32)>,
     pub(super) overlay_window_bounds_subscription: Option<Subscription>,
-    pub(super) conversation_state: oxideterm_ai::AiChatState,
     pub(super) message_list_state: ListState,
     pub(super) message_list_cache: RefCell<VirtualListSignatureCache>,
     pub(super) markdown_cache: RefCell<AiMarkdownDocumentCache>,
     pub(super) context_token_cache: RefCell<AiContextTokenBreakdownCache>,
-    pub(super) persistence_store: Option<oxideterm_ai::AiChatPersistenceStore>,
-    pub(super) initialized: bool,
-    pub(super) initialization_error: Option<AiChatInitializationError>,
     pub(super) conversation_list_open: bool,
     pub(super) menu_open: bool,
     pub(super) reasoning_menu_open: bool,
@@ -1625,7 +1862,6 @@ pub(super) struct AiChatWorkspaceState {
     pub(super) summarize_confirm_presence: oxideterm_gpui_ui::motion::ExitPresence,
     pub(super) clear_all_confirm_open: bool,
     pub(super) delete_message_confirm: Option<String>,
-    pub(super) safety_bypass_conversations: HashSet<String>,
     pub(super) draft: String,
     pub(super) input_focused: bool,
     pub(super) footer_focus: Option<AiChatFooterAction>,
@@ -1642,8 +1878,6 @@ pub(super) struct AiChatWorkspaceState {
     pub(super) context_trim_notice_sequence: u64,
     pub(super) include_context: bool,
     pub(super) include_all_panes: bool,
-    pub(super) loading: bool,
-    pub(super) next_sequence: u64,
 }
 
 /// Owns provider/model settings and selector state not yet extracted into the AI Entity.
@@ -1695,7 +1929,6 @@ impl AiChatWorkspaceState {
             sidebar_width,
             overlay_window_size,
             overlay_window_bounds_subscription: None,
-            conversation_state: oxideterm_ai::AiChatState::default(),
             message_list_state: tauri_virtual_list_state(
                 0,
                 ListAlignment::Top,
@@ -1704,9 +1937,6 @@ impl AiChatWorkspaceState {
             message_list_cache: RefCell::new(VirtualListSignatureCache::default()),
             markdown_cache: RefCell::new(AiMarkdownDocumentCache::default()),
             context_token_cache: RefCell::new(AiContextTokenBreakdownCache::default()),
-            persistence_store: None,
-            initialized: false,
-            initialization_error: None,
             conversation_list_open: false,
             menu_open: false,
             reasoning_menu_open: false,
@@ -1717,7 +1947,6 @@ impl AiChatWorkspaceState {
             summarize_confirm_presence: oxideterm_gpui_ui::motion::ExitPresence::visible(),
             clear_all_confirm_open: false,
             delete_message_confirm: None,
-            safety_bypass_conversations: HashSet::new(),
             draft: String::new(),
             input_focused: false,
             footer_focus: None,
@@ -1734,8 +1963,6 @@ impl AiChatWorkspaceState {
             context_trim_notice_sequence: 0,
             include_context: false,
             include_all_panes: false,
-            loading: false,
-            next_sequence: 0,
         }
     }
 }
@@ -2183,6 +2410,61 @@ mod entity_tests {
             assert!(entity.complete_chat_stream(generation));
             assert!(!entity.is_chat_stream_generation(generation));
             assert!(!entity.complete_chat_stream(generation));
+        });
+    }
+
+    #[gpui::test]
+    fn chat_conversation_state_and_cancel_lifecycle_are_entity_owned(cx: &mut TestAppContext) {
+        let entity = cx.new(|cx| {
+            AiWorkspaceEntity::new(test_runtime(), oxideterm_ai::AiProviderKeyStore::new(), cx)
+        });
+        entity.update(cx, |entity, _cx| {
+            assert!(!entity.chat_initialized);
+            assert!(entity.persistence_store.is_none());
+            let conversation_id = entity.conversation_state_mut().create_conversation(
+                "conversation-a".to_string(),
+                Some("Conversation A".to_string()),
+                100,
+                None,
+            );
+            entity.conversation_state_mut().add_message(
+                &conversation_id,
+                oxideterm_ai::AiChatMessage {
+                    id: "assistant-a".to_string(),
+                    role: oxideterm_ai::AiChatRole::Assistant,
+                    content: "partial response".to_string(),
+                    timestamp_ms: 101,
+                    model: Some("model-a".to_string()),
+                    context: None,
+                    is_streaming: true,
+                    thinking_content: None,
+                    metadata: None,
+                    tool_call_id: None,
+                    tool_calls: Vec::new(),
+                    turn: None,
+                    transcript_ref: None,
+                    summary_ref: None,
+                    branches: None,
+                    suggestions: Vec::new(),
+                },
+            );
+            entity.set_active_conversation_safety_bypass(true);
+            entity.set_chat_loading(true);
+            assert_eq!(entity.next_chat_id(200), "chat-200-1");
+
+            let (cancelled_id, stopped_turns) = entity.cancel_chat_conversation_state();
+            assert_eq!(cancelled_id.as_deref(), Some("conversation-a"));
+            assert_eq!(stopped_turns.len(), 1);
+            assert!(!entity.chat_is_loading());
+            assert!(
+                entity
+                    .conversation_state()
+                    .active_conversation()
+                    .is_some_and(|conversation| !conversation.messages[0].is_streaming)
+            );
+
+            assert!(!entity.delete_conversation("conversation-a"));
+            assert!(entity.safety_bypass_conversations().is_empty());
         });
     }
 

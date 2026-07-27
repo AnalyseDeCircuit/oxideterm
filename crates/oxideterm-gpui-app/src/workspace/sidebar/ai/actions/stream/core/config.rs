@@ -27,11 +27,9 @@ impl WorkspaceApp {
         request_content: Option<&str>,
         task_system_prompt: Option<&str>,
         rag_system_prompt: Option<&str>,
+        cx: &App,
     ) -> bool {
-        let Some(conversation) = self
-            .ai
-            .chat
-            .conversation_state
+        let Some(conversation) = self.ai_entity.read(cx).conversation_state()
             .conversations
             .iter()
             .find(|conversation| conversation.id == conversation_id)
@@ -64,7 +62,7 @@ impl WorkspaceApp {
                 .clone()
                 .filter(|agent_id| !agent_id.trim().is_empty())
                 .ok_or_else(|| "No ACP agent selected.".to_string())?;
-            let session_state = self.active_ai_acp_session_state(&acp_agent_id);
+            let session_state = self.active_ai_acp_session_state(&acp_agent_id, cx);
             let model_label = session_state
                 .as_ref()
                 .and_then(|state| oxideterm_ai::acp_model_config_option(&state.config_options))
@@ -90,7 +88,7 @@ impl WorkspaceApp {
                 api_key: None,
                 max_response_tokens: None,
                 reasoning_effort: None,
-                safety_mode: match self.active_ai_safety_mode() {
+                safety_mode: match self.active_ai_safety_mode(cx) {
                     AiSafetyMode::Bypass => AiPolicySafetyMode::Bypass,
                     AiSafetyMode::Default => AiPolicySafetyMode::Default,
                 },
@@ -117,10 +115,7 @@ impl WorkspaceApp {
             .and_then(|models| models.get(&model))
             .and_then(serde_json::Value::as_str)
             .unwrap_or("auto");
-        let reasoning_effort = self
-            .ai
-            .chat
-            .conversation_state
+        let reasoning_effort = self.ai_entity.read(cx).conversation_state()
             .active_conversation()
             .and_then(|conversation| {
                 ai_conversation_reasoning_effort(conversation, &provider.id, &model)
@@ -150,7 +145,7 @@ impl WorkspaceApp {
             api_key: None,
             max_response_tokens,
             reasoning_effort: Some(reasoning_effort),
-            safety_mode: match self.active_ai_safety_mode() {
+            safety_mode: match self.active_ai_safety_mode(cx) {
                 AiSafetyMode::Bypass => AiPolicySafetyMode::Bypass,
                 AiSafetyMode::Default => AiPolicySafetyMode::Default,
             },
@@ -164,6 +159,7 @@ impl WorkspaceApp {
     pub(in crate::workspace) fn resolve_ai_summary_stream_config(
         &self,
         compact: bool,
+        cx: &App,
     ) -> Result<AiChatStreamConfig, String> {
         let settings = self.settings_store.settings();
         let providers = ai_provider_views(&settings.ai.providers);
@@ -202,10 +198,7 @@ impl WorkspaceApp {
             .and_then(|models| models.get(&model))
             .and_then(serde_json::Value::as_str)
             .unwrap_or("auto");
-        let reasoning_effort = self
-            .ai
-            .chat
-            .conversation_state
+        let reasoning_effort = self.ai_entity.read(cx).conversation_state()
             .active_conversation()
             .and_then(|conversation| {
                 ai_conversation_reasoning_effort(conversation, &provider.id, &model)
@@ -230,7 +223,7 @@ impl WorkspaceApp {
             api_key: None,
             max_response_tokens,
             reasoning_effort: Some(reasoning_effort),
-            safety_mode: match self.active_ai_safety_mode() {
+            safety_mode: match self.active_ai_safety_mode(cx) {
                 AiSafetyMode::Bypass => AiPolicySafetyMode::Bypass,
                 AiSafetyMode::Default => AiPolicySafetyMode::Default,
             },
@@ -244,10 +237,9 @@ impl WorkspaceApp {
     pub(in crate::workspace) fn active_ai_acp_session_state(
         &self,
         agent_id: &str,
+        cx: &App,
     ) -> Option<AiAcpSessionState> {
-        self.ai
-            .chat
-            .conversation_state
+        self.ai_entity.read(cx).conversation_state()
             .active_conversation()
             .and_then(ai_acp_session_state)
             .filter(|state| state.agent_id == agent_id)
@@ -260,6 +252,7 @@ impl WorkspaceApp {
         request_content: Option<String>,
         task_system_prompt: Option<String>,
         rag_system_prompt: Option<String>,
+        cx: &App,
     ) -> Option<(Vec<AiChatMessage>, usize)> {
         let transcript_lookup_prompt = self.ai_transcript_lookup_prompt_for_conversation(
             conversation_id,
@@ -267,11 +260,9 @@ impl WorkspaceApp {
             request_content.as_deref(),
             task_system_prompt.as_deref(),
             rag_system_prompt.as_deref(),
+            cx,
         );
-        let mut history = self
-            .ai
-            .chat
-            .conversation_state
+        let mut history = self.ai_entity.read(cx).conversation_state()
             .conversations
             .iter()
             .find(|conversation| conversation.id == conversation_id)
@@ -490,11 +481,9 @@ impl WorkspaceApp {
         request_content: Option<&str>,
         task_system_prompt: Option<&str>,
         rag_system_prompt: Option<&str>,
+        cx: &App,
     ) -> Option<String> {
-        let conversation = self
-            .ai
-            .chat
-            .conversation_state
+        let conversation = self.ai_entity.read(cx).conversation_state()
             .conversations
             .iter()
             .find(|conversation| conversation.id == conversation_id)?;
@@ -536,36 +525,22 @@ impl WorkspaceApp {
         &self,
         conversation_id: String,
         entries: Vec<oxideterm_ai::PersistedTranscriptEntry>,
+        cx: &App,
     ) {
-        if entries.is_empty() {
-            return;
-        }
-        let Some(store) = self.ai.chat.persistence_store.clone() else {
-            return;
-        };
-        self.forwarding_runtime.spawn_blocking(move || {
-            if let Err(error) = store.append_transcript_entries(&conversation_id, entries) {
-                eprintln!("[AiChatStore] Failed to persist transcript entries: {error}");
-            }
-        });
+        self.ai_entity
+            .read(cx)
+            .persist_transcript_entries(conversation_id, entries);
     }
 
     pub(in crate::workspace) fn persist_ai_diagnostic_events(
         &self,
         conversation_id: String,
         events: Vec<oxideterm_ai::PersistedDiagnosticEvent>,
+        cx: &App,
     ) {
-        if events.is_empty() {
-            return;
-        }
-        let Some(store) = self.ai.chat.persistence_store.clone() else {
-            return;
-        };
-        self.forwarding_runtime.spawn_blocking(move || {
-            if let Err(error) = store.append_diagnostic_events(&conversation_id, events) {
-                eprintln!("[AiChatStore] Failed to persist diagnostic events: {error}");
-            }
-        });
+        self.ai_entity
+            .read(cx)
+            .persist_diagnostic_events(conversation_id, events);
     }
 
     pub(in crate::workspace) fn ai_diagnostic_base(

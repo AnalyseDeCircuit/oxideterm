@@ -234,6 +234,7 @@ impl WorkspaceApp {
                         synthetic,
                         retry_attempt,
                         hard_deny_triggered,
+                        cx,
                     );
                 }
                 AiStreamDeliveryEvent::RoundSummary {
