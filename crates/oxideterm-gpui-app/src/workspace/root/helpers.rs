@@ -1052,7 +1052,7 @@ impl WorkspaceApp {
         if self.dismiss_terminal_broadcast_menu(cx) {
             changed = true;
         }
-        if self.close_terminal_git_branch_picker() {
+        if self.close_terminal_git_branch_picker(cx) {
             changed = true;
         }
         if self.close_tab_context_menu() {

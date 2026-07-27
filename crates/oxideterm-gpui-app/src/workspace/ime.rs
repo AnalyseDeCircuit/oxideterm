@@ -677,7 +677,7 @@ impl WorkspaceApp {
             return Some(WorkspaceImeTarget::TerminalCwdSearch);
         }
 
-        if self.terminal_git_branch_picker.open {
+        if self.terminal.read(cx).git_panel_open() {
             return Some(WorkspaceImeTarget::TerminalGitBranchSearch);
         }
 
@@ -1433,10 +1433,12 @@ impl WorkspaceApp {
                     .cwd_picker_open()
                     .then(|| terminal.cwd_query().to_string())
             }
-            WorkspaceImeTarget::TerminalGitBranchSearch => self
-                .terminal_git_branch_picker
-                .open
-                .then(|| self.terminal_git_branch_picker.query.clone()),
+            WorkspaceImeTarget::TerminalGitBranchSearch => {
+                let terminal = self.terminal.read(cx);
+                terminal
+                    .git_panel_open()
+                    .then(|| terminal.git_panel_query().to_string())
+            }
             WorkspaceImeTarget::TerminalProjectSearch => {
                 let terminal = self.terminal.read(cx);
                 terminal
@@ -2241,15 +2243,9 @@ impl WorkspaceApp {
                 }
             }
             WorkspaceImeTarget::TerminalGitBranchSearch => {
-                if self.terminal_git_branch_picker.open {
-                    replace_utf16(
-                        &mut self.terminal_git_branch_picker.query,
-                        replacement_range,
-                        text,
-                    );
-                    // Filtering rebuilds the visible branch rows; drop the stale
-                    // highlighted branch until keyboard navigation chooses one.
-                    self.terminal_git_branch_picker.highlighted_branch = None;
+                if self.terminal.update(cx, |terminal, _cx| {
+                    terminal.replace_git_panel_query(replacement_range, text)
+                }) {
                     self.new_connection_caret_visible = true;
                     cx.notify();
                 }

@@ -243,7 +243,7 @@ impl WorkspaceApp {
                     bar.child(self.render_terminal_quick_commands_popover(cx))
                 },
             )
-            .when(self.terminal_git_branch_picker.open, |bar| {
+            .when(self.terminal.read(cx).git_panel_open(), |bar| {
                 bar.child(self.render_terminal_git_branch_picker(cx))
             })
             .when(
@@ -723,7 +723,7 @@ impl WorkspaceApp {
                                                 !this.terminal_quick_commands_open;
                                             this.dismiss_terminal_broadcast_menu(cx);
                                             this.close_terminal_cwd_picker(cx);
-                                            this.close_terminal_git_branch_picker();
+                                            this.close_terminal_git_branch_picker(cx);
                                             if !this.terminal_quick_commands_open {
                                                 this.close_terminal_quick_commands_popover();
                                             }

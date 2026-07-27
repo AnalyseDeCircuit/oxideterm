@@ -661,7 +661,7 @@ impl WorkspaceApp {
             || (anchor.id == SelectAnchorId::TerminalCwdMenu
                 && self.terminal.read(cx).cwd_picker_open())
             || (anchor.id == SelectAnchorId::TerminalGitBranchMenu
-                && self.terminal_git_branch_picker.open)
+                && self.terminal.read(cx).git_panel_open())
             || (anchor.id == SelectAnchorId::TerminalProjectMenu
                 && self.terminal.read(cx).project_panel_open())
             || (anchor.id == SelectAnchorId::SessionManagerViewMode
@@ -827,7 +827,7 @@ impl WorkspaceApp {
             self.close_terminal_quick_commands_popover();
             changed = true;
         }
-        if self.close_terminal_git_branch_picker() {
+        if self.close_terminal_git_branch_picker(cx) {
             changed = true;
         }
         if self.session_manager.focused_input.take().is_some() {

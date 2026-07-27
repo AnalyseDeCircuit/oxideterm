@@ -719,7 +719,7 @@ impl WorkspaceApp {
             .saturating_add(status.modified())
             .saturating_add(status.untracked());
         let workspace = cx.entity();
-        let active = self.terminal_git_branch_picker.open;
+        let active = self.terminal.read(cx).git_panel_open();
         let foreground = if active {
             rgb(self.tokens.ui.accent)
         } else {
@@ -796,8 +796,8 @@ impl WorkspaceApp {
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(|this, _event, _window, cx| {
-                    if this.terminal_git_branch_picker.open {
-                        this.close_terminal_git_branch_picker();
+                    if this.terminal.read(cx).git_panel_open() {
+                        this.close_terminal_git_branch_picker(cx);
                         cx.notify();
                     } else {
                         this.open_terminal_git_branch_picker(cx);

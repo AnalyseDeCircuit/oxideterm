@@ -1685,6 +1685,20 @@ impl WorkspaceApp {
             WorkspaceTerminalEvent::GitMetadataChanged => {
                 cx.notify();
             }
+            WorkspaceTerminalEvent::GitCommitDraftReady(request) => {
+                if let Some(command) = request.take() {
+                    // The Entity owns generation and completion; the root only
+                    // installs the one-shot result into its current input owner.
+                    self.terminal_command_input_collapsed = false;
+                    self.terminal_command_bar_focused = true;
+                    self.terminal_command_bar_draft = command;
+                    self.terminal_command_suggestions_open = false;
+                    self.terminal_command_suggestion_highlighted = None;
+                    self.ime_marked_text = None;
+                    self.clear_ime_selection();
+                    cx.notify();
+                }
+            }
             WorkspaceTerminalEvent::ProjectMetadataChanged => {
                 if let Some(key) = self.active_terminal_project_key(cx) {
                     self.terminal.update(cx, |terminal, _cx| {

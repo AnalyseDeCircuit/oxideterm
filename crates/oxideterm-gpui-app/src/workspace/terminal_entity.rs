@@ -42,6 +42,7 @@ impl TerminalNoticeBatchRequest {
 pub(in crate::workspace) enum WorkspaceTerminalEvent {
     NoticesReady(TerminalNoticeBatchRequest),
     GitMetadataChanged,
+    GitCommitDraftReady(terminal_git::TerminalGitCommitDraftRequest),
     ProjectMetadataChanged,
 }
 
@@ -68,6 +69,9 @@ pub(in crate::workspace) struct WorkspaceTerminalEntity {
     git_tx: delivery::ActiveDeliverySender<TerminalGitProbeDelivery>,
     git_rx: std::sync::mpsc::Receiver<TerminalGitProbeDelivery>,
     git_store: GitStatusStore,
+    pub(super) git_action_tx: delivery::ActiveDeliverySender<terminal_git::TerminalGitDelivery>,
+    pub(super) git_action_rx: std::sync::mpsc::Receiver<terminal_git::TerminalGitDelivery>,
+    pub(super) git_panel: terminal_git::TerminalGitBranchPickerState,
     project_tx: delivery::ActiveDeliverySender<terminal_project::TerminalProjectDelivery>,
     project_rx: std::sync::mpsc::Receiver<terminal_project::TerminalProjectDelivery>,
     project_store: ProjectStatusStore,
@@ -91,6 +95,8 @@ impl WorkspaceTerminalEntity {
         let (notice_tx, notice_rx) =
             delivery::ActiveDeliverySender::channel_with_wake(delivery_wake.clone());
         let (git_tx, git_rx) =
+            delivery::ActiveDeliverySender::channel_with_wake(delivery_wake.clone());
+        let (git_action_tx, git_action_rx) =
             delivery::ActiveDeliverySender::channel_with_wake(delivery_wake.clone());
         let (project_tx, project_rx) =
             delivery::ActiveDeliverySender::channel_with_wake(delivery_wake.clone());
@@ -133,6 +139,9 @@ impl WorkspaceTerminalEntity {
             git_tx,
             git_rx,
             git_store: GitStatusStore::default(),
+            git_action_tx,
+            git_action_rx,
+            git_panel: terminal_git::TerminalGitBranchPickerState::default(),
             project_tx,
             project_rx,
             project_store: ProjectStatusStore::default(),
@@ -457,6 +466,7 @@ impl WorkspaceTerminalEntity {
     fn drain_deliveries(&mut self, cx: &mut Context<Self>) -> bool {
         self.drain_notices(cx)
             | self.drain_git_results(cx)
+            | self.drain_git_action_results(cx)
             | self.drain_project_results(cx)
             | self.drain_cwd_results(cx)
     }
@@ -664,9 +674,10 @@ mod tests {
     use super::*;
     use gpui::TestAppContext;
     use oxideterm_environment::{
-        CurrentDirectoryScope, CurrentDirectorySnapshot, CurrentDirectorySource, ProjectFacet,
-        ProjectFacetKind, ProjectTaskGroup,
+        CurrentDirectoryScope, CurrentDirectorySnapshot, CurrentDirectorySource,
+        GitBranchListOutcome, GitBranchReference, ProjectFacet, ProjectFacetKind, ProjectTaskGroup,
     };
+    use terminal_git::TerminalGitPanelSection;
 
     struct TerminalEventRecorder {
         notices: Vec<TerminalNoticeBatchRequest>,
@@ -886,6 +897,7 @@ mod tests {
                     WorkspaceTerminalEvent::GitMetadataChanged => {
                         recorder.git_metadata_changes += 1;
                     }
+                    WorkspaceTerminalEvent::GitCommitDraftReady(_) => {}
                     WorkspaceTerminalEvent::ProjectMetadataChanged => {
                         recorder.project_metadata_changes += 1;
                     }
@@ -944,6 +956,7 @@ mod tests {
                     WorkspaceTerminalEvent::GitMetadataChanged => {
                         recorder.git_metadata_changes += 1;
                     }
+                    WorkspaceTerminalEvent::GitCommitDraftReady(_) => {}
                     WorkspaceTerminalEvent::ProjectMetadataChanged => {
                         recorder.project_metadata_changes += 1;
                     }
@@ -1004,6 +1017,7 @@ mod tests {
                     WorkspaceTerminalEvent::GitMetadataChanged => {
                         recorder.git_metadata_changes += 1;
                     }
+                    WorkspaceTerminalEvent::GitCommitDraftReady(_) => {}
                     WorkspaceTerminalEvent::ProjectMetadataChanged => {
                         recorder.project_metadata_changes += 1;
                     }
@@ -1048,6 +1062,51 @@ mod tests {
             recorder.read_with(cx, |recorder, _cx| recorder.git_metadata_changes),
             1
         );
+    }
+
+    #[gpui::test]
+    fn git_panel_delivery_and_reopen_generation_are_entity_owned(cx: &mut TestAppContext) {
+        let terminal = new_terminal_entity(cx);
+        let key = GitProbeKey::new(GitProbeScope::ssh_node("missing-node"), "/repo")
+            .expect("git probe key");
+        let sender = terminal.update(cx, |terminal, cx| {
+            terminal.open_git_panel(key.clone(), TerminalGitPanelSection::Branches, cx);
+            terminal.git_action_tx.clone()
+        });
+        sender
+            .send(terminal_git::TerminalGitDelivery::BranchList {
+                key: key.clone(),
+                generation: 1,
+                outcome: GitBranchListOutcome::Ready(vec![
+                    GitBranchReference::new("main", true).expect("branch"),
+                ]),
+            })
+            .expect("branch delivery");
+        cx.run_until_parked();
+        terminal.read_with(cx, |terminal, _cx| {
+            assert!(terminal.git_panel_open());
+            assert_eq!(terminal.visible_git_branches()[0].name(), "main");
+        });
+
+        terminal.update(cx, |terminal, cx| {
+            assert!(terminal.close_git_panel());
+            terminal.open_git_panel(key.clone(), TerminalGitPanelSection::Branches, cx);
+        });
+        sender
+            .send(terminal_git::TerminalGitDelivery::BranchList {
+                key,
+                generation: 1,
+                outcome: GitBranchListOutcome::NotRepository,
+            })
+            .expect("stale branch delivery");
+        cx.run_until_parked();
+        terminal.read_with(cx, |terminal, _cx| {
+            assert!(terminal.visible_git_branches().is_empty());
+            assert_eq!(
+                terminal.git_panel_error(),
+                Some(&terminal_git::TerminalGitBranchError::NodeUnavailable)
+            );
+        });
     }
 
     #[gpui::test]
