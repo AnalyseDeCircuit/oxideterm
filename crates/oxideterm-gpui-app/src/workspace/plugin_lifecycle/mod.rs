@@ -438,7 +438,7 @@ impl WorkspaceApp {
             return false;
         };
         let terminal_count = node.terminal_ids.len();
-        let Some(runtime) = self.node_runtime_store.metadata_snapshot(&node_id) else {
+        let Some(runtime) = self.node_router.node_metadata(&node_id) else {
             return false;
         };
         if native_plugin_session_connection_state(
@@ -820,7 +820,7 @@ impl WorkspaceApp {
             })
             .collect::<HashMap<_, _>>();
         native_plugin_session_tree_from_nodes(
-            self.node_runtime_store.metadata_snapshots(),
+            self.node_router.node_metadata_snapshots(),
             &titles,
             &terminal_ids,
         )

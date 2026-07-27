@@ -15,11 +15,11 @@ fn attach_saved_owner_to_reused_ssh_node(
 }
 
 fn saved_node_route_matches_config(
-    runtime_store: &NodeRuntimeStore,
+    node_router: &NodeRouter,
     node_id: &NodeId,
     requested_config: &SshConfig,
 ) -> bool {
-    let Ok(path) = runtime_store.path_to_node(node_id) else {
+    let Ok(path) = node_router.path_to_node(node_id) else {
         return false;
     };
     let proxy_hops = requested_config.proxy_chain.as_deref().unwrap_or_default();
@@ -31,7 +31,7 @@ fn saved_node_route_matches_config(
     // still matches the current saved profile. Authentication and host-key
     // overrides may change without changing which remote node the path owns.
     path.iter().enumerate().all(|(index, node_id)| {
-        let Some(actual) = runtime_store.metadata_snapshot(node_id) else {
+        let Some(actual) = node_router.node_metadata(node_id) else {
             return false;
         };
         let (expected_host, expected_port, expected_username) = proxy_hops
@@ -194,7 +194,7 @@ impl WorkspaceApp {
     ) -> Result<()> {
         let indexed_node_id = self.saved_ssh_nodes.get(&saved_connection_id).cloned();
         if let Some(node_id) = indexed_node_id.clone().filter(|node_id| {
-            saved_node_route_matches_config(&self.node_runtime_store, node_id, &config)
+            saved_node_route_matches_config(&self.node_router, node_id, &config)
                 && self.ssh_nodes.get(node_id).is_some_and(|node| {
                     node.endpoint.host == config.host
                         && node.endpoint.port == config.port
@@ -215,8 +215,8 @@ impl WorkspaceApp {
                 let node_config = self
                     .config_with_host_key_acceptance_for_node(&node_id, &config)
                     .or_else(|| {
-                        self.node_runtime_store
-                            .snapshot(&node_id)
+                        self.node_router
+                            .node_runtime_snapshot(&node_id)
                             .map(|snapshot| snapshot.config)
                     })
                     .ok_or_else(|| {
@@ -256,8 +256,8 @@ impl WorkspaceApp {
             let expansion =
                 self.expand_saved_connection_tree(&saved_connection_id, config, title.clone())?;
             let target_config = self
-                .node_runtime_store
-                .snapshot(&expansion.target_node_id)
+                .node_router
+                .node_runtime_snapshot(&expansion.target_node_id)
                 .map(|snapshot| snapshot.config)
                 .ok_or_else(|| anyhow::anyhow!("target node was not materialized"))?;
             let target_node_id = expansion.target_node_id;
@@ -303,8 +303,8 @@ impl WorkspaceApp {
                     let node_config = self
                         .config_with_host_key_acceptance_for_node(&existing_node_id, &config)
                         .or_else(|| {
-                            self.node_runtime_store
-                                .snapshot(&existing_node_id)
+                            self.node_router
+                                .node_runtime_snapshot(&existing_node_id)
                                 .map(|snapshot| snapshot.config)
                         })
                         .ok_or_else(|| {
@@ -379,17 +379,17 @@ impl WorkspaceApp {
         let saved_connection_id = saved_connection_id.trim().to_string();
         self.saved_ssh_nodes
             .insert(saved_connection_id.clone(), node_id.clone());
-        let runtime_origin_needs_owner = self
-            .node_runtime_store
-            .metadata_snapshot(node_id)
-            .is_some_and(|snapshot| {
-                snapshot.origin.saved_connection_id() != Some(saved_connection_id.as_str())
-            });
+        let runtime_origin_needs_owner =
+            self.node_router
+                .node_metadata(node_id)
+                .is_some_and(|snapshot| {
+                    snapshot.origin.saved_connection_id() != Some(saved_connection_id.as_str())
+                });
         if attached || runtime_origin_needs_owner {
             // This is an explicit saved-connection open that reaches an
             // existing node. Promote runtime origin so persisted node ownership
             // and SSH privilege scope agree after restart.
-            let _ = self.node_runtime_store.update_origin(
+            let _ = self.node_router.update_node_origin(
                 node_id,
                 NodeOrigin::Restored {
                     saved_connection_id,
@@ -409,7 +409,7 @@ impl WorkspaceApp {
         let trust_host_key = accepted_config.trust_host_key?;
         let expected_host_key_fingerprint =
             accepted_config.expected_host_key_fingerprint.clone()?;
-        let runtime_snapshot = self.node_runtime_store.snapshot(node_id)?;
+        let runtime_snapshot = self.node_router.node_runtime_snapshot(node_id)?;
         let mut config = runtime_snapshot.config;
         // Tauri passes accepted host-key data as connectNode step options. A
         // reused native node connects from its runtime-owned config, so update
@@ -418,11 +418,8 @@ impl WorkspaceApp {
         config.trust_host_key = Some(trust_host_key);
         config.expected_host_key_fingerprint = Some(expected_host_key_fingerprint);
         let action_config = config.clone();
-        self.node_runtime_store.upsert_node_with_origin(
-            node_id.clone(),
-            config,
-            runtime_snapshot.origin,
-        );
+        self.node_router
+            .upsert_node_with_origin(node_id.clone(), config, runtime_snapshot.origin);
         Some(action_config)
     }
 
@@ -438,8 +435,8 @@ impl WorkspaceApp {
             // credentials may still focus an already-active root node with the
             // same endpoint, but it must not create a new terminal.
             let matching_root = self
-                .node_runtime_store
-                .metadata_snapshot(node_id)
+                .node_router
+                .node_metadata(node_id)
                 .is_some_and(|snapshot| {
                     snapshot.depth == 0
                         && snapshot.host == connection.host
@@ -464,8 +461,8 @@ impl WorkspaceApp {
     }
 
     fn existing_direct_root_node_for_saved_config(&self, config: &SshConfig) -> Option<NodeId> {
-        self.node_runtime_store
-            .flatten()
+        self.node_router
+            .flatten_tree()
             .into_iter()
             .find(|node| {
                 node.depth == 0
@@ -492,8 +489,8 @@ impl WorkspaceApp {
                 Vec::new(),
                 NodeReadiness::Disconnected,
             );
-            if !self.node_runtime_store.contains_node(&node_id) {
-                self.node_runtime_store.upsert_node_with_origin(
+            if !self.node_router.contains_node(&node_id) {
+                self.node_router.upsert_node_with_origin(
                     node_id.clone(),
                     config,
                     NodeOrigin::Restored {
@@ -521,7 +518,7 @@ impl WorkspaceApp {
             Vec::new(),
             NodeReadiness::Disconnected,
         );
-        self.node_runtime_store
+        self.node_router
             .upsert_node_with_origin(node_id.clone(), config, origin);
         self.ssh_nodes.insert(node_id.clone(), ui_node);
         if let Some(saved_connection_id) = saved_connection_id {
@@ -552,8 +549,8 @@ impl WorkspaceApp {
         });
 
         let origin = self
-            .node_runtime_store
-            .metadata_snapshot(&node_id)
+            .node_router
+            .node_metadata(&node_id)
             .map(|snapshot| snapshot.origin)
             .or_else(|| {
                 saved_connection_id.as_ref().map(|id| NodeOrigin::Restored {
@@ -561,12 +558,9 @@ impl WorkspaceApp {
                 })
             })
             .unwrap_or(NodeOrigin::Direct);
-        if !self.node_runtime_store.contains_node(&node_id) {
-            self.node_runtime_store.upsert_node_with_origin(
-                node_id.clone(),
-                config.clone(),
-                origin,
-            );
+        if !self.node_router.contains_node(&node_id) {
+            self.node_router
+                .upsert_node_with_origin(node_id.clone(), config.clone(), origin);
         }
         let starting_node_connection = self.node_router.connection_id_for_node(&node_id).is_none();
         let trace_plan = starting_node_connection
@@ -575,8 +569,8 @@ impl WorkspaceApp {
             })
             .flatten();
         let trace_parent_id = self
-            .node_runtime_store
-            .metadata_snapshot(&node_id)
+            .node_router
+            .node_metadata(&node_id)
             .and_then(|snapshot| snapshot.parent_id);
         if starting_node_connection {
             let node_consumer = ConnectionConsumer::NodeRouter(node_id.0.clone());
@@ -742,7 +736,7 @@ impl WorkspaceApp {
         update_saved_node_index: bool,
     ) {
         for node_id in &expansion.path_node_ids {
-            let Some(snapshot) = self.node_runtime_store.metadata_snapshot(node_id) else {
+            let Some(snapshot) = self.node_router.node_metadata(node_id) else {
                 continue;
             };
             let title = if node_id == &expansion.target_node_id {
@@ -795,7 +789,7 @@ impl WorkspaceApp {
             .node_router
             .connection_id_for_node(node_id)
             .ok_or_else(|| anyhow::anyhow!("SSH node {} is not connected", node_id.0))?;
-        if !self.node_runtime_store.contains_node(node_id) {
+        if !self.node_router.contains_node(node_id) {
             return Err(anyhow::anyhow!(
                 "SSH node {} has no runtime owner",
                 node_id.0
@@ -980,8 +974,8 @@ impl WorkspaceApp {
             return Ok(());
         }
         let target_has_parent = self
-            .node_runtime_store
-            .metadata_snapshot(&node_id)
+            .node_router
+            .node_metadata(&node_id)
             .and_then(|snapshot| snapshot.parent_id)
             .is_some();
         if target_has_parent && self.node_router.connection_id_for_node(&node_id).is_none() {
@@ -1250,38 +1244,38 @@ mod create_tests {
 
     #[test]
     fn saved_node_route_rejects_a_stale_direct_target() {
-        let store = NodeRuntimeStore::default();
+        let router = NodeRouter::new(SshConnectionRegistry::new(ConnectionPoolConfig::default()));
         let node_id = NodeId::new("saved-node");
-        store.upsert_node(
+        router.upsert_node(
             node_id.clone(),
             SshConfig::password("old.example.com", 22, "ops", "old-secret"),
         );
         let requested = SshConfig::password("new.example.com", 22, "ops", "new-secret");
 
         assert!(!saved_node_route_matches_config(
-            &store, &node_id, &requested
+            &router, &node_id, &requested
         ));
     }
 
     #[test]
     fn saved_node_route_accepts_the_same_direct_target_with_new_auth() {
-        let store = NodeRuntimeStore::default();
+        let router = NodeRouter::new(SshConnectionRegistry::new(ConnectionPoolConfig::default()));
         let node_id = NodeId::new("saved-node");
-        store.upsert_node(
+        router.upsert_node(
             node_id.clone(),
             SshConfig::password("target.example.com", 22, "ops", "old-secret"),
         );
         let requested = SshConfig::password("target.example.com", 22, "ops", "new-secret");
 
         assert!(saved_node_route_matches_config(
-            &store, &node_id, &requested
+            &router, &node_id, &requested
         ));
     }
 
     #[test]
     fn saved_node_route_rejects_a_different_proxy_chain() {
-        let store = NodeRuntimeStore::default();
-        let expansion = store
+        let router = NodeRouter::new(SshConnectionRegistry::new(ConnectionPoolConfig::default()));
+        let expansion = router
             .expand_manual_preset(
                 "saved-a",
                 vec![SshConfig::password("old-jump.example.com", 22, "ops", "pw")],
@@ -1306,7 +1300,7 @@ mod create_tests {
         };
 
         assert!(!saved_node_route_matches_config(
-            &store,
+            &router,
             &expansion.target_node_id,
             &requested,
         ));

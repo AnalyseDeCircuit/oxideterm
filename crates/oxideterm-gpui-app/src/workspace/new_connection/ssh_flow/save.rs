@@ -39,7 +39,7 @@ impl WorkspaceApp {
             cx.notify();
             return;
         };
-        let Some(runtime_snapshot) = self.node_runtime_store.snapshot(&node_id) else {
+        let Some(runtime_snapshot) = self.node_router.node_runtime_snapshot(&node_id) else {
             self.session_manager.status = Some(self.i18n.t("ssh.form.runtime_node_missing"));
             cx.notify();
             return;
@@ -88,13 +88,16 @@ impl WorkspaceApp {
         let mut configs = Vec::new();
         let mut cursor = Some(parent_id.clone());
         while let Some(node_id) = cursor {
-            let snapshot = self.node_runtime_store.snapshot(&node_id).ok_or_else(|| {
-                anyhow::anyhow!(
-                    "{}: {}",
-                    self.i18n.t("ssh.form.runtime_node_missing"),
-                    node_id.0
-                )
-            })?;
+            let snapshot = self
+                .node_router
+                .node_runtime_snapshot(&node_id)
+                .ok_or_else(|| {
+                    anyhow::anyhow!(
+                        "{}: {}",
+                        self.i18n.t("ssh.form.runtime_node_missing"),
+                        node_id.0
+                    )
+                })?;
             configs.push(snapshot.config);
             cursor = snapshot.parent_id;
         }
@@ -1021,7 +1024,7 @@ impl WorkspaceApp {
         let Some(title) = self.ssh_nodes.get(&node_id).map(|node| node.title.clone()) else {
             return;
         };
-        let Some(runtime_snapshot) = self.node_runtime_store.snapshot(&node_id) else {
+        let Some(runtime_snapshot) = self.node_router.node_runtime_snapshot(&node_id) else {
             return;
         };
         self.prepare_modal_interaction_boundary(cx);

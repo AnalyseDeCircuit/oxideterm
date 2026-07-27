@@ -311,7 +311,7 @@ impl WorkspaceApp {
             return true;
         }
 
-        let Ok(path_node_ids) = self.node_runtime_store.path_to_node(&target_node_id) else {
+        let Ok(path_node_ids) = self.node_router.path_to_node(&target_node_id) else {
             self.report_proxy_session_tree_error(
                 format!("Node path not found for {}", target_node_id.0),
                 cx,
@@ -358,8 +358,8 @@ impl WorkspaceApp {
         }
 
         let upstream_proxy = nodes_to_connect.first().and_then(|node_id| {
-            self.node_runtime_store
-                .snapshot(node_id)
+            self.node_router
+                .node_runtime_snapshot(node_id)
                 .filter(|snapshot| snapshot.parent_id.is_none())
                 .and_then(|snapshot| snapshot.config.upstream_proxy)
         });
@@ -490,13 +490,12 @@ impl WorkspaceApp {
         }
         let tx = self.ssh_worker_sender(cx);
         let router = self.node_router.clone();
-        let runtime_store = self.node_runtime_store.clone();
         std::thread::spawn(move || {
             let root_upstream_proxy = run.upstream_proxy.clone();
             let status = match tokio::runtime::Runtime::new() {
                 Ok(runtime) => runtime.block_on(async move {
-                    match runtime_store
-                        .snapshot(&step.node_id)
+                    match router
+                        .node_runtime_snapshot(&step.node_id)
                         .and_then(|snapshot| snapshot.parent_id)
                     {
                         Some(parent_id) => {
@@ -587,8 +586,8 @@ impl WorkspaceApp {
         self.host_key_challenge = None;
         self.release_proxy_session_tree_locks(&run.plan, cx);
         let Some(target_config) = self
-            .node_runtime_store
-            .snapshot(&target_node_id)
+            .node_router
+            .node_runtime_snapshot(&target_node_id)
             .map(|snapshot| snapshot.config)
         else {
             self.report_proxy_session_tree_error(
@@ -728,7 +727,7 @@ impl WorkspaceApp {
         let Some(fingerprint) = step.expected_host_key_fingerprint.clone() else {
             return;
         };
-        if let Some(snapshot) = self.node_runtime_store.snapshot(&step.node_id) {
+        if let Some(snapshot) = self.node_router.node_runtime_snapshot(&step.node_id) {
             let mut config = snapshot.config;
             config.strict_host_key_checking = true;
             config.trust_host_key = Some(trust_host_key);
@@ -736,11 +735,8 @@ impl WorkspaceApp {
             // Tauri passes host-key acceptance as connectNode options. Native
             // stores the same one-step options on the node config immediately
             // before starting connect_tree_node.
-            self.node_runtime_store.upsert_node_with_origin(
-                step.node_id.clone(),
-                config,
-                snapshot.origin,
-            );
+            self.node_router
+                .upsert_node_with_origin(step.node_id.clone(), config, snapshot.origin);
         }
     }
 
@@ -768,7 +764,7 @@ impl WorkspaceApp {
         let Some(cleanup_root) = plan.cleanup_root_node_id() else {
             return;
         };
-        let nodes_to_cleanup = self.node_runtime_store.subtree_postorder(&cleanup_root);
+        let nodes_to_cleanup = self.node_router.subtree_postorder(&cleanup_root);
         for node_id in &nodes_to_cleanup {
             self.workspace_runtime.update(cx, |runtime, cx| {
                 runtime.cancel_connection_trace(node_id, cx);
@@ -911,8 +907,8 @@ impl WorkspaceApp {
                     match self.expand_saved_connection_tree(&expansion_id, config, title.clone()) {
                         Ok(expansion) => {
                             if let Some(target_config) = self
-                                .node_runtime_store
-                                .snapshot(&expansion.target_node_id)
+                                .node_router
+                                .node_runtime_snapshot(&expansion.target_node_id)
                                 .map(|snapshot| snapshot.config)
                             {
                                 let post_connect_command =

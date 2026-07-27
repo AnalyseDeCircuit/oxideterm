@@ -60,6 +60,35 @@ impl NodeRouter {
         self.runtime.metadata_snapshot(node_id)
     }
 
+    /// Returns the secret-bearing runtime snapshot only to explicit connection actions.
+    pub fn node_runtime_snapshot(&self, node_id: &NodeId) -> Option<NodeRuntimeSnapshot> {
+        self.runtime.snapshot(node_id)
+    }
+
+    pub fn node_metadata_snapshots(&self) -> Vec<NodeMetadataSnapshot> {
+        self.runtime.metadata_snapshots()
+    }
+
+    pub fn path_to_node(&self, node_id: &NodeId) -> Result<Vec<NodeId>, RouteError> {
+        self.runtime.path_to_node(node_id)
+    }
+
+    pub fn contains_node(&self, node_id: &NodeId) -> bool {
+        self.runtime.contains_node(node_id)
+    }
+
+    pub fn update_node_origin(
+        &self,
+        node_id: &NodeId,
+        origin: NodeOrigin,
+    ) -> Result<(), RouteError> {
+        self.runtime.update_origin(node_id, origin)
+    }
+
+    pub fn subtree_postorder(&self, node_id: &NodeId) -> Vec<NodeId> {
+        self.runtime.subtree_postorder(node_id)
+    }
+
     pub fn minimal_subtree_roots(
         &self,
         candidate_node_ids: impl IntoIterator<Item = NodeId>,

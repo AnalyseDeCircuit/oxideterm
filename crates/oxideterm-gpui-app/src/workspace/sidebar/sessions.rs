@@ -41,8 +41,8 @@ impl WorkspaceApp {
         }
 
         let config = self
-            .node_runtime_store
-            .snapshot(&node_id)
+            .node_router
+            .node_runtime_snapshot(&node_id)
             .map(|snapshot| snapshot.config)
             .ok_or_else(|| anyhow::anyhow!("SSH node {} has no runtime config", node_id.0))?;
         let saved_connection_id = self
@@ -1341,7 +1341,7 @@ impl WorkspaceApp {
         if saved_connection_id.is_some() {
             return false;
         }
-        let Some(snapshot) = self.node_runtime_store.metadata_snapshot(node_id) else {
+        let Some(snapshot) = self.node_router.node_metadata(node_id) else {
             return true;
         };
         // ManualPreset/Restored are already saved-connection materializations,

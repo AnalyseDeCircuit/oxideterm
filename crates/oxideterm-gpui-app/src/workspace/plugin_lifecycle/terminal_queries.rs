@@ -96,7 +96,7 @@ pub(super) fn native_plugin_active_terminal_target(
     let node_id = workspace.terminal_ssh_nodes.get(&session_id).cloned();
     let connection_id = node_id
         .as_ref()
-        .and_then(|node_id| workspace.node_runtime_store.connection_id_for_node(node_id));
+        .and_then(|node_id| workspace.node_router.connection_id_for_node(node_id));
     let connection_state = connection_id
         .as_ref()
         .and_then(|connection_id| connection_states.get(connection_id))

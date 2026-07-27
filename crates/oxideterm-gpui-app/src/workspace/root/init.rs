@@ -526,7 +526,6 @@ impl WorkspaceApp {
             wsl_graphics: Arc::new(oxideterm_wsl_graphics::WslGraphicsState::new()),
             sftp_transfer_manager,
             sftp_progress_store,
-            node_runtime_store,
             node_router,
             notification_center: NotificationCenterState::default(),
             notification_sidebar_list_state: tauri_virtual_list_state(

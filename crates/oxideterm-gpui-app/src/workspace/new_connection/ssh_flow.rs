@@ -213,9 +213,9 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) {
         let parent_ready = self
-            .node_runtime_store
-            .snapshot(&parent_node_id)
-            .is_some_and(|snapshot| snapshot.state.readiness == NodeReadiness::Ready);
+            .node_router
+            .node_metadata(&parent_node_id)
+            .is_some_and(|snapshot| snapshot.readiness == NodeReadiness::Ready);
         if !parent_ready {
             self.session_manager.status = Some(format!(
                 "{}: {}",
@@ -257,9 +257,9 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) {
         let parent_ready = self
-            .node_runtime_store
-            .snapshot(&parent_node_id)
-            .is_some_and(|snapshot| snapshot.state.readiness == NodeReadiness::Ready);
+            .node_router
+            .node_metadata(&parent_node_id)
+            .is_some_and(|snapshot| snapshot.readiness == NodeReadiness::Ready);
         if !parent_ready {
             self.report_saved_next_hop_error("sessions.saved_next_hop.parent_not_ready", cx);
             return;

@@ -975,8 +975,8 @@ impl WorkspaceApp {
                         .with_target(target);
                 };
                 let Some(config) = self
-                    .node_runtime_store
-                    .snapshot(&node_id)
+                    .node_router
+                    .node_runtime_snapshot(&node_id)
                     .map(|runtime| runtime.config)
                 else {
                     return snapshot

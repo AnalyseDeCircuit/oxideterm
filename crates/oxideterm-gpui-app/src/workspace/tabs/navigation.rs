@@ -530,7 +530,7 @@ impl WorkspaceApp {
             return;
         }
 
-        let mut nodes_to_disconnect = self.node_runtime_store.subtree_postorder(node_id);
+        let mut nodes_to_disconnect = self.node_router.subtree_postorder(node_id);
         if nodes_to_disconnect.is_empty() {
             nodes_to_disconnect.push(node_id.clone());
         }

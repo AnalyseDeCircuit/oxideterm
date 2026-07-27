@@ -84,8 +84,8 @@ impl WorkspaceApp {
             .get(node_id)
             .and_then(|node| node.saved_connection_id.as_deref());
         let node_origin = self
-            .node_runtime_store
-            .snapshot(node_id)
+            .node_router
+            .node_metadata(node_id)
             .map(|snapshot| snapshot.origin);
         let has_origin_saved_owner = node_origin
             .as_ref()

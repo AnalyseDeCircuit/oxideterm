@@ -938,7 +938,6 @@ pub(crate) struct WorkspaceApp {
     wsl_graphics: Arc<oxideterm_wsl_graphics::WslGraphicsState>,
     sftp_transfer_manager: Arc<SftpTransferManager>,
     sftp_progress_store: Arc<dyn ProgressStore>,
-    node_runtime_store: NodeRuntimeStore,
     node_router: NodeRouter,
     notification_center: NotificationCenterState,
     notification_sidebar_list_state: ListState,

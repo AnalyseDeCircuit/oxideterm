@@ -261,7 +261,7 @@ impl WorkspaceApp {
         cleanup_root: &NodeId,
         cx: &mut Context<Self>,
     ) {
-        let mut nodes_to_cleanup = self.node_runtime_store.subtree_postorder(cleanup_root);
+        let mut nodes_to_cleanup = self.node_router.subtree_postorder(cleanup_root);
         if nodes_to_cleanup.is_empty() {
             nodes_to_cleanup.push(cleanup_root.clone());
         }
@@ -308,7 +308,7 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let mut nodes_to_remove = self.node_runtime_store.subtree_postorder(cleanup_root);
+        let mut nodes_to_remove = self.node_router.subtree_postorder(cleanup_root);
         if nodes_to_remove.is_empty() {
             nodes_to_remove.push(cleanup_root.clone());
         }
@@ -471,8 +471,8 @@ impl WorkspaceApp {
                     }
                     if !connection_chain_node {
                         let children_to_start = self
-                            .node_runtime_store
-                            .metadata_snapshot(&node_id)
+                            .node_router
+                            .node_metadata(&node_id)
                             .map(|snapshot| snapshot.children_ids)
                             .unwrap_or_default();
                         for child_id in children_to_start {
@@ -662,7 +662,7 @@ impl WorkspaceApp {
                     // probes only decide whether their backend connection can
                     // also be marked Active; UI link-down is cleared for the
                     // whole affected subtree once the root connection survives.
-                    for affected_node_id in self.node_runtime_store.subtree_postorder(&node_id) {
+                    for affected_node_id in self.node_router.subtree_postorder(&node_id) {
                         if let Some(node) = self.ssh_nodes.get_mut(&affected_node_id) {
                             node.readiness = NodeReadiness::Ready;
                         }
@@ -959,7 +959,7 @@ impl WorkspaceApp {
                         // connection ids before the root disconnected event is
                         // consumed, so affected_children is a subtree signal
                         // here rather than a reliable lookup table.
-                        self.node_runtime_store.subtree_postorder(&node_id)
+                        self.node_router.subtree_postorder(&node_id)
                     };
                     if nodes_to_close.is_empty() {
                         nodes_to_close.push(node_id.clone());
@@ -1079,8 +1079,7 @@ impl WorkspaceApp {
                         self.schedule_grace_period_reconnect(&node_id, cx);
                     }
                     if matches!(state, NodeReadiness::Disconnected) {
-                        let mut nodes_to_close =
-                            self.node_runtime_store.subtree_postorder(&node_id);
+                        let mut nodes_to_close = self.node_router.subtree_postorder(&node_id);
                         if nodes_to_close.is_empty() {
                             nodes_to_close.push(node_id.clone());
                         }
@@ -1114,7 +1113,7 @@ impl WorkspaceApp {
         if self.ssh_nodes.contains_key(node_id) {
             return false;
         }
-        let Some(snapshot) = self.node_runtime_store.metadata_snapshot(node_id) else {
+        let Some(snapshot) = self.node_router.node_metadata(node_id) else {
             return false;
         };
         let title = snapshot
@@ -1477,7 +1476,7 @@ impl WorkspaceApp {
             }
         }
 
-        let mut affected_nodes = self.node_runtime_store.subtree_postorder(node_id);
+        let mut affected_nodes = self.node_router.subtree_postorder(node_id);
         affected_nodes.reverse();
         let terminal_sessions_by_node = affected_nodes
             .iter()
@@ -1683,7 +1682,7 @@ impl WorkspaceApp {
         root_node_id: &NodeId,
         cx: &mut Context<Self>,
     ) {
-        let mut affected_nodes = self.node_runtime_store.subtree_postorder(root_node_id);
+        let mut affected_nodes = self.node_router.subtree_postorder(root_node_id);
         affected_nodes.reverse();
         if affected_nodes.is_empty() {
             affected_nodes.push(root_node_id.clone());
@@ -1729,8 +1728,8 @@ impl WorkspaceApp {
             runtime.take_next_reconnect_cascade_node()
         }) {
             let parent_ready = self
-                .node_runtime_store
-                .metadata_snapshot(&node_id)
+                .node_router
+                .node_metadata(&node_id)
                 .and_then(|snapshot| snapshot.parent_id)
                 .is_some_and(|parent_id| self.node_is_ready_for_terminal(&parent_id));
             if !parent_ready {
@@ -1919,8 +1918,8 @@ impl WorkspaceApp {
 
     fn has_active_reconnect_job_for_ancestor(&self, node_id: &NodeId, cx: &App) -> bool {
         let mut cursor = self
-            .node_runtime_store
-            .metadata_snapshot(node_id)
+            .node_router
+            .node_metadata(node_id)
             .and_then(|snapshot| snapshot.parent_id);
         while let Some(parent_id) = cursor {
             if self
@@ -1931,8 +1930,8 @@ impl WorkspaceApp {
                 return true;
             }
             cursor = self
-                .node_runtime_store
-                .metadata_snapshot(&parent_id)
+                .node_router
+                .node_metadata(&parent_id)
                 .and_then(|snapshot| snapshot.parent_id);
         }
         false
@@ -2021,7 +2020,7 @@ impl WorkspaceApp {
         {
             return false;
         }
-        let Ok(path_node_ids) = self.node_runtime_store.path_to_node(node_id) else {
+        let Ok(path_node_ids) = self.node_router.path_to_node(node_id) else {
             return false;
         };
         if path_node_ids.is_empty() {
@@ -2175,7 +2174,7 @@ impl WorkspaceApp {
             // connection, or replace it when it has been closed.
         }
 
-        let Some(runtime_snapshot) = self.node_runtime_store.snapshot(node_id) else {
+        let Some(runtime_snapshot) = self.node_router.node_runtime_snapshot(node_id) else {
             return false;
         };
         let parent_id = runtime_snapshot.parent_id;

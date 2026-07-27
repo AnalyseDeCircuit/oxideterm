@@ -784,8 +784,8 @@ impl WorkspaceApp {
         while let Some(current_id) = current {
             path.push(current_id.clone());
             current = self
-                .node_runtime_store
-                .snapshot(&current_id)
+                .node_router
+                .node_metadata(&current_id)
                 .and_then(|snapshot| snapshot.parent_id);
         }
         path.reverse();
@@ -887,7 +887,7 @@ impl WorkspaceApp {
         node_id: &NodeId,
         cx: &mut Context<Self>,
     ) {
-        let mut affected_nodes = self.node_runtime_store.subtree_postorder(node_id);
+        let mut affected_nodes = self.node_router.subtree_postorder(node_id);
         if affected_nodes.is_empty() {
             affected_nodes.push(node_id.clone());
         }
