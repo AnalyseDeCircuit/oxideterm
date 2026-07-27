@@ -30,7 +30,9 @@ use oxideterm_gpui_ui::{
     typography::tauri_cjk_ui_font_family as forwards_cjk_ui_font_family,
 };
 use oxideterm_i18n::I18n;
-use oxideterm_ssh::{ConnectionConsumer, ConnectionState, NodeId, NodeReadiness, NodeRouter};
+use oxideterm_ssh::{
+    ConnectionConsumer, ConnectionState, NodeId, NodeReadiness, NodeRouter, PhaseResult,
+};
 use oxideterm_workspace::{Tab, TabId, TabKind, TabTitleSource};
 
 use super::ime::WorkspaceImeTarget;
@@ -47,11 +49,13 @@ mod components;
 mod entity;
 mod forms;
 mod helpers;
+mod reconnect;
 mod runtime_service;
 mod surface;
 mod view_state;
 
 pub(in crate::workspace) use entity::*;
+pub(in crate::workspace) use reconnect::*;
 pub(in crate::workspace) use runtime_service::*;
 
 const FORWARDS_PAGE_PADDING: f32 = 16.0; // Tauri p-4
@@ -237,5 +241,14 @@ pub(super) enum ForwardingWorkerResult {
         connection_id: Option<String>,
         binding: Option<(String, String, ConnectionConsumer)>,
         result: Result<PortDetectionSnapshot, String>,
+    },
+    ReconnectRestore {
+        node_id: NodeId,
+        result: PhaseResult,
+        restored: u32,
+        detail: String,
+        job_id: String,
+        created_forwards: Vec<(String, String)>,
+        bindings: Vec<(String, String, ConnectionConsumer)>,
     },
 }

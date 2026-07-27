@@ -1,15 +1,11 @@
 use super::nodes_reconnect_helpers::{
-    cleanup_reconnect_created_forwards, event_log_severity_for_connection_status,
-    event_log_title_for_node_readiness, forward_restore_failure_label,
-    forward_restore_key_for_rule, forward_restore_key_for_snapshot_rule,
-    forward_restore_phase_result, forward_restore_result_detail,
-    forward_rule_from_reconnect_snapshot, node_readiness_became_ready,
-    node_readiness_became_unavailable, readiness_for_connection_status,
-    reason_for_connection_status, reconnect_cascade_child_should_start,
-    reconnect_error_is_non_retryable, reconnect_forward_rule_from_rule,
-    release_reconnect_forward_bindings,
+    event_log_severity_for_connection_status, event_log_title_for_node_readiness,
+    node_readiness_became_ready, node_readiness_became_unavailable,
+    readiness_for_connection_status, reason_for_connection_status,
+    reconnect_cascade_child_should_start, reconnect_error_is_non_retryable,
 };
 use super::*;
+use crate::workspace::forwards::reconnect_forward_rule_from_rule;
 
 const RECONNECT_CASCADE_DELAY: Duration = Duration::from_millis(100);
 const RECONNECT_AUTO_CLEANUP_DELAY_MS: u64 = 30_000;
@@ -706,61 +702,6 @@ impl WorkspaceApp {
                             .reconnect_orchestrator()
                             .advance(&node_id.0, ReconnectPhase::GracePeriod);
                         self.log_reconnect_phase(&node_id, ReconnectPhase::GracePeriod, None);
-                    }
-                    changed = true;
-                }
-                ReconnectWorkerResult::ForwardRulesRestored {
-                    node_id,
-                    result,
-                    restored,
-                    detail,
-                    job_id,
-                    created_forwards,
-                    bindings,
-                } => {
-                    if !self.reconnect_worker_result_is_current(&node_id, Some(&job_id), cx) {
-                        self.release_stale_reconnect_forward_bindings(bindings);
-                        self.cleanup_stale_reconnect_forward_restores(created_forwards);
-                        changed = true;
-                        continue;
-                    }
-                    self.workspace_runtime.update(cx, |runtime, _cx| {
-                        runtime.complete_forward_restore(&node_id, restored);
-                    });
-                    for binding in bindings {
-                        self.remember_forwarding_binding(Some(binding));
-                    }
-                    if self
-                        .workspace_runtime
-                        .read(cx)
-                        .has_active_reconnect_job(&node_id)
-                    {
-                        let _ = self
-                            .workspace_runtime
-                            .read(cx)
-                            .reconnect_orchestrator()
-                            .complete_phase(&node_id.0, result, Some(detail.clone()));
-                        if result == PhaseResult::Failed {
-                            self.finish_reconnect_job(&node_id, Err(detail), cx);
-                            changed = true;
-                            continue;
-                        }
-                        let _ = self
-                            .workspace_runtime
-                            .read(cx)
-                            .reconnect_orchestrator()
-                            .advance(&node_id.0, ReconnectPhase::ResumeTransfers);
-                        self.log_reconnect_phase(&node_id, ReconnectPhase::ResumeTransfers, None);
-                        let queued = self.resume_sftp_transfers_for_reconnect(&node_id, cx);
-                        if queued == 0 {
-                            self.finish_reconnect_after_transfer_resume(
-                                &node_id,
-                                PhaseResult::Skipped,
-                                "no incomplete transfers in snapshot".to_string(),
-                                0,
-                                cx,
-                            );
-                        }
                     }
                     changed = true;
                 }
@@ -1695,6 +1636,62 @@ impl WorkspaceApp {
         }
     }
 
+    pub(in crate::workspace) fn apply_reconnect_forward_restore_completion(
+        &mut self,
+        node_id: NodeId,
+        result: PhaseResult,
+        restored: u32,
+        detail: String,
+        job_id: String,
+        created_forwards: Vec<(String, String)>,
+        bindings: Vec<(String, String, ConnectionConsumer)>,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if !self.reconnect_worker_result_is_current(&node_id, Some(&job_id), cx) {
+            self.release_stale_reconnect_forward_bindings(bindings);
+            self.cleanup_stale_reconnect_forward_restores(created_forwards);
+            return true;
+        }
+        self.workspace_runtime.update(cx, |runtime, _cx| {
+            runtime.complete_forward_restore(&node_id, restored);
+        });
+        for binding in bindings {
+            self.remember_forwarding_binding(Some(binding));
+        }
+        if self
+            .workspace_runtime
+            .read(cx)
+            .has_active_reconnect_job(&node_id)
+        {
+            let _ = self
+                .workspace_runtime
+                .read(cx)
+                .reconnect_orchestrator()
+                .complete_phase(&node_id.0, result, Some(detail.clone()));
+            if result == PhaseResult::Failed {
+                self.finish_reconnect_job(&node_id, Err(detail), cx);
+                return true;
+            }
+            let _ = self
+                .workspace_runtime
+                .read(cx)
+                .reconnect_orchestrator()
+                .advance(&node_id.0, ReconnectPhase::ResumeTransfers);
+            self.log_reconnect_phase(&node_id, ReconnectPhase::ResumeTransfers, None);
+            let queued = self.resume_sftp_transfers_for_reconnect(&node_id, cx);
+            if queued == 0 {
+                self.finish_reconnect_after_transfer_resume(
+                    &node_id,
+                    PhaseResult::Skipped,
+                    "no incomplete transfers in snapshot".to_string(),
+                    0,
+                    cx,
+                );
+            }
+        }
+        true
+    }
+
     fn node_still_needs_reconnect(&self, node_id: &NodeId) -> bool {
         let Some(node) = self.ssh_nodes.get(node_id) else {
             return false;
@@ -2036,137 +2033,16 @@ impl WorkspaceApp {
                 (entry.node_id.clone(), owner)
             })
             .collect::<HashMap<_, _>>();
-        let router = self.node_router.clone();
-        let forwarding_registry = self.forwarding_service.registry().clone();
-        let runtime = self.forwarding_runtime.clone();
-        let tx = self.reconnect_worker_sender(cx);
-        let root_node_id = node_id.clone();
-        runtime.spawn(async move {
-            let mut restored = 0_u32;
-            let mut failures = 0_u32;
-            let mut failure_details = Vec::<String>::new();
-            let mut created_forwards = Vec::<(String, String)>::new();
-            let mut bindings = Vec::<(String, String, ConnectionConsumer)>::new();
-            for entry in snapshots {
-                if !restore_token.load(Ordering::Acquire) {
-                    cleanup_reconnect_created_forwards(&forwarding_registry, &created_forwards)
-                        .await;
-                    release_reconnect_forward_bindings(&router, &bindings);
-                    return;
-                }
-                let entry_node_id = NodeId::new(entry.node_id.clone());
-                let session_id = format!(
-                    "{}{}",
-                    crate::workspace::forwards::FORWARDS_NODE_SESSION_PREFIX,
-                    entry.node_id
-                );
-                let consumer = ConnectionConsumer::PortForward(session_id.clone());
-                let resolved = match router
-                    .acquire_connection_wait(
-                        &entry_node_id,
-                        consumer.clone(),
-                        Duration::from_secs(15),
-                    )
-                    .await
-                {
-                    Ok(resolved) => resolved,
-                    Err(error) => {
-                        failures += entry.rules.len() as u32;
-                        for rule in &entry.rules {
-                            failure_details.push(format!(
-                                "{}: {}",
-                                forward_restore_failure_label(rule),
-                                error
-                            ));
-                        }
-                        continue;
-                    }
-                };
-                let binding = (
-                    session_id.clone(),
-                    resolved.connection_id.clone(),
-                    consumer.clone(),
-                );
-                if !restore_token.load(Ordering::Acquire) {
-                    router.release_consumer(&resolved.connection_id, &consumer);
-                    cleanup_reconnect_created_forwards(&forwarding_registry, &created_forwards)
-                        .await;
-                    release_reconnect_forward_bindings(&router, &bindings);
-                    return;
-                }
-                let manager = forwarding_registry
-                    .register_for_reconnect_restore(
-                        session_id.clone(),
-                        resolved.handle,
-                        old_connection_ids_by_node
-                            .get(&entry.node_id)
-                            .map(String::as_str),
-                    )
-                    .await;
-                bindings.push(binding);
-                let live_keys = manager
-                    .list_forwards()
-                    .into_iter()
-                    .map(|rule| forward_restore_key_for_rule(&rule))
-                    .collect::<HashSet<_>>();
-                let mut live_keys = live_keys;
-                for snapshot_rule in entry.rules {
-                    let key = forward_restore_key_for_snapshot_rule(&snapshot_rule);
-                    for live_rule in manager.list_forwards() {
-                        live_keys.insert(forward_restore_key_for_rule(&live_rule));
-                    }
-                    if live_keys.contains(&key) {
-                        continue;
-                    }
-                    if !restore_token.load(Ordering::Acquire) {
-                        cleanup_reconnect_created_forwards(&forwarding_registry, &created_forwards)
-                            .await;
-                        release_reconnect_forward_bindings(&router, &bindings);
-                        return;
-                    }
-                    let failure_label = forward_restore_failure_label(&snapshot_rule);
-                    let Some(rule) = forward_rule_from_reconnect_snapshot(&snapshot_rule) else {
-                        failures += 1;
-                        failure_details.push(format!(
-                            "{failure_label}: unsupported forward type '{}'",
-                            snapshot_rule.forward_type
-                        ));
-                        continue;
-                    };
-                    match manager.create_forward_with_health_check(rule, true).await {
-                        Ok(created) => {
-                            live_keys.insert(forward_restore_key_for_rule(&created));
-                            restored += 1;
-                            created_forwards.push((session_id.clone(), created.id.clone()));
-                            if let Some(owner_connection_id) =
-                                owner_connection_ids.get(&entry.node_id).cloned().flatten()
-                            {
-                                let created_id = created.id.clone();
-                                let _ = forwarding_registry.sync_persisted_forward_rule(
-                                    &created_id,
-                                    &session_id,
-                                    Some(owner_connection_id),
-                                    created,
-                                );
-                            }
-                        }
-                        Err(error) => {
-                            failures += 1;
-                            failure_details.push(format!("{failure_label}: {error}"));
-                        }
-                    }
-                }
-            }
-            let detail = forward_restore_result_detail(restored, failures, &failure_details);
-            let _ = tx.send(ReconnectWorkerResult::ForwardRulesRestored {
-                node_id: root_node_id,
-                result: forward_restore_phase_result(failures),
-                restored,
-                detail,
-                job_id,
-                created_forwards,
-                bindings,
-            });
+        let restore_request = forwards::ReconnectForwardRestoreRequest {
+            root_node_id: node_id.clone(),
+            snapshots,
+            old_connection_ids_by_node,
+            owner_connection_ids,
+            cancellation: restore_token,
+            job_id,
+        };
+        self.forwarding.update(cx, |forwarding, _cx| {
+            forwarding.request_reconnect_restore(restore_request);
         });
     }
 

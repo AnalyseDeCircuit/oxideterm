@@ -5,8 +5,14 @@ use super::*;
 use crate::workspace::delivery;
 #[cfg(test)]
 use oxideterm_ssh::ConnectionPoolConfig;
-use oxideterm_ssh::SshConnectionRegistry;
-use std::sync::{Mutex, MutexGuard};
+use oxideterm_ssh::{ReconnectForwardRuleSnapshot, SshConnectionRegistry};
+use std::{
+    collections::HashSet,
+    sync::{
+        Mutex, MutexGuard,
+        atomic::{AtomicBool, Ordering},
+    },
+};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum ForwardingQuickAction {
@@ -37,6 +43,15 @@ pub(super) enum ForwardingRuntimeOperation {
         action: ForwardingQuickAction,
         port: u16,
     },
+}
+
+pub(in crate::workspace) struct ReconnectForwardRestoreRequest {
+    pub(in crate::workspace) root_node_id: NodeId,
+    pub(in crate::workspace) snapshots: Vec<ReconnectForwardRuleSnapshot>,
+    pub(in crate::workspace) old_connection_ids_by_node: HashMap<String, String>,
+    pub(in crate::workspace) owner_connection_ids: HashMap<String, Option<String>>,
+    pub(in crate::workspace) cancellation: Arc<AtomicBool>,
+    pub(in crate::workspace) job_id: String,
 }
 
 #[derive(Clone, Default, Eq, PartialEq)]
@@ -278,6 +293,146 @@ impl ForwardingRuntimeService {
                 Err(_) => None,
             };
             let _ = worker_tx.send(ForwardingWorkerResult::Binding { binding });
+        });
+    }
+
+    pub(super) fn submit_reconnect_restore(
+        &self,
+        request: ReconnectForwardRestoreRequest,
+        worker_tx: delivery::ActiveDeliverySender<ForwardingWorkerResult>,
+    ) {
+        let service = self.clone();
+        self.task_runtime.spawn(async move {
+            let ReconnectForwardRestoreRequest {
+                root_node_id,
+                snapshots,
+                old_connection_ids_by_node,
+                owner_connection_ids,
+                cancellation,
+                job_id,
+            } = request;
+            let mut restored = 0_u32;
+            let mut failures = 0_u32;
+            let mut failure_details = Vec::<String>::new();
+            let mut created_forwards = Vec::<(String, String)>::new();
+            let mut bindings = Vec::<(String, String, ConnectionConsumer)>::new();
+            for entry in snapshots {
+                if !cancellation.load(Ordering::Acquire) {
+                    cleanup_reconnect_created_forwards(&service.registry, &created_forwards).await;
+                    release_reconnect_forward_bindings(&service.node_router, &bindings);
+                    return;
+                }
+                let entry_node_id = NodeId::new(entry.node_id.clone());
+                let session_id = Self::session_id_for_node(&entry_node_id);
+                let consumer = ConnectionConsumer::PortForward(session_id.clone());
+                let resolved = match service
+                    .node_router
+                    .acquire_connection_wait(
+                        &entry_node_id,
+                        consumer.clone(),
+                        Duration::from_secs(15),
+                    )
+                    .await
+                {
+                    Ok(resolved) => resolved,
+                    Err(error) => {
+                        failures += entry.rules.len() as u32;
+                        for rule in &entry.rules {
+                            failure_details.push(format!(
+                                "{}: {}",
+                                forward_restore_failure_label(rule),
+                                error
+                            ));
+                        }
+                        continue;
+                    }
+                };
+                let binding = (
+                    session_id.clone(),
+                    resolved.connection_id.clone(),
+                    consumer.clone(),
+                );
+                if !cancellation.load(Ordering::Acquire) {
+                    service
+                        .node_router
+                        .release_consumer(&resolved.connection_id, &consumer);
+                    cleanup_reconnect_created_forwards(&service.registry, &created_forwards).await;
+                    release_reconnect_forward_bindings(&service.node_router, &bindings);
+                    return;
+                }
+                let manager = service
+                    .registry
+                    .register_for_reconnect_restore(
+                        session_id.clone(),
+                        resolved.handle,
+                        old_connection_ids_by_node
+                            .get(&entry.node_id)
+                            .map(String::as_str),
+                    )
+                    .await;
+                bindings.push(binding);
+                let mut live_keys = manager
+                    .list_forwards()
+                    .into_iter()
+                    .map(|rule| forward_restore_key_for_rule(&rule))
+                    .collect::<HashSet<_>>();
+                for snapshot_rule in entry.rules {
+                    let key = forward_restore_key_for_snapshot_rule(&snapshot_rule);
+                    for live_rule in manager.list_forwards() {
+                        live_keys.insert(forward_restore_key_for_rule(&live_rule));
+                    }
+                    if live_keys.contains(&key) {
+                        continue;
+                    }
+                    if !cancellation.load(Ordering::Acquire) {
+                        cleanup_reconnect_created_forwards(&service.registry, &created_forwards)
+                            .await;
+                        release_reconnect_forward_bindings(&service.node_router, &bindings);
+                        return;
+                    }
+                    let failure_label = forward_restore_failure_label(&snapshot_rule);
+                    let Some(rule) = forward_rule_from_reconnect_snapshot(&snapshot_rule) else {
+                        failures += 1;
+                        failure_details.push(format!(
+                            "{failure_label}: unsupported forward type '{}'",
+                            snapshot_rule.forward_type
+                        ));
+                        continue;
+                    };
+                    match manager.create_forward_with_health_check(rule, true).await {
+                        Ok(created) => {
+                            live_keys.insert(forward_restore_key_for_rule(&created));
+                            restored += 1;
+                            created_forwards.push((session_id.clone(), created.id.clone()));
+                            if let Some(owner_connection_id) =
+                                owner_connection_ids.get(&entry.node_id).cloned().flatten()
+                            {
+                                let created_id = created.id.clone();
+                                let _ = service.registry.sync_persisted_forward_rule(
+                                    &created_id,
+                                    &session_id,
+                                    Some(owner_connection_id),
+                                    created,
+                                );
+                            }
+                        }
+                        Err(error) => {
+                            failures += 1;
+                            failure_details.push(format!("{failure_label}: {error}"));
+                        }
+                    }
+                }
+            }
+            let detail = forward_restore_result_detail(restored, failures, &failure_details);
+            let _ = worker_tx.send(ForwardingWorkerResult::ReconnectRestore {
+                node_id: root_node_id,
+                result: forward_restore_phase_result(failures),
+                restored,
+                detail,
+                job_id,
+                created_forwards,
+                bindings,
+            });
         });
     }
 

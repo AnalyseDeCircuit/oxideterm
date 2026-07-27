@@ -25,6 +25,15 @@ pub(in crate::workspace) enum ForwardingDeliveryIntent {
         node_id: NodeId,
         binding: Option<(String, String, ConnectionConsumer)>,
     },
+    ReconnectRestore {
+        node_id: NodeId,
+        result: PhaseResult,
+        restored: u32,
+        detail: String,
+        job_id: String,
+        created_forwards: Vec<(String, String)>,
+        bindings: Vec<(String, String, ConnectionConsumer)>,
+    },
     Runtime(ForwardEvent),
 }
 
@@ -167,6 +176,14 @@ impl ForwardingWorkspaceEntity {
         // Entity's delivery sender to workspace coordination code.
         self.runtime_service
             .submit_session_restore(node_id, self.worker_tx.clone());
+    }
+
+    pub(in crate::workspace) fn request_reconnect_restore(
+        &self,
+        request: ReconnectForwardRestoreRequest,
+    ) {
+        self.runtime_service
+            .submit_reconnect_restore(request, self.worker_tx.clone());
     }
 
     pub(super) fn refresh_runtime_snapshot(&mut self, node_id: &NodeId) -> bool {
@@ -398,6 +415,25 @@ impl ForwardingWorkspaceEntity {
                     self.delivery_intents
                         .push_back(ForwardingDeliveryIntent::PortScan { node_id, binding });
                 }
+                ForwardingWorkerResult::ReconnectRestore {
+                    node_id,
+                    result,
+                    restored,
+                    detail,
+                    job_id,
+                    created_forwards,
+                    bindings,
+                } => self
+                    .delivery_intents
+                    .push_back(ForwardingDeliveryIntent::ReconnectRestore {
+                        node_id,
+                        result,
+                        restored,
+                        detail,
+                        job_id,
+                        created_forwards,
+                        bindings,
+                    }),
             }
         }
 
@@ -589,6 +625,47 @@ mod tests {
             .unwrap();
         assert!(state.has_scanned_ports);
         assert_eq!(state.detected_ports.len(), 1);
+    }
+
+    #[gpui::test]
+    fn hidden_reconnect_restore_completion_uses_forwarding_delivery(cx: &mut TestAppContext) {
+        let (worker_tx, worker_rx) = delivery::ActiveDeliverySender::channel();
+        let (_runtime_tx, runtime_rx) = std::sync::mpsc::channel();
+        let runtime_service = ForwardingRuntimeService::test_fixture();
+        let entity = cx.new(|cx| {
+            ForwardingWorkspaceEntity::new(
+                worker_tx.clone(),
+                worker_rx,
+                runtime_rx,
+                runtime_service,
+                cx,
+            )
+        });
+        worker_tx
+            .send(ForwardingWorkerResult::ReconnectRestore {
+                node_id: NodeId::new("hidden-forward"),
+                result: PhaseResult::Ok,
+                restored: 2,
+                detail: "restored 2 forward(s)".to_string(),
+                job_id: "job-a".to_string(),
+                created_forwards: Vec::new(),
+                bindings: Vec::new(),
+            })
+            .expect("reconnect restore delivery");
+
+        cx.run_until_parked();
+
+        let intents = entity.update(cx, |entity, _cx| entity.take_delivery_intents());
+        assert!(matches!(
+            intents.front(),
+            Some(ForwardingDeliveryIntent::ReconnectRestore {
+                node_id,
+                result: PhaseResult::Ok,
+                restored: 2,
+                job_id,
+                ..
+            }) if node_id == &NodeId::new("hidden-forward") && job_id == "job-a"
+        ));
     }
 
     #[gpui::test]

@@ -151,8 +151,7 @@ use oxideterm_connections::{
     SshConfigSyncService,
 };
 use oxideterm_forwarding::{
-    ForwardEventDeliverySender, ForwardRule, ForwardStatus, ForwardType, ForwardingRegistry,
-    SavedForwardStore,
+    ForwardEventDeliverySender, ForwardStatus, ForwardingRegistry, SavedForwardStore,
 };
 use oxideterm_gpui_ide::IdeSurface;
 use oxideterm_gpui_platform::{
@@ -224,11 +223,11 @@ use oxideterm_ssh::{
     ConnectionTraceStatus, MAX_RETAINED_RECONNECT_JOBS, NodeEventReceiver, NodeEventSubscription,
     NodeId, NodeOrigin, NodeReadiness, NodeRouter, NodeRuntimeStore, NodeState, NodeStateEvent,
     NodeTreeExpansion, NodeTreePersistenceSnapshot, NodeTreeSnapshot, NodeTreeSnapshotNode,
-    PhaseResult, ProbeConnectionStatus, ProxyHopConfig, ReconnectForwardRule,
-    ReconnectForwardRuleSnapshot, ReconnectNodeConnectionSnapshot, ReconnectNodeTerminalSnapshot,
-    ReconnectNodeTransferSnapshot, ReconnectOrchestratorStore, ReconnectPhase, ReconnectProgress,
-    ReconnectSnapshot, SshAlgorithmDiagnosticKind, SshConfig, SshConnectionRegistry,
-    SshTransportClient, TerminalEndpoint, UpstreamProxyConfig,
+    PhaseResult, ProbeConnectionStatus, ProxyHopConfig, ReconnectForwardRuleSnapshot,
+    ReconnectNodeConnectionSnapshot, ReconnectNodeTerminalSnapshot, ReconnectNodeTransferSnapshot,
+    ReconnectOrchestratorStore, ReconnectPhase, ReconnectProgress, ReconnectSnapshot,
+    SshAlgorithmDiagnosticKind, SshConfig, SshConnectionRegistry, SshTransportClient,
+    TerminalEndpoint, UpstreamProxyConfig,
 };
 use oxideterm_ssh_launch::TemporarySshLaunch;
 use oxideterm_terminal::{

@@ -451,6 +451,26 @@ impl WorkspaceApp {
                         changed = true;
                     }
                 }
+                ForwardingDeliveryIntent::ReconnectRestore {
+                    node_id,
+                    result,
+                    restored,
+                    detail,
+                    job_id,
+                    created_forwards,
+                    bindings,
+                } => {
+                    changed |= self.apply_reconnect_forward_restore_completion(
+                        node_id,
+                        result,
+                        restored,
+                        detail,
+                        job_id,
+                        created_forwards,
+                        bindings,
+                        cx,
+                    );
+                }
                 ForwardingDeliveryIntent::Runtime(ForwardEvent::StatusChanged {
                     session_id,
                     status,

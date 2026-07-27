@@ -90,15 +90,6 @@ pub(in crate::workspace) enum ReconnectWorkerResult {
         detail: String,
         job_id: String,
     },
-    ForwardRulesRestored {
-        node_id: NodeId,
-        result: PhaseResult,
-        restored: u32,
-        detail: String,
-        job_id: String,
-        created_forwards: Vec<(String, String)>,
-        bindings: Vec<(String, String, ConnectionConsumer)>,
-    },
     RemoteShellIntegrationGateFinished {
         node_id: NodeId,
         result: std::result::Result<(RemoteShellIntegrationStatus, bool), String>,
