@@ -344,13 +344,13 @@ impl WorkspaceApp {
     ) -> AnyElement {
         let mut panel = ai_model_selector_models_panel(&self.tokens);
         let session_state = self.active_ai_acp_session_state(&agent_id);
-        let config_options = self.ai_acp_model_options_for_agent(&agent_id);
+        let config_options = self.ai_acp_model_options_for_agent(&agent_id, cx);
         let model_option = config_options
             .as_ref()
             .and_then(|options| oxideterm_ai::acp_model_config_option(options));
         let Some(option) = model_option.filter(|option| !option.choices.is_empty()) else {
             let provider_id = Self::ai_acp_provider_id(&agent_id);
-            let label = self.ai_acp_agent_model_fallback_label(&agent_id);
+            let label = self.ai_acp_agent_model_fallback_label(&agent_id, cx);
             let active = self.ai_active_model_selector_provider_id().as_deref()
                 == Some(provider_id.as_str());
             let row = ai_model_selector_model_row(
@@ -366,7 +366,7 @@ impl WorkspaceApp {
                     )
                 }),
             );
-            if self.ai_acp_model_discovery_is_pending(&agent_id) {
+            if self.ai_acp_model_discovery_is_pending(&agent_id, cx) {
                 return panel.child(row.opacity(0.7)).into_any_element();
             }
             return panel

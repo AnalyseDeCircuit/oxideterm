@@ -119,7 +119,7 @@ impl WorkspaceApp {
                     panel_right,
                 ),
                 f32::from(anchor.bounds.top()) - AI_FLOATING_GAP,
-                self.render_ai_model_selector_dropdown(&self.ai_model_selector_providers(), cx),
+                self.render_ai_model_selector_dropdown(&self.ai_model_selector_providers(cx), cx),
             )
         } else if self.ai.chat.reasoning_menu_open {
             let anchor = self.select_anchors.get(&SelectAnchorId::AiReasoningMenu)?;

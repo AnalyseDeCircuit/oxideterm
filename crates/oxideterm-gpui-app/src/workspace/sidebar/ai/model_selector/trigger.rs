@@ -5,7 +5,7 @@ impl WorkspaceApp {
         anchor_id: SelectAnchorId,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let providers = self.ai_model_selector_providers();
+        let providers = self.ai_model_selector_providers(cx);
         let enabled_providers = providers
             .iter()
             .filter(|provider| provider.enabled)
@@ -58,7 +58,7 @@ impl WorkspaceApp {
                         .ai
                         .active_acp_agent_id
                         .as_deref()
-                        .map(|agent_id| self.ai_acp_agent_model_fallback_label(agent_id))
+                        .map(|agent_id| self.ai_acp_agent_model_fallback_label(agent_id, cx))
                         .unwrap_or_else(|| {
                             self.i18n.t("ai.model_selector.agent_model_unavailable")
                         })

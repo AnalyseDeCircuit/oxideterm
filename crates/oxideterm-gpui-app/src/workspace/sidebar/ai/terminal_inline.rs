@@ -465,7 +465,7 @@ window.focus(&this.focus_handle, cx);
                                 .top(px(40.0))
                                 .left(px(32.0))
                                 .child(self.render_ai_model_selector_dropdown(
-                                    &self.ai_model_selector_providers(),
+                                    &self.ai_model_selector_providers(cx),
                                     cx,
                                 )),
                         )

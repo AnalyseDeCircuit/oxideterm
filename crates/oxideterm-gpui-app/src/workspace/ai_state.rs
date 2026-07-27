@@ -2,6 +2,7 @@ use super::*;
 
 pub(in crate::workspace) enum AiWorkspaceEvent {
     AcpAgentProbeDeliveryReady,
+    AcpModelDiscoveryDeliveryReady,
     ModelRefreshDeliveryReady,
     ProviderKeyStatusChanged,
     SelectorProviderStatusChanged,
@@ -12,6 +13,12 @@ pub(in crate::workspace) struct AiAcpAgentProbeIntent {
     pub(in crate::workspace) runtime_state: oxideterm_settings::AcpAgentRuntimeState,
     pub(in crate::workspace) auth_status: oxideterm_settings::AcpAgentAuthStatus,
     pub(in crate::workspace) last_error_kind: Option<String>,
+}
+
+pub(in crate::workspace) struct AiAcpModelDiscoveryIntent {
+    pub(in crate::workspace) conversation_id: String,
+    agent_id: String,
+    config_options: Option<Vec<oxideterm_ai::AcpSessionConfigOption>>,
 }
 
 pub(in crate::workspace) enum AiModelRefreshIntent {
@@ -55,6 +62,12 @@ struct AiAcpAgentProbeResult {
     last_error_kind: Option<String>,
 }
 
+struct AiAcpModelDiscoveryDelivery {
+    conversation_id: String,
+    agent_id: String,
+    config_options: Option<Vec<oxideterm_ai::AcpSessionConfigOption>>,
+}
+
 /// Owns AI worker delivery slices as they move out of the workspace root.
 pub(in crate::workspace) struct AiWorkspaceEntity {
     task_runtime: Arc<tokio::runtime::Runtime>,
@@ -83,6 +96,12 @@ pub(in crate::workspace) struct AiWorkspaceEntity {
     acp_agent_probe_tx: crate::workspace::delivery::ActiveDeliverySender<AiAcpAgentProbeDelivery>,
     acp_agent_probe_rx: std::sync::mpsc::Receiver<AiAcpAgentProbeDelivery>,
     acp_agent_probe_intents: VecDeque<AiAcpAgentProbeIntent>,
+    acp_model_options: HashMap<(String, String), Vec<oxideterm_ai::AcpSessionConfigOption>>,
+    acp_model_discovery_pending: HashSet<(String, String)>,
+    acp_model_discovery_tx:
+        crate::workspace::delivery::ActiveDeliverySender<AiAcpModelDiscoveryDelivery>,
+    acp_model_discovery_rx: std::sync::mpsc::Receiver<AiAcpModelDiscoveryDelivery>,
+    acp_model_discovery_intents: VecDeque<AiAcpModelDiscoveryIntent>,
 }
 
 impl AiWorkspaceEntity {
@@ -98,6 +117,8 @@ impl AiWorkspaceEntity {
         let (selector_probe_tx, selector_probe_rx) =
             crate::workspace::delivery::ActiveDeliverySender::channel();
         let (acp_agent_probe_tx, acp_agent_probe_rx) =
+            crate::workspace::delivery::ActiveDeliverySender::channel();
+        let (acp_model_discovery_tx, acp_model_discovery_rx) =
             crate::workspace::delivery::ActiveDeliverySender::channel();
         let entity = Self {
             task_runtime,
@@ -123,11 +144,17 @@ impl AiWorkspaceEntity {
             acp_agent_probe_tx,
             acp_agent_probe_rx,
             acp_agent_probe_intents: VecDeque::new(),
+            acp_model_options: HashMap::new(),
+            acp_model_discovery_pending: HashSet::new(),
+            acp_model_discovery_tx,
+            acp_model_discovery_rx,
+            acp_model_discovery_intents: VecDeque::new(),
         };
         entity.schedule_model_refresh_delivery(cx);
         entity.schedule_provider_key_status_delivery(cx);
         entity.schedule_selector_probe_delivery(cx);
         entity.schedule_acp_agent_probe_delivery(cx);
+        entity.schedule_acp_model_discovery_delivery(cx);
         entity
     }
 
@@ -381,6 +408,103 @@ impl AiWorkspaceEntity {
         std::mem::take(&mut self.acp_agent_probe_intents)
     }
 
+    pub(in crate::workspace) fn acp_model_options(
+        &self,
+        conversation_id: &str,
+        agent_id: &str,
+    ) -> Option<Vec<oxideterm_ai::AcpSessionConfigOption>> {
+        self.acp_model_options
+            .get(&(conversation_id.to_string(), agent_id.to_string()))
+            .cloned()
+    }
+
+    pub(in crate::workspace) fn acp_model_discovery_is_pending(
+        &self,
+        conversation_id: &str,
+        agent_id: &str,
+    ) -> bool {
+        self.acp_model_discovery_pending
+            .contains(&(conversation_id.to_string(), agent_id.to_string()))
+    }
+
+    pub(in crate::workspace) fn request_acp_model_discovery(
+        &mut self,
+        conversation_id: String,
+        agent: oxideterm_settings::AcpAgentConfig,
+        session_cwd: std::path::PathBuf,
+    ) -> bool {
+        let agent_id = agent.id.clone();
+        let discovery_key = (conversation_id.clone(), agent_id.clone());
+        if self.acp_model_options.contains_key(&discovery_key)
+            || !self.acp_model_discovery_pending.insert(discovery_key)
+        {
+            return false;
+        }
+        let capability_policy = oxideterm_ai::AcpHostCapabilityPolicy {
+            fs_read_text_file: agent.capability_policy.fs_read_text_file,
+            fs_write_text_file: agent.capability_policy.fs_write_text_file,
+            terminal: agent.capability_policy.terminal,
+        };
+        let display_name = if agent.display_name.trim().is_empty() {
+            agent_id.clone()
+        } else {
+            agent.display_name
+        };
+        // Discovery uses the same zeroizing one-shot launch config as a real
+        // ACP session and moves token-bearing args/env into the worker.
+        let launch_config = oxideterm_ai::AcpLaunchConfig {
+            id: agent.id,
+            display_name,
+            command: agent.command,
+            args: agent.args,
+            env: agent.env,
+            cwd: agent.cwd.map(std::path::PathBuf::from),
+        };
+        let worker_tx = self.acp_model_discovery_tx.clone();
+        self.task_runtime.spawn(async move {
+            let config_options = match oxideterm_ai::build_acp_stdio_launcher(launch_config) {
+                Ok(launcher) => oxideterm_ai::discover_acp_session_config_options(
+                    launcher,
+                    env!("CARGO_PKG_VERSION").to_string(),
+                    capability_policy,
+                    session_cwd,
+                )
+                .await
+                .ok()
+                .filter(|options| {
+                    oxideterm_ai::acp_model_config_option(options)
+                        .is_some_and(|option| !option.choices.is_empty())
+                }),
+                Err(_) => None,
+            };
+            let _ = worker_tx.send(AiAcpModelDiscoveryDelivery {
+                conversation_id,
+                agent_id,
+                config_options,
+            });
+        });
+        true
+    }
+
+    pub(in crate::workspace) fn take_acp_model_discovery_intents(
+        &mut self,
+    ) -> VecDeque<AiAcpModelDiscoveryIntent> {
+        std::mem::take(&mut self.acp_model_discovery_intents)
+    }
+
+    pub(in crate::workspace) fn apply_acp_model_discovery(
+        &mut self,
+        intent: AiAcpModelDiscoveryIntent,
+        conversation_exists: bool,
+    ) {
+        if let Some(options) = intent.config_options
+            && conversation_exists
+        {
+            self.acp_model_options
+                .insert((intent.conversation_id, intent.agent_id), options);
+        }
+    }
+
     fn begin_model_refresh(&mut self, provider_id: &str) -> Option<u64> {
         if self.refreshing_models.contains(provider_id) {
             return None;
@@ -617,6 +741,59 @@ impl AiWorkspaceEntity {
         }
         drain.outcome.backlog_remaining
     }
+
+    fn schedule_acp_model_discovery_delivery(&self, cx: &mut Context<Self>) {
+        let delivery_wake = self.acp_model_discovery_tx.wake();
+        let release_wake = delivery_wake.clone();
+        cx.on_release(move |_, _| {
+            // A hidden selector must not discard a user-triggered completion.
+            release_wake.stop();
+        })
+        .detach();
+        cx.spawn(async move |entity, cx| {
+            loop {
+                delivery_wake.wait().await;
+                let should_drain = delivery_wake.take();
+                let stopped = delivery_wake.is_stopped();
+                if should_drain {
+                    let backlog_remaining = entity
+                        .update(cx, |entity, cx| {
+                            entity.drain_acp_model_discovery_results(cx)
+                        })
+                        .unwrap_or(false);
+                    if backlog_remaining {
+                        delivery_wake.mark();
+                    }
+                }
+                if stopped {
+                    break;
+                }
+            }
+        })
+        .detach();
+    }
+
+    fn drain_acp_model_discovery_results(&mut self, cx: &mut Context<Self>) -> bool {
+        let drain = crate::workspace::delivery::drain_channel(
+            &self.acp_model_discovery_rx,
+            crate::workspace::delivery::USER_ACTION_DELIVERY_BUDGET,
+        );
+        for delivery in drain.items {
+            self.acp_model_discovery_pending
+                .remove(&(delivery.conversation_id.clone(), delivery.agent_id.clone()));
+            self.acp_model_discovery_intents
+                .push_back(AiAcpModelDiscoveryIntent {
+                    conversation_id: delivery.conversation_id,
+                    agent_id: delivery.agent_id,
+                    config_options: delivery.config_options,
+                });
+        }
+        if !self.acp_model_discovery_intents.is_empty() {
+            cx.emit(AiWorkspaceEvent::AcpModelDiscoveryDeliveryReady);
+            cx.notify();
+        }
+        drain.outcome.backlog_remaining
+    }
 }
 
 fn ai_acp_probe_error_result(kind: &'static str) -> AiAcpAgentProbeResult {
@@ -732,12 +909,6 @@ pub(super) struct AiModelWorkspaceState {
     pub(super) selector_expanded_providers: HashSet<String>,
     pub(super) selector_highlighted_model: Option<(String, String)>,
     pub(super) selector_status_signature: u64,
-    pub(super) acp_model_options:
-        HashMap<(String, String), Vec<oxideterm_ai::AcpSessionConfigOption>>,
-    pub(super) acp_model_discovery_pending: HashSet<(String, String)>,
-    pub(super) acp_model_discovery_tx:
-        Option<crate::workspace::delivery::ActiveDeliverySender<AcpModelDiscoveryDelivery>>,
-    pub(super) acp_model_discovery_rx: Option<std::sync::mpsc::Receiver<AcpModelDiscoveryDelivery>>,
     pub(super) mcp_add_dialog: Option<AiMcpServerDraft>,
     pub(super) key_store: oxideterm_ai::AiProviderKeyStore,
 }
@@ -885,10 +1056,6 @@ impl AiModelWorkspaceState {
             selector_expanded_providers: HashSet::new(),
             selector_highlighted_model: None,
             selector_status_signature: 0,
-            acp_model_options: HashMap::new(),
-            acp_model_discovery_pending: HashSet::new(),
-            acp_model_discovery_tx: None,
-            acp_model_discovery_rx: None,
             mcp_add_dialog: None,
             key_store,
         }
@@ -1123,6 +1290,52 @@ mod entity_tests {
     }
 
     #[gpui::test]
+    fn acp_model_discovery_delivery_and_options_are_entity_owned(cx: &mut TestAppContext) {
+        let entity = cx.new(|cx| {
+            AiWorkspaceEntity::new(test_runtime(), oxideterm_ai::AiProviderKeyStore::new(), cx)
+        });
+        let config_options = vec![oxideterm_ai::AcpSessionConfigOption {
+            config_id: "model".to_string(),
+            name: "Model".to_string(),
+            category: Some("model".to_string()),
+            current_value_id: "model-a".to_string(),
+            choices: vec![oxideterm_ai::AcpSessionConfigChoice {
+                value_id: "model-a".to_string(),
+                label: "Model A".to_string(),
+            }],
+        }];
+        let worker_tx = entity.update(cx, |entity, _cx| {
+            entity
+                .acp_model_discovery_pending
+                .insert(("conversation-a".to_string(), "agent-a".to_string()));
+            entity.acp_model_discovery_tx.clone()
+        });
+        worker_tx
+            .send(AiAcpModelDiscoveryDelivery {
+                conversation_id: "conversation-a".to_string(),
+                agent_id: "agent-a".to_string(),
+                config_options: Some(config_options.clone()),
+            })
+            .unwrap();
+
+        cx.run_until_parked();
+
+        let intents = entity.update(cx, |entity, _cx| entity.take_acp_model_discovery_intents());
+        assert_eq!(intents.len(), 1);
+        entity.update(cx, |entity, _cx| {
+            entity.apply_acp_model_discovery(
+                intents.into_iter().next().expect("discovery intent"),
+                true,
+            );
+            assert_eq!(
+                entity.acp_model_options("conversation-a", "agent-a"),
+                Some(config_options)
+            );
+            assert!(!entity.acp_model_discovery_is_pending("conversation-a", "agent-a"));
+        });
+    }
+
+    #[gpui::test]
     fn entity_release_stops_all_entity_delivery_waiters(cx: &mut TestAppContext) {
         let entity = cx.new(|cx| {
             AiWorkspaceEntity::new(test_runtime(), oxideterm_ai::AiProviderKeyStore::new(), cx)
@@ -1132,6 +1345,7 @@ mod entity_tests {
             provider_key_status_wake,
             selector_probe_wake,
             acp_agent_probe_wake,
+            acp_model_discovery_wake,
         ) = cx.read(|cx| {
             let entity = entity.read(cx);
             (
@@ -1139,6 +1353,7 @@ mod entity_tests {
                 entity.provider_key_status_tx.wake(),
                 entity.selector_probe_tx.wake(),
                 entity.acp_agent_probe_tx.wake(),
+                entity.acp_model_discovery_tx.wake(),
             )
         });
 
@@ -1151,5 +1366,6 @@ mod entity_tests {
         assert!(provider_key_status_wake.is_stopped());
         assert!(selector_probe_wake.is_stopped());
         assert!(acp_agent_probe_wake.is_stopped());
+        assert!(acp_model_discovery_wake.is_stopped());
     }
 }

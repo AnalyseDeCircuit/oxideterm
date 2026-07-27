@@ -29,15 +29,12 @@ impl WorkspaceApp {
                             let stream_backlog =
                                 workspace.poll_ai_chat_stream_events(Some(window), cx);
                             let compaction_backlog = workspace.poll_ai_compaction_results(cx);
-                            let model_discovery_backlog =
-                                workspace.poll_ai_acp_model_discovery_results(cx);
                             let knowledge_backlog =
                                 workspace.poll_knowledge_reindex_results(cx);
                             let inline_backlog =
                                 workspace.poll_terminal_ai_inline_delivery(cx);
                             stream_backlog
                                 || compaction_backlog
-                                || model_discovery_backlog
                                 || knowledge_backlog
                                 || inline_backlog
                         })

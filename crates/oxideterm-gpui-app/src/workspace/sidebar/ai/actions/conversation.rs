@@ -168,7 +168,7 @@ impl WorkspaceApp {
             }
         }
 
-        let stream_config = match self.resolve_ai_stream_config() {
+        let stream_config = match self.resolve_ai_stream_config(cx) {
             Ok(config) => config,
             Err(error) => {
                 self.push_ai_settings_toast(error, TerminalNoticeVariant::Error);
@@ -444,7 +444,7 @@ impl WorkspaceApp {
         conversation.messages.truncate(last_user_index + 1);
         conversation.message_count = conversation.messages.len();
         conversation.updated_at_ms = ai_now_ms();
-        let stream_config = match self.resolve_ai_stream_config() {
+        let stream_config = match self.resolve_ai_stream_config(cx) {
             Ok(config) => config,
             Err(error) => {
                 self.push_ai_settings_toast(error, TerminalNoticeVariant::Error);
@@ -618,7 +618,7 @@ impl WorkspaceApp {
             }
             index
         };
-        let stream_config = match self.resolve_ai_stream_config() {
+        let stream_config = match self.resolve_ai_stream_config(cx) {
             Ok(config) => config,
             Err(error) => {
                 self.push_ai_settings_toast(error, TerminalNoticeVariant::Error);

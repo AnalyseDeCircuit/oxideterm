@@ -53,6 +53,7 @@ impl WorkspaceApp {
 
     pub(in crate::workspace) fn resolve_ai_stream_config(
         &self,
+        cx: &App,
     ) -> Result<AiChatStreamConfig, String> {
         let settings = self.settings_store.settings();
         let tool_policy = ai_tool_use_policy_from_settings(&settings.ai.tool_use);
@@ -76,7 +77,7 @@ impl WorkspaceApp {
                     )
                     .map(|choice| choice.label.clone())
                 })
-                .unwrap_or_else(|| self.ai_acp_agent_model_fallback_label(&acp_agent_id));
+                .unwrap_or_else(|| self.ai_acp_agent_model_fallback_label(&acp_agent_id, cx));
             return Ok(AiChatStreamConfig {
                 execution_backend: AiExecutionBackend::Acp,
                 provider_id: None,

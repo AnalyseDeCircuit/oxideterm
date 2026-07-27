@@ -1220,13 +1220,6 @@ struct TerminalFontSizeHud {
 }
 
 #[derive(Clone, Debug)]
-struct AcpModelDiscoveryDelivery {
-    conversation_id: String,
-    agent_id: String,
-    config_options: Option<Vec<oxideterm_ai::AcpSessionConfigOption>>,
-}
-
-#[derive(Clone, Debug)]
 struct ActiveConnectionTrace {
     visible: bool,
     latest: ConnectionTraceEvent,
