@@ -1114,7 +1114,7 @@ impl WorkspaceApp {
         if self.ssh_nodes.contains_key(node_id) {
             return false;
         }
-        let Some(snapshot) = self.node_runtime_store.snapshot(node_id) else {
+        let Some(snapshot) = self.node_runtime_store.metadata_snapshot(node_id) else {
             return false;
         };
         let title = snapshot
@@ -1122,15 +1122,19 @@ impl WorkspaceApp {
             .saved_connection_id()
             .and_then(|id| self.connection_store.get(id))
             .map(|connection| connection.name.clone())
-            .unwrap_or_else(|| format!("{}@{}", snapshot.config.username, snapshot.config.host));
+            .unwrap_or_else(|| format!("{}@{}", snapshot.username, snapshot.host));
         self.ssh_nodes.insert(
             node_id.clone(),
             WorkspaceSshNode {
                 saved_connection_id: snapshot.origin.saved_connection_id().map(str::to_string),
-                config: snapshot.config,
+                endpoint: WorkspaceSshNodeEndpoint {
+                    host: snapshot.host,
+                    port: snapshot.port,
+                    username: snapshot.username,
+                },
                 title,
                 terminal_ids: Vec::new(),
-                readiness: snapshot.state.readiness,
+                readiness: snapshot.readiness,
             },
         );
         true
@@ -2124,7 +2128,11 @@ impl WorkspaceApp {
         trace_plan: Option<&ConnectionTracePlan>,
         cx: &mut Context<Self>,
     ) -> bool {
-        let Some(node) = self.ssh_nodes.get(node_id).cloned() else {
+        let Some((readiness, has_terminal_consumer)) = self
+            .ssh_nodes
+            .get(node_id)
+            .map(|node| (node.readiness.clone(), !node.terminal_ids.is_empty()))
+        else {
             return false;
         };
         let stale_connection_id =
@@ -2142,14 +2150,11 @@ impl WorkspaceApp {
                     })
                 });
         let force_reconnect = stale_connection_id.is_some();
-        if matches!(
-            node.readiness,
-            NodeReadiness::Ready | NodeReadiness::Connecting
-        ) && let Some(connection_id) = self.node_router.connection_id_for_node(node_id)
+        if matches!(readiness, NodeReadiness::Ready | NodeReadiness::Connecting)
+            && let Some(connection_id) = self.node_router.connection_id_for_node(node_id)
             && let Some(handle) = self.ssh_registry.get(&connection_id)
         {
             let state = handle.state();
-            let has_terminal_consumer = !node.terminal_ids.is_empty();
             // Terminal panes are only shell-channel consumers. When no terminal
             // remains, reopening SFTP/forwards must prove or rebuild the node
             // transport through connect_tree_node instead of treating the old
@@ -2170,10 +2175,10 @@ impl WorkspaceApp {
             // connection, or replace it when it has been closed.
         }
 
-        let parent_id = self
-            .node_runtime_store
-            .metadata_snapshot(node_id)
-            .and_then(|snapshot| snapshot.parent_id);
+        let Some(runtime_snapshot) = self.node_runtime_store.snapshot(node_id) else {
+            return false;
+        };
+        let parent_id = runtime_snapshot.parent_id;
         if let Some(parent_id) = parent_id.as_ref()
             && !self.node_is_ready_for_terminal(parent_id)
         {
@@ -2199,27 +2204,9 @@ impl WorkspaceApp {
             self.drop_stale_node_connection(node_id, connection_id);
         }
 
-        let origin = self
-            .node_runtime_store
-            .metadata_snapshot(node_id)
-            .map(|snapshot| snapshot.origin)
-            .or_else(|| {
-                node.saved_connection_id
-                    .as_ref()
-                    .map(|id| NodeOrigin::Restored {
-                        saved_connection_id: id.clone(),
-                    })
-            })
-            .unwrap_or(NodeOrigin::Direct);
-        self.node_runtime_store.upsert_node_with_origin(
-            node_id.clone(),
-            node.config.clone(),
-            origin,
-        );
+        let config = runtime_snapshot.config;
         let consumer = ConnectionConsumer::NodeRouter(node_id.0.clone());
-        let handle = self
-            .ssh_registry
-            .acquire(node.config.clone(), consumer.clone());
+        let handle = self.ssh_registry.acquire(config.clone(), consumer.clone());
         let connection_id = handle.connection_id().to_string();
         let _ = self
             .ssh_registry
@@ -2231,7 +2218,6 @@ impl WorkspaceApp {
             node.readiness = NodeReadiness::Connecting;
         }
 
-        let config = node.config;
         let registry = self.ssh_registry.clone();
         let router = self.node_router.clone();
         let tx = self.reconnect_worker_sender(cx);

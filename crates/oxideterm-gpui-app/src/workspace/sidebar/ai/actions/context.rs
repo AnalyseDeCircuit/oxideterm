@@ -71,7 +71,7 @@ impl WorkspaceApp {
                 {
                     parts.push(format!(
                         "- Terminal: SSH to {}@{}:{}",
-                        node.config.username, node.config.host, node.config.port
+                        node.endpoint.username, node.endpoint.host, node.endpoint.port
                     ));
                     parts.push(format!("- Active session_id: {}", session_id.0));
                 }

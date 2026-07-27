@@ -421,29 +421,29 @@ mod runtime_save_tests {
         let mut nodes = HashMap::from([
             (
                 NodeId::new("node-home"),
-                WorkspaceSshNode {
-                    saved_connection_id: Some("home".to_string()),
-                    config: SshConfig {
+                WorkspaceSshNode::new(
+                    Some("home".to_string()),
+                    &SshConfig {
                         host: "100.118.61.75".to_string(),
                         ..SshConfig::default()
                     },
-                    title: "Old Home".to_string(),
-                    terminal_ids: Vec::new(),
-                    readiness: NodeReadiness::Ready,
-                },
+                    "Old Home".to_string(),
+                    Vec::new(),
+                    NodeReadiness::Ready,
+                ),
             ),
             (
                 NodeId::new("node-prod"),
-                WorkspaceSshNode {
-                    saved_connection_id: Some("prod".to_string()),
-                    config: SshConfig {
+                WorkspaceSshNode::new(
+                    Some("prod".to_string()),
+                    &SshConfig {
                         host: "prod.example.com".to_string(),
                         ..SshConfig::default()
                     },
-                    title: "Production".to_string(),
-                    terminal_ids: Vec::new(),
-                    readiness: NodeReadiness::Ready,
-                },
+                    "Production".to_string(),
+                    Vec::new(),
+                    NodeReadiness::Ready,
+                ),
             ),
         ]);
 
@@ -456,7 +456,7 @@ mod runtime_save_tests {
         let home = nodes.get(&NodeId::new("node-home")).unwrap();
         let prod = nodes.get(&NodeId::new("node-prod")).unwrap();
         assert_eq!(home.title, "Renamed Home");
-        assert_eq!(home.config.host, "100.118.61.75");
+        assert_eq!(home.endpoint.host, "100.118.61.75");
         assert_eq!(prod.title, "Production");
     }
 }

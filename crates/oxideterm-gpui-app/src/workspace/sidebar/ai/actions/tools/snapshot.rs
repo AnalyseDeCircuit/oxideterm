@@ -67,7 +67,7 @@ pub(in crate::workspace) fn ai_sftp_target_for_node(
             node_id: node_id.0.clone(),
             session_id: sftp_session_id,
             connection_id: node.saved_connection_id.clone(),
-            host: node.config.host.clone(),
+            host: node.endpoint.host.clone(),
         },
     ))
 }
@@ -216,9 +216,9 @@ impl WorkspaceApp {
                     refs.insert("sessionId".to_string(), session_id.0.to_string());
                 }
                 let mut metadata = serde_json::json!({
-                    "host": node.config.host,
-                    "port": node.config.port,
-                    "username": node.config.username,
+                    "host": node.endpoint.host,
+                    "port": node.endpoint.port,
+                    "username": node.endpoint.username,
                     "status": runtime_status,
                     "terminalIds": node.terminal_ids.iter().map(|id| id.0).collect::<Vec<_>>(),
                     "title": node.title,
@@ -236,7 +236,7 @@ impl WorkspaceApp {
                     kind: "ssh-node".to_string(),
                     label: format!(
                         "{}@{}:{}",
-                        node.config.username, node.config.host, node.config.port
+                        node.endpoint.username, node.endpoint.host, node.endpoint.port
                     ),
                     state: match node.readiness {
                         NodeReadiness::Ready => "connected",
@@ -509,8 +509,8 @@ impl WorkspaceApp {
             self.ssh_nodes.get(node_id).map(|node| {
                 serde_json::json!({
                     "id": node_id.0,
-                    "host": node.config.host,
-                    "username": node.config.username,
+                    "host": node.endpoint.host,
+                    "username": node.endpoint.username,
                     "status": match node.readiness {
                         NodeReadiness::Ready => "connected",
                         NodeReadiness::Connecting => "connecting",
@@ -960,7 +960,11 @@ impl WorkspaceApp {
                 };
                 // Tauri reconnects stale ssh-node targets and creates a fresh terminal;
                 // stale pane metadata must not be reported as an already-live target.
-                let Some(node) = self.ssh_nodes.get(&node_id).cloned() else {
+                let Some((title, saved_connection_id)) =
+                    self.ssh_nodes.get(&node_id).map(|node| {
+                        (node.title.clone(), node.saved_connection_id.clone())
+                    })
+                else {
                     return snapshot
                         .fail(
                             "SSH target is missing.",
@@ -970,11 +974,25 @@ impl WorkspaceApp {
                         )
                         .with_target(target);
                 };
-                let saved_connection_id = node.saved_connection_id.clone();
+                let Some(config) = self
+                    .node_runtime_store
+                    .snapshot(&node_id)
+                    .map(|runtime| runtime.config)
+                else {
+                    return snapshot
+                        .fail(
+                            "SSH target runtime is missing.",
+                            "missing_node_runtime",
+                            format!("No SSH runtime config exists for {}.", node_id.0),
+                            "write",
+                        )
+                        .with_target(target);
+                };
+                // Authentication config is copied only for this explicit reconnect action.
                 match self.queue_ssh_terminal_tab_for_node(
                     node_id.clone(),
-                    node.config,
-                    node.title,
+                    config,
+                    title,
                     saved_connection_id,
                     window,
                     cx,

@@ -45,10 +45,10 @@ fn tabbar_scroll_x_after_wheel(current_scroll_x: f32, wheel_delta: f32, max_scro
 fn attach_terminal_to_existing_ssh_node(
     node: &mut WorkspaceSshNode,
     saved_connection_id: Option<String>,
-    config: SshConfig,
+    config: &SshConfig,
     session_id: TerminalSessionId,
 ) {
-    node.config = config;
+    node.update_endpoint(config);
     // Terminal tab titles are per-tab state. Never let a Docker exec/logs tab,
     // quick command tab, or other one-off title rename the host node itself.
     if !matches!(node.readiness, NodeReadiness::Ready) {
@@ -349,16 +349,18 @@ impl WorkspaceApp {
                 attach_terminal_to_existing_ssh_node(
                     node,
                     saved_connection_id.clone(),
-                    config.clone(),
+                    &config,
                     session_id,
                 );
             })
-            .or_insert_with(|| WorkspaceSshNode {
-                saved_connection_id,
-                config,
-                title,
-                terminal_ids: vec![session_id],
-                readiness: NodeReadiness::Connecting,
+            .or_insert_with(|| {
+                WorkspaceSshNode::new(
+                    saved_connection_id,
+                    &config,
+                    title,
+                    vec![session_id],
+                    NodeReadiness::Connecting,
+                )
             });
     }
 
@@ -484,7 +486,7 @@ impl WorkspaceApp {
         };
         let title = node.title.trim();
         let display_name = if title.is_empty() {
-            format!("{}@{}", node.config.username, node.config.host)
+            format!("{}@{}", node.endpoint.username, node.endpoint.host)
         } else {
             title.to_string()
         };
@@ -1617,26 +1619,27 @@ mod tests {
 
     #[test]
     fn attaching_terminal_does_not_rename_existing_ssh_node() {
-        let mut node = WorkspaceSshNode {
-            saved_connection_id: Some("home".to_string()),
-            config: SshConfig::default(),
-            title: "Home Host".to_string(),
-            terminal_ids: vec![TerminalSessionId(1)],
-            readiness: NodeReadiness::Ready,
+        let mut node = WorkspaceSshNode::new(
+            Some("home".to_string()),
+            &SshConfig::default(),
+            "Home Host".to_string(),
+            vec![TerminalSessionId(1)],
+            NodeReadiness::Ready,
+        );
+        let updated_config = SshConfig {
+            host: "100.118.61.75".to_string(),
+            ..SshConfig::default()
         };
 
         attach_terminal_to_existing_ssh_node(
             &mut node,
             Some("home".to_string()),
-            SshConfig {
-                host: "100.118.61.75".to_string(),
-                ..SshConfig::default()
-            },
+            &updated_config,
             TerminalSessionId(2),
         );
 
         assert_eq!(node.title, "Home Host");
-        assert_eq!(node.config.host, "100.118.61.75");
+        assert_eq!(node.endpoint.host, "100.118.61.75");
         assert_eq!(
             node.terminal_ids,
             vec![TerminalSessionId(1), TerminalSessionId(2)]
@@ -1646,20 +1649,20 @@ mod tests {
 
     #[test]
     fn attaching_terminal_without_saved_id_keeps_existing_node_owner() {
-        let mut node = WorkspaceSshNode {
-            saved_connection_id: Some("prod".to_string()),
-            config: SshConfig::default(),
-            title: "Production".to_string(),
-            terminal_ids: vec![TerminalSessionId(1)],
-            readiness: NodeReadiness::Ready,
-        };
+        let mut node = WorkspaceSshNode::new(
+            Some("prod".to_string()),
+            &SshConfig::default(),
+            "Production".to_string(),
+            vec![TerminalSessionId(1)],
+            NodeReadiness::Ready,
+        );
 
         // A later terminal is a consumer of the existing node owner, not a new
         // privilege scope that can clear or replace that owner.
         attach_terminal_to_existing_ssh_node(
             &mut node,
             None,
-            SshConfig::default(),
+            &SshConfig::default(),
             TerminalSessionId(2),
         );
 

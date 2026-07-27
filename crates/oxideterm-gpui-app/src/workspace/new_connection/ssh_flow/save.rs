@@ -34,15 +34,17 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(node) = self.ssh_nodes.get(&node_id).cloned() else {
+        let Some(title) = self.ssh_nodes.get(&node_id).map(|node| node.title.clone()) else {
             self.session_manager.status = Some(self.i18n.t("ssh.form.runtime_node_missing"));
             cx.notify();
             return;
         };
-        let parent_id = self
-            .node_runtime_store
-            .metadata_snapshot(&node_id)
-            .and_then(|snapshot| snapshot.parent_id);
+        let Some(runtime_snapshot) = self.node_runtime_store.snapshot(&node_id) else {
+            self.session_manager.status = Some(self.i18n.t("ssh.form.runtime_node_missing"));
+            cx.notify();
+            return;
+        };
+        let parent_id = runtime_snapshot.parent_id.clone();
         let proxy_hops = match parent_id
             .as_ref()
             .map(|parent_id| self.runtime_proxy_hops_for_parent_path(parent_id))
@@ -58,8 +60,8 @@ impl WorkspaceApp {
 
         self.prepare_modal_interaction_boundary(cx);
         let mut form = form_from_runtime_config(
-            &node.config,
-            Some(&node.title),
+            &runtime_snapshot.config,
+            Some(&title),
             self.i18n.t("ssh.form.ungrouped"),
         );
         form.proxy_hops = proxy_hops;
@@ -1016,13 +1018,16 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(node) = self.ssh_nodes.get(&node_id).cloned() else {
+        let Some(title) = self.ssh_nodes.get(&node_id).map(|node| node.title.clone()) else {
+            return;
+        };
+        let Some(runtime_snapshot) = self.node_runtime_store.snapshot(&node_id) else {
             return;
         };
         self.prepare_modal_interaction_boundary(cx);
         let mut form = form_from_runtime_config(
-            &node.config,
-            Some(&node.title),
+            &runtime_snapshot.config,
+            Some(&title),
             self.i18n.t("ssh.form.ungrouped"),
         );
         form.agent_available = detect_ssh_agent_available();

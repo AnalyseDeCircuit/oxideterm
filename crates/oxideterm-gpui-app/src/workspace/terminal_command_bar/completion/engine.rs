@@ -170,7 +170,7 @@ impl WorkspaceApp {
             if let Some(node_id) = node_id
                 && let Some(node) = self.ssh_nodes.get(node_id)
             {
-                return format!("{}@{}", node.config.username, node.config.host);
+                return format!("{}@{}", node.endpoint.username, node.endpoint.host);
             }
             return tab.title.clone();
         }

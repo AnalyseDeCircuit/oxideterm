@@ -1148,17 +1148,14 @@ impl WorkspaceApp {
             root_ids: restored_roots,
             nodes: restored_nodes,
         };
-        if let Err(error) = self.node_router.apply_tree_snapshot(snapshot.clone()) {
-            eprintln!("failed to restore session tree snapshot: {error}");
-            return;
-        }
 
         // Rebuild the UI-facing node cache from the SessionTree owner. Runtime
         // ids are deliberately cleared above: after process restart, Tauri also
         // needs reconnect/connect_tree_node to create fresh SSH/SFTP/terminal
         // owners instead of trusting stale ids from disk.
         let mut saved_targets: HashMap<String, (u32, NodeId)> = HashMap::new();
-        for node in snapshot.nodes {
+        let mut ui_nodes = Vec::with_capacity(snapshot.nodes.len());
+        for node in &snapshot.nodes {
             let title = node
                 .origin
                 .saved_connection_id()
@@ -1174,16 +1171,25 @@ impl WorkspaceApp {
                     *entry = (rank, node.id.clone());
                 }
             }
-            self.ssh_nodes.insert(
-                node.id,
-                WorkspaceSshNode {
-                    saved_connection_id: node.origin.saved_connection_id().map(str::to_string),
-                    config: node.config,
+            ui_nodes.push((
+                node.id.clone(),
+                WorkspaceSshNode::new(
+                    node.origin.saved_connection_id().map(str::to_string),
+                    &node.config,
                     title,
-                    terminal_ids: Vec::new(),
-                    readiness: NodeReadiness::Disconnected,
-                },
-            );
+                    Vec::new(),
+                    NodeReadiness::Disconnected,
+                ),
+            ));
+        }
+        // Move the only reconstructed secret-bearing tree into NodeRouter after
+        // deriving the display-safe projection; do not clone the full snapshot.
+        if let Err(error) = self.node_router.apply_tree_snapshot(snapshot) {
+            eprintln!("failed to restore session tree snapshot: {error}");
+            return;
+        }
+        for (node_id, node) in ui_nodes {
+            self.ssh_nodes.insert(node_id, node);
         }
         for (saved_connection_id, (_, node_id)) in saved_targets {
             self.saved_ssh_nodes.insert(saved_connection_id, node_id);

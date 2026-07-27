@@ -40,11 +40,15 @@ impl WorkspaceApp {
             return self.queue_ssh_terminal_tab_for_existing_node(node_id, None, title, window, cx);
         }
 
-        let (config, saved_connection_id) = self
+        let config = self
+            .node_runtime_store
+            .snapshot(&node_id)
+            .map(|snapshot| snapshot.config)
+            .ok_or_else(|| anyhow::anyhow!("SSH node {} has no runtime config", node_id.0))?;
+        let saved_connection_id = self
             .ssh_nodes
             .get(&node_id)
-            .map(|node| (node.config.clone(), node.saved_connection_id.clone()))
-            .ok_or_else(|| anyhow::anyhow!("SSH node {} not found", node_id.0))?;
+            .and_then(|node| node.saved_connection_id.clone());
         // Keep secret-bearing config out of virtual rows and retained listeners.
         // A disconnected node copies it only at the explicit connect action.
         self.queue_ssh_terminal_tab_for_node(
@@ -173,9 +177,9 @@ impl WorkspaceApp {
                     parent_id: flat_node.parent_id.map(NodeId::new),
                     saved_connection_id: node.saved_connection_id.clone(),
                     title: node.title.clone(),
-                    host: node.config.host.clone(),
-                    username: node.config.username.clone(),
-                    port: node.config.port,
+                    host: node.endpoint.host.clone(),
+                    username: node.endpoint.username.clone(),
+                    port: node.endpoint.port,
                     node_view,
                     depth: flat_node.depth as usize,
                     is_last: flat_node.is_last_child,

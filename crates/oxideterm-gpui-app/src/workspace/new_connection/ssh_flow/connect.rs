@@ -352,8 +352,8 @@ impl WorkspaceApp {
                 return true;
             };
             endpoints.push(NativeSessionTreeConnectEndpoint::new(
-                node.config.host.clone(),
-                node.config.port,
+                node.endpoint.host.clone(),
+                node.endpoint.port,
             ));
         }
 
@@ -361,11 +361,7 @@ impl WorkspaceApp {
             self.node_runtime_store
                 .snapshot(node_id)
                 .filter(|snapshot| snapshot.parent_id.is_none())
-                .and_then(|_| {
-                    self.ssh_nodes
-                        .get(node_id)
-                        .and_then(|node| node.config.upstream_proxy.clone())
-                })
+                .and_then(|snapshot| snapshot.config.upstream_proxy)
         });
         let expansion = NodeTreeExpansion {
             target_node_id: target_node_id,
@@ -732,22 +728,18 @@ impl WorkspaceApp {
         let Some(fingerprint) = step.expected_host_key_fingerprint.clone() else {
             return;
         };
-        if let Some(node) = self.ssh_nodes.get_mut(&step.node_id) {
-            node.config.strict_host_key_checking = true;
-            node.config.trust_host_key = Some(trust_host_key);
-            node.config.expected_host_key_fingerprint = Some(fingerprint);
-            let origin = self
-                .node_runtime_store
-                .snapshot(&step.node_id)
-                .map(|snapshot| snapshot.origin)
-                .unwrap_or_default();
+        if let Some(snapshot) = self.node_runtime_store.snapshot(&step.node_id) {
+            let mut config = snapshot.config;
+            config.strict_host_key_checking = true;
+            config.trust_host_key = Some(trust_host_key);
+            config.expected_host_key_fingerprint = Some(fingerprint);
             // Tauri passes host-key acceptance as connectNode options. Native
             // stores the same one-step options on the node config immediately
             // before starting connect_tree_node.
             self.node_runtime_store.upsert_node_with_origin(
                 step.node_id.clone(),
-                node.config.clone(),
-                origin,
+                config,
+                snapshot.origin,
             );
         }
     }
@@ -991,13 +983,13 @@ impl WorkspaceApp {
                 };
                 self.ssh_nodes.insert(
                     child_id.clone(),
-                    crate::workspace::WorkspaceSshNode {
-                        saved_connection_id: None,
-                        config,
+                    crate::workspace::WorkspaceSshNode::new(
+                        None,
+                        &config,
                         title,
-                        terminal_ids: Vec::new(),
-                        readiness: NodeReadiness::Connecting,
-                    },
+                        Vec::new(),
+                        NodeReadiness::Connecting,
+                    ),
                 );
                 self.expanded_ssh_nodes.insert(parent_id);
                 self.expanded_ssh_nodes.insert(child_id.clone());

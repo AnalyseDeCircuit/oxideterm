@@ -577,13 +577,13 @@ mod ai_turn_order_tests {
         let mut config = oxideterm_ssh::SshConfig::default();
         config.host = "example.com".to_string();
         config.username = "alice".to_string();
-        let node = WorkspaceSshNode {
-            saved_connection_id: Some("conn-1".to_string()),
-            config,
-            title: "example".to_string(),
-            terminal_ids: Vec::new(),
-            readiness: NodeReadiness::Ready,
-        };
+        let node = WorkspaceSshNode::new(
+            Some("conn-1".to_string()),
+            &config,
+            "example".to_string(),
+            Vec::new(),
+            NodeReadiness::Ready,
+        );
 
         let target = ai_sftp_target_for_node(&node_id, &node, "sftp-1".to_string());
 
@@ -625,13 +625,13 @@ mod ai_turn_order_tests {
         let mut config = oxideterm_ssh::SshConfig::default();
         config.host = "example.com".to_string();
         config.username = "alice".to_string();
-        let node = WorkspaceSshNode {
-            saved_connection_id: Some("conn-1".to_string()),
-            config,
-            title: "example".to_string(),
-            terminal_ids: Vec::new(),
-            readiness: NodeReadiness::Ready,
-        };
+        let node = WorkspaceSshNode::new(
+            Some("conn-1".to_string()),
+            &config,
+            "example".to_string(),
+            Vec::new(),
+            NodeReadiness::Ready,
+        );
 
         let target = ai_ide_workspace_target_for_node(
             &node_id,

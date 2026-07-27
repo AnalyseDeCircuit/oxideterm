@@ -268,7 +268,9 @@ use self::new_connection::{
 use self::onboarding::OnboardingState;
 use self::pane_tree::SplitDrag;
 use self::quick_commands::QuickCommandsState;
-use self::root::state::{PendingSshTerminalOpen, ReconnectWorkerResult, WorkspaceSshNode};
+use self::root::state::{
+    PendingSshTerminalOpen, ReconnectWorkerResult, WorkspaceSshNode, WorkspaceSshNodeEndpoint,
+};
 use self::root::{background::*, helpers::*};
 use self::session_manager::SessionManagerState;
 use self::sidebar::AiInlinePanelState;

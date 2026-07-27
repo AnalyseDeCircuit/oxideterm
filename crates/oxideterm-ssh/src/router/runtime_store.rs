@@ -12,28 +12,33 @@ impl NodeRuntimeStore {
     }
 
     pub fn upsert_node_with_origin(&self, node_id: NodeId, config: SshConfig, origin: NodeOrigin) {
-        let is_new = !self.nodes.contains_key(&node_id);
-        self.nodes
-            .entry(node_id.clone())
-            .and_modify(|route| {
-                route.config = config.clone();
-                route.origin = origin.clone();
+        let is_new = match self.nodes.entry(node_id.clone()) {
+            Entry::Occupied(mut entry) => {
+                let route = entry.get_mut();
+                // Move auth material into the existing runtime owner without a transient clone.
+                route.config = config;
+                route.origin = origin;
                 route.generation += 1;
-            })
-            .or_insert_with(|| NodeRuntimeEntry {
-                config,
-                parent_id: None,
-                children_ids: Vec::new(),
-                depth: 0,
-                origin,
-                connection_id: None,
-                terminal_session_id: None,
-                terminal_endpoints: Vec::new(),
-                sftp_session_id: None,
-                state: NodeState::default(),
-                created_at_ms: now_ms(),
-                generation: 0,
-            });
+                false
+            }
+            Entry::Vacant(entry) => {
+                entry.insert(NodeRuntimeEntry {
+                    config,
+                    parent_id: None,
+                    children_ids: Vec::new(),
+                    depth: 0,
+                    origin,
+                    connection_id: None,
+                    terminal_session_id: None,
+                    terminal_endpoints: Vec::new(),
+                    sftp_session_id: None,
+                    state: NodeState::default(),
+                    created_at_ms: now_ms(),
+                    generation: 0,
+                });
+                true
+            }
+        };
         if is_new {
             let mut root_ids = self.root_ids.write();
             if !root_ids.contains(&node_id) {
@@ -103,29 +108,33 @@ impl NodeRuntimeStore {
             parent.depth
         };
 
-        self.nodes
-            .entry(node_id.clone())
-            .and_modify(|route| {
-                route.config = config.clone();
+        match self.nodes.entry(node_id.clone()) {
+            Entry::Occupied(mut entry) => {
+                let route = entry.get_mut();
+                // Existing child nodes receive the new config by value so secrets are not copied.
+                route.config = config;
                 route.parent_id = Some(parent_id.clone());
                 route.depth = parent_depth + 1;
-                route.origin = origin.clone();
+                route.origin = origin;
                 route.generation += 1;
-            })
-            .or_insert_with(|| NodeRuntimeEntry {
-                config,
-                parent_id: Some(parent_id),
-                children_ids: Vec::new(),
-                depth: parent_depth + 1,
-                origin,
-                connection_id: None,
-                terminal_session_id: None,
-                terminal_endpoints: Vec::new(),
-                sftp_session_id: None,
-                state: NodeState::default(),
-                created_at_ms: now_ms(),
-                generation: 0,
-            });
+            }
+            Entry::Vacant(entry) => {
+                entry.insert(NodeRuntimeEntry {
+                    config,
+                    parent_id: Some(parent_id),
+                    children_ids: Vec::new(),
+                    depth: parent_depth + 1,
+                    origin,
+                    connection_id: None,
+                    terminal_session_id: None,
+                    terminal_endpoints: Vec::new(),
+                    sftp_session_id: None,
+                    state: NodeState::default(),
+                    created_at_ms: now_ms(),
+                    generation: 0,
+                });
+            }
+        }
         self.root_ids.write().retain(|id| id != &node_id);
         Ok(())
     }
