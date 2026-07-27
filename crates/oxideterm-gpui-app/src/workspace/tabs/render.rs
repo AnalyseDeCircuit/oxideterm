@@ -125,7 +125,7 @@ impl WorkspaceApp {
                         drag.drop_target_index,
                     ) != drag.from_index
             });
-            let reconnect_node_id = self.reconnect_node_id_for_tab(tab);
+            let reconnect_node_id = self.reconnect_node_id_for_tab(tab, cx);
             let reconnect_job = reconnect_node_id
                 .as_ref()
                 .and_then(|node_id| self.reconnect_orchestrator.job(&node_id.0))
@@ -656,7 +656,7 @@ impl WorkspaceApp {
         )
     }
 
-    fn reconnect_node_id_for_tab(&self, tab: &Tab) -> Option<NodeId> {
+    fn reconnect_node_id_for_tab(&self, tab: &Tab, cx: &App) -> Option<NodeId> {
         match tab.kind {
             TabKind::SshTerminal => {
                 if let Some(active_pane_id) = tab.active_pane_id
@@ -694,9 +694,9 @@ impl WorkspaceApp {
                 .cloned()
                 .filter(|node_id| self.has_active_reconnect_job(node_id)),
             TabKind::Forwards => self
-                .forward_tab_nodes
-                .get(&tab.id)
-                .cloned()
+                .forwarding
+                .read(cx)
+                .node_for_tab(tab.id)
                 .filter(|node_id| self.has_active_reconnect_job(node_id)),
             TabKind::Ide => self
                 .ide_tab_nodes

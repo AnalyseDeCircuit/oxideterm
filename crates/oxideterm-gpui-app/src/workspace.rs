@@ -973,7 +973,6 @@ pub(crate) struct WorkspaceApp {
     expanded_ssh_nodes: HashSet<NodeId>,
     active_ssh_node_id: Option<NodeId>,
     next_ssh_node_id: u64,
-    forward_tab_nodes: HashMap<TabId, NodeId>,
     forwarding: Entity<forwards::ForwardingWorkspaceEntity>,
     _forwarding_subscriptions: Vec<Subscription>,
     file_manager: FileManagerState,

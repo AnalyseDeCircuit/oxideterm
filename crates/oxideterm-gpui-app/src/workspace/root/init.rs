@@ -534,7 +534,6 @@ impl WorkspaceApp {
             expanded_ssh_nodes: HashSet::new(),
             active_ssh_node_id: None,
             next_ssh_node_id: 1,
-            forward_tab_nodes: HashMap::new(),
             forwarding,
             _forwarding_subscriptions: vec![forwarding_subscription, forwarding_observation],
             file_manager: FileManagerState::load(settings_store.path()),

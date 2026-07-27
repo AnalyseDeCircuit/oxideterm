@@ -217,7 +217,7 @@ impl WorkspaceApp {
             Some(TabKind::Forwards) => {
                 self.active_surface = ActiveSurface::Terminal;
                 if let Some(active_tab_id) = self.main_window_tabs.active_tab_id
-                    && let Some(node_id) = self.forward_tab_nodes.get(&active_tab_id).cloned()
+                    && let Some(node_id) = self.forwarding.read(cx).node_for_tab(active_tab_id)
                 {
                     self.active_ssh_node_id = Some(node_id.clone());
                     self.expanded_ssh_nodes.insert(node_id.clone());
@@ -965,7 +965,8 @@ impl WorkspaceApp {
             self.ide_last_closed_at_by_node
                 .insert(node_id, SystemTime::now());
         }
-        self.forward_tab_nodes.remove(&tab.id);
+        self.forwarding
+            .update(cx, |forwarding, _cx| forwarding.unmap_tab(tab.id));
         let mut pane_ids = Vec::new();
         let mut session_ids = Vec::new();
         if let Some(root_pane) = &tab.root_pane {
@@ -1094,7 +1095,7 @@ impl WorkspaceApp {
         let tab_ids = self
             .tabs
             .iter()
-            .filter(|tab| self.tab_belongs_to_node(tab, node_id))
+            .filter(|tab| self.tab_belongs_to_node(tab, node_id, cx))
             .map(|tab| tab.id)
             .collect::<Vec<_>>();
         for tab_id in tab_ids {
@@ -1102,14 +1103,14 @@ impl WorkspaceApp {
         }
     }
 
-    fn tab_belongs_to_node(&self, tab: &Tab, node_id: &NodeId) -> bool {
+    fn tab_belongs_to_node(&self, tab: &Tab, node_id: &NodeId, cx: &App) -> bool {
         if self.sftp_tab_nodes.get(&tab.id) == Some(node_id) {
             return true;
         }
         if self.ide_tab_nodes.get(&tab.id) == Some(node_id) {
             return true;
         }
-        if self.forward_tab_nodes.get(&tab.id) == Some(node_id) {
+        if self.forwarding.read(cx).tab_matches_node(tab.id, node_id) {
             return true;
         }
         let mut session_ids = Vec::new();

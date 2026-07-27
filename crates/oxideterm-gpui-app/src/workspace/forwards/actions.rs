@@ -140,17 +140,17 @@ impl WorkspaceApp {
 
     pub(super) fn dismiss_detected_port(&mut self, port: u16, cx: &mut Context<Self>) {
         if let Some(tab_id) = self.main_window_tabs.active_tab_id
-            && let Some(node_id) = self.forward_tab_nodes.get(&tab_id)
+            && let Some(node_id) = self.forwarding.read(cx).node_for_tab(tab_id)
         {
-            let connection_id = self.forwarding_connection_id_for_node(node_id);
+            let connection_id = self.forwarding_connection_id_for_node(&node_id);
             self.forwarding.update(cx, |forwarding, _cx| {
-                forwarding.dismiss_detected_port(node_id, port);
+                forwarding.dismiss_detected_port(&node_id, port);
             });
             if let Some(connection_id) = connection_id {
                 self.forwarding_registry
                     .ignore_detected_port(&connection_id, port);
             }
-            if let Some(manager) = self.forwarding_manager_for_node_readonly(node_id) {
+            if let Some(manager) = self.forwarding_manager_for_node_readonly(&node_id) {
                 manager.ignore_detected_port(port);
             }
         }
@@ -349,7 +349,7 @@ impl WorkspaceApp {
     pub(in crate::workspace) fn maybe_start_forwards_port_scan(&mut self, cx: &mut Context<Self>) {
         let nodes = self.forwarding.read(cx).tracked_port_profiler_nodes();
         for node_id in nodes {
-            if !self.forwards_node_has_visible_tab(&node_id) {
+            if !self.forwards_node_has_visible_tab(&node_id, cx) {
                 if let Some(connection_id) = self.forwarding_connection_id_for_node(&node_id) {
                     // Hidden forwarding pages stop their profiler without touching tunnel owners.
                     self.forwarding_registry.stop_port_profiler(&connection_id);
@@ -371,7 +371,9 @@ impl WorkspaceApp {
 
     pub(in crate::workspace) fn maybe_refresh_forwards_stats(&mut self, cx: &mut Context<Self>) {
         if !self
-            .forward_tab_nodes
+            .forwarding
+            .read(cx)
+            .tab_node_mappings()
             .keys()
             .any(|tab_id| self.forwards_tab_is_visible(*tab_id))
         {
@@ -556,7 +558,7 @@ impl WorkspaceApp {
                 }
                 ForwardingDeliveryIntent::PortScan { node_id, binding } => {
                     self.remember_forwarding_binding(binding);
-                    if self.active_forwards_tab_matches_node(&node_id) {
+                    if self.active_forwards_tab_matches_node(&node_id, cx) {
                         self.sync_forwarding_view_port_detection(&node_id, cx);
                         changed = true;
                     }
@@ -567,7 +569,7 @@ impl WorkspaceApp {
                     error,
                     ..
                 }) => {
-                    let visible = self.active_forwards_tab_matches_session(&session_id);
+                    let visible = self.active_forwards_tab_matches_session(&session_id, cx);
                     match status {
                         ForwardStatus::Suspended => {
                             let description = self.i18n.t("forwards.toast.suspended_desc");
@@ -592,7 +594,7 @@ impl WorkspaceApp {
                     session_id,
                     ..
                 }) => {
-                    if self.active_forwards_tab_matches_session(&session_id) {
+                    if self.active_forwards_tab_matches_session(&session_id, cx) {
                         changed = true;
                     }
                 }
@@ -600,7 +602,7 @@ impl WorkspaceApp {
                     session_id,
                     forward_ids,
                 }) => {
-                    let visible = self.active_forwards_tab_matches_session(&session_id);
+                    let visible = self.active_forwards_tab_matches_session(&session_id, cx);
                     // Tauri handles sessionSuspended as a toast-only runtime
                     // event. Keep inline form errors reserved for create/edit
                     // validation and operation failures.
@@ -637,7 +639,7 @@ impl WorkspaceApp {
                             }),
                         );
                     });
-                    if self.active_forwards_tab_matches_node(&node_id) {
+                    if self.active_forwards_tab_matches_node(&node_id, cx) {
                         self.sync_forwarding_view_port_detection(&node_id, cx);
                         changed = true;
                     }
@@ -668,23 +670,31 @@ impl WorkspaceApp {
         });
     }
 
-    fn active_forwards_tab_matches_session(&self, session_id: &str) -> bool {
-        self.forward_tab_nodes.iter().any(|(tab_id, node_id)| {
-            self.forwards_tab_is_visible(*tab_id)
-                && self.forwarding_session_id_for_node(node_id) == session_id
-        })
+    fn active_forwards_tab_matches_session(&self, session_id: &str, cx: &App) -> bool {
+        self.forwarding
+            .read(cx)
+            .tab_node_mappings()
+            .iter()
+            .any(|(tab_id, node_id)| {
+                self.forwards_tab_is_visible(*tab_id)
+                    && self.forwarding_session_id_for_node(node_id) == session_id
+            })
     }
 
-    fn active_forwards_tab_matches_node(&self, node_id: &NodeId) -> bool {
-        self.forward_tab_nodes
+    fn active_forwards_tab_matches_node(&self, node_id: &NodeId, cx: &App) -> bool {
+        self.forwarding
+            .read(cx)
+            .tab_node_mappings()
             .iter()
             .any(|(tab_id, visible_node_id)| {
                 visible_node_id == node_id && self.forwards_tab_is_visible(*tab_id)
             })
     }
 
-    fn forwards_node_has_visible_tab(&self, node_id: &NodeId) -> bool {
-        self.forward_tab_nodes
+    fn forwards_node_has_visible_tab(&self, node_id: &NodeId, cx: &App) -> bool {
+        self.forwarding
+            .read(cx)
+            .tab_node_mappings()
             .iter()
             .any(|(tab_id, visible_node_id)| {
                 visible_node_id == node_id && self.forwards_tab_is_visible(*tab_id)

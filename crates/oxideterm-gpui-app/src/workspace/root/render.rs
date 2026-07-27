@@ -82,7 +82,7 @@ impl WorkspaceApp {
                 }
             }
             TabKind::Forwards => {
-                let Some(node_id) = self.forward_tab_nodes.get(&tab_id).cloned() else {
+                let Some(node_id) = self.forwarding.read(cx).node_for_tab(tab_id) else {
                     return modals;
                 };
                 let has_background = self.background_surface_active("forwards");

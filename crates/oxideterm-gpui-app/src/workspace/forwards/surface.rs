@@ -60,12 +60,8 @@ impl WorkspaceApp {
             .map(|node| node.title.clone())
             .unwrap_or_else(|| node_id.0.clone());
         let title = format!("{} · {}", self.i18n.t("forwards.table.title"), node_title);
-        let tab_id = if let Some((tab_id, _)) = self
-            .forward_tab_nodes
-            .iter()
-            .find(|(_, existing_node_id)| *existing_node_id == &node_id)
-        {
-            *tab_id
+        let tab_id = if let Some(tab_id) = self.forwarding.read(cx).tab_for_node(&node_id) {
+            tab_id
         } else {
             let tab_id = self.alloc_tab_id();
             self.tabs.push(Tab {
@@ -76,7 +72,9 @@ impl WorkspaceApp {
                 root_pane: None,
                 active_pane_id: None,
             });
-            self.forward_tab_nodes.insert(tab_id, node_id.clone());
+            self.forwarding.update(cx, |forwarding, _cx| {
+                forwarding.map_tab_to_node(tab_id, node_id.clone());
+            });
             tab_id
         };
 
@@ -112,7 +110,7 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
-        let Some(node_id) = self.forward_tab_nodes.get(&tab_id).cloned() else {
+        let Some(node_id) = self.forwarding.read(cx).node_for_tab(tab_id) else {
             return self.render_empty_workspace(cx);
         };
         self.sync_forwards_section_list_state(tab_id, &node_id, cx);

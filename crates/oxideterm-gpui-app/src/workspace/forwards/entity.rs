@@ -36,6 +36,7 @@ pub(in crate::workspace) enum ForwardingWorkspaceEvent {
 /// Owns forwarding UI delivery and sampling state without owning tunnel lifetime.
 pub(in crate::workspace) struct ForwardingWorkspaceEntity {
     pub(super) view: ForwardsViewState,
+    tab_nodes: HashMap<TabId, NodeId>,
     pub(super) section_list_state: ListState,
     pub(super) section_list_cache: RefCell<VirtualListSignatureCache>,
     pub(super) table_row_list_state: ListState,
@@ -55,6 +56,7 @@ impl ForwardingWorkspaceEntity {
         let (_runtime_tx, runtime_event_rx) = std::sync::mpsc::channel();
         Self {
             view: ForwardsViewState::default(),
+            tab_nodes: HashMap::new(),
             section_list_state: ListState::new(0, ListAlignment::Top, px(0.0)),
             section_list_cache: RefCell::new(VirtualListSignatureCache::default()),
             table_row_list_state: ListState::new(0, ListAlignment::Top, px(0.0)),
@@ -76,6 +78,7 @@ impl ForwardingWorkspaceEntity {
     ) -> Self {
         let entity = Self {
             view: ForwardsViewState::default(),
+            tab_nodes: HashMap::new(),
             section_list_state: ListState::new(
                 FORWARDS_SECTION_LIST_INITIAL_ITEM_COUNT,
                 ListAlignment::Top,
@@ -113,6 +116,33 @@ impl ForwardingWorkspaceEntity {
         &self,
     ) -> delivery::ActiveDeliverySender<ForwardingWorkerResult> {
         self.worker_tx.clone()
+    }
+
+    pub(in crate::workspace) fn node_for_tab(&self, tab_id: TabId) -> Option<NodeId> {
+        self.tab_nodes.get(&tab_id).cloned()
+    }
+
+    pub(in crate::workspace) fn tab_for_node(&self, node_id: &NodeId) -> Option<TabId> {
+        self.tab_nodes
+            .iter()
+            .find_map(|(tab_id, mapped_node_id)| (mapped_node_id == node_id).then_some(*tab_id))
+    }
+
+    pub(in crate::workspace) fn tab_matches_node(&self, tab_id: TabId, node_id: &NodeId) -> bool {
+        self.tab_nodes.get(&tab_id) == Some(node_id)
+    }
+
+    pub(in crate::workspace) fn map_tab_to_node(&mut self, tab_id: TabId, node_id: NodeId) {
+        self.tab_nodes.insert(tab_id, node_id);
+    }
+
+    pub(in crate::workspace) fn unmap_tab(&mut self, tab_id: TabId) -> Option<NodeId> {
+        // Removing a view mapping must not release the registry-owned tunnel.
+        self.tab_nodes.remove(&tab_id)
+    }
+
+    pub(in crate::workspace) fn tab_node_mappings(&self) -> &HashMap<TabId, NodeId> {
+        &self.tab_nodes
     }
 
     pub(in crate::workspace) fn take_delivery_intents(
@@ -362,6 +392,22 @@ mod tests {
         let state = entity.port_detection_state(&node_id).unwrap();
         assert_eq!(state.connection_id.as_deref(), Some("connection-b"));
         assert!(state.new_ports.is_empty());
+    }
+
+    #[test]
+    fn closing_tab_removes_only_the_view_mapping() {
+        let mut entity = ForwardingWorkspaceEntity::test_fixture();
+        let tab_id = TabId(7);
+        let node_id = NodeId::new("shared-forward");
+        entity.map_tab_to_node(tab_id, node_id.clone());
+
+        assert_eq!(entity.node_for_tab(tab_id), Some(node_id.clone()));
+        assert_eq!(entity.unmap_tab(tab_id), Some(node_id));
+        assert!(entity.node_for_tab(tab_id).is_none());
+
+        // The Entity deliberately has no stop/remove call here; a tab close
+        // cannot change registry-owned forwarding lifetime.
+        assert!(entity.delivery_intents.is_empty());
     }
 
     #[gpui::test]
