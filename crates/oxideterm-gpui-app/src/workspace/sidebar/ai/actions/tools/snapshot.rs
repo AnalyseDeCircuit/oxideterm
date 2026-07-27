@@ -522,7 +522,15 @@ impl WorkspaceApp {
             })
         });
         let model_visible_settings = ai_model_visible_settings_projection(settings);
-        let runtime_epoch = self.ai_entity.read(cx).runtime_epoch().to_string();
+        let (runtime_epoch, agent_fs, ai_mcp_registry, ai_acp_runtime_registry) = {
+            let ai = self.ai_entity.read(cx);
+            (
+                ai.runtime_epoch().to_string(),
+                ai.agent_fs().clone(),
+                ai.mcp_registry().clone(),
+                ai.acp_runtime_registry().clone(),
+            )
+        };
         let transfers = ai_transfers_state(&self.sftp_transfer_manager, &runtime_epoch);
         let mut ssh_node_states = std::collections::BTreeMap::<String, usize>::new();
         for node in self.ssh_nodes.values() {
@@ -594,11 +602,11 @@ impl WorkspaceApp {
             health_state,
             node_router: self.node_router.clone(),
             sftp_transfer_manager: self.sftp_transfer_manager.clone(),
-            agent_fs: self.ai.runtime.agent_fs.clone(),
+            agent_fs,
             backend_runtime: self.forwarding_runtime.clone(),
             rag_store: self.ai.knowledge.rag_store.get(),
-            ai_mcp_registry: self.ai.runtime.mcp_registry.clone(),
-            ai_acp_runtime_registry: self.ai.runtime.acp_runtime_registry.clone(),
+            ai_mcp_registry,
+            ai_acp_runtime_registry,
             ai_key_store: self.ai.models.key_store.clone(),
             ai_providers: settings.ai.providers.clone(),
             ai_embedding_config: settings.ai.embedding_config.clone(),

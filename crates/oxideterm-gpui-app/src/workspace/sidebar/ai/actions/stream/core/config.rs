@@ -136,7 +136,7 @@ impl WorkspaceApp {
         let tools = ai_stream_tool_definitions(
             tool_policy.enabled,
             &tool_policy,
-            &self.ai.runtime.mcp_registry,
+            self.ai_entity.read(cx).mcp_registry(),
         );
         Ok(AiChatStreamConfig {
             execution_backend: AiExecutionBackend::Provider,

@@ -291,7 +291,7 @@ impl WorkspaceApp {
         self.set_context_sidebar_rendered_with_motion(true, cx);
         if panel == ContextSidebarPanel::Assistant {
             self.ensure_ai_chat_initialized();
-            self.bootstrap_ai_mcp_registry();
+            self.bootstrap_ai_mcp_registry(cx);
         } else {
             // Non-AI context panels share the old right-sidebar shell, but must
             // not keep AI-specific focus or floating popovers alive.

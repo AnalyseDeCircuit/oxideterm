@@ -205,15 +205,15 @@ impl WorkspaceApp {
         }
         let app_lock = app_lock::AppLockState::load(oxideterm_app_lock::AppLockStore::new());
         let ai = ai_state::AiWorkspaceState::new(
-            ai_agent_fs,
             (settings.sidebar_ui.ai_sidebar_width as f32)
                 .clamp(AI_SIDEBAR_MIN_WIDTH, AI_SIDEBAR_MAX_WIDTH),
             Some(current_window_size(window)),
         );
         let ai_entity = cx.new(|cx| {
-            ai_state::AiWorkspaceEntity::new(
+            ai_state::AiWorkspaceEntity::new_with_agent_fs(
                 forwarding_runtime.clone(),
                 ai.models.key_store.clone(),
+                ai_agent_fs,
                 cx,
             )
         });
@@ -746,7 +746,7 @@ impl WorkspaceApp {
         .detach();
         if workspace.ai_sidebar_visible() {
             workspace.ensure_ai_chat_initialized();
-            workspace.bootstrap_ai_mcp_registry();
+            workspace.bootstrap_ai_mcp_registry(cx);
         }
         if workspace.version_migration.open {
             workspace.refresh_cli_companion_status(cx);

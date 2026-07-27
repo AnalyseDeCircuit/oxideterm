@@ -25,12 +25,12 @@ impl WorkspaceApp {
         }
     }
 
-    pub(in crate::workspace) fn bootstrap_ai_mcp_registry(&self) {
+    pub(in crate::workspace) fn bootstrap_ai_mcp_registry(&self, cx: &App) {
         // Tauri boots the MCP registry from AiChatPanel mount, not from process
         // startup or every settings write. Keep native at the same user-visible
         // boundary so HTTP auth-token/keychain access only happens when the AI
         // surface is actually in use.
-        let registry = self.ai.runtime.mcp_registry.clone();
+        let registry = self.ai_entity.read(cx).mcp_registry().clone();
         let configs = self.settings_store.settings().ai.mcp_servers.clone();
         self.forwarding_runtime.spawn(async move {
             registry.connect_all_values(&configs).await;
@@ -93,9 +93,9 @@ impl WorkspaceApp {
             // ACP Stop must target the live generation before local task abort
             // drops the registered session handle.
             let _ = self
-                .ai
-                .runtime
-                .acp_runtime_registry
+                .ai_entity
+                .read(cx)
+                .acp_runtime_registry()
                 .cancel_generation(conversation_id, &generation_id);
         }
         self.ai_entity.update(cx, |ai, _cx| {
@@ -208,9 +208,9 @@ impl WorkspaceApp {
             let generation_id = self.ai_entity.read(cx).chat_stream_generation().to_string();
             // Keep silent cancellation aligned with the visible Stop path.
             let _ = self
-                .ai
-                .runtime
-                .acp_runtime_registry
+                .ai_entity
+                .read(cx)
+                .acp_runtime_registry()
                 .cancel_generation(conversation_id, &generation_id);
         }
         self.ai_entity.update(cx, |ai, _cx| {

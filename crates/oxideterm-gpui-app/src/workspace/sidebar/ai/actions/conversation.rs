@@ -130,7 +130,7 @@ impl WorkspaceApp {
             cx.notify();
             return;
         }
-        self.bootstrap_ai_mcp_registry();
+        self.bootstrap_ai_mcp_registry(cx);
 
         let parsed_input = parse_ai_user_input(&content);
         let detected_intent = detect_ai_intent(&parsed_input);

@@ -151,6 +151,9 @@ pub(in crate::workspace) struct AiWorkspaceEntity {
     pub(in crate::workspace) tool_execution_records: VecDeque<AiToolExecutionRecord>,
     pub(in crate::workspace) tool_result_facts: VecDeque<AiToolResultFact>,
     pub(in crate::workspace) cli_agent_sessions: HashMap<String, AiCliAgentSession>,
+    agent_fs: NodeAgentIdeFileSystem,
+    mcp_registry: oxideterm_ai::McpRegistry,
+    acp_runtime_registry: oxideterm_ai::AcpRuntimeRegistry,
     compaction_tx: AiCompactionDeliverySender,
     compaction_rx: std::sync::mpsc::Receiver<AiCompactionDelivery>,
     compaction_deliveries: VecDeque<AiCompactionDelivery>,
@@ -159,9 +162,25 @@ pub(in crate::workspace) struct AiWorkspaceEntity {
 }
 
 impl AiWorkspaceEntity {
+    #[cfg(test)]
     pub(in crate::workspace) fn new(
         task_runtime: Arc<tokio::runtime::Runtime>,
         key_store: oxideterm_ai::AiProviderKeyStore,
+        cx: &mut Context<Self>,
+    ) -> Self {
+        // Entity unit tests do not connect nodes, but still exercise the real
+        // disabled filesystem and registry ownership paths.
+        let agent_fs = NodeAgentIdeFileSystem::new(
+            NodeRouter::new(oxideterm_ssh::SshConnectionRegistry::default()),
+            oxideterm_ide_fs::NodeAgentMode::Disabled,
+        );
+        Self::new_with_agent_fs(task_runtime, key_store, agent_fs, cx)
+    }
+
+    pub(in crate::workspace) fn new_with_agent_fs(
+        task_runtime: Arc<tokio::runtime::Runtime>,
+        key_store: oxideterm_ai::AiProviderKeyStore,
+        agent_fs: NodeAgentIdeFileSystem,
         cx: &mut Context<Self>,
     ) -> Self {
         let (model_refresh_tx, model_refresh_rx) =
@@ -182,6 +201,7 @@ impl AiWorkspaceEntity {
             crate::workspace::delivery::ActiveDeliverySender::channel();
         let (compaction_tx, compaction_rx) =
             crate::workspace::delivery::ActiveDeliverySender::channel();
+        let mcp_registry = oxideterm_ai::McpRegistry::new(key_store.clone());
         let entity = Self {
             task_runtime,
             key_store,
@@ -231,6 +251,9 @@ impl AiWorkspaceEntity {
             tool_execution_records: VecDeque::new(),
             tool_result_facts: VecDeque::new(),
             cli_agent_sessions: HashMap::new(),
+            agent_fs,
+            mcp_registry,
+            acp_runtime_registry: oxideterm_ai::AcpRuntimeRegistry::default(),
             compaction_tx,
             compaction_rx,
             compaction_deliveries: VecDeque::new(),
@@ -929,6 +952,25 @@ impl AiWorkspaceEntity {
         &self.cli_agent_sessions
     }
 
+    pub(in crate::workspace) fn agent_fs(&self) -> &NodeAgentIdeFileSystem {
+        &self.agent_fs
+    }
+
+    pub(in crate::workspace) fn set_agent_fs_mode(
+        &mut self,
+        mode: oxideterm_ide_fs::NodeAgentMode,
+    ) {
+        self.agent_fs.set_mode(mode);
+    }
+
+    pub(in crate::workspace) fn mcp_registry(&self) -> &oxideterm_ai::McpRegistry {
+        &self.mcp_registry
+    }
+
+    pub(in crate::workspace) fn acp_runtime_registry(&self) -> &oxideterm_ai::AcpRuntimeRegistry {
+        &self.acp_runtime_registry
+    }
+
     pub(in crate::workspace) fn take_chat_stream_deliveries(
         &mut self,
     ) -> VecDeque<AiStreamDelivery> {
@@ -1548,7 +1590,6 @@ impl gpui::EventEmitter<AiWorkspaceEvent> for AiWorkspaceEntity {}
 /// Owns all AI-related workspace state while preserving the existing feature boundaries.
 pub(super) struct AiWorkspaceState {
     pub(super) chat: AiChatWorkspaceState,
-    pub(super) runtime: AiRuntimeWorkspaceState,
     pub(super) models: AiModelWorkspaceState,
     pub(super) knowledge: AiKnowledgeWorkspaceState,
 }
@@ -1605,13 +1646,6 @@ pub(super) struct AiChatWorkspaceState {
     pub(super) next_sequence: u64,
 }
 
-/// Owns AI integration services that have not yet moved into the AI Entity.
-pub(super) struct AiRuntimeWorkspaceState {
-    pub(super) agent_fs: NodeAgentIdeFileSystem,
-    pub(super) mcp_registry: oxideterm_ai::McpRegistry,
-    pub(super) acp_runtime_registry: oxideterm_ai::AcpRuntimeRegistry,
-}
-
 /// Owns provider/model settings and selector state not yet extracted into the AI Entity.
 pub(super) struct AiModelWorkspaceState {
     pub(super) context_model_list_states: RefCell<HashMap<String, ListState>>,
@@ -1641,19 +1675,13 @@ pub(super) struct AiKnowledgeWorkspaceState {
 }
 
 impl AiWorkspaceState {
-    pub(super) fn new(
-        agent_fs: NodeAgentIdeFileSystem,
-        sidebar_width: f32,
-        overlay_window_size: Option<(f32, f32)>,
-    ) -> Self {
-        // The model state and MCP registry share the same zeroizing key-store cache;
+    pub(super) fn new(sidebar_width: f32, overlay_window_size: Option<(f32, f32)>) -> Self {
+        // The model state and AI Entity share the same zeroizing key-store cache;
         // no raw provider key is copied into workspace fields during extraction.
         let key_store = oxideterm_ai::AiProviderKeyStore::new();
-        let mcp_registry = oxideterm_ai::McpRegistry::new(key_store.clone());
 
         Self {
             chat: AiChatWorkspaceState::new(sidebar_width, overlay_window_size),
-            runtime: AiRuntimeWorkspaceState::new(agent_fs, mcp_registry),
             models: AiModelWorkspaceState::new(key_store),
             knowledge: AiKnowledgeWorkspaceState::new(),
         }
@@ -1708,16 +1736,6 @@ impl AiChatWorkspaceState {
             include_all_panes: false,
             loading: false,
             next_sequence: 0,
-        }
-    }
-}
-
-impl AiRuntimeWorkspaceState {
-    fn new(agent_fs: NodeAgentIdeFileSystem, mcp_registry: oxideterm_ai::McpRegistry) -> Self {
-        Self {
-            agent_fs,
-            mcp_registry,
-            acp_runtime_registry: oxideterm_ai::AcpRuntimeRegistry::default(),
         }
     }
 }

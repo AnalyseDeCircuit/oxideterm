@@ -23,7 +23,7 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let configs = ai_mcp_configs(settings);
-        let snapshots = self.ai.runtime.mcp_registry.snapshots();
+        let snapshots = self.ai_entity.read(cx).mcp_registry().snapshots();
         let configured_server_ids: HashSet<_> =
             configs.iter().map(|config| config.id.as_str()).collect();
         // Only live configured MCP rows should drive the retry/status ticker.
@@ -264,7 +264,8 @@ impl WorkspaceApp {
                                     rgb(self.tokens.ui.text_muted),
                                     false,
                                     move |this, _event, _window, cx| {
-                                        let registry = this.ai.runtime.mcp_registry.clone();
+                                        let registry =
+                                            this.ai_entity.read(cx).mcp_registry().clone();
                                         let server_id = refresh_id.clone();
                                         cx.spawn(async move |weak, cx| {
                                             let _ = registry.refresh_tools(&server_id).await;
@@ -282,7 +283,7 @@ impl WorkspaceApp {
                                 rgb(self.tokens.ui.error),
                                 false,
                                 move |this, _event, _window, cx| {
-                                    let registry = this.ai.runtime.mcp_registry.clone();
+                                    let registry = this.ai_entity.read(cx).mcp_registry().clone();
                                     let runtime = this.forwarding_runtime.clone();
                                     let server_id = remove_id.clone();
                                     cx.spawn(async move |weak, cx| {
@@ -459,7 +460,7 @@ impl WorkspaceApp {
             Some(icon),
             options,
             cx.listener(move |this, _event, _window, cx| {
-                let registry = this.ai.runtime.mcp_registry.clone();
+                let registry = this.ai_entity.read(cx).mcp_registry().clone();
                 let config = config.clone();
                 cx.spawn(async move |weak, cx| {
                     if connected {
@@ -1181,7 +1182,7 @@ impl WorkspaceApp {
         let should_store_auth_token = !draft.auth_token.is_empty()
             && draft.auth_header_mode != oxideterm_ai::McpAuthHeaderMode::None;
         if should_store_auth_token {
-            let registry = self.ai.runtime.mcp_registry.clone();
+            let registry = self.ai_entity.read(cx).mcp_registry().clone();
             let runtime = self.forwarding_runtime.clone();
             let mut restore_draft = draft.clone();
             // Move the UI token draft into a zeroizing owner before it crosses

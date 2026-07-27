@@ -1173,12 +1173,11 @@ impl WorkspaceApp {
             reconnect_timing_from_settings(&settings),
             reconnect_max_attempts_from_settings(&settings),
         );
-        self.ai
-            .runtime
-            .agent_fs
-            .set_mode(crate::workspace::ide::node_agent_mode_from_settings(
+        self.ai_entity.update(cx, |ai, _cx| {
+            ai.set_agent_fs_mode(crate::workspace::ide::node_agent_mode_from_settings(
                 &settings,
             ));
+        });
         // Monitoring settings own recurring remote shells and page-scoped GPU work.
         self.apply_host_tool_monitoring_settings(cx);
         self.sidebar_collapsed = settings.sidebar_ui.collapsed;
