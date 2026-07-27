@@ -12,12 +12,12 @@ use oxideterm_settings::{
     create_default_highlight_rule, is_gpui_preview_version, reindex_highlight_rules,
 };
 use oxideterm_settings_model::{
-    AI_MODEL_REFRESH_MISSING_API_KEY, AcpAgentPreset, AiMcpServerDraft, AiModelRefreshDelivery,
-    AiProviderModelChipItem, AiProviderModelPanel, AiSettingsPage, AiSettingsSection,
-    AiToolPolicyGroup, CliCompanionStatus, KNOWLEDGE_EMBEDDING_BATCH_SIZE, KnowledgeDeleteTarget,
-    KnowledgeExternalEdit, SETTINGS_SECTION_HEADER_ITEM_COUNT, SettingsDynamicSectionCounts,
-    SettingsInputDraftApply, TERMINAL_THEME_COLOR_FIELDS, ThemeColorField, ThemeEditorSection,
-    ThemeEditorState, UI_THEME_COLOR_FIELDS, ai_add_acp_agent, ai_add_acp_agent_preset,
+    AcpAgentPreset, AiMcpServerDraft, AiProviderModelChipItem, AiProviderModelPanel,
+    AiSettingsPage, AiSettingsSection, AiToolPolicyGroup, CliCompanionStatus,
+    KNOWLEDGE_EMBEDDING_BATCH_SIZE, KnowledgeDeleteTarget, KnowledgeExternalEdit,
+    SETTINGS_SECTION_HEADER_ITEM_COUNT, SettingsDynamicSectionCounts, SettingsInputDraftApply,
+    TERMINAL_THEME_COLOR_FIELDS, ThemeColorField, ThemeEditorSection, ThemeEditorState,
+    UI_THEME_COLOR_FIELDS, ai_add_acp_agent, ai_add_acp_agent_preset,
     ai_context_max_chars_label_key, ai_context_visible_lines_label_key, ai_delete_acp_agent,
     ai_mcp_auth_mode_value, ai_mcp_clean_record, ai_mcp_configs, ai_mcp_draft_input_value,
     ai_mcp_draft_valid, ai_mcp_server_signature, ai_mcp_split_args, ai_mcp_transport_label,
@@ -44,12 +44,10 @@ use oxideterm_theme::BUILT_IN_THEMES;
 use super::ime::WorkspaceImeTarget;
 use super::*;
 use oxideterm_ai::{
-    AI_PROVIDER_TEMPLATES, AiProviderKeyDisplayState, AiProviderRefreshKeyPolicy, AiProviderView,
+    AI_PROVIDER_TEMPLATES, AiProviderKeyDisplayState, AiProviderView,
     add_provider_from_template as ai_add_provider_from_template,
-    apply_provider_model_refresh as ai_apply_provider_model_refresh, fetch_provider_models,
-    generated_provider_id, provider_id as ai_provider_id,
-    provider_key_display_state as ai_provider_key_display_state,
-    provider_refresh_key_policy as ai_provider_refresh_key_policy,
+    apply_provider_model_refresh as ai_apply_provider_model_refresh, generated_provider_id,
+    provider_id as ai_provider_id, provider_key_display_state as ai_provider_key_display_state,
     provider_string as ai_provider_string,
     provider_template_by_type as ai_provider_template_by_type, provider_view as ai_provider_view,
     remove_provider_at_with_scoped_settings as ai_remove_provider_at_with_scoped_settings,

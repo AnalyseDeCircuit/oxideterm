@@ -210,6 +210,19 @@ impl WorkspaceApp {
                 .clamp(AI_SIDEBAR_MIN_WIDTH, AI_SIDEBAR_MAX_WIDTH),
             Some(current_window_size(window)),
         );
+        let ai_entity = cx.new(|cx| {
+            ai_state::AiWorkspaceEntity::new(
+                forwarding_runtime.clone(),
+                ai.models.key_store.clone(),
+                cx,
+            )
+        });
+        let ai_entity_subscription = cx.subscribe(
+            &ai_entity,
+            |workspace, _ai_entity, event: &ai_state::AiWorkspaceEvent, cx| {
+                workspace.handle_ai_workspace_event(event, cx);
+            },
+        );
         let settings_store_last_modified =
             crate::workspace::settings::settings_store_modified_time(settings_store.path());
         let connection_store_last_modified =
@@ -362,6 +375,8 @@ impl WorkspaceApp {
                 && settings.ai.enabled,
             context_sidebar_motion_generation: 0,
             ai,
+            ai_entity,
+            _ai_entity_subscription: ai_entity_subscription,
             active_context_sidebar_panel: ContextSidebarPanel::Assistant,
             needs_active_pane_focus: false,
             active_sidebar_section: SidebarSection::from_settings_key(

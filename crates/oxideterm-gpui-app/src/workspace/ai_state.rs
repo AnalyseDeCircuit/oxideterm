@@ -1,5 +1,228 @@
 use super::*;
 
+pub(in crate::workspace) enum AiWorkspaceEvent {
+    ModelRefreshDeliveryReady,
+}
+
+pub(in crate::workspace) enum AiModelRefreshIntent {
+    Updated {
+        index: usize,
+        provider_id: String,
+        refresh: oxideterm_ai::ProviderModelRefresh,
+    },
+    MissingApiKey {
+        provider_id: String,
+    },
+    Failed,
+}
+
+enum AiModelRefreshFailure {
+    MissingApiKey,
+    Failed,
+}
+
+struct AiModelRefreshWorkerDelivery {
+    index: usize,
+    provider_id: String,
+    generation: u64,
+    result: Result<oxideterm_ai::ProviderModelRefresh, AiModelRefreshFailure>,
+}
+
+/// Owns AI worker delivery slices as they move out of the workspace root.
+pub(in crate::workspace) struct AiWorkspaceEntity {
+    task_runtime: Arc<tokio::runtime::Runtime>,
+    key_store: oxideterm_ai::AiProviderKeyStore,
+    model_refresh_generations: HashMap<String, u64>,
+    refreshing_models: HashSet<String>,
+    model_refresh_tx:
+        crate::workspace::delivery::ActiveDeliverySender<AiModelRefreshWorkerDelivery>,
+    model_refresh_rx: std::sync::mpsc::Receiver<AiModelRefreshWorkerDelivery>,
+    model_refresh_pending: usize,
+    next_model_refresh_generation: u64,
+    model_refresh_intents: VecDeque<AiModelRefreshIntent>,
+}
+
+impl AiWorkspaceEntity {
+    pub(in crate::workspace) fn new(
+        task_runtime: Arc<tokio::runtime::Runtime>,
+        key_store: oxideterm_ai::AiProviderKeyStore,
+        cx: &mut Context<Self>,
+    ) -> Self {
+        let (model_refresh_tx, model_refresh_rx) =
+            crate::workspace::delivery::ActiveDeliverySender::channel();
+        let entity = Self {
+            task_runtime,
+            key_store,
+            model_refresh_generations: HashMap::new(),
+            refreshing_models: HashSet::new(),
+            model_refresh_tx,
+            model_refresh_rx,
+            model_refresh_pending: 0,
+            next_model_refresh_generation: 0,
+            model_refresh_intents: VecDeque::new(),
+        };
+        entity.schedule_model_refresh_delivery(cx);
+        entity
+    }
+
+    pub(in crate::workspace) fn model_is_refreshing(&self, provider_id: &str) -> bool {
+        self.refreshing_models.contains(provider_id)
+    }
+
+    pub(in crate::workspace) fn request_model_refresh(
+        &mut self,
+        index: usize,
+        provider: oxideterm_ai::AiProviderView,
+    ) -> bool {
+        let Some(generation) = self.begin_model_refresh(&provider.id) else {
+            return false;
+        };
+        let provider_id = provider.id.clone();
+        let key_store = self.key_store.clone();
+        let worker_tx = self.model_refresh_tx.clone();
+        self.task_runtime.spawn(async move {
+            let key_policy = oxideterm_ai::provider_refresh_key_policy(&provider.provider_type);
+            let api_key = match key_policy {
+                oxideterm_ai::AiProviderRefreshKeyPolicy::NoKey => None,
+                oxideterm_ai::AiProviderRefreshKeyPolicy::OptionalStoredKey => {
+                    tokio::task::spawn_blocking({
+                        let key_store = key_store.clone();
+                        let provider_id = provider_id.clone();
+                        move || key_store.get_provider_key(&provider_id)
+                    })
+                    .await
+                    .ok()
+                    .and_then(Result::ok)
+                    .flatten()
+                }
+                oxideterm_ai::AiProviderRefreshKeyPolicy::RequiredStoredKey => {
+                    match tokio::task::spawn_blocking({
+                        let key_store = key_store.clone();
+                        let provider_id = provider_id.clone();
+                        move || key_store.get_provider_key(&provider_id)
+                    })
+                    .await
+                    {
+                        Ok(Ok(Some(key))) => Some(key),
+                        Ok(Ok(None)) => {
+                            let _ = worker_tx.send(AiModelRefreshWorkerDelivery {
+                                index,
+                                provider_id,
+                                generation,
+                                result: Err(AiModelRefreshFailure::MissingApiKey),
+                            });
+                            return;
+                        }
+                        Ok(Err(_)) | Err(_) => {
+                            let _ = worker_tx.send(AiModelRefreshWorkerDelivery {
+                                index,
+                                provider_id,
+                                generation,
+                                result: Err(AiModelRefreshFailure::Failed),
+                            });
+                            return;
+                        }
+                    }
+                }
+            };
+            let result = oxideterm_ai::fetch_provider_models(provider, api_key)
+                .await
+                .map_err(|_| AiModelRefreshFailure::Failed);
+            let _ = worker_tx.send(AiModelRefreshWorkerDelivery {
+                index,
+                provider_id,
+                generation,
+                result,
+            });
+        });
+        true
+    }
+
+    pub(in crate::workspace) fn take_model_refresh_intents(
+        &mut self,
+    ) -> VecDeque<AiModelRefreshIntent> {
+        std::mem::take(&mut self.model_refresh_intents)
+    }
+
+    fn begin_model_refresh(&mut self, provider_id: &str) -> Option<u64> {
+        if self.refreshing_models.contains(provider_id) {
+            return None;
+        }
+        self.next_model_refresh_generation = self.next_model_refresh_generation.saturating_add(1);
+        let generation = self.next_model_refresh_generation;
+        self.model_refresh_generations
+            .insert(provider_id.to_string(), generation);
+        self.refreshing_models.insert(provider_id.to_string());
+        self.model_refresh_pending = self.model_refresh_pending.saturating_add(1);
+        Some(generation)
+    }
+
+    fn schedule_model_refresh_delivery(&self, cx: &mut Context<Self>) {
+        let delivery_wake = self.model_refresh_tx.wake();
+        let release_wake = delivery_wake.clone();
+        cx.on_release(move |_, _| {
+            // Releasing UI state stops only its waiter; in-flight HTTP work
+            // remains owned by the workspace Tokio runtime.
+            release_wake.stop();
+        })
+        .detach();
+        cx.spawn(async move |entity, cx| {
+            loop {
+                delivery_wake.wait().await;
+                let should_drain = delivery_wake.take();
+                let stopped = delivery_wake.is_stopped();
+                if should_drain {
+                    let backlog_remaining = entity
+                        .update(cx, |entity, cx| entity.drain_model_refresh_deliveries(cx))
+                        .unwrap_or(false);
+                    if backlog_remaining {
+                        delivery_wake.mark();
+                    }
+                }
+                if stopped {
+                    break;
+                }
+            }
+        })
+        .detach();
+    }
+
+    fn drain_model_refresh_deliveries(&mut self, cx: &mut Context<Self>) -> bool {
+        let drain = crate::workspace::delivery::drain_channel(
+            &self.model_refresh_rx,
+            crate::workspace::delivery::USER_ACTION_DELIVERY_BUDGET,
+        );
+        for delivery in drain.items {
+            self.model_refresh_pending = self.model_refresh_pending.saturating_sub(1);
+            if self.model_refresh_generations.get(&delivery.provider_id)
+                != Some(&delivery.generation)
+            {
+                continue;
+            }
+            self.refreshing_models.remove(&delivery.provider_id);
+            let intent = match delivery.result {
+                Ok(refresh) => AiModelRefreshIntent::Updated {
+                    index: delivery.index,
+                    provider_id: delivery.provider_id,
+                    refresh,
+                },
+                Err(AiModelRefreshFailure::MissingApiKey) => AiModelRefreshIntent::MissingApiKey {
+                    provider_id: delivery.provider_id,
+                },
+                Err(AiModelRefreshFailure::Failed) => AiModelRefreshIntent::Failed,
+            };
+            self.model_refresh_intents.push_back(intent);
+        }
+        if !self.model_refresh_intents.is_empty() {
+            cx.emit(AiWorkspaceEvent::ModelRefreshDeliveryReady);
+            cx.notify();
+        }
+        drain.outcome.backlog_remaining
+    }
+}
+
+impl gpui::EventEmitter<AiWorkspaceEvent> for AiWorkspaceEntity {}
+
 /// Owns all AI-related workspace state while preserving the existing feature boundaries.
 pub(super) struct AiWorkspaceState {
     pub(super) delivery_wake: crate::workspace::delivery::ActiveDeliveryWake,
@@ -121,13 +344,6 @@ pub(super) struct AiModelWorkspaceState {
         Option<crate::workspace::delivery::ActiveDeliverySender<AiProviderKeyStatusDelivery>>,
     pub(super) provider_key_status_rx:
         Option<std::sync::mpsc::Receiver<AiProviderKeyStatusDelivery>>,
-    pub(super) refresh_generations: HashMap<String, u64>,
-    pub(super) refreshing: HashSet<String>,
-    pub(super) refresh_tx:
-        Option<crate::workspace::delivery::ActiveDeliverySender<AiModelRefreshDelivery>>,
-    pub(super) refresh_rx: Option<std::sync::mpsc::Receiver<AiModelRefreshDelivery>>,
-    pub(super) refresh_pending: usize,
-    pub(super) next_refresh_generation: u64,
     pub(super) next_selector_probe_generation: u64,
     pub(super) selector_probe_rx: Option<std::sync::mpsc::Receiver<AiModelSelectorProbeDelivery>>,
     pub(super) selector_probe_tx:
@@ -293,12 +509,6 @@ impl AiModelWorkspaceState {
             provider_key_status_pending: HashSet::new(),
             provider_key_status_tx: None,
             provider_key_status_rx: None,
-            refresh_generations: HashMap::new(),
-            refreshing: HashSet::new(),
-            refresh_tx: None,
-            refresh_rx: None,
-            refresh_pending: 0,
-            next_refresh_generation: 0,
             next_selector_probe_generation: 0,
             selector_probe_rx: None,
             selector_probe_tx: None,
@@ -315,5 +525,79 @@ impl AiKnowledgeWorkspaceState {
             reindex_rx: None,
             window_activation_subscription: None,
         }
+    }
+}
+
+#[cfg(test)]
+mod entity_tests {
+    use super::*;
+    use gpui::TestAppContext;
+
+    fn test_runtime() -> Arc<tokio::runtime::Runtime> {
+        Arc::new(
+            tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .expect("AI entity test runtime"),
+        )
+    }
+
+    #[gpui::test]
+    fn model_refresh_state_and_delivery_are_entity_owned(cx: &mut TestAppContext) {
+        let entity = cx.new(|cx| {
+            AiWorkspaceEntity::new(test_runtime(), oxideterm_ai::AiProviderKeyStore::new(), cx)
+        });
+        let generation = entity.update(cx, |entity, _cx| {
+            let generation = entity
+                .begin_model_refresh("provider-a")
+                .expect("first refresh starts");
+            assert!(entity.begin_model_refresh("provider-a").is_none());
+            generation
+        });
+        let worker_tx = cx.read(|cx| entity.read(cx).model_refresh_tx.clone());
+        worker_tx
+            .send(AiModelRefreshWorkerDelivery {
+                index: 2,
+                provider_id: "provider-a".to_string(),
+                generation,
+                result: Ok(oxideterm_ai::ProviderModelRefresh {
+                    models: vec!["model-a".to_string()],
+                    context_windows: HashMap::new(),
+                }),
+            })
+            .unwrap();
+
+        cx.run_until_parked();
+
+        cx.read(|cx| {
+            let entity = entity.read(cx);
+            assert!(!entity.model_is_refreshing("provider-a"));
+            assert_eq!(entity.model_refresh_pending, 0);
+        });
+        let intents = entity.update(cx, |entity, _cx| entity.take_model_refresh_intents());
+        assert_eq!(intents.len(), 1);
+        assert!(matches!(
+            intents.front(),
+            Some(AiModelRefreshIntent::Updated {
+                index: 2,
+                provider_id,
+                refresh,
+            }) if provider_id == "provider-a" && refresh.models == ["model-a"]
+        ));
+    }
+
+    #[gpui::test]
+    fn entity_release_stops_only_model_refresh_delivery_waiter(cx: &mut TestAppContext) {
+        let entity = cx.new(|cx| {
+            AiWorkspaceEntity::new(test_runtime(), oxideterm_ai::AiProviderKeyStore::new(), cx)
+        });
+        let delivery_wake = cx.read(|cx| entity.read(cx).model_refresh_tx.wake());
+
+        drop(entity);
+        cx.update(|_cx| {});
+        cx.run_until_parked();
+
+        // The workspace runtime owns in-flight HTTP work independently.
+        assert!(delivery_wake.is_stopped());
     }
 }

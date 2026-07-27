@@ -56,7 +56,7 @@ impl WorkspaceApp {
                         rgb(self.tokens.ui.text_muted),
                     ),
                 )
-                .opacity(if self.ai.models.refreshing.contains(&provider.id) {
+                .opacity(if self.ai_entity.read(cx).model_is_refreshing(&provider.id) {
                     0.45
                 } else {
                     1.0

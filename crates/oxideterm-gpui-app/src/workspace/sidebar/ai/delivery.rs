@@ -31,7 +31,6 @@ impl WorkspaceApp {
                             let compaction_backlog = workspace.poll_ai_compaction_results(cx);
                             let selector_backlog =
                                 workspace.poll_ai_model_selector_probe_results(cx);
-                            let refresh_backlog = workspace.poll_ai_model_refresh_results(cx);
                             let agent_probe_backlog =
                                 workspace.poll_ai_acp_agent_probe_results(cx);
                             let model_discovery_backlog =
@@ -45,7 +44,6 @@ impl WorkspaceApp {
                             stream_backlog
                                 || compaction_backlog
                                 || selector_backlog
-                                || refresh_backlog
                                 || agent_probe_backlog
                                 || model_discovery_backlog
                                 || key_status_backlog

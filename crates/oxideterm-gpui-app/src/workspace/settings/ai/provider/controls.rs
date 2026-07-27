@@ -206,7 +206,7 @@ impl WorkspaceApp {
         provider: &AiProviderView,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let refreshing = self.ai.models.refreshing.contains(&provider.id);
+        let refreshing = self.ai_entity.read(cx).model_is_refreshing(&provider.id);
         let provider_for_refresh = provider.clone();
         let mut options = ToolbarButtonOptions::compact_text(
             ButtonVariant::Ghost,

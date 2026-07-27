@@ -208,8 +208,7 @@ use oxideterm_settings::{
     is_managed_background_image, list_background_images, remove_background_image,
 };
 use oxideterm_settings_model::{
-    AiMcpServerDraft, AiModelRefreshDelivery, AiProviderKeyStatusDelivery,
-    SettingsNavigationLayout, SettingsPageModel,
+    AiMcpServerDraft, AiProviderKeyStatusDelivery, SettingsNavigationLayout, SettingsPageModel,
 };
 use oxideterm_sftp::{
     BackgroundTransferDirection, BackgroundTransferKind, BackgroundTransferSnapshot,
@@ -837,6 +836,8 @@ pub(crate) struct WorkspaceApp {
     context_sidebar_rendered: bool,
     context_sidebar_motion_generation: u64,
     ai: ai_state::AiWorkspaceState,
+    ai_entity: Entity<ai_state::AiWorkspaceEntity>,
+    _ai_entity_subscription: Subscription,
     active_context_sidebar_panel: ContextSidebarPanel,
     needs_active_pane_focus: bool,
     active_sidebar_section: SidebarSection,
