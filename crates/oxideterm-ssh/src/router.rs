@@ -18,6 +18,7 @@ use thiserror::Error;
 use tokio::sync::Mutex;
 use tokio::time::sleep;
 use uuid::Uuid;
+use zeroize::Zeroizing;
 
 use crate::{
     AcquiredSftpMeta, ConnectionConsumer, ConnectionInfo, ConnectionState,
@@ -118,7 +119,7 @@ impl NodeOrigin {
 #[serde(rename_all = "camelCase")]
 pub struct TerminalEndpoint {
     pub ws_port: u16,
-    pub ws_token: String,
+    pub ws_token: Zeroizing<String>,
     pub session_id: String,
 }
 
@@ -273,7 +274,6 @@ pub struct NodeRuntimeSnapshot {
     pub origin: NodeOrigin,
     pub connection_id: Option<String>,
     pub terminal_session_id: Option<String>,
-    pub terminal_endpoints: Vec<TerminalEndpoint>,
     pub sftp_session_id: Option<String>,
     pub state: NodeState,
     pub created_at_ms: u64,
@@ -341,6 +341,30 @@ pub struct NodeTreeSnapshotNode {
     #[serde(default)]
     pub terminal_endpoints: Vec<TerminalEndpoint>,
     pub sftp_session_id: Option<String>,
+    pub created_at_ms: u64,
+    pub generation: u64,
+}
+
+/// Restart-safe tree state that excludes live runtime handles and secrets.
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NodeTreePersistenceSnapshot {
+    pub version: u32,
+    pub exported_at_ms: u64,
+    pub root_ids: Vec<NodeId>,
+    pub nodes: Vec<NodeTreePersistenceNode>,
+}
+
+/// Persistable node projection; saved connections resolve their config on restore.
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NodeTreePersistenceNode {
+    pub id: NodeId,
+    pub parent_id: Option<NodeId>,
+    pub children_ids: Vec<NodeId>,
+    pub depth: u32,
+    pub origin: NodeOrigin,
+    pub config: Option<SshConfig>,
     pub created_at_ms: u64,
     pub generation: u64,
 }

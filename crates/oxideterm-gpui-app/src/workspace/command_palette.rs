@@ -579,7 +579,7 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let mut root_ids = self.node_router.export_tree_snapshot().root_ids;
+        let mut root_ids = self.node_router.root_node_ids();
         if root_ids.is_empty() {
             root_ids = self.ssh_nodes.keys().cloned().collect();
         }

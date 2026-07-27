@@ -223,11 +223,12 @@ use oxideterm_ssh::{
     ConnectionTraceMode, ConnectionTracePlan, ConnectionTraceStage, ConnectionTraceState,
     ConnectionTraceStatus, MAX_RETAINED_RECONNECT_JOBS, NodeEventReceiver, NodeEventSubscription,
     NodeId, NodeOrigin, NodeReadiness, NodeRouter, NodeRuntimeStore, NodeState, NodeStateEvent,
-    NodeTreeExpansion, NodeTreeSnapshot, NodeTreeSnapshotNode, PhaseResult, ProbeConnectionStatus,
-    ProxyHopConfig, ReconnectForwardRule, ReconnectForwardRuleSnapshot, ReconnectJob,
-    ReconnectNodeConnectionSnapshot, ReconnectNodeTerminalSnapshot, ReconnectNodeTransferSnapshot,
-    ReconnectOrchestratorStore, ReconnectPhase, ReconnectSnapshot, SshAlgorithmDiagnosticKind,
-    SshConfig, SshConnectionRegistry, SshTransportClient, TerminalEndpoint, UpstreamProxyConfig,
+    NodeTreeExpansion, NodeTreePersistenceSnapshot, NodeTreeSnapshot, NodeTreeSnapshotNode,
+    PhaseResult, ProbeConnectionStatus, ProxyHopConfig, ReconnectForwardRule,
+    ReconnectForwardRuleSnapshot, ReconnectJob, ReconnectNodeConnectionSnapshot,
+    ReconnectNodeTerminalSnapshot, ReconnectNodeTransferSnapshot, ReconnectOrchestratorStore,
+    ReconnectPhase, ReconnectSnapshot, SshAlgorithmDiagnosticKind, SshConfig,
+    SshConnectionRegistry, SshTransportClient, TerminalEndpoint, UpstreamProxyConfig,
 };
 use oxideterm_ssh_launch::TemporarySshLaunch;
 use oxideterm_terminal::{
@@ -1261,9 +1262,7 @@ struct WorkspaceTooltipPending {
     generation: u64,
 }
 
-#[derive(Clone)]
 struct WorkspaceTerminalEndpointSession {
-    endpoint: TerminalEndpoint,
     session: SharedTerminalSession,
 }
 
@@ -1280,28 +1279,6 @@ struct DetachedLocalTerminalSession {
     session: SharedTerminalSession,
     detached_at: Instant,
     buffer_lines: usize,
-}
-
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct PersistedNodeTreeSnapshot {
-    version: u32,
-    exported_at_ms: u64,
-    root_ids: Vec<NodeId>,
-    nodes: Vec<PersistedNodeTreeNode>,
-}
-
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct PersistedNodeTreeNode {
-    id: NodeId,
-    parent_id: Option<NodeId>,
-    children_ids: Vec<NodeId>,
-    depth: u32,
-    origin: NodeOrigin,
-    config: Option<SshConfig>,
-    created_at_ms: u64,
-    generation: u64,
 }
 
 #[cfg(test)]

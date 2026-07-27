@@ -1196,7 +1196,7 @@ impl WorkspaceApp {
         let Ok(bytes) = fs::read(&path) else {
             return;
         };
-        let Ok(persisted) = serde_json::from_slice::<PersistedNodeTreeSnapshot>(&bytes) else {
+        let Ok(persisted) = serde_json::from_slice::<NodeTreePersistenceSnapshot>(&bytes) else {
             eprintln!("failed to parse session tree snapshot: {}", path.display());
             return;
         };
@@ -1286,41 +1286,9 @@ impl WorkspaceApp {
     }
 
     pub(in crate::workspace) fn persist_session_tree_snapshot(&self) {
-        let runtime = self.node_router.export_tree_snapshot();
-        let nodes = runtime
-            .nodes
-            .into_iter()
-            .filter_map(|node| {
-                let config = persistable_session_tree_config(&node);
-                if config.is_none() && node.origin.saved_connection_id().is_none() {
-                    return None;
-                }
-                Some(PersistedNodeTreeNode {
-                    id: node.id,
-                    parent_id: node.parent_id,
-                    children_ids: node.children_ids,
-                    depth: node.depth,
-                    origin: node.origin,
-                    config,
-                    created_at_ms: node.created_at_ms,
-                    generation: node.generation,
-                })
-            })
-            .collect::<Vec<_>>();
-        let retained_ids = nodes
-            .iter()
-            .map(|node| node.id.clone())
-            .collect::<HashSet<_>>();
-        let persisted = PersistedNodeTreeSnapshot {
-            version: runtime.version,
-            exported_at_ms: runtime.exported_at_ms,
-            root_ids: runtime
-                .root_ids
-                .into_iter()
-                .filter(|id| retained_ids.contains(id))
-                .collect(),
-            nodes,
-        };
+        // Build the disk projection inside the SSH runtime so secret-bearing
+        // configs and endpoint tokens are never cloned into an app snapshot.
+        let persisted = self.node_router.export_persistence_snapshot();
         let path = default_session_tree_path();
         if let Err(error) = write_session_tree_snapshot(&path, &persisted) {
             eprintln!("failed to persist session tree snapshot: {error}");
@@ -1339,7 +1307,7 @@ pub(in crate::workspace) fn restored_saved_node_rank(origin: &NodeOrigin) -> u32
 
 pub(in crate::workspace) fn write_session_tree_snapshot(
     path: &Path,
-    snapshot: &PersistedNodeTreeSnapshot,
+    snapshot: &NodeTreePersistenceSnapshot,
 ) -> Result<()> {
     let bytes = serde_json::to_vec_pretty(snapshot)?;
     durable_write_with_before_replace(path, &bytes, fail_before_session_tree_replace_for_tests)?;
@@ -1367,15 +1335,6 @@ pub(in crate::workspace) fn fail_before_session_tree_replace_for_tests() -> io::
 #[cfg(test)]
 pub(in crate::workspace) fn inject_session_tree_replace_failure() {
     FAIL_NEXT_SESSION_TREE_REPLACE.with(|fail| fail.set(true));
-}
-
-pub(in crate::workspace) fn persistable_session_tree_config(
-    node: &NodeTreeSnapshotNode,
-) -> Option<SshConfig> {
-    if node.origin.saved_connection_id().is_some() {
-        return None;
-    }
-    (!node.config.has_runtime_auth_secret()).then(|| node.config.clone())
 }
 
 pub(in crate::workspace) fn connection_error_is_cancelled(error: &str) -> bool {

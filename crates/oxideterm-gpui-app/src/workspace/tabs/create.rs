@@ -1139,16 +1139,11 @@ impl WorkspaceApp {
             // endpoint and GPUI panes consume the session by id instead of
             // being the authoritative terminal owner.
             ws_port: 0,
-            ws_token: format!("native-terminal-{}", session_id.0),
+            ws_token: zeroize::Zeroizing::new(format!("native-terminal-{}", session_id.0)),
             session_id: session_id.0.to_string(),
         };
-        self.terminal_endpoint_sessions.insert(
-            session_id,
-            WorkspaceTerminalEndpointSession {
-                endpoint: endpoint.clone(),
-                session,
-            },
-        );
+        self.terminal_endpoint_sessions
+            .insert(session_id, WorkspaceTerminalEndpointSession { session });
         // Register every endpoint. NodeRouter keeps the first endpoint primary
         // and can elect another live endpoint when that terminal closes.
         if let Ok(event) = self.node_router.bind_terminal_endpoint(node_id, endpoint) {

@@ -48,6 +48,14 @@ impl NodeRouter {
         self.runtime.export_snapshot()
     }
 
+    pub fn export_persistence_snapshot(&self) -> NodeTreePersistenceSnapshot {
+        self.runtime.export_persistence_snapshot()
+    }
+
+    pub fn root_node_ids(&self) -> Vec<NodeId> {
+        self.runtime.root_node_ids()
+    }
+
     pub fn apply_tree_snapshot(&self, snapshot: NodeTreeSnapshot) -> Result<(), RouteError> {
         self.runtime.apply_snapshot(snapshot)
     }
@@ -260,13 +268,14 @@ impl NodeRouter {
     }
 
     pub fn terminal_url(&self, node_id: &NodeId) -> Result<TerminalEndpoint, RouteError> {
-        let runtime = self
-            .runtime
-            .snapshot(node_id)
-            .ok_or_else(|| RouteError::NodeNotFound(node_id.0.clone()))?;
-        runtime.state.ws_endpoint.ok_or_else(|| {
-            RouteError::NotConnected(format!("No active terminal session for node {}", node_id.0))
-        })
+        self.runtime
+            .primary_terminal_endpoint(node_id)?
+            .ok_or_else(|| {
+                RouteError::NotConnected(format!(
+                    "No active terminal session for node {}",
+                    node_id.0
+                ))
+            })
     }
 
     pub fn node_id_for_connection(&self, connection_id: &str) -> Option<NodeId> {

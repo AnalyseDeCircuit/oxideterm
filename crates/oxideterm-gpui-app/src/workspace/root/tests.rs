@@ -154,7 +154,7 @@ mod tests {
             std::env::temp_dir().join(format!("oxideterm-session-tree-{}", uuid::Uuid::new_v4()));
         fs::create_dir_all(&tempdir).unwrap();
         let path = tempdir.join("session_tree.json");
-        let previous = PersistedNodeTreeSnapshot {
+        let previous = NodeTreePersistenceSnapshot {
             version: 1,
             exported_at_ms: 1,
             root_ids: Vec::new(),
@@ -162,7 +162,7 @@ mod tests {
         };
         write_session_tree_snapshot(&path, &previous).unwrap();
         let previous_bytes = fs::read(&path).unwrap();
-        let replacement = PersistedNodeTreeSnapshot {
+        let replacement = NodeTreePersistenceSnapshot {
             version: 1,
             exported_at_ms: 2,
             root_ids: Vec::new(),

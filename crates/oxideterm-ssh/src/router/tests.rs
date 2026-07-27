@@ -56,7 +56,7 @@ mod tests {
 
         let endpoint = TerminalEndpoint {
             ws_port: 0,
-            ws_token: "native-terminal-term-a".to_string(),
+            ws_token: Zeroizing::new("native-terminal-term-a".to_string()),
             session_id: "term-a".to_string(),
         };
         let event = router
@@ -95,7 +95,7 @@ mod tests {
                 &node,
                 TerminalEndpoint {
                     ws_port: 8022,
-                    ws_token: "representative-endpoint-token".to_string(),
+                    ws_token: Zeroizing::new("representative-endpoint-token".to_string()),
                     session_id: "term-a".to_string(),
                 },
             )
@@ -111,18 +111,86 @@ mod tests {
     }
 
     #[test]
+    fn persistence_snapshot_excludes_runtime_secrets_and_endpoints() {
+        let store = NodeRuntimeStore::default();
+        let secret_root = NodeId::new("secret-root");
+        let mut secret_root_snapshot = snapshot_node("secret-root", None, 0, Vec::new());
+        secret_root_snapshot.config = SshConfig::password(
+            "secret.example.test",
+            22,
+            "deploy",
+            "representative-password",
+        );
+        secret_root_snapshot.state.readiness = NodeReadiness::Ready;
+        store
+            .apply_snapshot(NodeTreeSnapshot {
+                version: 1,
+                exported_at_ms: now_ms(),
+                root_ids: vec![secret_root.clone()],
+                nodes: vec![secret_root_snapshot],
+            })
+            .unwrap();
+        let secret_child = store
+            .drill_down(
+                secret_root,
+                SshConfig {
+                    host: "child.example.test".to_string(),
+                    username: "deploy".to_string(),
+                    auth: crate::AuthMethod::Agent,
+                    ..SshConfig::default()
+                },
+            )
+            .unwrap();
+
+        let saved_node = NodeId::new("saved-node");
+        store.upsert_node_with_origin(
+            saved_node.clone(),
+            SshConfig::password(
+                "saved.example.test",
+                22,
+                "deploy",
+                "saved-store-password",
+            ),
+            NodeOrigin::Restored {
+                saved_connection_id: "saved-connection".to_string(),
+            },
+        );
+        store
+            .bind_terminal_endpoint(
+                &saved_node,
+                TerminalEndpoint {
+                    ws_port: 8022,
+                    ws_token: Zeroizing::new("representative-endpoint-token".to_string()),
+                    session_id: "term-a".to_string(),
+                },
+            )
+            .unwrap();
+
+        let snapshot = store.export_persistence_snapshot();
+        let debug_output = format!("{snapshot:?}");
+
+        assert_eq!(snapshot.nodes.len(), 1);
+        assert_eq!(snapshot.nodes[0].id, saved_node);
+        assert!(snapshot.nodes[0].config.is_none());
+        assert!(!snapshot.nodes.iter().any(|node| node.id == secret_child));
+        assert!(!debug_output.contains("representative-password"));
+        assert!(!debug_output.contains("saved-store-password"));
+        assert!(!debug_output.contains("representative-endpoint-token"));
+    }
+
+    #[test]
     fn removing_primary_terminal_elects_another_endpoint() {
         let router = NodeRouter::new(SshConnectionRegistry::default());
         let node = NodeId::new("node-a");
         router.upsert_node(node.clone(), SshConfig::password("host", 22, "me", "pw"));
         let first = TerminalEndpoint {
             ws_port: 0,
-            ws_token: "first-token".to_string(),
+            ws_token: Zeroizing::new("first-token".to_string()),
             session_id: "term-a".to_string(),
         };
         let second = TerminalEndpoint {
             ws_port: 0,
-            ws_token: "second-token".to_string(),
+            ws_token: Zeroizing::new("second-token".to_string()),
             session_id: "term-b".to_string(),
         };
 
@@ -135,7 +203,8 @@ mod tests {
         assert_eq!(router.terminal_url(&node).unwrap(), second);
         let snapshot = router.runtime_store().snapshot(&node).unwrap();
         assert_eq!(snapshot.terminal_session_id.as_deref(), Some("term-b"));
-        assert_eq!(snapshot.terminal_endpoints.len(), 1);
+        let tree_snapshot = router.export_tree_snapshot();
+        assert_eq!(tree_snapshot.nodes[0].terminal_endpoints.len(), 1);
     }
 
     #[test]
@@ -434,30 +503,9 @@ mod tests {
         ));
 
         {
-            let mut snapshot = store.snapshot(&root).unwrap();
-            snapshot.state.readiness = NodeReadiness::Ready;
-            store
-                .apply_snapshot(NodeTreeSnapshot {
-                    version: 1,
-                    exported_at_ms: now_ms(),
-                    root_ids: vec![root.clone()],
-                    nodes: vec![NodeTreeSnapshotNode {
-                        id: root.clone(),
-                        parent_id: None,
-                        children_ids: Vec::new(),
-                        depth: 0,
-                        config: snapshot.config,
-                        origin: snapshot.origin,
-                        state: snapshot.state,
-                        connection_id: snapshot.connection_id,
-                        terminal_session_id: snapshot.terminal_session_id,
-                        terminal_endpoints: snapshot.terminal_endpoints,
-                        sftp_session_id: snapshot.sftp_session_id,
-                        created_at_ms: snapshot.created_at_ms,
-                        generation: snapshot.generation,
-                    }],
-                })
-                .unwrap();
+            let mut snapshot = store.export_snapshot();
+            snapshot.nodes[0].state.readiness = NodeReadiness::Ready;
+            store.apply_snapshot(snapshot).unwrap();
         }
 
         let child = store
@@ -491,7 +539,7 @@ mod tests {
                         sftp_cwd: Some("/home/me".to_string()),
                         ws_endpoint: Some(TerminalEndpoint {
                             ws_port: 0,
-                            ws_token: "token".to_string(),
+                            ws_token: Zeroizing::new("token".to_string()),
                             session_id: "term-a".to_string(),
                         }),
                     },
@@ -531,7 +579,7 @@ mod tests {
                 &node,
                 TerminalEndpoint {
                     ws_port: 0,
-                    ws_token: "native-terminal-term-a".to_string(),
+                    ws_token: Zeroizing::new("native-terminal-term-a".to_string()),
                     session_id: "term-a".to_string(),
                 },
             )
@@ -729,7 +777,7 @@ mod tests {
                 &child_id,
                 TerminalEndpoint {
                     ws_port: 0,
-                    ws_token: "native-terminal-term-target".to_string(),
+                    ws_token: Zeroizing::new("native-terminal-term-target".to_string()),
                     session_id: "term-target".to_string(),
                 },
             )
