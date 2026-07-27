@@ -416,17 +416,18 @@ impl WorkspaceApp {
         drill_down_parent_id: Option<&NodeId>,
     ) -> Option<anyhow::Result<SaveConnectionRequest>> {
         let form = self.new_connection_form.as_ref()?;
-        let mut form = form.clone();
-        if let Some(parent_id) = drill_down_parent_id {
-            match self.runtime_proxy_hops_for_parent_path(parent_id) {
-                Ok(mut hops) => {
-                    hops.extend(form.proxy_hops);
-                    form.proxy_hops = hops;
-                }
+        let runtime_proxy_hops = match drill_down_parent_id {
+            Some(parent_id) => match self.runtime_proxy_hops_for_parent_path(parent_id) {
+                Ok(hops) => hops,
                 Err(error) => return Some(Err(error)),
-            }
-        }
-        Some(save_request_from_form(&form, None))
+            },
+            None => Vec::new(),
+        };
+        Some(save_request_from_form_with_proxy_hop_prefix(
+            form,
+            &runtime_proxy_hops,
+            None,
+        ))
     }
 
     pub(super) fn submit_serial_connection_form(

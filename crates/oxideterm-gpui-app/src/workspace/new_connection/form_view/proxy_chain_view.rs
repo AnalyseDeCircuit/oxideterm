@@ -727,10 +727,10 @@ impl WorkspaceApp {
     }
 
     pub(super) fn render_proxy_chain_section(&self, cx: &mut Context<Self>) -> AnyElement {
-        let (hops, expanded) = self
+        let (hop_count, expanded) = self
             .new_connection_form
             .as_ref()
-            .map(|form| (form.proxy_hops.clone(), form.proxy_chain_expanded))
+            .map(|form| (form.proxy_hops.len(), form.proxy_chain_expanded))
             .unwrap_or_default();
         let mut list = div()
             .id("new-connection-proxy-chain-scroll")
@@ -741,7 +741,7 @@ impl WorkspaceApp {
             .selectable_overflow_y_scroll(
                 &self.selectable_text_scroll_handle("new-connection-proxy-chain-scroll"),
             );
-        if hops.is_empty() {
+        if hop_count == 0 {
             list = list.child(
                 div()
                     .py(px(24.0))
@@ -751,8 +751,10 @@ impl WorkspaceApp {
                     .child(self.i18n.t("ssh.form.proxy_chain_empty")),
             );
         } else {
-            for (index, hop) in hops.iter().cloned().enumerate() {
-                list = list.child(self.render_proxy_hop_summary(index, hop, cx));
+            if let Some(form) = self.new_connection_form.as_ref() {
+                for (index, hop) in form.proxy_hops.iter().enumerate() {
+                    list = list.child(self.render_proxy_hop_summary(index, hop, cx));
+                }
             }
         }
 
@@ -780,7 +782,7 @@ impl WorkspaceApp {
                             .flex()
                             .items_center()
                             .gap_2()
-                            .when(!hops.is_empty(), |row| {
+                            .when(hop_count > 0, |row| {
                                 row.child(self.render_proxy_chain_toggle(expanded, cx))
                             })
                             .child(self.render_add_jump_button(cx)),
@@ -794,12 +796,12 @@ impl WorkspaceApp {
                     .text_align(gpui::TextAlign::Center)
                     .text_size(px(self.tokens.metrics.ui_text_sm))
                     .text_color(rgb(self.tokens.ui.text_muted))
-                    .child(if hops.is_empty() {
+                    .child(if hop_count == 0 {
                         self.i18n.t("ssh.form.proxy_chain_empty")
                     } else {
                         self.i18n
                             .t("ssh.form.proxy_chain_count")
-                            .replace("{{count}}", &hops.len().to_string())
+                            .replace("{{count}}", &hop_count.to_string())
                     })
                     .into_any_element()
             })
@@ -928,7 +930,7 @@ impl WorkspaceApp {
     fn render_proxy_hop_summary(
         &self,
         index: usize,
-        hop: NewConnectionProxyHop,
+        hop: &NewConnectionProxyHop,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let auth_label = match hop.auth_tab {
@@ -1017,17 +1019,17 @@ impl WorkspaceApp {
                         )
                         .child(self.render_proxy_hop_line(
                             self.i18n.t("ssh.form.proxy_chain_host"),
-                            hop.host,
+                            hop.host.clone(),
                             cx,
                         ))
                         .child(self.render_proxy_hop_line(
                             self.i18n.t("ssh.form.proxy_chain_port"),
-                            hop.port,
+                            hop.port.clone(),
                             cx,
                         ))
                         .child(self.render_proxy_hop_line(
                             self.i18n.t("ssh.form.proxy_chain_username"),
-                            hop.username,
+                            hop.username.clone(),
                             cx,
                         ))
                         .child(self.render_proxy_hop_line(

@@ -28,14 +28,13 @@ pub(super) fn manager_table_min_width_for_metrics(metrics: TauriTableMetrics) ->
 }
 
 pub(super) fn base_form() -> NewConnectionForm {
-    NewConnectionForm {
-        name: "Home".to_string(),
-        host: "192.168.1.2".to_string(),
-        port: "22".to_string(),
-        username: "me".to_string(),
-        group: "Ungrouped".to_string(),
-        ..NewConnectionForm::default()
-    }
+    let mut form = NewConnectionForm::default();
+    form.name = "Home".to_string();
+    form.host = "192.168.1.2".to_string();
+    form.port = "22".to_string();
+    form.username = "me".to_string();
+    form.group = "Ungrouped".to_string();
+    form
 }
 
 pub(super) fn connection_info_fixture(icon: Option<&str>) -> ConnectionInfo {
@@ -178,12 +177,10 @@ pub(super) fn remote_desktop_selection_is_typed_separately_from_ssh_ids() {
 
 #[test]
 pub(super) fn save_request_from_form_preserves_custom_icon_and_independent_colors() {
-    let form = NewConnectionForm {
-        icon: "cloud".to_string(),
-        color: "#7dd3fc".to_string(),
-        icon_background_color: "#082f49".to_string(),
-        ..base_form()
-    };
+    let mut form = base_form();
+    form.icon = "cloud".to_string();
+    form.color = "#7dd3fc".to_string();
+    form.icon_background_color = "#082f49".to_string();
     let request = save_request_from_form(&form, Some("conn-1".to_string())).unwrap();
 
     assert_eq!(request.icon.as_deref(), Some("cloud"));
@@ -306,11 +303,9 @@ pub(super) fn busy_oxide_export_does_not_keep_a_stale_text_input_active() {
 
 #[test]
 pub(super) fn new_connection_save_password_false_does_not_request_keychain_storage() {
-    let form = NewConnectionForm {
-        password: "secret".to_string(),
-        save_password: false,
-        ..base_form()
-    };
+    let mut form = base_form();
+    form.password = "secret".to_string();
+    form.save_password = false;
 
     let request = save_request_from_form(&form, None).unwrap();
 
@@ -325,11 +320,9 @@ pub(super) fn new_connection_save_password_false_does_not_request_keychain_stora
 
 #[test]
 pub(super) fn new_connection_save_password_true_keeps_empty_password_as_submitted_secret() {
-    let form = NewConnectionForm {
-        password: String::new(),
-        save_password: true,
-        ..base_form()
-    };
+    let mut form = base_form();
+    form.password = String::new();
+    form.save_password = true;
 
     let request = save_request_from_form(&form, None).unwrap();
 
@@ -348,12 +341,10 @@ pub(super) fn edit_properties_unloaded_password_preserves_saved_keychain_id() {
         keychain_id: Some("kc-password".to_string()),
         plaintext_password: None,
     };
-    let form = NewConnectionForm {
-        password: String::new(),
-        password_loaded: false,
-        save_password: true,
-        ..base_form()
-    };
+    let mut form = base_form();
+    form.password = String::new();
+    form.password_loaded = false;
+    form.save_password = true;
 
     let request = save_request_from_form_with_existing_auth(
         &form,
@@ -461,12 +452,10 @@ pub(super) fn edit_properties_same_key_empty_passphrase_submits_no_new_secret() 
         passphrase_keychain_id: Some("kc-passphrase".to_string()),
         plaintext_passphrase: None,
     };
-    let form = NewConnectionForm {
-        auth_tab: SshAuthTab::SshKey,
-        key_path: "/tmp/id_ed25519".to_string(),
-        passphrase: String::new(),
-        ..base_form()
-    };
+    let mut form = base_form();
+    form.auth_tab = SshAuthTab::SshKey;
+    form.key_path = "/tmp/id_ed25519".to_string();
+    form.passphrase = String::new();
 
     let request = save_request_from_form_with_existing_auth(
         &form,
@@ -491,12 +480,10 @@ pub(super) fn edit_properties_same_key_empty_passphrase_submits_no_new_secret() 
 
 #[test]
 pub(super) fn new_connection_request_carries_proxy_chain() {
-    let mut form = NewConnectionForm {
-        auth_tab: SshAuthTab::Agent,
-        identity_agent: Some("/tmp/target-agent.sock".to_string()),
-        agent_forwarding_socket: Some("/tmp/target-forward.sock".to_string()),
-        ..base_form()
-    };
+    let mut form = base_form();
+    form.auth_tab = SshAuthTab::Agent;
+    form.identity_agent = Some("/tmp/target-agent.sock".to_string());
+    form.agent_forwarding_socket = Some("/tmp/target-forward.sock".to_string());
     form.proxy_hops
         .push(crate::workspace::new_connection::NewConnectionProxyHop {
             saved_connection_id: String::new(),
@@ -548,10 +535,8 @@ pub(super) fn new_connection_request_carries_proxy_chain() {
 
 #[test]
 pub(super) fn proxy_hop_two_factor_is_saved_as_keyboard_interactive() {
-    let mut form = NewConnectionForm {
-        auth_tab: SshAuthTab::Agent,
-        ..base_form()
-    };
+    let mut form = base_form();
+    form.auth_tab = SshAuthTab::Agent;
     form.proxy_hops
         .push(crate::workspace::new_connection::NewConnectionProxyHop {
             saved_connection_id: String::new(),
@@ -576,6 +561,26 @@ pub(super) fn proxy_hop_two_factor_is_saved_as_keyboard_interactive() {
         request.proxy_chain[0].auth,
         oxideterm_connections::SavedAuth::KeyboardInteractive
     ));
+}
+
+#[test]
+pub(super) fn runtime_proxy_hops_are_prepended_without_cloning_the_connection_form() {
+    let mut form = base_form();
+    form.auth_tab = SshAuthTab::Agent;
+    let mut form_hop = crate::workspace::new_connection::NewConnectionProxyHop::new();
+    form_hop.host = "form-hop.example.com".to_string();
+    form_hop.username = "form-user".to_string();
+    form.proxy_hops.push(form_hop);
+
+    let mut runtime_hop = crate::workspace::new_connection::NewConnectionProxyHop::new();
+    runtime_hop.host = "runtime-hop.example.com".to_string();
+    runtime_hop.username = "runtime-user".to_string();
+    let request =
+        save_request_from_form_with_proxy_hop_prefix(&form, &[runtime_hop], None).unwrap();
+
+    assert_eq!(request.proxy_chain.len(), 2);
+    assert_eq!(request.proxy_chain[0].host, "runtime-hop.example.com");
+    assert_eq!(request.proxy_chain[1].host, "form-hop.example.com");
 }
 
 #[test]

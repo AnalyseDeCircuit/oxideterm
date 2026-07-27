@@ -767,15 +767,14 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) {
         self.prepare_modal_interaction_boundary(cx);
-        self.new_connection_form = Some(NewConnectionForm {
-            name: host.clone(),
-            host,
-            port: port.to_string(),
-            username,
-            focused_field: NewConnectionField::Password,
-            group: self.i18n.t("ssh.form.ungrouped"),
-            ..NewConnectionForm::default()
-        });
+        let mut form = NewConnectionForm::default();
+        form.name = host.clone();
+        form.host = host;
+        form.port = port.to_string();
+        form.username = username;
+        form.focused_field = NewConnectionField::Password;
+        form.group = self.i18n.t("ssh.form.ungrouped");
+        self.new_connection_form = Some(form);
         self.drill_down_parent_node_id = None;
         self.editing_saved_connection_id = None;
         self.editing_saved_connection_connect_after_save_node_id = None;

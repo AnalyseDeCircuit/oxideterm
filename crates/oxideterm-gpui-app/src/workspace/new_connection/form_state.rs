@@ -14,6 +14,7 @@ use oxideterm_remote_desktop::{
     RemoteDesktopVncImageQuality, RemoteDesktopVncOptions, RemoteDesktopVncSecurityPolicy,
     RemoteDesktopVncSessionMode,
 };
+use zeroize::Zeroize;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(in crate::workspace) enum SshAuthTab {
@@ -306,7 +307,6 @@ pub(in crate::workspace) fn toggle_remote_desktop_feature(
     }
 }
 
-#[derive(Clone)]
 pub(in crate::workspace) struct PrivilegeCredentialDraft {
     pub(in crate::workspace) credential_id: Option<String>,
     pub(in crate::workspace) label: String,
@@ -346,7 +346,19 @@ impl Default for PrivilegeCredentialDraft {
     }
 }
 
-#[derive(Clone)]
+impl PrivilegeCredentialDraft {
+    fn zeroize_secret_drafts(&mut self) {
+        self.secret.zeroize();
+    }
+}
+
+impl Drop for PrivilegeCredentialDraft {
+    fn drop(&mut self) {
+        // The settings draft is the last plain-text owner before keychain storage.
+        self.zeroize_secret_drafts();
+    }
+}
+
 pub(in crate::workspace) struct NewConnectionProxyHop {
     pub(in crate::workspace) saved_connection_id: String,
     pub(in crate::workspace) host: String,
@@ -413,6 +425,11 @@ impl NewConnectionProxyHop {
         !self.host.trim().is_empty() && !self.username.trim().is_empty()
     }
 
+    fn zeroize_secret_drafts(&mut self) {
+        self.password.zeroize();
+        self.passphrase.zeroize();
+    }
+
     pub(in crate::workspace) fn apply_saved_connection(&mut self, connection: &ConnectionInfo) {
         self.saved_connection_id = connection.id.clone();
         self.host = connection.host.clone();
@@ -440,7 +457,13 @@ impl NewConnectionProxyHop {
     }
 }
 
-#[derive(Clone)]
+impl Drop for NewConnectionProxyHop {
+    fn drop(&mut self) {
+        // Proxy credentials remain in one form owner and are scrubbed on removal.
+        self.zeroize_secret_drafts();
+    }
+}
+
 pub(in crate::workspace) struct NewConnectionForm {
     pub(in crate::workspace) transport: NewConnectionTransport,
     pub(in crate::workspace) name: String,
@@ -655,31 +678,45 @@ impl Default for NewConnectionForm {
     }
 }
 
+impl NewConnectionForm {
+    fn zeroize_secret_drafts(&mut self) {
+        self.password.zeroize();
+        self.passphrase.zeroize();
+        self.upstream_proxy_password.zeroize();
+    }
+}
+
+impl Drop for NewConnectionForm {
+    fn drop(&mut self) {
+        // GPUI inputs require plain String drafts, so scrub them at owner teardown.
+        self.zeroize_secret_drafts();
+    }
+}
+
 pub(in crate::workspace) fn form_from_remote_desktop_profile(
     profile: &RemoteDesktopProfile,
     ungrouped_label: String,
 ) -> NewConnectionForm {
     // Editing carries only the keychain reference; the credential value is never loaded.
-    NewConnectionForm {
-        transport: match profile.protocol {
-            oxideterm_remote_desktop::RemoteDesktopProtocol::Rdp => NewConnectionTransport::Rdp,
-            oxideterm_remote_desktop::RemoteDesktopProtocol::Vnc => NewConnectionTransport::Vnc,
-        },
-        name: profile.name.clone(),
-        host: profile.host.clone(),
-        port: profile.port.to_string(),
-        username: profile.username.clone().unwrap_or_default(),
-        remote_desktop_session_options: profile.session_options,
-        remote_desktop_profile_id: Some(profile.id.clone()),
-        saved_password_keychain_id: profile.credential_ref.clone(),
-        save_password: profile.credential_ref.is_some(),
-        group: profile.group.clone().unwrap_or(ungrouped_label),
-        icon: profile.icon.clone().unwrap_or_default(),
-        color: profile.color.clone().unwrap_or_default(),
-        icon_background_color: profile.icon_background_color.clone().unwrap_or_default(),
-        focused_field: NewConnectionField::Name,
-        ..NewConnectionForm::default()
-    }
+    let mut form = NewConnectionForm::default();
+    form.transport = match profile.protocol {
+        oxideterm_remote_desktop::RemoteDesktopProtocol::Rdp => NewConnectionTransport::Rdp,
+        oxideterm_remote_desktop::RemoteDesktopProtocol::Vnc => NewConnectionTransport::Vnc,
+    };
+    form.name = profile.name.clone();
+    form.host = profile.host.clone();
+    form.port = profile.port.to_string();
+    form.username = profile.username.clone().unwrap_or_default();
+    form.remote_desktop_session_options = profile.session_options;
+    form.remote_desktop_profile_id = Some(profile.id.clone());
+    form.saved_password_keychain_id = profile.credential_ref.clone();
+    form.save_password = profile.credential_ref.is_some();
+    form.group = profile.group.clone().unwrap_or(ungrouped_label);
+    form.icon = profile.icon.clone().unwrap_or_default();
+    form.color = profile.color.clone().unwrap_or_default();
+    form.icon_background_color = profile.icon_background_color.clone().unwrap_or_default();
+    form.focused_field = NewConnectionField::Name;
+    form
 }
 
 /// Returns the presentation-only visibility state for primary credential fields.
@@ -1212,20 +1249,21 @@ mod tests {
 
     use super::{
         NewConnectionField, NewConnectionForm, NewConnectionFormMode, NewConnectionProxyHop,
-        NewConnectionTransport, RDP_DEFAULT_PORT_TEXT, RemoteDesktopSessionFeature,
-        RemoteDesktopSessionOptions, RemoteDesktopVncCompression, RemoteDesktopVncImageQuality,
-        RemoteDesktopVncOptions, RemoteDesktopVncPreference, RemoteDesktopVncSecurityPolicy,
-        RemoteDesktopVncSessionMode, SSH_DEFAULT_PORT_TEXT, SavedConnectionPromptAction,
-        SshAuthFamily, SshAuthTab, SshKeyAuthSource, TELNET_DEFAULT_PORT_TEXT,
-        VNC_DEFAULT_PORT_TEXT, apply_remote_desktop_vnc_preference, apply_transport_default_port,
-        apply_transport_default_username, auth_family_from_tab, auth_tab_from_key_source,
-        backspace_current_connection_field, connection_icon_field_visible,
-        connection_secret_field_visible, default_auth_tab_for_family,
-        form_from_remote_desktop_profile, insert_text_into_current_connection_field,
-        key_source_from_tab, new_connection_form_mode, next_connection_field,
-        remote_desktop_feature_supported, remote_desktop_vnc_preference_selected,
-        select_current_connection_field, text_from_keystroke,
-        toggle_connection_secret_field_visibility, toggle_remote_desktop_feature,
+        NewConnectionTransport, PrivilegeCredentialDraft, RDP_DEFAULT_PORT_TEXT,
+        RemoteDesktopSessionFeature, RemoteDesktopSessionOptions, RemoteDesktopVncCompression,
+        RemoteDesktopVncImageQuality, RemoteDesktopVncOptions, RemoteDesktopVncPreference,
+        RemoteDesktopVncSecurityPolicy, RemoteDesktopVncSessionMode, SSH_DEFAULT_PORT_TEXT,
+        SavedConnectionPromptAction, SshAuthFamily, SshAuthTab, SshKeyAuthSource,
+        TELNET_DEFAULT_PORT_TEXT, VNC_DEFAULT_PORT_TEXT, apply_remote_desktop_vnc_preference,
+        apply_transport_default_port, apply_transport_default_username, auth_family_from_tab,
+        auth_tab_from_key_source, backspace_current_connection_field,
+        connection_icon_field_visible, connection_secret_field_visible,
+        default_auth_tab_for_family, form_from_remote_desktop_profile,
+        insert_text_into_current_connection_field, key_source_from_tab, new_connection_form_mode,
+        next_connection_field, remote_desktop_feature_supported,
+        remote_desktop_vnc_preference_selected, select_current_connection_field,
+        text_from_keystroke, toggle_connection_secret_field_visibility,
+        toggle_remote_desktop_feature,
     };
 
     fn keystroke(key: &str, key_char: Option<&str>, modifiers: Modifiers) -> Keystroke {
@@ -1276,19 +1314,42 @@ mod tests {
 
     #[test]
     fn visible_secret_drafts_remain_redacted_from_debug_output() {
-        let form = NewConnectionForm {
-            password: "password-value".to_string(),
-            password_visible: true,
-            passphrase: "passphrase-value".to_string(),
-            passphrase_visible: true,
-            ..NewConnectionForm::default()
-        };
+        let mut form = NewConnectionForm::default();
+        form.password = "password-value".to_string();
+        form.password_visible = true;
+        form.passphrase = "passphrase-value".to_string();
+        form.passphrase_visible = true;
 
         let debug_output = format!("{form:?}");
 
         assert!(!debug_output.contains("password-value"));
         assert!(!debug_output.contains("passphrase-value"));
         assert!(debug_output.contains("[redacted secret]"));
+    }
+
+    #[test]
+    fn connection_and_privilege_secret_drafts_are_zeroized() {
+        let mut form = NewConnectionForm::default();
+        form.password = "password-value".to_string();
+        form.passphrase = "passphrase-value".to_string();
+        form.upstream_proxy_password = "proxy-password-value".to_string();
+        form.zeroize_secret_drafts();
+
+        let mut proxy_hop = NewConnectionProxyHop::new();
+        proxy_hop.password = "hop-password-value".to_string();
+        proxy_hop.passphrase = "hop-passphrase-value".to_string();
+        proxy_hop.zeroize_secret_drafts();
+
+        let mut privilege_draft = PrivilegeCredentialDraft::default();
+        privilege_draft.secret = "privilege-secret-value".to_string();
+        privilege_draft.zeroize_secret_drafts();
+
+        assert!(form.password.is_empty());
+        assert!(form.passphrase.is_empty());
+        assert!(form.upstream_proxy_password.is_empty());
+        assert!(proxy_hop.password.is_empty());
+        assert!(proxy_hop.passphrase.is_empty());
+        assert!(privilege_draft.secret.is_empty());
     }
 
     #[test]
@@ -1436,11 +1497,9 @@ mod tests {
 
     #[test]
     fn selected_text_is_replaced_by_committed_input() {
-        let mut form = NewConnectionForm {
-            host: "example.test".to_string(),
-            focused_field: NewConnectionField::Host,
-            ..NewConnectionForm::default()
-        };
+        let mut form = NewConnectionForm::default();
+        form.host = "example.test".to_string();
+        form.focused_field = NewConnectionField::Host;
         select_current_connection_field(&mut form);
         insert_text_into_current_connection_field(&mut form, "192.168.1.10");
         assert_eq!(form.host, "192.168.1.10");
@@ -1718,11 +1777,9 @@ mod tests {
 
     #[test]
     fn backspace_clears_selected_field() {
-        let mut form = NewConnectionForm {
-            username: "root".to_string(),
-            focused_field: NewConnectionField::Username,
-            ..NewConnectionForm::default()
-        };
+        let mut form = NewConnectionForm::default();
+        form.username = "root".to_string();
+        form.focused_field = NewConnectionField::Username;
         select_current_connection_field(&mut form);
         assert!(backspace_current_connection_field(&mut form));
         assert!(form.username.is_empty());
@@ -1731,11 +1788,9 @@ mod tests {
 
     #[test]
     fn backspace_reports_text_changes_without_selection() {
-        let mut form = NewConnectionForm {
-            username: "root".to_string(),
-            focused_field: NewConnectionField::Username,
-            ..NewConnectionForm::default()
-        };
+        let mut form = NewConnectionForm::default();
+        form.username = "root".to_string();
+        form.focused_field = NewConnectionField::Username;
 
         assert!(backspace_current_connection_field(&mut form));
         assert_eq!(form.username, "roo");
@@ -1744,10 +1799,8 @@ mod tests {
 
     #[test]
     fn backspace_reports_false_for_empty_unselected_field() {
-        let mut form = NewConnectionForm {
-            focused_field: NewConnectionField::Name,
-            ..NewConnectionForm::default()
-        };
+        let mut form = NewConnectionForm::default();
+        form.focused_field = NewConnectionField::Name;
 
         assert!(!backspace_current_connection_field(&mut form));
         assert_eq!(form.selected_field, None);
@@ -1755,11 +1808,9 @@ mod tests {
 
     #[test]
     fn backspace_clears_stale_selection_state() {
-        let mut form = NewConnectionForm {
-            focused_field: NewConnectionField::Username,
-            selected_field: Some(NewConnectionField::Host),
-            ..NewConnectionForm::default()
-        };
+        let mut form = NewConnectionForm::default();
+        form.focused_field = NewConnectionField::Username;
+        form.selected_field = Some(NewConnectionField::Host);
 
         assert!(backspace_current_connection_field(&mut form));
         assert_eq!(form.selected_field, None);

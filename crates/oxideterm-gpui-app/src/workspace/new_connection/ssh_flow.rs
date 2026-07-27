@@ -38,7 +38,8 @@ use crate::workspace::{
     delivery::ActiveDeliverySender,
     session_manager::{
         duplicate_connection_template_name, form_from_saved_connection, save_request_from_form,
-        save_request_from_form_with_existing_auth, upstream_proxy_config_from_form,
+        save_request_from_form_with_existing_auth, save_request_from_form_with_proxy_hop_prefix,
+        upstream_proxy_config_from_form,
     },
 };
 use oxideterm_session_adapter::{
@@ -155,16 +156,15 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) {
         self.prepare_modal_interaction_boundary(cx);
-        self.new_connection_form = Some(NewConnectionForm {
-            group: self.i18n.t("ssh.form.ungrouped"),
-            agent_available: detect_ssh_agent_available(),
-            save_connection: self
-                .settings_store
-                .settings()
-                .new_connection
-                .save_connection,
-            ..NewConnectionForm::default()
-        });
+        let mut form = NewConnectionForm::default();
+        form.group = self.i18n.t("ssh.form.ungrouped");
+        form.agent_available = detect_ssh_agent_available();
+        form.save_connection = self
+            .settings_store
+            .settings()
+            .new_connection
+            .save_connection;
+        self.new_connection_form = Some(form);
         self.drill_down_parent_node_id = None;
         self.editing_saved_connection_id = None;
         self.editing_saved_connection_connect_after_save_node_id = None;
@@ -226,14 +226,12 @@ impl WorkspaceApp {
         }
 
         self.prepare_modal_interaction_boundary(cx);
-        let mut form = NewConnectionForm {
-            auth_tab: SshAuthTab::Agent,
-            focused_field: super::form_state::NewConnectionField::Host,
-            save_connection: false,
-            group: self.i18n.t("ssh.form.ungrouped"),
-            agent_available: detect_ssh_agent_available(),
-            ..NewConnectionForm::default()
-        };
+        let mut form = NewConnectionForm::default();
+        form.auth_tab = SshAuthTab::Agent;
+        form.focused_field = super::form_state::NewConnectionField::Host;
+        form.save_connection = false;
+        form.group = self.i18n.t("ssh.form.ungrouped");
+        form.agent_available = detect_ssh_agent_available();
         form.username = String::new();
         self.new_connection_form = Some(form);
         self.drill_down_parent_node_id = Some(parent_node_id);

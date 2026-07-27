@@ -124,29 +124,27 @@ pub(super) fn form_from_runtime_config(
     default_group: String,
 ) -> NewConnectionForm {
     let auth_fields = runtime_auth_form_fields(&config.auth);
-    let mut form = NewConnectionForm {
-        name: title
-            .filter(|title| !title.trim().is_empty())
-            .map(str::to_string)
-            .unwrap_or_else(|| format!("{}@{}", config.username, config.host)),
-        host: config.host.clone(),
-        port: config.port.to_string(),
-        username: config.username.clone(),
-        auth_tab: auth_fields.auth_tab,
-        password: auth_fields.password,
-        key_path: auth_fields.key_path,
-        managed_key_id: auth_fields.managed_key_id,
-        cert_path: auth_fields.cert_path,
-        passphrase: auth_fields.passphrase,
-        group: default_group,
-        post_connect_command: config.post_connect_command.clone().unwrap_or_default(),
-        agent_forwarding: config.agent_forwarding,
-        identity_agent: config.identity_agent.clone(),
-        agent_forwarding_socket: config.agent_forwarding_socket.clone(),
-        legacy_ssh_compatibility: config.legacy_ssh_compatibility,
-        save_password: auth_fields.save_password,
-        ..NewConnectionForm::default()
-    };
+    let mut form = NewConnectionForm::default();
+    form.name = title
+        .filter(|title| !title.trim().is_empty())
+        .map(str::to_string)
+        .unwrap_or_else(|| format!("{}@{}", config.username, config.host));
+    form.host = config.host.clone();
+    form.port = config.port.to_string();
+    form.username = config.username.clone();
+    form.auth_tab = auth_fields.auth_tab;
+    form.password = auth_fields.password;
+    form.key_path = auth_fields.key_path;
+    form.managed_key_id = auth_fields.managed_key_id;
+    form.cert_path = auth_fields.cert_path;
+    form.passphrase = auth_fields.passphrase;
+    form.group = default_group;
+    form.post_connect_command = config.post_connect_command.clone().unwrap_or_default();
+    form.agent_forwarding = config.agent_forwarding;
+    form.identity_agent = config.identity_agent.clone();
+    form.agent_forwarding_socket = config.agent_forwarding_socket.clone();
+    form.legacy_ssh_compatibility = config.legacy_ssh_compatibility;
+    form.save_password = auth_fields.save_password;
 
     if let Some(chain) = &config.proxy_chain {
         form.proxy_hops = chain

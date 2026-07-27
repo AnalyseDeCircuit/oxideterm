@@ -6,7 +6,7 @@ use std::{
 };
 
 use crate::workspace::new_connection::{
-    NewConnectionUpstreamProxyAuth, NewConnectionUpstreamProxyPolicy,
+    NewConnectionProxyHop, NewConnectionUpstreamProxyAuth, NewConnectionUpstreamProxyPolicy,
 };
 use crate::workspace::quick_commands::QuickCommandImportStrategy;
 use crate::workspace::session_icons;
@@ -667,7 +667,8 @@ use self::{
 // Preserve the workspace-facing session manager API at its original visibility.
 pub(in crate::workspace) use self::helpers::{
     duplicate_connection_template_name, form_from_saved_connection, save_request_from_form,
-    save_request_from_form_with_existing_auth, upstream_proxy_config_from_form,
+    save_request_from_form_with_existing_auth, save_request_from_form_with_proxy_hop_prefix,
+    upstream_proxy_config_from_form,
 };
 
 #[cfg(test)]
