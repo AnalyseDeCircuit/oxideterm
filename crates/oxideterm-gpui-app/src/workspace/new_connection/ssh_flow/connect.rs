@@ -764,37 +764,11 @@ impl WorkspaceApp {
         let Some(cleanup_root) = plan.cleanup_root_node_id() else {
             return;
         };
-        let nodes_to_cleanup = self.node_router.subtree_postorder(&cleanup_root);
-        for node_id in &nodes_to_cleanup {
-            self.workspace_runtime.update(cx, |runtime, cx| {
-                runtime.cancel_connection_trace(node_id, cx);
-            });
-            self.workspace_runtime
-                .update(cx, |runtime, _cx| runtime.unlock_connecting_node(node_id));
-            self.remove_pending_ssh_terminal_opens_for_node(node_id);
-            if let Some(connection_id) = self.node_router.connection_id_for_node(node_id) {
-                let node_consumer = ConnectionConsumer::NodeRouter(node_id.0.clone());
-                self.ssh_registry.release(&connection_id, &node_consumer);
-                self.release_parent_ref_for_child_connection(node_id, &connection_id);
-                if let Some(handle) = self.ssh_registry.get(&connection_id) {
-                    let runtime = self.forwarding_runtime.clone();
-                    runtime.spawn(async move {
-                        handle.clear_physical().await;
-                    });
-                }
-                let _ = self
-                    .ssh_registry
-                    .mark_state(&connection_id, ConnectionState::Disconnected);
-                self.node_router.emitter().unregister(&connection_id);
-                let _ = self.ssh_registry.retire_connection(&connection_id);
-            }
-        }
-
-        // Tauri removes the temporary manual proxy expansion on cancel/failure.
-        // Native stores that expansion in both NodeRuntimeStore and the
-        // UI-facing node maps, so cleanup has to remove both owners.
-        let removed_nodes = self.node_router.remove_runtime_subtree(&cleanup_root);
+        let removed_nodes = self.workspace_runtime.update(cx, |runtime, cx| {
+            runtime.remove_node_runtime_subtree(&cleanup_root, cx)
+        });
         for node_id in removed_nodes {
+            self.remove_pending_ssh_terminal_opens_for_node(&node_id);
             self.ssh_nodes.remove(&node_id);
             self.expanded_ssh_nodes.remove(&node_id);
             self.saved_ssh_nodes

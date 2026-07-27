@@ -14,11 +14,10 @@ use oxideterm_remote_desktop::{
     RemoteDesktopSecret,
 };
 use oxideterm_ssh::{
-    AuthMethod, ConnectionConsumer, ConnectionState, HostKeyStatus,
-    KeyboardInteractivePromptRequest, KeyboardInteractiveResponses, NodeId, NodeReadiness,
-    NodeTreeExpansion, ProxyHopConfig, SshConfig, SshPromptError, SshPromptHandler,
-    SshTransportClient, UpstreamProxyAuth, UpstreamProxyProtocol,
-    check_host_key_with_upstream_proxy,
+    AuthMethod, ConnectionConsumer, HostKeyStatus, KeyboardInteractivePromptRequest,
+    KeyboardInteractiveResponses, NodeId, NodeReadiness, NodeTreeExpansion, ProxyHopConfig,
+    SshConfig, SshPromptError, SshPromptHandler, SshTransportClient, UpstreamProxyAuth,
+    UpstreamProxyProtocol, check_host_key_with_upstream_proxy,
 };
 use tokio::sync::oneshot;
 

@@ -534,20 +534,7 @@ impl WorkspaceApp {
         if nodes_to_disconnect.is_empty() {
             nodes_to_disconnect.push(node_id.clone());
         }
-        self.workspace_runtime.update(cx, |runtime, _cx| {
-            runtime.cancel_queued_reconnects(&nodes_to_disconnect);
-        });
         for affected_node_id in &nodes_to_disconnect {
-            self.workspace_runtime.update(cx, |runtime, cx| {
-                runtime.cancel_connection_trace(affected_node_id, cx);
-            });
-            self.workspace_runtime.update(cx, |runtime, _cx| {
-                runtime.abort_connection_chain_for_node(affected_node_id);
-            });
-            self.workspace_runtime
-                .read(cx)
-                .reconnect_orchestrator()
-                .cancel(&affected_node_id.0);
             let _ = self.interrupt_sftp_transfers_by_node(
                 affected_node_id,
                 "Connection closed".to_string(),
@@ -571,42 +558,17 @@ impl WorkspaceApp {
         // node-scoped surfaces after an explicit disconnect.
         for affected_node_id in &nodes_to_disconnect {
             self.close_tabs_for_node(affected_node_id, window, cx);
-
-            if let Some(connection_id) = self.node_router.connection_id_for_node(affected_node_id) {
-                let node_consumer = ConnectionConsumer::NodeRouter(affected_node_id.0.clone());
-                self.ssh_registry.release(&connection_id, &node_consumer);
-                self.release_parent_ref_for_child_connection(affected_node_id, &connection_id);
-                if let Some(handle) = self.ssh_registry.get(&connection_id) {
-                    let runtime = self.forwarding_runtime.clone();
-                    runtime.spawn(async move {
-                        handle.clear_physical().await;
-                    });
-                }
-                if let Some(info) = self
-                    .ssh_registry
-                    .mark_state(&connection_id, ConnectionState::Disconnected)
-                    && let Some(event) = self
-                        .node_router
-                        .sync_connection_state_by_connection_id(&info, "explicit disconnect")
-                {
-                    self.emit_node_event(event);
-                }
-                self.node_router.emitter().unregister(&connection_id);
-                let _ = self.ssh_registry.retire_connection(&connection_id);
-            }
-
-            if let Some(node) = self.ssh_nodes.get_mut(affected_node_id) {
+        }
+        let disconnected_nodes = self.workspace_runtime.update(cx, |runtime, cx| {
+            runtime.disconnect_node_runtime_subtree(node_id, cx)
+        });
+        for affected_node_id in disconnected_nodes {
+            if let Some(node) = self.ssh_nodes.get_mut(&affected_node_id) {
                 // Tauri disconnect_tree_node marks every affected subtree node
                 // as Disconnected. Link-down propagation uses Error elsewhere;
                 // explicit user disconnect should not look like a failure.
                 node.readiness = NodeReadiness::Disconnected;
                 node.terminal_ids.clear();
-            }
-            if let Ok(event) = self
-                .node_router
-                .disconnect_node_runtime(affected_node_id, "explicit disconnect")
-            {
-                self.emit_node_event(event);
             }
         }
         self.persist_session_tree_snapshot();

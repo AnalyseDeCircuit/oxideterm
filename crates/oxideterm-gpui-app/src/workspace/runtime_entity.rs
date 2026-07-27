@@ -250,7 +250,7 @@ impl WorkspaceRuntimeEntity {
                 });
         let force_reconnect = stale_connection_id.is_some();
         if let Some(connection_id) = stale_connection_id.as_deref() {
-            self.drop_stale_node_connection(node_id, connection_id);
+            self.retire_node_connection(node_id, connection_id);
         }
 
         let parent_id = runtime_snapshot.parent_id;
@@ -346,7 +346,83 @@ impl WorkspaceRuntimeEntity {
         Ok(())
     }
 
-    fn drop_stale_node_connection(&self, node_id: &NodeId, connection_id: &str) {
+    pub(in crate::workspace) fn retire_stale_node_connection(
+        &self,
+        node_id: &NodeId,
+        connection_id: &str,
+    ) {
+        // Stale completion cleanup must not disconnect a newer binding for the same node.
+        if self
+            .node_router
+            .connection_id_for_node(node_id)
+            .is_some_and(|current_id| current_id == connection_id)
+        {
+            return;
+        }
+        self.retire_node_connection(node_id, connection_id);
+    }
+
+    pub(in crate::workspace) fn reset_node_connection(&self, node_id: &NodeId) {
+        if let Some(connection_id) = self.node_router.connection_id_for_node(node_id) {
+            self.retire_node_connection(node_id, &connection_id);
+        }
+        let _ = self
+            .node_router
+            .disconnect_node_runtime(node_id, "reset before linear connection");
+    }
+
+    pub(in crate::workspace) fn remove_node_runtime_subtree(
+        &mut self,
+        cleanup_root: &NodeId,
+        cx: &mut Context<Self>,
+    ) -> Vec<NodeId> {
+        let nodes_to_remove = self.runtime_subtree_postorder(cleanup_root);
+        self.cancel_node_runtime_work(&nodes_to_remove, cx);
+        for node_id in &nodes_to_remove {
+            if let Some(connection_id) = self.node_router.connection_id_for_node(node_id) {
+                self.retire_node_connection(node_id, &connection_id);
+            }
+        }
+        self.node_router.remove_runtime_subtree(cleanup_root)
+    }
+
+    pub(in crate::workspace) fn disconnect_node_runtime_subtree(
+        &mut self,
+        root_node_id: &NodeId,
+        cx: &mut Context<Self>,
+    ) -> Vec<NodeId> {
+        let nodes_to_disconnect = self.runtime_subtree_postorder(root_node_id);
+        self.cancel_node_runtime_work(&nodes_to_disconnect, cx);
+        for node_id in &nodes_to_disconnect {
+            if let Some(connection_id) = self.node_router.connection_id_for_node(node_id) {
+                self.retire_node_connection(node_id, &connection_id);
+            }
+            let _ = self
+                .node_router
+                .disconnect_node_runtime(node_id, "explicit disconnect");
+        }
+        nodes_to_disconnect
+    }
+
+    fn runtime_subtree_postorder(&self, root_node_id: &NodeId) -> Vec<NodeId> {
+        let mut node_ids = self.node_router.subtree_postorder(root_node_id);
+        if node_ids.is_empty() {
+            node_ids.push(root_node_id.clone());
+        }
+        node_ids
+    }
+
+    fn cancel_node_runtime_work(&mut self, node_ids: &[NodeId], cx: &mut Context<Self>) {
+        self.cancel_queued_reconnects(node_ids);
+        for node_id in node_ids {
+            self.cancel_connection_trace(node_id, cx);
+            self.abort_connection_chain_for_node(node_id);
+            self.unlock_connecting_node(node_id);
+            self.reconnect_orchestrator.cancel(&node_id.0);
+        }
+    }
+
+    fn retire_node_connection(&self, node_id: &NodeId, connection_id: &str) {
         let consumer = ConnectionConsumer::NodeRouter(node_id.0.clone());
         self.ssh_registry.release(connection_id, &consumer);
         self.release_parent_ref_for_child_connection(node_id, connection_id);
@@ -1704,6 +1780,110 @@ mod tests {
                     .contains(&ConnectionConsumer::NodeRouter(node_id.0.clone()))
             );
         });
+    }
+
+    #[gpui::test]
+    fn stale_worker_completion_preserves_current_pooled_binding(cx: &mut TestAppContext) {
+        let ssh_registry = SshConnectionRegistry::new(ConnectionPoolConfig::default());
+        let node_router = NodeRouter::new(ssh_registry.clone());
+        let node_id = NodeId::new("node-a");
+        let config = SshConfig {
+            host: "node-a.example".to_string(),
+            ..SshConfig::default()
+        };
+        node_router.upsert_node(node_id.clone(), config.clone());
+        let node_consumer = ConnectionConsumer::NodeRouter(node_id.0.clone());
+        let connection = ssh_registry.acquire(config, node_consumer.clone());
+        let connection_id = connection.connection_id().to_string();
+        node_router
+            .bind_connection(&node_id, connection_id.clone())
+            .expect("node connection binding");
+        let task_runtime = test_task_runtime();
+        let entity = cx.new(|cx| {
+            WorkspaceRuntimeEntity::new(
+                ssh_registry.clone(),
+                node_router,
+                task_runtime,
+                true,
+                ReconnectTiming::default(),
+                3,
+                cx,
+            )
+        });
+
+        entity.update(cx, |entity, _cx| {
+            entity.retire_stale_node_connection(&node_id, &connection_id);
+        });
+
+        let connection_info = ssh_registry
+            .get(&connection_id)
+            .expect("current pooled connection remains registered")
+            .info();
+        assert!(connection_info.consumers.contains(&node_consumer));
+    }
+
+    #[gpui::test]
+    fn child_reset_releases_only_ancestor_consumer(cx: &mut TestAppContext) {
+        let ssh_registry = SshConnectionRegistry::new(ConnectionPoolConfig::default());
+        let node_runtime_store = NodeRuntimeStore::default();
+        let parent_id = NodeId::new("parent");
+        let child_id = NodeId::new("child");
+        let parent_config = SshConfig {
+            host: "parent.example".to_string(),
+            ..SshConfig::default()
+        };
+        let child_config = SshConfig {
+            host: "child.example".to_string(),
+            ..SshConfig::default()
+        };
+        node_runtime_store.upsert_node(parent_id.clone(), parent_config.clone());
+        node_runtime_store
+            .upsert_child_node(parent_id.clone(), child_id.clone(), child_config.clone())
+            .expect("child runtime node");
+        let node_router = NodeRouter::with_runtime_store(ssh_registry.clone(), node_runtime_store);
+        let parent_consumer = ConnectionConsumer::NodeRouter(parent_id.0.clone());
+        let parent_connection = ssh_registry.acquire(parent_config, parent_consumer.clone());
+        let parent_connection_id = parent_connection.connection_id().to_string();
+        node_router
+            .bind_connection(&parent_id, parent_connection_id.clone())
+            .expect("parent connection binding");
+        let child_consumer = ConnectionConsumer::NodeRouter(child_id.0.clone());
+        let child_connection = ssh_registry.acquire(child_config, child_consumer);
+        let child_connection_id = child_connection.connection_id().to_string();
+        node_router
+            .bind_connection(&child_id, child_connection_id.clone())
+            .expect("child connection binding");
+        ssh_registry
+            .set_parent_connection_id(&child_connection_id, Some(parent_connection_id.clone()))
+            .expect("parent connection link");
+        let ancestor_consumer = ConnectionConsumer::NodeRouter(format!("{}:ancestor", child_id.0));
+        ssh_registry
+            .acquire_consumer_for_connection(&parent_connection_id, ancestor_consumer.clone())
+            .expect("ancestor consumer");
+        let task_runtime = test_task_runtime();
+        let entity = cx.new(|cx| {
+            WorkspaceRuntimeEntity::new(
+                ssh_registry.clone(),
+                node_router,
+                task_runtime,
+                true,
+                ReconnectTiming::default(),
+                3,
+                cx,
+            )
+        });
+
+        entity.update(cx, |entity, _cx| {
+            entity.reset_node_connection(&child_id);
+        });
+
+        assert!(ssh_registry.get(&child_connection_id).is_none());
+        let parent_info = ssh_registry
+            .get(&parent_connection_id)
+            .expect("shared parent connection remains registered")
+            .info();
+        assert!(parent_info.consumers.contains(&parent_consumer));
+        assert!(!parent_info.consumers.contains(&ancestor_consumer));
     }
 
     #[gpui::test]

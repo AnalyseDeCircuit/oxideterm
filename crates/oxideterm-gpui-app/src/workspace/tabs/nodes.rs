@@ -261,40 +261,11 @@ impl WorkspaceApp {
         cleanup_root: &NodeId,
         cx: &mut Context<Self>,
     ) {
-        let mut nodes_to_cleanup = self.node_router.subtree_postorder(cleanup_root);
-        if nodes_to_cleanup.is_empty() {
-            nodes_to_cleanup.push(cleanup_root.clone());
-        }
-        for node_id in &nodes_to_cleanup {
-            self.workspace_runtime.update(cx, |runtime, cx| {
-                runtime.cancel_connection_trace(node_id, cx);
-            });
-            self.workspace_runtime
-                .update(cx, |runtime, _cx| runtime.unlock_connecting_node(node_id));
-            self.remove_pending_ssh_terminal_opens_for_node(node_id);
-            if let Some(connection_id) = self.node_router.connection_id_for_node(node_id) {
-                let node_consumer = ConnectionConsumer::NodeRouter(node_id.0.clone());
-                self.ssh_registry.release(&connection_id, &node_consumer);
-                self.release_parent_ref_for_child_connection(node_id, &connection_id);
-                if let Some(handle) = self.ssh_registry.get(&connection_id) {
-                    let runtime = self.forwarding_runtime.clone();
-                    runtime.spawn(async move {
-                        handle.clear_physical().await;
-                    });
-                }
-                let _ = self
-                    .ssh_registry
-                    .mark_state(&connection_id, ConnectionState::Disconnected);
-                self.node_router.emitter().unregister(&connection_id);
-                let _ = self.ssh_registry.retire_connection(&connection_id);
-            }
-        }
-
-        // Tauri cleanupNodeId removes the temporary root created for saved
-        // direct connect failures. Native stores that root in both the runtime
-        // tree and GPUI mirrors, so all owners must be cleared together.
-        let removed_nodes = self.node_router.remove_runtime_subtree(cleanup_root);
+        let removed_nodes = self.workspace_runtime.update(cx, |runtime, cx| {
+            runtime.remove_node_runtime_subtree(cleanup_root, cx)
+        });
         for node_id in removed_nodes {
+            self.remove_pending_ssh_terminal_opens_for_node(&node_id);
             self.ssh_nodes.remove(&node_id);
             self.expanded_ssh_nodes.remove(&node_id);
             self.saved_ssh_nodes
@@ -312,20 +283,10 @@ impl WorkspaceApp {
         if nodes_to_remove.is_empty() {
             nodes_to_remove.push(cleanup_root.clone());
         }
-        self.workspace_runtime.update(cx, |runtime, _cx| {
-            runtime.cancel_queued_reconnects(&nodes_to_remove);
-        });
         for node_id in &nodes_to_remove {
             // A failed node can still own stale tabs, reconnect jobs, forwards,
             // or transfer records. Clear those owners before dropping the tree.
             self.close_tabs_for_node(node_id, window, cx);
-            self.workspace_runtime.update(cx, |runtime, _cx| {
-                runtime.abort_connection_chain_for_node(node_id);
-            });
-            self.workspace_runtime
-                .read(cx)
-                .reconnect_orchestrator()
-                .cancel(&node_id.0);
             let _ =
                 self.interrupt_sftp_transfers_by_node(node_id, "Connection removed".to_string());
         }
@@ -349,7 +310,9 @@ impl WorkspaceApp {
                     job_id,
                 } => {
                     if !self.reconnect_worker_result_is_current(&node_id, job_id.as_deref(), cx) {
-                        self.drop_stale_node_connection(&node_id, &connection_id);
+                        self.workspace_runtime.update(cx, |runtime, _cx| {
+                            runtime.retire_stale_node_connection(&node_id, &connection_id);
+                        });
                         changed = true;
                         continue;
                     }
@@ -1854,47 +1817,6 @@ impl WorkspaceApp {
         }
     }
 
-    fn drop_stale_node_connection(&mut self, node_id: &NodeId, connection_id: &str) {
-        let consumer = ConnectionConsumer::NodeRouter(node_id.0.clone());
-        self.ssh_registry.release(connection_id, &consumer);
-        self.release_parent_ref_for_child_connection(node_id, connection_id);
-        if let Some(handle) = self.ssh_registry.get(connection_id) {
-            let runtime = self.forwarding_runtime.clone();
-            runtime.spawn(async move {
-                handle.clear_physical().await;
-            });
-        }
-        let _ = self
-            .ssh_registry
-            .mark_state_without_event(connection_id, ConnectionState::Disconnected);
-        self.node_router.emitter().unregister(connection_id);
-        let _ = self.ssh_registry.retire_connection(connection_id);
-    }
-
-    pub(in crate::workspace) fn release_parent_ref_for_child_connection(
-        &self,
-        child_node_id: &NodeId,
-        child_connection_id: &str,
-    ) {
-        let Some(parent_connection_id) = self
-            .ssh_registry
-            .get(child_connection_id)
-            .and_then(|handle| handle.info().parent_connection_id)
-        else {
-            return;
-        };
-        // Tauri increments the parent connection ref when a tunneled child is
-        // established and releases it when that child connection is destroyed.
-        // Native represents that ref as a stable ancestor consumer.
-        self.ssh_registry.release(
-            &parent_connection_id,
-            &ConnectionConsumer::NodeRouter(format!("{}:ancestor", child_node_id.0)),
-        );
-        let _ = self
-            .ssh_registry
-            .set_parent_connection_id(child_connection_id, None);
-    }
-
     fn node_still_needs_reconnect(&self, node_id: &NodeId) -> bool {
         let Some(node) = self.ssh_nodes.get(node_id) else {
             return false;
@@ -2043,37 +1965,13 @@ impl WorkspaceApp {
             return false;
         }
         for node_id in &nodes_to_connect {
-            self.reset_node_for_connection_chain(node_id);
+            self.workspace_runtime
+                .update(cx, |runtime, _cx| runtime.reset_node_connection(node_id));
+            if let Some(node) = self.ssh_nodes.get_mut(node_id) {
+                node.readiness = NodeReadiness::Disconnected;
+            }
         }
         self.start_next_connection_chain_node(cx)
-    }
-
-    fn reset_node_for_connection_chain(&mut self, node_id: &NodeId) {
-        if let Some(connection_id) = self.node_router.connection_id_for_node(node_id) {
-            let node_consumer = ConnectionConsumer::NodeRouter(node_id.0.clone());
-            self.ssh_registry.release(&connection_id, &node_consumer);
-            self.release_parent_ref_for_child_connection(node_id, &connection_id);
-            if let Some(handle) = self.ssh_registry.get(&connection_id) {
-                let runtime = self.forwarding_runtime.clone();
-                runtime.spawn(async move {
-                    handle.clear_physical().await;
-                });
-            }
-            let _ = self
-                .ssh_registry
-                .mark_state(&connection_id, ConnectionState::Disconnected);
-            self.node_router.emitter().unregister(&connection_id);
-            let _ = self.ssh_registry.retire_connection(&connection_id);
-        }
-        if let Some(node) = self.ssh_nodes.get_mut(node_id) {
-            node.readiness = NodeReadiness::Disconnected;
-        }
-        if let Ok(event) = self
-            .node_router
-            .disconnect_node_runtime(node_id, "reset before linear connection")
-        {
-            self.emit_node_event(event);
-        }
     }
 
     fn start_next_connection_chain_node(&mut self, cx: &mut Context<Self>) -> bool {
