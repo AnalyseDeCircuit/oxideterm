@@ -312,7 +312,7 @@ impl Render for WorkspaceApp {
                     let _ = this.handle_keyboard_interactive_key(event, window, cx);
                     window.prevent_default();
                     cx.stop_propagation();
-                } else if this.host_key_challenge.is_some() {
+                } else if this.connection_flow.read(cx).has_host_key_challenge() {
                     if event.keystroke.key.as_str() == "escape" {
                         this.cancel_host_key_challenge(cx);
                     }
@@ -964,9 +964,10 @@ impl Render for WorkspaceApp {
                 self.render_new_connection_select_overlay(window, cx),
                 |root, overlay| root.child(overlay),
             )
-            .when(self.host_key_challenge.is_some(), |root| {
-                root.child(self.render_host_key_dialog(cx))
-            })
+            .when(
+                self.connection_flow.read(cx).has_host_key_challenge(),
+                |root| root.child(self.render_host_key_dialog(cx)),
+            )
             .when(self.keyboard_interactive_challenge.is_some(), |root| {
                 root.child(self.render_keyboard_interactive_dialog(cx))
             })

@@ -260,7 +260,7 @@ use self::ime::{
 };
 use self::launcher::LauncherState;
 use self::new_connection::{
-    HostKeyChallenge, KeyboardInteractiveChallenge, NativeSessionTreeConnectPlan,
+    ConnectionFlowEntity, KeyboardInteractiveChallenge, NativeSessionTreeConnectPlan,
     NativeSshPromptHandler, NewConnectionField, NewConnectionForm, NewConnectionSelect,
     PrivilegeCredentialDraft, SavedConnectionPromptAction, SshAuthTab, SshConnectionIntent,
     SshConnectionWorkerResult,
@@ -888,7 +888,8 @@ pub(crate) struct WorkspaceApp {
     open_new_connection_select: Option<NewConnectionSelect>,
     new_connection_select_focus_origin: Option<browser_behavior::BrowserFocusOrigin>,
     new_connection_caret_visible: bool,
-    host_key_challenge: Option<HostKeyChallenge>,
+    connection_flow: Entity<ConnectionFlowEntity>,
+    _connection_flow_observation: Subscription,
     active_proxy_connect_run: Option<NativeProxyConnectRun>,
     keyboard_interactive_challenge: Option<KeyboardInteractiveChallenge>,
     keyboard_interactive_timer_generation: u64,

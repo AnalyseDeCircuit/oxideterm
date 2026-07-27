@@ -213,7 +213,7 @@ impl WorkspaceApp {
                 self.prepare_modal_interaction_boundary(cx);
                 let host = config.host.clone();
                 let port = config.port;
-                self.host_key_challenge = Some(HostKeyChallenge {
+                let challenge = HostKeyChallenge {
                     presence: oxideterm_gpui_ui::motion::ExitPresence::visible(),
                     config,
                     title,
@@ -222,6 +222,9 @@ impl WorkspaceApp {
                     session_tree_challenge: None,
                     host,
                     port,
+                };
+                self.connection_flow.update(cx, |connection_flow, cx| {
+                    connection_flow.open_host_key_challenge(challenge, cx);
                 });
                 self.needs_active_pane_focus = false;
                 cx.notify();
@@ -417,7 +420,7 @@ impl WorkspaceApp {
                 let title = active_run.title.clone();
                 let intent = active_run.intent.clone();
                 self.prepare_modal_interaction_boundary(cx);
-                self.host_key_challenge = Some(HostKeyChallenge {
+                let host_key_challenge = HostKeyChallenge {
                     presence: oxideterm_gpui_ui::motion::ExitPresence::visible(),
                     config: SshConfig::default(),
                     title,
@@ -426,6 +429,9 @@ impl WorkspaceApp {
                     session_tree_challenge: Some(challenge.clone()),
                     host: challenge.step.host,
                     port: challenge.step.port,
+                };
+                self.connection_flow.update(cx, |connection_flow, cx| {
+                    connection_flow.open_host_key_challenge(host_key_challenge, cx);
                 });
                 self.needs_active_pane_focus = false;
                 cx.notify();
@@ -583,7 +589,9 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) {
         self.active_proxy_connect_run = None;
-        self.host_key_challenge = None;
+        self.connection_flow.update(cx, |connection_flow, cx| {
+            connection_flow.clear_host_key_challenge(cx);
+        });
         self.release_proxy_session_tree_locks(&run.plan, cx);
         let Some(target_config) = self
             .node_router
@@ -870,7 +878,9 @@ impl WorkspaceApp {
                 };
                 self.new_connection_form = None;
                 self.duplicating_saved_connection_id = None;
-                self.host_key_challenge = None;
+                self.connection_flow.update(cx, |connection_flow, cx| {
+                    connection_flow.clear_host_key_challenge(cx);
+                });
                 self.close_new_connection_select();
                 if config
                     .proxy_chain
@@ -921,7 +931,9 @@ impl WorkspaceApp {
                 );
             }
             SshConnectionIntent::ConnectSaved(id) => {
-                self.host_key_challenge = None;
+                self.connection_flow.update(cx, |connection_flow, cx| {
+                    connection_flow.clear_host_key_challenge(cx);
+                });
                 if self.saved_connection_prompt_action.is_some() {
                     self.new_connection_form = None;
                     self.editing_saved_connection_id = None;
@@ -934,7 +946,9 @@ impl WorkspaceApp {
                 let _ = self.open_or_create_saved_ssh_terminal_tab(id, config, title, window, cx);
             }
             SshConnectionIntent::DrillDown(parent_id) => {
-                self.host_key_challenge = None;
+                self.connection_flow.update(cx, |connection_flow, cx| {
+                    connection_flow.clear_host_key_challenge(cx);
+                });
                 let child_id = match self
                     .node_router
                     .drill_down_node(parent_id.clone(), config.clone())

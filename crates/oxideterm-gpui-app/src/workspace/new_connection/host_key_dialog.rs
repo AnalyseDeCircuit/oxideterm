@@ -1,6 +1,6 @@
 use gpui::{
-    AnyElement, Context, MouseButton, ParentElement, SharedString, Styled, Timer, Window, div,
-    prelude::*, px, rgb, rgba,
+    AnyElement, Context, MouseButton, ParentElement, SharedString, Styled, Window, div, prelude::*,
+    px, rgb, rgba,
 };
 use oxideterm_gpui_ui::{
     button::{ButtonOptions, ButtonRadius, ButtonSize, ButtonVariant, ToolbarButtonOptions},
@@ -19,7 +19,6 @@ enum HostKeyButtonAction {
     RemoveSaved,
 }
 
-#[derive(Clone, Debug)]
 pub(in crate::workspace) struct HostKeyChallenge {
     pub(in crate::workspace) presence: oxideterm_gpui_ui::motion::ExitPresence,
     pub(in crate::workspace) config: SshConfig,
@@ -38,7 +37,9 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(mut challenge) = self.host_key_challenge.take() else {
+        let Some(mut challenge) = self.connection_flow.update(cx, |connection_flow, cx| {
+            connection_flow.take_host_key_challenge(cx)
+        }) else {
             return;
         };
         let fingerprint = match &challenge.status {
@@ -78,12 +79,16 @@ impl WorkspaceApp {
     }
 
     pub(in crate::workspace) fn cancel_host_key_challenge(&mut self, cx: &mut Context<Self>) {
-        let Some(challenge) = self.host_key_challenge.as_mut() else {
+        let delay = oxideterm_gpui_ui::motion::duration(
+            &self.tokens,
+            oxideterm_gpui_ui::motion::MotionDuration::Overlay,
+        );
+        let began_exit = self.connection_flow.update(cx, |connection_flow, cx| {
+            connection_flow.begin_host_key_challenge_exit(delay, cx)
+        });
+        if !began_exit {
             return;
-        };
-        let Some(generation) = challenge.presence.begin_exit() else {
-            return;
-        };
+        }
         self.cancel_active_proxy_connect_run(cx);
         // Tauri HostKeyConfirmDialog cancellation only clears pending
         // connect/test state. It does not surface a form or session-manager
@@ -94,40 +99,13 @@ impl WorkspaceApp {
         } else {
             self.session_manager.status = None;
         }
-        let delay = oxideterm_gpui_ui::motion::duration(
-            &self.tokens,
-            oxideterm_gpui_ui::motion::MotionDuration::Overlay,
-        );
-        if delay.is_zero() {
-            self.finish_host_key_challenge_exit(generation);
-        } else {
-            cx.spawn(async move |weak, cx| {
-                Timer::after(delay).await;
-                let _ = weak.update(cx, |this, cx| {
-                    if this.finish_host_key_challenge_exit(generation) {
-                        cx.notify();
-                    }
-                });
-            })
-            .detach();
-        }
         cx.notify();
     }
 
-    fn finish_host_key_challenge_exit(&mut self, generation: u64) -> bool {
-        if !self
-            .host_key_challenge
-            .as_ref()
-            .is_some_and(|challenge| challenge.presence.finish_exit(generation))
-        {
-            return false;
-        }
-        self.host_key_challenge = None;
-        true
-    }
-
     fn remove_changed_host_key_challenge(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
-        let Some(challenge) = self.host_key_challenge.take() else {
+        let Some(challenge) = self.connection_flow.update(cx, |connection_flow, cx| {
+            connection_flow.take_host_key_challenge(cx)
+        }) else {
             return;
         };
         let HostKeyStatus::Changed {
@@ -136,7 +114,9 @@ impl WorkspaceApp {
             ..
         } = &challenge.status
         else {
-            self.host_key_challenge = Some(challenge);
+            self.connection_flow.update(cx, |connection_flow, cx| {
+                connection_flow.restore_host_key_challenge(challenge, cx);
+            });
             return;
         };
 
@@ -170,7 +150,9 @@ impl WorkspaceApp {
                 } else {
                     self.session_manager.status = Some(error.to_string());
                 }
-                self.host_key_challenge = Some(challenge);
+                self.connection_flow.update(cx, |connection_flow, cx| {
+                    connection_flow.restore_host_key_challenge(challenge, cx);
+                });
             }
         }
         cx.notify();
@@ -180,11 +162,10 @@ impl WorkspaceApp {
         &self,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let Some(challenge) = self.host_key_challenge.as_ref() else {
+        let Some(challenge) = self.connection_flow.read(cx).host_key_dialog_snapshot() else {
             return div().into_any_element();
         };
-        let dialog_visible =
-            challenge.presence.phase() == oxideterm_gpui_ui::motion::ExitPhase::Visible;
+        let dialog_visible = challenge.visible;
         let theme = self.tokens.ui;
         let (title, message, key_type, fingerprint, changed) = match &challenge.status {
             HostKeyStatus::Unknown {

@@ -168,7 +168,9 @@ impl WorkspaceApp {
         self.editing_saved_connection_connect_after_save_node_id = None;
         self.duplicating_saved_connection_id = None;
         self.saved_connection_prompt_action = None;
-        self.host_key_challenge = None;
+        self.connection_flow.update(cx, |connection_flow, cx| {
+            connection_flow.clear_host_key_challenge(cx);
+        });
         self.cancel_active_proxy_connect_run(cx);
         self.cancel_keyboard_interactive_challenge(cx);
         self.new_connection_form_presence.reopen();

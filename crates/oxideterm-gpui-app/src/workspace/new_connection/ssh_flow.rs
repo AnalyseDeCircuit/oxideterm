@@ -304,7 +304,9 @@ impl WorkspaceApp {
             node.readiness = NodeReadiness::Connecting;
         }
         self.active_ssh_node_id = Some(target_node_id.clone());
-        self.host_key_challenge = None;
+        self.connection_flow.update(cx, |connection_flow, cx| {
+            connection_flow.clear_host_key_challenge(cx);
+        });
         self.new_connection_form = None;
         self.drill_down_parent_node_id = None;
         self.duplicating_saved_connection_id = None;

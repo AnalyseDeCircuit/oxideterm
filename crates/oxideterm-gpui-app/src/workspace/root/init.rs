@@ -143,6 +143,12 @@ impl WorkspaceApp {
                 workspace.handle_workspace_terminal_event(event, cx);
             },
         );
+        let connection_flow = cx.new(|_| ConnectionFlowEntity::new());
+        let connection_flow_observation =
+            cx.observe(&connection_flow, |_workspace, _connection_flow, cx| {
+                // Connection-flow lifecycle changes repaint mounted dialogs without root mirrors.
+                cx.notify();
+            });
         let (profiler_update_tx, profiler_update_rx) = tokio::sync::mpsc::unbounded_channel();
         let host_tools_messages = HostToolsMessages::from_i18n(&i18n);
         let host_tools = cx.new(|cx| {
@@ -489,7 +495,8 @@ impl WorkspaceApp {
             open_new_connection_select: None,
             new_connection_select_focus_origin: None,
             new_connection_caret_visible: true,
-            host_key_challenge: None,
+            connection_flow,
+            _connection_flow_observation: connection_flow_observation,
             active_proxy_connect_run: None,
             keyboard_interactive_challenge: None,
             keyboard_interactive_timer_generation: 0,
