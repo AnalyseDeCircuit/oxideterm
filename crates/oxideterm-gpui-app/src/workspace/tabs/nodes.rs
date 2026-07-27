@@ -111,7 +111,11 @@ impl WorkspaceApp {
         for action in actions {
             match action {
                 runtime_entity::ReconnectScheduleAction::ContinueConnectionChain { node_id } => {
-                    if self.connection_chain_waits_after_node(&node_id) {
+                    if self
+                        .workspace_runtime
+                        .read(cx)
+                        .connection_chain_waits_after_node(&node_id)
+                    {
                         self.start_next_connection_chain_node(cx);
                         changed = true;
                     }
@@ -242,14 +246,19 @@ impl WorkspaceApp {
         })
     }
 
-    fn cleanup_temporary_session_tree_node(&mut self, cleanup_root: &NodeId) {
+    fn cleanup_temporary_session_tree_node(
+        &mut self,
+        cleanup_root: &NodeId,
+        cx: &mut Context<Self>,
+    ) {
         let mut nodes_to_cleanup = self.node_runtime_store.subtree_postorder(cleanup_root);
         if nodes_to_cleanup.is_empty() {
             nodes_to_cleanup.push(cleanup_root.clone());
         }
         for node_id in &nodes_to_cleanup {
             self.cancel_connection_trace_for_node(node_id);
-            self.connecting_node_locks.remove(node_id);
+            self.workspace_runtime
+                .update(cx, |runtime, _cx| runtime.unlock_connecting_node(node_id));
             self.remove_pending_ssh_terminal_opens_for_node(node_id);
             if let Some(connection_id) = self.node_router.connection_id_for_node(node_id) {
                 let node_consumer = ConnectionConsumer::NodeRouter(node_id.0.clone());
@@ -298,7 +307,9 @@ impl WorkspaceApp {
             // A failed node can still own stale tabs, reconnect jobs, forwards,
             // or transfer records. Clear those owners before dropping the tree.
             self.close_tabs_for_node(node_id, window, cx);
-            self.abort_connection_chain_for_node(node_id);
+            self.workspace_runtime.update(cx, |runtime, _cx| {
+                runtime.abort_connection_chain_for_node(node_id);
+            });
             self.workspace_runtime
                 .read(cx)
                 .reconnect_orchestrator()
@@ -306,7 +317,7 @@ impl WorkspaceApp {
             let _ =
                 self.interrupt_sftp_transfers_by_node(node_id, "Connection removed".to_string());
         }
-        self.cleanup_temporary_session_tree_node(cleanup_root);
+        self.cleanup_temporary_session_tree_node(cleanup_root, cx);
         self.persist_session_tree_snapshot();
         cx.notify();
     }
@@ -384,13 +395,15 @@ impl WorkspaceApp {
                     }
                     self.persist_session_tree_snapshot();
                     let connection_chain_node = self
-                        .active_connection_chain
-                        .as_ref()
-                        .is_some_and(|run| run.node_ids.contains(&node_id));
+                        .workspace_runtime
+                        .read(cx)
+                        .connection_chain_contains(&node_id);
                     if connection_chain_node {
                         self.advance_connection_chain_after_node_connected(&node_id, cx);
                     } else {
-                        self.connecting_node_locks.remove(&node_id);
+                        self.workspace_runtime.update(cx, |runtime, _cx| {
+                            runtime.unlock_connecting_node(&node_id);
+                        });
                         self.schedule_next_reconnect_cascade_node(cx);
                     }
                     if self.active_proxy_connect_waits_for_node(&node_id) {
@@ -473,15 +486,19 @@ impl WorkspaceApp {
                         .read(cx)
                         .has_active_reconnect_job(&node_id);
                     let connection_chain_node = self
-                        .active_connection_chain
-                        .as_ref()
-                        .is_some_and(|run| run.node_ids.contains(&node_id));
+                        .workspace_runtime
+                        .read(cx)
+                        .connection_chain_contains(&node_id);
                     let connection_failure_notice = (!active_reconnect_job)
-                        .then(|| self.connection_failure_notice_for_node(&node_id, &error))
+                        .then(|| self.connection_failure_notice_for_node(&node_id, &error, cx))
                         .flatten();
-                    self.abort_connection_chain_for_node(&node_id);
+                    self.workspace_runtime.update(cx, |runtime, _cx| {
+                        runtime.abort_connection_chain_for_node(&node_id);
+                    });
                     if !connection_chain_node {
-                        self.connecting_node_locks.remove(&node_id);
+                        self.workspace_runtime.update(cx, |runtime, _cx| {
+                            runtime.unlock_connecting_node(&node_id);
+                        });
                     } else {
                         self.workspace_runtime.update(cx, |runtime, _cx| {
                             runtime.clear_reconnect_cascade();
@@ -565,7 +582,7 @@ impl WorkspaceApp {
                     let cleanup_node_id = self.pending_ssh_terminal_open_cleanup_for_node(&node_id);
                     self.remove_pending_ssh_terminal_opens_for_node(&node_id);
                     if let Some(cleanup_node_id) = cleanup_node_id {
-                        self.cleanup_temporary_session_tree_node(&cleanup_node_id);
+                        self.cleanup_temporary_session_tree_node(&cleanup_node_id, cx);
                         if !connection_chain_node {
                             self.schedule_next_reconnect_cascade_node(cx);
                         }
@@ -1896,7 +1913,7 @@ impl WorkspaceApp {
     pub(in crate::workspace) fn ensure_node_connection_started(
         &mut self,
         node_id: &NodeId,
-        cx: &App,
+        cx: &mut Context<Self>,
     ) -> bool {
         let trace_mode = if self
             .workspace_runtime
@@ -1913,7 +1930,7 @@ impl WorkspaceApp {
     pub(in crate::workspace) fn ensure_node_connection_started_without_ancestors(
         &mut self,
         node_id: &NodeId,
-        cx: &App,
+        cx: &mut Context<Self>,
     ) -> bool {
         self.ensure_node_connection_started_without_ancestors_with_mode(
             node_id,
@@ -1926,22 +1943,25 @@ impl WorkspaceApp {
         &mut self,
         node_id: &NodeId,
         trace_mode: ConnectionTraceMode,
-        cx: &App,
+        cx: &mut Context<Self>,
     ) -> bool {
         if self.node_connection_is_active_or_connecting(node_id) {
             return true;
         }
-        if self.connecting_node_locks.contains(node_id) {
+        if !self
+            .workspace_runtime
+            .update(cx, |runtime, _cx| runtime.try_lock_connecting_node(node_id))
+        {
             return false;
         }
-        self.connecting_node_locks.insert(node_id.clone());
         let trace_plan = ConnectionTracePlan {
             attempt_id: self.connection_trace_state.next_attempt_id(),
             mode: trace_mode,
             node_ids: vec![node_id.clone()],
         };
         if !self.ensure_single_node_connection_started_with_trace(node_id, Some(&trace_plan), cx) {
-            self.connecting_node_locks.remove(node_id);
+            self.workspace_runtime
+                .update(cx, |runtime, _cx| runtime.unlock_connecting_node(node_id));
             return false;
         }
         true
@@ -1966,9 +1986,13 @@ impl WorkspaceApp {
         &mut self,
         node_id: &NodeId,
         trace_mode: ConnectionTraceMode,
-        cx: &App,
+        cx: &mut Context<Self>,
     ) -> bool {
-        if self.active_connection_chain.is_some() {
+        if self
+            .workspace_runtime
+            .read(cx)
+            .has_active_connection_chain()
+        {
             return false;
         }
         let Ok(path_node_ids) = self.node_runtime_store.path_to_node(node_id) else {
@@ -1985,30 +2009,19 @@ impl WorkspaceApp {
             return true;
         };
         let nodes_to_connect = path_node_ids[start_index..].to_vec();
-        if nodes_to_connect
-            .iter()
-            .any(|node_id| self.connecting_node_locks.contains(node_id))
-        {
-            return false;
-        }
-        for node_id in &nodes_to_connect {
-            self.connecting_node_locks.insert(node_id.clone());
-        }
-
-        for node_id in &nodes_to_connect {
-            self.reset_node_for_connection_chain(node_id);
-        }
-
         let trace_plan = ConnectionTracePlan {
             attempt_id: self.connection_trace_state.next_attempt_id(),
             mode: trace_mode,
             node_ids: nodes_to_connect.clone(),
         };
-        self.active_connection_chain = Some(ConnectionChainRun {
-            node_ids: nodes_to_connect,
-            next_index: 0,
-            trace_plan,
-        });
+        if !self.workspace_runtime.update(cx, |runtime, _cx| {
+            runtime.try_begin_connection_chain(trace_plan)
+        }) {
+            return false;
+        }
+        for node_id in &nodes_to_connect {
+            self.reset_node_for_connection_chain(node_id);
+        }
         self.start_next_connection_chain_node(cx)
     }
 
@@ -2040,20 +2053,18 @@ impl WorkspaceApp {
         }
     }
 
-    fn start_next_connection_chain_node(&mut self, cx: &App) -> bool {
-        let Some(run) = self.active_connection_chain.clone() else {
+    fn start_next_connection_chain_node(&mut self, cx: &mut Context<Self>) -> bool {
+        let Some(step) = self.workspace_runtime.read(cx).connection_chain_next_step() else {
             return false;
         };
-        let Some(node_id) = run.node_ids.get(run.next_index).cloned() else {
-            self.release_connection_chain();
-            return true;
-        };
         if !self.ensure_single_node_connection_started_with_trace(
-            &node_id,
-            Some(&run.trace_plan),
+            &step.node_id,
+            Some(step.trace_plan.as_ref()),
             cx,
         ) {
-            self.abort_connection_chain_for_node(&node_id);
+            self.workspace_runtime.update(cx, |runtime, _cx| {
+                runtime.abort_connection_chain_for_node(&step.node_id);
+            });
             return false;
         }
         true
@@ -2064,59 +2075,25 @@ impl WorkspaceApp {
         node_id: &NodeId,
         cx: &mut Context<Self>,
     ) {
-        let Some(run) = self.active_connection_chain.as_mut() else {
-            return;
-        };
-        let Some(current_id) = run.node_ids.get(run.next_index) else {
-            self.release_connection_chain();
-            return;
-        };
-        if current_id != node_id {
-            return;
-        }
-        run.next_index += 1;
-        if run.next_index >= run.node_ids.len() {
-            self.release_connection_chain();
-            self.schedule_next_reconnect_cascade_node(cx);
-            return;
-        }
-        let completed_node_id = node_id.clone();
-        self.workspace_runtime.update(cx, |runtime, cx| {
-            runtime.schedule_reconnect_action(
-                runtime_entity::ReconnectScheduleAction::ContinueConnectionChain {
-                    node_id: completed_node_id,
-                },
-                RECONNECT_CASCADE_DELAY,
-                cx,
-            );
-        });
-    }
-
-    fn connection_chain_waits_after_node(&self, node_id: &NodeId) -> bool {
-        let Some(run) = self.active_connection_chain.as_ref() else {
-            return false;
-        };
-        run.next_index > 0
-            && run
-                .node_ids
-                .get(run.next_index - 1)
-                .is_some_and(|current_id| current_id == node_id)
-    }
-
-    pub(super) fn abort_connection_chain_for_node(&mut self, node_id: &NodeId) {
-        if self
-            .active_connection_chain
-            .as_ref()
-            .is_some_and(|run| run.node_ids.contains(node_id))
+        match self
+            .workspace_runtime
+            .update(cx, |runtime, _cx| runtime.advance_connection_chain(node_id))
         {
-            self.release_connection_chain();
-        }
-    }
-
-    fn release_connection_chain(&mut self) {
-        if let Some(run) = self.active_connection_chain.take() {
-            for node_id in run.node_ids {
-                self.connecting_node_locks.remove(&node_id);
+            runtime_entity::ConnectionChainAdvance::Ignored => {}
+            runtime_entity::ConnectionChainAdvance::Continue => {
+                let completed_node_id = node_id.clone();
+                self.workspace_runtime.update(cx, |runtime, cx| {
+                    runtime.schedule_reconnect_action(
+                        runtime_entity::ReconnectScheduleAction::ContinueConnectionChain {
+                            node_id: completed_node_id,
+                        },
+                        RECONNECT_CASCADE_DELAY,
+                        cx,
+                    );
+                });
+            }
+            runtime_entity::ConnectionChainAdvance::Complete => {
+                self.schedule_next_reconnect_cascade_node(cx);
             }
         }
     }

@@ -56,6 +56,25 @@ struct ReconnectRequeueState {
     generation: u64,
 }
 
+#[derive(Debug)]
+pub(in crate::workspace) struct ConnectionChainStep {
+    pub(in crate::workspace) node_id: NodeId,
+    pub(in crate::workspace) trace_plan: Arc<ConnectionTracePlan>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(in crate::workspace) enum ConnectionChainAdvance {
+    Ignored,
+    Continue,
+    Complete,
+}
+
+#[derive(Debug)]
+struct ConnectionChainRun {
+    next_index: usize,
+    trace_plan: Arc<ConnectionTracePlan>,
+}
+
 /// Owns runtime worker endpoints and reliable delivery independently from tabs.
 pub(in crate::workspace) struct WorkspaceRuntimeEntity {
     ssh_worker_tx: delivery::ActiveDeliverySender<SshConnectionWorkerResult>,
@@ -87,6 +106,8 @@ pub(in crate::workspace) struct WorkspaceRuntimeEntity {
     reconnect_forward_restore_totals: HashMap<NodeId, u32>,
     reconnect_forward_restore_tokens: HashMap<NodeId, Arc<AtomicBool>>,
     reconnect_orchestrator: ReconnectOrchestratorStore,
+    active_connection_chain: Option<ConnectionChainRun>,
+    connecting_node_locks: HashSet<NodeId>,
     ssh_registry: SshConnectionRegistry,
     task_runtime: Arc<tokio::runtime::Runtime>,
     reconnect_timing: ReconnectTiming,
@@ -150,6 +171,8 @@ impl WorkspaceRuntimeEntity {
                 reconnect_timing,
                 reconnect_max_attempts,
             ),
+            active_connection_chain: None,
+            connecting_node_locks: HashSet::new(),
             ssh_registry,
             task_runtime,
             reconnect_timing,
@@ -203,6 +226,120 @@ impl WorkspaceRuntimeEntity {
             .into_iter()
             .map(NodeId::new)
             .collect()
+    }
+
+    pub(in crate::workspace) fn has_active_connection_chain(&self) -> bool {
+        self.active_connection_chain.is_some()
+    }
+
+    pub(in crate::workspace) fn connection_chain_contains(&self, node_id: &NodeId) -> bool {
+        self.active_connection_chain
+            .as_ref()
+            .is_some_and(|run| run.trace_plan.node_ids.contains(node_id))
+    }
+
+    pub(in crate::workspace) fn connection_chain_position(
+        &self,
+        node_id: &NodeId,
+    ) -> Option<(usize, usize)> {
+        let run = self.active_connection_chain.as_ref()?;
+        let position = run
+            .trace_plan
+            .node_ids
+            .iter()
+            .position(|candidate| candidate == node_id)?;
+        Some((position, run.trace_plan.node_ids.len()))
+    }
+
+    pub(in crate::workspace) fn any_connecting_node_is_locked(&self, node_ids: &[NodeId]) -> bool {
+        node_ids
+            .iter()
+            .any(|node_id| self.connecting_node_locks.contains(node_id))
+    }
+
+    pub(in crate::workspace) fn try_lock_connecting_node(&mut self, node_id: &NodeId) -> bool {
+        self.connecting_node_locks.insert(node_id.clone())
+    }
+
+    pub(in crate::workspace) fn unlock_connecting_node(&mut self, node_id: &NodeId) {
+        self.connecting_node_locks.remove(node_id);
+    }
+
+    pub(in crate::workspace) fn try_begin_connection_chain(
+        &mut self,
+        trace_plan: ConnectionTracePlan,
+    ) -> bool {
+        if trace_plan.node_ids.is_empty()
+            || self.active_connection_chain.is_some()
+            || self.any_connecting_node_is_locked(&trace_plan.node_ids)
+        {
+            return false;
+        }
+        // The trace plan is shared shallowly across steps instead of cloning its node path.
+        self.connecting_node_locks
+            .extend(trace_plan.node_ids.iter().cloned());
+        self.active_connection_chain = Some(ConnectionChainRun {
+            next_index: 0,
+            trace_plan: Arc::new(trace_plan),
+        });
+        true
+    }
+
+    pub(in crate::workspace) fn connection_chain_next_step(&self) -> Option<ConnectionChainStep> {
+        let run = self.active_connection_chain.as_ref()?;
+        let node_id = run.trace_plan.node_ids.get(run.next_index)?.clone();
+        Some(ConnectionChainStep {
+            node_id,
+            trace_plan: Arc::clone(&run.trace_plan),
+        })
+    }
+
+    pub(in crate::workspace) fn advance_connection_chain(
+        &mut self,
+        node_id: &NodeId,
+    ) -> ConnectionChainAdvance {
+        let Some(run) = self.active_connection_chain.as_mut() else {
+            return ConnectionChainAdvance::Ignored;
+        };
+        if run.trace_plan.node_ids.get(run.next_index) != Some(node_id) {
+            return ConnectionChainAdvance::Ignored;
+        }
+        run.next_index += 1;
+        if run.next_index < run.trace_plan.node_ids.len() {
+            return ConnectionChainAdvance::Continue;
+        }
+        self.release_connection_chain();
+        ConnectionChainAdvance::Complete
+    }
+
+    pub(in crate::workspace) fn connection_chain_waits_after_node(&self, node_id: &NodeId) -> bool {
+        self.active_connection_chain.as_ref().is_some_and(|run| {
+            run.next_index > 0
+                && run
+                    .trace_plan
+                    .node_ids
+                    .get(run.next_index - 1)
+                    .is_some_and(|current_id| current_id == node_id)
+        })
+    }
+
+    pub(in crate::workspace) fn abort_connection_chain_for_node(
+        &mut self,
+        node_id: &NodeId,
+    ) -> bool {
+        if !self.connection_chain_contains(node_id) {
+            return false;
+        }
+        self.release_connection_chain();
+        true
+    }
+
+    fn release_connection_chain(&mut self) {
+        if let Some(run) = self.active_connection_chain.take() {
+            for node_id in &run.trace_plan.node_ids {
+                self.connecting_node_locks.remove(node_id);
+            }
+        }
     }
 
     pub(in crate::workspace) fn ssh_worker_sender(
@@ -930,6 +1067,88 @@ mod tests {
 
             entity.reconnect_orchestrator().finish(&node_id.0, Ok(0));
             assert!(!entity.has_active_reconnect_job(&node_id));
+        });
+    }
+
+    #[gpui::test]
+    fn connection_chain_state_and_locks_are_entity_owned(cx: &mut TestAppContext) {
+        let entity = test_runtime_entity(cx);
+        let parent_node_id = NodeId::new("node-parent");
+        let child_node_id = NodeId::new("node-child");
+
+        entity.update(cx, |entity, _cx| {
+            assert!(entity.try_lock_connecting_node(&parent_node_id));
+            assert!(!entity.try_lock_connecting_node(&parent_node_id));
+            entity.unlock_connecting_node(&parent_node_id);
+
+            let trace_plan = ConnectionTracePlan {
+                attempt_id: "attempt-a".to_string(),
+                mode: ConnectionTraceMode::Connect,
+                node_ids: vec![parent_node_id.clone(), child_node_id.clone()],
+            };
+            assert!(entity.try_begin_connection_chain(trace_plan));
+            assert!(entity.has_active_connection_chain());
+            assert!(entity.connection_chain_contains(&parent_node_id));
+            assert_eq!(
+                entity.connection_chain_position(&child_node_id),
+                Some((1, 2))
+            );
+            assert!(
+                entity.any_connecting_node_is_locked(&[
+                    parent_node_id.clone(),
+                    child_node_id.clone()
+                ])
+            );
+
+            let first_step = entity.connection_chain_next_step().unwrap();
+            assert_eq!(first_step.node_id, parent_node_id);
+            assert_eq!(first_step.trace_plan.attempt_id, "attempt-a");
+            assert_eq!(
+                entity.advance_connection_chain(&child_node_id),
+                ConnectionChainAdvance::Ignored
+            );
+            assert_eq!(
+                entity.advance_connection_chain(&parent_node_id),
+                ConnectionChainAdvance::Continue
+            );
+            assert!(entity.connection_chain_waits_after_node(&parent_node_id));
+            assert_eq!(
+                entity.connection_chain_next_step().unwrap().node_id,
+                child_node_id
+            );
+            assert_eq!(
+                entity.advance_connection_chain(&child_node_id),
+                ConnectionChainAdvance::Complete
+            );
+            assert!(!entity.has_active_connection_chain());
+
+            // Completing the chain releases every lock for future user or reconnect actions.
+            assert!(entity.try_lock_connecting_node(&parent_node_id));
+            entity.unlock_connecting_node(&parent_node_id);
+            assert!(entity.try_lock_connecting_node(&child_node_id));
+            entity.unlock_connecting_node(&child_node_id);
+        });
+    }
+
+    #[gpui::test]
+    fn aborting_connection_chain_releases_only_the_owned_chain(cx: &mut TestAppContext) {
+        let entity = test_runtime_entity(cx);
+        let chain_node_id = NodeId::new("node-chain");
+        let unrelated_node_id = NodeId::new("node-unrelated");
+
+        entity.update(cx, |entity, _cx| {
+            assert!(entity.try_lock_connecting_node(&unrelated_node_id));
+            assert!(entity.try_begin_connection_chain(ConnectionTracePlan {
+                attempt_id: "attempt-a".to_string(),
+                mode: ConnectionTraceMode::Reconnect,
+                node_ids: vec![chain_node_id.clone()],
+            }));
+            assert!(!entity.abort_connection_chain_for_node(&unrelated_node_id));
+            assert!(entity.connection_chain_contains(&chain_node_id));
+            assert!(entity.abort_connection_chain_for_node(&chain_node_id));
+            assert!(!entity.has_active_connection_chain());
+            assert!(entity.try_lock_connecting_node(&chain_node_id));
+            assert!(!entity.try_lock_connecting_node(&unrelated_node_id));
         });
     }
 

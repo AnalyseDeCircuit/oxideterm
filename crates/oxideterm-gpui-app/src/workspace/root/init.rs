@@ -529,8 +529,6 @@ impl WorkspaceApp {
             sftp_progress_store,
             node_runtime_store,
             node_router,
-            active_connection_chain: None,
-            connecting_node_locks: HashSet::new(),
             notification_center: NotificationCenterState::default(),
             notification_sidebar_list_state: tauri_virtual_list_state(
                 0,

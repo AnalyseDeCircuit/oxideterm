@@ -537,7 +537,9 @@ impl WorkspaceApp {
         });
         for affected_node_id in &nodes_to_disconnect {
             self.cancel_connection_trace_for_node(affected_node_id);
-            self.abort_connection_chain_for_node(affected_node_id);
+            self.workspace_runtime.update(cx, |runtime, _cx| {
+                runtime.abort_connection_chain_for_node(affected_node_id);
+            });
             self.workspace_runtime
                 .read(cx)
                 .reconnect_orchestrator()

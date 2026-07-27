@@ -84,7 +84,7 @@ impl WorkspaceApp {
         let Some(generation) = challenge.presence.begin_exit() else {
             return;
         };
-        self.cancel_active_proxy_connect_run();
+        self.cancel_active_proxy_connect_run(cx);
         // Tauri HostKeyConfirmDialog cancellation only clears pending
         // connect/test state. It does not surface a form or session-manager
         // error for a user-initiated close.

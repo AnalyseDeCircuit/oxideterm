@@ -730,6 +730,7 @@ impl WorkspaceApp {
         &self,
         node_id: &NodeId,
         error: &str,
+        cx: &App,
     ) -> Option<(String, Option<String>)> {
         if connection_error_is_cancelled(error) {
             return None;
@@ -742,13 +743,11 @@ impl WorkspaceApp {
             ));
         }
 
-        if let Some(run) = self.active_connection_chain.as_ref()
-            && let Some(position) = run
-                .node_ids
-                .iter()
-                .position(|candidate| candidate == node_id)
+        if let Some((position, total)) = self
+            .workspace_runtime
+            .read(cx)
+            .connection_chain_position(node_id)
         {
-            let total = run.node_ids.len();
             let description = self
                 .ssh_algorithm_diagnostic_message(error)
                 .unwrap_or_else(|| error.to_string());

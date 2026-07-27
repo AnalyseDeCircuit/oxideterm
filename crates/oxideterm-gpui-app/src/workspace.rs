@@ -938,8 +938,6 @@ pub(crate) struct WorkspaceApp {
     sftp_progress_store: Arc<dyn ProgressStore>,
     node_runtime_store: NodeRuntimeStore,
     node_router: NodeRouter,
-    active_connection_chain: Option<ConnectionChainRun>,
-    connecting_node_locks: HashSet<NodeId>,
     notification_center: NotificationCenterState,
     notification_sidebar_list_state: ListState,
     notification_sidebar_list_cache: RefCell<VirtualListSignatureCache>,
@@ -1209,13 +1207,6 @@ struct ActiveConnectionTrace {
     flush_generation: u64,
     expires_at: Option<Instant>,
     presence: oxideterm_gpui_ui::motion::ExitPresence,
-}
-
-#[derive(Clone, Debug)]
-struct ConnectionChainRun {
-    node_ids: Vec<NodeId>,
-    next_index: usize,
-    trace_plan: ConnectionTracePlan,
 }
 
 #[derive(Clone, Debug)]

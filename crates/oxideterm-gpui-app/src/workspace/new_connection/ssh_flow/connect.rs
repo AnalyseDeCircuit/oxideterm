@@ -298,7 +298,12 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
-        if self.active_proxy_connect_run.is_some() || self.active_connection_chain.is_some() {
+        if self.active_proxy_connect_run.is_some()
+            || self
+                .workspace_runtime
+                .read(cx)
+                .has_active_connection_chain()
+        {
             self.report_proxy_session_tree_error(
                 "CHAIN_LOCK_BUSY: Another connection chain is in progress".to_string(),
                 cx,
@@ -325,9 +330,10 @@ impl WorkspaceApp {
         if nodes_to_connect.is_empty() {
             return false;
         }
-        if nodes_to_connect
-            .iter()
-            .any(|node_id| self.connecting_node_locks.contains(node_id))
+        if self
+            .workspace_runtime
+            .read(cx)
+            .any_connecting_node_is_locked(&nodes_to_connect)
         {
             self.report_proxy_session_tree_error(
                 "NODE_LOCK_BUSY: Node is already connecting".to_string(),
@@ -429,7 +435,7 @@ impl WorkspaceApp {
                 cx.notify();
             }
             HostKeyStatus::Error { message } => {
-                self.cancel_active_proxy_connect_run();
+                self.cancel_active_proxy_connect_run(cx);
                 self.report_proxy_session_tree_error(message, cx);
             }
         }
@@ -566,7 +572,7 @@ impl WorkspaceApp {
 
         self.apply_session_tree_step_host_key_options(&step);
         if !self.ensure_node_connection_started_without_ancestors(&step.node_id, cx) {
-            self.cancel_active_proxy_connect_run();
+            self.cancel_active_proxy_connect_run(cx);
             self.report_proxy_session_tree_error(
                 format!("failed to start SSH node {}", step.node_id.0),
                 cx,
@@ -583,7 +589,7 @@ impl WorkspaceApp {
     ) {
         self.active_proxy_connect_run = None;
         self.host_key_challenge = None;
-        self.release_proxy_session_tree_locks(&run.plan);
+        self.release_proxy_session_tree_locks(&run.plan, cx);
         let Some(target_config) = self
             .node_runtime_store
             .snapshot(&target_node_id)
@@ -685,7 +691,7 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) {
         if self.active_proxy_connect_waits_for_node(node_id) {
-            self.cancel_active_proxy_connect_run();
+            self.cancel_active_proxy_connect_run(cx);
             self.report_proxy_session_tree_error(error, cx);
         }
     }
@@ -746,26 +752,35 @@ impl WorkspaceApp {
         }
     }
 
-    pub(in crate::workspace) fn cancel_active_proxy_connect_run(&mut self) {
+    pub(in crate::workspace) fn cancel_active_proxy_connect_run(&mut self, cx: &mut Context<Self>) {
         let Some(run) = self.active_proxy_connect_run.take() else {
             return;
         };
-        self.cleanup_proxy_session_tree_run(&run);
+        self.cleanup_proxy_session_tree_run(&run, cx);
     }
 
-    pub(super) fn cleanup_proxy_session_tree_run(&mut self, run: &NativeProxyConnectRun) {
-        self.cleanup_proxy_session_tree_plan(&run.plan);
+    pub(super) fn cleanup_proxy_session_tree_run(
+        &mut self,
+        run: &NativeProxyConnectRun,
+        cx: &mut Context<Self>,
+    ) {
+        self.cleanup_proxy_session_tree_plan(&run.plan, cx);
     }
 
-    pub(super) fn cleanup_proxy_session_tree_plan(&mut self, plan: &NativeSessionTreeConnectPlan) {
-        self.release_proxy_session_tree_locks(plan);
+    pub(super) fn cleanup_proxy_session_tree_plan(
+        &mut self,
+        plan: &NativeSessionTreeConnectPlan,
+        cx: &mut Context<Self>,
+    ) {
+        self.release_proxy_session_tree_locks(plan, cx);
         let Some(cleanup_root) = plan.cleanup_root_node_id() else {
             return;
         };
         let nodes_to_cleanup = self.node_runtime_store.subtree_postorder(&cleanup_root);
         for node_id in &nodes_to_cleanup {
             self.cancel_connection_trace_for_node(node_id);
-            self.connecting_node_locks.remove(node_id);
+            self.workspace_runtime
+                .update(cx, |runtime, _cx| runtime.unlock_connecting_node(node_id));
             self.remove_pending_ssh_terminal_opens_for_node(node_id);
             if let Some(connection_id) = self.node_router.connection_id_for_node(node_id) {
                 let node_consumer = ConnectionConsumer::NodeRouter(node_id.0.clone());
@@ -798,10 +813,16 @@ impl WorkspaceApp {
         self.persist_session_tree_snapshot();
     }
 
-    pub(super) fn release_proxy_session_tree_locks(&mut self, plan: &NativeSessionTreeConnectPlan) {
-        for step in &plan.steps {
-            self.connecting_node_locks.remove(&step.node_id);
-        }
+    pub(super) fn release_proxy_session_tree_locks(
+        &mut self,
+        plan: &NativeSessionTreeConnectPlan,
+        cx: &mut Context<Self>,
+    ) {
+        self.workspace_runtime.update(cx, |runtime, _cx| {
+            for step in &plan.steps {
+                runtime.unlock_connecting_node(&step.node_id);
+            }
+        });
     }
 
     pub(super) fn report_proxy_session_tree_error(
