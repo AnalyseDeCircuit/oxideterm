@@ -31,10 +31,7 @@ fn saved_node_route_matches_config(
     // still matches the current saved profile. Authentication and host-key
     // overrides may change without changing which remote node the path owns.
     path.iter().enumerate().all(|(index, node_id)| {
-        let Some(actual) = runtime_store
-            .snapshot(node_id)
-            .map(|snapshot| snapshot.config)
-        else {
+        let Some(actual) = runtime_store.metadata_snapshot(node_id) else {
             return false;
         };
         let (expected_host, expected_port, expected_username) = proxy_hops
@@ -45,7 +42,9 @@ fn saved_node_route_matches_config(
                 requested_config.port,
                 requested_config.username.as_str(),
             ));
-        ssh_config_matches_endpoint(&actual, expected_host, expected_port, expected_username)
+        actual.host == expected_host
+            && actual.port == expected_port
+            && actual.username == expected_username
     })
 }
 
@@ -371,21 +370,18 @@ impl WorkspaceApp {
         let saved_connection_id = saved_connection_id.trim().to_string();
         self.saved_ssh_nodes
             .insert(saved_connection_id.clone(), node_id.clone());
-        let runtime_origin_needs_owner =
-            self.node_runtime_store
-                .snapshot(node_id)
-                .is_some_and(|snapshot| {
-                    snapshot.origin.saved_connection_id() != Some(saved_connection_id.as_str())
-                });
-        if (attached || runtime_origin_needs_owner)
-            && let Some(snapshot) = self.node_runtime_store.snapshot(node_id)
-        {
+        let runtime_origin_needs_owner = self
+            .node_runtime_store
+            .metadata_snapshot(node_id)
+            .is_some_and(|snapshot| {
+                snapshot.origin.saved_connection_id() != Some(saved_connection_id.as_str())
+            });
+        if attached || runtime_origin_needs_owner {
             // This is an explicit saved-connection open that reaches an
             // existing node. Promote runtime origin so persisted node ownership
             // and SSH privilege scope agree after restart.
-            self.node_runtime_store.upsert_node_with_origin(
-                node_id.clone(),
-                snapshot.config,
+            let _ = self.node_runtime_store.update_origin(
+                node_id,
                 NodeOrigin::Restored {
                     saved_connection_id,
                 },
@@ -415,7 +411,7 @@ impl WorkspaceApp {
         node.config = config.clone();
         let origin = self
             .node_runtime_store
-            .snapshot(node_id)
+            .metadata_snapshot(node_id)
             .map(|snapshot| snapshot.origin)
             .unwrap_or_default();
         self.node_runtime_store
@@ -436,12 +432,12 @@ impl WorkspaceApp {
             // same endpoint, but it must not create a new terminal.
             let matching_root = self
                 .node_runtime_store
-                .snapshot(node_id)
+                .metadata_snapshot(node_id)
                 .is_some_and(|snapshot| {
                     snapshot.depth == 0
-                        && snapshot.config.host == connection.host
-                        && snapshot.config.port == connection.port
-                        && snapshot.config.username == connection.username
+                        && snapshot.host == connection.host
+                        && snapshot.port == connection.port
+                        && snapshot.username == connection.username
                 });
             // `then_some` evaluates its argument eagerly. Use `first()` so a
             // ready node without attached terminals can be skipped instead of
@@ -482,7 +478,7 @@ impl WorkspaceApp {
         if let Some(saved_connection_id) = saved_connection_id.as_ref()
             && let Some(node_id) = self.saved_ssh_nodes.get(saved_connection_id).cloned()
         {
-            if self.node_runtime_store.snapshot(&node_id).is_none() {
+            if !self.node_runtime_store.contains_node(&node_id) {
                 self.node_runtime_store.upsert_node_with_origin(
                     node_id.clone(),
                     config.clone(),
@@ -553,7 +549,7 @@ impl WorkspaceApp {
 
         let origin = self
             .node_runtime_store
-            .snapshot(&node_id)
+            .metadata_snapshot(&node_id)
             .map(|snapshot| snapshot.origin)
             .or_else(|| {
                 saved_connection_id.as_ref().map(|id| NodeOrigin::Restored {
@@ -561,7 +557,7 @@ impl WorkspaceApp {
                 })
             })
             .unwrap_or(NodeOrigin::Direct);
-        if self.node_runtime_store.snapshot(&node_id).is_none() {
+        if !self.node_runtime_store.contains_node(&node_id) {
             self.node_runtime_store.upsert_node_with_origin(
                 node_id.clone(),
                 config.clone(),
@@ -574,7 +570,7 @@ impl WorkspaceApp {
             .flatten();
         let trace_parent_id = self
             .node_runtime_store
-            .snapshot(&node_id)
+            .metadata_snapshot(&node_id)
             .and_then(|snapshot| snapshot.parent_id);
         if starting_node_connection {
             let node_consumer = ConnectionConsumer::NodeRouter(node_id.0.clone());
@@ -788,7 +784,7 @@ impl WorkspaceApp {
             .node_router
             .connection_id_for_node(node_id)
             .ok_or_else(|| anyhow::anyhow!("SSH node {} is not connected", node_id.0))?;
-        if self.node_runtime_store.snapshot(node_id).is_none() {
+        if !self.node_runtime_store.contains_node(node_id) {
             return Err(anyhow::anyhow!(
                 "SSH node {} has no runtime owner",
                 node_id.0
@@ -974,7 +970,7 @@ impl WorkspaceApp {
         }
         let target_has_parent = self
             .node_runtime_store
-            .snapshot(&node_id)
+            .metadata_snapshot(&node_id)
             .and_then(|snapshot| snapshot.parent_id)
             .is_some();
         if target_has_parent && self.node_router.connection_id_for_node(&node_id).is_none() {

@@ -8,7 +8,8 @@ use std::{collections::HashMap, time::Duration};
 use oxideterm_i18n::I18n;
 use oxideterm_notification_center::{EventCategory, EventLogEntry, EventSeverity};
 use oxideterm_ssh::{
-    ConnectionConsumer, ConnectionInfo, ConnectionState, NodeMetadataSnapshot, NodeReadiness,
+    ConnectionConsumer, ConnectionInfo, ConnectionState, NodeMetadataSnapshot, NodeOrigin,
+    NodeReadiness,
 };
 use serde_json::Value;
 
@@ -204,6 +205,7 @@ pub(super) fn test_host_api_snapshot_with_sessions() -> NativePluginHostApiSnaps
             parent_id: None,
             children_ids: vec![child_id.clone()],
             depth: 0,
+            origin: NodeOrigin::Direct,
             host: "example.test".to_string(),
             port: 22,
             username: "deploy".to_string(),
@@ -219,6 +221,7 @@ pub(super) fn test_host_api_snapshot_with_sessions() -> NativePluginHostApiSnaps
             parent_id: Some(root_id),
             children_ids: Vec::new(),
             depth: 1,
+            origin: NodeOrigin::Direct,
             host: "child.test".to_string(),
             port: 2222,
             username: "root".to_string(),

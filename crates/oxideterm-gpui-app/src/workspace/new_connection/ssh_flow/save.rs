@@ -41,7 +41,7 @@ impl WorkspaceApp {
         };
         let parent_id = self
             .node_runtime_store
-            .snapshot(&node_id)
+            .metadata_snapshot(&node_id)
             .and_then(|snapshot| snapshot.parent_id);
         let proxy_hops = match parent_id
             .as_ref()

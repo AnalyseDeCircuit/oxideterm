@@ -106,8 +106,24 @@ mod tests {
 
         assert_eq!(metadata[0].host, "example.test");
         assert_eq!(metadata[0].username, "deploy");
+        assert_eq!(metadata[0].origin, NodeOrigin::Direct);
         assert!(!debug_output.contains("representative-password"));
         assert!(!debug_output.contains("representative-endpoint-token"));
+
+        store
+            .update_origin(
+                &node,
+                NodeOrigin::Restored {
+                    saved_connection_id: "saved-connection".to_string(),
+                },
+            )
+            .unwrap();
+        assert_eq!(
+            store.metadata_snapshot(&node).unwrap().origin,
+            NodeOrigin::Restored {
+                saved_connection_id: "saved-connection".to_string(),
+            }
+        );
     }
 
     #[test]

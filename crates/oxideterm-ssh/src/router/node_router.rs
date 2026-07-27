@@ -56,6 +56,10 @@ impl NodeRouter {
         self.runtime.root_node_ids()
     }
 
+    pub fn node_metadata(&self, node_id: &NodeId) -> Option<NodeMetadataSnapshot> {
+        self.runtime.metadata_snapshot(node_id)
+    }
+
     pub fn minimal_subtree_roots(
         &self,
         candidate_node_ids: impl IntoIterator<Item = NodeId>,

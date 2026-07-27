@@ -1335,7 +1335,7 @@ impl WorkspaceApp {
         if node.saved_connection_id.is_some() {
             return false;
         }
-        let Some(snapshot) = self.node_runtime_store.snapshot(node_id) else {
+        let Some(snapshot) = self.node_runtime_store.metadata_snapshot(node_id) else {
             return true;
         };
         // ManualPreset/Restored are already saved-connection materializations,

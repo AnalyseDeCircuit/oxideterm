@@ -322,7 +322,7 @@ impl WorkspaceApp {
                     if !connection_chain_node {
                         let children_to_start = self
                             .node_runtime_store
-                            .snapshot(&node_id)
+                            .metadata_snapshot(&node_id)
                             .map(|snapshot| snapshot.children_ids)
                             .unwrap_or_default();
                         for child_id in children_to_start {
@@ -1633,7 +1633,7 @@ impl WorkspaceApp {
         while let Some(node_id) = self.pending_reconnect_cascade_nodes.pop_front() {
             let parent_ready = self
                 .node_runtime_store
-                .snapshot(&node_id)
+                .metadata_snapshot(&node_id)
                 .and_then(|snapshot| snapshot.parent_id)
                 .is_some_and(|parent_id| self.node_is_ready_for_terminal(&parent_id));
             if !parent_ready {
@@ -1853,7 +1853,7 @@ impl WorkspaceApp {
     fn has_active_reconnect_job_for_ancestor(&self, node_id: &NodeId) -> bool {
         let mut cursor = self
             .node_runtime_store
-            .snapshot(node_id)
+            .metadata_snapshot(node_id)
             .and_then(|snapshot| snapshot.parent_id);
         while let Some(parent_id) = cursor {
             if self
@@ -1865,7 +1865,7 @@ impl WorkspaceApp {
             }
             cursor = self
                 .node_runtime_store
-                .snapshot(&parent_id)
+                .metadata_snapshot(&parent_id)
                 .and_then(|snapshot| snapshot.parent_id);
         }
         false
@@ -2146,7 +2146,7 @@ impl WorkspaceApp {
 
         let parent_id = self
             .node_runtime_store
-            .snapshot(node_id)
+            .metadata_snapshot(node_id)
             .and_then(|snapshot| snapshot.parent_id);
         if let Some(parent_id) = parent_id.as_ref()
             && !self.node_is_ready_for_terminal(parent_id)
@@ -2173,7 +2173,7 @@ impl WorkspaceApp {
 
         let origin = self
             .node_runtime_store
-            .snapshot(node_id)
+            .metadata_snapshot(node_id)
             .map(|snapshot| snapshot.origin)
             .or_else(|| {
                 node.saved_connection_id

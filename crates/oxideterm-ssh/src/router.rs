@@ -287,6 +287,7 @@ pub struct NodeMetadataSnapshot {
     pub parent_id: Option<NodeId>,
     pub children_ids: Vec<NodeId>,
     pub depth: u32,
+    pub origin: NodeOrigin,
     pub host: String,
     pub port: u16,
     pub username: String,

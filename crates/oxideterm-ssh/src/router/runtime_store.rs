@@ -420,6 +420,31 @@ impl NodeRuntimeStore {
         self.root_ids.read().clone()
     }
 
+    pub fn contains_node(&self, node_id: &NodeId) -> bool {
+        self.nodes.contains_key(node_id)
+    }
+
+    /// Returns the non-secret projection used by UI and plugin readers.
+    pub fn metadata_snapshot(&self, node_id: &NodeId) -> Option<NodeMetadataSnapshot> {
+        let route = self.nodes.get(node_id)?;
+        Some(node_metadata_snapshot(node_id.clone(), &route))
+    }
+
+    /// Changes persistence ownership without copying the node's SSH config.
+    pub fn update_origin(
+        &self,
+        node_id: &NodeId,
+        origin: NodeOrigin,
+    ) -> Result<(), RouteError> {
+        let mut route = self
+            .nodes
+            .get_mut(node_id)
+            .ok_or_else(|| RouteError::NodeNotFound(node_id.0.clone()))?;
+        route.origin = origin;
+        route.generation = route.generation.saturating_add(1);
+        Ok(())
+    }
+
     /// Selects non-overlapping existing roots without cloning node configs.
     pub fn minimal_subtree_roots(
         &self,
@@ -467,24 +492,7 @@ impl NodeRuntimeStore {
         let mut nodes = self
             .nodes
             .iter()
-            .map(|entry| {
-                let route = entry.value();
-                NodeMetadataSnapshot {
-                    id: entry.key().clone(),
-                    parent_id: route.parent_id.clone(),
-                    children_ids: route.children_ids.clone(),
-                    depth: route.depth,
-                    host: route.config.host.clone(),
-                    port: route.config.port,
-                    username: route.config.username.clone(),
-                    readiness: route.state.readiness.clone(),
-                    error: route.state.error.clone(),
-                    connection_id: route.connection_id.clone(),
-                    terminal_session_id: route.terminal_session_id.clone(),
-                    sftp_session_id: route.sftp_session_id.clone(),
-                    created_at_ms: route.created_at_ms,
-                }
-            })
+            .map(|entry| node_metadata_snapshot(entry.key().clone(), entry.value()))
             .collect::<Vec<_>>();
         nodes.sort_by_key(|node| (node.depth, node.created_at_ms, node.id.0.clone()));
         nodes
@@ -1058,6 +1066,25 @@ impl NodeRuntimeStore {
                     .insert(connection_id.clone(), entry.key().clone());
             }
         }
+    }
+}
+
+fn node_metadata_snapshot(node_id: NodeId, route: &NodeRuntimeEntry) -> NodeMetadataSnapshot {
+    NodeMetadataSnapshot {
+        id: node_id,
+        parent_id: route.parent_id.clone(),
+        children_ids: route.children_ids.clone(),
+        depth: route.depth,
+        origin: route.origin.clone(),
+        host: route.config.host.clone(),
+        port: route.config.port,
+        username: route.config.username.clone(),
+        readiness: route.state.readiness.clone(),
+        error: route.state.error.clone(),
+        connection_id: route.connection_id.clone(),
+        terminal_session_id: route.terminal_session_id.clone(),
+        sftp_session_id: route.sftp_session_id.clone(),
+        created_at_ms: route.created_at_ms,
     }
 }
 

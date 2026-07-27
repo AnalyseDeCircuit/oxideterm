@@ -438,12 +438,12 @@ impl WorkspaceApp {
             return false;
         };
         let terminal_count = node.terminal_ids.len();
-        let Some(runtime) = self.node_runtime_store.snapshot(&node_id) else {
+        let Some(runtime) = self.node_runtime_store.metadata_snapshot(&node_id) else {
             return false;
         };
         if native_plugin_session_connection_state(
-            &runtime.state.readiness,
-            runtime.state.error.as_deref(),
+            &runtime.readiness,
+            runtime.error.as_deref(),
             terminal_count,
         ) != "active"
         {
