@@ -1478,6 +1478,9 @@ impl WorkspaceApp {
             plugin_entity::PluginWorkspaceEvent::RuntimeIntentsReady => {
                 self.apply_native_plugin_runtime_intents(cx);
             }
+            plugin_entity::PluginWorkspaceEvent::OxideImportIntentsReady => {
+                self.apply_native_plugin_oxide_import_intents(cx);
+            }
         }
     }
 

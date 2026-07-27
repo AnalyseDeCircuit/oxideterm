@@ -7,7 +7,9 @@ use oxideterm_connections::{
     SavedConnectionsConflictStrategy, SavedConnectionsSyncSnapshot,
     oxide_file::ImportResultEnvelope,
 };
-use oxideterm_plugin_host_api::sync::NativePluginOxideImportOptions;
+use oxideterm_plugin_host_api::sync::{
+    NativePluginOxideImportOptions, NativePluginQuickCommandImportStrategy,
+};
 use serde_json::Value;
 use zeroize::Zeroizing;
 
@@ -117,15 +119,30 @@ pub(in crate::workspace) enum NativePluginSyncAction {
 }
 
 pub(in crate::workspace) struct NativePluginOxideImportCoreResult {
-    pub(super) store: oxideterm_connections::ConnectionStore,
-    pub(super) envelope: ImportResultEnvelope,
+    pub(in crate::workspace) store: oxideterm_connections::ConnectionStore,
+    pub(in crate::workspace) envelope: ImportResultEnvelope,
+}
+
+/// Options applied on the GPUI owner after the background import commits.
+pub(in crate::workspace) struct NativePluginOxidePostImportOptions {
+    pub(in crate::workspace) import_app_settings: bool,
+    pub(in crate::workspace) selected_app_settings_sections:
+        Option<std::collections::HashSet<String>>,
+    pub(in crate::workspace) import_plugin_settings: bool,
+    pub(in crate::workspace) selected_plugin_ids: Option<std::collections::HashSet<String>>,
+    pub(in crate::workspace) import_quick_commands: bool,
+    pub(in crate::workspace) quick_command_strategy: NativePluginQuickCommandImportStrategy,
 }
 
 pub(in crate::workspace) enum NativePluginOxideImportWorkerMessage {
     Progress {
+        operation_id: u64,
         stage: String,
         current: usize,
         total: usize,
     },
-    Done(Result<NativePluginOxideImportCoreResult, String>),
+    Done {
+        operation_id: u64,
+        result: Result<NativePluginOxideImportCoreResult, ()>,
+    },
 }

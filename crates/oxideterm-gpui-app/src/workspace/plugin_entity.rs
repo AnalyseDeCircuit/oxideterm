@@ -7,8 +7,10 @@ use std::time::{Duration, Instant};
 use zeroize::Zeroizing;
 
 use super::plugin_lifecycle::{
-    NativePluginConfirmDialog, NativePluginConfirmRequest, NativePluginProductUiEffect,
-    NativePluginRuntimeDelivery, NativePluginSyncRequest, NativePluginTerminalRequest,
+    NativePluginConfirmDialog, NativePluginConfirmRequest, NativePluginOxideImportCoreResult,
+    NativePluginOxideImportWorkerMessage, NativePluginOxidePostImportOptions,
+    NativePluginProductUiEffect, NativePluginRuntimeDelivery, NativePluginSyncRequest,
+    NativePluginTerminalRequest,
 };
 #[cfg(test)]
 use super::plugin_lifecycle::{NativePluginSyncAction, NativePluginTerminalAction};
@@ -18,6 +20,7 @@ pub(in crate::workspace) enum PluginWorkspaceEvent {
     RuntimeRequestsReady,
     RuntimeSubscriptionSampleDue,
     RuntimeIntentsReady,
+    OxideImportIntentsReady,
 }
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -53,6 +56,30 @@ pub(in crate::workspace) enum PluginRuntimeIntent {
         refresh: PluginRuntimeAdapterRefresh,
     },
     StateChanged,
+}
+
+pub(in crate::workspace) enum PluginOxideImportIntent {
+    Progress {
+        plugin_id: Arc<str>,
+        registration_id: Arc<str>,
+        value: serde_json::Value,
+    },
+    Complete {
+        plugin_id: Arc<str>,
+        progress_registration_id: Option<Arc<str>>,
+        request_id: String,
+        result: Result<NativePluginOxideImportCoreResult, ()>,
+        options: NativePluginOxidePostImportOptions,
+        response_tx: std::sync::mpsc::Sender<plugin_runtime::PluginResponse>,
+    },
+}
+
+struct PluginOxideImportContext {
+    plugin_id: Arc<str>,
+    progress_registration_id: Option<Arc<str>>,
+    request_id: String,
+    options: NativePluginOxidePostImportOptions,
+    response_tx: std::sync::mpsc::Sender<plugin_runtime::PluginResponse>,
 }
 
 pub(in crate::workspace) const NATIVE_PLUGIN_RUNTIME_FAILURE_DIAGNOSTIC: &str =
@@ -98,6 +125,11 @@ pub(in crate::workspace) struct PluginWorkspaceEntity {
     sync_tx: delivery::ActiveDeliverySender<NativePluginSyncRequest>,
     sync_rx: std::sync::mpsc::Receiver<NativePluginSyncRequest>,
     product_ui_effects: VecDeque<NativePluginProductUiEffect>,
+    oxide_import_delivery_tx: delivery::ActiveDeliverySender<NativePluginOxideImportWorkerMessage>,
+    oxide_import_delivery_rx: std::sync::mpsc::Receiver<NativePluginOxideImportWorkerMessage>,
+    oxide_import_contexts: HashMap<u64, PluginOxideImportContext>,
+    oxide_import_intents: VecDeque<PluginOxideImportIntent>,
+    next_oxide_import_id: u64,
     runtime_services_started: bool,
     subscription_samples: Vec<PluginSubscriptionSample>,
     subscription_snapshots: HashMap<PluginSubscriptionSample, serde_json::Value>,
@@ -124,6 +156,8 @@ impl PluginWorkspaceEntity {
             delivery::ActiveDeliverySender::channel_with_wake(runtime_request_wake.clone());
         let (sync_tx, sync_rx) =
             delivery::ActiveDeliverySender::channel_with_wake(runtime_request_wake.clone());
+        let (oxide_import_delivery_tx, oxide_import_delivery_rx) =
+            delivery::ActiveDeliverySender::channel();
         let entity = Self {
             task_runtime,
             registry: Arc::new(registry),
@@ -148,6 +182,11 @@ impl PluginWorkspaceEntity {
             sync_tx,
             sync_rx,
             product_ui_effects: VecDeque::new(),
+            oxide_import_delivery_tx,
+            oxide_import_delivery_rx,
+            oxide_import_contexts: HashMap::new(),
+            oxide_import_intents: VecDeque::new(),
+            next_oxide_import_id: 1,
             runtime_services_started: false,
             subscription_samples: Vec::new(),
             subscription_snapshots: HashMap::new(),
@@ -161,6 +200,7 @@ impl PluginWorkspaceEntity {
         entity.schedule_runtime_delivery(cx);
         entity.schedule_manager_delivery(cx);
         entity.schedule_runtime_request_delivery(cx);
+        entity.schedule_oxide_import_delivery(cx);
         entity
     }
 
@@ -376,6 +416,89 @@ impl PluginWorkspaceEntity {
 
     pub(in crate::workspace) fn take_runtime_intents(&mut self) -> VecDeque<PluginRuntimeIntent> {
         std::mem::take(&mut self.runtime_intents)
+    }
+
+    pub(in crate::workspace) fn start_oxide_import(
+        &mut self,
+        store: oxideterm_connections::ConnectionStore,
+        plugin_id: String,
+        request_id: String,
+        bytes: Vec<u8>,
+        password: Zeroizing<String>,
+        options: oxideterm_plugin_host_api::sync::NativePluginOxideImportOptions,
+        progress_registration_id: Option<String>,
+        response_tx: std::sync::mpsc::Sender<plugin_runtime::PluginResponse>,
+    ) {
+        let operation_id = self.next_oxide_import_id;
+        self.next_oxide_import_id = self.next_oxide_import_id.wrapping_add(1).max(1);
+        let oxideterm_plugin_host_api::sync::NativePluginOxideImportOptions {
+            oxide_options,
+            import_app_settings,
+            selected_app_settings_sections,
+            import_plugin_settings,
+            selected_plugin_ids,
+            import_quick_commands,
+            quick_command_strategy,
+        } = options;
+        self.oxide_import_contexts.insert(
+            operation_id,
+            PluginOxideImportContext {
+                plugin_id: Arc::from(plugin_id),
+                progress_registration_id: progress_registration_id.map(Arc::from),
+                request_id,
+                options: NativePluginOxidePostImportOptions {
+                    import_app_settings,
+                    selected_app_settings_sections,
+                    import_plugin_settings,
+                    selected_plugin_ids,
+                    import_quick_commands,
+                    quick_command_strategy,
+                },
+                response_tx,
+            },
+        );
+
+        let delivery_tx = self.oxide_import_delivery_tx.clone();
+        std::thread::spawn(move || {
+            let mut store = store;
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                oxideterm_plugin_host_api::sync::native_plugin_apply_oxide_import_core_with_progress(
+                    &mut store,
+                    &bytes,
+                    &password,
+                    oxide_options,
+                    |stage, current, total| {
+                        let _ = delivery_tx.send(
+                            NativePluginOxideImportWorkerMessage::Progress {
+                                operation_id,
+                                stage: stage.to_string(),
+                                current,
+                                total,
+                            },
+                        );
+                    },
+                )
+            }))
+            .map_err(|_| ())
+            .and_then(|result| {
+                result
+                    .map(|envelope| NativePluginOxideImportCoreResult { store, envelope })
+                    .map_err(|error| {
+                        // Import errors may include paths or decrypted payload details.
+                        let _sensitive_error = Zeroizing::new(error);
+                    })
+            });
+            let _ = delivery_tx.send(NativePluginOxideImportWorkerMessage::Done {
+                operation_id,
+                result,
+            });
+        });
+    }
+
+    pub(in crate::workspace) fn take_oxide_import_intents(
+        &mut self,
+    ) -> VecDeque<PluginOxideImportIntent> {
+        std::mem::take(&mut self.oxide_import_intents)
     }
 
     pub(in crate::workspace) fn start_package_install(
@@ -996,6 +1119,98 @@ impl PluginWorkspaceEntity {
         .detach();
     }
 
+    fn schedule_oxide_import_delivery(&self, cx: &mut Context<Self>) {
+        let delivery_wake = self.oxide_import_delivery_tx.wake();
+        let release_wake = delivery_wake.clone();
+        cx.on_release(move |_, _| {
+            // Workspace release stops only foreground delivery; an in-flight
+            // import still owns and erases its password inside the worker.
+            release_wake.stop();
+        })
+        .detach();
+        cx.spawn(async move |entity, cx| {
+            loop {
+                delivery_wake.wait().await;
+                let should_drain = delivery_wake.take();
+                let stopped = delivery_wake.is_stopped();
+                if should_drain {
+                    let backlog_remaining = entity
+                        .update(cx, |entity, cx| entity.drain_oxide_import_deliveries(cx))
+                        .unwrap_or(false);
+                    if backlog_remaining {
+                        delivery_wake.mark();
+                    }
+                }
+                if stopped {
+                    break;
+                }
+            }
+        })
+        .detach();
+    }
+
+    fn drain_oxide_import_deliveries(&mut self, cx: &mut Context<Self>) -> bool {
+        let drain = delivery::drain_channel(
+            &self.oxide_import_delivery_rx,
+            delivery::USER_ACTION_DELIVERY_BUDGET,
+        );
+        let mut added_intent = false;
+        for delivery in drain.items {
+            match delivery {
+                NativePluginOxideImportWorkerMessage::Progress {
+                    operation_id,
+                    stage,
+                    current,
+                    total,
+                } => {
+                    let Some(context) = self.oxide_import_contexts.get(&operation_id) else {
+                        continue;
+                    };
+                    let Some(registration_id) = context.progress_registration_id.as_ref() else {
+                        continue;
+                    };
+                    self.oxide_import_intents
+                        .push_back(PluginOxideImportIntent::Progress {
+                            plugin_id: Arc::clone(&context.plugin_id),
+                            registration_id: Arc::clone(registration_id),
+                            value:
+                                oxideterm_plugin_host_api::sync::native_plugin_sync_progress_value(
+                                    "Importing .oxide",
+                                    &stage,
+                                    current,
+                                    total,
+                                    false,
+                                ),
+                        });
+                    added_intent = true;
+                }
+                NativePluginOxideImportWorkerMessage::Done {
+                    operation_id,
+                    result,
+                } => {
+                    let Some(context) = self.oxide_import_contexts.remove(&operation_id) else {
+                        continue;
+                    };
+                    self.oxide_import_intents
+                        .push_back(PluginOxideImportIntent::Complete {
+                            plugin_id: context.plugin_id,
+                            progress_registration_id: context.progress_registration_id,
+                            request_id: context.request_id,
+                            result,
+                            options: context.options,
+                            response_tx: context.response_tx,
+                        });
+                    added_intent = true;
+                }
+            }
+        }
+        if added_intent {
+            cx.emit(PluginWorkspaceEvent::OxideImportIntentsReady);
+            cx.notify();
+        }
+        drain.outcome.backlog_remaining
+    }
+
     fn drain_manager_deliveries(&mut self, cx: &mut Context<Self>) -> bool {
         let drain = delivery::drain_channel(
             &self.manager_delivery_rx,
@@ -1232,6 +1447,79 @@ mod tests {
     }
 
     #[gpui::test]
+    fn oxide_import_progress_and_completion_are_entity_owned(cx: &mut TestAppContext) {
+        let runtime = Arc::new(
+            tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .expect("plugin entity test runtime"),
+        );
+        let entity = cx.new(|cx| {
+            PluginWorkspaceEntity::new(runtime, plugin_host::NativePluginRegistry::default(), cx)
+        });
+        let (response_tx, _response_rx) = std::sync::mpsc::channel();
+        let delivery_tx = entity.update(cx, |entity, _cx| {
+            entity.oxide_import_contexts.insert(
+                7,
+                PluginOxideImportContext {
+                    plugin_id: Arc::from("plugin.test"),
+                    progress_registration_id: Some(Arc::from("import-progress")),
+                    request_id: "import-request".to_string(),
+                    options: NativePluginOxidePostImportOptions {
+                        import_app_settings: false,
+                        selected_app_settings_sections: None,
+                        import_plugin_settings: false,
+                        selected_plugin_ids: None,
+                        import_quick_commands: false,
+                        quick_command_strategy: oxideterm_plugin_host_api::sync::
+                            NativePluginQuickCommandImportStrategy::Rename,
+                    },
+                    response_tx,
+                },
+            );
+            entity.oxide_import_delivery_tx.clone()
+        });
+        delivery_tx
+            .send(NativePluginOxideImportWorkerMessage::Progress {
+                operation_id: 7,
+                stage: "connections".to_string(),
+                current: 1,
+                total: 2,
+            })
+            .expect("oxide progress delivery");
+        delivery_tx
+            .send(NativePluginOxideImportWorkerMessage::Done {
+                operation_id: 7,
+                result: Err(()),
+            })
+            .expect("oxide completion delivery");
+
+        cx.run_until_parked();
+
+        entity.update(cx, |entity, _cx| {
+            let mut intents = entity.take_oxide_import_intents();
+            assert!(matches!(
+                intents.pop_front(),
+                Some(PluginOxideImportIntent::Progress {
+                    plugin_id,
+                    registration_id,
+                    ..
+                }) if plugin_id.as_ref() == "plugin.test"
+                    && registration_id.as_ref() == "import-progress"
+            ));
+            assert!(matches!(
+                intents.pop_front(),
+                Some(PluginOxideImportIntent::Complete {
+                    request_id,
+                    result: Err(()),
+                    ..
+                }) if request_id == "import-request"
+            ));
+            assert!(entity.oxide_import_contexts.is_empty());
+        });
+    }
+
+    #[gpui::test]
     fn entity_release_stops_plugin_delivery_waiters(cx: &mut TestAppContext) {
         let runtime = Arc::new(
             tokio::runtime::Builder::new_current_thread()
@@ -1242,14 +1530,16 @@ mod tests {
         let entity = cx.new(|cx| {
             PluginWorkspaceEntity::new(runtime, plugin_host::NativePluginRegistry::default(), cx)
         });
-        let (manager_wake, runtime_delivery_wake, runtime_request_wake) = cx.read(|cx| {
-            let entity = entity.read(cx);
-            (
-                entity.manager_delivery_tx.wake(),
-                entity.runtime_delivery_tx.wake(),
-                entity.runtime_request_wake.clone(),
-            )
-        });
+        let (manager_wake, runtime_delivery_wake, runtime_request_wake, oxide_import_wake) = cx
+            .read(|cx| {
+                let entity = entity.read(cx);
+                (
+                    entity.manager_delivery_tx.wake(),
+                    entity.runtime_delivery_tx.wake(),
+                    entity.runtime_request_wake.clone(),
+                    entity.oxide_import_delivery_tx.wake(),
+                )
+            });
 
         drop(entity);
         cx.update(|_cx| {});
@@ -1259,6 +1549,7 @@ mod tests {
         assert!(manager_wake.is_stopped());
         assert!(runtime_delivery_wake.is_stopped());
         assert!(runtime_request_wake.is_stopped());
+        assert!(oxide_import_wake.is_stopped());
     }
 
     #[gpui::test]

@@ -14,14 +14,12 @@ use oxideterm_connections::{
 #[cfg(test)]
 pub(super) use oxideterm_plugin_host_api::sync::native_plugin_apply_oxide_import_core;
 pub(super) use oxideterm_plugin_host_api::sync::{
-    NativePluginOxideImportOptions, NativePluginQuickCommandImportStrategy,
-    native_plugin_apply_oxide_import_core_with_progress, native_plugin_bool_arg,
-    native_plugin_file_data_arg, native_plugin_optional_string_arg,
-    native_plugin_selected_plugin_settings, native_plugin_settings_revision_map,
-    native_plugin_sync_apply_saved_connections_args, native_plugin_sync_connection_ids,
-    native_plugin_sync_import_oxide_args, native_plugin_sync_import_result_value,
-    native_plugin_sync_oxide_error, native_plugin_sync_progress_registration_id,
-    native_plugin_sync_progress_value,
+    NativePluginQuickCommandImportStrategy, native_plugin_bool_arg, native_plugin_file_data_arg,
+    native_plugin_optional_string_arg, native_plugin_selected_plugin_settings,
+    native_plugin_settings_revision_map, native_plugin_sync_apply_saved_connections_args,
+    native_plugin_sync_connection_ids, native_plugin_sync_import_oxide_args,
+    native_plugin_sync_import_result_value, native_plugin_sync_oxide_error,
+    native_plugin_sync_progress_registration_id, native_plugin_sync_progress_value,
 };
 use serde_json::{Map, Value, json};
 use zeroize::Zeroizing;

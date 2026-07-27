@@ -4,8 +4,6 @@
 use std::{
     collections::{HashMap, HashSet},
     sync::Arc,
-    sync::mpsc,
-    time::Duration,
 };
 
 use gpui::{
@@ -17,7 +15,6 @@ use oxideterm_gpui_terminal::{TerminalNotice, TerminalNoticeVariant};
 use oxideterm_gpui_ui::{ConfirmDialogVariant, ConfirmDialogView};
 use oxideterm_sftp::BackgroundTransferState;
 use serde_json::{Value, json};
-use zeroize::Zeroizing;
 
 use super::{
     TabKind, TelnetSessionConfig, TerminalInputInterceptor, TerminalOutputProcessor,
@@ -263,7 +260,7 @@ impl WorkspaceApp {
                 registration_id,
                 value,
             } => {
-                self.update_native_plugin_progress(&plugin_id, registration_id, value, cx);
+                self.update_native_plugin_progress(&plugin_id, &registration_id, value, cx);
                 let _ = request.response_tx.send(plugin_runtime::PluginResponse::ok(
                     request.request_id,
                     Value::Null,
@@ -275,16 +272,21 @@ impl WorkspaceApp {
                 options,
                 progress_registration_id,
                 plugin_id,
-            } => self.start_native_plugin_oxide_import(
-                plugin_id,
-                request.request_id,
-                bytes,
-                password,
-                options,
-                progress_registration_id,
-                request.response_tx,
-                cx,
-            ),
+            } => {
+                let store = self.connection_store.clone();
+                self.plugin_entity.update(cx, |plugins, _cx| {
+                    plugins.start_oxide_import(
+                        store,
+                        plugin_id,
+                        request.request_id,
+                        bytes,
+                        password,
+                        options,
+                        progress_registration_id,
+                        request.response_tx,
+                    );
+                });
+            }
         }
     }
 
@@ -314,111 +316,11 @@ impl WorkspaceApp {
         }
     }
 
-    fn start_native_plugin_oxide_import(
-        &mut self,
-        plugin_id: String,
-        request_id: String,
-        bytes: Vec<u8>,
-        password: Zeroizing<String>,
-        options: NativePluginOxideImportOptions,
-        progress_registration_id: Option<String>,
-        response_tx: mpsc::Sender<plugin_runtime::PluginResponse>,
-        cx: &mut Context<Self>,
-    ) {
-        let mut store = self.connection_store.clone();
-        let oxide_options = options.oxide_options.clone();
-        let (worker_tx, worker_rx) = mpsc::channel();
-        std::thread::spawn(move || {
-            let result = native_plugin_apply_oxide_import_core_with_progress(
-                &mut store,
-                &bytes,
-                &password,
-                oxide_options,
-                |stage, current, total| {
-                    let _ = worker_tx.send(NativePluginOxideImportWorkerMessage::Progress {
-                        stage: stage.to_string(),
-                        current,
-                        total,
-                    });
-                },
-            )
-            .map(|envelope| NativePluginOxideImportCoreResult { store, envelope });
-            let _ = worker_tx.send(NativePluginOxideImportWorkerMessage::Done(result));
-        });
-
-        cx.spawn(async move |weak, cx| {
-            loop {
-                match worker_rx.try_recv() {
-                    Ok(NativePluginOxideImportWorkerMessage::Progress {
-                        stage,
-                        current,
-                        total,
-                    }) => {
-                        if let Some(registration_id) = progress_registration_id.as_ref() {
-                            let value = native_plugin_sync_progress_value(
-                                "Importing .oxide",
-                                &stage,
-                                current,
-                                total,
-                                false,
-                            );
-                            let _ = weak.update(cx, |this, cx| {
-                                this.update_native_plugin_progress(
-                                    &plugin_id,
-                                    registration_id.clone(),
-                                    value,
-                                    cx,
-                                );
-                            });
-                        }
-                    }
-                    Ok(NativePluginOxideImportWorkerMessage::Done(result)) => {
-                        let _ = weak.update(cx, |this, cx| {
-                            let response = this
-                                .finish_native_plugin_oxide_import(request_id, result, options, cx);
-                            if let Some(registration_id) = progress_registration_id {
-                                this.update_native_plugin_progress(
-                                    &plugin_id,
-                                    registration_id,
-                                    native_plugin_sync_progress_value(
-                                        "Importing .oxide",
-                                        "complete",
-                                        1,
-                                        1,
-                                        true,
-                                    ),
-                                    cx,
-                                );
-                            }
-                            let _ = response_tx.send(response);
-                            cx.notify();
-                        });
-                        break;
-                    }
-                    Err(mpsc::TryRecvError::Empty) => {
-                        Timer::after(Duration::from_millis(33)).await;
-                    }
-                    Err(mpsc::TryRecvError::Disconnected) => {
-                        let _ = response_tx.send(plugin_runtime::PluginResponse::error(
-                            request_id,
-                            plugin_runtime::PluginError::runtime(
-                                "plugin_sync_import_interrupted",
-                                "Native plugin sync.importOxide worker stopped before completion",
-                            ),
-                        ));
-                        break;
-                    }
-                }
-            }
-        })
-        .detach();
-    }
-
     fn finish_native_plugin_oxide_import(
         &mut self,
         request_id: String,
-        result: Result<NativePluginOxideImportCoreResult, String>,
-        options: NativePluginOxideImportOptions,
+        result: Result<NativePluginOxideImportCoreResult, ()>,
+        options: NativePluginOxidePostImportOptions,
         cx: &mut Context<Self>,
     ) -> plugin_runtime::PluginResponse {
         let Ok(core) = result else {
@@ -426,9 +328,7 @@ impl WorkspaceApp {
                 request_id,
                 plugin_runtime::PluginError::runtime(
                     "plugin_sync_oxide_error",
-                    result
-                        .err()
-                        .unwrap_or_else(|| "Unknown .oxide import error".to_string()),
+                    "Native plugin .oxide import failed",
                 ),
             );
         };
@@ -1330,6 +1230,53 @@ impl WorkspaceApp {
         cx.notify();
     }
 
+    pub(in crate::workspace) fn apply_native_plugin_oxide_import_intents(
+        &mut self,
+        cx: &mut Context<Self>,
+    ) {
+        let intents = self
+            .plugin_entity
+            .update(cx, |plugins, _cx| plugins.take_oxide_import_intents());
+        for intent in intents {
+            match intent {
+                plugin_entity::PluginOxideImportIntent::Progress {
+                    plugin_id,
+                    registration_id,
+                    value,
+                } => {
+                    self.update_native_plugin_progress(&plugin_id, &registration_id, value, cx);
+                }
+                plugin_entity::PluginOxideImportIntent::Complete {
+                    plugin_id,
+                    progress_registration_id,
+                    request_id,
+                    result,
+                    options,
+                    response_tx,
+                } => {
+                    let response =
+                        self.finish_native_plugin_oxide_import(request_id, result, options, cx);
+                    if let Some(registration_id) = progress_registration_id {
+                        self.update_native_plugin_progress(
+                            &plugin_id,
+                            &registration_id,
+                            native_plugin_sync_progress_value(
+                                "Importing .oxide",
+                                "complete",
+                                1,
+                                1,
+                                true,
+                            ),
+                            cx,
+                        );
+                    }
+                    let _ = response_tx.send(response);
+                }
+            }
+        }
+        cx.notify();
+    }
+
     pub(super) fn dispatch_native_plugin_command(
         &mut self,
         plugin_id: String,
@@ -1635,7 +1582,7 @@ impl WorkspaceApp {
             plugin_runtime::PluginOutboundEffect::Progress {
                 registration_id,
                 value,
-            } => self.update_native_plugin_progress(plugin_id, registration_id, value, cx),
+            } => self.update_native_plugin_progress(plugin_id, &registration_id, value, cx),
             _ => {}
         }
     }
@@ -2063,17 +2010,17 @@ impl WorkspaceApp {
     fn update_native_plugin_progress(
         &mut self,
         plugin_id: &str,
-        registration_id: String,
+        registration_id: &str,
         value: serde_json::Value,
         cx: &mut Context<Self>,
     ) {
-        let progress_key = native_plugin_progress_key(plugin_id, &registration_id);
+        let progress_key = native_plugin_progress_key(plugin_id, registration_id);
         if native_plugin_progress_is_done(&value) {
             self.dismiss_plugin_progress_toast(&progress_key, cx);
             return;
         }
 
-        let notice = native_plugin_progress_notice(plugin_id, &registration_id, value);
+        let notice = native_plugin_progress_notice(plugin_id, registration_id, value);
         // Tauri plugin progress is host-owned and keyed by reporter id. Native
         // updates the same toast entry instead of appending one toast per event
         // burst, which keeps noisy process runtimes from flooding the overlay.
