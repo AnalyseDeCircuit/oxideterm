@@ -116,7 +116,11 @@ impl TerminalCwdPickerState {
     }
 
     fn close(&mut self) {
+        let generation = self.generation;
         *self = Self::default();
+        // A picker close invalidates work but must not reuse its generation
+        // when the same directory is opened again before a worker completes.
+        self.generation = generation;
     }
 }
 

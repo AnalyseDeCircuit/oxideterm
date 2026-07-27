@@ -859,10 +859,12 @@ mod tests {
             CurrentDirectorySource::SessionDefault,
         )
         .expect("current directory snapshot");
+        let key = snapshot.key().clone();
 
-        terminal.update(cx, |terminal, cx| {
+        let sender = terminal.update(cx, |terminal, cx| {
             terminal.open_cwd_picker_for_snapshot(snapshot, cx);
             assert!(terminal.replace_cwd_query(None, "src"));
+            terminal.cwd_tx.clone()
         });
         terminal.read_with(cx, |terminal, _cx| {
             assert!(terminal.cwd_picker_open());
@@ -881,6 +883,28 @@ mod tests {
         terminal.read_with(cx, |terminal, _cx| {
             assert!(!terminal.cwd_picker_open());
             assert!(terminal.visible_cwd_entries().is_empty());
+        });
+
+        let reopened = CurrentDirectorySnapshot::new(
+            CurrentDirectoryScope::Local,
+            root,
+            CurrentDirectorySource::SessionDefault,
+        )
+        .expect("reopened current directory snapshot");
+        terminal.update(cx, |terminal, cx| {
+            terminal.open_cwd_picker_for_snapshot(reopened, cx);
+        });
+        sender
+            .send(terminal_cwd::TerminalCwdDelivery::DirectoryList {
+                key,
+                generation: 1,
+                outcome: terminal_cwd::TerminalCwdListOutcome::Unavailable,
+            })
+            .expect("stale cwd delivery");
+        cx.run_until_parked();
+        terminal.read_with(cx, |terminal, _cx| {
+            assert!(terminal.cwd_picker_open());
+            assert_eq!(terminal.cwd_picker_error(), None);
         });
     }
 
