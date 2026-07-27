@@ -142,6 +142,7 @@ pub(in crate::workspace) struct AiWorkspaceEntity {
     chat_stream_tx: AiStreamDeliverySender,
     chat_stream_rx: std::sync::mpsc::Receiver<AiStreamDelivery>,
     chat_stream_deliveries: VecDeque<AiStreamDelivery>,
+    pending_tool_approvals: HashMap<String, tokio::sync::oneshot::Sender<bool>>,
     compaction_tx: AiCompactionDeliverySender,
     compaction_rx: std::sync::mpsc::Receiver<AiCompactionDelivery>,
     compaction_deliveries: VecDeque<AiCompactionDelivery>,
@@ -215,6 +216,7 @@ impl AiWorkspaceEntity {
             chat_stream_tx,
             chat_stream_rx,
             chat_stream_deliveries: VecDeque::new(),
+            pending_tool_approvals: HashMap::new(),
             compaction_tx,
             compaction_rx,
             compaction_deliveries: VecDeque::new(),
@@ -824,6 +826,7 @@ impl AiWorkspaceEntity {
     }
 
     pub(in crate::workspace) fn begin_chat_stream(&mut self) -> (u64, AiStreamDeliverySender) {
+        self.reject_all_tool_approvals();
         if let Some(task) = self.chat_stream_task.take() {
             task.abort();
         }
@@ -844,6 +847,7 @@ impl AiWorkspaceEntity {
     }
 
     pub(in crate::workspace) fn cancel_chat_stream(&mut self) -> u64 {
+        self.reject_all_tool_approvals();
         if let Some(task) = self.chat_stream_task.take() {
             task.abort();
         }
@@ -855,11 +859,48 @@ impl AiWorkspaceEntity {
         if generation != self.chat_stream_generation {
             return false;
         }
+        self.reject_all_tool_approvals();
         // Invalidate any delivery queued after the terminal event, matching the
         // old one-shot receiver lifetime without keeping a receiver on the root.
         self.chat_stream_task.take();
         self.chat_stream_generation = self.chat_stream_generation.saturating_add(1);
         true
+    }
+
+    pub(in crate::workspace) fn register_tool_approval(
+        &mut self,
+        generation: u64,
+        tool_call_id: String,
+        sender: tokio::sync::oneshot::Sender<bool>,
+    ) -> bool {
+        if generation != self.chat_stream_generation {
+            let _ = sender.send(false);
+            return false;
+        }
+        if let Some(stale_sender) = self.pending_tool_approvals.insert(tool_call_id, sender) {
+            // A repeated protocol id supersedes the older waiter without
+            // allowing two workers to consume one user decision.
+            let _ = stale_sender.send(false);
+        }
+        true
+    }
+
+    pub(in crate::workspace) fn resolve_tool_approval(
+        &mut self,
+        tool_call_id: &str,
+        approved: bool,
+    ) -> bool {
+        let Some(sender) = self.pending_tool_approvals.remove(tool_call_id) else {
+            return false;
+        };
+        let _ = sender.send(approved);
+        true
+    }
+
+    fn reject_all_tool_approvals(&mut self) {
+        for (_, sender) in self.pending_tool_approvals.drain() {
+            let _ = sender.send(false);
+        }
     }
 
     pub(in crate::workspace) fn take_chat_stream_deliveries(
@@ -1468,6 +1509,14 @@ fn ai_acp_probe_error_result(kind: &'static str) -> AiAcpAgentProbeResult {
     }
 }
 
+impl Drop for AiWorkspaceEntity {
+    fn drop(&mut self) {
+        // Releasing the workspace is an explicit rejection boundary for every
+        // protocol worker still waiting on a user decision.
+        self.reject_all_tool_approvals();
+    }
+}
+
 impl gpui::EventEmitter<AiWorkspaceEvent> for AiWorkspaceEntity {}
 
 /// Owns all AI-related workspace state while preserving the existing feature boundaries.
@@ -1538,7 +1587,6 @@ pub(super) struct AiRuntimeWorkspaceState {
     pub(super) tool_execution_records: VecDeque<AiToolExecutionRecord>,
     pub(super) tool_result_facts: VecDeque<AiToolResultFact>,
     pub(super) cli_agent_sessions: HashMap<String, AiCliAgentSession>,
-    pub(super) pending_tool_approvals: HashMap<String, tokio::sync::oneshot::Sender<bool>>,
     pub(super) agent_fs: NodeAgentIdeFileSystem,
     pub(super) mcp_registry: oxideterm_ai::McpRegistry,
     pub(super) acp_runtime_registry: oxideterm_ai::AcpRuntimeRegistry,
@@ -1653,7 +1701,6 @@ impl AiRuntimeWorkspaceState {
             tool_execution_records: VecDeque::new(),
             tool_result_facts: VecDeque::new(),
             cli_agent_sessions: HashMap::new(),
-            pending_tool_approvals: HashMap::new(),
             agent_fs,
             mcp_registry,
             acp_runtime_registry: oxideterm_ai::AcpRuntimeRegistry::default(),
@@ -2105,6 +2152,57 @@ mod entity_tests {
             assert!(!entity.is_chat_stream_generation(generation));
             assert!(!entity.complete_chat_stream(generation));
         });
+    }
+
+    #[gpui::test]
+    fn tool_approval_generation_and_lifecycle_are_entity_owned(cx: &mut TestAppContext) {
+        let entity = cx.new(|cx| {
+            AiWorkspaceEntity::new(test_runtime(), oxideterm_ai::AiProviderKeyStore::new(), cx)
+        });
+        let (generation, _) = entity.update(cx, |entity, _cx| entity.begin_chat_stream());
+        let (first_sender, mut first_receiver) = tokio::sync::oneshot::channel();
+        let (replacement_sender, mut replacement_receiver) = tokio::sync::oneshot::channel();
+        entity.update(cx, |entity, _cx| {
+            assert!(entity.register_tool_approval(generation, "tool-a".to_string(), first_sender,));
+            assert!(entity.register_tool_approval(
+                generation,
+                "tool-a".to_string(),
+                replacement_sender,
+            ));
+            assert!(entity.resolve_tool_approval("tool-a", true));
+            assert!(!entity.resolve_tool_approval("tool-a", false));
+        });
+        assert_eq!(first_receiver.try_recv(), Ok(false));
+        assert_eq!(replacement_receiver.try_recv(), Ok(true));
+
+        let (stale_sender, mut stale_receiver) = tokio::sync::oneshot::channel();
+        entity.update(cx, |entity, _cx| {
+            entity.cancel_chat_stream();
+            assert!(!entity.register_tool_approval(
+                generation,
+                "stale-tool".to_string(),
+                stale_sender,
+            ));
+        });
+        assert_eq!(stale_receiver.try_recv(), Ok(false));
+
+        let (release_sender, mut release_receiver) = tokio::sync::oneshot::channel();
+        let current_generation = entity.update(cx, |entity, _cx| {
+            let (current_generation, _) = entity.begin_chat_stream();
+            assert!(entity.register_tool_approval(
+                current_generation,
+                "release-tool".to_string(),
+                release_sender,
+            ));
+            current_generation
+        });
+        assert!(current_generation > generation);
+
+        drop(entity);
+        cx.update(|_cx| {});
+        cx.run_until_parked();
+
+        assert_eq!(release_receiver.try_recv(), Ok(false));
     }
 
     #[gpui::test]

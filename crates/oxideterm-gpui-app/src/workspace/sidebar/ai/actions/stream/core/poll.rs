@@ -104,18 +104,6 @@ impl WorkspaceApp {
                             let projection =
                                 oxideterm_ai::acp_permission_request_projection(&request);
                             let (approval_tx, approval_rx) = tokio::sync::oneshot::channel();
-                            self.ai
-                                .runtime
-                                .pending_tool_approvals
-                                .insert(projection.tool_call_id.clone(), approval_tx);
-                            let forwarding_runtime = self.forwarding_runtime.clone();
-                            forwarding_runtime.spawn(async move {
-                                let approved = approval_rx.await.unwrap_or(false);
-                                let response = oxideterm_ai::acp_permission_response_for_decision(
-                                    &request, approved,
-                                );
-                                let _ = response_tx.send(Ok(response));
-                            });
                             self.apply_ai_tool_status(
                                 delivery.generation,
                                 &delivery.conversation_id,
@@ -133,6 +121,21 @@ impl WorkspaceApp {
                                 None,
                                 cx,
                             );
+                            self.ai_entity.update(cx, |ai, _cx| {
+                                ai.register_tool_approval(
+                                    delivery.generation,
+                                    projection.tool_call_id,
+                                    approval_tx,
+                                );
+                            });
+                            let forwarding_runtime = self.forwarding_runtime.clone();
+                            forwarding_runtime.spawn(async move {
+                                let approved = approval_rx.await.unwrap_or(false);
+                                let response = oxideterm_ai::acp_permission_response_for_decision(
+                                    &request, approved,
+                                );
+                                let _ = response_tx.send(Ok(response));
+                            });
                         }
                         event => {
                             for stream_event in
@@ -317,10 +320,6 @@ impl WorkspaceApp {
                     sender,
                 } => {
                     self.flush_pending_ai_stream_text(&mut pending_text, cx);
-                    self.ai
-                        .runtime
-                        .pending_tool_approvals
-                        .insert(tool_call_id.clone(), sender);
                     self.apply_ai_tool_status(
                         delivery.generation,
                         &delivery.conversation_id,
@@ -338,6 +337,9 @@ impl WorkspaceApp {
                         None,
                         cx,
                     );
+                    self.ai_entity.update(cx, |ai, _cx| {
+                        ai.register_tool_approval(delivery.generation, tool_call_id, sender);
+                    });
                 }
                 AiStreamDeliveryEvent::ToolExecutionRequested {
                     tool_call_id,

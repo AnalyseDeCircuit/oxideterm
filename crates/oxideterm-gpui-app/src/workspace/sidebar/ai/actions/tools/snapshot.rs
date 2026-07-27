@@ -683,9 +683,9 @@ impl WorkspaceApp {
         approved: bool,
         cx: &mut Context<Self>,
     ) {
-        if let Some(sender) = self.ai.runtime.pending_tool_approvals.remove(&tool_call_id) {
-            let _ = sender.send(approved);
-        }
+        self.ai_entity.update(cx, |ai, _cx| {
+            ai.resolve_tool_approval(&tool_call_id, approved);
+        });
         cx.notify();
     }
 

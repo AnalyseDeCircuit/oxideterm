@@ -102,9 +102,6 @@ impl WorkspaceApp {
             ai.cancel_chat_stream();
         });
         self.ai.chat.loading = false;
-        for (_, sender) in self.ai.runtime.pending_tool_approvals.drain() {
-            let _ = sender.send(false);
-        }
         let conversation_id = self
             .ai
             .chat
@@ -220,9 +217,6 @@ impl WorkspaceApp {
             ai.cancel_chat_stream();
         });
         self.ai.chat.loading = false;
-        for (_, sender) in self.ai.runtime.pending_tool_approvals.drain() {
-            let _ = sender.send(false);
-        }
         let conversation_id = self
             .ai
             .chat
