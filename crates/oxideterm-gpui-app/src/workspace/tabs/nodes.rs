@@ -105,7 +105,7 @@ impl WorkspaceApp {
             }
         }
         if !forwarding_to_suspend.is_empty() {
-            let forwarding_registry = self.forwarding_registry.clone();
+            let forwarding_registry = self.forwarding_service.registry().clone();
             let forwarding_runtime = self.forwarding_runtime.clone();
             forwarding_runtime.spawn(async move {
                 for (session_id, connection_id) in forwarding_to_suspend {
@@ -1018,7 +1018,7 @@ impl WorkspaceApp {
                     let _ = self.interrupt_sftp_transfers_by_node(&node_id, message);
                     let session_id = self.forwarding_session_id_for_node(&node_id);
                     let forwarding_connection_id = self.forwarding_connection_id_for_node(&node_id);
-                    let forwarding_registry = self.forwarding_registry.clone();
+                    let forwarding_registry = self.forwarding_service.registry().clone();
                     self.forwarding_runtime.spawn(async move {
                         if let Some(connection_id) = forwarding_connection_id {
                             forwarding_registry.stop_port_profiler(&connection_id);
@@ -1139,7 +1139,7 @@ impl WorkspaceApp {
                     let _ = self.interrupt_sftp_transfers_by_node(&node_id, message);
                     let session_id = self.forwarding_session_id_for_node(&node_id);
                     let connection_id = self.forwarding_connection_id_for_node(&node_id);
-                    let forwarding_registry = self.forwarding_registry.clone();
+                    let forwarding_registry = self.forwarding_service.registry().clone();
                     self.forwarding_runtime.spawn(async move {
                         if let Some(connection_id) = connection_id {
                             forwarding_registry.stop_port_profiler(&connection_id);
@@ -1272,7 +1272,7 @@ impl WorkspaceApp {
             let _ = self.interrupt_sftp_transfers_by_node(affected_node_id, message);
             let session_id = self.forwarding_session_id_for_node(affected_node_id);
             let connection_id = self.forwarding_connection_id_for_node(affected_node_id);
-            let forwarding_registry = self.forwarding_registry.clone();
+            let forwarding_registry = self.forwarding_service.registry().clone();
             self.forwarding_runtime.spawn(async move {
                 if let Some(connection_id) = connection_id {
                     forwarding_registry.stop_port_profiler(&connection_id);
@@ -2006,7 +2006,7 @@ impl WorkspaceApp {
         if created_forwards.is_empty() {
             return;
         }
-        let forwarding_registry = self.forwarding_registry.clone();
+        let forwarding_registry = self.forwarding_service.registry().clone();
         self.forwarding_runtime.spawn(async move {
             for (session_id, rule_id) in created_forwards {
                 if let Some(manager) = forwarding_registry.get(&session_id) {
@@ -2021,17 +2021,8 @@ impl WorkspaceApp {
         bindings: Vec<(String, String, ConnectionConsumer)>,
     ) {
         for (session_id, connection_id, consumer) in bindings {
-            self.forwarding_registry.stop_port_profiler(&connection_id);
-            self.ssh_registry.release(&connection_id, &consumer);
-            if self
-                .forwarding_connection_consumers
-                .get(&session_id)
-                .is_some_and(|(stored_connection_id, stored_consumer)| {
-                    stored_connection_id == &connection_id && stored_consumer == &consumer
-                })
-            {
-                self.forwarding_connection_consumers.remove(&session_id);
-            }
+            self.forwarding_service
+                .discard_binding(&session_id, &connection_id, &consumer);
         }
     }
 
@@ -2552,7 +2543,7 @@ impl WorkspaceApp {
     fn restore_forwarding_session_for_node(&mut self, node_id: &NodeId, cx: &mut Context<Self>) {
         let session_id = self.forwarding_session_id_for_node(node_id);
         let consumer = ConnectionConsumer::PortForward(session_id.clone());
-        let forwarding_registry = self.forwarding_registry.clone();
+        let forwarding_registry = self.forwarding_service.registry().clone();
         let runtime = self.forwarding_runtime.clone();
         let router = self.node_router.clone();
         let node_id = node_id.clone();
@@ -2604,7 +2595,7 @@ impl WorkspaceApp {
             })
             .collect::<HashMap<_, _>>();
         let router = self.node_router.clone();
-        let forwarding_registry = self.forwarding_registry.clone();
+        let forwarding_registry = self.forwarding_service.registry().clone();
         let runtime = self.forwarding_runtime.clone();
         let tx = self.reconnect_worker_tx.clone();
         let root_node_id = node_id.clone();
@@ -2745,7 +2736,8 @@ impl WorkspaceApp {
             .iter()
             .filter_map(|affected_node_id| {
                 let manager = self
-                    .forwarding_registry
+                    .forwarding_service
+                    .registry()
                     .get(&self.forwarding_session_id_for_node(affected_node_id))?;
                 let rules = manager
                     .list_forwards()
@@ -2770,7 +2762,8 @@ impl WorkspaceApp {
             let entry_node_id = NodeId::new(entry.node_id.clone());
             let expected = entry.rules.len();
             let live = self
-                .forwarding_registry
+                .forwarding_service
+                .registry()
                 .get(&self.forwarding_session_id_for_node(&entry_node_id))
                 .map(|manager| {
                     manager

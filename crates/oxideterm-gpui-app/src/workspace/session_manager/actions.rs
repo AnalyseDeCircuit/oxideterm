@@ -208,7 +208,7 @@ impl WorkspaceApp {
         } else {
             // Tauri deletes owner-bound saved forwards with the saved connection
             // so sync/import cannot later resurrect forwards for a missing owner.
-            if let Err(error) = self.forwarding_registry.delete_owned_forwards(id) {
+            if let Err(error) = self.forwarding_service.registry().delete_owned_forwards(id) {
                 self.session_manager.status = Some(error.to_string());
                 cx.notify();
                 return;
@@ -570,7 +570,11 @@ impl WorkspaceApp {
                 SessionManagerSelectionTarget::Connection(id) => {
                     if self.connection_store.delete(&id).unwrap_or(false) {
                         // Keep batch delete aligned with the single-delete command path.
-                        if let Err(error) = self.forwarding_registry.delete_owned_forwards(&id) {
+                        if let Err(error) = self
+                            .forwarding_service
+                            .registry()
+                            .delete_owned_forwards(&id)
+                        {
                             self.session_manager.status = Some(error.to_string());
                             cx.notify();
                             return;

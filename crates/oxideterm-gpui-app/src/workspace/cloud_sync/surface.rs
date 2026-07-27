@@ -341,7 +341,7 @@ impl WorkspaceApp {
         }
         let result = build_local_snapshot(
             &self.connection_store,
-            &self.forwarding_registry,
+            self.forwarding_service.registry(),
             &self.settings_store,
             state.last_synced_structured_state.as_ref(),
             Some(&state.sync_scope),
@@ -434,7 +434,8 @@ impl WorkspaceApp {
                 .export_saved_connections_snapshot()
                 .ok(),
             forwards: self
-                .forwarding_registry
+                .forwarding_service
+                .registry()
                 .export_saved_forwards_snapshot()
                 .ok(),
             quick_commands,

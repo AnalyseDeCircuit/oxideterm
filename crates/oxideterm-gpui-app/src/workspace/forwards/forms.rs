@@ -338,7 +338,7 @@ impl WorkspaceApp {
             cx.listener(move |this, _event, _window, cx| {
                 this.forwarding
                     .update(cx, |forwarding, _cx| forwarding.clear_pending_delete());
-                let registry = this.forwarding_registry.clone();
+                let registry = this.forwarding_service.registry().clone();
                 let delete_id = confirm_id.clone();
                 this.start_forward_operation(
                     tab_id,

@@ -439,7 +439,7 @@ impl WorkspaceApp {
             },
             cx.listener(move |this, _event, _window, cx| {
                 let persist = this.forward_persist_context_for_node(&node_id);
-                let registry = this.forwarding_registry.clone();
+                let registry = this.forwarding_service.registry().clone();
                 this.start_forward_operation(
                     tab_id,
                     node_id.clone(),
@@ -763,7 +763,7 @@ impl WorkspaceApp {
                                 move |this, _event, _window, cx| {
                                     let forward_id = rule_for_restart.id.clone();
                                     let persist = this.forward_persist_context_for_node(&node_id);
-                                    let registry = this.forwarding_registry.clone();
+                                    let registry = this.forwarding_service.registry().clone();
                                     this.start_forward_operation(
                                         tab_id,
                                         node_id.clone(),

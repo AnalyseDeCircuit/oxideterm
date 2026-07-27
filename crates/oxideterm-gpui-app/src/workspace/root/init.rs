@@ -67,6 +67,11 @@ impl WorkspaceApp {
         let node_runtime_store = NodeRuntimeStore::default();
         let node_router =
             NodeRouter::with_runtime_store(ssh_registry.clone(), node_runtime_store.clone());
+        let forwarding_service = forwards::ForwardingRuntimeService::new(
+            forwarding_registry,
+            ssh_registry.clone(),
+            node_router.clone(),
+        );
         let runtime_delivery_wake = delivery::ActiveDeliveryWake::default();
         let (ssh_worker_tx, ssh_worker_rx) =
             delivery::ActiveDeliverySender::channel_with_wake(runtime_delivery_wake.clone());
@@ -481,10 +486,9 @@ impl WorkspaceApp {
             ssh_worker_tx,
             ssh_worker_rx,
             ssh_registry,
-            forwarding_registry,
+            forwarding_service,
             forwarding_runtime,
             wsl_graphics: Arc::new(oxideterm_wsl_graphics::WslGraphicsState::new()),
-            forwarding_connection_consumers: HashMap::new(),
             sftp_transfer_manager,
             sftp_progress_store,
             node_runtime_store,

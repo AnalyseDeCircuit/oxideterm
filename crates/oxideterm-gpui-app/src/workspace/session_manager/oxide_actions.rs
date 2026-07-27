@@ -476,7 +476,7 @@ impl WorkspaceApp {
             .collect::<HashSet<_>>();
         let mut forwards_by_key = HashMap::<String, PersistedForward>::new();
 
-        for forward in self.forwarding_registry.list_all_saved_forwards() {
+        for forward in self.forwarding_service.registry().list_all_saved_forwards() {
             let Some(owner_id) = forward.owner_connection_id.as_ref() else {
                 continue;
             };
@@ -1478,11 +1478,11 @@ impl WorkspaceApp {
             .cloned()
             .collect::<HashSet<_>>();
 
-        match self.forwarding_registry.apply_owned_forward_import_records(
-            &records,
-            &replace_owner_ids,
-            &merge_owner_ids,
-        ) {
+        match self
+            .forwarding_service
+            .registry()
+            .apply_owned_forward_import_records(&records, &replace_owner_ids, &merge_owner_ids)
+        {
             Ok(count) => count,
             Err(error) => {
                 envelope

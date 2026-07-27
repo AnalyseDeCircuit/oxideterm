@@ -1,12 +1,12 @@
 use super::helpers::parse_port;
 use super::{
     App, Arc, ConnectionConsumer, ConnectionState, Context, DetectedPort, Duration,
-    FORWARDS_DEFAULT_BIND_ADDRESS, FORWARDS_DEFAULT_TARGET_HOST, FORWARDS_NODE_SESSION_PREFIX,
-    FORWARDS_PORT_SCAN_INTERVAL, FORWARDS_STATS_REFRESH_INTERVAL, ForwardEvent, ForwardInput,
-    ForwardRule, ForwardStatus, ForwardType, ForwardUpdate, ForwardingDeliveryIntent,
-    ForwardingManager, ForwardingRegistry, ForwardingWorkerResult, ForwardingWorkspaceEvent,
-    KeyDownEvent, NodeId, NodeReadiness, NodeRouter, PortDetectionSnapshot, TabId, TerminalNotice,
-    TerminalNoticeVariant, WorkspaceApp, thread,
+    FORWARDS_DEFAULT_BIND_ADDRESS, FORWARDS_DEFAULT_TARGET_HOST, FORWARDS_PORT_SCAN_INTERVAL,
+    FORWARDS_STATS_REFRESH_INTERVAL, ForwardEvent, ForwardInput, ForwardRule, ForwardStatus,
+    ForwardType, ForwardUpdate, ForwardingDeliveryIntent, ForwardingManager, ForwardingRegistry,
+    ForwardingWorkerResult, ForwardingWorkspaceEvent, KeyDownEvent, NodeId, NodeReadiness,
+    NodeRouter, PortDetectionSnapshot, TabId, TerminalNotice, TerminalNoticeVariant, WorkspaceApp,
+    thread,
 };
 impl WorkspaceApp {
     pub(super) fn submit_forward_create(
@@ -59,7 +59,7 @@ impl WorkspaceApp {
         };
         let check_health = !skip_health_check;
         let persist = self.forward_persist_context_for_node(&node_id);
-        let registry = self.forwarding_registry.clone();
+        let registry = self.forwarding_service.registry().clone();
         self.start_forward_operation(
             tab_id,
             node_id,
@@ -113,7 +113,7 @@ impl WorkspaceApp {
             });
         self.dismiss_detected_port(port.port, cx);
         let persist = self.forward_persist_context_for_node(&node_id);
-        let registry = self.forwarding_registry.clone();
+        let registry = self.forwarding_service.registry().clone();
         self.start_forward_operation(
             tab_id,
             node_id,
@@ -147,7 +147,8 @@ impl WorkspaceApp {
                 forwarding.dismiss_detected_port(&node_id, port);
             });
             if let Some(connection_id) = connection_id {
-                self.forwarding_registry
+                self.forwarding_service
+                    .registry()
                     .ignore_detected_port(&connection_id, port);
             }
             if let Some(manager) = self.forwarding_manager_for_node_readonly(&node_id) {
@@ -193,7 +194,7 @@ impl WorkspaceApp {
         };
         let forward_id = editing.id;
         let persist = self.forward_persist_context_for_node(&node_id);
-        let registry = self.forwarding_registry.clone();
+        let registry = self.forwarding_service.registry().clone();
         self.start_forward_operation(
             tab_id,
             node_id,
@@ -293,7 +294,7 @@ impl WorkspaceApp {
             .get(&node_id)
             .and_then(|node| node.saved_connection_id.clone());
         let router = self.node_router.clone();
-        let registry = self.forwarding_registry.clone();
+        let registry = self.forwarding_service.registry().clone();
         let tx = self.forwarding.read(cx).worker_sender();
         let runtime = self.forwarding_runtime.clone();
         thread::spawn(move || {
@@ -352,7 +353,9 @@ impl WorkspaceApp {
             if !self.forwards_node_has_visible_tab(&node_id, cx) {
                 if let Some(connection_id) = self.forwarding_connection_id_for_node(&node_id) {
                     // Hidden forwarding pages stop their profiler without touching tunnel owners.
-                    self.forwarding_registry.stop_port_profiler(&connection_id);
+                    self.forwarding_service
+                        .registry()
+                        .stop_port_profiler(&connection_id);
                 }
                 self.forwarding.update(cx, |forwarding, _cx| {
                     forwarding.reset_hidden_port_scan_schedule(&node_id);
@@ -418,7 +421,7 @@ impl WorkspaceApp {
             .get(&node_id)
             .and_then(|node| node.saved_connection_id.clone());
         let router = self.node_router.clone();
-        let registry = self.forwarding_registry.clone();
+        let registry = self.forwarding_service.registry().clone();
         let tx = self.forwarding.read(cx).worker_sender();
         let runtime = self.forwarding_runtime.clone();
         thread::spawn(move || {
@@ -720,68 +723,19 @@ impl WorkspaceApp {
         &self,
         node_id: &NodeId,
     ) -> Option<String> {
-        let session_id = self.forwarding_session_id_for_node(node_id);
-        self.forwarding_connection_consumers
-            .get(&session_id)
-            .map(|(connection_id, _)| connection_id.clone())
+        self.forwarding_service.connection_id_for_node(node_id)
     }
 
     fn forwarding_node_for_connection_id(&self, connection_id: &str) -> Option<NodeId> {
-        self.forwarding_connection_consumers.iter().find_map(
-            |(session_id, (candidate_connection_id, _))| {
-                if candidate_connection_id != connection_id {
-                    return None;
-                }
-                session_id
-                    .strip_prefix(FORWARDS_NODE_SESSION_PREFIX)
-                    .map(|raw_node_id| NodeId(raw_node_id.to_string()))
-            },
-        )
+        self.forwarding_service
+            .node_for_connection_id(connection_id)
     }
 
     pub(in crate::workspace) fn release_forwarding_binding_for_node(
         &mut self,
         node_id: &NodeId,
     ) -> Option<String> {
-        let session_id = self.forwarding_session_id_for_node(node_id);
-        self.release_forwarding_binding_for_session(&session_id, Some(node_id))
-    }
-
-    fn release_forwarding_binding_for_session(
-        &mut self,
-        session_id: &str,
-        node_id: Option<&NodeId>,
-    ) -> Option<String> {
-        let consumer = ConnectionConsumer::PortForward(session_id.to_string());
-        let connection_id = if let Some((connection_id, stored_consumer)) =
-            self.forwarding_connection_consumers.remove(session_id)
-        {
-            self.ssh_registry.release(&connection_id, &stored_consumer);
-            Some(connection_id)
-        } else if let Some(manager) = self.forwarding_registry.get(session_id) {
-            // Manual disconnect in Tauri tears down every affected forward
-            // manager even if the Forwards view is already gone. Native can see
-            // that same lifecycle while an async worker has registered the
-            // manager but its Binding result has not yet been polled into
-            // forwarding_connection_consumers, so release the known
-            // PortForward consumer from the manager's current node-owned
-            // connection as a fallback.
-            let connection_id = manager.ssh_connection_handle().connection_id().to_string();
-            self.ssh_registry.release(&connection_id, &consumer);
-            Some(connection_id)
-        } else if let Some(connection_id) =
-            node_id.and_then(|node_id| self.node_router.connection_id_for_node(node_id))
-        {
-            self.ssh_registry.release(&connection_id, &consumer);
-            Some(connection_id)
-        } else {
-            None
-        };
-
-        if let Some(connection_id) = connection_id.as_ref() {
-            self.forwarding_registry.stop_port_profiler(connection_id);
-        }
-        connection_id
+        self.forwarding_service.release_binding_for_node(node_id)
     }
 
     fn sync_forwarding_view_port_detection(&mut self, node_id: &NodeId, cx: &mut Context<Self>) {
@@ -794,79 +748,22 @@ impl WorkspaceApp {
         &self,
         node_id: &NodeId,
     ) -> Option<Arc<ForwardingManager>> {
-        self.forwarding_registry
-            .get(&self.forwarding_session_id_for_node(node_id))
+        self.forwarding_service.manager_for_node(node_id)
     }
 
     pub(in crate::workspace) fn remember_forwarding_binding(
         &mut self,
         binding: Option<(String, String, ConnectionConsumer)>,
     ) {
-        if let Some((session_id, connection_id, consumer)) = binding {
-            if !self.forwarding_binding_is_current(&session_id, &connection_id) {
-                // Forwarding workers run off-thread. A manual disconnect can
-                // remove the node-owned manager before the worker result is
-                // polled; stale Binding results must release their registry
-                // consumer instead of re-populating forwarding_connection_consumers
-                // after Tauri-equivalent node teardown has completed.
-                self.forwarding_registry.stop_port_profiler(&connection_id);
-                self.ssh_registry.release(&connection_id, &consumer);
-                if self
-                    .forwarding_connection_consumers
-                    .get(&session_id)
-                    .is_some_and(|(stored_connection_id, stored_consumer)| {
-                        stored_connection_id == &connection_id && stored_consumer == &consumer
-                    })
-                {
-                    self.forwarding_connection_consumers.remove(&session_id);
-                }
-                return;
-            }
-            if let Some((previous_connection_id, previous_consumer)) =
-                self.forwarding_connection_consumers.get(&session_id)
-                && (previous_connection_id != &connection_id || previous_consumer != &consumer)
-            {
-                // Forwarding is node-owned in the same sense as Tauri's
-                // NodeRouter path: reconnect/restore must swap to the fresh
-                // registry handle and release the old logical consumer instead
-                // of keeping a reference to the last terminal-era transport.
-                self.forwarding_registry
-                    .stop_port_profiler(previous_connection_id);
-                self.ssh_registry
-                    .release(previous_connection_id, previous_consumer);
-            }
-            self.forwarding_connection_consumers
-                .insert(session_id, (connection_id, consumer));
-        }
-    }
-
-    fn forwarding_binding_is_current(&self, session_id: &str, connection_id: &str) -> bool {
-        let manager_matches_connection =
-            self.forwarding_registry
-                .get(session_id)
-                .is_some_and(|manager| {
-                    manager.ssh_connection_handle().connection_id() == connection_id
-                });
-        if !manager_matches_connection {
-            return false;
-        }
-
-        if let Some(raw_node_id) = session_id.strip_prefix(FORWARDS_NODE_SESSION_PREFIX) {
-            let node_id = NodeId(raw_node_id.to_string());
-            if self
-                .ssh_nodes
-                .get(&node_id)
-                .is_some_and(|node| node.readiness == NodeReadiness::Disconnected)
-            {
-                return false;
-            }
-            return self
-                .node_router
-                .connection_id_for_node(&node_id)
-                .is_some_and(|current_connection_id| current_connection_id == connection_id);
-        }
-
-        true
+        let node_is_disconnected = binding
+            .as_ref()
+            .and_then(|(session_id, _, _)| {
+                super::ForwardingRuntimeService::node_id_for_session(session_id)
+            })
+            .and_then(|node_id| self.ssh_nodes.get(&node_id))
+            .is_some_and(|node| node.readiness == NodeReadiness::Disconnected);
+        self.forwarding_service
+            .remember_binding(binding, node_is_disconnected);
     }
 
     async fn forwarding_manager_for_node_async(
@@ -938,7 +835,7 @@ impl WorkspaceApp {
     }
 
     pub(in crate::workspace) fn forwarding_session_id_for_node(&self, node_id: &NodeId) -> String {
-        format!("{FORWARDS_NODE_SESSION_PREFIX}{}", node_id.0)
+        super::ForwardingRuntimeService::session_id_for_node(node_id)
     }
 
     pub(super) fn open_forward_edit_form(&mut self, rule: ForwardRule, cx: &mut Context<Self>) {

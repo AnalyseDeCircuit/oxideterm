@@ -391,7 +391,7 @@ impl WorkspaceApp {
                 }
             };
         let connection_store = self.connection_store.clone();
-        let forwarding_registry = self.forwarding_registry.clone();
+        let forwarding_registry = self.forwarding_service.registry().clone();
         let settings_store = self.settings_store.clone();
         let service = self.cloud_sync.controller.service.clone();
         let (tx, rx) = mpsc::channel();
@@ -671,7 +671,7 @@ impl WorkspaceApp {
         self.cloud_sync.controller.store.state_mut().last_error = None;
         self.save_cloud_sync_state();
         let connection_store = self.connection_store.clone();
-        let forwarding_registry = self.forwarding_registry.clone();
+        let forwarding_registry = self.forwarding_service.registry().clone();
         let settings_store = self.settings_store.clone();
         let settings = self.cloud_sync.controller.store.state().settings.clone();
         let hints = self
@@ -947,7 +947,7 @@ impl WorkspaceApp {
             .and_then(|_| {
                 build_local_snapshot(
                     &self.connection_store,
-                    &self.forwarding_registry,
+                    self.forwarding_service.registry(),
                     &self.settings_store,
                     self.cloud_sync
                         .controller
@@ -1171,7 +1171,7 @@ impl WorkspaceApp {
             .clone();
         let local_snapshot = build_local_snapshot(
             &self.connection_store,
-            &self.forwarding_registry,
+            self.forwarding_service.registry(),
             &self.settings_store,
             previous_local_baseline.as_ref(),
             Some(&self.cloud_sync.controller.store.state().sync_scope),
@@ -1251,7 +1251,7 @@ impl WorkspaceApp {
 
         let local_snapshot = build_local_snapshot(
             &self.connection_store,
-            &self.forwarding_registry,
+            self.forwarding_service.registry(),
             &self.settings_store,
             None,
             Some(&self.cloud_sync.controller.store.state().sync_scope),
@@ -1396,7 +1396,11 @@ impl WorkspaceApp {
     pub(super) fn cloud_sync_upload_failure_summary(&self) -> CloudSyncHistorySummary {
         CloudSyncHistorySummary {
             connections: self.connection_store.connections().len(),
-            forwards: self.forwarding_registry.list_all_saved_forwards().len(),
+            forwards: self
+                .forwarding_service
+                .registry()
+                .list_all_saved_forwards()
+                .len(),
             quick_commands: 0,
             serial_profiles: self.connection_store.serial_profiles().len(),
             remote_desktop_profiles: self.connection_store.remote_desktop_profiles().len(),

@@ -862,7 +862,7 @@ impl WorkspaceApp {
     }
 
     pub(super) fn native_plugin_saved_forwards_snapshot(&self) -> Value {
-        native_plugin_forward_saved_forwards(&self.forwarding_registry)
+        native_plugin_forward_saved_forwards(self.forwarding_service.registry())
             .unwrap_or_else(|_| json!([]))
     }
 
@@ -1950,7 +1950,7 @@ impl WorkspaceApp {
         let sync_tx = self.native_plugin_runtime.sync_tx.clone();
         let sftp_router = self.node_router.clone();
         let sftp_runtime = self.forwarding_runtime.clone();
-        let forwarding_registry = self.forwarding_registry.clone();
+        let forwarding_registry = self.forwarding_service.registry().clone();
         let forwarding_runtime = self.forwarding_runtime.clone();
         let transfer_manager = self.sftp_transfer_manager.clone();
         let profiler_registry = self.host_tools.read(cx).profiler_registry().clone();
@@ -1969,7 +1969,8 @@ impl WorkspaceApp {
             self.connection_store.export_saved_connections_snapshot();
         let sync_local_metadata = self.connection_store.local_sync_metadata();
         let sync_saved_forwards_revision = self
-            .forwarding_registry
+            .forwarding_service
+            .registry()
             .export_saved_forwards_snapshot()
             .ok()
             .map(|snapshot| snapshot.revision);

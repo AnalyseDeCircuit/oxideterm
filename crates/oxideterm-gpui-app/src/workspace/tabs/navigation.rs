@@ -392,15 +392,11 @@ impl WorkspaceApp {
         &mut self,
         session_id: TerminalSessionId,
     ) {
-        let forwarding_registry = self.forwarding_registry.clone();
+        let forwarding_registry = self.forwarding_service.registry().clone();
         let forwarding_runtime = self.forwarding_runtime.clone();
         let forwarding_session_id = session_id.0.to_string();
-        if let Some((connection_id, consumer)) = self
-            .forwarding_connection_consumers
-            .remove(&forwarding_session_id)
-        {
-            self.ssh_registry.release(&connection_id, &consumer);
-        }
+        self.forwarding_service
+            .release_binding_for_session(&forwarding_session_id);
         forwarding_runtime.spawn(async move {
             let _ = forwarding_registry.remove(&forwarding_session_id).await;
         });
@@ -564,7 +560,7 @@ impl WorkspaceApp {
             self.forwarding.update(cx, |forwarding, _cx| {
                 forwarding.untrack_port_profiler(affected_node_id);
             });
-            let forwarding_registry = self.forwarding_registry.clone();
+            let forwarding_registry = self.forwarding_service.registry().clone();
             let forwarding_runtime = self.forwarding_runtime.clone();
             let forwarding_session_id = self.forwarding_session_id_for_node(affected_node_id);
             self.release_forwarding_binding_for_node(affected_node_id);

@@ -48,10 +48,12 @@ mod components;
 mod entity;
 mod forms;
 mod helpers;
+mod runtime_service;
 mod surface;
 mod view_state;
 
 pub(in crate::workspace) use entity::*;
+pub(in crate::workspace) use runtime_service::*;
 
 const FORWARDS_PAGE_PADDING: f32 = 16.0; // Tauri p-4
 const FORWARDS_SECTION_GAP: f32 = 24.0; // Tauri space-y-6
