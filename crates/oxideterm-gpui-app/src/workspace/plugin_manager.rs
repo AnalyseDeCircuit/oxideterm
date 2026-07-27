@@ -1446,18 +1446,23 @@ impl WorkspaceApp {
     pub(in crate::workspace) fn handle_plugin_workspace_event(
         &mut self,
         event: &plugin_entity::PluginWorkspaceEvent,
+        window_handle: AnyWindowHandle,
         cx: &mut Context<Self>,
     ) {
         match event {
-            plugin_entity::PluginWorkspaceEvent::ManagerDeliveryReady => {}
+            plugin_entity::PluginWorkspaceEvent::ManagerDeliveryReady => {
+                let deliveries = self
+                    .plugin_entity
+                    .update(cx, |plugins, _cx| plugins.take_manager_deliveries());
+                for delivery in deliveries {
+                    self.handle_native_plugin_manager_delivery(delivery, cx);
+                }
+                cx.notify();
+            }
+            plugin_entity::PluginWorkspaceEvent::RuntimeRequestsReady => {
+                self.schedule_native_plugin_runtime_request_apply(window_handle, cx);
+            }
         }
-        let deliveries = self
-            .plugin_entity
-            .update(cx, |plugins, _cx| plugins.take_manager_deliveries());
-        for delivery in deliveries {
-            self.handle_native_plugin_manager_delivery(delivery, cx);
-        }
-        cx.notify();
     }
 
     fn handle_native_plugin_manager_delivery(

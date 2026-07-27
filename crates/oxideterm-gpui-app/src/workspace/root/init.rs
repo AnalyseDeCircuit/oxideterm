@@ -226,10 +226,11 @@ impl WorkspaceApp {
         );
         let plugin_entity =
             cx.new(|cx| plugin_entity::PluginWorkspaceEntity::new(forwarding_runtime.clone(), cx));
+        let plugin_window_handle = window.window_handle();
         let plugin_entity_subscription = cx.subscribe(
             &plugin_entity,
-            |workspace, _plugin_entity, event: &plugin_entity::PluginWorkspaceEvent, cx| {
-                workspace.handle_plugin_workspace_event(event, cx);
+            move |workspace, _plugin_entity, event: &plugin_entity::PluginWorkspaceEvent, cx| {
+                workspace.handle_plugin_workspace_event(event, plugin_window_handle, cx);
             },
         );
         let settings_store_last_modified =
@@ -772,7 +773,6 @@ impl WorkspaceApp {
         let window_handle = window.window_handle();
         workspace.schedule_node_event_delivery(window_handle, cx);
         workspace.schedule_runtime_worker_delivery(window_handle, cx);
-        workspace.schedule_native_plugin_ui_delivery(window_handle, cx);
         workspace.schedule_graphics_worker_delivery(window_handle, cx);
         cx.spawn(async move |weak, cx| {
             loop {

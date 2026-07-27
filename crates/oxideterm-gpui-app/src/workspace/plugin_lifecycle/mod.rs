@@ -5,7 +5,7 @@ use std::{
     collections::{HashMap, HashSet},
     sync::Arc,
     sync::mpsc,
-    time::{Duration, Instant},
+    time::Duration,
 };
 
 use gpui::{
@@ -83,49 +83,35 @@ impl WorkspaceApp {
         // Starting services enables producers without starting polling timers.
     }
 
-    fn poll_native_plugin_confirm_requests(&mut self, cx: &mut Context<Self>) -> bool {
-        if self.native_plugin_runtime.confirm.is_some() {
-            return false;
+    fn promote_native_plugin_confirm(&mut self, cx: &mut Context<Self>) {
+        let promoted = self
+            .plugin_entity
+            .update(cx, |plugins, _cx| plugins.promote_confirm_request());
+        if promoted {
+            // The root retains only the shared overlay focus adapter.
+            self.reset_standard_confirm_focus();
+            cx.notify();
         }
-
-        match self.native_plugin_runtime.confirm_rx.try_recv() {
-            Ok(request) => {
-                // Tauri resolves ui.showConfirm from the window UI event bridge.
-                // Native stores only the pending response channel here; plugin
-                // code never runs in the render path.
-                self.native_plugin_runtime.confirm = Some(request.into());
-                self.native_plugin_runtime.confirm_presence.reopen();
-                self.reset_standard_confirm_focus();
-                cx.notify();
-            }
-            Err(mpsc::TryRecvError::Empty) => {}
-            Err(mpsc::TryRecvError::Disconnected) => {}
-        }
-        false
     }
 
     fn respond_native_plugin_confirm(&mut self, confirmed: bool, cx: &mut Context<Self>) {
-        let Some(generation) = self.native_plugin_runtime.confirm_presence.begin_exit() else {
+        let Some(generation) = self
+            .plugin_entity
+            .update(cx, |plugins, _cx| plugins.begin_confirm_exit(confirmed))
+        else {
             return;
         };
-        let Some(dialog) = self.native_plugin_runtime.confirm.as_ref() else {
-            return;
-        };
-        // Resolve the plugin call once, but retain its copy until the exit frame ends.
-        dialog.respond(confirmed);
         self.clear_standard_confirm_focus();
         let delay = oxideterm_gpui_ui::motion::duration(
             &self.tokens,
             oxideterm_gpui_ui::motion::MotionDuration::Control,
         );
         if delay.is_zero() {
-            if self
-                .native_plugin_runtime
-                .confirm_presence
-                .finish_exit(generation)
-            {
-                self.native_plugin_runtime.confirm = None;
-                self.poll_native_plugin_confirm_requests(cx);
+            let promoted = self
+                .plugin_entity
+                .update(cx, |plugins, _cx| plugins.finish_confirm_exit(generation));
+            if promoted {
+                self.reset_standard_confirm_focus();
             }
             cx.notify();
             return;
@@ -133,50 +119,25 @@ impl WorkspaceApp {
         cx.spawn(async move |weak, cx| {
             Timer::after(delay).await;
             let _ = weak.update(cx, |this, cx| {
-                if this
-                    .native_plugin_runtime
-                    .confirm_presence
-                    .finish_exit(generation)
-                {
-                    this.native_plugin_runtime.confirm = None;
-                    this.poll_native_plugin_confirm_requests(cx);
-                    cx.notify();
+                let promoted = this
+                    .plugin_entity
+                    .update(cx, |plugins, _cx| plugins.finish_confirm_exit(generation));
+                if promoted {
+                    this.reset_standard_confirm_focus();
                 }
+                cx.notify();
             });
         })
         .detach();
         cx.notify();
     }
 
-    fn poll_native_plugin_terminal_requests(&mut self, cx: &mut Context<Self>) -> bool {
-        let request_batch = delivery::drain_channel(
-            &self.native_plugin_runtime.terminal_rx,
-            delivery::USER_ACTION_DELIVERY_BUDGET,
-        );
-        for request in request_batch.items {
-            self.handle_native_plugin_terminal_request(request, cx);
-        }
-        request_batch.outcome.backlog_remaining
-    }
-
     fn handle_native_plugin_terminal_request(
         &mut self,
         request: NativePluginTerminalRequest,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if matches!(
-            request.action,
-            NativePluginTerminalAction::OpenTelnet { .. }
-        ) {
-            // Opening a terminal tab needs the GPUI Window; queue it for the
-            // render pass instead of constructing a pane from the runtime task.
-            self.native_plugin_runtime
-                .terminal_ui_requests
-                .push_back(request);
-            self.native_plugin_runtime.ui_wake.mark();
-            return;
-        }
-
         let response = match request.action {
             NativePluginTerminalAction::WriteActive { text } => {
                 let ok = self.write_native_plugin_active_terminal_text(&text, cx);
@@ -190,96 +151,56 @@ impl WorkspaceApp {
                 self.clear_native_plugin_node_terminal_buffer(&node_id, cx);
                 plugin_runtime::PluginResponse::ok(request.request_id, Value::Null)
             }
-            NativePluginTerminalAction::OpenTelnet { .. } => unreachable!(),
+            NativePluginTerminalAction::OpenTelnet { host, port } => {
+                self.open_native_plugin_telnet_terminal(&request.request_id, host, port, window, cx)
+            }
         };
         let _ = request.response_tx.send(response);
     }
 
-    pub(super) fn poll_native_plugin_terminal_ui_requests(
+    pub(super) fn schedule_native_plugin_runtime_request_apply(
         &mut self,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> bool {
-        let started_at = Instant::now();
-        let mut processed = 0usize;
-        while delivery::USER_ACTION_DELIVERY_BUDGET.allows_next(processed, started_at.elapsed()) {
-            let Some(request) = self.native_plugin_runtime.terminal_ui_requests.pop_front() else {
-                break;
-            };
-            let response = match request.action {
-                NativePluginTerminalAction::OpenTelnet { host, port } => self
-                    .open_native_plugin_telnet_terminal(
-                        &request.request_id,
-                        host,
-                        port,
-                        window,
-                        cx,
-                    ),
-                _ => plugin_runtime::PluginResponse::error(
-                    request.request_id,
-                    plugin_runtime::PluginError::protocol(
-                        "invalid_terminal_ui_request",
-                        "Native plugin terminal UI queue received a non-UI request",
-                    ),
-                ),
-            };
-            let _ = request.response_tx.send(response);
-            processed += 1;
-        }
-        !self.native_plugin_runtime.terminal_ui_requests.is_empty()
-    }
-
-    pub(super) fn schedule_native_plugin_ui_delivery(
-        &self,
         window_handle: AnyWindowHandle,
         cx: &mut Context<Self>,
     ) {
-        let ui_wake = self.native_plugin_runtime.ui_wake.clone();
-        let release_wake = ui_wake.clone();
-        cx.on_release(move |_, _| {
-            // Plugin runtime may continue shutting down, but its window waiter ends here.
-            release_wake.stop();
-        })
-        .detach();
         cx.spawn(async move |weak, cx| {
-            loop {
-                ui_wake.wait().await;
-                let should_drain = ui_wake.take();
-                let stopped = ui_wake.is_stopped();
-                if !should_drain {
-                    if stopped {
-                        break;
-                    }
-                    continue;
-                }
-                let Ok(Ok(backlog_remaining)) = cx.update_window(window_handle, |_, window, cx| {
-                    weak.update(cx, |workspace, cx| {
-                        let confirm_backlog = workspace.poll_native_plugin_confirm_requests(cx);
-                        let terminal_request_backlog =
-                            workspace.poll_native_plugin_terminal_requests(cx);
-                        let sync_backlog = workspace.poll_native_plugin_sync_requests(cx);
-                        let terminal_ui_backlog =
-                            workspace.poll_native_plugin_terminal_ui_requests(window, cx);
-                        let product_backlog =
-                            workspace.poll_native_plugin_product_ui_effects(window, cx);
-                        confirm_backlog
-                            || terminal_request_backlog
-                            || sync_backlog
-                            || terminal_ui_backlog
-                            || product_backlog
-                    })
-                }) else {
-                    break;
-                };
-                if backlog_remaining {
-                    // Reliable plugin queues share one continuation permit and keep FIFO locally.
-                    ui_wake.mark();
-                } else if stopped {
-                    break;
-                }
-            }
+            let _ = cx.update_window(window_handle, |_, window, cx| {
+                weak.update(cx, |workspace, cx| {
+                    workspace.apply_native_plugin_runtime_requests(window, cx);
+                })
+            });
         })
         .detach();
+    }
+
+    fn apply_native_plugin_runtime_requests(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.promote_native_plugin_confirm(cx);
+        let terminal_batch = self
+            .plugin_entity
+            .update(cx, |plugins, _cx| plugins.take_terminal_requests());
+        let terminal_backlog = terminal_batch.outcome.backlog_remaining;
+        for request in terminal_batch.items {
+            self.handle_native_plugin_terminal_request(request, window, cx);
+        }
+
+        let sync_batch = self
+            .plugin_entity
+            .update(cx, |plugins, _cx| plugins.take_sync_requests());
+        let sync_backlog = sync_batch.outcome.backlog_remaining;
+        for request in sync_batch.items {
+            self.handle_native_plugin_sync_request(request, cx);
+        }
+
+        let product_backlog = self.apply_native_plugin_product_ui_effects(window, cx);
+        if terminal_backlog || sync_backlog || product_backlog {
+            // Continue through the Entity wake so one budgeted UI turn cannot
+            // monopolize the application thread.
+            self.plugin_entity.read(cx).mark_runtime_requests_ready();
+        }
     }
 
     fn open_native_plugin_telnet_terminal(
@@ -328,17 +249,6 @@ impl WorkspaceApp {
                 ),
             ),
         }
-    }
-
-    fn poll_native_plugin_sync_requests(&mut self, cx: &mut Context<Self>) -> bool {
-        let request_batch = delivery::drain_channel(
-            &self.native_plugin_runtime.sync_rx,
-            delivery::USER_ACTION_DELIVERY_BUDGET,
-        );
-        for request in request_batch.items {
-            self.handle_native_plugin_sync_request(request, cx);
-        }
-        request_batch.outcome.backlog_remaining
     }
 
     fn handle_native_plugin_sync_request(
@@ -727,10 +637,10 @@ impl WorkspaceApp {
         event: &KeyDownEvent,
         cx: &mut Context<Self>,
     ) -> bool {
-        if self.native_plugin_runtime.confirm.is_none()
-            || self.native_plugin_runtime.confirm_presence.phase()
-                != oxideterm_gpui_ui::motion::ExitPhase::Visible
-        {
+        let plugins = self.plugin_entity.read(cx);
+        let confirm_is_visible = plugins.confirm_dialog().is_some()
+            && plugins.confirm_phase() == oxideterm_gpui_ui::motion::ExitPhase::Visible;
+        if !confirm_is_visible {
             return false;
         }
 
@@ -752,12 +662,13 @@ impl WorkspaceApp {
         &self,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
-        let dialog = self.native_plugin_runtime.confirm.as_ref()?;
+        let plugins = self.plugin_entity.read(cx);
+        let dialog = plugins.confirm_dialog()?;
         Some(
             oxideterm_gpui_ui::confirm::confirm_dialog_with_focus_motion(
                 &self.tokens,
                 "native-plugin-confirm-motion",
-                self.native_plugin_runtime.confirm_presence.phase(),
+                plugins.confirm_phase(),
                 ConfirmDialogView {
                     variant: ConfirmDialogVariant::Default,
                     title: div()
@@ -1945,9 +1856,7 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> plugin_runtime::NativeHostApiResolver {
         let snapshot = native_plugin_host_api_snapshot_from_workspace(self, cx);
-        let confirm_tx = self.native_plugin_runtime.confirm_tx.clone();
-        let terminal_tx = self.native_plugin_runtime.terminal_tx.clone();
-        let sync_tx = self.native_plugin_runtime.sync_tx.clone();
+        let request_senders = self.plugin_entity.read(cx).runtime_request_senders();
         let sftp_router = self.node_router.clone();
         let sftp_runtime = self.forwarding_runtime.clone();
         let forwarding_registry = self.forwarding_service.registry().clone();
@@ -2009,14 +1918,14 @@ impl WorkspaceApp {
                 return Some(native_plugin_show_progress_response(
                     &plugin_id,
                     call,
-                    Some(&sync_tx),
+                    Some(&request_senders.sync),
                 ));
             }
             if call.namespace == "ui" && call.method == "showConfirm" {
                 return Some(native_plugin_show_confirm_response(
                     &plugin_id,
                     call,
-                    &confirm_tx,
+                    &request_senders.confirm,
                 ));
             }
             if call.namespace == "secrets" {
@@ -2064,7 +1973,7 @@ impl WorkspaceApp {
                     sync_saved_forwards_revision.as_deref(),
                     &sync_plugin_settings,
                     &sync_plugin_settings_revisions,
-                    Some(&sync_tx),
+                    Some(&request_senders.sync),
                 ));
             }
             if call.namespace == "transfers" {
@@ -2104,7 +2013,10 @@ impl WorkspaceApp {
                     "writeToActive" | "writeToNode" | "clearBuffer"
                 )
             {
-                return Some(native_plugin_terminal_response(call, &terminal_tx));
+                return Some(native_plugin_terminal_response(
+                    call,
+                    &request_senders.terminal,
+                ));
             }
             if call.namespace == "terminal" && call.method == "openTelnet" {
                 if !telnet_transport_plugins.contains(&plugin_id) {
@@ -2116,7 +2028,10 @@ impl WorkspaceApp {
                         ),
                     ));
                 }
-                return Some(native_plugin_terminal_response(call, &terminal_tx));
+                return Some(native_plugin_terminal_response(
+                    call,
+                    &request_senders.terminal,
+                ));
             }
             native_plugin_returnable_host_api_response(&snapshot, &plugin_id, call)
         })

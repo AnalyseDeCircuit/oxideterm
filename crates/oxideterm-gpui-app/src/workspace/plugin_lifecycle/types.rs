@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use std::{
-    collections::VecDeque,
     sync::{Arc, mpsc},
     time::Instant,
 };
@@ -15,24 +14,12 @@ use oxideterm_plugin_host_api::sync::NativePluginOxideImportOptions;
 use serde_json::Value;
 use zeroize::Zeroizing;
 
-use crate::workspace::{delivery, plugin_host, plugin_runtime};
+use crate::workspace::{plugin_host, plugin_runtime};
 
 /// Owns native plugin runtime coordination and emitted host snapshots.
 pub(in crate::workspace) struct NativePluginRuntimeState {
     pub(in crate::workspace) registry: plugin_host::NativePluginRegistry,
     pub(in crate::workspace) host: Arc<tokio::sync::Mutex<plugin_runtime::NativePluginRuntimeHost>>,
-    pub(in crate::workspace) confirm_tx: delivery::ActiveDeliverySender<NativePluginConfirmRequest>,
-    pub(in crate::workspace) confirm_rx: mpsc::Receiver<NativePluginConfirmRequest>,
-    pub(in crate::workspace) confirm: Option<NativePluginConfirmDialog>,
-    pub(in crate::workspace) confirm_presence: oxideterm_gpui_ui::motion::ExitPresence,
-    pub(in crate::workspace) terminal_tx:
-        delivery::ActiveDeliverySender<NativePluginTerminalRequest>,
-    pub(in crate::workspace) terminal_rx: mpsc::Receiver<NativePluginTerminalRequest>,
-    pub(in crate::workspace) terminal_ui_requests: VecDeque<NativePluginTerminalRequest>,
-    pub(in crate::workspace) product_ui_effects: VecDeque<NativePluginProductUiEffect>,
-    pub(in crate::workspace) ui_wake: delivery::ActiveDeliveryWake,
-    pub(in crate::workspace) sync_tx: delivery::ActiveDeliverySender<NativePluginSyncRequest>,
-    pub(in crate::workspace) sync_rx: mpsc::Receiver<NativePluginSyncRequest>,
     pub(in crate::workspace) services_started: bool,
     pub(in crate::workspace) layout_snapshot: Value,
     pub(in crate::workspace) layout_polling: bool,
@@ -56,30 +43,11 @@ pub(in crate::workspace) struct NativePluginRuntimeState {
 
 impl NativePluginRuntimeState {
     pub(in crate::workspace) fn new(registry: plugin_host::NativePluginRegistry) -> Self {
-        // Runtime request channels are created together so every endpoint has
-        // the same lifetime as the registry and runtime host that use it.
-        let ui_wake = delivery::ActiveDeliveryWake::default();
-        let (confirm_tx, confirm_rx) =
-            delivery::ActiveDeliverySender::channel_with_wake(ui_wake.clone());
-        let (terminal_tx, terminal_rx) =
-            delivery::ActiveDeliverySender::channel_with_wake(ui_wake.clone());
-        let (sync_tx, sync_rx) = delivery::ActiveDeliverySender::channel_with_wake(ui_wake.clone());
         Self {
             registry,
             host: Arc::new(tokio::sync::Mutex::new(
                 plugin_runtime::NativePluginRuntimeHost::default(),
             )),
-            confirm_tx,
-            confirm_rx,
-            confirm: None,
-            confirm_presence: oxideterm_gpui_ui::motion::ExitPresence::visible(),
-            terminal_tx,
-            terminal_rx,
-            terminal_ui_requests: VecDeque::new(),
-            product_ui_effects: VecDeque::new(),
-            ui_wake,
-            sync_tx,
-            sync_rx,
             services_started: false,
             layout_snapshot: Value::Null,
             layout_polling: false,
@@ -122,11 +90,11 @@ pub(in crate::workspace) enum NativePluginRuntimeDelivery {
 }
 
 pub(in crate::workspace) struct NativePluginConfirmRequest {
-    pub(super) plugin_id: String,
-    pub(super) request_id: String,
-    pub(super) title: String,
-    pub(super) description: String,
-    pub(super) response_tx: mpsc::Sender<bool>,
+    pub(in crate::workspace) plugin_id: String,
+    pub(in crate::workspace) request_id: String,
+    pub(in crate::workspace) title: String,
+    pub(in crate::workspace) description: String,
+    pub(in crate::workspace) response_tx: mpsc::Sender<bool>,
 }
 
 pub(in crate::workspace) struct NativePluginConfirmDialog {
@@ -158,9 +126,9 @@ impl NativePluginConfirmDialog {
 }
 
 pub(in crate::workspace) struct NativePluginTerminalRequest {
-    pub(super) request_id: String,
-    pub(super) action: NativePluginTerminalAction,
-    pub(super) response_tx: mpsc::Sender<plugin_runtime::PluginResponse>,
+    pub(in crate::workspace) request_id: String,
+    pub(in crate::workspace) action: NativePluginTerminalAction,
+    pub(in crate::workspace) response_tx: mpsc::Sender<plugin_runtime::PluginResponse>,
 }
 
 pub(in crate::workspace) enum NativePluginTerminalAction {
@@ -170,18 +138,18 @@ pub(in crate::workspace) enum NativePluginTerminalAction {
     OpenTelnet { host: String, port: u16 },
 }
 
-/// Holds window-owned plugin effects until the next workspace render pass.
+/// Describes a plugin effect that must be applied with a live workspace window.
 pub(in crate::workspace) struct NativePluginProductUiEffect {
-    pub(super) plugin_id: String,
-    pub(super) namespace: String,
-    pub(super) method: String,
-    pub(super) args: Value,
+    pub(in crate::workspace) plugin_id: String,
+    pub(in crate::workspace) namespace: String,
+    pub(in crate::workspace) method: String,
+    pub(in crate::workspace) args: Value,
 }
 
 pub(in crate::workspace) struct NativePluginSyncRequest {
-    pub(super) request_id: String,
-    pub(super) action: NativePluginSyncAction,
-    pub(super) response_tx: mpsc::Sender<plugin_runtime::PluginResponse>,
+    pub(in crate::workspace) request_id: String,
+    pub(in crate::workspace) action: NativePluginSyncAction,
+    pub(in crate::workspace) response_tx: mpsc::Sender<plugin_runtime::PluginResponse>,
 }
 
 pub(in crate::workspace) enum NativePluginSyncAction {

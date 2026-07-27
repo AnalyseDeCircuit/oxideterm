@@ -3,15 +3,13 @@
 
 //! Workspace-owned side effects for stable product plugin APIs.
 
-use std::time::Instant;
-
 use gpui::{Context, Window};
 use oxideterm_quick_commands::QuickCommandDraft;
 use oxideterm_ssh::NodeId;
 use serde_json::Value;
 use zeroize::Zeroizing;
 
-use super::{NativePluginProductUiEffect, WorkspaceApp, delivery};
+use super::{NativePluginProductUiEffect, WorkspaceApp};
 
 impl WorkspaceApp {
     pub(super) fn handle_native_plugin_product_host_call(
@@ -25,17 +23,16 @@ impl WorkspaceApp {
         match (namespace, method) {
             ("connections", "connect" | "reconnect" | "disconnect")
             | ("quickCommands", "execute") => {
-                // These effects require the current GPUI Window and are consumed
-                // at the beginning of the next workspace render pass.
-                self.native_plugin_runtime.product_ui_effects.push_back(
-                    NativePluginProductUiEffect {
+                // These effects require a live GPUI Window, so the Entity keeps
+                // them until its reliable delivery event reaches the adapter.
+                self.plugin_entity.update(cx, |plugins, _cx| {
+                    plugins.enqueue_product_ui_effect(NativePluginProductUiEffect {
                         plugin_id: plugin_id.to_string(),
                         namespace: namespace.to_string(),
                         method: method.to_string(),
                         args,
-                    },
-                );
-                self.native_plugin_runtime.ui_wake.mark();
+                    });
+                });
             }
             ("notifications", method) => {
                 self.apply_native_plugin_notification_effect(method, &args, cx)
@@ -53,17 +50,15 @@ impl WorkspaceApp {
     }
 
     /// Consumes only effects that need a live window, preserving their product owners.
-    pub(in crate::workspace) fn poll_native_plugin_product_ui_effects(
+    pub(in crate::workspace) fn apply_native_plugin_product_ui_effects(
         &mut self,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
-        let started_at = Instant::now();
-        let mut processed = 0usize;
-        while delivery::USER_ACTION_DELIVERY_BUDGET.allows_next(processed, started_at.elapsed()) {
-            let Some(effect) = self.native_plugin_runtime.product_ui_effects.pop_front() else {
-                break;
-            };
+        let (effects, backlog_remaining) = self
+            .plugin_entity
+            .update(cx, |plugins, _cx| plugins.take_product_ui_effects());
+        for effect in effects {
             match (effect.namespace.as_str(), effect.method.as_str()) {
                 ("connections", "connect") => {
                     if let Some(connection_id) = string_arg(&effect.args, "connectionId") {
@@ -100,9 +95,8 @@ impl WorkspaceApp {
                     "Unsupported queued product plugin effect".to_string(),
                 ),
             }
-            processed += 1;
         }
-        !self.native_plugin_runtime.product_ui_effects.is_empty()
+        backlog_remaining
     }
 
     fn apply_native_plugin_notification_effect(
