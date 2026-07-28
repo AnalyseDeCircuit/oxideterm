@@ -789,8 +789,17 @@ impl WorkspaceApp {
                 true
             }
             "escape" => {
-                self.focused_settings_input = None;
-                self.clear_settings_input_draft(input);
+                if matches!(
+                    input,
+                    SettingsInput::AppLockCurrentPassword
+                        | SettingsInput::AppLockNewPassword
+                        | SettingsInput::AppLockConfirmPassword
+                ) {
+                    self.commit_focused_app_lock_input();
+                } else {
+                    self.focused_settings_input = None;
+                    self.clear_settings_input_draft(input);
+                }
                 self.new_connection_caret_visible = true;
                 cx.notify();
                 true
@@ -801,8 +810,17 @@ impl WorkspaceApp {
                     self.apply_settings_input_draft(input, cx);
                     return true;
                 }
-                self.focused_settings_input = None;
-                self.clear_settings_input_draft(input);
+                if matches!(
+                    input,
+                    SettingsInput::AppLockCurrentPassword
+                        | SettingsInput::AppLockNewPassword
+                        | SettingsInput::AppLockConfirmPassword
+                ) {
+                    self.commit_focused_app_lock_input();
+                } else {
+                    self.focused_settings_input = None;
+                    self.clear_settings_input_draft(input);
+                }
                 self.new_connection_caret_visible = true;
                 cx.notify();
                 true
@@ -829,7 +847,17 @@ impl WorkspaceApp {
             changed = true;
         }
         if let Some(input) = self.focused_settings_input.take() {
-            self.clear_settings_input_draft(input);
+            if matches!(
+                input,
+                SettingsInput::AppLockCurrentPassword
+                    | SettingsInput::AppLockNewPassword
+                    | SettingsInput::AppLockConfirmPassword
+            ) {
+                self.focused_settings_input = Some(input);
+                self.commit_focused_app_lock_input();
+            } else {
+                self.clear_settings_input_draft(input);
+            }
             self.ime_marked_text = None;
             self.clear_ime_selection();
             changed = true;
@@ -1071,15 +1099,41 @@ impl WorkspaceApp {
         self.settings_workspace.update(cx, |settings, cx| {
             settings.blur_settings_entity_input(cx);
         });
+        let app_lock_input = matches!(
+            input,
+            SettingsInput::AppLockCurrentPassword
+                | SettingsInput::AppLockNewPassword
+                | SettingsInput::AppLockConfirmPassword
+        );
+        if app_lock_input && self.focused_settings_input == Some(input) {
+            self.clear_ime_selection();
+            self.new_connection_caret_visible = true;
+            cx.notify();
+            return;
+        }
         if let Some(previous_input) = self
             .focused_settings_input
             .filter(|previous| *previous != input)
         {
-            self.clear_settings_input_draft(previous_input);
+            if matches!(
+                previous_input,
+                SettingsInput::AppLockCurrentPassword
+                    | SettingsInput::AppLockNewPassword
+                    | SettingsInput::AppLockConfirmPassword
+            ) {
+                self.commit_focused_app_lock_input();
+            } else {
+                self.clear_settings_input_draft(previous_input);
+            }
         }
         self.focused_settings_input = Some(input);
         self.clear_ime_selection();
-        self.settings_input_draft = current_value;
+        self.settings_input_draft = if app_lock_input {
+            // Move the active secret into the editor so only one owner exists.
+            self.take_app_lock_input_value(input).unwrap_or_default()
+        } else {
+            current_value
+        };
         self.new_connection_caret_visible = true;
         cx.notify();
     }
@@ -1154,7 +1208,7 @@ impl WorkspaceApp {
             | SettingsInput::PortableConfirmPassword => String::new(),
             SettingsInput::AppLockCurrentPassword
             | SettingsInput::AppLockNewPassword
-            | SettingsInput::AppLockConfirmPassword => self.app_lock_input_value(input).to_string(),
+            | SettingsInput::AppLockConfirmPassword => String::new(),
             SettingsInput::ManagedKeyFilePath
             | SettingsInput::ManagedKeyFileName
             | SettingsInput::ManagedKeyFilePassphrase
@@ -1265,11 +1319,7 @@ impl WorkspaceApp {
             | SettingsInput::PortableConfirmPassword => {}
             SettingsInput::AppLockCurrentPassword
             | SettingsInput::AppLockNewPassword
-            | SettingsInput::AppLockConfirmPassword => {
-                let draft = self.settings_input_draft.clone();
-                let _ = self.set_app_lock_input_value(input, &draft);
-                cx.notify();
-            }
+            | SettingsInput::AppLockConfirmPassword => {}
             SettingsInput::ManagedKeyFilePath
             | SettingsInput::ManagedKeyFileName
             | SettingsInput::ManagedKeyFilePassphrase
