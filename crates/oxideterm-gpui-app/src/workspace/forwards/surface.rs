@@ -114,6 +114,8 @@ impl WorkspaceApp {
         let Some(node_id) = self.forwarding.read(cx).node_for_tab(tab_id) else {
             return self.render_empty_workspace(cx);
         };
+        // Detached renders are also mount boundaries for Entity-owned sampling.
+        self.sync_forwarding_sampling_visibility(cx);
         self.sync_forwards_section_list_state(tab_id, &node_id, cx);
         let has_background = self.background_surface_active("forwards");
         let state = self.forwarding.read(cx).section_list_state.clone();

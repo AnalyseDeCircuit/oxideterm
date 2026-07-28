@@ -47,8 +47,11 @@ pub(in crate::workspace) enum ForwardingWorkspaceEvent {
 pub(in crate::workspace) struct ForwardingWorkspaceEntity {
     pub(super) view: ForwardsViewState,
     tab_nodes: HashMap<TabId, NodeId>,
+    sampling_visible: bool,
     sampling_generation: u64,
     sampling_task: Option<gpui::Task<()>>,
+    #[cfg(test)]
+    sampling_tick_count: usize,
     pub(super) section_list_state: ListState,
     pub(super) section_list_cache: RefCell<VirtualListSignatureCache>,
     pub(super) table_row_list_state: ListState,
@@ -71,8 +74,10 @@ impl ForwardingWorkspaceEntity {
         Self {
             view: ForwardsViewState::default(),
             tab_nodes: HashMap::new(),
+            sampling_visible: false,
             sampling_generation: 0,
             sampling_task: None,
+            sampling_tick_count: 0,
             section_list_state: ListState::new(0, ListAlignment::Top, px(0.0)),
             section_list_cache: RefCell::new(VirtualListSignatureCache::default()),
             table_row_list_state: ListState::new(0, ListAlignment::Top, px(0.0)),
@@ -98,8 +103,11 @@ impl ForwardingWorkspaceEntity {
         let entity = Self {
             view: ForwardsViewState::default(),
             tab_nodes: HashMap::new(),
+            sampling_visible: false,
             sampling_generation: 0,
             sampling_task: None,
+            #[cfg(test)]
+            sampling_tick_count: 0,
             section_list_state: ListState::new(
                 FORWARDS_SECTION_LIST_INITIAL_ITEM_COUNT,
                 ListAlignment::Top,
@@ -220,15 +228,10 @@ impl ForwardingWorkspaceEntity {
         &mut self,
         tab_id: TabId,
         node_id: NodeId,
-        cx: &mut Context<Self>,
+        _cx: &mut Context<Self>,
     ) {
-        let was_empty = self.tab_nodes.is_empty();
         self.tab_nodes.insert(tab_id, node_id.clone());
         self.refresh_runtime_snapshot(&node_id);
-        if was_empty {
-            self.sampling_generation = self.sampling_generation.wrapping_add(1);
-            self.schedule_sampling(self.sampling_generation, cx);
-        }
     }
 
     pub(in crate::workspace) fn unmap_tab(&mut self, tab_id: TabId) -> Option<NodeId> {
@@ -241,8 +244,7 @@ impl ForwardingWorkspaceEntity {
         }
         if removed.is_some() && self.tab_nodes.is_empty() {
             // Cancel the page sampler without touching long-lived runtime state.
-            self.sampling_generation = self.sampling_generation.wrapping_add(1);
-            self.sampling_task.take();
+            self.stop_sampling();
         }
         removed
     }
@@ -251,24 +253,78 @@ impl ForwardingWorkspaceEntity {
         &self.tab_nodes
     }
 
+    pub(in crate::workspace) fn set_sampling_visible(
+        &mut self,
+        visible: bool,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let should_sample = visible && !self.tab_nodes.is_empty();
+        if self.sampling_visible == should_sample {
+            return false;
+        }
+        if !should_sample {
+            self.stop_sampling();
+            return true;
+        }
+
+        self.sampling_visible = true;
+        self.sampling_generation = self.sampling_generation.wrapping_add(1);
+        self.view.last_stats_refresh = None;
+        for state in self.port_detection_by_node.values_mut() {
+            if !state.port_scan_pending {
+                state.last_port_scan_started = None;
+            }
+        }
+        self.schedule_sampling(self.sampling_generation, cx);
+        true
+    }
+
+    pub(in crate::workspace) fn sampling_visible(&self) -> bool {
+        self.sampling_visible
+    }
+
+    fn stop_sampling(&mut self) {
+        if !self.sampling_visible && self.sampling_task.is_none() {
+            return;
+        }
+        self.sampling_visible = false;
+        self.sampling_generation = self.sampling_generation.wrapping_add(1);
+        // Dropping the Entity-owned GPUI task cancels its pending Timer.
+        self.sampling_task.take();
+        for state in self.port_detection_by_node.values_mut() {
+            if !state.port_scan_pending {
+                state.last_port_scan_started = None;
+            }
+        }
+    }
+
     fn schedule_sampling(&mut self, generation: u64, cx: &mut Context<Self>) {
         self.sampling_task = Some(cx.spawn(async move |entity, cx| {
             loop {
                 Timer::after(FORWARDS_SAMPLING_TICK_INTERVAL).await;
                 let keep_running = entity
-                    .update(cx, |entity, cx| {
-                        if entity.sampling_generation != generation || entity.tab_nodes.is_empty() {
-                            return false;
-                        }
-                        cx.emit(ForwardingWorkspaceEvent::SamplingDue);
-                        true
-                    })
+                    .update(cx, |entity, cx| entity.apply_sampling_tick(generation, cx))
                     .unwrap_or(false);
                 if !keep_running {
                     break;
                 }
             }
         }));
+    }
+
+    fn apply_sampling_tick(&mut self, generation: u64, cx: &mut Context<Self>) -> bool {
+        if self.sampling_generation != generation
+            || !self.sampling_visible
+            || self.tab_nodes.is_empty()
+        {
+            return false;
+        }
+        #[cfg(test)]
+        {
+            self.sampling_tick_count = self.sampling_tick_count.saturating_add(1);
+        }
+        cx.emit(ForwardingWorkspaceEvent::SamplingDue);
+        true
     }
 
     pub(in crate::workspace) fn take_delivery_intents(
@@ -562,11 +618,13 @@ mod tests {
         let node_id = NodeId::new("shared-forward");
         entity.update(cx, |entity, cx| {
             entity.map_tab_to_node(tab_id, node_id.clone(), cx);
+            entity.set_sampling_visible(true, cx);
         });
 
         cx.read(|cx| {
             assert_eq!(entity.read(cx).node_for_tab(tab_id), Some(node_id.clone()));
             assert!(entity.read(cx).runtime_snapshots.contains_key(&node_id));
+            assert!(entity.read(cx).sampling_visible);
             assert_eq!(entity.read(cx).sampling_generation, 1);
             assert!(entity.read(cx).sampling_task.is_some());
         });
@@ -575,6 +633,7 @@ mod tests {
         cx.read(|cx| {
             assert!(entity.read(cx).node_for_tab(tab_id).is_none());
             assert!(!entity.read(cx).runtime_snapshots.contains_key(&node_id));
+            assert!(!entity.read(cx).sampling_visible);
             assert_eq!(entity.read(cx).sampling_generation, 2);
             assert!(entity.read(cx).sampling_task.is_none());
         });
@@ -582,6 +641,110 @@ mod tests {
         // The Entity deliberately has no stop/remove call here; a tab close
         // cannot change registry-owned forwarding lifetime.
         cx.read(|cx| assert!(entity.read(cx).delivery_intents.is_empty()));
+    }
+
+    #[gpui::test]
+    fn hidden_mount_stops_sampling_without_blocking_reliable_delivery(cx: &mut TestAppContext) {
+        let (worker_tx, worker_rx) = delivery::ActiveDeliverySender::channel();
+        let (_runtime_tx, runtime_rx) = std::sync::mpsc::channel();
+        let runtime_service = ForwardingRuntimeService::test_fixture();
+        let entity = cx.new(|cx| {
+            ForwardingWorkspaceEntity::new(
+                worker_tx.clone(),
+                worker_rx,
+                runtime_rx,
+                runtime_service,
+                cx,
+            )
+        });
+        let tab_id = TabId(8);
+        let node_id = NodeId::new("visibility-forward");
+        entity.update(cx, |entity, cx| {
+            entity.map_tab_to_node(tab_id, node_id.clone(), cx);
+            assert!(entity.set_sampling_visible(true, cx));
+            entity
+                .port_detection_by_node
+                .entry(node_id.clone())
+                .or_default()
+                .last_port_scan_started = Some(Instant::now());
+            entity.view.last_stats_refresh = Some(Instant::now());
+        });
+
+        let visible_generation = cx.read(|cx| entity.read(cx).sampling_generation);
+        entity.update(cx, |entity, cx| {
+            assert!(entity.apply_sampling_tick(visible_generation, cx));
+            assert_eq!(entity.sampling_tick_count, 1);
+            assert!(entity.set_sampling_visible(false, cx));
+            assert!(!entity.sampling_visible);
+            assert!(entity.sampling_task.is_none());
+            assert!(
+                entity
+                    .port_detection_by_node
+                    .get(&node_id)
+                    .is_some_and(|state| state.last_port_scan_started.is_none())
+            );
+            // A queued tick from the canceled generation cannot wake sampling.
+            assert!(!entity.apply_sampling_tick(visible_generation, cx));
+            assert_eq!(entity.sampling_tick_count, 1);
+        });
+
+        worker_tx
+            .send(ForwardingWorkerResult::ReconnectRestore {
+                node_id: node_id.clone(),
+                result: PhaseResult::Ok,
+                restored: 1,
+                detail: "restored 1 forward".to_string(),
+                job_id: "hidden-job".to_string(),
+                created_forwards: Vec::new(),
+                bindings: Vec::new(),
+            })
+            .expect("hidden reconnect restore delivery");
+        cx.run_until_parked();
+        let intents = entity.update(cx, |entity, _cx| entity.take_delivery_intents());
+        assert!(matches!(
+            intents.back(),
+            Some(ForwardingDeliveryIntent::ReconnectRestore {
+                node_id: delivered_node_id,
+                job_id,
+                ..
+            }) if delivered_node_id == &node_id && job_id == "hidden-job"
+        ));
+
+        // Closing the view removes only its mapping; reliable runtime delivery
+        // remains owned by the Entity and is independent from tunnel lifetime.
+        let removed = entity.update(cx, |entity, _cx| entity.unmap_tab(tab_id));
+        assert_eq!(removed, Some(node_id.clone()));
+        worker_tx
+            .send(ForwardingWorkerResult::ReconnectRestore {
+                node_id: node_id.clone(),
+                result: PhaseResult::Ok,
+                restored: 1,
+                detail: "restored after close".to_string(),
+                job_id: "closed-view-job".to_string(),
+                created_forwards: Vec::new(),
+                bindings: Vec::new(),
+            })
+            .expect("closed-view reconnect restore delivery");
+        cx.run_until_parked();
+        let intents = entity.update(cx, |entity, _cx| entity.take_delivery_intents());
+        assert!(matches!(
+            intents.back(),
+            Some(ForwardingDeliveryIntent::ReconnectRestore {
+                node_id: delivered_node_id,
+                job_id,
+                ..
+            }) if delivered_node_id == &node_id && job_id == "closed-view-job"
+        ));
+
+        entity.update(cx, |entity, cx| {
+            entity.map_tab_to_node(tab_id, node_id, cx);
+            assert!(entity.set_sampling_visible(true, cx));
+            assert!(entity.sampling_task.is_some());
+            assert!(entity.view.last_stats_refresh.is_none());
+            let resumed_generation = entity.sampling_generation;
+            assert!(entity.apply_sampling_tick(resumed_generation, cx));
+            assert_eq!(entity.sampling_tick_count, 2);
+        });
     }
 
     #[gpui::test]

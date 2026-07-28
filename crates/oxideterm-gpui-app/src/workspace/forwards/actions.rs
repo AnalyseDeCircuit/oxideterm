@@ -236,10 +236,8 @@ impl WorkspaceApp {
     }
 
     pub(super) fn start_port_profiler_for_node(&mut self, node_id: NodeId, cx: &mut Context<Self>) {
-        // Tauri starts a per-connection ResourceProfiler from usePortDetection
-        // and leaves it running after the Forwards view unmounts. Native mirrors
-        // that lifecycle with a node-owned scanner that emits PortScan results
-        // independent of the currently active tab.
+        // Port profiling is view sampling, not tunnel ownership. It can stop
+        // while hidden without releasing listeners, managers, or SSH consumers.
         self.forwarding.update(cx, |forwarding, _cx| {
             forwarding.track_port_profiler(node_id.clone());
         });
@@ -316,6 +314,31 @@ impl WorkspaceApp {
         }
     }
 
+    pub(in crate::workspace) fn sync_forwarding_sampling_visibility(&mut self, cx: &mut App) {
+        let sampling_visible = self
+            .forwarding
+            .read(cx)
+            .tab_node_mappings()
+            .keys()
+            .any(|tab_id| self.forwards_tab_is_visible(*tab_id, cx));
+        let visibility_changed = self.forwarding.update(cx, |forwarding, cx| {
+            forwarding.set_sampling_visible(sampling_visible, cx)
+        });
+        if !visibility_changed || sampling_visible {
+            return;
+        }
+
+        // Hiding the view stops only sampling profilers. Tunnel managers,
+        // listeners, and SSH consumers retain their independent runtime owner.
+        for node_id in self.forwarding.read(cx).tracked_port_profiler_nodes() {
+            if let Some(connection_id) = self.forwarding_connection_id_for_node(&node_id) {
+                self.forwarding_service
+                    .registry()
+                    .stop_port_profiler(&connection_id);
+            }
+        }
+    }
+
     fn start_port_scan(
         &mut self,
         node_id: NodeId,
@@ -376,6 +399,10 @@ impl WorkspaceApp {
         match event {
             ForwardingWorkspaceEvent::DeliveryReady => {}
             ForwardingWorkspaceEvent::SamplingDue => {
+                self.sync_forwarding_sampling_visibility(cx);
+                if !self.forwarding.read(cx).sampling_visible() {
+                    return;
+                }
                 // The Entity owns cadence; the root only supplies the current
                 // cross-window visibility and runtime adapters.
                 self.maybe_start_forwards_port_scan(cx);
