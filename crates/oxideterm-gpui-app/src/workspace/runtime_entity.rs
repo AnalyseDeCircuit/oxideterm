@@ -121,8 +121,11 @@ pub(in crate::workspace) enum ReconnectFailureAction {
 #[derive(Debug)]
 pub(in crate::workspace) enum NodeRuntimeEffect {
     ConnectionStatusChanged {
+        node_id: NodeId,
         connection_id: String,
         status: String,
+        state: NodeReadiness,
+        reason: String,
         affected_children: Vec<String>,
     },
     ConnectionStateChanged {
@@ -271,7 +274,9 @@ pub(in crate::workspace) struct WorkspaceRuntimeEntity {
     task_runtime: Arc<tokio::runtime::Runtime>,
     reconnect_timing: ReconnectTiming,
     ssh_active_probe_in_flight: bool,
+    active_probe_task: Option<tokio::task::AbortHandle>,
     active_probe_timer_generation: u64,
+    reconnect_grace_probe_tasks: HashMap<NodeId, (String, tokio::task::AbortHandle)>,
     remote_shell_integration: settings::RemoteShellIntegrationRuntimeState,
     remote_shell_gate_tasks: HashMap<NodeId, (u64, tokio::task::AbortHandle)>,
     remote_shell_maintenance_task: Option<(NodeId, u64, tokio::task::AbortHandle)>,
@@ -365,7 +370,9 @@ impl WorkspaceRuntimeEntity {
             task_runtime,
             reconnect_timing,
             ssh_active_probe_in_flight: false,
+            active_probe_task: None,
             active_probe_timer_generation: 0,
+            reconnect_grace_probe_tasks: HashMap::new(),
             remote_shell_integration: settings::RemoteShellIntegrationRuntimeState::default(),
             remote_shell_gate_tasks: HashMap::new(),
             remote_shell_maintenance_task: None,
@@ -411,7 +418,21 @@ impl WorkspaceRuntimeEntity {
         session_id: TerminalSessionId,
     ) -> Option<NodeId> {
         // Removing a terminal consumer never changes node or transport ownership.
-        self.terminal_ssh_nodes.remove(&session_id)
+        let node_id = self.terminal_ssh_nodes.remove(&session_id)?;
+        let endpoint_session_id = session_id.0.to_string();
+        let _ = self
+            .node_router
+            .unbind_terminal_session(&node_id, &endpoint_session_id);
+        Some(node_id)
+    }
+
+    pub(in crate::workspace) fn bind_ssh_terminal_endpoint(
+        &self,
+        node_id: &NodeId,
+        endpoint: TerminalEndpoint,
+    ) {
+        // NodeRouter dispatches the availability event as part of the bind.
+        let _ = self.node_router.bind_terminal_endpoint(node_id, endpoint);
     }
 
     pub(in crate::workspace) fn ssh_terminal_node_id(
@@ -426,6 +447,23 @@ impl WorkspaceRuntimeEntity {
             .iter()
             .map(|(session_id, node_id)| (*session_id, node_id.clone()))
             .collect()
+    }
+
+    pub(in crate::workspace) fn ssh_terminal_session_ids_for_node(
+        &self,
+        node_id: &NodeId,
+    ) -> Vec<TerminalSessionId> {
+        let mut session_ids = self
+            .terminal_ssh_nodes
+            .iter()
+            .filter_map(|(session_id, session_node_id)| {
+                (session_node_id == node_id).then_some(*session_id)
+            })
+            .collect::<Vec<_>>();
+        // Session ids are monotonic, preserving the previous projection's
+        // stable oldest-terminal focus behavior despite HashMap storage.
+        session_ids.sort_unstable_by_key(|session_id| session_id.0);
+        session_ids
     }
 
     pub(in crate::workspace) fn ssh_terminal_session_belongs_to_node(
@@ -730,7 +768,8 @@ impl WorkspaceRuntimeEntity {
         }
     }
 
-    pub(in crate::workspace) fn cancel_reconnect_job(&self, node_id: &NodeId) -> bool {
+    pub(in crate::workspace) fn cancel_reconnect_job(&mut self, node_id: &NodeId) -> bool {
+        self.cancel_reconnect_grace_probe(node_id);
         self.reconnect_orchestrator.cancel(&node_id.0).is_some()
     }
 
@@ -873,6 +912,23 @@ impl WorkspaceRuntimeEntity {
         Ok(())
     }
 
+    pub(in crate::workspace) fn record_node_transport_start_failure(
+        &mut self,
+        node_id: &NodeId,
+        detail: String,
+        cx: &mut Context<Self>,
+    ) {
+        let detail = oxideterm_ai::sanitize_for_ai(&detail);
+        if let Ok(event) = self.node_router.sync_node_readiness_event(
+            node_id,
+            NodeReadiness::Error,
+            detail.clone(),
+        ) {
+            self.node_router.emitter().emit(event);
+        }
+        self.finish_connection_trace_failed(node_id, Some(detail), cx);
+    }
+
     fn next_node_transport_attempt_id(&mut self) -> NodeTransportAttemptId {
         self.next_node_transport_attempt_id = self.next_node_transport_attempt_id.wrapping_add(1);
         NodeTransportAttemptId(self.next_node_transport_attempt_id)
@@ -973,6 +1029,13 @@ impl WorkspaceRuntimeEntity {
         for node_id in self.reconnect_orchestrator.active_node_ids() {
             let _ = self.reconnect_orchestrator.cancel(&node_id);
         }
+        for (_, (_, abort_handle)) in self.reconnect_grace_probe_tasks.drain() {
+            abort_handle.abort();
+        }
+        if let Some(abort_handle) = self.active_probe_task.take() {
+            abort_handle.abort();
+        }
+        self.ssh_active_probe_in_flight = false;
         self.runtime_effects.clear();
         self.runtime_effect_delivery_pending = false;
         self.pending_ssh_terminal_opens.clear();
@@ -1208,13 +1271,16 @@ impl WorkspaceRuntimeEntity {
     }
 
     pub(in crate::workspace) fn start_reconnect_grace_probe(
-        &self,
+        &mut self,
         request: ReconnectGraceProbeRequest,
     ) {
+        self.cancel_reconnect_grace_probe(&request.node_id);
         let registry = self.ssh_registry.clone();
         let reconnect_tx = self.reconnect_worker_tx.clone();
         let timing = self.reconnect_orchestrator.timing();
-        self.task_runtime.spawn(async move {
+        let task_node_id = request.node_id.clone();
+        let task_job_id = request.job_id.clone();
+        let task = self.task_runtime.spawn(async move {
             let ReconnectGraceProbeRequest {
                 node_id,
                 connection_id,
@@ -1318,6 +1384,26 @@ impl WorkspaceRuntimeEntity {
                 }
             }
         });
+        // A reconnect probe can outlive its initiating UI action, so the
+        // runtime owner retains cancellation until the terminal result arrives.
+        self.reconnect_grace_probe_tasks
+            .insert(task_node_id, (task_job_id, task.abort_handle()));
+    }
+
+    fn cancel_reconnect_grace_probe(&mut self, node_id: &NodeId) {
+        if let Some((_, abort_handle)) = self.reconnect_grace_probe_tasks.remove(node_id) {
+            abort_handle.abort();
+        }
+    }
+
+    fn complete_reconnect_grace_probe(&mut self, node_id: &NodeId, job_id: &str) {
+        if self
+            .reconnect_grace_probe_tasks
+            .get(node_id)
+            .is_some_and(|(current_job_id, _)| current_job_id == job_id)
+        {
+            self.reconnect_grace_probe_tasks.remove(node_id);
+        }
     }
 
     pub(in crate::workspace) fn apply_grace_recovery(
@@ -1371,6 +1457,54 @@ impl WorkspaceRuntimeEntity {
         {
             self.node_router.emitter().emit(event);
         }
+    }
+
+    pub(in crate::workspace) fn cascade_connection_status_to_children(
+        &self,
+        root_node_id: &NodeId,
+        affected_connection_ids: Option<&[String]>,
+        state: NodeReadiness,
+        reason: String,
+    ) -> Vec<NodeId> {
+        let connection_state = match state {
+            NodeReadiness::Error => ConnectionState::LinkDown,
+            NodeReadiness::Disconnected => ConnectionState::Disconnected,
+            NodeReadiness::Ready | NodeReadiness::Connecting => return Vec::new(),
+        };
+        let affected_node_ids = self
+            .node_router
+            .connection_id_for_node(root_node_id)
+            .map(|root_connection_id| {
+                affected_connection_ids
+                    .map(|connection_ids| connection_ids.to_vec())
+                    .unwrap_or_else(|| {
+                        self.ssh_registry
+                            .descendant_connection_infos(&root_connection_id)
+                            .into_iter()
+                            .map(|info| info.connection_id)
+                            .collect()
+                    })
+                    .into_iter()
+                    .filter_map(|connection_id| {
+                        self.node_router.node_id_for_connection(&connection_id)
+                    })
+                    .filter(|node_id| node_id != root_node_id)
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        for affected_node_id in &affected_node_ids {
+            let _ = self.node_router.sync_node_readiness_event(
+                affected_node_id,
+                state.clone(),
+                reason.clone(),
+            );
+            if let Some(connection_id) = self.node_router.connection_id_for_node(affected_node_id) {
+                let _ = self
+                    .ssh_registry
+                    .mark_state_without_event(&connection_id, connection_state.clone());
+            }
+        }
+        affected_node_ids
     }
 
     pub(in crate::workspace) fn retire_stale_node_connection(
@@ -1605,14 +1739,6 @@ impl WorkspaceRuntimeEntity {
         }
     }
 
-    pub(in crate::workspace) fn plan_connection_trace(
-        &mut self,
-        mode: ConnectionTraceMode,
-        path: &[(NodeId, bool)],
-    ) -> Option<ConnectionTracePlan> {
-        self.connection_trace_state.plan_for_path(mode, path)
-    }
-
     pub(in crate::workspace) fn new_connection_trace_plan(
         &mut self,
         mode: ConnectionTraceMode,
@@ -1835,6 +1961,7 @@ impl WorkspaceRuntimeEntity {
             .retain(|effect| !runtime_effect_is_reconnect_schedule_for_nodes(effect, node_ids));
         self.cancel_reconnect_scheduler_nodes(node_ids);
         for node_id in node_ids {
+            self.cancel_reconnect_grace_probe(node_id);
             self.cancel_node_transport_attempt(node_id);
             self.clear_reconnect_restore_state(node_id);
         }
@@ -2269,10 +2396,12 @@ impl WorkspaceRuntimeEntity {
         let ssh_registry = self.ssh_registry.clone();
         let timeout = self.reconnect_timing.proactive_keepalive_timeout;
         let result_sender = self.active_probe_tx.clone();
-        self.task_runtime.spawn(async move {
+        let task = self.task_runtime.spawn(async move {
             let changed = ssh_registry.probe_active_connections(timeout).await.len();
             let _ = result_sender.send(changed);
         });
+        // Workspace shutdown aborts the in-flight probe before retiring its registry.
+        self.active_probe_task = Some(task.abort_handle());
     }
 
     fn drain_worker_results(&mut self, cx: &mut Context<Self>) -> bool {
@@ -2308,6 +2437,7 @@ impl WorkspaceRuntimeEntity {
             .any(|changed| changed > 0);
         if active_probe_completed {
             self.ssh_active_probe_in_flight = false;
+            self.active_probe_task = None;
             self.schedule_active_probe_after(self.reconnect_timing.ssh_keepalive_interval, cx);
         }
         if active_connections_changed {
@@ -2375,7 +2505,7 @@ impl WorkspaceRuntimeEntity {
                 self.complete_node_transport_attempt(&node_id, attempt_id);
                 // Worker errors cross a UI and notification boundary, so redact before queuing.
                 let error = oxideterm_ai::sanitize_for_ai(&error);
-                self.finish_connection_trace_failed(&node_id, Some(error.clone()), cx);
+                self.record_node_transport_start_failure(&node_id, error.clone(), cx);
                 let action = if self.reconnect_orchestrator.is_active(&node_id.0) {
                     let _ = self.reconnect_orchestrator.complete_phase(
                         &node_id.0,
@@ -2415,39 +2545,45 @@ impl WorkspaceRuntimeEntity {
                 connection_id,
                 recovered_connections,
                 job_id,
-            } => self.reconnect_job_is_current(&node_id, &job_id).then(|| {
-                let _ = self.reconnect_orchestrator.complete_phase(
-                    &node_id.0,
-                    PhaseResult::Ok,
-                    Some(format!(
-                        "connection {connection_id} recovered during grace period"
-                    )),
-                );
-                ReconnectRuntimeEffect::GraceRecovered {
-                    node_id,
-                    connection_id,
-                    recovered_connections,
-                }
-            }),
+            } => {
+                self.complete_reconnect_grace_probe(&node_id, &job_id);
+                self.reconnect_job_is_current(&node_id, &job_id).then(|| {
+                    let _ = self.reconnect_orchestrator.complete_phase(
+                        &node_id.0,
+                        PhaseResult::Ok,
+                        Some(format!(
+                            "connection {connection_id} recovered during grace period"
+                        )),
+                    );
+                    ReconnectRuntimeEffect::GraceRecovered {
+                        node_id,
+                        connection_id,
+                        recovered_connections,
+                    }
+                })
+            }
             ReconnectWorkerResult::GraceExpired {
                 node_id,
                 connection_id,
                 detail,
                 job_id,
-            } => self.reconnect_job_is_current(&node_id, &job_id).then(|| {
-                let detail = oxideterm_ai::sanitize_for_ai(&detail);
-                let _ = self.reconnect_orchestrator.complete_phase(
-                    &node_id.0,
-                    PhaseResult::Failed,
-                    Some(detail.clone()),
-                );
-                self.apply_grace_expiration(&connection_id);
-                let _ = self
-                    .reconnect_orchestrator
-                    .advance(&node_id.0, ReconnectPhase::SshConnect);
-                let _ = self.reconnect_orchestrator.begin_ssh_attempt(&node_id.0);
-                ReconnectRuntimeEffect::GraceExpired { node_id, detail }
-            }),
+            } => {
+                self.complete_reconnect_grace_probe(&node_id, &job_id);
+                self.reconnect_job_is_current(&node_id, &job_id).then(|| {
+                    let detail = oxideterm_ai::sanitize_for_ai(&detail);
+                    let _ = self.reconnect_orchestrator.complete_phase(
+                        &node_id.0,
+                        PhaseResult::Failed,
+                        Some(detail.clone()),
+                    );
+                    self.apply_grace_expiration(&connection_id);
+                    let _ = self
+                        .reconnect_orchestrator
+                        .advance(&node_id.0, ReconnectPhase::SshConnect);
+                    let _ = self.reconnect_orchestrator.begin_ssh_attempt(&node_id.0);
+                    ReconnectRuntimeEffect::GraceExpired { node_id, detail }
+                })
+            }
             ReconnectWorkerResult::SftpTransfersSnapshotted {
                 node_id,
                 transfers_by_node,
@@ -2567,11 +2703,29 @@ impl WorkspaceRuntimeEntity {
                     status,
                     affected_children,
                     ..
-                } => Some(NodeRuntimeEffect::ConnectionStatusChanged {
-                    connection_id,
-                    status,
-                    affected_children,
-                }),
+                } => {
+                    let node_id = self.node_router.node_id_for_connection(&connection_id)?;
+                    let event_state = readiness_for_runtime_connection_status(&status)?;
+                    let state = self
+                        .node_router
+                        .node_state(&node_id)
+                        .map(|snapshot| snapshot.state.readiness)
+                        .unwrap_or(event_state);
+                    let reason = reason_for_runtime_connection_status(&status);
+                    let _ = self.node_router.sync_node_readiness_event(
+                        &node_id,
+                        state.clone(),
+                        reason.clone(),
+                    );
+                    Some(NodeRuntimeEffect::ConnectionStatusChanged {
+                        node_id,
+                        connection_id,
+                        status,
+                        state,
+                        reason,
+                        affected_children,
+                    })
+                }
                 _ => None,
             };
         };
@@ -2590,11 +2744,20 @@ impl WorkspaceRuntimeEntity {
                 state,
                 reason,
                 ..
-            } => Some(NodeRuntimeEffect::ConnectionStateChanged {
-                node_id,
-                state,
-                reason: oxideterm_ai::sanitize_for_ai(&reason),
-            }),
+            } => {
+                let reason = oxideterm_ai::sanitize_for_ai(&reason);
+                let node_id = NodeId::new(node_id);
+                let _ = self.node_router.sync_node_readiness_event(
+                    &node_id,
+                    state.clone(),
+                    reason.clone(),
+                );
+                Some(NodeRuntimeEffect::ConnectionStateChanged {
+                    node_id: node_id.0,
+                    state,
+                    reason,
+                })
+            }
             NodeStateEvent::SftpReady {
                 node_id,
                 ready,
@@ -2628,6 +2791,27 @@ impl WorkspaceRuntimeEntity {
             self.push_runtime_effect(WorkspaceRuntimeEffect::StartReconnectRoot { node_id }, cx);
         }
     }
+}
+
+fn readiness_for_runtime_connection_status(status: &str) -> Option<NodeReadiness> {
+    match status {
+        "connected" => Some(NodeReadiness::Ready),
+        "link_down" => Some(NodeReadiness::Error),
+        "reconnecting" => Some(NodeReadiness::Connecting),
+        "disconnected" => Some(NodeReadiness::Disconnected),
+        _ => None,
+    }
+}
+
+fn reason_for_runtime_connection_status(status: &str) -> String {
+    match status {
+        "connected" => "connection restored",
+        "link_down" => "link down",
+        "reconnecting" => "reconnecting",
+        "disconnected" => "connection disconnected",
+        _ => "connection status changed",
+    }
+    .to_string()
 }
 
 fn should_install_remote_shell_integration(
@@ -3230,15 +3414,37 @@ mod tests {
                 cx,
             )
         });
+        let (endpoint_event_tx, endpoint_event_rx) = std::sync::mpsc::channel();
+        node_router.emitter().subscribe(endpoint_event_tx);
 
         let session_id = TerminalSessionId(7);
         entity.update(cx, |entity, _cx| {
+            entity.bind_ssh_terminal_endpoint(
+                &node_id,
+                TerminalEndpoint {
+                    ws_port: 0,
+                    ws_token: zeroize::Zeroizing::new("terminal-token".to_string()),
+                    session_id: session_id.0.to_string(),
+                },
+            );
             assert!(entity.register_ssh_terminal_session(session_id, node_id.clone()));
             assert_eq!(
                 entity.unregister_ssh_terminal_session(session_id),
                 Some(node_id.clone())
             );
         });
+        assert!(matches!(
+            endpoint_event_rx.try_recv(),
+            Ok(NodeStateEvent::TerminalEndpointChanged {
+                node_id: event_node_id,
+                available: true,
+                ..
+            }) if event_node_id == node_id.0
+        ));
+        assert!(matches!(
+            endpoint_event_rx.try_recv(),
+            Err(std::sync::mpsc::TryRecvError::Empty)
+        ));
 
         let connection_info = ssh_registry
             .get(&connection_id)
@@ -3249,6 +3455,10 @@ mod tests {
         assert_eq!(
             node_router.connection_id_for_node(&node_id),
             Some(connection_id)
+        );
+        assert!(
+            node_router.terminal_url(&node_id).is_err(),
+            "closing a terminal removes only its endpoint"
         );
     }
 
@@ -3355,11 +3565,22 @@ mod tests {
 
         entity.update(cx, |entity, _cx| {
             assert!(entity.register_ssh_terminal_session(TerminalSessionId(9), node_id.clone()));
+            let active_probe_task = entity.task_runtime.spawn(std::future::pending::<()>());
+            entity.active_probe_task = Some(active_probe_task.abort_handle());
+            entity.ssh_active_probe_in_flight = true;
+            let grace_probe_task = entity.task_runtime.spawn(std::future::pending::<()>());
+            entity.reconnect_grace_probe_tasks.insert(
+                node_id.clone(),
+                ("grace-job".to_string(), grace_probe_task.abort_handle()),
+            );
             entity.shutdown_workspace_runtime();
             entity.shutdown_workspace_runtime();
             assert_eq!(entity.lifecycle, WorkspaceRuntimeLifecycle::Stopped);
             assert!(entity.terminal_ssh_nodes.is_empty());
             assert!(entity.pending_ssh_terminal_opens.is_empty());
+            assert!(entity.active_probe_task.is_none());
+            assert!(!entity.ssh_active_probe_in_flight);
+            assert!(entity.reconnect_grace_probe_tasks.is_empty());
         });
 
         assert!(ssh_registry.get(&connection_id).is_none());
@@ -3387,6 +3608,23 @@ mod tests {
 
             assert!(!entity.node_transport_result_is_current(&node_id, attempt_id));
             assert!(entity.runtime_effects.is_empty());
+        });
+    }
+
+    #[gpui::test]
+    fn cancelling_reconnect_clears_the_owned_grace_probe(cx: &mut TestAppContext) {
+        let entity = test_runtime_entity(cx);
+        let node_id = NodeId::new("node-a");
+        entity.update(cx, |entity, _cx| {
+            let grace_probe_task = entity.task_runtime.spawn(std::future::pending::<()>());
+            entity.reconnect_grace_probe_tasks.insert(
+                node_id.clone(),
+                ("grace-job".to_string(), grace_probe_task.abort_handle()),
+            );
+
+            entity.cancel_queued_reconnects(std::slice::from_ref(&node_id));
+
+            assert!(!entity.reconnect_grace_probe_tasks.contains_key(&node_id));
         });
     }
 
@@ -3955,6 +4193,64 @@ mod tests {
             assert_eq!(
                 entity.node_event_generations.get(&NodeId::new("node-a")),
                 Some(&3)
+            );
+        });
+    }
+
+    #[gpui::test]
+    fn connection_status_reducer_updates_runtime_before_emitting_ui_effect(
+        cx: &mut TestAppContext,
+    ) {
+        let ssh_registry = SshConnectionRegistry::new(ConnectionPoolConfig::default());
+        let node_router = NodeRouter::new(ssh_registry.clone());
+        let node_id = NodeId::new("node-a");
+        let config = SshConfig::default();
+        node_router.upsert_node(node_id.clone(), config.clone());
+        let connection =
+            ssh_registry.acquire(config, ConnectionConsumer::NodeRouter(node_id.0.clone()));
+        let connection_id = connection.connection_id().to_string();
+        node_router
+            .bind_connection(&node_id, connection_id.clone())
+            .expect("bind node connection");
+        let _ = ssh_registry.mark_state_without_event(&connection_id, ConnectionState::LinkDown);
+        let task_runtime = test_task_runtime();
+        let entity = cx.new(|cx| {
+            WorkspaceRuntimeEntity::new(
+                ssh_registry,
+                node_router,
+                task_runtime,
+                true,
+                ReconnectTiming::default(),
+                3,
+                cx,
+            )
+        });
+
+        entity.update(cx, |entity, _cx| {
+            let effect = entity
+                .reduce_node_event(NodeStateEvent::ConnectionStatusChanged {
+                    connection_id: connection_id.clone(),
+                    status: "link_down".to_string(),
+                    affected_children: Vec::new(),
+                    timestamp: 0,
+                })
+                .expect("typed connection status effect");
+            assert!(matches!(
+                effect,
+                NodeRuntimeEffect::ConnectionStatusChanged {
+                    node_id: effect_node_id,
+                    state: NodeReadiness::Error,
+                    ..
+                } if effect_node_id == node_id
+            ));
+            assert_eq!(
+                entity
+                    .node_router
+                    .node_runtime_snapshot(&node_id)
+                    .expect("runtime snapshot")
+                    .state
+                    .readiness,
+                NodeReadiness::Error
             );
         });
     }

@@ -777,34 +777,6 @@ impl WorkspaceApp {
         ))
     }
 
-    pub(in crate::workspace) fn connection_trace_plan_for_node(
-        &mut self,
-        node_id: &NodeId,
-        mode: ConnectionTraceMode,
-        cx: &mut Context<Self>,
-    ) -> Option<ConnectionTracePlan> {
-        let mut path = Vec::new();
-        let mut current = Some(node_id.clone());
-        while let Some(current_id) = current {
-            path.push(current_id.clone());
-            current = self
-                .node_router
-                .node_metadata(&current_id)
-                .and_then(|snapshot| snapshot.parent_id);
-        }
-        path.reverse();
-        let path = path
-            .into_iter()
-            .map(|candidate| {
-                let ready = self.connection_trace_node_is_ready(&candidate);
-                (candidate, ready)
-            })
-            .collect::<Vec<_>>();
-        self.workspace_runtime.update(cx, |runtime, _cx| {
-            runtime.plan_connection_trace(mode, &path)
-        })
-    }
-
     pub(in crate::workspace) fn connection_trace_node_is_ready(&self, node_id: &NodeId) -> bool {
         self.node_router
             .node_state(node_id)
@@ -885,19 +857,16 @@ impl WorkspaceApp {
         if affected_nodes.is_empty() {
             affected_nodes.push(node_id.clone());
         }
-        self.workspace_runtime.update(cx, |runtime, _cx| {
+        let cancelled = self.workspace_runtime.update(cx, |runtime, _cx| {
             runtime.cancel_queued_reconnects(&affected_nodes);
-        });
-        let mut cancelled = 0_u32;
-        for affected_node_id in affected_nodes {
-            if self
-                .workspace_runtime
-                .read(cx)
-                .cancel_reconnect_job(&affected_node_id)
-            {
-                cancelled = cancelled.saturating_add(1);
+            let mut cancelled = 0_u32;
+            for affected_node_id in affected_nodes {
+                if runtime.cancel_reconnect_job(&affected_node_id) {
+                    cancelled = cancelled.saturating_add(1);
+                }
             }
-        }
+            cancelled
+        });
         if cancelled > 0 {
             self.push_event_log_entry(
                 WorkspaceEventSeverity::Warn,

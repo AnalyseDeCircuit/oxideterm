@@ -287,7 +287,7 @@ fn open_main_workspace_window(
         });
         if let Some(launch) = ssh_launch
             && let Err(error) = workspace.update(cx, |workspace, cx| {
-                workspace.open_temporary_ssh_launch(launch, window, cx)
+                workspace.open_temporary_ssh_launch(launch, cx)
             })
         {
             eprintln!("failed to open temporary SSH launch: {error}");

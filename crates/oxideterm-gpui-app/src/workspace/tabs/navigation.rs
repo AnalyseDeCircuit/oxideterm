@@ -42,26 +42,6 @@ fn tabbar_scroll_x_after_wheel(current_scroll_x: f32, wheel_delta: f32, max_scro
     (current_scroll_x - wheel_delta).clamp(0.0, max_scroll)
 }
 
-fn attach_terminal_to_existing_ssh_node(
-    node: &mut WorkspaceSshNode,
-    saved_connection_id: Option<String>,
-    config: &SshConfig,
-    session_id: TerminalSessionId,
-) {
-    node.update_endpoint(config);
-    // Terminal tab titles are per-tab state. Never let a Docker exec/logs tab,
-    // quick command tab, or other one-off title rename the host node itself.
-    if !matches!(node.readiness, NodeReadiness::Ready) {
-        node.readiness = NodeReadiness::Connecting;
-    }
-    if !node.terminal_ids.contains(&session_id) {
-        node.terminal_ids.push(session_id);
-    }
-    if node.saved_connection_id.is_none() {
-        node.saved_connection_id = saved_connection_id;
-    }
-}
-
 fn focus_terminal_node_projection(
     node_id: &NodeId,
     active_node_id: &mut Option<NodeId>,
@@ -313,64 +293,17 @@ impl WorkspaceApp {
         }
     }
 
-    pub(super) fn register_ssh_terminal_session(
-        &mut self,
-        node_id: NodeId,
-        saved_connection_id: Option<String>,
-        config: SshConfig,
-        title: String,
-        session_id: TerminalSessionId,
-        cx: &mut App,
-    ) -> Result<()> {
-        let registered = self.workspace_runtime.update(cx, |runtime, _cx| {
-            runtime.register_ssh_terminal_session(session_id, node_id.clone())
-        });
-        if !registered {
-            return Err(anyhow::anyhow!("workspace runtime is shutting down"));
-        }
-        self.expanded_ssh_nodes.insert(node_id.clone());
-        self.active_ssh_node_id = Some(node_id.clone());
-        if let Some(saved_connection_id) = saved_connection_id.as_ref() {
-            self.saved_ssh_nodes
-                .insert(saved_connection_id.clone(), node_id.clone());
-        }
-
-        self.ssh_nodes
-            .entry(node_id)
-            .and_modify(|node| {
-                attach_terminal_to_existing_ssh_node(
-                    node,
-                    saved_connection_id.clone(),
-                    &config,
-                    session_id,
-                );
-            })
-            .or_insert_with(|| {
-                WorkspaceSshNode::new(
-                    saved_connection_id,
-                    &config,
-                    title,
-                    vec![session_id],
-                    NodeReadiness::Connecting,
-                )
-            });
-        Ok(())
-    }
-
     pub(super) fn register_existing_ssh_terminal_session(
         &mut self,
         node_id: &NodeId,
         session_id: TerminalSessionId,
         cx: &mut App,
     ) -> Result<()> {
-        let node = self
+        let saved_connection_id = self
             .ssh_nodes
-            .get_mut(node_id)
+            .get(node_id)
+            .map(|node| node.saved_connection_id.clone())
             .ok_or_else(|| anyhow::anyhow!("SSH node {} not found", node_id.0))?;
-        if !node.terminal_ids.contains(&session_id) {
-            node.terminal_ids.push(session_id);
-        }
-        let saved_connection_id = node.saved_connection_id.clone();
 
         // Existing terminals register only their consumer identity. The node
         // and registry keep owning the authentication config and transport.
@@ -379,6 +312,11 @@ impl WorkspaceApp {
         });
         if !registered {
             return Err(anyhow::anyhow!("workspace runtime is shutting down"));
+        }
+        if let Some(node) = self.ssh_nodes.get_mut(node_id)
+            && !node.terminal_ids.contains(&session_id)
+        {
+            node.terminal_ids.push(session_id);
         }
         self.expanded_ssh_nodes.insert(node_id.clone());
         self.active_ssh_node_id = Some(node_id.clone());
@@ -407,22 +345,25 @@ impl WorkspaceApp {
         let node_id = self.workspace_runtime.update(cx, |runtime, _cx| {
             runtime.unregister_ssh_terminal_session(session_id)
         });
-        let Some(node_id) = node_id else {
-            return;
-        };
         // Tauri terminal close only removes the terminal/session mapping.
         // Do not health-probe here: a closed shell channel is not evidence
         // that the node-owned SSH transport died, and probing on the last
         // terminal close can incorrectly drive the node into LinkDown.
-        let Some(node) = self.ssh_nodes.get_mut(&node_id) else {
-            return;
-        };
-        node.terminal_ids.retain(|id| *id != session_id);
-        let endpoint_session_id = session_id.0.to_string();
-        let _ = self
-            .node_router
-            .unbind_terminal_session(&node_id, &endpoint_session_id);
-        self.persist_session_tree_snapshot();
+        let mut projection_changed = false;
+        for (projected_node_id, node) in &mut self.ssh_nodes {
+            if node_id
+                .as_ref()
+                .is_some_and(|runtime_node_id| runtime_node_id != projected_node_id)
+            {
+                continue;
+            }
+            let terminal_count = node.terminal_ids.len();
+            node.terminal_ids.retain(|id| *id != session_id);
+            projection_changed |= node.terminal_ids.len() != terminal_count;
+        }
+        if projection_changed {
+            self.persist_session_tree_snapshot();
+        }
     }
 
     pub(in crate::workspace) fn focus_terminal_session(
@@ -1548,62 +1489,6 @@ mod tests {
         assert_eq!(tab_reorder_target_visible_index(0, 3), 2);
         assert_eq!(tab_reorder_target_visible_index(2, 0), 0);
         assert_eq!(tab_reorder_target_visible_index(1, 2), 1);
-    }
-
-    #[test]
-    fn attaching_terminal_does_not_rename_existing_ssh_node() {
-        let mut node = WorkspaceSshNode::new(
-            Some("home".to_string()),
-            &SshConfig::default(),
-            "Home Host".to_string(),
-            vec![TerminalSessionId(1)],
-            NodeReadiness::Ready,
-        );
-        let updated_config = SshConfig {
-            host: "100.118.61.75".to_string(),
-            ..SshConfig::default()
-        };
-
-        attach_terminal_to_existing_ssh_node(
-            &mut node,
-            Some("home".to_string()),
-            &updated_config,
-            TerminalSessionId(2),
-        );
-
-        assert_eq!(node.title, "Home Host");
-        assert_eq!(node.endpoint.host, "100.118.61.75");
-        assert_eq!(
-            node.terminal_ids,
-            vec![TerminalSessionId(1), TerminalSessionId(2)]
-        );
-        assert_eq!(node.readiness, NodeReadiness::Ready);
-    }
-
-    #[test]
-    fn attaching_terminal_without_saved_id_keeps_existing_node_owner() {
-        let mut node = WorkspaceSshNode::new(
-            Some("prod".to_string()),
-            &SshConfig::default(),
-            "Production".to_string(),
-            vec![TerminalSessionId(1)],
-            NodeReadiness::Ready,
-        );
-
-        // A later terminal is a consumer of the existing node owner, not a new
-        // privilege scope that can clear or replace that owner.
-        attach_terminal_to_existing_ssh_node(
-            &mut node,
-            None,
-            &SshConfig::default(),
-            TerminalSessionId(2),
-        );
-
-        assert_eq!(node.saved_connection_id.as_deref(), Some("prod"));
-        assert_eq!(
-            node.terminal_ids,
-            vec![TerminalSessionId(1), TerminalSessionId(2)]
-        );
     }
 
     #[test]

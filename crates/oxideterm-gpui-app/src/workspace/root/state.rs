@@ -44,10 +44,6 @@ impl WorkspaceSshNode {
             readiness,
         }
     }
-
-    pub(in crate::workspace) fn update_endpoint(&mut self, config: &SshConfig) {
-        self.endpoint = WorkspaceSshNodeEndpoint::from_config(config);
-    }
 }
 
 #[derive(Debug)]

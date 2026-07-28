@@ -1,7 +1,6 @@
 use super::nodes_reconnect_helpers::{
     event_log_severity_for_connection_status, event_log_title_for_node_readiness,
     node_readiness_became_ready, node_readiness_became_unavailable,
-    readiness_for_connection_status, reason_for_connection_status,
     reconnect_cascade_child_should_start,
 };
 use super::*;
@@ -221,9 +220,6 @@ impl WorkspaceApp {
                             None => {}
                         }
                     }
-                    if let Ok(event) = self.node_router.bind_connection(&node_id, connection_id) {
-                        self.emit_node_event(event);
-                    }
                     let projected_readiness = self
                         .node_router
                         .node_state(&node_id)
@@ -276,9 +272,11 @@ impl WorkspaceApp {
                             .unwrap_or_default();
                         for child_id in children_to_start {
                             if self
-                                .ssh_nodes
-                                .get(&child_id)
-                                .is_some_and(|child| child.readiness == NodeReadiness::Connecting)
+                                .node_router
+                                .node_state(&child_id)
+                                .is_ok_and(|snapshot| {
+                                    snapshot.state.readiness == NodeReadiness::Connecting
+                                })
                             {
                                 self.ensure_node_connection_started(&child_id, cx);
                             }
@@ -401,13 +399,6 @@ impl WorkspaceApp {
                     if let Some(node) = self.ssh_nodes.get_mut(&node_id) {
                         node.readiness = NodeReadiness::Error;
                     }
-                    let event = NodeStateEvent::ConnectionStateChanged {
-                        node_id: node_id.0.clone(),
-                        generation: self.node_router.emitter().sequencer().next(&node_id),
-                        state: NodeReadiness::Error,
-                        reason: error,
-                    };
-                    self.emit_node_event(event);
                     if !connection_chain_node {
                         self.schedule_next_reconnect_cascade_node(cx);
                     }
@@ -499,32 +490,18 @@ impl WorkspaceApp {
     ) -> bool {
         match event {
             runtime_entity::NodeRuntimeEffect::ConnectionStatusChanged {
+                node_id,
                 connection_id,
                 status,
+                state,
+                reason,
                 affected_children,
             } => {
-                let Some(node_id) = self.node_router.node_id_for_connection(&connection_id) else {
-                    return false;
-                };
-                let Some(event_state) = readiness_for_connection_status(&status) else {
-                    return false;
-                };
-                let state = self
-                    .node_router
-                    .node_state(&node_id)
-                    .map(|snapshot| snapshot.state.readiness)
-                    .unwrap_or(event_state);
-                let reason = reason_for_connection_status(&status);
                 self.ensure_workspace_ssh_node_from_runtime(&node_id);
                 let previous = self
                     .ssh_nodes
                     .get(&node_id)
                     .map(|node| node.readiness.clone());
-                let _ = self.node_router.sync_node_readiness_event(
-                    &node_id,
-                    state.clone(),
-                    reason.clone(),
-                );
                 if let Some(node) = self.ssh_nodes.get_mut(&node_id) {
                     node.readiness = state.clone();
                 }
@@ -640,11 +617,6 @@ impl WorkspaceApp {
                     .node_state(&node_id)
                     .map(|snapshot| snapshot.state.readiness)
                     .unwrap_or(event_state);
-                let _ = self.node_router.sync_node_readiness_event(
-                    &node_id,
-                    state.clone(),
-                    reason.clone(),
-                );
                 let previous = self
                     .ssh_nodes
                     .get(&node_id)
@@ -804,47 +776,20 @@ impl WorkspaceApp {
         reason: String,
         cx: &mut Context<Self>,
     ) -> usize {
-        let connection_state = match state {
-            NodeReadiness::Error => ConnectionState::LinkDown,
-            NodeReadiness::Disconnected => ConnectionState::Disconnected,
-            NodeReadiness::Ready | NodeReadiness::Connecting => return 0,
-        };
         let affected = self
-            .node_router
-            .connection_id_for_node(root_node_id)
-            .map(|root_connection_id| {
-                affected_connection_ids
-                    .map(|ids| ids.to_vec())
-                    .unwrap_or_else(|| {
-                        self.ssh_registry
-                            .descendant_connection_infos(&root_connection_id)
-                            .into_iter()
-                            .map(|info| info.connection_id)
-                            .collect::<Vec<_>>()
-                    })
-                    .into_iter()
-                    .filter_map(|connection_id| {
-                        self.node_router.node_id_for_connection(&connection_id)
-                    })
-                    .filter(|node_id| node_id != root_node_id)
-                    .collect::<Vec<_>>()
-            })
-            .unwrap_or_default();
+            .workspace_runtime
+            .read(cx)
+            .cascade_connection_status_to_children(
+                root_node_id,
+                affected_connection_ids,
+                state.clone(),
+                reason,
+            );
         for affected_node_id in &affected {
             self.ensure_workspace_ssh_node_from_runtime(affected_node_id);
             self.mark_ide_interrupted_for_node(affected_node_id, cx);
             if let Some(node) = self.ssh_nodes.get_mut(affected_node_id) {
                 node.readiness = state.clone();
-            }
-            let _ = self.node_router.sync_node_readiness_event(
-                affected_node_id,
-                state.clone(),
-                reason.clone(),
-            );
-            if let Some(connection_id) = self.node_router.connection_id_for_node(affected_node_id) {
-                let _ = self
-                    .ssh_registry
-                    .mark_state_without_event(&connection_id, connection_state.clone());
             }
             let message = if matches!(state, NodeReadiness::Disconnected) {
                 "Connection closed".to_string()
@@ -1112,10 +1057,10 @@ impl WorkspaceApp {
             .iter()
             .filter_map(|affected_node_id| {
                 let terminal_ids = self
-                    .ssh_nodes
-                    .get(affected_node_id)?
-                    .terminal_ids
-                    .iter()
+                    .workspace_runtime
+                    .read(cx)
+                    .ssh_terminal_session_ids_for_node(affected_node_id)
+                    .into_iter()
                     .map(|session_id| session_id.0.to_string())
                     .collect::<Vec<_>>();
                 (!terminal_ids.is_empty()).then_some(ReconnectNodeTerminalSnapshot {
@@ -1219,9 +1164,11 @@ impl WorkspaceApp {
             .iter()
             .filter(|affected_node_id| *affected_node_id != root_node_id)
             .filter(|affected_node_id| {
-                self.ssh_nodes
-                    .get(affected_node_id)
-                    .is_some_and(|node| reconnect_cascade_child_should_start(&node.readiness))
+                self.node_router
+                    .node_state(affected_node_id)
+                    .is_ok_and(|snapshot| {
+                        reconnect_cascade_child_should_start(&snapshot.state.readiness)
+                    })
             })
             .cloned()
             .collect::<Vec<_>>();
@@ -1232,11 +1179,6 @@ impl WorkspaceApp {
         if let Some(node) = self.ssh_nodes.get_mut(root_node_id) {
             node.readiness = NodeReadiness::Connecting;
         }
-        let _ = self.node_router.sync_node_readiness_event(
-            root_node_id,
-            NodeReadiness::Connecting,
-            "grace expired",
-        );
         if !self.ensure_node_connection_started(root_node_id, cx) {
             self.workspace_runtime.update(cx, |runtime, _cx| {
                 runtime.clear_reconnect_cascade();
@@ -1649,15 +1591,8 @@ impl WorkspaceApp {
             if let Some(node) = self.ssh_nodes.get_mut(node_id) {
                 node.readiness = NodeReadiness::Error;
             }
-            if let Ok(event) = self.node_router.sync_node_readiness_event(
-                node_id,
-                NodeReadiness::Error,
-                error.clone(),
-            ) {
-                self.emit_node_event(event);
-            }
             self.workspace_runtime.update(cx, |runtime, cx| {
-                runtime.finish_connection_trace_failed(node_id, Some(error), cx);
+                runtime.record_node_transport_start_failure(node_id, error, cx);
             });
             return false;
         }
@@ -1677,15 +1612,8 @@ impl WorkspaceApp {
             if let Some(node) = self.ssh_nodes.get_mut(node_id) {
                 node.readiness = NodeReadiness::Error;
             }
-            if let Ok(event) = self.node_router.sync_node_readiness_event(
-                node_id,
-                NodeReadiness::Error,
-                detail.clone(),
-            ) {
-                self.emit_node_event(event);
-            }
             self.workspace_runtime.update(cx, |runtime, cx| {
-                runtime.finish_connection_trace_failed(node_id, Some(detail), cx);
+                runtime.record_node_transport_start_failure(node_id, detail, cx);
             });
             return false;
         }

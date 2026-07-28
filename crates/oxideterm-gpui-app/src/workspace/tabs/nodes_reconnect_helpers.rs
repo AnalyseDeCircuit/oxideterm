@@ -1,26 +1,5 @@
 use super::*;
 
-pub(super) fn readiness_for_connection_status(status: &str) -> Option<NodeReadiness> {
-    match status {
-        "connected" => Some(NodeReadiness::Ready),
-        "link_down" => Some(NodeReadiness::Error),
-        "reconnecting" => Some(NodeReadiness::Connecting),
-        "disconnected" => Some(NodeReadiness::Disconnected),
-        _ => None,
-    }
-}
-
-pub(super) fn reason_for_connection_status(status: &str) -> String {
-    match status {
-        "connected" => "connection restored",
-        "link_down" => "link down",
-        "reconnecting" => "reconnecting",
-        "disconnected" => "connection disconnected",
-        _ => "connection status changed",
-    }
-    .to_string()
-}
-
 pub(super) fn event_log_severity_for_connection_status(status: &str) -> WorkspaceEventSeverity {
     match status {
         // Mirrors Tauri `useEventLogCapture.statusSeverity`: link loss is the

@@ -203,9 +203,11 @@ impl WorkspaceApp {
         }) {
             self.associate_existing_node_with_saved_connection(&node_id, &saved_connection_id);
             if let Some(session_id) = self
-                .ssh_nodes
-                .get(&node_id)
-                .and_then(|node| node.terminal_ids.first().copied())
+                .workspace_runtime
+                .read(cx)
+                .ssh_terminal_session_ids_for_node(&node_id)
+                .first()
+                .copied()
                 && self.focus_terminal_session(session_id, window, cx)
             {
                 let _ = self.connection_store.mark_used(&saved_connection_id);
@@ -283,9 +285,11 @@ impl WorkspaceApp {
                     &saved_connection_id,
                 );
                 if let Some(session_id) = self
-                    .ssh_nodes
-                    .get(&existing_node_id)
-                    .and_then(|node| node.terminal_ids.first().copied())
+                    .workspace_runtime
+                    .read(cx)
+                    .ssh_terminal_session_ids_for_node(&existing_node_id)
+                    .first()
+                    .copied()
                     && self.focus_terminal_session(session_id, window, cx)
                 {
                     let _ = self.connection_store.mark_used(&saved_connection_id);
@@ -432,7 +436,7 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
-        let Some(session_id) = self.ssh_nodes.iter().find_map(|(node_id, node)| {
+        let Some(session_id) = self.ssh_nodes.iter().find_map(|(node_id, _node)| {
             // Match Tauri connectToSaved: a saved connection with missing
             // credentials may still focus an already-active root node with the
             // same endpoint, but it must not create a new terminal.
@@ -448,8 +452,18 @@ impl WorkspaceApp {
             // `then_some` evaluates its argument eagerly. Use `first()` so a
             // ready node without attached terminals can be skipped instead of
             // indexing an empty terminal list during startup/event handling.
-            (matching_root && node.readiness == NodeReadiness::Ready)
-                .then(|| node.terminal_ids.first().copied())
+            let runtime_ready = self
+                .node_router
+                .node_state(node_id)
+                .is_ok_and(|snapshot| snapshot.state.readiness == NodeReadiness::Ready);
+            let session_id = self
+                .workspace_runtime
+                .read(cx)
+                .ssh_terminal_session_ids_for_node(node_id)
+                .first()
+                .copied();
+            (matching_root && runtime_ready)
+                .then_some(session_id)
                 .flatten()
         }) else {
             return false;
@@ -531,141 +545,11 @@ impl WorkspaceApp {
         node_id
     }
 
-    pub(in crate::workspace) fn create_ssh_terminal_tab_for_node(
-        &mut self,
-        post_connect_command: Option<String>,
-        config: SshConfig,
-        title: String,
-        saved_connection_id: Option<String>,
-        node_id: Option<NodeId>,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> Result<TerminalSessionId> {
-        let tab_id = self.alloc_tab_id(cx);
-        let pane_id = self.alloc_pane_id(cx);
-        let session_id = self.alloc_session_id(cx);
-        let node_id = node_id.unwrap_or_else(|| {
-            let id = NodeId::new(format!("ssh-{}", self.next_ssh_node_id));
-            self.next_ssh_node_id += 1;
-            id
-        });
-
-        let origin = self
-            .node_router
-            .node_metadata(&node_id)
-            .map(|snapshot| snapshot.origin)
-            .or_else(|| {
-                saved_connection_id.as_ref().map(|id| NodeOrigin::Restored {
-                    saved_connection_id: id.clone(),
-                })
-            })
-            .unwrap_or(NodeOrigin::Direct);
-        if !self.node_router.contains_node(&node_id) {
-            self.node_router
-                .upsert_node_with_origin(node_id.clone(), config.clone(), origin);
-        }
-        let starting_node_connection = self.node_router.connection_id_for_node(&node_id).is_none();
-        let trace_plan = starting_node_connection
-            .then(|| {
-                self.connection_trace_plan_for_node(&node_id, ConnectionTraceMode::Connect, cx)
-            })
-            .flatten();
-        let trace_parent_id = self
-            .node_router
-            .node_metadata(&node_id)
-            .and_then(|snapshot| snapshot.parent_id);
-        if starting_node_connection {
-            let node_consumer = ConnectionConsumer::NodeRouter(node_id.0.clone());
-            let node_handle = self.ssh_registry.acquire(config.clone(), node_consumer);
-            let connection_id = node_handle.connection_id().to_string();
-            let _ = self
-                .ssh_registry
-                .mark_state(&connection_id, ConnectionState::Connecting);
-            // Tauri owns SSH node liveness outside any terminal tab. Keep a
-            // NodeRouter consumer in the pool so SFTP/forwards can resolve by
-            // nodeId after the terminal pane that established the transport is
-            // closed; the terminal below is only an additional consumer.
-            if let Ok(event) = self.node_router.bind_connection(&node_id, connection_id) {
-                self.emit_node_event(event);
-            }
-        }
-        self.register_ssh_terminal_session(
-            node_id.clone(),
-            saved_connection_id,
-            config.clone(),
-            title.clone(),
-            session_id,
-            cx,
-        )?;
-        if starting_node_connection {
-            self.begin_connection_trace_for_node(
-                &node_id,
-                trace_plan.as_ref(),
-                trace_parent_id.as_ref(),
-                cx,
-            );
-        }
-        let preferences = self.prepare_terminal_preferences_for_tab_kind(&TabKind::SshTerminal, cx);
-        let consumer = ConnectionConsumer::Terminal(session_id.0.to_string());
-        let prompt_handler =
-            std::sync::Arc::new(NativeSshPromptHandler::new(self.ssh_worker_sender(cx)));
-        let managed_key_resolver =
-            oxideterm_session_adapter::managed_key_resolver_from_store(&self.connection_store);
-        // Tauri passes postConnectCommand as a createTerminalForNode option.
-        // Keep it one-shot for this terminal instead of letting every future
-        // terminal opened from the same node replay the saved command.
-        let session_config = SshSessionConfig::from(config)
-            .with_post_connect_command(post_connect_command)
-            .with_registry(self.ssh_registry.clone(), consumer)
-            .with_prompt_handler(prompt_handler)
-            .with_managed_key_resolver(managed_key_resolver)
-            // SSH terminal connect tasks share the workspace backend runtime so
-            // opening many SSH tabs does not create one Tokio runtime per pane.
-            // The remote PTY must be allocated from the first real GPUI layout
-            // size, not from the terminal model's construction fallback.
-            .with_deferred_pty(true)
-            .with_runtime_handle(self.forwarding_runtime.handle().clone())
-            .with_trzsz_policy(preferences.trzsz_policy.clone());
-        let shared_session = TerminalPane::ssh_shared_session(session_config, &preferences);
-        self.register_terminal_endpoint_session(&node_id, session_id, shared_session.clone());
-        let pane = cx.new(|cx| {
-            TerminalPane::from_shared_session(shared_session, preferences, window, cx)
-                .expect("failed to initialize ssh terminal pane")
-        });
-
-        self.register_terminal_pane(pane_id, session_id, pane.clone(), window, cx);
-        self.refresh_native_plugin_terminal_hooks(cx);
-        self.tabs.push(Tab {
-            id: tab_id,
-            kind: TabKind::SshTerminal,
-            title,
-            title_source: TabTitleSource::Static,
-            root_pane: Some(PaneNode::leaf(pane_id, session_id)),
-            active_pane_id: Some(pane_id),
-        });
-        self.bind_terminal_location(tab_id, pane_id, session_id, cx);
-        self.set_main_window_active_tab(Some(tab_id), cx);
-        self.active_surface = ActiveSurface::Terminal;
-        if self.sidebar_collapsed {
-            self.set_sidebar_collapsed_with_motion(false, cx);
-        }
-        self.needs_active_pane_focus = true;
-        pane.update(cx, |pane, cx| pane.focus(window, cx));
-        self.reveal_active_tab(window);
-        self.persist_session_tree_snapshot();
-        // The policy check starts only after the visible terminal has been
-        // registered, so it cannot displace the first login Shell request.
-        self.start_remote_shell_integration_terminal_gate(node_id, false, cx);
-        cx.notify();
-        Ok(session_id)
-    }
-
     pub(crate) fn open_temporary_ssh_launch(
         &mut self,
         launch: TemporarySshLaunch,
-        window: &mut Window,
         cx: &mut Context<Self>,
-    ) -> Result<TerminalSessionId> {
+    ) -> Result<()> {
         let title = launch.title();
         let auth = match launch.password {
             Some(password) => AuthMethod::password_secret(password),
@@ -679,7 +563,28 @@ impl WorkspaceApp {
             strict_host_key_checking: true,
             ..SshConfig::default()
         };
-        self.create_ssh_terminal_tab_for_node(None, config, title, None, None, window, cx)
+        let node_id = self.materialize_ssh_root_node(config, title.clone(), None);
+        let queue_outcome = self.workspace_runtime.update(cx, |runtime, runtime_cx| {
+            runtime.queue_ssh_terminal_open(
+                runtime_entity::PendingSshTerminalOpen {
+                    node_id: node_id.clone(),
+                    post_connect_command: None,
+                    mark_used_connection_id: None,
+                    save_after_open: None,
+                    cleanup_node_id: Some(node_id.clone()),
+                    title,
+                },
+                runtime_cx,
+            )
+        });
+        if queue_outcome == runtime_entity::QueueSshTerminalOpenOutcome::WorkspaceShuttingDown {
+            return Err(anyhow::anyhow!("workspace runtime is shutting down"));
+        }
+        // The temporary launch now shares the same node-owned transport attempt
+        // and reliable completion delivery as every other first terminal.
+        self.ensure_node_connection_started(&node_id, cx);
+        cx.notify();
+        Ok(())
     }
 
     pub(in crate::workspace) fn expand_saved_connection_tree(
@@ -689,8 +594,9 @@ impl WorkspaceApp {
         target_title: String,
     ) -> Result<NodeTreeExpansion> {
         let proxy_chain = config.proxy_chain.take().unwrap_or_default();
+        // Consume the detached chain so runtime authentication material is not cloned.
         let hops = proxy_chain
-            .iter()
+            .into_iter()
             .map(ssh_config_from_proxy_hop)
             .collect::<Vec<_>>();
         let expansion = self
@@ -709,8 +615,9 @@ impl WorkspaceApp {
         target_title: String,
     ) -> Result<NodeTreeExpansion> {
         let proxy_chain = config.proxy_chain.take().unwrap_or_default();
+        // Consume the detached chain so runtime authentication material is not cloned.
         let hops = proxy_chain
-            .iter()
+            .into_iter()
             .map(ssh_config_from_proxy_hop)
             .collect::<Vec<_>>();
         let expansion = self.node_router.expand_manual_preset_under_parent(
@@ -823,7 +730,7 @@ impl WorkspaceApp {
                 .with_runtime_handle(self.forwarding_runtime.handle().clone())
                 .with_trzsz_policy(preferences.trzsz_policy.clone());
         let shared_session = TerminalPane::ssh_shared_session(session_config, &preferences);
-        self.register_terminal_endpoint_session(node_id, session_id, shared_session.clone());
+        self.register_terminal_endpoint_session(node_id, session_id, shared_session.clone(), cx);
         let pane = cx.new(|cx| {
             TerminalPane::from_shared_session(shared_session, preferences, window, cx)
                 .expect("failed to remount ssh terminal pane")
@@ -1067,6 +974,7 @@ impl WorkspaceApp {
         node_id: &NodeId,
         session_id: TerminalSessionId,
         session: SharedTerminalSession,
+        cx: &mut Context<Self>,
     ) {
         let endpoint = TerminalEndpoint {
             // Native GPUI does not need a loopback WebSocket, but the owner
@@ -1081,9 +989,9 @@ impl WorkspaceApp {
             .insert(session_id, WorkspaceTerminalEndpointSession { session });
         // Register every endpoint. NodeRouter keeps the first endpoint primary
         // and can elect another live endpoint when that terminal closes.
-        if let Ok(event) = self.node_router.bind_terminal_endpoint(node_id, endpoint) {
-            self.emit_node_event(event);
-        }
+        self.workspace_runtime
+            .read(cx)
+            .bind_ssh_terminal_endpoint(node_id, endpoint);
         self.persist_session_tree_snapshot();
     }
 
@@ -1126,17 +1034,33 @@ impl WorkspaceApp {
     }
 }
 
-fn ssh_config_from_proxy_hop(hop: &ProxyHopConfig) -> SshConfig {
+fn ssh_config_from_proxy_hop(hop: ProxyHopConfig) -> SshConfig {
+    let ProxyHopConfig {
+        host,
+        port,
+        username,
+        auth,
+        agent_forwarding,
+        identity_agent,
+        agent_forwarding_socket,
+        legacy_ssh_compatibility,
+        strict_host_key_checking,
+        trust_host_key,
+        expected_host_key_fingerprint,
+    } = hop;
     SshConfig {
-        host: hop.host.clone(),
-        port: hop.port,
-        username: hop.username.clone(),
-        auth: hop.auth.clone(),
+        host,
+        port,
+        username,
+        auth,
         proxy_chain: None,
-        agent_forwarding: hop.agent_forwarding,
-        strict_host_key_checking: hop.strict_host_key_checking,
-        trust_host_key: hop.trust_host_key,
-        expected_host_key_fingerprint: hop.expected_host_key_fingerprint.clone(),
+        agent_forwarding,
+        identity_agent,
+        agent_forwarding_socket,
+        legacy_ssh_compatibility,
+        strict_host_key_checking,
+        trust_host_key,
+        expected_host_key_fingerprint,
         ..SshConfig::default()
     }
 }
@@ -1144,6 +1068,49 @@ fn ssh_config_from_proxy_hop(hop: &ProxyHopConfig) -> SshConfig {
 #[cfg(test)]
 mod create_tests {
     use super::*;
+
+    #[test]
+    fn proxy_hop_conversion_moves_auth_and_preserves_transport_options() {
+        let config = ssh_config_from_proxy_hop(ProxyHopConfig {
+            host: "jump.example.com".to_string(),
+            port: 2202,
+            username: "operator".to_string(),
+            auth: AuthMethod::password("runtime-secret"),
+            agent_forwarding: true,
+            identity_agent: Some("/tmp/identity-agent.sock".to_string()),
+            agent_forwarding_socket: Some("/tmp/forward-agent.sock".to_string()),
+            legacy_ssh_compatibility: true,
+            strict_host_key_checking: true,
+            trust_host_key: Some(false),
+            expected_host_key_fingerprint: Some("SHA256:test".to_string()),
+        });
+
+        assert_eq!(config.host, "jump.example.com");
+        assert_eq!(config.port, 2202);
+        assert_eq!(config.username, "operator");
+        assert!(config.agent_forwarding);
+        assert_eq!(
+            config.identity_agent.as_deref(),
+            Some("/tmp/identity-agent.sock")
+        );
+        assert_eq!(
+            config.agent_forwarding_socket.as_deref(),
+            Some("/tmp/forward-agent.sock")
+        );
+        assert!(config.legacy_ssh_compatibility);
+        assert!(config.strict_host_key_checking);
+        assert_eq!(config.trust_host_key, Some(false));
+        assert_eq!(
+            config.expected_host_key_fingerprint.as_deref(),
+            Some("SHA256:test")
+        );
+        match config.auth {
+            AuthMethod::Password { password } => {
+                assert_eq!(password.as_str(), "runtime-secret");
+            }
+            _ => panic!("proxy hop password authentication was not preserved"),
+        }
+    }
 
     #[test]
     fn reused_ssh_node_without_owner_accepts_explicit_saved_owner() {
