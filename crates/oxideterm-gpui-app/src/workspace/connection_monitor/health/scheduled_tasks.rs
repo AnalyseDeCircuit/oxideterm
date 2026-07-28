@@ -1575,10 +1575,13 @@ impl HostToolsEntity {
 
     pub(in crate::workspace::connection_monitor) fn finish_host_schedules_snapshot(
         &mut self,
-        delivery: HostScheduleSnapshotDelivery,
+        mut delivery: HostScheduleSnapshotDelivery,
         cx: &mut Context<Self>,
     ) {
         if self.host_schedules.running.as_ref() != Some(&delivery.request) {
+            if let Ok(output) = delivery.result.as_mut() {
+                zeroize_host_snapshot_output(output);
+            }
             return;
         }
         let feedback = delivery.request.feedback;
@@ -1586,8 +1589,14 @@ impl HostToolsEntity {
         self.host_schedules.polling = false;
         self.host_schedules.running = None;
         match delivery.result {
-            Ok(output) if output.exit_code.unwrap_or(0) == 0 => {
-                let snapshot = parse_scheduled_task_snapshot(&output.stdout);
+            Ok(mut output) if output.exit_code.unwrap_or(0) == 0 => {
+                let mut snapshot = parse_scheduled_task_snapshot(&output.stdout);
+                if matches!(&snapshot.status, ResourceScheduledTaskStatus::Error { .. }) {
+                    snapshot.status = ResourceScheduledTaskStatus::Error {
+                        message: failure_fallback,
+                    };
+                }
+                zeroize_host_snapshot_output(&mut output);
                 if feedback.should_toast() {
                     match &snapshot.status {
                         ResourceScheduledTaskStatus::Available { .. } => {
@@ -1613,7 +1622,22 @@ impl HostToolsEntity {
                 self.host_schedules.snapshot_connection_id = Some(delivery.request.connection_id);
                 self.host_schedules.snapshot = Some(snapshot);
             }
-            Ok(_) | Err(()) => {
+            Ok(mut output) => {
+                zeroize_host_snapshot_output(&mut output);
+                self.host_schedules.snapshot_connection_id = Some(delivery.request.connection_id);
+                self.host_schedules.snapshot = Some(ResourceScheduledTaskSnapshot {
+                    status: ResourceScheduledTaskStatus::Error {
+                        message: failure_fallback,
+                    },
+                    entries: Vec::new(),
+                });
+                if feedback.should_toast() {
+                    cx.emit(HostToolsEvent::ShowNotice(
+                        HostToolsNotice::ScheduleSnapshotFailed,
+                    ));
+                }
+            }
+            Err(()) => {
                 self.host_schedules.snapshot_connection_id = Some(delivery.request.connection_id);
                 self.host_schedules.snapshot = Some(ResourceScheduledTaskSnapshot {
                     status: ResourceScheduledTaskStatus::Error {

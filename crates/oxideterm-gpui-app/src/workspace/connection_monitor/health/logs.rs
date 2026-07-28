@@ -888,10 +888,13 @@ impl HostToolsEntity {
 
     pub(in crate::workspace::connection_monitor) fn finish_host_logs_snapshot(
         &mut self,
-        delivery: HostLogSnapshotDelivery,
+        mut delivery: HostLogSnapshotDelivery,
         cx: &mut Context<Self>,
     ) {
         if self.host_logs.running.as_ref() != Some(&delivery.request) {
+            if let Ok(output) = delivery.result.as_mut() {
+                zeroize_host_snapshot_output(output);
+            }
             return;
         }
         let feedback = delivery.request.feedback;
@@ -899,8 +902,14 @@ impl HostToolsEntity {
         self.host_logs.polling = false;
         self.host_logs.running = None;
         match delivery.result {
-            Ok(output) if output.exit_code.unwrap_or(0) == 0 => {
-                let snapshot = parse_log_snapshot(&output.stdout);
+            Ok(mut output) if output.exit_code.unwrap_or(0) == 0 => {
+                let mut snapshot = parse_log_snapshot(&output.stdout);
+                if matches!(&snapshot.status, ResourceLogStatus::Error { .. }) {
+                    snapshot.status = ResourceLogStatus::Error {
+                        message: failure_fallback,
+                    };
+                }
+                zeroize_host_snapshot_output(&mut output);
                 if feedback.should_toast() {
                     match &snapshot.status {
                         ResourceLogStatus::Available { .. } => {
@@ -924,7 +933,8 @@ impl HostToolsEntity {
                 self.host_logs.snapshot_connection_id = Some(delivery.request.connection_id);
                 self.host_logs.snapshot = Some(snapshot);
             }
-            Ok(_) => {
+            Ok(mut output) => {
+                zeroize_host_snapshot_output(&mut output);
                 self.host_logs.snapshot_connection_id = Some(delivery.request.connection_id);
                 self.host_logs.snapshot = Some(ResourceLogSnapshot {
                     status: ResourceLogStatus::Error {

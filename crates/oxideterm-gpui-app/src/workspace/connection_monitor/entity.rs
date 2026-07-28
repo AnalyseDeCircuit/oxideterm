@@ -2189,9 +2189,11 @@ mod tests {
                 HostLogSnapshotDelivery {
                     request,
                     result: Ok(SshCommandOutput {
-                        stdout: secret_marker.to_string(),
+                        stdout: format!(
+                            "===HOST_LOGS===\n__OXIDE_LOG_ERROR__{secret_marker}\n===HOST_LOGS_END===\n"
+                        ),
                         stderr: secret_marker.to_string(),
-                        exit_code: Some(1),
+                        exit_code: Some(0),
                         truncated: false,
                     }),
                 },
@@ -2251,9 +2253,11 @@ mod tests {
                 HostPortSnapshotDelivery {
                     request,
                     result: Ok(SshCommandOutput {
-                        stdout: secret_marker.to_string(),
+                        stdout: format!(
+                            "===PORTS===\n__OXIDE_PORT_ERROR__{secret_marker}\n===PORTS_END===\n"
+                        ),
                         stderr: secret_marker.to_string(),
-                        exit_code: Some(1),
+                        exit_code: Some(0),
                         truncated: false,
                     }),
                 },
@@ -2314,9 +2318,11 @@ mod tests {
                     HostFilesystemSnapshotDelivery {
                         request,
                         result: Ok(SshCommandOutput {
-                            stdout: secret_marker.to_string(),
+                            stdout: format!(
+                                "===FILESYSTEMS===\n__OXIDE_FILESYSTEM_ERROR__{secret_marker}\n===FILESYSTEMS_END===\n"
+                            ),
                             stderr: secret_marker.to_string(),
-                            exit_code: Some(1),
+                            exit_code: Some(0),
                             truncated: false,
                         }),
                     },
@@ -2377,9 +2383,11 @@ mod tests {
                 HostPackageSnapshotDelivery {
                     request,
                     result: Ok(SshCommandOutput {
-                        stdout: secret_marker.to_string(),
+                        stdout: format!(
+                            "===PACKAGES===\n__OXIDE_PACKAGE_ERROR__{secret_marker}\n===PACKAGES_END===\n"
+                        ),
                         stderr: secret_marker.to_string(),
-                        exit_code: Some(1),
+                        exit_code: Some(0),
                         truncated: false,
                     }),
                 },
@@ -2440,9 +2448,11 @@ mod tests {
                     HostScheduleSnapshotDelivery {
                         request,
                         result: Ok(SshCommandOutput {
-                            stdout: secret_marker.to_string(),
+                            stdout: format!(
+                                "===SCHEDULED_TASKS===\n__OXIDE_SCHEDULE_ERROR__{secret_marker}\n===SCHEDULED_TASKS_END===\n"
+                            ),
                             stderr: secret_marker.to_string(),
-                            exit_code: Some(1),
+                            exit_code: Some(0),
                             truncated: false,
                         }),
                     },

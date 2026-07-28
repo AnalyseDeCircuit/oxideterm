@@ -1099,10 +1099,13 @@ impl HostToolsEntity {
 
     pub(in crate::workspace::connection_monitor) fn finish_host_filesystems_snapshot(
         &mut self,
-        delivery: HostFilesystemSnapshotDelivery,
+        mut delivery: HostFilesystemSnapshotDelivery,
         cx: &mut Context<Self>,
     ) {
         if self.host_filesystems.running.as_ref() != Some(&delivery.request) {
+            if let Ok(output) = delivery.result.as_mut() {
+                zeroize_host_snapshot_output(output);
+            }
             return;
         }
         let feedback = delivery.request.feedback;
@@ -1110,8 +1113,14 @@ impl HostToolsEntity {
         self.host_filesystems.polling = false;
         self.host_filesystems.running = None;
         match delivery.result {
-            Ok(output) if output.exit_code.unwrap_or(0) == 0 => {
-                let snapshot = parse_filesystem_snapshot(&output.stdout);
+            Ok(mut output) if output.exit_code.unwrap_or(0) == 0 => {
+                let mut snapshot = parse_filesystem_snapshot(&output.stdout);
+                if matches!(&snapshot.status, ResourceFilesystemStatus::Error { .. }) {
+                    snapshot.status = ResourceFilesystemStatus::Error {
+                        message: failure_fallback,
+                    };
+                }
+                zeroize_host_snapshot_output(&mut output);
                 if feedback.should_toast() {
                     match &snapshot.status {
                         ResourceFilesystemStatus::Available { .. } => {
@@ -1137,7 +1146,22 @@ impl HostToolsEntity {
                 self.host_filesystems.snapshot_connection_id = Some(delivery.request.connection_id);
                 self.host_filesystems.snapshot = Some(snapshot);
             }
-            Ok(_) | Err(()) => {
+            Ok(mut output) => {
+                zeroize_host_snapshot_output(&mut output);
+                self.host_filesystems.snapshot_connection_id = Some(delivery.request.connection_id);
+                self.host_filesystems.snapshot = Some(ResourceFilesystemSnapshot {
+                    status: ResourceFilesystemStatus::Error {
+                        message: failure_fallback,
+                    },
+                    entries: Vec::new(),
+                });
+                if feedback.should_toast() {
+                    cx.emit(HostToolsEvent::ShowNotice(
+                        HostToolsNotice::FilesystemSnapshotFailed,
+                    ));
+                }
+            }
+            Err(()) => {
                 self.host_filesystems.snapshot_connection_id = Some(delivery.request.connection_id);
                 self.host_filesystems.snapshot = Some(ResourceFilesystemSnapshot {
                     status: ResourceFilesystemStatus::Error {

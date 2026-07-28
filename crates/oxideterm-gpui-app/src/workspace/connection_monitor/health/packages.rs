@@ -1042,10 +1042,13 @@ impl HostToolsEntity {
 
     pub(in crate::workspace::connection_monitor) fn finish_host_packages_snapshot(
         &mut self,
-        delivery: HostPackageSnapshotDelivery,
+        mut delivery: HostPackageSnapshotDelivery,
         cx: &mut Context<Self>,
     ) {
         if self.host_packages.running.as_ref() != Some(&delivery.request) {
+            if let Ok(output) = delivery.result.as_mut() {
+                zeroize_host_snapshot_output(output);
+            }
             return;
         }
         let feedback = delivery.request.feedback;
@@ -1053,8 +1056,14 @@ impl HostToolsEntity {
         self.host_packages.polling = false;
         self.host_packages.running = None;
         match delivery.result {
-            Ok(output) if output.exit_code.unwrap_or(0) == 0 => {
-                let snapshot = parse_package_snapshot(&output.stdout);
+            Ok(mut output) if output.exit_code.unwrap_or(0) == 0 => {
+                let mut snapshot = parse_package_snapshot(&output.stdout);
+                if matches!(&snapshot.status, ResourcePackageStatus::Error { .. }) {
+                    snapshot.status = ResourcePackageStatus::Error {
+                        message: failure_fallback,
+                    };
+                }
+                zeroize_host_snapshot_output(&mut output);
                 if feedback.should_toast() {
                     match &snapshot.status {
                         ResourcePackageStatus::Available { .. } => {
@@ -1080,7 +1089,23 @@ impl HostToolsEntity {
                 self.host_packages.snapshot_connection_id = Some(delivery.request.connection_id);
                 self.host_packages.snapshot = Some(snapshot);
             }
-            Ok(_) | Err(()) => {
+            Ok(mut output) => {
+                zeroize_host_snapshot_output(&mut output);
+                self.host_packages.snapshot_connection_id = Some(delivery.request.connection_id);
+                self.host_packages.snapshot = Some(ResourcePackageSnapshot {
+                    status: ResourcePackageStatus::Error {
+                        message: failure_fallback,
+                    },
+                    managers: Vec::new(),
+                    entries: Vec::new(),
+                });
+                if feedback.should_toast() {
+                    cx.emit(HostToolsEvent::ShowNotice(
+                        HostToolsNotice::PackageSnapshotFailed,
+                    ));
+                }
+            }
+            Err(()) => {
                 self.host_packages.snapshot_connection_id = Some(delivery.request.connection_id);
                 self.host_packages.snapshot = Some(ResourcePackageSnapshot {
                     status: ResourcePackageStatus::Error {

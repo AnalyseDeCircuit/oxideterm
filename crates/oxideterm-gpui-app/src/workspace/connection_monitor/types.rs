@@ -4,6 +4,7 @@ use gpui::{Rgba, rgb, rgba};
 use oxideterm_gpui_ui::motion::ExitPresence;
 use oxideterm_ssh::SshCommandOutput;
 use oxideterm_topology::TopologyViewStatus;
+use zeroize::Zeroize;
 
 use super::*;
 
@@ -444,6 +445,35 @@ pub(super) struct HostLogSnapshotRequest {
 pub(super) struct HostLogSnapshotDelivery {
     pub(super) request: HostLogSnapshotRequest,
     pub(super) result: Result<SshCommandOutput, ()>,
+}
+
+pub(super) fn zeroize_host_snapshot_output(output: &mut SshCommandOutput) {
+    // Host inspection commands may return credentials embedded in logs or
+    // diagnostics. Clear both raw streams once parsing or classification ends.
+    output.stdout.zeroize();
+    output.stderr.zeroize();
+}
+
+#[cfg(test)]
+mod snapshot_output_zeroize_tests {
+    use super::*;
+
+    #[test]
+    fn host_snapshot_output_zeroizes_both_raw_streams() {
+        let mut output = SshCommandOutput {
+            stdout: "Authorization: secret-output".to_string(),
+            stderr: "Proxy-Authorization: secret-error".to_string(),
+            exit_code: Some(1),
+            truncated: true,
+        };
+
+        zeroize_host_snapshot_output(&mut output);
+
+        assert!(output.stdout.is_empty());
+        assert!(output.stderr.is_empty());
+        assert_eq!(output.exit_code, Some(1));
+        assert!(output.truncated);
+    }
 }
 
 pub(super) struct HostLogsState {
