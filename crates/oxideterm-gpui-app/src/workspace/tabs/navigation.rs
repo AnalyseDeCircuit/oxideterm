@@ -62,6 +62,17 @@ fn attach_terminal_to_existing_ssh_node(
     }
 }
 
+fn focus_terminal_node_projection(
+    node_id: &NodeId,
+    active_node_id: &mut Option<NodeId>,
+    expanded_node_ids: &mut HashSet<NodeId>,
+) {
+    // Focusing a terminal changes only navigation state. Transport readiness
+    // remains exclusively driven by registry and NodeRouter events.
+    *active_node_id = Some(node_id.clone());
+    expanded_node_ids.insert(node_id.clone());
+}
+
 impl WorkspaceApp {
     pub(in crate::workspace) fn handle_tab_host_event(
         &mut self,
@@ -400,12 +411,12 @@ impl WorkspaceApp {
         if let Some(tab) = self.tab_mut_by_id(location.tab_id) {
             tab.active_pane_id = Some(location.pane_id);
         }
-        if let Some(node_id) = self.terminal_ssh_nodes.get(&session_id)
-            && let Some(node) = self.ssh_nodes.get_mut(node_id)
-        {
-            node.readiness = NodeReadiness::Ready;
-            self.active_ssh_node_id = Some(node_id.clone());
-            self.expanded_ssh_nodes.insert(node_id.clone());
+        if let Some(node_id) = self.terminal_ssh_nodes.get(&session_id) {
+            focus_terminal_node_projection(
+                node_id,
+                &mut self.active_ssh_node_id,
+                &mut self.expanded_ssh_nodes,
+            );
         }
         self.sync_active_tab_surface(cx);
         self.needs_active_pane_focus = true;
@@ -1553,6 +1564,26 @@ mod tests {
             node.terminal_ids,
             vec![TerminalSessionId(1), TerminalSessionId(2)]
         );
+    }
+
+    #[test]
+    fn focusing_terminal_does_not_mark_node_ready() {
+        let node_id = NodeId("focus-only".to_string());
+        let node = WorkspaceSshNode::new(
+            None,
+            &SshConfig::default(),
+            "Focus only".to_string(),
+            vec![TerminalSessionId(1)],
+            NodeReadiness::Disconnected,
+        );
+        let mut active_node_id = None;
+        let mut expanded_node_ids = HashSet::new();
+
+        focus_terminal_node_projection(&node_id, &mut active_node_id, &mut expanded_node_ids);
+
+        assert_eq!(node.readiness, NodeReadiness::Disconnected);
+        assert_eq!(active_node_id, Some(node_id.clone()));
+        assert!(expanded_node_ids.contains(&node_id));
     }
 
     #[test]
