@@ -2,7 +2,7 @@ use std::{
     collections::{HashSet, VecDeque},
     path::{Path, PathBuf},
     sync::Arc,
-    time::Duration,
+    time::{Duration, SystemTime},
 };
 
 use gpui::{Context, EventEmitter, Task, Timer};
@@ -17,6 +17,55 @@ use super::update::NativeUpdateRuntime;
 use super::{
     CliCompanionStatus, PortableSettingsAction, PortableSettingsDialog, SettingsManagedKeyDialog,
 };
+
+const EXTERNAL_STORE_WATCH_INTERVAL: Duration = Duration::from_millis(530);
+
+/// Tracks persisted settings stores without retaining their contents.
+struct ExternalStoreWatch {
+    settings_path: PathBuf,
+    connections_path: PathBuf,
+    settings_modified: Option<SystemTime>,
+    connections_modified: Option<SystemTime>,
+}
+
+impl ExternalStoreWatch {
+    fn new(settings_path: PathBuf, connections_path: PathBuf) -> Self {
+        let settings_modified = super::settings_store_modified_time(&settings_path);
+        let connections_modified = super::settings_store_modified_time(&connections_path);
+        Self {
+            settings_path,
+            connections_path,
+            settings_modified,
+            connections_modified,
+        }
+    }
+
+    fn refresh_observed_state(&mut self) {
+        self.settings_modified = super::settings_store_modified_time(&self.settings_path);
+        self.connections_modified = super::settings_store_modified_time(&self.connections_path);
+    }
+
+    fn take_external_change(&mut self) -> bool {
+        let settings_modified = super::settings_store_modified_time(&self.settings_path);
+        let connections_modified = super::settings_store_modified_time(&self.connections_path);
+        self.take_change_for_modified_times(settings_modified, connections_modified)
+    }
+
+    fn take_change_for_modified_times(
+        &mut self,
+        settings_modified: Option<SystemTime>,
+        connections_modified: Option<SystemTime>,
+    ) -> bool {
+        let changed = settings_modified != self.settings_modified
+            || connections_modified != self.connections_modified;
+        if changed {
+            // Advance before publishing so a failed reload does not create an event storm.
+            self.settings_modified = settings_modified;
+            self.connections_modified = connections_modified;
+        }
+        changed
+    }
+}
 
 /// Non-secret result produced by the portable runtime status worker.
 pub(in crate::workspace) struct PortableStatusRefresh {
@@ -185,6 +234,8 @@ fn background_gallery_strings(settings_path: &Path) -> anyhow::Result<Vec<String
 
 /// Owns settings work that must complete independently from root rendering.
 pub(in crate::workspace) struct SettingsWorkspaceEntity {
+    external_store_watch: Option<ExternalStoreWatch>,
+    external_store_watch_task: Option<Task<()>>,
     portable_status: Option<oxideterm_portable_runtime::PortableStatusSnapshot>,
     portable_status_error: Option<String>,
     portable_exportable_secret_count: Option<usize>,
@@ -265,6 +316,7 @@ pub(in crate::workspace) enum SettingsWorkspaceToast {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(in crate::workspace) enum SettingsWorkspaceEvent {
+    ExternalStoresChanged,
     ResetNativeUpdateOverlay,
     ShowNativeUpdateNotification,
     ShowNativeUpdateToast(SettingsWorkspaceToast),
@@ -289,6 +341,8 @@ impl EventEmitter<SettingsWorkspaceEvent> for SettingsWorkspaceEntity {}
 impl SettingsWorkspaceEntity {
     pub(in crate::workspace) fn new(cx: &mut Context<Self>) -> Self {
         Self {
+            external_store_watch: None,
+            external_store_watch_task: None,
             portable_status: None,
             portable_status_error: None,
             portable_exportable_secret_count: None,
@@ -358,6 +412,41 @@ impl SettingsWorkspaceEntity {
             theme_import_task: None,
             theme_import_results: VecDeque::new(),
             native_update: NativeUpdateRuntime::new(cx),
+        }
+    }
+
+    pub(in crate::workspace) fn start_external_store_watch(
+        &mut self,
+        settings_path: PathBuf,
+        connections_path: PathBuf,
+        cx: &mut Context<Self>,
+    ) {
+        self.external_store_watch = Some(ExternalStoreWatch::new(settings_path, connections_path));
+        // Retaining the task makes Entity release the only cancellation boundary.
+        self.external_store_watch_task = Some(cx.spawn(async move |settings, cx| {
+            loop {
+                Timer::after(EXTERNAL_STORE_WATCH_INTERVAL).await;
+                let should_continue = settings
+                    .update(cx, |settings, cx| {
+                        let Some(watch) = settings.external_store_watch.as_mut() else {
+                            return false;
+                        };
+                        if watch.take_external_change() {
+                            cx.emit(SettingsWorkspaceEvent::ExternalStoresChanged);
+                        }
+                        true
+                    })
+                    .unwrap_or(false);
+                if !should_continue {
+                    break;
+                }
+            }
+        }));
+    }
+
+    pub(in crate::workspace) fn acknowledge_external_store_state(&mut self) {
+        if let Some(watch) = self.external_store_watch.as_mut() {
+            watch.refresh_observed_state();
         }
     }
 
@@ -1105,11 +1194,34 @@ impl Drop for SettingsWorkspaceEntity {
 
 #[cfg(test)]
 mod tests {
-    use std::{path::PathBuf, sync::Arc, time::Duration};
+    use std::{
+        path::PathBuf,
+        sync::Arc,
+        time::{Duration, SystemTime},
+    };
 
     use gpui::{AppContext, TestAppContext};
 
-    use super::{BackgroundGalleryOperationResult, DataDirectoryConfirm, SettingsWorkspaceEntity};
+    use super::{
+        BackgroundGalleryOperationResult, DataDirectoryConfirm, ExternalStoreWatch,
+        SettingsWorkspaceEntity,
+    };
+
+    #[test]
+    fn external_store_watch_advances_before_publishing_each_change() {
+        let initial = SystemTime::UNIX_EPOCH;
+        let changed = initial + Duration::from_secs(1);
+        let mut watch = ExternalStoreWatch {
+            settings_path: PathBuf::new(),
+            connections_path: PathBuf::new(),
+            settings_modified: Some(initial),
+            connections_modified: Some(initial),
+        };
+
+        assert!(watch.take_change_for_modified_times(Some(changed), Some(initial)));
+        assert!(!watch.take_change_for_modified_times(Some(changed), Some(initial)));
+        assert!(watch.take_change_for_modified_times(Some(changed), Some(changed)));
+    }
 
     #[test]
     fn secret_render_projections_do_not_copy_entity_owned_plaintext() {

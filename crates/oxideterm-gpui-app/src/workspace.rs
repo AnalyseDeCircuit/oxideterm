@@ -859,8 +859,6 @@ pub(crate) struct WorkspaceApp {
     connection_store: ConnectionStore,
     // The connection-layer worker owns SSH config parsing and persistence.
     ssh_config_sync_service: Option<SshConfigSyncService>,
-    settings_store_last_modified: Option<SystemTime>,
-    connection_store_last_modified: Option<SystemTime>,
     session_manager: Entity<SessionManagerState>,
     _session_manager_observation: Subscription,
     _session_manager_subscription: Subscription,

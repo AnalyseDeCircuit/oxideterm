@@ -368,7 +368,7 @@ impl WorkspaceApp {
         }
         window.focus(&self.focus_handle, cx);
         self.reveal_active_tab(window);
-        self.persist_sidebar_settings();
+        self.persist_sidebar_settings(cx);
         cx.notify();
     }
 

@@ -634,6 +634,9 @@ impl WorkspaceApp {
             NodeAgentMode::Disabled => IdeAgentMode::Disabled,
         };
         let _ = self.settings_store.save();
+        self.settings_workspace.update(cx, |settings, _cx| {
+            settings.acknowledge_external_store_state()
+        });
         self.ai_entity
             .update(cx, |ai, _cx| ai.set_agent_fs_mode(mode));
         self.apply_ide_runtime_settings_to_surfaces(cx);

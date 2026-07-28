@@ -554,6 +554,11 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) {
         match event {
+            SettingsWorkspaceEvent::ExternalStoresChanged => {
+                // The Entity owns change detection; Workspace applies the
+                // cross-system settings and connection-store side effects.
+                let _ = self.reload_after_external_sync(cx);
+            }
             SettingsWorkspaceEvent::ResetNativeUpdateOverlay => {
                 self.native_update_notification_open = false;
                 self.native_update_notification_presence.reopen();

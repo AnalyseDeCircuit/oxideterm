@@ -1115,7 +1115,7 @@ impl WorkspaceApp {
         if self.sidebar_collapsed {
             self.set_sidebar_collapsed_with_motion(false, cx);
         }
-        self.persist_sidebar_settings();
+        self.persist_sidebar_settings(cx);
         self.reveal_active_tab(window);
         if self.settings_page.active_tab == SettingsTab::General {
             self.refresh_cli_companion_status(cx);

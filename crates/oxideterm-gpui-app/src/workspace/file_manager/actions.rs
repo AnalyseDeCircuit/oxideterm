@@ -49,7 +49,7 @@ impl WorkspaceApp {
         } else {
             self.refresh_file_manager(cx);
         }
-        self.persist_sidebar_settings();
+        self.persist_sidebar_settings(cx);
         self.reveal_active_tab(window);
         cx.notify();
     }

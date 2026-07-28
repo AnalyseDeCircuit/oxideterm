@@ -1,5 +1,4 @@
 use super::*;
-use crate::workspace::settings::settings_store_modified_time;
 
 fn should_collapse_context_sidebar_panel(
     sidebar_visible: bool,
@@ -104,22 +103,22 @@ impl WorkspaceApp {
         .detach();
     }
 
-    pub(in crate::workspace) fn persist_sidebar_settings(&mut self) {
+    pub(in crate::workspace) fn persist_sidebar_settings(&mut self, cx: &mut Context<Self>) {
         self.settings_store.settings_mut().sidebar_ui.collapsed = self.sidebar_collapsed;
         self.settings_store.settings_mut().sidebar_ui.width = self.sidebar_width.round() as i64;
         self.settings_store.settings_mut().sidebar_ui.active_section = self
             .effective_sidebar_panel_section()
             .as_settings_key()
             .to_string();
-        self.persist_sidebar_settings_store();
+        self.persist_sidebar_settings_store(cx);
     }
 
-    fn persist_sidebar_settings_store(&mut self) {
+    fn persist_sidebar_settings_store(&mut self, cx: &mut Context<Self>) {
         if self.settings_store.save().is_ok() {
-            // The settings poller must not mistake this in-process sidebar
-            // write for an external CLI or cloud-sync update.
-            self.settings_store_last_modified =
-                settings_store_modified_time(self.settings_store.path());
+            // Internal writes advance the Entity-owned watcher before its next tick.
+            self.settings_workspace.update(cx, |settings, _cx| {
+                settings.acknowledge_external_store_state()
+            });
         }
     }
 
@@ -164,7 +163,7 @@ impl WorkspaceApp {
         if self.sidebar_collapsed {
             self.set_sidebar_collapsed_with_motion(false, cx);
         }
-        self.persist_sidebar_settings();
+        self.persist_sidebar_settings(cx);
         cx.notify();
     }
 
@@ -172,7 +171,7 @@ impl WorkspaceApp {
         self.set_sidebar_collapsed_with_motion(!self.sidebar_collapsed, cx);
         self.sidebar_resizing = false;
         self.sidebar_resize_hotzone_hovered = false;
-        self.persist_sidebar_settings();
+        self.persist_sidebar_settings(cx);
         cx.notify();
     }
 
@@ -237,7 +236,7 @@ impl WorkspaceApp {
     pub(in crate::workspace) fn finish_sidebar_resize(&mut self, cx: &mut Context<Self>) {
         if self.sidebar_resizing {
             self.sidebar_resizing = false;
-            self.persist_sidebar_settings();
+            self.persist_sidebar_settings(cx);
             cx.notify();
         }
     }
@@ -312,7 +311,7 @@ impl WorkspaceApp {
         }
         self.sync_host_tools_lifecycle(panel == ContextSidebarPanel::HostTools, cx);
         self.clear_ai_sidebar_keyboard_focus(cx);
-        self.persist_sidebar_settings_store();
+        self.persist_sidebar_settings_store(cx);
         cx.notify();
         true
     }
@@ -328,7 +327,7 @@ impl WorkspaceApp {
         self.sync_host_tools_lifecycle(false, cx);
         self.clear_ai_sidebar_keyboard_focus(cx);
         self.close_ai_sidebar_popovers(cx);
-        self.persist_sidebar_settings_store();
+        self.persist_sidebar_settings_store(cx);
         cx.notify();
     }
 
@@ -397,7 +396,7 @@ impl WorkspaceApp {
                 .settings_mut()
                 .sidebar_ui
                 .ai_sidebar_width = self.ai.chat.sidebar_width.round() as i64;
-            self.persist_sidebar_settings_store();
+            self.persist_sidebar_settings_store(cx);
             cx.notify();
         }
     }

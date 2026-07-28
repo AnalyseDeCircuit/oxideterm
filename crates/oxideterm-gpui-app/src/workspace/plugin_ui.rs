@@ -261,7 +261,7 @@ impl WorkspaceApp {
         self.set_main_window_active_tab(Some(tab_id_value), cx);
         self.active_surface = ActiveSurface::Terminal;
         self.needs_active_pane_focus = false;
-        self.persist_sidebar_settings();
+        self.persist_sidebar_settings(cx);
         cx.notify();
         Ok(())
     }

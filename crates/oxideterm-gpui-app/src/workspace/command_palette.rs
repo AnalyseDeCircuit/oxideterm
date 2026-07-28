@@ -447,7 +447,7 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.record_command_palette_mru(&execution.id);
+        self.record_command_palette_mru(&execution.id, cx);
         self.ime_marked_text = None;
 
         match execution.action {
@@ -682,11 +682,14 @@ impl WorkspaceApp {
         )
     }
 
-    fn record_command_palette_mru(&mut self, id: &str) {
+    fn record_command_palette_mru(&mut self, id: &str, cx: &mut Context<Self>) {
         self.settings_store
             .settings_mut()
             .record_command_palette_use(id);
         let _ = self.settings_store.save();
+        self.settings_workspace.update(cx, |settings, _cx| {
+            settings.acknowledge_external_store_state()
+        });
     }
 
     fn reload_window_from_palette(&mut self, cx: &mut Context<Self>) {

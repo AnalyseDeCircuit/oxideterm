@@ -107,7 +107,13 @@ impl WorkspaceApp {
             forwarding_runtime.clone(),
         );
         let connection_flow = cx.new(ConnectionFlowEntity::new);
-        let settings_workspace = cx.new(settings::SettingsWorkspaceEntity::new);
+        let settings_path = settings_store.path().to_path_buf();
+        let connections_path = connection_store.path().to_path_buf();
+        let settings_workspace = cx.new(move |cx| {
+            let mut settings = settings::SettingsWorkspaceEntity::new(cx);
+            settings.start_external_store_watch(settings_path, connections_path, cx);
+            settings
+        });
         let settings_workspace_observation =
             cx.observe(&settings_workspace, |_workspace, _settings, cx| {
                 // Entity-owned settings workers repaint mounted settings surfaces.
@@ -130,6 +136,9 @@ impl WorkspaceApp {
                 LauncherWorkspaceEvent::EnabledChanged(enabled) => {
                     workspace.settings_store.settings_mut().launcher.enabled = *enabled;
                     let _ = workspace.settings_store.save();
+                    workspace.settings_workspace.update(cx, |settings, _cx| {
+                        settings.acknowledge_external_store_state()
+                    });
                     if !enabled {
                         workspace.ime_marked_text = None;
                     }
@@ -470,10 +479,6 @@ impl WorkspaceApp {
                 workspace.handle_plugin_workspace_event(event, plugin_window_handle, cx);
             },
         );
-        let settings_store_last_modified =
-            crate::workspace::settings::settings_store_modified_time(settings_store.path());
-        let connection_store_last_modified =
-            crate::workspace::settings::settings_store_modified_time(connection_store.path());
         let tab_host = cx.new(|_| tabs::WorkspaceTabHostEntity::new());
         let tab_host_window_handle = window.window_handle();
         let tab_host_subscription = cx.subscribe(
@@ -716,8 +721,6 @@ impl WorkspaceApp {
             settings_store,
             connection_store,
             ssh_config_sync_service: None,
-            settings_store_last_modified,
-            connection_store_last_modified,
             session_manager,
             _session_manager_observation: session_manager_observation,
             _session_manager_subscription: session_manager_subscription,
@@ -760,7 +763,6 @@ impl WorkspaceApp {
                 if cx
                     .update_window(window_handle, |_, _window, cx| {
                         weak.update(cx, |workspace, cx| {
-                            workspace.poll_external_settings_store_changes(cx);
                             workspace.maybe_refresh_connection_monitor(cx);
                             workspace.maybe_refresh_active_terminal_git(cx);
                             workspace.maybe_refresh_active_terminal_project(cx);

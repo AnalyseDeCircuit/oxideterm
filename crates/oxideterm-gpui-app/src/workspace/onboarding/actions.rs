@@ -198,6 +198,9 @@ impl WorkspaceApp {
             }
         }
         let _ = self.connection_store.save();
+        self.settings_workspace.update(cx, |settings, _cx| {
+            settings.acknowledge_external_store_state()
+        });
         self.onboarding.imported_count = imported;
         self.onboarding.import_state = OnboardingImportState::Done;
         self.onboarding.host_count = Some(imported);

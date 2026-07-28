@@ -208,7 +208,7 @@ impl WorkspaceApp {
         self.needs_active_pane_focus = false;
         window.focus(&self.focus_handle, cx);
         self.reveal_active_tab(window);
-        self.persist_sidebar_settings();
+        self.persist_sidebar_settings(cx);
         cx.notify();
     }
 

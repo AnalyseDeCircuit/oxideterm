@@ -522,7 +522,7 @@ impl WorkspaceApp {
                     });
                     this.active_sidebar_section = SidebarSection::Extensions;
                     this.active_surface = ActiveSurface::Terminal;
-                    this.persist_sidebar_settings();
+                    this.persist_sidebar_settings(cx);
                     cx.stop_propagation();
                     cx.notify();
                 }),
