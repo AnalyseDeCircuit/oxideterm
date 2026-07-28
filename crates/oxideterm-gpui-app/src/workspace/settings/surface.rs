@@ -562,23 +562,12 @@ impl WorkspaceApp {
                 }
             }
             SettingsTab::Knowledge => {
-                self.settings_page
-                    .knowledge_selected_collection_id
-                    .hash(&mut hasher);
-                self.settings_page
-                    .knowledge_error
-                    .is_some()
-                    .hash(&mut hasher);
-                self.settings_page
-                    .knowledge_import_progress
-                    .hash(&mut hasher);
-                self.settings_page
-                    .knowledge_embedding_progress
-                    .hash(&mut hasher);
-                self.ai_entity
-                    .read(cx)
-                    .knowledge_reindex_progress()
-                    .hash(&mut hasher);
+                let ai = self.ai_entity.read(cx);
+                ai.knowledge_selected_collection_id().hash(&mut hasher);
+                ai.knowledge_error().is_some().hash(&mut hasher);
+                ai.knowledge_import_progress().hash(&mut hasher);
+                ai.knowledge_embedding_progress().hash(&mut hasher);
+                ai.knowledge_reindex_progress().hash(&mut hasher);
             }
             SettingsTab::Keybindings => {
                 // The toolbar owns the moving scope indicator. Keep row zero
@@ -619,7 +608,7 @@ impl WorkspaceApp {
             terminal_page: self.settings_page.terminal_page,
             ai_page: self.settings_page.ai_page,
             visible_keybinding_scope_count: self.visible_keybinding_scope_count(),
-            knowledge_has_error: self.settings_page.knowledge_error.is_some(),
+            knowledge_has_error: self.ai_entity.read(cx).knowledge_error().is_some(),
             knowledge_has_selected_collection,
         }
     }
@@ -661,9 +650,9 @@ impl WorkspaceApp {
     pub(in crate::workspace) fn knowledge_has_selected_collection(&self, cx: &App) -> bool {
         let rag_store = self.ai_entity.read(cx).rag_store();
         let collections = oxideterm_ai::rag_list_collections(&rag_store, None).unwrap_or_default();
-        self.settings_page
-            .knowledge_selected_collection_id
-            .as_deref()
+        self.ai_entity
+            .read(cx)
+            .knowledge_selected_collection_id()
             .filter(|id| collections.iter().any(|collection| collection.id == *id))
             .or_else(|| collections.first().map(|collection| collection.id.as_str()))
             .is_some()

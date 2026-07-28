@@ -10,9 +10,9 @@ impl WorkspaceApp {
         let rag_store = self.ai_entity.read(cx).rag_store();
         let collections = oxideterm_ai::rag_list_collections(&rag_store, None).unwrap_or_default();
         let selected_id = self
-            .settings_page
-            .knowledge_selected_collection_id
-            .as_deref()
+            .ai_entity
+            .read(cx)
+            .knowledge_selected_collection_id()
             .filter(|id| collections.iter().any(|collection| collection.id == *id))
             .map(str::to_string)
             .or_else(|| collections.first().map(|collection| collection.id.clone()));
@@ -27,7 +27,12 @@ impl WorkspaceApp {
             .and_then(|id| oxideterm_ai::rag_get_collection_stats(&rag_store, id).ok());
 
         let mut index = section_index;
-        if let Some(error) = self.settings_page.knowledge_error.as_ref() {
+        let knowledge_error = self
+            .ai_entity
+            .read(cx)
+            .knowledge_error()
+            .map(str::to_string);
+        if let Some(error) = knowledge_error.as_deref() {
             if index == 0 {
                 return self.knowledge_error_row(error);
             }
@@ -136,14 +141,12 @@ impl WorkspaceApp {
         let import_collection_id = collection.id.clone();
         let embedding_collection_id = collection.id.clone();
         let documents = documents.map(|page| page.documents).unwrap_or_default();
-        let import_label = self
-            .settings_page
-            .knowledge_import_progress
+        let import_progress = self.ai_entity.read(cx).knowledge_import_progress();
+        let embedding_progress = self.ai_entity.read(cx).knowledge_embedding_progress();
+        let import_label = import_progress
             .map(|(current, total)| format!("{current}/{total}"))
             .unwrap_or_else(|| self.i18n.t("settings_view.knowledge.import_files"));
-        let embedding_label = self
-            .settings_page
-            .knowledge_embedding_progress
+        let embedding_label = embedding_progress
             .map(|(current, total)| format!("{current}/{total}"))
             .unwrap_or_else(|| self.i18n.t("settings_view.knowledge.generate_embeddings"));
         let reindex_progress = self.ai_entity.read(cx).knowledge_reindex_progress();
@@ -199,8 +202,7 @@ impl WorkspaceApp {
                         .justify_end()
                         .gap(px(8.0))
                         .child({
-                            let import_disabled =
-                                self.settings_page.knowledge_import_progress.is_some();
+                            let import_disabled = import_progress.is_some();
                             self.knowledge_text_icon_button(
                                 LucideIcon::FolderOpen,
                                 import_label,
@@ -226,8 +228,7 @@ impl WorkspaceApp {
                             }),
                         ))
                         .child({
-                            let embedding_disabled =
-                                self.settings_page.knowledge_embedding_progress.is_some();
+                            let embedding_disabled = embedding_progress.is_some();
                             self.knowledge_text_icon_button(
                                 LucideIcon::Sparkles,
                                 embedding_label,
@@ -326,8 +327,10 @@ impl WorkspaceApp {
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |this, _event, _window, cx| {
-                    this.settings_page
-                        .select_knowledge_collection(collection_id.clone());
+                    this.ai_entity.update(cx, |entity, cx| {
+                        entity.select_knowledge_collection(collection_id.clone());
+                        cx.notify();
+                    });
                     cx.stop_propagation();
                     cx.notify();
                 }),
@@ -376,8 +379,13 @@ impl WorkspaceApp {
                 rgb(self.tokens.ui.text_muted),
                 Some(rgb(self.tokens.ui.error)),
                 move |this, _event, _window, cx| {
-                    this.settings_page
-                        .request_delete_collection(delete_id.clone(), delete_name.clone());
+                    this.ai_entity.update(cx, |entity, cx| {
+                        entity.request_delete_knowledge_collection(
+                            delete_id.clone(),
+                            delete_name.clone(),
+                        );
+                        cx.notify();
+                    });
                     this.reset_standard_confirm_focus();
                     cx.stop_propagation();
                     cx.notify();
@@ -458,9 +466,9 @@ impl WorkspaceApp {
         let delete_name = document.title.clone();
         let edit_id = document.id.clone();
         let editing_this = self
-            .settings_page
-            .knowledge_external_edit
-            .as_ref()
+            .ai_entity
+            .read(cx)
+            .knowledge_external_edit()
             .is_some_and(|edit| edit.doc_id == document.id);
         div()
             .flex()
@@ -546,8 +554,13 @@ impl WorkspaceApp {
                         rgb(self.tokens.ui.text_muted),
                         Some(rgb(self.tokens.ui.error)),
                         move |this, _event, _window, cx| {
-                            this.settings_page
-                                .request_delete_document(delete_id.clone(), delete_name.clone());
+                            this.ai_entity.update(cx, |entity, cx| {
+                                entity.request_delete_knowledge_document(
+                                    delete_id.clone(),
+                                    delete_name.clone(),
+                                );
+                                cx.notify();
+                            });
                             this.reset_standard_confirm_focus();
                             cx.stop_propagation();
                             cx.notify();
@@ -628,7 +641,10 @@ impl WorkspaceApp {
         } else {
             self.tokens.ui.text_muted
         };
-        let embeddings_expanded = self.settings_page.knowledge_embedding_config_expanded;
+        let embeddings_expanded = self
+            .ai_entity
+            .read(cx)
+            .knowledge_embedding_config_expanded();
 
         div()
             .rounded(px(self.tokens.radii.lg))
@@ -743,14 +759,17 @@ impl WorkspaceApp {
                             .on_mouse_down(
                                 MouseButton::Left,
                                 cx.listener(|this, _event, _window, cx| {
-                                    this.settings_page.toggle_knowledge_embedding_config();
+                                    this.ai_entity.update(cx, |entity, cx| {
+                                        entity.toggle_knowledge_embedding_config();
+                                        cx.notify();
+                                    });
                                     cx.stop_propagation();
                                     cx.notify();
                                 }),
                             ),
                     ),
             )
-            .when(self.settings_page.knowledge_embedding_config_expanded, |section| {
+            .when(embeddings_expanded, |section| {
                 section.child(
                     div()
                         .border_t_1()
@@ -945,8 +964,11 @@ impl WorkspaceApp {
         }
     }
 
-    pub(in crate::workspace) fn knowledge_document_format_label(&self) -> String {
-        match self.settings_page.knowledge_new_document_format.as_str() {
+    pub(in crate::workspace) fn knowledge_document_format_label(
+        &self,
+        cx: &Context<Self>,
+    ) -> String {
+        match self.ai_entity.read(cx).knowledge_new_document_format() {
             "plaintext" => "Plain Text".to_string(),
             _ => "Markdown".to_string(),
         }

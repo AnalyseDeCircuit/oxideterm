@@ -1,8 +1,9 @@
 use std::{fmt, time::Duration};
 
-use crate::{AiProviderView, SharedAiProviderKey, provider_view};
+use crate::{AiProviderView, SharedAiProviderKey, provider_view, sanitize_for_ai};
 use anyhow::{Context, Result, anyhow};
 use serde::Deserialize;
+use zeroize::Zeroize;
 
 const EMBEDDING_TIMEOUT: Duration = Duration::from_secs(3);
 const OPENAI_DEFAULT_EMBEDDING_MODEL: &str = "text-embedding-3-small";
@@ -199,6 +200,30 @@ pub async fn embed_texts(
     if texts.is_empty() {
         return Ok(Vec::new());
     }
+    // This is the single outbound boundary for document chunks and search
+    // queries. Consume and clear each raw allocation before provider dispatch.
+    let texts = sanitize_embedding_texts(texts);
+    dispatch_sanitized_embeddings(provider, api_key, model, texts).await
+}
+
+pub async fn embed_query_text(
+    provider: &AiProviderView,
+    api_key: Option<&SharedAiProviderKey>,
+    model: &str,
+    query: &str,
+) -> Result<Vec<Vec<f32>>> {
+    // A query remains borrowed by the local keyword search, so sanitize it
+    // directly at this boundary without first cloning the raw query.
+    let texts = sanitize_embedding_query(query);
+    dispatch_sanitized_embeddings(provider, api_key, model, texts).await
+}
+
+async fn dispatch_sanitized_embeddings(
+    provider: &AiProviderView,
+    api_key: Option<&SharedAiProviderKey>,
+    model: &str,
+    texts: Vec<String>,
+) -> Result<Vec<Vec<f32>>> {
     match provider.provider_type.as_str() {
         "openai" | "openai_compatible" => {
             embed_openai_compatible(&provider.base_url, api_key, model, texts).await
@@ -208,6 +233,21 @@ pub async fn embed_texts(
             "unsupported embedding provider type: {provider_type}"
         )),
     }
+}
+
+fn sanitize_embedding_texts(texts: Vec<String>) -> Vec<String> {
+    texts
+        .into_iter()
+        .map(|mut raw_text| {
+            let sanitized_text = sanitize_for_ai(&raw_text);
+            raw_text.zeroize();
+            sanitized_text
+        })
+        .collect()
+}
+
+fn sanitize_embedding_query(query: &str) -> Vec<String> {
+    vec![sanitize_for_ai(query)]
 }
 
 fn ai_embedding_model(
@@ -331,4 +371,50 @@ struct OpenAiEmbeddingItem {
 #[derive(Deserialize)]
 struct OllamaEmbeddingResponse {
     embeddings: Vec<Vec<f32>>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn embedding_boundary_redacts_chunks_and_queries_before_provider_dispatch() {
+        let raw_secret = "sk-proj-abcdefghijklmnopqrstuvwxyz123456";
+        let sanitized_chunks =
+            sanitize_embedding_texts(vec![format!("Document API_KEY={raw_secret}")]);
+        let sanitized_query =
+            sanitize_embedding_query(&format!("Find Authorization: Bearer {raw_secret}"));
+
+        assert_eq!(sanitized_chunks.len(), 1);
+        assert!(!sanitized_chunks[0].contains(raw_secret));
+        assert!(!sanitized_query[0].contains(raw_secret));
+        assert!(sanitized_chunks[0].contains("Document API_KEY=[REDACTED]"));
+        assert!(sanitized_query[0].contains("Find Authorization: Bearer [REDACTED]"));
+    }
+
+    #[tokio::test]
+    async fn embedding_errors_do_not_include_raw_content() {
+        let raw_secret = "sk-proj-abcdefghijklmnopqrstuvwxyz123456";
+        let provider = AiProviderView {
+            id: "unsupported".to_string(),
+            provider_type: "unsupported".to_string(),
+            name: "Unsupported".to_string(),
+            base_url: "https://example.invalid".to_string(),
+            models: Vec::new(),
+            enabled: true,
+            custom: true,
+        };
+
+        let error = embed_texts(
+            &provider,
+            None,
+            "test-model",
+            vec![format!("password={raw_secret}")],
+        )
+        .await
+        .expect_err("unsupported providers must fail");
+        let debug = format!("{error:?}");
+        assert!(!debug.contains(raw_secret));
+        assert!(!error.to_string().contains(raw_secret));
+    }
 }

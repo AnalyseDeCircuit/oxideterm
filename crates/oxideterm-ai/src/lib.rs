@@ -66,7 +66,7 @@ pub use profiles::{AiExecutionBackend, resolve_ai_reasoning_effort, tool_policy_
 pub use provider_embeddings::{
     AiChatEmbeddingApiKeyDecision, AiEmbeddingMode, AiEmbeddingProviderReason,
     ResolvedAiEmbeddingProvider, ai_embedding_requires_api_key, ai_provider_supports_embeddings,
-    embed_texts, resolve_ai_embedding_provider, resolve_chat_embedding_api_key,
+    embed_query_text, embed_texts, resolve_ai_embedding_provider, resolve_chat_embedding_api_key,
 };
 pub use providers::{
     AI_PROVIDER_TEMPLATES, active_model_selection, active_provider_view,

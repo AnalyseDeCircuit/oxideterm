@@ -1277,11 +1277,11 @@ impl WorkspaceApp {
         if let Some(value) = persisted_settings_input_value(settings, input) {
             return value;
         }
-        if let Some(value) = self.settings_page.page_input_value(input) {
-            return value;
-        }
         if let Some(value) = self.ai_entity.read(cx).settings_input_value(input) {
             return value.to_owned();
+        }
+        if let Some(value) = self.settings_page.page_input_value(input) {
+            return value;
         }
         if let Some(value) =
             cloud_sync_form_input_value_ref(&self.cloud_sync.read(cx).view.form, input)
@@ -1367,6 +1367,12 @@ impl WorkspaceApp {
             SettingsInputDraftApply::Unhandled => {}
         }
 
+        if ai_state::AiWorkspaceEntity::owns_settings_input(input) {
+            // Entity-owned inputs are updated directly by the IME adapter and
+            // must not be copied into the legacy settings page model.
+            cx.notify();
+            return;
+        }
         if self
             .settings_page
             .apply_page_input_draft(input, &self.settings_input_draft)

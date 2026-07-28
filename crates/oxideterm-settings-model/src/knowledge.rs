@@ -3,7 +3,7 @@
 
 //! Knowledge settings import and dialog models.
 
-use std::{fs, path::Path, path::PathBuf};
+use std::{fmt, fs, path::Path, path::PathBuf};
 
 pub const KNOWLEDGE_MAX_IMPORT_FILE_SIZE: u64 = 5 * 1024 * 1024;
 pub const KNOWLEDGE_IMPORT_EXTENSIONS: &[&str] = &["md", "txt", "markdown"];
@@ -15,18 +15,40 @@ pub enum KnowledgeDeleteTarget {
     Document,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct KnowledgeDeleteConfirm {
     pub target: KnowledgeDeleteTarget,
     pub id: String,
     pub name: String,
 }
 
-#[derive(Clone, Debug)]
+impl fmt::Debug for KnowledgeDeleteConfirm {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("KnowledgeDeleteConfirm")
+            .field("target", &self.target)
+            .field("id", &self.id)
+            .field("name", &"<redacted>")
+            .finish()
+    }
+}
+
+#[derive(Clone)]
 pub struct KnowledgeExternalEdit {
     pub doc_id: String,
     pub path: PathBuf,
     pub version: u64,
+}
+
+impl fmt::Debug for KnowledgeExternalEdit {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("KnowledgeExternalEdit")
+            .field("doc_id", &self.doc_id)
+            .field("path", &"<redacted>")
+            .field("version", &self.version)
+            .finish()
+    }
 }
 
 pub fn import_knowledge_file(
@@ -86,5 +108,23 @@ mod tests {
     fn knowledge_extension_allowlist_is_lowercase() {
         assert!(KNOWLEDGE_IMPORT_EXTENSIONS.contains(&"md"));
         assert!(!KNOWLEDGE_IMPORT_EXTENSIONS.contains(&"pdf"));
+    }
+
+    #[test]
+    fn knowledge_debug_output_redacts_user_names_and_paths() {
+        let secret = "private-customer-secret";
+        let confirm = KnowledgeDeleteConfirm {
+            target: KnowledgeDeleteTarget::Document,
+            id: "document-id".to_string(),
+            name: secret.to_string(),
+        };
+        let edit = KnowledgeExternalEdit {
+            doc_id: "document-id".to_string(),
+            path: PathBuf::from(format!("/tmp/{secret}.md")),
+            version: 1,
+        };
+
+        assert!(!format!("{confirm:?}").contains(secret));
+        assert!(!format!("{edit:?}").contains(secret));
     }
 }

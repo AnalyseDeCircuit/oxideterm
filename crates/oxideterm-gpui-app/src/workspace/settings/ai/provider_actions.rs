@@ -186,13 +186,17 @@ impl WorkspaceApp {
                                     cx,
                                 );
                             } else {
-                                self.settings_page.clear_knowledge_error();
+                                self.ai_entity.update(cx, |entity, cx| {
+                                    entity.clear_knowledge_error();
+                                    cx.notify();
+                                });
                             }
                         }
                     }
                 }
                 cx.notify();
             }
+            ai_state::AiWorkspaceEvent::KnowledgePageChanged => cx.notify(),
             ai_state::AiWorkspaceEvent::McpRuntimeChanged => cx.notify(),
             ai_state::AiWorkspaceEvent::ModelRefreshDeliveryReady => {
                 let intents = self

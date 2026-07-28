@@ -1142,15 +1142,18 @@ impl WorkspaceApp {
             (SettingsTab::Knowledge, SettingsSelect::KnowledgeDocumentFormat) => {
                 let mut popup = select_overlay_popup(&self.tokens, width.max(220.0));
                 for (format, label) in [("markdown", "Markdown"), ("plaintext", "Plain Text")] {
-                    let selected = self.settings_page.knowledge_new_document_format == format;
+                    let selected =
+                        self.ai_entity.read(cx).knowledge_new_document_format() == format;
                     popup = popup.child(select_option_action(
                         select_option(&self.tokens, label, selected),
                         false,
                         false,
                         cx.listener(move |this, _event, _window, cx| {
                             this.close_settings_select();
-                            this.settings_page
-                                .set_knowledge_document_format(format.to_string());
+                            this.ai_entity.update(cx, |entity, cx| {
+                                entity.set_knowledge_document_format(format.to_string());
+                                cx.notify();
+                            });
                             cx.stop_propagation();
                             cx.notify();
                         }),

@@ -528,8 +528,6 @@ impl WorkspaceApp {
             segmented_control_user_motion:
                 selection_motion::UserSegmentedControlMotionState::default(),
             theme_editor_presence: oxideterm_gpui_ui::motion::ExitPresence::visible(),
-            knowledge_create_presence: oxideterm_gpui_ui::motion::ExitPresence::visible(),
-            knowledge_document_presence: oxideterm_gpui_ui::motion::ExitPresence::visible(),
             help_legal_notice_presence: oxideterm_gpui_ui::motion::ExitPresence::visible(),
             ai_text_editor_dialog: None,
             ai_text_editor: None,

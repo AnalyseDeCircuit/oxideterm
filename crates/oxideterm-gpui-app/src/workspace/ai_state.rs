@@ -7,6 +7,8 @@ use oxideterm_settings_model::{
     ai_mcp_transport_value,
 };
 
+pub(in crate::workspace) mod knowledge;
+
 pub(in crate::workspace) enum AiChatInitializationOutcome {
     AlreadyInitialized,
     Loaded,
@@ -20,6 +22,7 @@ pub(in crate::workspace) enum AiWorkspaceEvent {
     CompactionDeliveryReady,
     CompactionStateChanged,
     CredentialOperationReady,
+    KnowledgePageChanged,
     KnowledgeReindexDeliveryReady,
     McpRuntimeChanged,
     ModelRefreshDeliveryReady,
@@ -210,6 +213,9 @@ pub(in crate::workspace) struct AiWorkspaceEntity {
     acp_model_discovery_rx: std::sync::mpsc::Receiver<AiAcpModelDiscoveryDelivery>,
     acp_model_discovery_intents: VecDeque<AiAcpModelDiscoveryIntent>,
     rag_store: LazyAiRagStore,
+    knowledge_page: knowledge::KnowledgePageState,
+    knowledge_import_task: Option<Task<()>>,
+    knowledge_embedding_task: Option<Task<()>>,
     knowledge_reindex_progress: Option<(usize, usize)>,
     knowledge_reindex_cancel: Option<Arc<AtomicBool>>,
     knowledge_reindex_tx:
@@ -337,6 +343,9 @@ impl AiWorkspaceEntity {
             acp_model_discovery_rx,
             acp_model_discovery_intents: VecDeque::new(),
             rag_store: LazyAiRagStore::default(),
+            knowledge_page: knowledge::KnowledgePageState::default(),
+            knowledge_import_task: None,
+            knowledge_embedding_task: None,
             knowledge_reindex_progress: None,
             knowledge_reindex_cancel: None,
             knowledge_reindex_tx,
@@ -392,7 +401,10 @@ impl AiWorkspaceEntity {
     pub(in crate::workspace) fn owns_settings_input(input: SettingsInput) -> bool {
         matches!(
             input,
-            SettingsInput::AiProviderApiKey(_) | SettingsInput::AiAcpAgentAuthToken(_)
+            SettingsInput::AiProviderApiKey(_)
+                | SettingsInput::AiAcpAgentAuthToken(_)
+                | SettingsInput::KnowledgeCollectionName
+                | SettingsInput::KnowledgeDocumentTitle
         ) || input.is_ai_mcp()
     }
 
@@ -403,6 +415,15 @@ impl AiWorkspaceEntity {
     pub(in crate::workspace) fn settings_input_value(&self, input: SettingsInput) -> Option<&str> {
         if let Some(draft) = self.settings_secret_drafts.get(&input) {
             return Some(draft.as_str());
+        }
+        match input {
+            SettingsInput::KnowledgeCollectionName => {
+                return Some(&self.knowledge_page.new_collection_name);
+            }
+            SettingsInput::KnowledgeDocumentTitle => {
+                return Some(&self.knowledge_page.new_document_title);
+            }
+            _ => {}
         }
         let draft = self.mcp_add_dialog.as_ref()?;
         match input {
@@ -474,6 +495,8 @@ impl AiWorkspaceEntity {
         }
         let value = if let Some(draft) = self.settings_secret_drafts.get_mut(&input) {
             &mut **draft
+        } else if let Some(value) = self.knowledge_page.input_value_mut(input) {
+            value
         } else {
             let Some(draft) = self.mcp_add_dialog.as_mut() else {
                 return false;
@@ -498,6 +521,8 @@ impl AiWorkspaceEntity {
         }
         let changed = if let Some(draft) = self.settings_secret_drafts.get_mut(&input) {
             draft.pop().is_some()
+        } else if let Some(value) = self.knowledge_page.input_value_mut(input) {
+            value.pop().is_some()
         } else {
             self.mcp_add_dialog
                 .as_mut()
@@ -2906,6 +2931,11 @@ impl Drop for AiWorkspaceEntity {
         // Releasing the workspace is an explicit rejection boundary for every
         // protocol worker still waiting on a user decision.
         self.reject_all_tool_approvals();
+        // Runtime-backed reindex work is not a GPUI task, so entity release
+        // must explicitly stop it as well as dropping the retained UI tasks.
+        if let Some(cancel) = self.knowledge_reindex_cancel.take() {
+            cancel.store(true, Ordering::Release);
+        }
     }
 }
 
@@ -3737,6 +3767,86 @@ mod entity_tests {
         assert_eq!(
             entity.read_with(cx, |entity, _cx| entity.knowledge_reindex_progress()),
             None
+        );
+    }
+
+    #[gpui::test]
+    fn hidden_knowledge_page_still_receives_import_completion(cx: &mut TestAppContext) {
+        let data_dir = std::env::temp_dir().join(format!(
+            "oxideterm-knowledge-entity-test-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&data_dir).expect("create Knowledge test directory");
+        let document_path = data_dir.join("guide.md");
+        std::fs::write(&document_path, "# Guide\nEntity-owned import")
+            .expect("write Knowledge test document");
+        let entity = cx.new(|cx| {
+            let mut entity =
+                AiWorkspaceEntity::new(test_runtime(), oxideterm_ai::AiProviderKeyStore::new(), cx);
+            entity.rag_store = LazyAiRagStore::new(data_dir.clone());
+            entity
+        });
+        let store = entity.read_with(cx, |entity, _cx| entity.rag_store());
+        let collection = oxideterm_ai::rag_create_collection(
+            &store,
+            oxideterm_ai::RagCreateCollectionRequest {
+                name: "Hidden page".to_string(),
+                scope: oxideterm_ai::RagDocScopeRequest::Global,
+            },
+        )
+        .expect("create Knowledge test collection");
+
+        entity.update(cx, |entity, cx| {
+            assert!(entity.start_knowledge_import(
+                std::future::ready(Some(vec![document_path])),
+                collection.id.clone(),
+                "safe import failure".to_string(),
+                cx,
+            ));
+            assert!(entity.knowledge_import_task.is_some());
+        });
+        // No settings page or workspace callback is present while the task
+        // finishes; the entity must still apply the completion reliably.
+        cx.run_until_parked();
+
+        entity.read_with(cx, |entity, _cx| {
+            assert!(entity.knowledge_import_task.is_none());
+            assert_eq!(entity.knowledge_import_progress(), None);
+            assert_eq!(entity.knowledge_error(), None);
+        });
+        let documents = oxideterm_ai::rag_list_documents(&store, &collection.id, None, Some(10))
+            .expect("list imported Knowledge documents");
+        assert_eq!(documents.documents.len(), 1);
+        drop(entity);
+        drop(store);
+        std::fs::remove_dir_all(&data_dir).expect("remove Knowledge test directory");
+    }
+
+    #[gpui::test]
+    fn entity_release_cancels_knowledge_tasks_and_reindex(cx: &mut TestAppContext) {
+        let entity = cx.new(|cx| {
+            AiWorkspaceEntity::new(test_runtime(), oxideterm_ai::AiProviderKeyStore::new(), cx)
+        });
+        let cancel = Arc::new(AtomicBool::new(false));
+        let (paths_sender, paths_receiver) = tokio::sync::oneshot::channel();
+        entity.update(cx, |entity, cx| {
+            entity.knowledge_reindex_cancel = Some(cancel.clone());
+            assert!(entity.start_knowledge_import(
+                async move { paths_receiver.await.ok().flatten() },
+                "collection".to_string(),
+                "safe import failure".to_string(),
+                cx,
+            ));
+        });
+
+        drop(entity);
+        cx.update(|_cx| {});
+        cx.run_until_parked();
+
+        assert!(cancel.load(Ordering::Acquire));
+        assert!(
+            paths_sender.send(Some(Vec::new())).is_err(),
+            "dropping the entity must cancel its retained import future"
         );
     }
 

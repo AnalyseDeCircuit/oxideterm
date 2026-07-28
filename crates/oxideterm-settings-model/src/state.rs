@@ -10,9 +10,8 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::{
-    AiSettingsPage, KnowledgeDeleteConfirm, KnowledgeDeleteTarget, KnowledgeExternalEdit,
-    SettingsInput, SettingsKeybindingScopeFilter, SettingsTab, TerminalSettingsPage,
-    ThemeEditorState,
+    AiSettingsPage, SettingsInput, SettingsKeybindingScopeFilter, SettingsTab,
+    TerminalSettingsPage, ThemeEditorState,
 };
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
@@ -45,18 +44,6 @@ pub struct SettingsPageModel {
     pub expanded_ai_providers: HashMap<String, bool>,
     pub expanded_ai_provider_models: HashSet<String>,
     pub expanded_ai_context_providers: HashSet<String>,
-    pub knowledge_selected_collection_id: Option<String>,
-    pub knowledge_create_dialog_open: bool,
-    pub knowledge_new_document_dialog_open: bool,
-    pub knowledge_embedding_config_expanded: bool,
-    pub knowledge_new_collection_name: String,
-    pub knowledge_new_document_title: String,
-    pub knowledge_new_document_format: String,
-    pub knowledge_import_progress: Option<(usize, usize)>,
-    pub knowledge_embedding_progress: Option<(usize, usize)>,
-    pub knowledge_delete_confirm: Option<KnowledgeDeleteConfirm>,
-    pub knowledge_external_edit: Option<KnowledgeExternalEdit>,
-    pub knowledge_error: Option<String>,
     pub keybinding_recording_action_id: Option<String>,
     pub keybinding_conflict_action_ids: Vec<String>,
     pub keybinding_search_query: String,
@@ -84,18 +71,6 @@ impl Default for SettingsPageModel {
             expanded_ai_providers: HashMap::new(),
             expanded_ai_provider_models: HashSet::new(),
             expanded_ai_context_providers: HashSet::new(),
-            knowledge_selected_collection_id: None,
-            knowledge_create_dialog_open: false,
-            knowledge_new_document_dialog_open: false,
-            knowledge_embedding_config_expanded: false,
-            knowledge_new_collection_name: String::new(),
-            knowledge_new_document_title: String::new(),
-            knowledge_new_document_format: "markdown".to_string(),
-            knowledge_import_progress: None,
-            knowledge_embedding_progress: None,
-            knowledge_delete_confirm: None,
-            knowledge_external_edit: None,
-            knowledge_error: None,
             keybinding_recording_action_id: None,
             keybinding_conflict_action_ids: Vec::new(),
             keybinding_search_query: String::new(),
@@ -181,175 +156,6 @@ impl SettingsPageModel {
         self.expanded_ai_context_providers.remove(provider_id);
     }
 
-    /// Opens the create-collection dialog while preserving any draft name already typed.
-    pub fn open_knowledge_create_dialog(&mut self) {
-        self.knowledge_create_dialog_open = true;
-    }
-
-    /// Closes the create-collection dialog and clears its draft.
-    pub fn close_knowledge_create_dialog(&mut self) {
-        self.knowledge_create_dialog_open = false;
-        self.knowledge_new_collection_name.clear();
-    }
-
-    /// Hides the create-collection dialog while preserving its draft for a later retry.
-    pub fn hide_knowledge_create_dialog(&mut self) {
-        self.knowledge_create_dialog_open = false;
-    }
-
-    /// Opens the new-document dialog while preserving any draft title already typed.
-    pub fn open_knowledge_new_document_dialog(&mut self) {
-        self.knowledge_new_document_dialog_open = true;
-    }
-
-    /// Closes the new-document dialog and clears its draft title.
-    pub fn close_knowledge_new_document_dialog(&mut self) {
-        self.knowledge_new_document_dialog_open = false;
-        self.knowledge_new_document_title.clear();
-    }
-
-    /// Hides the new-document dialog while preserving its draft for a later retry.
-    pub fn hide_knowledge_new_document_dialog(&mut self) {
-        self.knowledge_new_document_dialog_open = false;
-    }
-
-    /// Records a successful collection creation and selects the created collection.
-    pub fn finish_knowledge_collection_create(&mut self, collection_id: impl Into<String>) {
-        self.knowledge_selected_collection_id = Some(collection_id.into());
-        self.knowledge_new_collection_name.clear();
-        self.knowledge_error = None;
-    }
-
-    /// Records a successful document creation and clears the document title draft.
-    pub fn finish_knowledge_document_create(&mut self) {
-        self.knowledge_new_document_title.clear();
-        self.knowledge_error = None;
-    }
-
-    /// Selects a knowledge collection from the page list.
-    pub fn select_knowledge_collection(&mut self, collection_id: impl Into<String>) {
-        self.knowledge_selected_collection_id = Some(collection_id.into());
-    }
-
-    /// Updates the create-collection draft from the shared settings input.
-    pub fn set_knowledge_collection_name(&mut self, name: impl Into<String>) {
-        self.knowledge_new_collection_name = name.into();
-    }
-
-    /// Updates the new-document title draft from the shared settings input.
-    pub fn set_knowledge_document_title(&mut self, title: impl Into<String>) {
-        self.knowledge_new_document_title = title.into();
-    }
-
-    /// Selects the document format used when creating a blank knowledge document.
-    pub fn set_knowledge_document_format(&mut self, format: impl Into<String>) {
-        self.knowledge_new_document_format = format.into();
-    }
-
-    /// Removes a selected collection if it matches the deleted collection.
-    pub fn clear_deleted_knowledge_collection(&mut self, collection_id: &str) {
-        if self.knowledge_selected_collection_id.as_deref() == Some(collection_id) {
-            self.knowledge_selected_collection_id = None;
-        }
-        self.knowledge_external_edit = None;
-        self.knowledge_error = None;
-    }
-
-    /// Stores a translated or backend-provided knowledge page error.
-    pub fn set_knowledge_error(&mut self, error: impl Into<String>) {
-        self.knowledge_error = Some(error.into());
-    }
-
-    /// Clears the knowledge page error after a successful action.
-    pub fn clear_knowledge_error(&mut self) {
-        self.knowledge_error = None;
-    }
-
-    /// Builds and stores a delete confirmation for a knowledge collection.
-    pub fn request_delete_collection(&mut self, id: impl Into<String>, name: impl Into<String>) {
-        self.knowledge_delete_confirm = Some(KnowledgeDeleteConfirm {
-            target: KnowledgeDeleteTarget::Collection,
-            id: id.into(),
-            name: name.into(),
-        });
-    }
-
-    /// Builds and stores a delete confirmation for a knowledge document.
-    pub fn request_delete_document(&mut self, id: impl Into<String>, name: impl Into<String>) {
-        self.knowledge_delete_confirm = Some(KnowledgeDeleteConfirm {
-            target: KnowledgeDeleteTarget::Document,
-            id: id.into(),
-            name: name.into(),
-        });
-    }
-
-    /// Clears the active knowledge delete confirmation.
-    pub fn clear_knowledge_delete_confirm(&mut self) {
-        self.knowledge_delete_confirm = None;
-    }
-
-    /// Takes the active knowledge delete confirmation for command execution.
-    pub fn take_knowledge_delete_confirm(&mut self) -> Option<KnowledgeDeleteConfirm> {
-        self.knowledge_delete_confirm.take()
-    }
-
-    /// Records an external edit file currently being watched by the settings page.
-    pub fn set_knowledge_external_edit(&mut self, edit: KnowledgeExternalEdit) {
-        self.knowledge_external_edit = Some(edit);
-        self.knowledge_error = None;
-    }
-
-    /// Clears the active external edit without touching other knowledge state.
-    pub fn clear_knowledge_external_edit(&mut self) {
-        self.knowledge_external_edit = None;
-    }
-
-    /// Starts a knowledge import progress counter and clears stale errors.
-    pub fn start_knowledge_import(&mut self, total: usize) {
-        self.knowledge_import_progress = Some((0, total));
-        self.knowledge_error = None;
-    }
-
-    /// Updates the knowledge import progress counter.
-    pub fn update_knowledge_import(&mut self, current: usize, total: usize) {
-        self.knowledge_import_progress = Some((current, total));
-    }
-
-    /// Finishes a knowledge import and clears stale errors.
-    pub fn finish_knowledge_import(&mut self) {
-        self.knowledge_import_progress = None;
-        self.knowledge_error = None;
-    }
-
-    /// Starts embedding progress and ensures the embedding controls are visible.
-    pub fn start_knowledge_embedding(&mut self, total: usize) {
-        self.knowledge_embedding_config_expanded = true;
-        self.knowledge_embedding_progress = Some((0, total));
-        self.knowledge_error = None;
-    }
-
-    /// Expands embedding configuration after a validation failure or user action.
-    pub fn expand_knowledge_embedding_config(&mut self) {
-        self.knowledge_embedding_config_expanded = true;
-        self.knowledge_error = None;
-    }
-
-    /// Toggles whether embedding configuration details are visible.
-    pub fn toggle_knowledge_embedding_config(&mut self) {
-        self.knowledge_embedding_config_expanded = !self.knowledge_embedding_config_expanded;
-    }
-
-    /// Updates the embedding progress counter.
-    pub fn update_knowledge_embedding(&mut self, current: usize, total: usize) {
-        self.knowledge_embedding_progress = Some((current, total));
-    }
-
-    /// Finishes embedding progress and clears stale errors.
-    pub fn finish_knowledge_embedding(&mut self) {
-        self.knowledge_embedding_progress = None;
-        self.knowledge_error = None;
-    }
-
     /// Starts recording a keybinding and clears stale conflict hints.
     pub fn start_keybinding_recording(&mut self, action_id: impl Into<String>) {
         self.keybinding_recording_action_id = Some(action_id.into());
@@ -413,8 +219,6 @@ impl SettingsPageModel {
                 .as_ref()
                 .and_then(|editor| editor.ui_colors.get(index).cloned())
                 .unwrap_or_default(),
-            SettingsInput::KnowledgeCollectionName => self.knowledge_new_collection_name.clone(),
-            SettingsInput::KnowledgeDocumentTitle => self.knowledge_new_document_title.clone(),
             _ => return None,
         };
         Some(value)
@@ -436,14 +240,6 @@ impl SettingsPageModel {
             }
             SettingsInput::CustomThemeUiColor(index) => {
                 self.apply_theme_editor_color_slot(index, draft, false)
-            }
-            SettingsInput::KnowledgeCollectionName => {
-                self.set_knowledge_collection_name(draft.to_string());
-                true
-            }
-            SettingsInput::KnowledgeDocumentTitle => {
-                self.set_knowledge_document_title(draft.to_string());
-                true
             }
             _ => false,
         }
@@ -498,17 +294,6 @@ pub enum AiSettingsSection {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn knowledge_dialog_close_clears_drafts() {
-        let mut model = SettingsPageModel::default();
-        model.open_knowledge_create_dialog();
-        model.knowledge_new_collection_name = "infra".to_string();
-        model.close_knowledge_create_dialog();
-
-        assert!(!model.knowledge_create_dialog_open);
-        assert!(model.knowledge_new_collection_name.is_empty());
-    }
 
     #[test]
     fn provider_removal_clears_related_expansion_state() {

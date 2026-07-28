@@ -90,7 +90,7 @@ impl AiOrchestratorRuntimeSnapshot {
         if oxideterm_ai::ai_embedding_requires_api_key(&provider) && api_key.is_none() {
             return None;
         }
-        oxideterm_ai::embed_texts(&provider, api_key, &resolved.model, vec![query.to_string()])
+        oxideterm_ai::embed_query_text(&provider, api_key, &resolved.model, query)
             .await
             .ok()
             .and_then(|vectors| vectors.into_iter().next())

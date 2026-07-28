@@ -736,8 +736,6 @@ pub(crate) struct WorkspaceApp {
     settings_navigation_draft: Option<SettingsNavigationLayout>,
     segmented_control_user_motion: selection_motion::UserSegmentedControlMotionState,
     theme_editor_presence: oxideterm_gpui_ui::motion::ExitPresence,
-    knowledge_create_presence: oxideterm_gpui_ui::motion::ExitPresence,
-    knowledge_document_presence: oxideterm_gpui_ui::motion::ExitPresence,
     help_legal_notice_presence: oxideterm_gpui_ui::motion::ExitPresence,
     // Prompt and memory documents are edited outside the virtual settings list.
     ai_text_editor_dialog: Option<settings::AiTextEditorDialog>,

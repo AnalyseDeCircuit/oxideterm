@@ -1073,17 +1073,19 @@ impl WorkspaceApp {
                 Some(ConfirmKeyboardAction::Handled) => true,
                 None => false,
             }
-        } else if self.settings_page.knowledge_create_dialog_open {
+        } else if self.ai_entity.read(cx).knowledge_create_dialog_open() {
             match self.handle_standard_confirm_key(event, cx) {
                 Some(ConfirmKeyboardAction::Cancel) => {
-                    self.settings_page.close_knowledge_create_dialog();
-                    cx.notify();
+                    self.ai_entity.update(cx, |entity, cx| {
+                        entity.close_knowledge_create_dialog(Duration::ZERO, cx);
+                    });
                     true
                 }
                 Some(ConfirmKeyboardAction::Confirm) => {
                     if self
-                        .settings_page
-                        .knowledge_new_collection_name
+                        .ai_entity
+                        .read(cx)
+                        .knowledge_new_collection_name()
                         .trim()
                         .is_empty()
                     {
@@ -1093,24 +1095,28 @@ impl WorkspaceApp {
                         cx.notify();
                     } else {
                         self.knowledge_create_collection(cx);
-                        self.settings_page.hide_knowledge_create_dialog();
+                        self.ai_entity.update(cx, |entity, cx| {
+                            entity.close_knowledge_create_dialog(Duration::ZERO, cx);
+                        });
                     }
                     true
                 }
                 Some(ConfirmKeyboardAction::Handled) => true,
                 None => false,
             }
-        } else if self.settings_page.knowledge_new_document_dialog_open {
+        } else if self.ai_entity.read(cx).knowledge_document_dialog_open() {
             match self.handle_standard_confirm_key(event, cx) {
                 Some(ConfirmKeyboardAction::Cancel) => {
-                    self.settings_page.close_knowledge_new_document_dialog();
-                    cx.notify();
+                    self.ai_entity.update(cx, |entity, cx| {
+                        entity.close_knowledge_document_dialog(Duration::ZERO, cx);
+                    });
                     true
                 }
                 Some(ConfirmKeyboardAction::Confirm) => {
                     if self
-                        .settings_page
-                        .knowledge_new_document_title
+                        .ai_entity
+                        .read(cx)
+                        .knowledge_new_document_title()
                         .trim()
                         .is_empty()
                     {
@@ -1121,18 +1127,22 @@ impl WorkspaceApp {
                         cx.notify();
                     } else {
                         self.knowledge_create_blank_document(cx);
-                        self.settings_page.hide_knowledge_new_document_dialog();
+                        self.ai_entity.update(cx, |entity, cx| {
+                            entity.close_knowledge_document_dialog(Duration::ZERO, cx);
+                        });
                     }
                     true
                 }
                 Some(ConfirmKeyboardAction::Handled) => true,
                 None => false,
             }
-        } else if self.settings_page.knowledge_delete_confirm.is_some() {
+        } else if self.ai_entity.read(cx).knowledge_delete_confirm().is_some() {
             match self.handle_standard_confirm_key(event, cx) {
                 Some(ConfirmKeyboardAction::Cancel) => {
-                    self.settings_page.clear_knowledge_delete_confirm();
-                    cx.notify();
+                    self.ai_entity.update(cx, |entity, cx| {
+                        entity.clear_knowledge_delete_confirm();
+                        cx.notify();
+                    });
                     true
                 }
                 Some(ConfirmKeyboardAction::Confirm) => {
