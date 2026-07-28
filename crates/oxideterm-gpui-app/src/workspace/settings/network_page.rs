@@ -65,20 +65,151 @@ fn schedule_settings_network_proxy_test(
     host: String,
     port: u16,
     upstream_proxy: UpstreamProxyConfig,
-) -> tokio::sync::oneshot::Receiver<HostKeyStatus> {
-    let (status_tx, status_rx) = tokio::sync::oneshot::channel();
+) -> tokio::task::JoinHandle<HostKeyStatus> {
     // The workspace runtime owns network I/O; the GPUI task receives only the
     // resulting status and never polls Tokio sockets on the UI executor.
     runtime.spawn(async move {
-        let status = match probe_upstream_proxy_route(&host, port, 10, &upstream_proxy).await {
+        match probe_upstream_proxy_route(&host, port, 10, &upstream_proxy).await {
             Ok(()) => HostKeyStatus::Verified,
             Err(error) => HostKeyStatus::Error {
                 message: error.to_string(),
             },
+        }
+    })
+}
+
+impl SettingsWorkspaceEntity {
+    pub(in crate::workspace) fn network_proxy_layout_flags(&self) -> (bool, bool, bool) {
+        (
+            self.network_proxy_password_status.is_some(),
+            self.network_proxy_test_pending,
+            self.network_proxy_test_result.is_some(),
+        )
+    }
+
+    pub(in crate::workspace) fn network_proxy_password_snapshot(
+        &self,
+    ) -> NetworkProxyPasswordSnapshot {
+        NetworkProxyPasswordSnapshot {
+            // GPUI input layout requires owned frame data; this copy is zeroized.
+            password: self.network_proxy_password.clone(),
+            password_status: self.network_proxy_password_status.clone(),
+        }
+    }
+
+    pub(in crate::workspace) fn network_proxy_test_snapshot(&self) -> NetworkProxyTestSnapshot {
+        NetworkProxyTestSnapshot {
+            test_host: self.network_proxy_test_host.clone(),
+            test_port: self.network_proxy_test_port.clone(),
+            test_pending: self.network_proxy_test_pending,
+            test_result: self.network_proxy_test_result.clone(),
+        }
+    }
+
+    pub(in crate::workspace) fn take_network_proxy_password(&mut self) -> Option<SecretString> {
+        if self.network_proxy_password.is_empty() {
+            return None;
+        }
+        self.settings_focused_input = None;
+        let password = std::mem::replace(
+            &mut self.network_proxy_password,
+            zeroize::Zeroizing::new(String::new()),
+        );
+        Some(SecretString::from(password))
+    }
+
+    pub(in crate::workspace) fn restore_network_proxy_password(
+        &mut self,
+        password: SecretString,
+        status: String,
+        cx: &mut Context<Self>,
+    ) {
+        zeroize::Zeroize::zeroize(&mut *self.network_proxy_password);
+        self.network_proxy_password = password.into_zeroizing();
+        self.network_proxy_password_status = Some(status);
+        cx.notify();
+    }
+
+    pub(in crate::workspace) fn finish_network_proxy_password_action(
+        &mut self,
+        status: Option<String>,
+        cx: &mut Context<Self>,
+    ) {
+        zeroize::Zeroize::zeroize(&mut *self.network_proxy_password);
+        if self.settings_focused_input == Some(SettingsInput::NetworkProxyPassword) {
+            self.settings_focused_input = None;
+        }
+        self.network_proxy_password_status = status;
+        cx.notify();
+    }
+
+    pub(in crate::workspace) fn set_network_proxy_password_status(
+        &mut self,
+        status: Option<String>,
+        cx: &mut Context<Self>,
+    ) {
+        self.network_proxy_password_status = status;
+        cx.notify();
+    }
+
+    pub(in crate::workspace) fn set_network_proxy_test_error(
+        &mut self,
+        error: String,
+        cx: &mut Context<Self>,
+    ) {
+        self.network_proxy_test_result = Some(Err(error));
+        cx.notify();
+    }
+
+    pub(in crate::workspace) fn start_network_proxy_test(
+        &mut self,
+        runtime: std::sync::Arc<tokio::runtime::Runtime>,
+        upstream_proxy: UpstreamProxyConfig,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if self.network_proxy_test_pending {
+            return false;
+        }
+        let host = self.network_proxy_test_host.trim().to_string();
+        if host.is_empty() {
+            self.set_network_proxy_test_error("host is required".to_string(), cx);
+            return false;
+        }
+        let Ok(port) = self.network_proxy_test_port.trim().parse::<u16>() else {
+            self.set_network_proxy_test_error("invalid port".to_string(), cx);
+            return false;
         };
-        let _ = status_tx.send(status);
-    });
-    status_rx
+
+        if let Some(abort) = self.network_proxy_test_abort.take() {
+            abort.abort();
+        }
+        let started_at = std::time::Instant::now();
+        let worker =
+            schedule_settings_network_proxy_test(runtime.as_ref(), host, port, upstream_proxy);
+        self.network_proxy_test_abort = Some(worker.abort_handle());
+        self.network_proxy_test_pending = true;
+        self.network_proxy_test_result = None;
+        self.network_proxy_test_task = Some(cx.spawn(async move |settings, cx| {
+            // Keep the shared runtime alive until this Entity-owned worker completes.
+            let _runtime_owner = runtime;
+            let status = worker.await.unwrap_or_else(|_| HostKeyStatus::Error {
+                message: "proxy route test task stopped unexpectedly".to_string(),
+            });
+            let elapsed = started_at.elapsed().as_millis();
+            let _ = settings.update(cx, |settings, cx| {
+                settings.network_proxy_test_task = None;
+                settings.network_proxy_test_abort = None;
+                settings.network_proxy_test_pending = false;
+                settings.network_proxy_test_result = Some(match status {
+                    HostKeyStatus::Error { message } => Err(message),
+                    _ => Ok(elapsed),
+                });
+                cx.notify();
+            });
+        }));
+        cx.notify();
+        true
+    }
 }
 
 impl WorkspaceApp {
@@ -324,22 +455,26 @@ impl WorkspaceApp {
         proxy_enabled: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let host_value = if self.focused_settings_input == Some(SettingsInput::NetworkProxyTestHost)
-        {
-            self.settings_input_draft.clone()
-        } else {
-            self.settings_network_proxy_test_host.clone()
-        };
-        let port_value = if self.focused_settings_input == Some(SettingsInput::NetworkProxyTestPort)
-        {
-            self.settings_input_draft.clone()
-        } else {
-            self.settings_network_proxy_test_port.clone()
-        };
+        let snapshot = self
+            .settings_workspace
+            .read(cx)
+            .network_proxy_test_snapshot();
+        let host_value = snapshot.test_host;
+        let port_value = snapshot.test_port;
         let test_disabled = !proxy_enabled
-            || self.settings_network_proxy_test_pending
+            || snapshot.test_pending
             || host_value.trim().is_empty()
             || port_value.trim().parse::<u16>().is_err();
+        let status = snapshot.test_result.map(|result| match result {
+            Ok(elapsed) => self
+                .i18n
+                .t("settings_view.network.test_success")
+                .replace("{{elapsed}}", &elapsed.to_string()),
+            Err(error) => self
+                .i18n
+                .t("settings_view.network.test_error")
+                .replace("{{error}}", &error),
+        });
 
         div()
             .w_full()
@@ -396,7 +531,7 @@ impl WorkspaceApp {
                         div()
                             .flex_none()
                             .child(self.workspace_toolbar_action_button(
-                                if self.settings_network_proxy_test_pending {
+                                if snapshot.test_pending {
                                     self.i18n.t("settings_view.network.testing")
                                 } else {
                                     self.i18n.t("settings_view.network.test_button")
@@ -417,19 +552,16 @@ impl WorkspaceApp {
                                 }),
                             )),
                     )
-                    .when_some(
-                        self.settings_network_proxy_test_status.clone(),
-                        |row, status| {
-                            row.child(
-                                div()
-                                    .min_w(px(0.0))
-                                    .flex_1()
-                                    .text_size(px(self.tokens.metrics.ui_text_xs))
-                                    .text_color(rgb(self.tokens.ui.text_muted))
-                                    .child(status),
-                            )
-                        },
-                    ),
+                    .when_some(status, |row, status| {
+                        row.child(
+                            div()
+                                .min_w(px(0.0))
+                                .flex_1()
+                                .text_size(px(self.tokens.metrics.ui_text_xs))
+                                .text_color(rgb(self.tokens.ui.text_muted))
+                                .child(status),
+                        )
+                    }),
             )
             .into_any_element()
     }
@@ -837,13 +969,12 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let password_input = SettingsInput::NetworkProxyPassword;
-        let current_value = if self.focused_settings_input == Some(password_input) {
-            self.settings_input_draft.clone()
-        } else {
-            String::new()
-        };
-        let save_disabled = current_value.is_empty() || !enabled;
-        let remove_disabled = !has_saved_password && current_value.is_empty();
+        let snapshot = self
+            .settings_workspace
+            .read(cx)
+            .network_proxy_password_snapshot();
+        let save_disabled = snapshot.password.is_empty() || !enabled;
+        let remove_disabled = !has_saved_password && snapshot.password.is_empty();
         let mut row = div()
             .w_full()
             .min_w(px(0.0))
@@ -872,7 +1003,7 @@ impl WorkspaceApp {
                             .flex_basis(px(SETTINGS_NETWORK_FIELD_WIDTH))
                             .child(self.settings_secret_text_input_control_fill(
                                 password_input,
-                                String::new(),
+                                snapshot.password,
                                 if has_saved_password {
                                     self.i18n
                                         .t("settings_view.network.password_saved_placeholder")
@@ -939,7 +1070,7 @@ impl WorkspaceApp {
             )
             .when(!enabled, |field| field.opacity(0.5));
 
-        if let Some(status) = self.settings_network_proxy_password_status.clone() {
+        if let Some(status) = snapshot.password_status {
             row = row.child(
                 div()
                     .min_w(px(0.0))
@@ -991,7 +1122,9 @@ impl WorkspaceApp {
     }
 
     pub(in crate::workspace) fn toggle_settings_network_enabled(&mut self, cx: &mut Context<Self>) {
-        self.settings_network_proxy_password_status = None;
+        self.settings_workspace.update(cx, |settings, cx| {
+            settings.set_network_proxy_password_status(None, cx);
+        });
         let removes_saved_password = self
             .settings_store
             .settings()
@@ -1012,12 +1145,15 @@ impl WorkspaceApp {
                 .connection_store
                 .delete_global_upstream_proxy_password()
         {
-            self.settings_network_proxy_password_status = Some(error.to_string());
-            cx.notify();
+            self.settings_workspace.update(cx, |settings, cx| {
+                settings.set_network_proxy_password_status(Some(error.to_string()), cx);
+            });
             return;
         }
         // Disabling the proxy also clears any transient credential draft.
-        self.clear_settings_input_draft(SettingsInput::NetworkProxyPassword);
+        self.settings_workspace.update(cx, |settings, cx| {
+            settings.finish_network_proxy_password_action(None, cx);
+        });
         self.edit_settings(
             |settings| {
                 if settings.network.upstream_proxy.is_some() {
@@ -1051,11 +1187,12 @@ impl WorkspaceApp {
         &mut self,
         cx: &mut Context<Self>,
     ) {
-        let password = self.settings_input_draft.clone();
-        if password.is_empty() {
+        let Some(secret) = self
+            .settings_workspace
+            .update(cx, |settings, _cx| settings.take_network_proxy_password())
+        else {
             return;
-        }
-        let secret = SecretString::new(password);
+        };
         match self
             .connection_store
             .save_global_upstream_proxy_password(&secret)
@@ -1076,20 +1213,19 @@ impl WorkspaceApp {
                     },
                     cx,
                 );
-                // Clear the transient UI draft after the keychain write succeeds.
-                zeroize::Zeroize::zeroize(&mut self.settings_input_draft);
-                self.settings_input_draft.clear();
-                self.focused_settings_input = None;
-                self.settings_network_proxy_password_status = Some(
-                    self.i18n
-                        .t("settings_view.network.password_saved_placeholder"),
-                );
+                let status = self
+                    .i18n
+                    .t("settings_view.network.password_saved_placeholder");
+                self.settings_workspace.update(cx, |settings, cx| {
+                    settings.finish_network_proxy_password_action(Some(status), cx);
+                });
             }
             Err(error) => {
-                self.settings_network_proxy_password_status = Some(error.to_string());
+                self.settings_workspace.update(cx, |settings, cx| {
+                    settings.restore_network_proxy_password(secret, error.to_string(), cx);
+                });
             }
         }
-        cx.notify();
     }
 
     pub(in crate::workspace) fn remove_settings_network_proxy_password(
@@ -1116,32 +1252,22 @@ impl WorkspaceApp {
                     },
                     cx,
                 );
-                zeroize::Zeroize::zeroize(&mut self.settings_input_draft);
-                self.settings_input_draft.clear();
-                self.focused_settings_input = None;
-                self.settings_network_proxy_password_status = None;
+                self.settings_workspace.update(cx, |settings, cx| {
+                    settings.finish_network_proxy_password_action(None, cx);
+                });
             }
             Err(error) => {
-                self.settings_network_proxy_password_status = Some(error.to_string());
+                self.settings_workspace.update(cx, |settings, cx| {
+                    settings.set_network_proxy_password_status(Some(error.to_string()), cx);
+                });
             }
         }
-        cx.notify();
     }
 
     pub(in crate::workspace) fn start_settings_network_proxy_test(
         &mut self,
         cx: &mut Context<Self>,
     ) {
-        let host = self.settings_network_proxy_test_host.trim().to_string();
-        let Ok(port) = self.settings_network_proxy_test_port.trim().parse::<u16>() else {
-            self.settings_network_proxy_test_status = Some(
-                self.i18n
-                    .t("settings_view.network.test_error")
-                    .replace("{{error}}", "invalid port"),
-            );
-            cx.notify();
-            return;
-        };
         let Some(proxy) = self
             .settings_store
             .settings()
@@ -1150,63 +1276,33 @@ impl WorkspaceApp {
             .as_ref()
             .cloned()
         else {
-            self.settings_network_proxy_test_status = Some(
-                self.i18n
-                    .t("settings_view.network.test_error")
-                    .replace("{{error}}", "proxy is disabled"),
-            );
-            cx.notify();
+            self.settings_workspace.update(cx, |settings, cx| {
+                settings.set_network_proxy_test_error("proxy is disabled".to_string(), cx);
+            });
             return;
         };
         let Ok(upstream_proxy) =
             upstream_proxy_config_from_global_settings(&self.connection_store, &proxy)
         else {
-            self.settings_network_proxy_test_status = Some(
-                self.i18n
-                    .t("settings_view.network.test_error")
-                    .replace("{{error}}", "proxy password is not available"),
-            );
-            cx.notify();
+            self.settings_workspace.update(cx, |settings, cx| {
+                settings.set_network_proxy_test_error(
+                    "proxy password is not available".to_string(),
+                    cx,
+                );
+            });
             return;
         };
-        self.settings_network_proxy_test_pending = true;
-        self.settings_network_proxy_test_status = None;
-        let started_at = std::time::Instant::now();
-        let status_rx = schedule_settings_network_proxy_test(
-            self.forwarding_runtime.as_ref(),
-            host,
-            port,
-            upstream_proxy,
-        );
-
-        cx.spawn(async move |weak, cx| {
-            let status = status_rx.await.unwrap_or_else(|_| HostKeyStatus::Error {
-                message: "proxy route test task stopped unexpectedly".to_string(),
-            });
-            let elapsed = started_at.elapsed().as_millis();
-            let _ = weak.update(cx, move |this, cx| {
-                this.settings_network_proxy_test_pending = false;
-                this.settings_network_proxy_test_status = Some(match status {
-                    HostKeyStatus::Error { message } => this
-                        .i18n
-                        .t("settings_view.network.test_error")
-                        .replace("{{error}}", &message),
-                    _ => this
-                        .i18n
-                        .t("settings_view.network.test_success")
-                        .replace("{{elapsed}}", &elapsed.to_string()),
-                });
-                cx.notify();
-            });
-        })
-        .detach();
-        cx.notify();
+        let runtime = self.forwarding_runtime.clone();
+        self.settings_workspace.update(cx, |settings, cx| {
+            settings.start_network_proxy_test(runtime, upstream_proxy, cx);
+        });
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use gpui::{AppContext, TestAppContext};
     use oxideterm_ssh::{UpstreamProxyAuth, UpstreamProxyProtocol};
 
     #[test]
@@ -1224,7 +1320,7 @@ mod tests {
         });
 
         let runtime = tokio::runtime::Runtime::new().expect("create workspace runtime");
-        let status_rx = schedule_settings_network_proxy_test(
+        let worker = schedule_settings_network_proxy_test(
             &runtime,
             "proxy-test-target.invalid".to_string(),
             22,
@@ -1238,10 +1334,99 @@ mod tests {
             },
         );
 
-        let status = status_rx
-            .blocking_recv()
+        let status = runtime
+            .block_on(worker)
             .expect("receive the proxy test result outside Tokio");
         proxy_server.join().expect("join proxy test server");
         assert!(matches!(status, HostKeyStatus::Error { .. }));
+    }
+
+    #[gpui::test]
+    fn proxy_password_moves_and_restores_without_plaintext_clone(cx: &mut TestAppContext) {
+        let settings = cx.new(SettingsWorkspaceEntity::new);
+        settings.update(cx, |settings, cx| {
+            assert!(settings.focus_settings_entity_input(SettingsInput::NetworkProxyPassword, cx));
+            assert!(settings.replace_settings_entity_input(
+                SettingsInput::NetworkProxyPassword,
+                None,
+                "proxy-secret",
+                cx,
+            ));
+
+            let password = settings
+                .take_network_proxy_password()
+                .expect("network proxy password");
+            assert_eq!(password.expose_secret(), "proxy-secret");
+            assert!(settings.network_proxy_password.is_empty());
+
+            settings.restore_network_proxy_password(password, "retry".to_string(), cx);
+            assert_eq!(settings.network_proxy_password.as_str(), "proxy-secret");
+            assert_eq!(
+                settings.network_proxy_password_status.as_deref(),
+                Some("retry")
+            );
+
+            settings.finish_network_proxy_password_action(None, cx);
+            assert!(settings.network_proxy_password.is_empty());
+            assert_eq!(settings.settings_entity_focused_input(), None);
+        });
+    }
+
+    #[gpui::test]
+    fn proxy_route_test_task_and_completion_are_entity_owned(cx: &mut TestAppContext) {
+        let proxy_listener = std::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0))
+            .expect("bind an entity proxy test listener");
+        let proxy_port = proxy_listener
+            .local_addr()
+            .expect("read entity proxy address")
+            .port();
+        let proxy_server = std::thread::spawn(move || {
+            let (stream, _) = proxy_listener
+                .accept()
+                .expect("accept entity proxy test client");
+            drop(stream);
+        });
+        let runtime = std::sync::Arc::new(
+            tokio::runtime::Builder::new_multi_thread()
+                .worker_threads(1)
+                .enable_all()
+                .build()
+                .expect("create entity proxy runtime"),
+        );
+        let settings = cx.new(SettingsWorkspaceEntity::new);
+        settings.update(cx, |settings, cx| {
+            settings.network_proxy_test_host = "proxy-test-target.invalid".to_string();
+            settings.network_proxy_test_port = "22".to_string();
+            assert!(settings.start_network_proxy_test(
+                runtime,
+                UpstreamProxyConfig {
+                    protocol: UpstreamProxyProtocol::Socks5,
+                    host: std::net::Ipv4Addr::LOCALHOST.to_string(),
+                    port: proxy_port,
+                    auth: UpstreamProxyAuth::None,
+                    remote_dns: true,
+                    no_proxy: String::new(),
+                },
+                cx,
+            ));
+            assert!(settings.network_proxy_test_pending);
+            assert!(settings.network_proxy_test_task.is_some());
+            assert!(settings.network_proxy_test_abort.is_some());
+        });
+
+        proxy_server.join().expect("join entity proxy test server");
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+        while settings.read_with(cx, |settings, _cx| settings.network_proxy_test_pending)
+            && std::time::Instant::now() < deadline
+        {
+            std::thread::sleep(std::time::Duration::from_millis(5));
+            cx.run_until_parked();
+        }
+        settings.update(cx, |settings, _cx| {
+            assert!(!settings.network_proxy_test_pending);
+            assert!(settings.network_proxy_test_task.is_none());
+            assert!(settings.network_proxy_test_abort.is_none());
+            assert!(matches!(settings.network_proxy_test_result, Some(Err(_))));
+        });
     }
 }

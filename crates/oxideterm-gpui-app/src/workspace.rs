@@ -768,11 +768,6 @@ pub(crate) struct WorkspaceApp {
     settings_selected_connection_import_drafts: HashSet<String>,
     settings_connection_import_duplicate_strategy: ConnectionImportDuplicateStrategy,
     settings_connection_import_target_group: String,
-    settings_network_proxy_password_status: Option<String>,
-    settings_network_proxy_test_host: String,
-    settings_network_proxy_test_port: String,
-    settings_network_proxy_test_pending: bool,
-    settings_network_proxy_test_status: Option<String>,
     settings_local_privilege_draft: PrivilegeCredentialDraft,
     settings_local_privilege_error: Option<String>,
     // The editor stays collapsed for populated scopes until the user starts an add or edit flow.

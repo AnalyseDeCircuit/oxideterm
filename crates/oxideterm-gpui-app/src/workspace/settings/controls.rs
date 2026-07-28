@@ -925,17 +925,21 @@ impl WorkspaceApp {
                         false,
                         cx.listener(move |this, _event, _window, cx| {
                             this.close_settings_select();
-                            this.settings_network_proxy_password_status = None;
-                            this.clear_settings_input_draft(SettingsInput::NetworkProxyPassword);
+                            this.settings_workspace.update(cx, |settings, cx| {
+                                settings.finish_network_proxy_password_action(None, cx);
+                            });
                             if mode == NetworkProxyAuthMode::None
                                 && has_saved_password
                                 && let Err(error) = this
                                     .connection_store
                                     .delete_global_upstream_proxy_password()
                             {
-                                this.settings_network_proxy_password_status =
-                                    Some(error.to_string());
-                                cx.notify();
+                                this.settings_workspace.update(cx, |settings, cx| {
+                                    settings.set_network_proxy_password_status(
+                                        Some(error.to_string()),
+                                        cx,
+                                    );
+                                });
                                 cx.stop_propagation();
                                 return;
                             }

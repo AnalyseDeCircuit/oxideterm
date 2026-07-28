@@ -58,6 +58,18 @@ pub(in crate::workspace) enum ManagedKeyDialogSnapshot {
     },
 }
 
+pub(in crate::workspace) struct NetworkProxyPasswordSnapshot {
+    pub(in crate::workspace) password: Zeroizing<String>,
+    pub(in crate::workspace) password_status: Option<String>,
+}
+
+pub(in crate::workspace) struct NetworkProxyTestSnapshot {
+    pub(in crate::workspace) test_host: String,
+    pub(in crate::workspace) test_port: String,
+    pub(in crate::workspace) test_pending: bool,
+    pub(in crate::workspace) test_result: Option<Result<u128, String>>,
+}
+
 /// Owns settings work that must complete independently from root rendering.
 pub(in crate::workspace) struct SettingsWorkspaceEntity {
     portable_status: Option<oxideterm_portable_runtime::PortableStatusSnapshot>,
@@ -86,6 +98,14 @@ pub(in crate::workspace) struct SettingsWorkspaceEntity {
     pub(super) managed_key_rename_name: String,
     pub(super) managed_key_dialog_presence: oxideterm_gpui_ui::motion::ExitPresence,
     pub(super) managed_key_dialog_exit_task: Option<Task<()>>,
+    pub(super) network_proxy_password: Zeroizing<String>,
+    pub(super) network_proxy_password_status: Option<String>,
+    pub(super) network_proxy_test_host: String,
+    pub(super) network_proxy_test_port: String,
+    pub(super) network_proxy_test_pending: bool,
+    pub(super) network_proxy_test_result: Option<Result<u128, String>>,
+    pub(super) network_proxy_test_task: Option<Task<()>>,
+    pub(super) network_proxy_test_abort: Option<tokio::task::AbortHandle>,
     pub(super) native_update: NativeUpdateRuntime,
 }
 
@@ -137,6 +157,14 @@ impl SettingsWorkspaceEntity {
             managed_key_rename_name: String::new(),
             managed_key_dialog_presence: oxideterm_gpui_ui::motion::ExitPresence::visible(),
             managed_key_dialog_exit_task: None,
+            network_proxy_password: Zeroizing::new(String::new()),
+            network_proxy_password_status: None,
+            network_proxy_test_host: String::new(),
+            network_proxy_test_port: "22".to_string(),
+            network_proxy_test_pending: false,
+            network_proxy_test_result: None,
+            network_proxy_test_task: None,
+            network_proxy_test_abort: None,
             native_update: NativeUpdateRuntime::new(cx),
         }
     }
@@ -242,6 +270,9 @@ impl SettingsWorkspaceEntity {
             SettingsInput::ManagedKeyPastePrivateKey => Some(&self.managed_key_paste_private_key),
             SettingsInput::ManagedKeyPastePassphrase => Some(&self.managed_key_paste_passphrase),
             SettingsInput::ManagedKeyRenameName => Some(&self.managed_key_rename_name),
+            SettingsInput::NetworkProxyPassword => Some(&self.network_proxy_password),
+            SettingsInput::NetworkProxyTestHost => Some(&self.network_proxy_test_host),
+            SettingsInput::NetworkProxyTestPort => Some(&self.network_proxy_test_port),
             _ => None,
         }
     }
@@ -274,6 +305,9 @@ impl SettingsWorkspaceEntity {
                 self.managed_key_dialog,
                 Some(SettingsManagedKeyDialog::Rename { .. })
             ),
+            SettingsInput::NetworkProxyPassword
+            | SettingsInput::NetworkProxyTestHost
+            | SettingsInput::NetworkProxyTestPort => true,
             _ => false,
         };
         if !can_focus {
@@ -343,6 +377,10 @@ impl SettingsWorkspaceEntity {
             | SettingsInput::ManagedKeyPastePrivateKey
             | SettingsInput::ManagedKeyPastePassphrase
             | SettingsInput::ManagedKeyRenameName => self.managed_key_status = None,
+            SettingsInput::NetworkProxyPassword => self.network_proxy_password_status = None,
+            SettingsInput::NetworkProxyTestHost | SettingsInput::NetworkProxyTestPort => {
+                self.network_proxy_test_result = None;
+            }
             _ => {}
         }
     }
@@ -363,7 +401,18 @@ impl SettingsWorkspaceEntity {
                 Some(&mut self.managed_key_paste_passphrase)
             }
             SettingsInput::ManagedKeyRenameName => Some(&mut self.managed_key_rename_name),
+            SettingsInput::NetworkProxyPassword => Some(&mut self.network_proxy_password),
+            SettingsInput::NetworkProxyTestHost => Some(&mut self.network_proxy_test_host),
+            SettingsInput::NetworkProxyTestPort => Some(&mut self.network_proxy_test_port),
             _ => None,
+        }
+    }
+}
+
+impl Drop for SettingsWorkspaceEntity {
+    fn drop(&mut self) {
+        if let Some(abort) = self.network_proxy_test_abort.take() {
+            abort.abort();
         }
     }
 }

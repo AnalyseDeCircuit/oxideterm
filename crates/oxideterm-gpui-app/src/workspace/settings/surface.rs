@@ -468,6 +468,10 @@ impl WorkspaceApp {
                 settings.network.application_proxy_mode.hash(&mut hasher);
                 settings.general.update_proxy.mode.hash(&mut hasher);
                 settings.general.update_proxy.protocol.hash(&mut hasher);
+                self.settings_workspace
+                    .read(cx)
+                    .network_proxy_layout_flags()
+                    .hash(&mut hasher);
             }
             SettingsTab::Help => {
                 settings.general.update_channel.hash(&mut hasher);
