@@ -1411,15 +1411,13 @@ impl WorkspaceApp {
         }
     }
 
-    pub(in crate::workspace) fn apply_workspace_runtime_connection_trace_events(
+    pub(in crate::workspace) fn apply_workspace_runtime_connection_trace_event(
         &mut self,
+        event: ConnectionTraceEvent,
         cx: &mut Context<Self>,
     ) {
-        let events = self
-            .workspace_runtime
-            .update(cx, |runtime, cx| runtime.take_connection_trace_events(cx));
         self.apply_workspace_overlay_intent(
-            WorkspaceOverlayIntent::ConnectionTraceEvents(events),
+            WorkspaceOverlayIntent::ConnectionTraceEvents(vec![event]),
             cx,
         );
     }

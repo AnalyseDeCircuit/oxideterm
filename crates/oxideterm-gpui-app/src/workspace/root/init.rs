@@ -187,10 +187,15 @@ impl WorkspaceApp {
             )
         });
         let runtime_window_handle = window.window_handle();
-        let workspace_runtime_subscription = cx.subscribe(
+        let workspace_runtime_subscription = cx.subscribe_in(
             &workspace_runtime,
-            move |workspace, _runtime, event: &runtime_entity::WorkspaceRuntimeEvent, cx| {
-                workspace.handle_workspace_runtime_event(event, runtime_window_handle, cx);
+            window,
+            move |workspace,
+                  _runtime,
+                  event: &runtime_entity::WorkspaceRuntimeEvent,
+                  window,
+                  cx| {
+                workspace.handle_workspace_runtime_event(event, window, cx);
             },
         );
         let (forwarding_worker_tx, forwarding_worker_rx) =

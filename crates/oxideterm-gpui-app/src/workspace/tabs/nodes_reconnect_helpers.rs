@@ -1,19 +1,5 @@
 use super::*;
 
-pub(super) fn reconnect_error_is_non_retryable(error: &str) -> bool {
-    let error = error.to_ascii_lowercase();
-    [
-        "authentication failed",
-        "hostkeymismatch",
-        "host key",
-        "permission denied",
-        "user_cancelled",
-        "cancelled",
-    ]
-    .iter()
-    .any(|needle| error.contains(needle))
-}
-
 pub(super) fn readiness_for_connection_status(status: &str) -> Option<NodeReadiness> {
     match status {
         "connected" => Some(NodeReadiness::Ready),
@@ -147,17 +133,6 @@ mod node_reconnect_helper_tests {
             event_log_title_for_node_readiness(&NodeReadiness::Disconnected),
             "event_log.events.node_state_disconnected"
         );
-    }
-
-    #[test]
-    fn reconnect_retry_filter_matches_tauri_non_retryable_errors() {
-        assert!(reconnect_error_is_non_retryable("Authentication failed"));
-        assert!(reconnect_error_is_non_retryable("HostKeyMismatch"));
-        assert!(reconnect_error_is_non_retryable("host key changed"));
-        assert!(reconnect_error_is_non_retryable("Permission denied"));
-        assert!(reconnect_error_is_non_retryable("USER_CANCELLED"));
-        assert!(reconnect_error_is_non_retryable("cancelled"));
-        assert!(!reconnect_error_is_non_retryable("network timeout"));
     }
 
     #[test]

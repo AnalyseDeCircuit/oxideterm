@@ -138,8 +138,7 @@ impl WorkspaceApp {
             let reconnect_job = reconnect_node_id.as_ref().and_then(|node_id| {
                 self.workspace_runtime
                     .read(cx)
-                    .reconnect_orchestrator()
-                    .active_progress(&node_id.0)
+                    .reconnect_active_progress(node_id)
             });
             let show_reconnect_progress = reconnect_job.is_some();
             let icon = tab_kind_icon(self, &tab.kind, cx);

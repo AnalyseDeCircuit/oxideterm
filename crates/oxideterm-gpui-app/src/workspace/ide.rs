@@ -162,8 +162,7 @@ impl WorkspaceApp {
         let Some((ide_snapshot, snapshot_at)) = self
             .workspace_runtime
             .read(cx)
-            .reconnect_orchestrator()
-            .ide_snapshot(&node_id.0)
+            .reconnect_ide_snapshot(node_id)
         else {
             return IdeReconnectRestoreStatus::Skipped;
         };

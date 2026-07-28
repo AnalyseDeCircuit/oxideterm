@@ -4,7 +4,10 @@
 use super::new_connection::SshConnectionWorkerResult;
 use super::*;
 use oxideterm_settings::RemoteShellIntegrationMode;
-use oxideterm_ssh::{ManagedKeyResolver, ReconnectTiming};
+use oxideterm_ssh::{
+    ManagedKeyResolver, ReconnectForwardRestorePlan, ReconnectIdeSnapshot, ReconnectJob,
+    ReconnectTiming,
+};
 
 const ACTIVE_PROBE_START_DELAY: Duration = Duration::from_millis(530);
 const RECONNECT_DEBOUNCE_DELAY: Duration = Duration::from_millis(500);
@@ -12,12 +15,97 @@ const RECONNECT_MAX_REQUEUE: u32 = 120;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(in crate::workspace) enum WorkspaceRuntimeEvent {
-    WorkerResultsReady,
-    NodeEventsReady,
-    ReconnectRootsReady,
-    ReconnectScheduleReady,
-    ConnectionTraceEventsReady,
+    EffectsReady,
+}
+
+#[derive(Debug)]
+pub(in crate::workspace) enum WorkspaceRuntimeEffect {
+    Reconnect(ReconnectRuntimeEffect),
+    Node(NodeRuntimeEffect),
+    StartReconnectRoot {
+        node_id: NodeId,
+    },
+    ContinueConnectionChain {
+        node_id: NodeId,
+    },
+    ContinueReconnectCascade,
+    StartReconnectPipeline {
+        node_id: NodeId,
+    },
+    RetryNodeConnect {
+        node_id: NodeId,
+        attempt: u32,
+        max_attempts: u32,
+    },
+    ReconnectRecoveredBeforeRetry {
+        node_id: NodeId,
+    },
+    ReconnectJobCleaned,
+    ConnectionTrace(ConnectionTraceEvent),
     ActiveConnectionsChanged,
+}
+
+#[derive(Debug)]
+pub(in crate::workspace) enum ReconnectRuntimeEffect {
+    NodeConnected {
+        node_id: NodeId,
+        connection_id: String,
+        reconnecting: bool,
+    },
+    NodeConnectFailed {
+        node_id: NodeId,
+        error: String,
+        action: ReconnectFailureAction,
+    },
+    GraceRecovered {
+        node_id: NodeId,
+        connection_id: String,
+        recovered_connections: Vec<(NodeId, String)>,
+    },
+    GraceExpired {
+        node_id: NodeId,
+        detail: String,
+    },
+    SftpTransfersSnapshotted {
+        node_id: NodeId,
+        entered_grace_period: bool,
+    },
+    RemoteShellIntegrationGateFinished {
+        node_id: NodeId,
+        result: Result<(RemoteShellIntegrationStatus, bool), String>,
+    },
+}
+
+#[derive(Debug)]
+pub(in crate::workspace) enum ReconnectFailureAction {
+    InitialConnect,
+    Retry {
+        attempt: u32,
+        max_attempts: u32,
+        delay: Duration,
+        job_id: String,
+    },
+    FinishReconnect,
+}
+
+#[derive(Debug)]
+pub(in crate::workspace) enum NodeRuntimeEffect {
+    ConnectionStatusChanged {
+        connection_id: String,
+        status: String,
+        affected_children: Vec<String>,
+    },
+    ConnectionStateChanged {
+        node_id: String,
+        state: NodeReadiness,
+        reason: String,
+    },
+    SftpReady {
+        node_id: String,
+        ready: bool,
+        cwd: Option<String>,
+    },
+    TerminalEndpointChanged,
 }
 
 #[derive(Debug)]
@@ -51,6 +139,16 @@ pub(in crate::workspace) enum ReconnectPipelineClaim {
 pub(in crate::workspace) enum NodeTransportStartError {
     MissingRuntime,
     Route(String),
+}
+
+pub(in crate::workspace) enum ReconnectPostTerminalAction {
+    RestoreForwards,
+    ResumeTransfers,
+}
+
+pub(in crate::workspace) enum ReconnectPhaseOutcome {
+    Failed,
+    Continue,
 }
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -119,21 +217,19 @@ pub(in crate::workspace) struct WorkspaceRuntimeEntity {
     active_probe_rx: std::sync::mpsc::Receiver<usize>,
     _node_event_subscription: NodeEventSubscription,
     node_event_rx: NodeEventReceiver,
-    reconnect_results: VecDeque<ReconnectWorkerResult>,
+    runtime_effects: VecDeque<WorkspaceRuntimeEffect>,
+    runtime_effect_delivery_pending: bool,
     node_transport_attempts: HashMap<NodeId, NodeTransportAttempt>,
     next_node_transport_attempt_id: u64,
-    node_events: VecDeque<NodeStateEvent>,
     node_event_generations: HashMap<NodeId, u64>,
     node_router: NodeRouter,
     reconnect_enabled: bool,
     pending_reconnect_node_ids: HashSet<NodeId>,
     reconnect_debounce_generation: u64,
-    ready_reconnect_roots: VecDeque<NodeId>,
     reconnect_pipeline_active_node: Option<NodeId>,
     reconnect_requeue_states: HashMap<NodeId, ReconnectRequeueState>,
     pending_reconnect_cascade_nodes: VecDeque<NodeId>,
     reconnect_cascade_generation: u64,
-    reconnect_schedule_actions: VecDeque<ReconnectScheduleAction>,
     // Restore bookkeeping survives page changes and is cancelled only by node lifecycle actions.
     pending_reconnect_transfer_resumes: HashMap<NodeId, HashSet<String>>,
     reconnect_transfer_resume_successes: HashMap<NodeId, usize>,
@@ -144,8 +240,6 @@ pub(in crate::workspace) struct WorkspaceRuntimeEntity {
     active_connection_chain: Option<ConnectionChainRun>,
     connecting_node_locks: HashSet<NodeId>,
     connection_trace_state: ConnectionTraceState,
-    connection_trace_events: VecDeque<ConnectionTraceEvent>,
-    connection_trace_delivery_pending: bool,
     ssh_registry: SshConnectionRegistry,
     task_runtime: Arc<tokio::runtime::Runtime>,
     reconnect_timing: ReconnectTiming,
@@ -209,21 +303,19 @@ impl WorkspaceRuntimeEntity {
             active_probe_rx,
             _node_event_subscription: node_event_subscription,
             node_event_rx,
-            reconnect_results: VecDeque::new(),
+            runtime_effects: VecDeque::new(),
+            runtime_effect_delivery_pending: false,
             node_transport_attempts: HashMap::new(),
             next_node_transport_attempt_id: 0,
-            node_events: VecDeque::new(),
             node_event_generations: HashMap::new(),
             node_router,
             reconnect_enabled,
             pending_reconnect_node_ids: HashSet::new(),
             reconnect_debounce_generation: 0,
-            ready_reconnect_roots: VecDeque::new(),
             reconnect_pipeline_active_node: None,
             reconnect_requeue_states: HashMap::new(),
             pending_reconnect_cascade_nodes: VecDeque::new(),
             reconnect_cascade_generation: 0,
-            reconnect_schedule_actions: VecDeque::new(),
             pending_reconnect_transfer_resumes: HashMap::new(),
             reconnect_transfer_resume_successes: HashMap::new(),
             pending_ide_restore_transfer_counts: HashMap::new(),
@@ -236,8 +328,6 @@ impl WorkspaceRuntimeEntity {
             active_connection_chain: None,
             connecting_node_locks: HashSet::new(),
             connection_trace_state: ConnectionTraceState::default(),
-            connection_trace_events: VecDeque::new(),
-            connection_trace_delivery_pending: false,
             ssh_registry,
             task_runtime,
             reconnect_timing,
@@ -268,13 +358,185 @@ impl WorkspaceRuntimeEntity {
         self.schedule_active_probe_after(ACTIVE_PROBE_START_DELAY, cx);
     }
 
-    pub(in crate::workspace) fn reconnect_orchestrator(&self) -> &ReconnectOrchestratorStore {
-        // The domain store owns job transitions; this Entity owns its workspace lifetime.
-        &self.reconnect_orchestrator
-    }
-
     pub(in crate::workspace) fn has_active_reconnect_job(&self, node_id: &NodeId) -> bool {
         self.reconnect_orchestrator.is_active(&node_id.0)
+    }
+
+    pub(in crate::workspace) fn complete_reconnect_terminal_remount(
+        &self,
+        node_id: &NodeId,
+        detail: String,
+    ) -> Option<ReconnectPostTerminalAction> {
+        if !self.reconnect_orchestrator.is_active(&node_id.0) {
+            return None;
+        }
+        let _ =
+            self.reconnect_orchestrator
+                .complete_phase(&node_id.0, PhaseResult::Ok, Some(detail));
+        let _ = self
+            .reconnect_orchestrator
+            .advance(&node_id.0, ReconnectPhase::RestoreForwards);
+        if self.reconnect_orchestrator.has_forward_snapshot(&node_id.0) {
+            Some(ReconnectPostTerminalAction::RestoreForwards)
+        } else {
+            let detail = "no forward rules in snapshot".to_string();
+            let _ = self.reconnect_orchestrator.complete_phase(
+                &node_id.0,
+                PhaseResult::Skipped,
+                Some(detail),
+            );
+            let _ = self
+                .reconnect_orchestrator
+                .advance(&node_id.0, ReconnectPhase::ResumeTransfers);
+            Some(ReconnectPostTerminalAction::ResumeTransfers)
+        }
+    }
+
+    pub(in crate::workspace) fn reconnect_terminal_session_ids(
+        &self,
+        node_id: &NodeId,
+    ) -> Vec<String> {
+        self.reconnect_orchestrator
+            .terminal_session_ids_for_node(&node_id.0)
+    }
+
+    pub(in crate::workspace) fn reconnect_incomplete_sftp_transfers(
+        &self,
+        node_id: &NodeId,
+    ) -> Vec<ReconnectNodeTransferSnapshot> {
+        self.reconnect_orchestrator
+            .incomplete_sftp_transfers(&node_id.0)
+    }
+
+    pub(in crate::workspace) fn start_reconnect_job(
+        &self,
+        node_id: &NodeId,
+        node_name: String,
+        snapshot: ReconnectSnapshot,
+    ) -> ReconnectJob {
+        let job = self
+            .reconnect_orchestrator
+            .schedule(node_id.0.clone(), node_name, snapshot);
+        let _ = self
+            .reconnect_orchestrator
+            .advance(&node_id.0, ReconnectPhase::Snapshot);
+        job
+    }
+
+    pub(in crate::workspace) fn finish_reconnect_job_state(
+        &self,
+        node_id: &NodeId,
+        result: Result<u32, String>,
+        verification_detail: Option<String>,
+    ) -> Option<ReconnectJob> {
+        if result.is_ok()
+            && let Some(detail) = verification_detail
+        {
+            let _ = self.reconnect_orchestrator.complete_phase(
+                &node_id.0,
+                PhaseResult::Ok,
+                Some(detail),
+            );
+        }
+        let job = self.reconnect_orchestrator.finish(&node_id.0, result);
+        self.reconnect_orchestrator
+            .enforce_terminal_job_cap(MAX_RETAINED_RECONNECT_JOBS);
+        job
+    }
+
+    pub(in crate::workspace) fn reconnect_forward_restore_plan(
+        &self,
+        node_id: &NodeId,
+    ) -> Option<ReconnectForwardRestorePlan> {
+        self.reconnect_orchestrator.forward_restore_plan(&node_id.0)
+    }
+
+    pub(in crate::workspace) fn reconnect_forward_rule_snapshots(
+        &self,
+        node_id: &NodeId,
+    ) -> Vec<ReconnectForwardRuleSnapshot> {
+        self.reconnect_orchestrator
+            .forward_rule_snapshots(&node_id.0)
+    }
+
+    pub(in crate::workspace) fn reconnect_active_progress(
+        &self,
+        node_id: &NodeId,
+    ) -> Option<ReconnectProgress> {
+        self.reconnect_orchestrator.active_progress(&node_id.0)
+    }
+
+    pub(in crate::workspace) fn reconnect_ide_snapshot(
+        &self,
+        node_id: &NodeId,
+    ) -> Option<(ReconnectIdeSnapshot, Option<SystemTime>)> {
+        self.reconnect_orchestrator.ide_snapshot(&node_id.0)
+    }
+
+    pub(in crate::workspace) fn complete_reconnect_transfer_resume(
+        &self,
+        node_id: &NodeId,
+        result: PhaseResult,
+        detail: String,
+    ) -> bool {
+        if !self.reconnect_orchestrator.is_active(&node_id.0) {
+            return false;
+        }
+        let _ = self
+            .reconnect_orchestrator
+            .complete_phase(&node_id.0, result, Some(detail));
+        let _ = self
+            .reconnect_orchestrator
+            .advance(&node_id.0, ReconnectPhase::RestoreIde);
+        true
+    }
+
+    pub(in crate::workspace) fn complete_reconnect_ide_restore(
+        &self,
+        node_id: &NodeId,
+        result: PhaseResult,
+        detail: String,
+    ) -> Option<ReconnectPhaseOutcome> {
+        if !self.reconnect_orchestrator.is_active(&node_id.0) {
+            return None;
+        }
+        let _ = self
+            .reconnect_orchestrator
+            .complete_phase(&node_id.0, result, Some(detail));
+        if result == PhaseResult::Failed {
+            Some(ReconnectPhaseOutcome::Failed)
+        } else {
+            let _ = self
+                .reconnect_orchestrator
+                .advance(&node_id.0, ReconnectPhase::Verify);
+            Some(ReconnectPhaseOutcome::Continue)
+        }
+    }
+
+    pub(in crate::workspace) fn complete_reconnect_forward_restore(
+        &self,
+        node_id: &NodeId,
+        result: PhaseResult,
+        detail: String,
+    ) -> Option<ReconnectPhaseOutcome> {
+        if !self.reconnect_orchestrator.is_active(&node_id.0) {
+            return None;
+        }
+        let _ = self
+            .reconnect_orchestrator
+            .complete_phase(&node_id.0, result, Some(detail));
+        if result == PhaseResult::Failed {
+            Some(ReconnectPhaseOutcome::Failed)
+        } else {
+            let _ = self
+                .reconnect_orchestrator
+                .advance(&node_id.0, ReconnectPhase::ResumeTransfers);
+            Some(ReconnectPhaseOutcome::Continue)
+        }
+    }
+
+    pub(in crate::workspace) fn cancel_reconnect_job(&self, node_id: &NodeId) -> bool {
+        self.reconnect_orchestrator.cancel(&node_id.0).is_some()
     }
 
     pub(in crate::workspace) fn start_node_transport(
@@ -441,8 +703,8 @@ impl WorkspaceRuntimeEntity {
         {
             let _ = self.node_router.prepare_node_connection_attempt(node_id);
         }
-        self.reconnect_results
-            .retain(|result| !node_transport_result_targets_attempt(result, node_id, attempt.id));
+        self.runtime_effects
+            .retain(|effect| !runtime_effect_targets_node_transport(effect, node_id));
     }
 
     pub(in crate::workspace) fn node_transport_result_is_current(
@@ -469,11 +731,13 @@ impl WorkspaceRuntimeEntity {
         for (_, attempt) in self.node_transport_attempts.drain() {
             attempt.abort_handle.abort();
         }
-        self.reconnect_results.retain(|result| {
+        self.runtime_effects.retain(|effect| {
             !matches!(
-                result,
-                ReconnectWorkerResult::NodeConnected { .. }
-                    | ReconnectWorkerResult::NodeConnectFailed { .. }
+                effect,
+                WorkspaceRuntimeEffect::Reconnect(
+                    ReconnectRuntimeEffect::NodeConnected { .. }
+                        | ReconnectRuntimeEffect::NodeConnectFailed { .. }
+                )
             )
         });
     }
@@ -1076,26 +1340,26 @@ impl WorkspaceRuntimeEntity {
         self.connection_trace_state.finish(node_id);
     }
 
-    pub(in crate::workspace) fn take_connection_trace_events(
+    pub(in crate::workspace) fn take_runtime_effects(
         &mut self,
         cx: &mut Context<Self>,
-    ) -> Vec<ConnectionTraceEvent> {
+    ) -> Vec<WorkspaceRuntimeEffect> {
         let budget = delivery::NOTIFICATION_DELIVERY_BUDGET;
         let started_at = Instant::now();
-        let mut events = Vec::new();
-        while budget.allows_next(events.len(), started_at.elapsed()) {
-            let Some(event) = self.connection_trace_events.pop_front() else {
+        let mut effects = Vec::new();
+        while budget.allows_next(effects.len(), started_at.elapsed()) {
+            let Some(effect) = self.runtime_effects.pop_front() else {
                 break;
             };
-            events.push(event);
+            effects.push(effect);
         }
-        if self.connection_trace_events.is_empty() {
-            self.connection_trace_delivery_pending = false;
+        if self.runtime_effects.is_empty() {
+            self.runtime_effect_delivery_pending = false;
         } else {
             // Continue a bounded reliable drain without involving a root waiter or heartbeat.
-            cx.emit(WorkspaceRuntimeEvent::ConnectionTraceEventsReady);
+            cx.emit(WorkspaceRuntimeEvent::EffectsReady);
         }
-        events
+        effects
     }
 
     fn push_connection_trace_event(
@@ -1107,31 +1371,21 @@ impl WorkspaceRuntimeEntity {
         detail: Option<String>,
         cx: &mut Context<Self>,
     ) {
-        let Some(event) = self
+        let Some(mut event) = self
             .connection_trace_state
             .event(node_id, stage, status, progress, detail)
         else {
             return;
         };
-        self.connection_trace_events.push_back(event);
-        if !self.connection_trace_delivery_pending {
-            self.connection_trace_delivery_pending = true;
-            cx.emit(WorkspaceRuntimeEvent::ConnectionTraceEventsReady);
-        }
+        // Trace details cross the runtime-to-UI boundary and must never preserve credentials.
+        event.detail = event.detail.as_deref().map(oxideterm_ai::sanitize_for_ai);
+        self.push_runtime_effect(WorkspaceRuntimeEffect::ConnectionTrace(event), cx);
     }
 
     #[cfg(test)]
     fn reconnect_worker_sender(&self) -> delivery::ActiveDeliverySender<ReconnectWorkerResult> {
         // Tests inject results through the same reliable wake path used by workers.
         self.reconnect_worker_tx.clone()
-    }
-
-    pub(in crate::workspace) fn take_worker_results(&mut self) -> VecDeque<ReconnectWorkerResult> {
-        std::mem::take(&mut self.reconnect_results)
-    }
-
-    pub(in crate::workspace) fn take_node_events(&mut self) -> VecDeque<NodeStateEvent> {
-        std::mem::take(&mut self.node_events)
     }
 
     pub(in crate::workspace) fn queue_reconnect_root(
@@ -1154,15 +1408,11 @@ impl WorkspaceRuntimeEntity {
         .detach();
     }
 
-    pub(in crate::workspace) fn take_reconnect_roots(&mut self) -> VecDeque<NodeId> {
-        std::mem::take(&mut self.ready_reconnect_roots)
-    }
-
     pub(in crate::workspace) fn cancel_queued_reconnects(&mut self, node_ids: &[NodeId]) {
         self.pending_reconnect_node_ids
             .retain(|node_id| !node_ids.contains(node_id));
-        self.ready_reconnect_roots
-            .retain(|node_id| !node_ids.contains(node_id));
+        self.runtime_effects
+            .retain(|effect| !runtime_effect_is_reconnect_schedule_for_nodes(effect, node_ids));
         self.cancel_reconnect_scheduler_nodes(node_ids);
         for node_id in node_ids {
             self.cancel_node_transport_attempt(node_id);
@@ -1174,7 +1424,6 @@ impl WorkspaceRuntimeEntity {
         &mut self,
         node_id: &NodeId,
         expected_connection_id: Option<String>,
-        retry_delay: Duration,
         cx: &mut Context<Self>,
     ) -> ReconnectPipelineClaim {
         if self
@@ -1199,6 +1448,7 @@ impl WorkspaceRuntimeEntity {
             }
             let generation = requeue_state.generation;
             let retry_node_id = node_id.clone();
+            let retry_delay = self.reconnect_orchestrator.retry_delay_for_attempt(1);
             cx.spawn(async move |entity, cx| {
                 Timer::after(retry_delay).await;
                 let _ = entity.update(cx, |entity, cx| {
@@ -1299,12 +1549,6 @@ impl WorkspaceRuntimeEntity {
             });
         })
         .detach();
-    }
-
-    pub(in crate::workspace) fn take_reconnect_schedule_actions(
-        &mut self,
-    ) -> VecDeque<ReconnectScheduleAction> {
-        std::mem::take(&mut self.reconnect_schedule_actions)
     }
 
     pub(in crate::workspace) fn begin_reconnect_transfer_resumes(
@@ -1445,8 +1689,8 @@ impl WorkspaceRuntimeEntity {
             .retain(|node_id, _| !node_ids.contains(node_id));
         self.pending_reconnect_cascade_nodes
             .retain(|node_id| !node_ids.contains(node_id));
-        self.reconnect_schedule_actions
-            .retain(|action| !reconnect_schedule_action_targets_any(action, node_ids));
+        self.runtime_effects
+            .retain(|effect| !runtime_effect_is_reconnect_schedule_for_nodes(effect, node_ids));
         if self
             .reconnect_pipeline_active_node
             .as_ref()
@@ -1462,8 +1706,86 @@ impl WorkspaceRuntimeEntity {
         action: ReconnectScheduleAction,
         cx: &mut Context<Self>,
     ) {
-        self.reconnect_schedule_actions.push_back(action);
-        cx.emit(WorkspaceRuntimeEvent::ReconnectScheduleReady);
+        if let Some(effect) = self.reduce_reconnect_schedule_action(action) {
+            self.push_runtime_effect(effect, cx);
+        }
+    }
+
+    fn reduce_reconnect_schedule_action(
+        &mut self,
+        action: ReconnectScheduleAction,
+    ) -> Option<WorkspaceRuntimeEffect> {
+        match action {
+            ReconnectScheduleAction::ContinueConnectionChain { node_id } => {
+                Some(WorkspaceRuntimeEffect::ContinueConnectionChain { node_id })
+            }
+            ReconnectScheduleAction::ContinueReconnectCascade => {
+                Some(WorkspaceRuntimeEffect::ContinueReconnectCascade)
+            }
+            ReconnectScheduleAction::StartReconnectPipeline {
+                node_id,
+                expected_connection_id,
+            } => {
+                if expected_connection_id.as_ref().is_some_and(|expected| {
+                    self.node_router.connection_id_for_node(&node_id).as_ref() != Some(expected)
+                }) {
+                    self.cancel_reconnect_retry(&node_id);
+                    None
+                } else {
+                    Some(WorkspaceRuntimeEffect::StartReconnectPipeline { node_id })
+                }
+            }
+            ReconnectScheduleAction::RetryNodeConnect { node_id, job_id } => {
+                if !self.reconnect_job_is_current(&node_id, &job_id) {
+                    return None;
+                }
+                let (attempt, max_attempts) =
+                    self.reconnect_orchestrator.active_attempt(&node_id.0)?;
+                let still_needs_reconnect = self
+                    .node_router
+                    .node_state(&node_id)
+                    .is_ok_and(|snapshot| snapshot.state.readiness != NodeReadiness::Ready);
+                if !still_needs_reconnect {
+                    let _ = self.reconnect_orchestrator.complete_phase(
+                        &node_id.0,
+                        PhaseResult::Ok,
+                        Some("node recovered before retry".to_string()),
+                    );
+                    Some(WorkspaceRuntimeEffect::ReconnectRecoveredBeforeRetry { node_id })
+                } else {
+                    let detail = format!("starting retry {attempt}/{max_attempts}");
+                    let _ = self.reconnect_orchestrator.complete_phase(
+                        &node_id.0,
+                        PhaseResult::Ok,
+                        Some(detail),
+                    );
+                    let _ = self
+                        .reconnect_orchestrator
+                        .advance(&node_id.0, ReconnectPhase::SshConnect);
+                    let _ = self.reconnect_orchestrator.begin_ssh_attempt(&node_id.0);
+                    Some(WorkspaceRuntimeEffect::RetryNodeConnect {
+                        node_id,
+                        attempt,
+                        max_attempts,
+                    })
+                }
+            }
+            ReconnectScheduleAction::CleanupReconnectJob {
+                node_id,
+                started_at,
+            } => self
+                .reconnect_orchestrator
+                .cleanup_terminal_job(&node_id.0, started_at)
+                .then_some(WorkspaceRuntimeEffect::ReconnectJobCleaned),
+        }
+    }
+
+    fn push_runtime_effect(&mut self, effect: WorkspaceRuntimeEffect, cx: &mut Context<Self>) {
+        self.runtime_effects.push_back(effect);
+        if !self.runtime_effect_delivery_pending {
+            self.runtime_effect_delivery_pending = true;
+            cx.emit(WorkspaceRuntimeEvent::EffectsReady);
+        }
     }
 
     fn schedule_worker_delivery(&self, cx: &mut Context<Self>) {
@@ -1541,18 +1863,14 @@ impl WorkspaceRuntimeEntity {
             delivery::drain_channel(&self.active_probe_rx, delivery::LIFECYCLE_DELIVERY_BUDGET);
         let (node_event_items, node_event_backlog_remaining) =
             drain_node_event_mailbox(&self.node_event_rx);
-        let mut received_reconnect_results = false;
         for result in reconnect_batch.items {
-            if self.accept_reconnect_worker_result(&result) {
-                self.reconnect_results.push_back(result);
-                received_reconnect_results = true;
+            if let Some(effect) = self.reduce_reconnect_worker_result(result, cx) {
+                self.push_runtime_effect(WorkspaceRuntimeEffect::Reconnect(effect), cx);
             }
         }
-        let mut received_node_events = false;
         for event in node_event_items {
-            if self.accept_node_event(&event) {
-                self.node_events.push_back(event);
-                received_node_events = true;
+            if let Some(effect) = self.reduce_node_event(event) {
+                self.push_runtime_effect(WorkspaceRuntimeEffect::Node(effect), cx);
             }
         }
         let active_probe_completed = !active_probe_batch.items.is_empty();
@@ -1564,37 +1882,191 @@ impl WorkspaceRuntimeEntity {
             self.ssh_active_probe_in_flight = false;
             self.schedule_active_probe_after(self.reconnect_timing.ssh_keepalive_interval, cx);
         }
-        if received_reconnect_results {
-            cx.emit(WorkspaceRuntimeEvent::WorkerResultsReady);
-        }
-        if received_node_events {
-            cx.emit(WorkspaceRuntimeEvent::NodeEventsReady);
-        }
         if active_connections_changed {
-            cx.emit(WorkspaceRuntimeEvent::ActiveConnectionsChanged);
+            self.push_runtime_effect(WorkspaceRuntimeEffect::ActiveConnectionsChanged, cx);
         }
         reconnect_batch.outcome.backlog_remaining
             || active_probe_batch.outcome.backlog_remaining
             || node_event_backlog_remaining
     }
 
-    fn accept_reconnect_worker_result(&mut self, result: &ReconnectWorkerResult) -> bool {
-        let (node_id, connection_id, attempt_id, job_id) = match result {
+    fn reduce_reconnect_worker_result(
+        &mut self,
+        result: ReconnectWorkerResult,
+        cx: &mut Context<Self>,
+    ) -> Option<ReconnectRuntimeEffect> {
+        match result {
             ReconnectWorkerResult::NodeConnected {
                 node_id,
                 connection_id,
                 attempt_id,
                 job_id,
+            } => {
+                if !self.accept_node_transport_result(
+                    &node_id,
+                    &connection_id,
+                    attempt_id,
+                    job_id.as_deref(),
+                ) {
+                    return None;
+                }
+                self.complete_node_transport_attempt(&node_id, attempt_id);
+                self.finish_connection_trace_success(&node_id, cx);
+                let reconnecting = self.reconnect_orchestrator.is_active(&node_id.0);
+                if reconnecting {
+                    let _ = self.reconnect_orchestrator.complete_phase(
+                        &node_id.0,
+                        PhaseResult::Ok,
+                        Some(format!("reconnected as {connection_id}")),
+                    );
+                    let _ = self
+                        .reconnect_orchestrator
+                        .advance(&node_id.0, ReconnectPhase::AwaitTerminal);
+                }
+                Some(ReconnectRuntimeEffect::NodeConnected {
+                    node_id,
+                    connection_id,
+                    reconnecting,
+                })
             }
-            | ReconnectWorkerResult::NodeConnectFailed {
+            ReconnectWorkerResult::NodeConnectFailed {
                 node_id,
                 connection_id,
+                error,
                 attempt_id,
                 job_id,
-                ..
-            } => (node_id, connection_id, *attempt_id, job_id.as_deref()),
-            _ => return true,
-        };
+            } => {
+                if !self.accept_node_transport_result(
+                    &node_id,
+                    &connection_id,
+                    attempt_id,
+                    job_id.as_deref(),
+                ) {
+                    return None;
+                }
+                self.complete_node_transport_attempt(&node_id, attempt_id);
+                // Worker errors cross a UI and notification boundary, so redact before queuing.
+                let error = oxideterm_ai::sanitize_for_ai(&error);
+                self.finish_connection_trace_failed(&node_id, Some(error.clone()), cx);
+                let action = if self.reconnect_orchestrator.is_active(&node_id.0) {
+                    let _ = self.reconnect_orchestrator.complete_phase(
+                        &node_id.0,
+                        PhaseResult::Failed,
+                        Some(error.clone()),
+                    );
+                    if !reconnect_error_is_non_retryable(&error) {
+                        self.reconnect_orchestrator
+                            .schedule_retry(&node_id.0)
+                            .and_then(|retry| {
+                                job_id
+                                    .or_else(|| {
+                                        self.reconnect_orchestrator.active_job_id(&node_id.0)
+                                    })
+                                    .map(|job_id| ReconnectFailureAction::Retry {
+                                        attempt: retry.attempt,
+                                        max_attempts: retry.max_attempts,
+                                        delay: retry.delay,
+                                        job_id,
+                                    })
+                            })
+                            .unwrap_or(ReconnectFailureAction::FinishReconnect)
+                    } else {
+                        ReconnectFailureAction::FinishReconnect
+                    }
+                } else {
+                    ReconnectFailureAction::InitialConnect
+                };
+                Some(ReconnectRuntimeEffect::NodeConnectFailed {
+                    node_id,
+                    error,
+                    action,
+                })
+            }
+            ReconnectWorkerResult::GraceRecovered {
+                node_id,
+                connection_id,
+                recovered_connections,
+                job_id,
+            } => self.reconnect_job_is_current(&node_id, &job_id).then(|| {
+                let _ = self.reconnect_orchestrator.complete_phase(
+                    &node_id.0,
+                    PhaseResult::Ok,
+                    Some(format!(
+                        "connection {connection_id} recovered during grace period"
+                    )),
+                );
+                ReconnectRuntimeEffect::GraceRecovered {
+                    node_id,
+                    connection_id,
+                    recovered_connections,
+                }
+            }),
+            ReconnectWorkerResult::GraceExpired {
+                node_id,
+                connection_id,
+                detail,
+                job_id,
+            } => self.reconnect_job_is_current(&node_id, &job_id).then(|| {
+                let detail = oxideterm_ai::sanitize_for_ai(&detail);
+                let _ = self.reconnect_orchestrator.complete_phase(
+                    &node_id.0,
+                    PhaseResult::Failed,
+                    Some(detail.clone()),
+                );
+                self.apply_grace_expiration(&connection_id);
+                let _ = self
+                    .reconnect_orchestrator
+                    .advance(&node_id.0, ReconnectPhase::SshConnect);
+                let _ = self.reconnect_orchestrator.begin_ssh_attempt(&node_id.0);
+                ReconnectRuntimeEffect::GraceExpired { node_id, detail }
+            }),
+            ReconnectWorkerResult::SftpTransfersSnapshotted {
+                node_id,
+                transfers_by_node,
+                detail,
+                job_id,
+            } => self.reconnect_job_is_current(&node_id, &job_id).then(|| {
+                let entered_grace_period = self.reconnect_orchestrator.is_active(&node_id.0);
+                let _ = self
+                    .reconnect_orchestrator
+                    .update_snapshot(&node_id.0, |snapshot| {
+                        snapshot.inflight_sftp_transfer_ids = transfers_by_node
+                            .iter()
+                            .flat_map(|entry| entry.transfer_ids.iter().cloned())
+                            .collect();
+                        snapshot.incomplete_sftp_transfers_by_node = transfers_by_node;
+                    });
+                if entered_grace_period {
+                    let _ = self.reconnect_orchestrator.complete_phase(
+                        &node_id.0,
+                        PhaseResult::Ok,
+                        Some(oxideterm_ai::sanitize_for_ai(&detail)),
+                    );
+                    let _ = self
+                        .reconnect_orchestrator
+                        .advance(&node_id.0, ReconnectPhase::GracePeriod);
+                }
+                ReconnectRuntimeEffect::SftpTransfersSnapshotted {
+                    node_id,
+                    entered_grace_period,
+                }
+            }),
+            ReconnectWorkerResult::RemoteShellIntegrationGateFinished { node_id, result } => {
+                Some(ReconnectRuntimeEffect::RemoteShellIntegrationGateFinished {
+                    node_id,
+                    result: result.map_err(|error| oxideterm_ai::sanitize_for_ai(&error)),
+                })
+            }
+        }
+    }
+
+    fn accept_node_transport_result(
+        &mut self,
+        node_id: &NodeId,
+        connection_id: &str,
+        attempt_id: NodeTransportAttemptId,
+        job_id: Option<&str>,
+    ) -> bool {
         let attempt_is_current = self.node_transport_result_is_current(node_id, attempt_id);
         let job_is_current =
             job_id.is_none_or(|job_id| self.reconnect_job_is_current(node_id, job_id));
@@ -1611,19 +2083,56 @@ impl WorkspaceRuntimeEntity {
         false
     }
 
-    fn accept_node_event(&mut self, event: &NodeStateEvent) -> bool {
-        let Some((node_id, generation)) = node_event_generation(event) else {
-            return true;
+    fn reduce_node_event(&mut self, event: NodeStateEvent) -> Option<NodeRuntimeEffect> {
+        let Some((node_id, generation)) = node_event_generation(&event) else {
+            return match event {
+                NodeStateEvent::ConnectionStatusChanged {
+                    connection_id,
+                    status,
+                    affected_children,
+                    ..
+                } => Some(NodeRuntimeEffect::ConnectionStatusChanged {
+                    connection_id,
+                    status,
+                    affected_children,
+                }),
+                _ => None,
+            };
         };
         if self
             .node_event_generations
             .get(&node_id)
             .is_some_and(|seen| generation <= *seen)
         {
-            return false;
+            return None;
         }
         self.node_event_generations.insert(node_id, generation);
-        true
+        match event {
+            NodeStateEvent::ConnectionStatusChanged { .. } => None,
+            NodeStateEvent::ConnectionStateChanged {
+                node_id,
+                state,
+                reason,
+                ..
+            } => Some(NodeRuntimeEffect::ConnectionStateChanged {
+                node_id,
+                state,
+                reason: oxideterm_ai::sanitize_for_ai(&reason),
+            }),
+            NodeStateEvent::SftpReady {
+                node_id,
+                ready,
+                cwd,
+                ..
+            } => Some(NodeRuntimeEffect::SftpReady {
+                node_id,
+                ready,
+                cwd,
+            }),
+            NodeStateEvent::TerminalEndpointChanged { .. } => {
+                Some(NodeRuntimeEffect::TerminalEndpointChanged)
+            }
+        }
     }
 
     fn flush_reconnect_roots(&mut self, generation: u64, cx: &mut Context<Self>) {
@@ -1639,8 +2148,9 @@ impl WorkspaceRuntimeEntity {
         if roots.is_empty() {
             return;
         }
-        self.ready_reconnect_roots.extend(roots);
-        cx.emit(WorkspaceRuntimeEvent::ReconnectRootsReady);
+        for node_id in roots {
+            self.push_runtime_effect(WorkspaceRuntimeEffect::StartReconnectRoot { node_id }, cx);
+        }
     }
 }
 
@@ -1654,38 +2164,46 @@ fn should_install_remote_shell_integration(
             && state != oxideterm_terminal::RemoteShellIntegrationState::Installed)
 }
 
-fn node_transport_result_targets_attempt(
-    result: &ReconnectWorkerResult,
-    target_node_id: &NodeId,
-    target_attempt_id: NodeTransportAttemptId,
-) -> bool {
-    match result {
-        ReconnectWorkerResult::NodeConnected {
-            node_id,
-            attempt_id,
-            ..
-        }
-        | ReconnectWorkerResult::NodeConnectFailed {
-            node_id,
-            attempt_id,
-            ..
-        } => node_id == target_node_id && *attempt_id == target_attempt_id,
-        _ => false,
-    }
+fn reconnect_error_is_non_retryable(error: &str) -> bool {
+    let error = error.to_ascii_lowercase();
+    [
+        "authentication failed",
+        "hostkeymismatch",
+        "host key",
+        "permission denied",
+        "user_cancelled",
+        "cancelled",
+    ]
+    .iter()
+    .any(|needle| error.contains(needle))
 }
 
-fn reconnect_schedule_action_targets_any(
-    action: &ReconnectScheduleAction,
+fn runtime_effect_targets_node_transport(
+    effect: &WorkspaceRuntimeEffect,
+    target_node_id: &NodeId,
+) -> bool {
+    matches!(
+        effect,
+        WorkspaceRuntimeEffect::Reconnect(
+            ReconnectRuntimeEffect::NodeConnected { node_id, .. }
+                | ReconnectRuntimeEffect::NodeConnectFailed { node_id, .. }
+        ) if node_id == target_node_id
+    )
+}
+
+fn runtime_effect_is_reconnect_schedule_for_nodes(
+    effect: &WorkspaceRuntimeEffect,
     node_ids: &[NodeId],
 ) -> bool {
-    match action {
-        ReconnectScheduleAction::ContinueReconnectCascade => false,
-        ReconnectScheduleAction::ContinueConnectionChain { node_id }
-        | ReconnectScheduleAction::StartReconnectPipeline { node_id, .. }
-        | ReconnectScheduleAction::RetryNodeConnect { node_id, .. }
-        | ReconnectScheduleAction::CleanupReconnectJob { node_id, .. } => {
+    match effect {
+        WorkspaceRuntimeEffect::StartReconnectRoot { node_id }
+        | WorkspaceRuntimeEffect::ContinueConnectionChain { node_id }
+        | WorkspaceRuntimeEffect::StartReconnectPipeline { node_id }
+        | WorkspaceRuntimeEffect::RetryNodeConnect { node_id, .. }
+        | WorkspaceRuntimeEffect::ReconnectRecoveredBeforeRetry { node_id } => {
             node_ids.contains(node_id)
         }
+        _ => false,
     }
 }
 
@@ -1766,6 +2284,17 @@ mod tests {
         ));
     }
 
+    #[test]
+    fn reconnect_retry_filter_matches_tauri_non_retryable_errors() {
+        assert!(reconnect_error_is_non_retryable("Authentication failed"));
+        assert!(reconnect_error_is_non_retryable("HostKeyMismatch"));
+        assert!(reconnect_error_is_non_retryable("host key changed"));
+        assert!(reconnect_error_is_non_retryable("Permission denied"));
+        assert!(reconnect_error_is_non_retryable("USER_CANCELLED"));
+        assert!(reconnect_error_is_non_retryable("cancelled"));
+        assert!(!reconnect_error_is_non_retryable("network timeout"));
+    }
+
     fn test_task_runtime() -> Arc<tokio::runtime::Runtime> {
         Arc::new(
             tokio::runtime::Builder::new_current_thread()
@@ -1800,6 +2329,34 @@ mod tests {
         })
     }
 
+    fn take_trace_effects(
+        entity: &mut WorkspaceRuntimeEntity,
+        cx: &mut Context<WorkspaceRuntimeEntity>,
+    ) -> Vec<ConnectionTraceEvent> {
+        entity
+            .take_runtime_effects(cx)
+            .into_iter()
+            .filter_map(|effect| match effect {
+                WorkspaceRuntimeEffect::ConnectionTrace(event) => Some(event),
+                _ => None,
+            })
+            .collect()
+    }
+
+    fn take_reconnect_effects(
+        entity: &mut WorkspaceRuntimeEntity,
+        cx: &mut Context<WorkspaceRuntimeEntity>,
+    ) -> Vec<ReconnectRuntimeEffect> {
+        entity
+            .take_runtime_effects(cx)
+            .into_iter()
+            .filter_map(|effect| match effect {
+                WorkspaceRuntimeEffect::Reconnect(effect) => Some(effect),
+                _ => None,
+            })
+            .collect()
+    }
+
     fn register_test_node_transport_attempt(
         entity: &mut WorkspaceRuntimeEntity,
         node_id: &NodeId,
@@ -1822,6 +2379,15 @@ mod tests {
     #[gpui::test]
     fn reconnect_worker_results_and_release_lifecycle_are_entity_owned(cx: &mut TestAppContext) {
         let entity = test_runtime_entity(cx);
+        let job_id = entity.update(cx, |entity, _cx| {
+            entity
+                .start_reconnect_job(
+                    &NodeId::new("node-a"),
+                    "Node A".to_string(),
+                    ReconnectSnapshot::default(),
+                )
+                .job_id
+        });
         let (reconnect_tx, wake) = cx.read(|cx| {
             let entity = entity.read(cx);
             (
@@ -1834,17 +2400,17 @@ mod tests {
                 node_id: NodeId::new("node-a"),
                 connection_id: "connection-a".to_string(),
                 detail: "test timeout".to_string(),
-                job_id: "job-a".to_string(),
+                job_id,
             })
             .expect("reconnect worker delivery");
 
         cx.run_until_parked();
 
-        entity.update(cx, |entity, _cx| {
-            let reconnect_results = entity.take_worker_results();
+        entity.update(cx, |entity, cx| {
+            let reconnect_results = take_reconnect_effects(entity, cx);
             assert!(matches!(
-                reconnect_results.front(),
-                Some(ReconnectWorkerResult::GraceExpired { .. })
+                reconnect_results.first(),
+                Some(ReconnectRuntimeEffect::GraceExpired { .. })
             ));
         });
 
@@ -1854,13 +2420,74 @@ mod tests {
     }
 
     #[gpui::test]
+    fn runtime_effect_delivery_is_exact_once_across_a_bounded_backlog(cx: &mut TestAppContext) {
+        let entity = test_runtime_entity(cx);
+        let ready_events = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let ready_event_count = Arc::clone(&ready_events);
+        let _subscription = entity.update(cx, |_, cx| {
+            cx.subscribe(&entity, move |_, _, event: &WorkspaceRuntimeEvent, _cx| {
+                if *event == WorkspaceRuntimeEvent::EffectsReady {
+                    ready_event_count.fetch_add(1, Ordering::AcqRel);
+                }
+            })
+        });
+
+        entity.update(cx, |entity, cx| {
+            for sequence in 0..65 {
+                entity.push_runtime_effect(
+                    WorkspaceRuntimeEffect::ContinueConnectionChain {
+                        node_id: NodeId::new(format!("node-{sequence}")),
+                    },
+                    cx,
+                );
+            }
+        });
+        assert_eq!(ready_events.load(Ordering::Acquire), 1);
+
+        let first_batch = entity.update(cx, |entity, cx| entity.take_runtime_effects(cx));
+        assert_eq!(first_batch.len(), 64);
+        assert_eq!(ready_events.load(Ordering::Acquire), 2);
+        let second_batch = entity.update(cx, |entity, cx| entity.take_runtime_effects(cx));
+        assert_eq!(first_batch.len() + second_batch.len(), 65);
+        assert!(!entity.read_with(cx, |entity, _cx| { entity.runtime_effect_delivery_pending }));
+    }
+
+    #[gpui::test]
+    fn reconnect_failure_is_redacted_before_it_becomes_a_typed_effect(cx: &mut TestAppContext) {
+        let entity = test_runtime_entity(cx);
+        entity.update(cx, |entity, cx| {
+            let node_id = NodeId::new("node-a");
+            let connection_id = "connection-a";
+            let attempt_id = register_test_node_transport_attempt(entity, &node_id, connection_id);
+            let effect = entity
+                .reduce_reconnect_worker_result(
+                    ReconnectWorkerResult::NodeConnectFailed {
+                        node_id,
+                        connection_id: connection_id.to_string(),
+                        error: "password=super-secret-value".to_string(),
+                        attempt_id,
+                        job_id: None,
+                    },
+                    cx,
+                )
+                .expect("current worker result");
+
+            assert!(matches!(
+                effect,
+                ReconnectRuntimeEffect::NodeConnectFailed { error, .. }
+                    if !error.contains("super-secret-value") && error.contains("[REDACTED]")
+            ));
+        });
+    }
+
+    #[gpui::test]
     fn active_probe_completion_stays_inside_runtime_entity(cx: &mut TestAppContext) {
         let entity = test_runtime_entity(cx);
         let changed_event_seen = Arc::new(AtomicBool::new(false));
         let changed_event_flag = changed_event_seen.clone();
         let _event_subscription = entity.update(cx, |_, cx| {
             cx.subscribe(&entity, move |_, _, event: &WorkspaceRuntimeEvent, _cx| {
-                if *event == WorkspaceRuntimeEvent::ActiveConnectionsChanged {
+                if *event == WorkspaceRuntimeEvent::EffectsReady {
                     changed_event_flag.store(true, Ordering::Release);
                 }
             })
@@ -1875,8 +2502,8 @@ mod tests {
 
         cx.run_until_parked();
 
-        entity.update(cx, |entity, _cx| {
-            let reconnect_results = entity.take_worker_results();
+        entity.update(cx, |entity, cx| {
+            let reconnect_results = entity.take_runtime_effects(cx);
             assert!(reconnect_results.is_empty());
             assert!(!entity.ssh_active_probe_in_flight);
         });
@@ -1917,9 +2544,9 @@ mod tests {
 
         entity.update(cx, |entity, cx| {
             entity.configure_reconnect(true, ReconnectTiming::default(), 4, cx);
-            let job = entity.reconnect_orchestrator().schedule(
-                node_id.0.clone(),
-                "Node A",
+            let job = entity.start_reconnect_job(
+                &node_id,
+                "Node A".to_string(),
                 ReconnectSnapshot::default(),
             );
 
@@ -1928,7 +2555,7 @@ mod tests {
             assert!(entity.reconnect_job_is_current(&node_id, &job.job_id));
             assert_eq!(entity.active_reconnect_node_ids(), vec![node_id.clone()]);
 
-            entity.reconnect_orchestrator().finish(&node_id.0, Ok(0));
+            entity.finish_reconnect_job_state(&node_id, Ok(0), None);
             assert!(!entity.has_active_reconnect_job(&node_id));
         });
     }
@@ -2023,7 +2650,7 @@ mod tests {
         let ready_event_count = Arc::clone(&ready_events);
         let _subscription = entity.update(cx, |_, cx| {
             cx.subscribe(&entity, move |_, _, event: &WorkspaceRuntimeEvent, _cx| {
-                if *event == WorkspaceRuntimeEvent::ConnectionTraceEventsReady {
+                if *event == WorkspaceRuntimeEvent::EffectsReady {
                     ready_event_count.fetch_add(1, Ordering::AcqRel);
                 }
             })
@@ -2042,8 +2669,7 @@ mod tests {
         });
         assert_eq!(ready_events.load(Ordering::Acquire), 1);
 
-        let started_events =
-            entity.update(cx, |entity, cx| entity.take_connection_trace_events(cx));
+        let started_events = entity.update(cx, |entity, cx| take_trace_effects(entity, cx));
         assert_eq!(started_events.len(), 6);
         assert_eq!(
             started_events.first().map(|event| event.stage),
@@ -2057,8 +2683,7 @@ mod tests {
         entity.update(cx, |entity, cx| {
             entity.finish_connection_trace_success(&node_id, cx);
         });
-        let finished_events =
-            entity.update(cx, |entity, cx| entity.take_connection_trace_events(cx));
+        let finished_events = entity.update(cx, |entity, cx| take_trace_effects(entity, cx));
         assert_eq!(finished_events.len(), 3);
         assert_eq!(
             finished_events.last().map(|event| event.status),
@@ -2070,7 +2695,7 @@ mod tests {
         });
         assert!(
             entity
-                .update(cx, |entity, cx| entity.take_connection_trace_events(cx))
+                .update(cx, |entity, cx| take_trace_effects(entity, cx))
                 .is_empty()
         );
     }
@@ -2084,7 +2709,7 @@ mod tests {
         entity.update(cx, |entity, cx| {
             entity.begin_connection_trace(&failed_node_id, None, None, None, cx);
             entity.begin_connection_trace(&cancelled_node_id, None, None, None, cx);
-            let _ = entity.take_connection_trace_events(cx);
+            let _ = take_trace_effects(entity, cx);
             entity.finish_connection_trace_failed(
                 &failed_node_id,
                 Some("connection timed out".to_string()),
@@ -2093,8 +2718,7 @@ mod tests {
             entity.cancel_connection_trace(&cancelled_node_id, cx);
         });
 
-        let terminal_events =
-            entity.update(cx, |entity, cx| entity.take_connection_trace_events(cx));
+        let terminal_events = entity.update(cx, |entity, cx| take_trace_effects(entity, cx));
         assert_eq!(terminal_events.len(), 2);
         assert!(terminal_events.iter().any(|event| {
             event.node_id == failed_node_id && event.status == ConnectionTraceStatus::Failed
@@ -2144,18 +2768,19 @@ mod tests {
             let connection_id = "connection-a";
             let attempt_id = register_test_node_transport_attempt(entity, &node_id, connection_id);
             entity
-                .reconnect_results
-                .push_back(ReconnectWorkerResult::NodeConnected {
-                    node_id: node_id.clone(),
-                    connection_id: connection_id.to_string(),
-                    attempt_id,
-                    job_id: None,
-                });
+                .runtime_effects
+                .push_back(WorkspaceRuntimeEffect::Reconnect(
+                    ReconnectRuntimeEffect::NodeConnected {
+                        node_id: node_id.clone(),
+                        connection_id: connection_id.to_string(),
+                        reconnecting: false,
+                    },
+                ));
 
             entity.shutdown_node_transport_attempts();
 
             assert!(!entity.node_transport_result_is_current(&node_id, attempt_id));
-            assert!(entity.take_worker_results().is_empty());
+            assert!(entity.runtime_effects.is_empty());
         });
     }
 
@@ -2296,7 +2921,7 @@ mod tests {
             .expect("late worker result");
         entity.update(cx, |entity, cx| {
             entity.drain_worker_results(cx);
-            assert!(entity.take_worker_results().is_empty());
+            assert!(take_reconnect_effects(entity, cx).is_empty());
             assert!(!entity.node_transport_result_is_current(&node_id, attempt_id));
             assert_eq!(
                 entity
@@ -2355,7 +2980,7 @@ mod tests {
             .expect("late worker result");
         entity.update(cx, |entity, cx| {
             entity.drain_worker_results(cx);
-            assert!(entity.take_worker_results().is_empty());
+            assert!(take_reconnect_effects(entity, cx).is_empty());
             assert_eq!(
                 entity
                     .node_router
@@ -2439,17 +3064,16 @@ mod tests {
             .expect("new worker result");
         entity.update(cx, |entity, cx| {
             entity.drain_worker_results(cx);
-            let results = entity.take_worker_results();
+            let results = take_reconnect_effects(entity, cx);
             assert_eq!(results.len(), 1);
             assert!(matches!(
-                results.front(),
-                Some(ReconnectWorkerResult::NodeConnected {
-                    attempt_id,
+                results.first(),
+                Some(ReconnectRuntimeEffect::NodeConnected {
                     connection_id,
                     ..
-                }) if *attempt_id == new_attempt_id && connection_id == &new_connection_id
+                }) if connection_id.as_str() == new_connection_id.as_str()
             ));
-            assert!(entity.node_transport_result_is_current(&node_id, new_attempt_id));
+            assert!(!entity.node_transport_result_is_current(&node_id, new_attempt_id));
         });
         assert!(ssh_registry.get(&new_connection_id).is_some());
     }
@@ -2677,7 +3301,7 @@ mod tests {
         let node_events_ready_flag = node_events_ready.clone();
         let _event_subscription = entity.update(cx, |_, cx| {
             cx.subscribe(&entity, move |_, _, event: &WorkspaceRuntimeEvent, _cx| {
-                if *event == WorkspaceRuntimeEvent::NodeEventsReady {
+                if *event == WorkspaceRuntimeEvent::EffectsReady {
                     node_events_ready_flag.store(true, Ordering::Release);
                 }
             })
@@ -2704,16 +3328,23 @@ mod tests {
         cx.run_until_parked();
         assert!(node_events_ready.load(Ordering::Acquire));
 
-        entity.update(cx, |entity, _cx| {
-            let events = entity.take_node_events();
+        entity.update(cx, |entity, cx| {
+            let events = entity
+                .take_runtime_effects(cx)
+                .into_iter()
+                .filter_map(|effect| match effect {
+                    WorkspaceRuntimeEffect::Node(effect) => Some(effect),
+                    _ => None,
+                })
+                .collect::<Vec<_>>();
             assert_eq!(events.len(), 2);
             assert!(matches!(
-                events.front(),
-                Some(NodeStateEvent::ConnectionStateChanged { generation: 2, .. })
+                events.first(),
+                Some(NodeRuntimeEffect::ConnectionStateChanged { .. })
             ));
             assert!(matches!(
-                events.back(),
-                Some(NodeStateEvent::TerminalEndpointChanged { generation: 3, .. })
+                events.last(),
+                Some(NodeRuntimeEffect::TerminalEndpointChanged)
             ));
             assert_eq!(
                 entity.node_event_generations.get(&NodeId::new("node-a")),
@@ -2751,9 +3382,12 @@ mod tests {
             entity.pending_reconnect_node_ids.insert(root.clone());
             entity.reconnect_debounce_generation = 7;
             entity.flush_reconnect_roots(6, cx);
-            assert!(entity.ready_reconnect_roots.is_empty());
+            assert!(entity.runtime_effects.is_empty());
             entity.flush_reconnect_roots(7, cx);
-            assert_eq!(entity.take_reconnect_roots(), VecDeque::from([root]));
+            assert!(matches!(
+                entity.take_runtime_effects(cx).as_slice(),
+                [WorkspaceRuntimeEffect::StartReconnectRoot { node_id }] if node_id == &root
+            ));
         });
     }
 
@@ -2782,7 +3416,6 @@ mod tests {
                 entity.claim_reconnect_pipeline(
                     &active_node_id,
                     Some("connection-a".to_string()),
-                    Duration::from_secs(60),
                     cx,
                 ),
                 ReconnectPipelineClaim::Acquired
@@ -2791,7 +3424,6 @@ mod tests {
                 entity.claim_reconnect_pipeline(
                     &waiting_node_id,
                     Some("connection-b".to_string()),
-                    Duration::from_secs(60),
                     cx,
                 ),
                 ReconnectPipelineClaim::Requeued
@@ -2805,7 +3437,6 @@ mod tests {
                 entity.claim_reconnect_pipeline(
                     &waiting_node_id,
                     Some("connection-b".to_string()),
-                    Duration::from_secs(60),
                     cx,
                 ),
                 ReconnectPipelineClaim::Exhausted
@@ -2818,12 +3449,7 @@ mod tests {
 
             entity.release_reconnect_pipeline(&active_node_id);
             assert_eq!(
-                entity.claim_reconnect_pipeline(
-                    &waiting_node_id,
-                    None,
-                    Duration::from_secs(60),
-                    cx,
-                ),
+                entity.claim_reconnect_pipeline(&waiting_node_id, None, cx),
                 ReconnectPipelineClaim::Acquired
             );
         });
@@ -2836,22 +3462,21 @@ mod tests {
             let active_node_id = NodeId::new("node-a");
             let child_node_id = NodeId::new("node-b");
             assert_eq!(
-                entity
-                    .claim_reconnect_pipeline(&active_node_id, None, Duration::from_secs(60), cx,),
+                entity.claim_reconnect_pipeline(&active_node_id, None, cx,),
                 ReconnectPipelineClaim::Acquired
             );
             entity.replace_reconnect_cascade([active_node_id.clone(), child_node_id.clone()]);
-            entity.reconnect_schedule_actions.push_back(
-                ReconnectScheduleAction::ContinueConnectionChain {
+            entity
+                .runtime_effects
+                .push_back(WorkspaceRuntimeEffect::ContinueConnectionChain {
                     node_id: child_node_id.clone(),
-                },
-            );
+                });
 
             entity.cancel_queued_reconnects(&[active_node_id.clone(), child_node_id]);
 
             assert!(entity.reconnect_pipeline_active_node.is_none());
             assert!(entity.pending_reconnect_cascade_nodes.is_empty());
-            assert!(entity.reconnect_schedule_actions.is_empty());
+            assert!(entity.runtime_effects.is_empty());
         });
     }
 
@@ -2882,7 +3507,7 @@ mod tests {
         let schedule_event_flag = schedule_event_seen.clone();
         let _event_subscription = entity.update(cx, |_, cx| {
             cx.subscribe(&entity, move |_, _, event: &WorkspaceRuntimeEvent, _cx| {
-                if *event == WorkspaceRuntimeEvent::ReconnectScheduleReady {
+                if *event == WorkspaceRuntimeEvent::EffectsReady {
                     schedule_event_flag.store(true, Ordering::Release);
                 }
             })
@@ -2899,13 +3524,11 @@ mod tests {
 
         cx.run_until_parked();
 
-        entity.update(cx, |entity, _cx| {
+        entity.update(cx, |entity, cx| {
             assert!(matches!(
-                entity.take_reconnect_schedule_actions().front(),
-                Some(ReconnectScheduleAction::ContinueConnectionChain { .. })
+                entity.take_runtime_effects(cx).first(),
+                Some(WorkspaceRuntimeEffect::ContinueConnectionChain { .. })
             ));
-            let reconnect_results = entity.take_worker_results();
-            assert!(reconnect_results.is_empty());
         });
         assert!(schedule_event_seen.load(Ordering::Acquire));
     }

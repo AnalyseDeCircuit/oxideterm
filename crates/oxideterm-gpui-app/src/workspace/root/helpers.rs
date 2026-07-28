@@ -893,9 +893,7 @@ impl WorkspaceApp {
             if self
                 .workspace_runtime
                 .read(cx)
-                .reconnect_orchestrator()
-                .cancel(&affected_node_id.0)
-                .is_some()
+                .cancel_reconnect_job(&affected_node_id)
             {
                 cancelled = cancelled.saturating_add(1);
             }

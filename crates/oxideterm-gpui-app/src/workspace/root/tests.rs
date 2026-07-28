@@ -4,8 +4,8 @@ mod tests {
     use oxideterm_gpui_settings_view::background_tab_options;
     use oxideterm_workspace::TabKind;
 
-    use super::super::super::*;
     use super::super::super::overlay::coalesce_connection_trace_running_events;
+    use super::super::super::*;
 
     fn connection_trace_event(
         status: ConnectionTraceStatus,
