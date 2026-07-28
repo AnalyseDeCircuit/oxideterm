@@ -56,17 +56,27 @@ pub(in crate::workspace) enum AiModelRefreshIntent {
 pub(in crate::workspace) enum AiCredentialFailure {
     SaveProviderKey,
     RemoveProviderKey,
+    SaveAcpToken,
+    RemoveAcpToken,
 }
 
 pub(in crate::workspace) enum AiCredentialIntent {
     ProviderKeyStored { index: usize, provider_id: String },
     ProviderKeyRemoved,
+    AcpTokenStored { agent_id: String },
+    AcpTokenRemoved { agent_id: String },
     Failed(AiCredentialFailure),
 }
 
 #[derive(Clone, Copy)]
 enum AiProviderKeyOperation {
     Store { index: usize },
+    Remove,
+}
+
+#[derive(Clone, Copy)]
+enum AiAcpTokenOperation {
+    Store,
     Remove,
 }
 
@@ -129,6 +139,7 @@ pub(in crate::workspace) struct AiWorkspaceEntity {
     settings_secret_drafts: HashMap<SettingsInput, zeroize::Zeroizing<String>>,
     focused_settings_secret_input: Option<SettingsInput>,
     provider_key_operation_tasks: HashMap<String, Task<()>>,
+    acp_token_operation_tasks: HashMap<String, Task<()>>,
     credential_intents: VecDeque<AiCredentialIntent>,
     model_refresh_generations: HashMap<String, u64>,
     refreshing_models: HashSet<String>,
@@ -248,6 +259,7 @@ impl AiWorkspaceEntity {
             settings_secret_drafts: HashMap::new(),
             focused_settings_secret_input: None,
             provider_key_operation_tasks: HashMap::new(),
+            acp_token_operation_tasks: HashMap::new(),
             credential_intents: VecDeque::new(),
             model_refresh_generations: HashMap::new(),
             refreshing_models: HashSet::new(),
@@ -329,7 +341,10 @@ impl AiWorkspaceEntity {
     }
 
     pub(in crate::workspace) fn owns_settings_secret_input(input: SettingsInput) -> bool {
-        matches!(input, SettingsInput::AiProviderApiKey(_))
+        matches!(
+            input,
+            SettingsInput::AiProviderApiKey(_) | SettingsInput::AiAcpAgentAuthToken(_)
+        )
     }
 
     pub(in crate::workspace) fn focused_settings_secret_input(&self) -> Option<SettingsInput> {
@@ -420,9 +435,24 @@ impl AiWorkspaceEntity {
         &mut self,
         input: SettingsInput,
     ) -> Option<zeroize::Zeroizing<String>> {
-        if !matches!(input, SettingsInput::AiProviderApiKey(_))
-            || self.focused_settings_secret_input != Some(input)
-        {
+        if !matches!(input, SettingsInput::AiProviderApiKey(_)) {
+            return None;
+        }
+        self.take_settings_secret(input)
+    }
+
+    pub(in crate::workspace) fn take_acp_auth_token(
+        &mut self,
+        input: SettingsInput,
+    ) -> Option<zeroize::Zeroizing<String>> {
+        if !matches!(input, SettingsInput::AiAcpAgentAuthToken(_)) {
+            return None;
+        }
+        self.take_settings_secret(input)
+    }
+
+    fn take_settings_secret(&mut self, input: SettingsInput) -> Option<zeroize::Zeroizing<String>> {
+        if self.focused_settings_secret_input != Some(input) {
             return None;
         }
         self.focused_settings_secret_input = None;
@@ -813,6 +843,8 @@ impl AiWorkspaceEntity {
             return false;
         }
 
+        // Keep completion attached to the AI owner instead of a detached
+        // workspace callback that could outlive its settings surface.
         let operation_provider_id = provider_id.clone();
         let operation_task = cx.spawn(async move |entity, cx| {
             let succeeded = operation.await;
@@ -851,6 +883,83 @@ impl AiWorkspaceEntity {
 
     pub(in crate::workspace) fn take_credential_intents(&mut self) -> VecDeque<AiCredentialIntent> {
         std::mem::take(&mut self.credential_intents)
+    }
+
+    pub(in crate::workspace) fn store_acp_auth_token(
+        &mut self,
+        agent_id: String,
+        token: zeroize::Zeroizing<String>,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let key_store = self.key_store.clone();
+        let task_runtime = self.task_runtime.clone();
+        let agent_id_for_store = agent_id.clone();
+        let operation = async move {
+            task_runtime
+                .spawn_blocking(move || key_store.store_acp_auth_token(&agent_id_for_store, token))
+                .await
+                .is_ok_and(|result| result.is_ok())
+        };
+        self.start_acp_token_operation(agent_id, AiAcpTokenOperation::Store, operation, cx)
+    }
+
+    pub(in crate::workspace) fn remove_acp_auth_token(
+        &mut self,
+        agent_id: String,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let key_store = self.key_store.clone();
+        let task_runtime = self.task_runtime.clone();
+        let agent_id_for_delete = agent_id.clone();
+        let operation = async move {
+            task_runtime
+                .spawn_blocking(move || key_store.delete_acp_auth_token(&agent_id_for_delete))
+                .await
+                .is_ok_and(|result| result.is_ok())
+        };
+        self.start_acp_token_operation(agent_id, AiAcpTokenOperation::Remove, operation, cx)
+    }
+
+    fn start_acp_token_operation(
+        &mut self,
+        agent_id: String,
+        operation_kind: AiAcpTokenOperation,
+        operation: impl std::future::Future<Output = bool> + 'static,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if self.acp_token_operation_tasks.contains_key(&agent_id) {
+            return false;
+        }
+
+        // Retain one task per agent so hiding settings cannot discard a
+        // user-requested keychain operation or its typed completion.
+        let operation_agent_id = agent_id.clone();
+        let operation_task = cx.spawn(async move |entity, cx| {
+            let succeeded = operation.await;
+            let _ = entity.update(cx, |entity, cx| {
+                entity.acp_token_operation_tasks.remove(&operation_agent_id);
+                let intent = match (operation_kind, succeeded) {
+                    (AiAcpTokenOperation::Store, true) => AiCredentialIntent::AcpTokenStored {
+                        agent_id: operation_agent_id,
+                    },
+                    (AiAcpTokenOperation::Remove, true) => AiCredentialIntent::AcpTokenRemoved {
+                        agent_id: operation_agent_id,
+                    },
+                    (AiAcpTokenOperation::Store, false) => {
+                        AiCredentialIntent::Failed(AiCredentialFailure::SaveAcpToken)
+                    }
+                    (AiAcpTokenOperation::Remove, false) => {
+                        AiCredentialIntent::Failed(AiCredentialFailure::RemoveAcpToken)
+                    }
+                };
+                entity.credential_intents.push_back(intent);
+                cx.emit(AiWorkspaceEvent::CredentialOperationReady);
+                cx.notify();
+            });
+        });
+        self.acp_token_operation_tasks
+            .insert(agent_id, operation_task);
+        true
     }
 
     pub(in crate::workspace) fn invalidate_provider_key_status(&mut self, provider_id: &str) {
@@ -2359,6 +2468,50 @@ mod entity_tests {
             assert!(matches!(
                 intent,
                 AiCredentialIntent::Failed(AiCredentialFailure::RemoveProviderKey)
+            ));
+        });
+    }
+
+    #[gpui::test]
+    fn acp_token_draft_and_operation_are_entity_owned(cx: &mut TestAppContext) {
+        let entity = cx.new(|cx| {
+            AiWorkspaceEntity::new(test_runtime(), oxideterm_ai::AiProviderKeyStore::new(), cx)
+        });
+        let input = SettingsInput::AiAcpAgentAuthToken(2);
+        let draft_allocation = entity.update(cx, |entity, cx| {
+            assert!(entity.focus_settings_secret_input(input, cx));
+            assert!(entity.replace_settings_secret_input(input, None, "test-token", cx));
+            entity
+                .settings_secret_input_value(input)
+                .expect("ACP token draft")
+                .as_ptr()
+        });
+        let token = entity
+            .update(cx, |entity, _cx| entity.take_acp_auth_token(input))
+            .expect("moved ACP token");
+        assert_eq!(token.as_ptr(), draft_allocation);
+
+        entity.update(cx, |entity, cx| {
+            assert!(entity.start_acp_token_operation(
+                "agent-test".to_string(),
+                AiAcpTokenOperation::Store,
+                std::future::ready(true),
+                cx,
+            ));
+            assert!(entity.acp_token_operation_tasks.contains_key("agent-test"));
+        });
+        cx.run_until_parked();
+
+        entity.update(cx, |entity, _cx| {
+            assert!(!entity.acp_token_operation_tasks.contains_key("agent-test"));
+            let intent = entity
+                .take_credential_intents()
+                .pop_front()
+                .expect("ACP completion intent");
+            assert!(matches!(
+                intent,
+                AiCredentialIntent::AcpTokenStored { agent_id }
+                    if agent_id == "agent-test"
             ));
         });
     }

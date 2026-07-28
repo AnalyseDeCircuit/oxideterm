@@ -52,7 +52,6 @@ use oxideterm_ai::{
     provider_template_by_type as ai_provider_template_by_type, provider_view as ai_provider_view,
     remove_provider_at_with_scoped_settings as ai_remove_provider_at_with_scoped_settings,
     set_active_provider_selection as ai_set_active_provider_selection,
-    take_provider_key_secret as ai_take_provider_key_secret,
 };
 use oxideterm_connections::{
     ConnectionImportApplyRequest, ConnectionImportDuplicateStrategy, ConnectionImportPreview,

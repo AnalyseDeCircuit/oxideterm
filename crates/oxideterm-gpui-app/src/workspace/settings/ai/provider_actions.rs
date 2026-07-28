@@ -91,12 +91,52 @@ impl WorkspaceApp {
                             }
                         }
                         ai_state::AiCredentialIntent::ProviderKeyRemoved => {}
+                        ai_state::AiCredentialIntent::AcpTokenStored { agent_id } => {
+                            self.edit_settings(
+                                |settings| {
+                                    if let Some(agent) = settings
+                                        .ai
+                                        .acp_agents
+                                        .iter_mut()
+                                        .find(|agent| agent.id == agent_id)
+                                    {
+                                        agent.auth.status =
+                                            oxideterm_settings::AcpAgentAuthStatus::Authenticated;
+                                        agent.auth.account_label = Some(
+                                            (!agent.display_name.trim().is_empty())
+                                                .then(|| agent.display_name.clone())
+                                                .unwrap_or_else(|| agent.id.clone()),
+                                        );
+                                    }
+                                },
+                                cx,
+                            );
+                        }
+                        ai_state::AiCredentialIntent::AcpTokenRemoved { agent_id } => {
+                            self.edit_settings(
+                                |settings| {
+                                    if let Some(agent) = settings
+                                        .ai
+                                        .acp_agents
+                                        .iter_mut()
+                                        .find(|agent| agent.id == agent_id)
+                                    {
+                                        agent.auth.status =
+                                            oxideterm_settings::AcpAgentAuthStatus::Unknown;
+                                        agent.auth.account_label = None;
+                                    }
+                                },
+                                cx,
+                            );
+                        }
                         ai_state::AiCredentialIntent::Failed(failure) => {
                             let message_key = match failure {
-                                ai_state::AiCredentialFailure::SaveProviderKey => {
+                                ai_state::AiCredentialFailure::SaveProviderKey
+                                | ai_state::AiCredentialFailure::SaveAcpToken => {
                                     "settings_view.ai.save_failed"
                                 }
-                                ai_state::AiCredentialFailure::RemoveProviderKey => {
+                                ai_state::AiCredentialFailure::RemoveProviderKey
+                                | ai_state::AiCredentialFailure::RemoveAcpToken => {
                                     "settings_view.ai.remove_failed"
                                 }
                             };

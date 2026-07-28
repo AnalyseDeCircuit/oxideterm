@@ -316,13 +316,14 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let input = SettingsInput::AiAcpAgentAuthToken(index);
-        let focused = self.focused_settings_input == Some(input);
-        let draft = if focused {
-            self.settings_input_draft.as_str()
-        } else {
-            ""
+        let (focused, save_disabled) = {
+            let ai_workspace = self.ai_entity.read(cx);
+            let focused = ai_workspace.focused_settings_secret_input() == Some(input);
+            let save_disabled = ai_workspace
+                .settings_secret_input_value(input)
+                .is_none_or(|draft| draft.trim().is_empty());
+            (focused, save_disabled)
         };
-        let save_disabled = draft.trim().is_empty();
         let remove_disabled =
             agent.auth.status != oxideterm_settings::AcpAgentAuthStatus::Authenticated;
         let save_agent_id = agent.id.clone();
@@ -352,7 +353,7 @@ impl WorkspaceApp {
                             .flex_basis(px(AI_ACP_AGENT_AUTH_TOKEN_MIN_WIDTH))
                             .child(self.ai_provider_secret_input(
                                 input,
-                                draft,
+                                "",
                                 if agent.auth.status
                                     == oxideterm_settings::AcpAgentAuthStatus::Authenticated
                                 {
@@ -426,61 +427,19 @@ impl WorkspaceApp {
         agent_id: String,
         cx: &mut Context<Self>,
     ) {
-        if self.focused_settings_input != Some(SettingsInput::AiAcpAgentAuthToken(index)) {
-            cx.notify();
-            return;
-        }
-
         // The ACP token draft is converted to a zeroizing owner at the
         // UI/backend boundary and is never applied through persisted settings.
-        let Some(token) = ai_take_provider_key_secret(&mut self.settings_input_draft) else {
+        let input = SettingsInput::AiAcpAgentAuthToken(index);
+        let Some(token) = self
+            .ai_entity
+            .update(cx, |ai, _cx| ai.take_acp_auth_token(input))
+        else {
             cx.notify();
             return;
         };
-        let key_store = self.ai.models.key_store.clone();
-        let runtime = self.forwarding_runtime.clone();
-        cx.spawn(async move |weak, cx| {
-            let agent_id_for_store = agent_id.clone();
-            let result = runtime
-                .spawn_blocking(move || key_store.store_acp_auth_token(&agent_id_for_store, token))
-                .await
-                .map_err(|error| error.to_string())
-                .and_then(|result| result.map_err(|error| error.to_string()));
-            let _ = weak.update(cx, |this, cx| {
-                match result {
-                    Ok(()) => {
-                        this.focused_settings_input = None;
-                        this.edit_settings(
-                            |settings| {
-                                if let Some(agent) = settings
-                                    .ai
-                                    .acp_agents
-                                    .iter_mut()
-                                    .find(|agent| agent.id == agent_id)
-                                {
-                                    agent.auth.status =
-                                        oxideterm_settings::AcpAgentAuthStatus::Authenticated;
-                                    agent.auth.account_label = Some(
-                                        (!agent.display_name.trim().is_empty())
-                                            .then(|| agent.display_name.clone())
-                                            .unwrap_or_else(|| agent.id.clone()),
-                                    );
-                                }
-                            },
-                            cx,
-                        );
-                    }
-                    Err(error) => {
-                        this.push_ai_settings_toast(
-                            this.ai_i18n_error("settings_view.ai.save_failed", &error),
-                            TerminalNoticeVariant::Error,
-                        );
-                    }
-                }
-                cx.notify();
-            });
-        })
-        .detach();
+        self.ai_entity.update(cx, |ai, cx| {
+            ai.store_acp_auth_token(agent_id, token, cx);
+        });
         cx.notify();
     }
 
@@ -490,45 +449,9 @@ impl WorkspaceApp {
         agent_id: String,
         cx: &mut Context<Self>,
     ) {
-        let key_store = self.ai.models.key_store.clone();
-        let runtime = self.forwarding_runtime.clone();
-        cx.spawn(async move |weak, cx| {
-            let agent_id_for_delete = agent_id.clone();
-            let result = runtime
-                .spawn_blocking(move || key_store.delete_acp_auth_token(&agent_id_for_delete))
-                .await
-                .map_err(|error| error.to_string())
-                .and_then(|result| result.map_err(|error| error.to_string()));
-            let _ = weak.update(cx, |this, cx| {
-                match result {
-                    Ok(()) => {
-                        this.edit_settings(
-                            |settings| {
-                                if let Some(agent) = settings
-                                    .ai
-                                    .acp_agents
-                                    .iter_mut()
-                                    .find(|agent| agent.id == agent_id)
-                                {
-                                    agent.auth.status =
-                                        oxideterm_settings::AcpAgentAuthStatus::Unknown;
-                                    agent.auth.account_label = None;
-                                }
-                            },
-                            cx,
-                        );
-                    }
-                    Err(error) => {
-                        this.push_ai_settings_toast(
-                            this.ai_i18n_error("settings_view.ai.remove_failed", &error),
-                            TerminalNoticeVariant::Error,
-                        );
-                    }
-                }
-                cx.notify();
-            });
-        })
-        .detach();
+        self.ai_entity.update(cx, |ai, cx| {
+            ai.remove_acp_auth_token(agent_id, cx);
+        });
         cx.notify();
     }
 

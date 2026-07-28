@@ -1340,9 +1340,6 @@ impl WorkspaceApp {
             SettingsInput::TerminalCommandSpecsJson => {
                 cx.notify();
             }
-            SettingsInput::AiProviderApiKey(_) => {
-                cx.notify();
-            }
             SettingsInput::NativePluginInstallUrl => {
                 let draft = self.settings_input_draft.trim().to_string();
                 self.update_plugin_manager_state(cx, |manager| {
