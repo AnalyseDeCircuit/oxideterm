@@ -60,6 +60,10 @@ pub(in crate::workspace) struct HostToolsEntity {
     pub(super) monitoring: oxideterm_settings::HostToolsSettings,
     pub(super) messages: Option<HostToolsMessages>,
     pub(super) lifecycle_refresh_task: Option<Task<()>>,
+    #[cfg(test)]
+    test_resource_sampler: Option<Arc<dyn ResourceSampler>>,
+    #[cfg(test)]
+    test_snapshot_dispatches: Option<Vec<ContextSidebarTool>>,
     pool_stats: Option<ConnectionPoolMonitorStats>,
     pool_summaries: Vec<ConnectionPoolEntrySummary>,
     topology_snapshot: Option<ConnectionTopologySnapshot>,
@@ -130,6 +134,10 @@ impl HostToolsEntity {
             monitoring: oxideterm_settings::HostToolsSettings::default(),
             messages: None,
             lifecycle_refresh_task: None,
+            #[cfg(test)]
+            test_resource_sampler: None,
+            #[cfg(test)]
+            test_snapshot_dispatches: None,
             pool_stats: None,
             pool_summaries: Vec::new(),
             topology_snapshot: None,
@@ -986,6 +994,20 @@ impl HostToolsEntity {
         let Some(messages) = self.messages.clone() else {
             return;
         };
+        #[cfg(test)]
+        if let Some(dispatches) = self.test_snapshot_dispatches.as_mut()
+            && !matches!(
+                self.active_tool,
+                ContextSidebarTool::Monitor
+                    | ContextSidebarTool::Gpu
+                    | ContextSidebarTool::Processes
+                    | ContextSidebarTool::Docker
+            )
+        {
+            // Tests record the command boundary without opening a real SSH channel.
+            dispatches.push(self.active_tool);
+            return;
+        }
         let notices = match self.active_tool {
             ContextSidebarTool::Services => {
                 self.request_service_snapshot(
@@ -1119,7 +1141,7 @@ impl HostToolsEntity {
             // Environment detection owns OS selection; never guess a probe dialect.
             return;
         };
-        let sampler: Arc<dyn ResourceSampler> = Arc::new(handle);
+        let sampler = self.resource_sampler(handle);
         self.profiler_registry.start_with_sampler_on_config(
             connection_id,
             sampler,
@@ -1165,7 +1187,7 @@ impl HostToolsEntity {
         let Some(os_type) = handle.remote_env().map(|environment| environment.os_type) else {
             return;
         };
-        let sampler: Arc<dyn ResourceSampler> = Arc::new(handle);
+        let sampler = self.resource_sampler(handle);
         self.host_gpu.snapshot_connection_id = Some(connection_id.clone());
         self.host_gpu.snapshot = None;
         self.host_gpu.expanded_uuid = None;
@@ -1178,6 +1200,18 @@ impl HostToolsEntity {
             runtime,
         ));
         cx.notify();
+    }
+
+    fn resource_sampler(
+        &self,
+        handle: oxideterm_ssh::SshConnectionHandle,
+    ) -> Arc<dyn ResourceSampler> {
+        #[cfg(test)]
+        if let Some(sampler) = self.test_resource_sampler.as_ref() {
+            // Tests share one counting sampler across profiler and GPU tasks.
+            return sampler.clone();
+        }
+        Arc::new(handle)
     }
 
     pub(super) fn gpu_snapshot_for(&self, connection_id: &str) -> Option<GpuSnapshot> {
@@ -1283,7 +1317,79 @@ impl HostToolsEntity {
 mod tests {
     use super::*;
     use gpui::TestAppContext;
-    use oxideterm_ssh::SshCommandOutput;
+    use oxideterm_connection_monitor::{
+        GPU_END_MARKER, ProfilerState, ResourceSampleShell, ResourceSamplerFuture,
+    };
+    use oxideterm_ssh::{RemoteEnvInfo, SshCommandOutput};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    struct VisibilityCountingSampler {
+        shell_open_count: Arc<AtomicUsize>,
+        shell_close_count: Arc<AtomicUsize>,
+    }
+
+    impl ResourceSampler for VisibilityCountingSampler {
+        fn open_shell<'a>(
+            &'a self,
+            _init_command: &'a str,
+            _timeout: Duration,
+        ) -> ResourceSamplerFuture<'a, Result<Box<dyn ResourceSampleShell>, String>> {
+            let shell_open_count = self.shell_open_count.clone();
+            let shell_close_count = self.shell_close_count.clone();
+            Box::pin(async move {
+                shell_open_count.fetch_add(1, Ordering::SeqCst);
+                Ok(Box::new(VisibilityCountingShell { shell_close_count })
+                    as Box<dyn ResourceSampleShell>)
+            })
+        }
+    }
+
+    struct VisibilityCountingShell {
+        shell_close_count: Arc<AtomicUsize>,
+    }
+
+    impl ResourceSampleShell for VisibilityCountingShell {
+        fn sample_until<'a>(
+            &'a mut self,
+            _command: &'a str,
+            end_marker: &'a str,
+            _timeout: Duration,
+            _max_output_size: usize,
+        ) -> ResourceSamplerFuture<'a, Result<String, String>> {
+            Box::pin(async move {
+                if end_marker == GPU_END_MARKER {
+                    return Ok(concat!(
+                        "===NVIDIA_STATUS===\navailable\n",
+                        "===NVIDIA_GPUS===\n",
+                        "0, GPU-a, 00000000:01:00.0, NVIDIA L40S, 555.42, P0, 10, 2, 512, 46068, 41, 50, 350, N/A\n",
+                        "===NVIDIA_GPU_QUERY_EXIT===\n0\n",
+                        "===NVIDIA_PROCESSES===\n",
+                        "===NVIDIA_GPU_END==="
+                    )
+                    .to_string());
+                }
+                Ok("===END===\n".to_string())
+            })
+        }
+
+        fn close<'a>(&'a mut self) -> ResourceSamplerFuture<'a, Result<(), String>> {
+            Box::pin(async move {
+                self.shell_close_count.fetch_add(1, Ordering::SeqCst);
+                Ok(())
+            })
+        }
+    }
+
+    fn wait_for_counter(counter: &AtomicUsize, expected: usize) {
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while counter.load(Ordering::SeqCst) < expected {
+            assert!(
+                Instant::now() < deadline,
+                "counter did not reach {expected} before the deadline"
+            );
+            std::thread::yield_now();
+        }
+    }
 
     #[gpui::test]
     fn runtime_navigation_transition_is_entity_owned(cx: &mut TestAppContext) {
@@ -1424,6 +1530,184 @@ mod tests {
             entity.refresh_lifecycle_tick(cx);
             assert!(entity.last_pool_refresh.is_some());
         });
+    }
+
+    #[gpui::test]
+    fn visibility_stops_page_samplers_but_keeps_reliable_actions_and_node_owner(
+        cx: &mut TestAppContext,
+    ) {
+        let runtime = tokio::runtime::Runtime::new().expect("create test runtime");
+        let registry = SshConnectionRegistry::default();
+        let node_consumer = ConnectionConsumer::NodeRouter("node-visibility".to_string());
+        let handle = registry.acquire(
+            SshConfig {
+                host: "host.example".to_string(),
+                username: "alice".to_string(),
+                auth: AuthMethod::Agent,
+                ..SshConfig::default()
+            },
+            node_consumer.clone(),
+        );
+        assert!(handle.set_remote_env(RemoteEnvInfo {
+            os_type: "Linux".to_string(),
+            os_version: None,
+            kernel: None,
+            arch: None,
+            shell: Some("/bin/sh".to_string()),
+            home: None,
+            zdotdir: None,
+            xdg_config_home: None,
+            detected_at: 1,
+        }));
+        let connection_id = handle.connection_id().to_string();
+        let shell_open_count = Arc::new(AtomicUsize::new(0));
+        let shell_close_count = Arc::new(AtomicUsize::new(0));
+        let test_sampler: Arc<dyn ResourceSampler> = Arc::new(VisibilityCountingSampler {
+            shell_open_count: shell_open_count.clone(),
+            shell_close_count: shell_close_count.clone(),
+        });
+        let (profiler_update_tx, profiler_update_rx) = tokio::sync::mpsc::unbounded_channel();
+        let entity =
+            cx.new(|cx| HostToolsEntity::new(profiler_update_tx, profiler_update_rx, registry, cx));
+        let mut events = cx.events(&entity);
+        let monitoring = oxideterm_settings::HostToolsSettings::default();
+        let sampling_config = oxideterm_connection_monitor::ResourceSamplingConfig::default();
+
+        entity.update(cx, |entity, cx| {
+            entity.test_resource_sampler = Some(test_sampler);
+            entity.test_snapshot_dispatches = Some(Vec::new());
+            entity.messages = Some(HostToolsMessages {
+                service_connection_missing: "Service connection missing".to_string(),
+                service_action_failed: "Service action failed".to_string(),
+                log_unknown_error: "Log capture failed".to_string(),
+                port_unknown_error: "Port capture failed".to_string(),
+                filesystem_unknown_error: "Filesystem capture failed".to_string(),
+                package_unknown_error: "Package capture failed".to_string(),
+                schedule_unknown_error: "Schedule capture failed".to_string(),
+                tmux_unknown_error: "tmux capture failed".to_string(),
+                tmux_unavailable: "tmux unavailable".to_string(),
+            });
+            entity.select_connection(connection_id.clone(), None, cx);
+            entity.active_tool = ContextSidebarTool::Gpu;
+            entity.update_lifecycle(
+                HostToolsVisibility::VisibleSidebar,
+                monitoring.clone(),
+                sampling_config,
+                runtime.handle().clone(),
+                true,
+                cx,
+            );
+        });
+
+        // Visible GPU owns one profiler shell and one page-scoped GPU shell.
+        wait_for_counter(&shell_open_count, 2);
+        entity.read_with(cx, |entity, _cx| {
+            assert_eq!(
+                entity.profiler_registry.state(&connection_id),
+                Some(ProfilerState::Running)
+            );
+            assert!(entity.gpu_sampling_is_running(&connection_id));
+        });
+
+        let action_request = HostServiceActionRequest {
+            connection_id: connection_id.clone(),
+            service_id: "ssh.service".to_string(),
+            description: "SSH".to_string(),
+            action: ServiceActionKind::Restart,
+        };
+        let reliable_sender = entity.update(cx, |entity, cx| {
+            entity.host_services.action_running = Some(action_request.clone());
+            entity.update_lifecycle(
+                HostToolsVisibility::Hidden,
+                monitoring.clone(),
+                sampling_config,
+                runtime.handle().clone(),
+                false,
+                cx,
+            );
+            entity.active_tool = ContextSidebarTool::Services;
+            entity.request_active_tool_snapshot(HostSnapshotFeedback::Silent, cx);
+            entity.reliable_delivery_tx.clone()
+        });
+
+        wait_for_counter(&shell_close_count, 2);
+        let hidden_shell_open_count = shell_open_count.load(Ordering::SeqCst);
+        std::thread::sleep(Duration::from_millis(25));
+        assert_eq!(
+            shell_open_count.load(Ordering::SeqCst),
+            hidden_shell_open_count
+        );
+        entity.read_with(cx, |entity, _cx| {
+            assert_eq!(entity.profiler_registry.state(&connection_id), None);
+            assert!(!entity.gpu_sampling_is_running(&connection_id));
+            assert!(
+                entity
+                    .test_snapshot_dispatches
+                    .as_ref()
+                    .expect("snapshot test hook")
+                    .is_empty()
+            );
+        });
+
+        reliable_sender
+            .send(super::delivery::HostToolsReliableDelivery::ServiceAction(
+                HostServiceActionDelivery {
+                    request: action_request,
+                    result: Ok(true),
+                },
+            ))
+            .expect("deliver hidden-page action result");
+        cx.run_until_parked();
+
+        entity.read_with(cx, |entity, _cx| {
+            assert!(entity.host_services.action_running.is_none());
+        });
+        assert_eq!(
+            events.try_recv().expect("hidden action completion notice"),
+            HostToolsEvent::ShowNotice(HostToolsNotice::ServiceActionFinished {
+                description: "SSH".to_string(),
+                succeeded: true,
+            })
+        );
+        assert!(events.try_recv().is_err());
+        assert_eq!(handle.info().ref_count, 1);
+        assert_eq!(handle.info().consumers, vec![node_consumer.clone()]);
+
+        entity.update(cx, |entity, cx| {
+            entity.update_lifecycle(
+                HostToolsVisibility::VisibleSidebar,
+                monitoring,
+                sampling_config,
+                runtime.handle().clone(),
+                false,
+                cx,
+            );
+            entity.request_active_tool_snapshot(HostSnapshotFeedback::Silent, cx);
+        });
+
+        // Re-showing Services restarts only the shared profiler plus Services.
+        wait_for_counter(&shell_open_count, hidden_shell_open_count + 1);
+        std::thread::sleep(Duration::from_millis(25));
+        assert_eq!(
+            shell_open_count.load(Ordering::SeqCst),
+            hidden_shell_open_count + 1
+        );
+        entity.read_with(cx, |entity, _cx| {
+            assert_eq!(
+                entity.profiler_registry.state(&connection_id),
+                Some(ProfilerState::Running)
+            );
+            assert!(!entity.gpu_sampling_is_running(&connection_id));
+            assert_eq!(
+                entity
+                    .test_snapshot_dispatches
+                    .as_ref()
+                    .expect("snapshot test hook"),
+                &[ContextSidebarTool::Services]
+            );
+        });
+        assert_eq!(handle.info().ref_count, 1);
+        assert_eq!(handle.info().consumers, vec![node_consumer]);
     }
 
     #[gpui::test]

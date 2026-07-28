@@ -94,7 +94,12 @@ impl HostToolsEntity {
                 .iter()
                 .any(|connection| connection.connection_id == selected)
         });
-        if force_pool_refresh || stale || selected_missing {
+        let profiler_missing = self
+            .selected_connection_id()
+            .is_some_and(|connection_id| self.profiler_connection_missing(connection_id));
+        if force_pool_refresh || stale || selected_missing || profiler_missing {
+            // Re-showing Host Tools must restart the page profiler even when
+            // the selected connection and cached pool snapshot stayed stable.
             self.sync_live_connections(connections, sampling_config, runtime, cx);
         }
     }
