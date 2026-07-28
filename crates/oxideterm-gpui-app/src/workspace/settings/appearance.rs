@@ -346,8 +346,9 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let background_blur = self
-            .settings_page
-            .background_blur_preview
+            .settings_workspace
+            .read(cx)
+            .background_blur_preview()
             .unwrap_or(settings.terminal.background_blur);
         let has_background_image = settings.terminal.background_image.is_some();
         let mut rows = Vec::new();

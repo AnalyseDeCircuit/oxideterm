@@ -613,6 +613,12 @@ impl WorkspaceApp {
                 }
                 cx.notify();
             }
+            SettingsWorkspaceEvent::BackgroundBlurCommitReady(value) => {
+                let value = *value;
+                if self.settings_store.settings().terminal.background_blur != value {
+                    self.edit_settings(|settings| settings.terminal.background_blur = value, cx);
+                }
+            }
             SettingsWorkspaceEvent::PortablePasswordChangeFinished { success } => {
                 if *success {
                     self.push_ai_settings_toast(

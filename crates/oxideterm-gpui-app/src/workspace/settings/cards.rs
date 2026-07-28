@@ -1,5 +1,8 @@
 use super::*;
 
+// Match the browser slider debounce while keeping exactly one retained task.
+const BACKGROUND_BLUR_COMMIT_DELAY: Duration = Duration::from_millis(150);
+
 impl WorkspaceApp {
     pub(in crate::workspace) fn settings_select_trigger(
         &self,
@@ -1558,36 +1561,14 @@ impl WorkspaceApp {
             slider_pointer_percent(x - left, width, self.tokens.metrics.ui_slider_thumb_size);
         let value = (percent * 20.0).round() as i64;
         let persisted_background_blur = self.settings_store.settings().terminal.background_blur;
-        let Some(generation) = self
-            .settings_page
-            .update_background_blur_preview(persisted_background_blur, value)
-        else {
-            return;
-        };
-        cx.notify();
-
-        cx.spawn(async move |weak, cx| {
-            Timer::after(Duration::from_millis(150)).await;
-            let _ = weak.update(cx, |this, cx| {
-                this.commit_background_blur_preview(generation, cx);
-            });
-        })
-        .detach();
-    }
-
-    pub(in crate::workspace) fn commit_background_blur_preview(
-        &mut self,
-        generation: u64,
-        cx: &mut Context<Self>,
-    ) {
-        let Some(value) = self.settings_page.take_background_blur_preview(generation) else {
-            return;
-        };
-        if self.settings_store.settings().terminal.background_blur != value {
-            self.edit_settings(|settings| settings.terminal.background_blur = value, cx);
-        } else {
-            cx.notify();
-        }
+        self.settings_workspace.update(cx, |settings, cx| {
+            settings.update_background_blur_preview(
+                persisted_background_blur,
+                value,
+                BACKGROUND_BLUR_COMMIT_DELAY,
+                cx,
+            );
+        });
     }
 }
 

@@ -63,8 +63,6 @@ pub struct SettingsPageModel {
     pub keybinding_reset_all_confirm_open: bool,
     pub legal_notice_open: bool,
     pub theme_editor: Option<ThemeEditorState>,
-    pub background_blur_preview: Option<i64>,
-    pub background_blur_commit_generation: u64,
     pub background_cache_poll_scheduled: bool,
 }
 
@@ -104,8 +102,6 @@ impl Default for SettingsPageModel {
             keybinding_reset_all_confirm_open: false,
             legal_notice_open: false,
             theme_editor: None,
-            background_blur_preview: None,
-            background_blur_commit_generation: 0,
             background_cache_poll_scheduled: false,
         }
     }
@@ -475,31 +471,6 @@ impl SettingsPageModel {
         true
     }
 
-    /// Updates the debounced background blur preview and returns the commit generation to schedule.
-    pub fn update_background_blur_preview(
-        &mut self,
-        persisted_value: i64,
-        preview_value: i64,
-    ) -> Option<u64> {
-        if self.background_blur_preview == Some(preview_value)
-            || (self.background_blur_preview.is_none() && persisted_value == preview_value)
-        {
-            return None;
-        }
-        self.background_blur_preview = Some(preview_value);
-        self.background_blur_commit_generation =
-            self.background_blur_commit_generation.wrapping_add(1);
-        Some(self.background_blur_commit_generation)
-    }
-
-    /// Takes a pending background blur preview only when its debounce generation is current.
-    pub fn take_background_blur_preview(&mut self, generation: u64) -> Option<i64> {
-        if self.background_blur_commit_generation != generation {
-            return None;
-        }
-        self.background_blur_preview.take()
-    }
-
     /// Marks whether the background image cache poll has already been scheduled.
     pub fn set_background_cache_poll_scheduled(&mut self, is_scheduled: bool) {
         self.background_cache_poll_scheduled = is_scheduled;
@@ -557,17 +528,6 @@ mod tests {
         assert!(!model.expanded_ai_providers.contains_key(&provider_id));
         assert!(!model.expanded_ai_provider_models.contains(&provider_id));
         assert!(!model.expanded_ai_context_providers.contains(&provider_id));
-    }
-
-    #[test]
-    fn background_blur_preview_debounces_by_generation() {
-        let mut model = SettingsPageModel::default();
-
-        let generation = model.update_background_blur_preview(0, 8).unwrap();
-        assert_eq!(model.update_background_blur_preview(0, 8), None);
-
-        assert_eq!(model.take_background_blur_preview(generation + 1), None);
-        assert_eq!(model.take_background_blur_preview(generation), Some(8));
     }
 
     #[test]

@@ -227,6 +227,9 @@ pub(in crate::workspace) struct SettingsWorkspaceEntity {
     data_directory_picker_task: Option<Task<()>>,
     data_directory_confirm_exit_task: Option<Task<()>>,
     data_directory_results: VecDeque<DataDirectoryOperationResult>,
+    background_blur_preview: Option<i64>,
+    background_blur_commit_generation: u64,
+    background_blur_commit_task: Option<Task<()>>,
     pub(super) native_update: NativeUpdateRuntime,
 }
 
@@ -246,6 +249,7 @@ pub(in crate::workspace) enum SettingsWorkspaceEvent {
     RequestQuitAfterNativeUpdate,
     DataDirectoryConfirmOpened,
     DataDirectoryOperationReady,
+    BackgroundBlurCommitReady(i64),
     PortablePasswordChangeFinished {
         success: bool,
     },
@@ -320,6 +324,9 @@ impl SettingsWorkspaceEntity {
             data_directory_picker_task: None,
             data_directory_confirm_exit_task: None,
             data_directory_results: VecDeque::new(),
+            background_blur_preview: None,
+            background_blur_commit_generation: 0,
+            background_blur_commit_task: None,
             native_update: NativeUpdateRuntime::new(cx),
         }
     }
@@ -463,6 +470,58 @@ impl SettingsWorkspaceEntity {
         &mut self,
     ) -> VecDeque<DataDirectoryOperationResult> {
         std::mem::take(&mut self.data_directory_results)
+    }
+
+    pub(in crate::workspace) fn background_blur_preview(&self) -> Option<i64> {
+        self.background_blur_preview
+    }
+
+    pub(in crate::workspace) fn update_background_blur_preview(
+        &mut self,
+        persisted_value: i64,
+        preview_value: i64,
+        delay: Duration,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if self.background_blur_preview == Some(preview_value)
+            || (self.background_blur_preview.is_none() && persisted_value == preview_value)
+        {
+            return false;
+        }
+
+        self.background_blur_preview = Some(preview_value);
+        self.background_blur_commit_generation =
+            self.background_blur_commit_generation.wrapping_add(1);
+        let generation = self.background_blur_commit_generation;
+        self.background_blur_commit_task = None;
+
+        if delay.is_zero() {
+            self.finish_background_blur_commit(generation, cx);
+            return true;
+        }
+
+        // Replacing this retained task cancels the previous debounce without
+        // leaving a detached root timer alive after another slider movement.
+        self.background_blur_commit_task = Some(cx.spawn(async move |settings, cx| {
+            Timer::after(delay).await;
+            let _ = settings.update(cx, |settings, cx| {
+                settings.background_blur_commit_task = None;
+                settings.finish_background_blur_commit(generation, cx);
+            });
+        }));
+        cx.notify();
+        true
+    }
+
+    fn finish_background_blur_commit(&mut self, generation: u64, cx: &mut Context<Self>) {
+        if self.background_blur_commit_generation != generation {
+            return;
+        }
+        let Some(value) = self.background_blur_preview.take() else {
+            return;
+        };
+        cx.emit(SettingsWorkspaceEvent::BackgroundBlurCommitReady(value));
+        cx.notify();
     }
 
     pub(in crate::workspace) fn portable_status_snapshot(&self) -> PortableStatusSnapshot {
@@ -832,6 +891,29 @@ mod tests {
             assert!(entity.begin_data_directory_confirm_exit(false, Duration::ZERO, cx));
             assert!(entity.data_directory_confirm().is_none());
             assert!(!entity.data_directory_confirm_is_visible());
+        });
+    }
+
+    #[gpui::test]
+    fn background_blur_preview_and_debounce_task_are_entity_owned(cx: &mut TestAppContext) {
+        let entity = cx.new(SettingsWorkspaceEntity::new);
+        entity.update(cx, |entity, cx| {
+            assert_eq!(entity.background_blur_preview(), None);
+            assert!(entity.update_background_blur_preview(0, 8, Duration::from_secs(1), cx,));
+            let first_generation = entity.background_blur_commit_generation;
+            assert_eq!(entity.background_blur_preview(), Some(8));
+            assert!(entity.background_blur_commit_task.is_some());
+            assert!(!entity.update_background_blur_preview(0, 8, Duration::from_secs(1), cx,));
+
+            assert!(entity.update_background_blur_preview(0, 12, Duration::from_secs(1), cx,));
+            let second_generation = entity.background_blur_commit_generation;
+            assert_ne!(first_generation, second_generation);
+            entity.finish_background_blur_commit(first_generation, cx);
+            assert_eq!(entity.background_blur_preview(), Some(12));
+
+            entity.background_blur_commit_task = None;
+            entity.finish_background_blur_commit(second_generation, cx);
+            assert_eq!(entity.background_blur_preview(), None);
         });
     }
 }
