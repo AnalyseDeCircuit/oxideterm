@@ -478,7 +478,11 @@ impl WorkspaceApp {
                     .managed_ssh_keys()
                     .len()
                     .hash(&mut hasher);
-                self.settings_managed_key_status.is_some().hash(&mut hasher);
+                self.settings_workspace
+                    .read(cx)
+                    .managed_key_status()
+                    .is_some()
+                    .hash(&mut hasher);
                 if settings_connection_importers_list_item(index) {
                     // Importer state only changes the final importer card. Invalidating
                     // earlier measured rows makes GPUI move the current scroll anchor.

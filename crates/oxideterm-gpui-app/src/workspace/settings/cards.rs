@@ -720,13 +720,17 @@ impl WorkspaceApp {
         event: &KeyDownEvent,
         cx: &mut Context<Self>,
     ) -> bool {
-        if let Some(input) = self.settings_workspace.read(cx).portable_focused_input() {
+        if let Some(input) = self
+            .settings_workspace
+            .read(cx)
+            .settings_entity_focused_input()
+        {
             let key = event.keystroke.key.as_str();
             let modifiers = event.keystroke.modifiers;
             match key {
                 "escape" | "enter" => {
                     self.settings_workspace.update(cx, |settings, cx| {
-                        settings.blur_portable_password_input(cx);
+                        settings.blur_settings_entity_input(cx);
                     });
                     self.clear_ime_selection();
                     self.new_connection_caret_visible = true;
@@ -734,7 +738,7 @@ impl WorkspaceApp {
                 }
                 "backspace" | "delete" if !modifiers.platform && !modifiers.control => {
                     self.settings_workspace.update(cx, |settings, cx| {
-                        settings.pop_portable_password_input(input, cx);
+                        settings.pop_settings_entity_input(input, cx);
                     });
                     return true;
                 }
@@ -818,7 +822,7 @@ impl WorkspaceApp {
         let mut changed = false;
         if self
             .settings_workspace
-            .update(cx, |settings, cx| settings.blur_portable_password_input(cx))
+            .update(cx, |settings, cx| settings.blur_settings_entity_input(cx))
         {
             self.ime_marked_text = None;
             self.clear_ime_selection();
@@ -1047,17 +1051,17 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) {
         self.close_settings_select();
-        let portable_input = self
+        let entity_owned_input = self
             .settings_workspace
             .read(cx)
-            .portable_input_value(input)
+            .settings_entity_input_value(input)
             .is_some();
-        if portable_input {
+        if entity_owned_input {
             if let Some(previous_input) = self.focused_settings_input.take() {
                 self.clear_settings_input_draft(previous_input);
             }
             self.settings_workspace.update(cx, |settings, cx| {
-                settings.focus_portable_password_input(input, cx);
+                settings.focus_settings_entity_input(input, cx);
             });
             self.clear_ime_selection();
             self.new_connection_caret_visible = true;
@@ -1065,7 +1069,7 @@ impl WorkspaceApp {
             return;
         }
         self.settings_workspace.update(cx, |settings, cx| {
-            settings.blur_portable_password_input(cx);
+            settings.blur_settings_entity_input(cx);
         });
         if let Some(previous_input) = self
             .focused_settings_input
@@ -1151,19 +1155,13 @@ impl WorkspaceApp {
             SettingsInput::AppLockCurrentPassword
             | SettingsInput::AppLockNewPassword
             | SettingsInput::AppLockConfirmPassword => self.app_lock_input_value(input).to_string(),
-            SettingsInput::ManagedKeyFilePath => self.settings_managed_key_file_path.clone(),
-            SettingsInput::ManagedKeyFileName => self.settings_managed_key_file_name.clone(),
-            SettingsInput::ManagedKeyFilePassphrase => {
-                self.settings_managed_key_file_passphrase.clone()
-            }
-            SettingsInput::ManagedKeyPasteName => self.settings_managed_key_paste_name.clone(),
-            SettingsInput::ManagedKeyPastePrivateKey => {
-                self.settings_managed_key_paste_private_key.clone()
-            }
-            SettingsInput::ManagedKeyPastePassphrase => {
-                self.settings_managed_key_paste_passphrase.clone()
-            }
-            SettingsInput::ManagedKeyRenameName => self.settings_managed_key_rename_name.clone(),
+            SettingsInput::ManagedKeyFilePath
+            | SettingsInput::ManagedKeyFileName
+            | SettingsInput::ManagedKeyFilePassphrase
+            | SettingsInput::ManagedKeyPasteName
+            | SettingsInput::ManagedKeyPastePrivateKey
+            | SettingsInput::ManagedKeyPastePassphrase
+            | SettingsInput::ManagedKeyRenameName => String::new(),
             SettingsInput::ConnectionImportTargetGroup => {
                 self.settings_connection_import_target_group.clone()
             }
@@ -1280,37 +1278,13 @@ impl WorkspaceApp {
                 let _ = self.set_app_lock_input_value(input, &draft);
                 cx.notify();
             }
-            SettingsInput::ManagedKeyFilePath => {
-                self.settings_managed_key_file_path = self.settings_input_draft.clone();
-                cx.notify();
-            }
-            SettingsInput::ManagedKeyFileName => {
-                self.settings_managed_key_file_name = self.settings_input_draft.clone();
-                cx.notify();
-            }
-            SettingsInput::ManagedKeyFilePassphrase => {
-                zeroize::Zeroize::zeroize(&mut self.settings_managed_key_file_passphrase);
-                self.settings_managed_key_file_passphrase = self.settings_input_draft.clone();
-                cx.notify();
-            }
-            SettingsInput::ManagedKeyPasteName => {
-                self.settings_managed_key_paste_name = self.settings_input_draft.clone();
-                cx.notify();
-            }
-            SettingsInput::ManagedKeyPastePrivateKey => {
-                zeroize::Zeroize::zeroize(&mut self.settings_managed_key_paste_private_key);
-                self.settings_managed_key_paste_private_key = self.settings_input_draft.clone();
-                cx.notify();
-            }
-            SettingsInput::ManagedKeyPastePassphrase => {
-                zeroize::Zeroize::zeroize(&mut self.settings_managed_key_paste_passphrase);
-                self.settings_managed_key_paste_passphrase = self.settings_input_draft.clone();
-                cx.notify();
-            }
-            SettingsInput::ManagedKeyRenameName => {
-                self.settings_managed_key_rename_name = self.settings_input_draft.clone();
-                cx.notify();
-            }
+            SettingsInput::ManagedKeyFilePath
+            | SettingsInput::ManagedKeyFileName
+            | SettingsInput::ManagedKeyFilePassphrase
+            | SettingsInput::ManagedKeyPasteName
+            | SettingsInput::ManagedKeyPastePrivateKey
+            | SettingsInput::ManagedKeyPastePassphrase
+            | SettingsInput::ManagedKeyRenameName => {}
             SettingsInput::ConnectionImportTargetGroup => {
                 self.settings_connection_import_target_group = self.settings_input_draft.clone();
                 cx.notify();

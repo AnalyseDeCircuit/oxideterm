@@ -195,7 +195,7 @@ impl WorkspaceApp {
     pub(in crate::workspace) fn settings_text_input_control(
         &self,
         input: SettingsInput,
-        value: String,
+        value: impl AsRef<str>,
         placeholder: String,
         width: f32,
         cx: &mut Context<Self>,
@@ -214,7 +214,7 @@ impl WorkspaceApp {
     pub(in crate::workspace) fn settings_text_input_control_fill(
         &self,
         input: SettingsInput,
-        value: String,
+        value: impl AsRef<str>,
         placeholder: String,
         cx: &mut Context<Self>,
     ) -> AnyElement {
@@ -234,7 +234,7 @@ impl WorkspaceApp {
     pub(in crate::workspace) fn settings_secret_text_input_control(
         &self,
         input: SettingsInput,
-        value: String,
+        value: impl AsRef<str>,
         placeholder: String,
         width: f32,
         cx: &mut Context<Self>,
@@ -253,7 +253,7 @@ impl WorkspaceApp {
     pub(in crate::workspace) fn settings_secret_text_input_control_fill(
         &self,
         input: SettingsInput,
-        value: String,
+        value: impl AsRef<str>,
         placeholder: String,
         cx: &mut Context<Self>,
     ) -> AnyElement {
@@ -272,7 +272,7 @@ impl WorkspaceApp {
     pub(in crate::workspace) fn settings_text_input_control_with_align(
         &self,
         input: SettingsInput,
-        value: String,
+        value: impl AsRef<str>,
         placeholder: String,
         width: f32,
         align: TextInputContentAlign,
@@ -292,18 +292,26 @@ impl WorkspaceApp {
     pub(in crate::workspace) fn settings_text_input_control_inner(
         &self,
         input: SettingsInput,
-        value: String,
+        value: impl AsRef<str>,
         placeholder: String,
         width: Option<f32>,
         align: TextInputContentAlign,
         secret: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let focused = self.focused_settings_input == Some(input);
-        let display_value = if focused {
+        let settings_workspace = self.settings_workspace.read(cx);
+        let entity_owned = settings_workspace
+            .settings_entity_input_value(input)
+            .is_some();
+        let focused = if entity_owned {
+            settings_workspace.settings_entity_focused_input() == Some(input)
+        } else {
+            self.focused_settings_input == Some(input)
+        };
+        let display_value = if focused && !entity_owned {
             self.settings_input_draft.as_str()
         } else {
-            value.as_str()
+            value.as_ref()
         };
         let target = WorkspaceImeTarget::Settings(input);
         let workspace = cx.entity();

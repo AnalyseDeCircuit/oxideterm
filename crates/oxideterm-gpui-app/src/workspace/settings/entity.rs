@@ -5,7 +5,7 @@ use oxideterm_gpui_settings_view::SettingsInput;
 use zeroize::Zeroizing;
 
 use super::update::NativeUpdateRuntime;
-use super::{PortableSettingsAction, PortableSettingsDialog};
+use super::{PortableSettingsAction, PortableSettingsDialog, SettingsManagedKeyDialog};
 
 /// Non-secret result produced by the portable runtime status worker.
 pub(in crate::workspace) struct PortableStatusRefresh {
@@ -33,6 +33,31 @@ pub(in crate::workspace) struct PortablePasswordDialogSnapshot {
     pub(in crate::workspace) presence: oxideterm_gpui_ui::motion::ExitPresence,
 }
 
+/// Copies only the active dialog payload; secret frame copies remain zeroizing.
+pub(in crate::workspace) enum ManagedKeyDialogSnapshot {
+    ImportFile {
+        file_path: String,
+        file_name: String,
+        file_passphrase: Zeroizing<String>,
+        presence: oxideterm_gpui_ui::motion::ExitPresence,
+    },
+    Paste {
+        name: String,
+        private_key: Zeroizing<String>,
+        passphrase: Zeroizing<String>,
+        presence: oxideterm_gpui_ui::motion::ExitPresence,
+    },
+    Rename {
+        name: String,
+        presence: oxideterm_gpui_ui::motion::ExitPresence,
+    },
+    Delete {
+        key: oxideterm_connections::ManagedSshKeyInfo,
+        usage: oxideterm_connections::ManagedSshKeyUsage,
+        presence: oxideterm_gpui_ui::motion::ExitPresence,
+    },
+}
+
 /// Owns settings work that must complete independently from root rendering.
 pub(in crate::workspace) struct SettingsWorkspaceEntity {
     portable_status: Option<oxideterm_portable_runtime::PortableStatusSnapshot>,
@@ -46,10 +71,21 @@ pub(in crate::workspace) struct SettingsWorkspaceEntity {
     pub(super) portable_current_password: Zeroizing<String>,
     pub(super) portable_new_password: Zeroizing<String>,
     pub(super) portable_confirm_password: Zeroizing<String>,
-    pub(super) portable_focused_input: Option<SettingsInput>,
+    pub(super) settings_focused_input: Option<SettingsInput>,
     pub(super) portable_dialog_presence: oxideterm_gpui_ui::motion::ExitPresence,
     pub(super) portable_dialog_exit_task: Option<Task<()>>,
     pub(super) portable_action_task: Option<Task<()>>,
+    pub(super) managed_key_dialog: Option<SettingsManagedKeyDialog>,
+    pub(super) managed_key_status: Option<String>,
+    pub(super) managed_key_file_path: String,
+    pub(super) managed_key_file_name: String,
+    pub(super) managed_key_file_passphrase: Zeroizing<String>,
+    pub(super) managed_key_paste_name: String,
+    pub(super) managed_key_paste_private_key: Zeroizing<String>,
+    pub(super) managed_key_paste_passphrase: Zeroizing<String>,
+    pub(super) managed_key_rename_name: String,
+    pub(super) managed_key_dialog_presence: oxideterm_gpui_ui::motion::ExitPresence,
+    pub(super) managed_key_dialog_exit_task: Option<Task<()>>,
     pub(super) native_update: NativeUpdateRuntime,
 }
 
@@ -86,10 +122,21 @@ impl SettingsWorkspaceEntity {
             portable_current_password: Zeroizing::new(String::new()),
             portable_new_password: Zeroizing::new(String::new()),
             portable_confirm_password: Zeroizing::new(String::new()),
-            portable_focused_input: None,
+            settings_focused_input: None,
             portable_dialog_presence: oxideterm_gpui_ui::motion::ExitPresence::visible(),
             portable_dialog_exit_task: None,
             portable_action_task: None,
+            managed_key_dialog: None,
+            managed_key_status: None,
+            managed_key_file_path: String::new(),
+            managed_key_file_name: String::new(),
+            managed_key_file_passphrase: Zeroizing::new(String::new()),
+            managed_key_paste_name: String::new(),
+            managed_key_paste_private_key: Zeroizing::new(String::new()),
+            managed_key_paste_passphrase: Zeroizing::new(String::new()),
+            managed_key_rename_name: String::new(),
+            managed_key_dialog_presence: oxideterm_gpui_ui::motion::ExitPresence::visible(),
+            managed_key_dialog_exit_task: None,
             native_update: NativeUpdateRuntime::new(cx),
         }
     }
@@ -174,6 +221,150 @@ impl SettingsWorkspaceEntity {
         self.portable_status = None;
         self.portable_status_error = None;
         cx.notify();
+    }
+
+    pub(in crate::workspace) fn settings_entity_focused_input(&self) -> Option<SettingsInput> {
+        self.settings_focused_input
+    }
+
+    pub(in crate::workspace) fn settings_entity_input_value(
+        &self,
+        input: SettingsInput,
+    ) -> Option<&str> {
+        match input {
+            SettingsInput::PortableCurrentPassword => Some(&self.portable_current_password),
+            SettingsInput::PortableNewPassword => Some(&self.portable_new_password),
+            SettingsInput::PortableConfirmPassword => Some(&self.portable_confirm_password),
+            SettingsInput::ManagedKeyFilePath => Some(&self.managed_key_file_path),
+            SettingsInput::ManagedKeyFileName => Some(&self.managed_key_file_name),
+            SettingsInput::ManagedKeyFilePassphrase => Some(&self.managed_key_file_passphrase),
+            SettingsInput::ManagedKeyPasteName => Some(&self.managed_key_paste_name),
+            SettingsInput::ManagedKeyPastePrivateKey => Some(&self.managed_key_paste_private_key),
+            SettingsInput::ManagedKeyPastePassphrase => Some(&self.managed_key_paste_passphrase),
+            SettingsInput::ManagedKeyRenameName => Some(&self.managed_key_rename_name),
+            _ => None,
+        }
+    }
+
+    pub(in crate::workspace) fn focus_settings_entity_input(
+        &mut self,
+        input: SettingsInput,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let portable_open = self.portable_dialog == Some(PortableSettingsDialog::ChangePassword);
+        let can_focus = match input {
+            SettingsInput::PortableCurrentPassword
+            | SettingsInput::PortableNewPassword
+            | SettingsInput::PortableConfirmPassword => portable_open,
+            SettingsInput::ManagedKeyFilePath
+            | SettingsInput::ManagedKeyFileName
+            | SettingsInput::ManagedKeyFilePassphrase => matches!(
+                self.managed_key_dialog,
+                Some(SettingsManagedKeyDialog::ImportFile)
+            ),
+            SettingsInput::ManagedKeyPasteName
+            | SettingsInput::ManagedKeyPastePrivateKey
+            | SettingsInput::ManagedKeyPastePassphrase => {
+                matches!(
+                    self.managed_key_dialog,
+                    Some(SettingsManagedKeyDialog::Paste)
+                )
+            }
+            SettingsInput::ManagedKeyRenameName => matches!(
+                self.managed_key_dialog,
+                Some(SettingsManagedKeyDialog::Rename { .. })
+            ),
+            _ => false,
+        };
+        if !can_focus {
+            return false;
+        }
+        self.settings_focused_input = Some(input);
+        cx.notify();
+        true
+    }
+
+    pub(in crate::workspace) fn blur_settings_entity_input(
+        &mut self,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let changed = self.settings_focused_input.take().is_some();
+        if changed {
+            cx.notify();
+        }
+        changed
+    }
+
+    pub(in crate::workspace) fn replace_settings_entity_input(
+        &mut self,
+        input: SettingsInput,
+        replacement_range: Option<std::ops::Range<usize>>,
+        text: &str,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if self.settings_focused_input != Some(input) {
+            return false;
+        }
+        let Some(value) = self.settings_entity_input_mut(input) else {
+            return false;
+        };
+        oxideterm_editor_core::utf16::replace_utf16(value, replacement_range, text);
+        self.clear_settings_entity_input_error(input);
+        cx.notify();
+        true
+    }
+
+    pub(in crate::workspace) fn pop_settings_entity_input(
+        &mut self,
+        input: SettingsInput,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if self.settings_focused_input != Some(input) {
+            return false;
+        }
+        let Some(value) = self.settings_entity_input_mut(input) else {
+            return false;
+        };
+        value.pop();
+        self.clear_settings_entity_input_error(input);
+        cx.notify();
+        true
+    }
+
+    fn clear_settings_entity_input_error(&mut self, input: SettingsInput) {
+        match input {
+            SettingsInput::PortableCurrentPassword
+            | SettingsInput::PortableNewPassword
+            | SettingsInput::PortableConfirmPassword => self.portable_action_error = None,
+            SettingsInput::ManagedKeyFilePath
+            | SettingsInput::ManagedKeyFileName
+            | SettingsInput::ManagedKeyFilePassphrase
+            | SettingsInput::ManagedKeyPasteName
+            | SettingsInput::ManagedKeyPastePrivateKey
+            | SettingsInput::ManagedKeyPastePassphrase
+            | SettingsInput::ManagedKeyRenameName => self.managed_key_status = None,
+            _ => {}
+        }
+    }
+
+    fn settings_entity_input_mut(&mut self, input: SettingsInput) -> Option<&mut String> {
+        match input {
+            SettingsInput::PortableCurrentPassword => Some(&mut self.portable_current_password),
+            SettingsInput::PortableNewPassword => Some(&mut self.portable_new_password),
+            SettingsInput::PortableConfirmPassword => Some(&mut self.portable_confirm_password),
+            SettingsInput::ManagedKeyFilePath => Some(&mut self.managed_key_file_path),
+            SettingsInput::ManagedKeyFileName => Some(&mut self.managed_key_file_name),
+            SettingsInput::ManagedKeyFilePassphrase => Some(&mut self.managed_key_file_passphrase),
+            SettingsInput::ManagedKeyPasteName => Some(&mut self.managed_key_paste_name),
+            SettingsInput::ManagedKeyPastePrivateKey => {
+                Some(&mut self.managed_key_paste_private_key)
+            }
+            SettingsInput::ManagedKeyPastePassphrase => {
+                Some(&mut self.managed_key_paste_passphrase)
+            }
+            SettingsInput::ManagedKeyRenameName => Some(&mut self.managed_key_rename_name),
+            _ => None,
+        }
     }
 }
 

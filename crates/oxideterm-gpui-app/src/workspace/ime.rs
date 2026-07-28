@@ -642,7 +642,11 @@ impl WorkspaceApp {
             return Some(WorkspaceImeTarget::SessionManager(input));
         }
 
-        if let Some(input) = self.settings_workspace.read(cx).portable_focused_input() {
+        if let Some(input) = self
+            .settings_workspace
+            .read(cx)
+            .settings_entity_focused_input()
+        {
             return Some(WorkspaceImeTarget::Settings(input));
         }
 
@@ -1528,10 +1532,15 @@ impl WorkspaceApp {
                 .map(str::to_string),
             WorkspaceImeTarget::QuickCommand(input) => self.quick_command_input_value(input, cx),
             WorkspaceImeTarget::Settings(input) => {
-                if self.settings_workspace.read(cx).portable_focused_input() == Some(input) {
+                if self
+                    .settings_workspace
+                    .read(cx)
+                    .settings_entity_focused_input()
+                    == Some(input)
+                {
                     self.settings_workspace
                         .read(cx)
-                        .portable_input_value(input)
+                        .settings_entity_input_value(input)
                         .map(str::to_owned)
                 } else if self.focused_settings_input == Some(input) {
                     Some(self.settings_input_draft.clone())
@@ -2382,16 +2391,14 @@ impl WorkspaceApp {
                 }
             }
             WorkspaceImeTarget::Settings(input) => {
-                let portable_input_focused =
-                    self.settings_workspace.read(cx).portable_focused_input() == Some(input);
-                if portable_input_focused {
+                let entity_input_focused = self
+                    .settings_workspace
+                    .read(cx)
+                    .settings_entity_focused_input()
+                    == Some(input);
+                if entity_input_focused {
                     self.settings_workspace.update(cx, |settings, cx| {
-                        settings.replace_portable_password_input(
-                            input,
-                            replacement_range,
-                            text,
-                            cx,
-                        );
+                        settings.replace_settings_entity_input(input, replacement_range, text, cx);
                     });
                 } else if self.focused_settings_input == Some(input) {
                     replace_utf16(&mut self.settings_input_draft, replacement_range, text);

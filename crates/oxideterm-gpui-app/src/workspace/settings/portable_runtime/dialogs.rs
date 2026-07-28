@@ -168,10 +168,13 @@ impl WorkspaceApp {
         let portable_owned = self
             .settings_workspace
             .read(cx)
-            .portable_input_value(input)
+            .settings_entity_input_value(input)
             .is_some();
         let focused = if portable_owned {
-            self.settings_workspace.read(cx).portable_focused_input() == Some(input)
+            self.settings_workspace
+                .read(cx)
+                .settings_entity_focused_input()
+                == Some(input)
         } else {
             self.focused_settings_input == Some(input)
         };

@@ -10,6 +10,288 @@ pub(in crate::workspace) const SSH_KEY_HEADER_TEXT_BASIS: f32 = 320.0; // Let lo
 pub(in crate::workspace) const SSH_CONFIG_IMPORT_DIALOG_WIDTH: f32 = 720.0;
 pub(in crate::workspace) const SSH_CONFIG_IMPORT_DIALOG_HEIGHT: f32 = 560.0;
 
+struct ManagedKeyFileImportRequest {
+    path: String,
+    name: Option<String>,
+    passphrase: Option<SecretString>,
+}
+
+struct ManagedKeyPasteImportRequest {
+    // The private key moves from the Entity into the store boundary exactly once.
+    private_key: SecretString,
+    name: Option<String>,
+    passphrase: Option<SecretString>,
+}
+
+impl SettingsWorkspaceEntity {
+    pub(in crate::workspace) fn managed_key_status(&self) -> Option<&str> {
+        self.managed_key_status.as_deref()
+    }
+
+    pub(in crate::workspace) fn clear_managed_key_status(&mut self, cx: &mut Context<Self>) {
+        if self.managed_key_status.take().is_some() {
+            cx.notify();
+        }
+    }
+
+    pub(in crate::workspace) fn managed_key_dialog_snapshot(
+        &self,
+    ) -> Option<ManagedKeyDialogSnapshot> {
+        let presence = self.managed_key_dialog_presence;
+        match self.managed_key_dialog.as_ref()? {
+            SettingsManagedKeyDialog::ImportFile => Some(ManagedKeyDialogSnapshot::ImportFile {
+                file_path: self.managed_key_file_path.clone(),
+                file_name: self.managed_key_file_name.clone(),
+                file_passphrase: self.managed_key_file_passphrase.clone(),
+                presence,
+            }),
+            SettingsManagedKeyDialog::Paste => Some(ManagedKeyDialogSnapshot::Paste {
+                name: self.managed_key_paste_name.clone(),
+                private_key: self.managed_key_paste_private_key.clone(),
+                passphrase: self.managed_key_paste_passphrase.clone(),
+                presence,
+            }),
+            SettingsManagedKeyDialog::Rename { .. } => Some(ManagedKeyDialogSnapshot::Rename {
+                name: self.managed_key_rename_name.clone(),
+                presence,
+            }),
+            SettingsManagedKeyDialog::Delete { key, usage } => {
+                Some(ManagedKeyDialogSnapshot::Delete {
+                    key: key.clone(),
+                    usage: usage.clone(),
+                    presence,
+                })
+            }
+        }
+    }
+
+    pub(in crate::workspace) fn open_managed_key_import_file_dialog(
+        &mut self,
+        cx: &mut Context<Self>,
+    ) {
+        self.managed_key_dialog_exit_task = None;
+        self.clear_managed_key_dialog_drafts();
+        self.managed_key_status = None;
+        self.managed_key_dialog_presence.reopen();
+        self.managed_key_dialog = Some(SettingsManagedKeyDialog::ImportFile);
+        cx.notify();
+    }
+
+    pub(in crate::workspace) fn open_managed_key_paste_dialog(&mut self, cx: &mut Context<Self>) {
+        self.managed_key_dialog_exit_task = None;
+        self.clear_managed_key_dialog_drafts();
+        self.managed_key_status = None;
+        self.managed_key_dialog_presence.reopen();
+        self.managed_key_dialog = Some(SettingsManagedKeyDialog::Paste);
+        cx.notify();
+    }
+
+    pub(in crate::workspace) fn open_managed_key_rename_dialog(
+        &mut self,
+        key_id: String,
+        key_name: String,
+        cx: &mut Context<Self>,
+    ) {
+        self.managed_key_dialog_exit_task = None;
+        self.clear_managed_key_dialog_drafts();
+        self.managed_key_rename_name = key_name;
+        self.managed_key_dialog_presence.reopen();
+        self.managed_key_dialog = Some(SettingsManagedKeyDialog::Rename { key_id });
+        cx.notify();
+    }
+
+    pub(in crate::workspace) fn open_managed_key_delete_dialog(
+        &mut self,
+        key: ManagedSshKeyInfo,
+        usage: ManagedSshKeyUsage,
+        cx: &mut Context<Self>,
+    ) {
+        self.managed_key_dialog_exit_task = None;
+        self.clear_managed_key_dialog_drafts();
+        self.managed_key_dialog_presence.reopen();
+        self.managed_key_dialog = Some(SettingsManagedKeyDialog::Delete { key, usage });
+        cx.notify();
+    }
+
+    pub(in crate::workspace) fn close_managed_key_dialog(
+        &mut self,
+        delay: std::time::Duration,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(generation) = self.managed_key_dialog_presence.begin_exit() else {
+            return;
+        };
+        self.managed_key_dialog_exit_task = None;
+        if delay.is_zero() {
+            self.finish_managed_key_dialog_exit(generation, cx);
+            return;
+        }
+        self.managed_key_dialog_exit_task = Some(cx.spawn(async move |settings, cx| {
+            gpui::Timer::after(delay).await;
+            let _ = settings.update(cx, |settings, cx| {
+                settings.finish_managed_key_dialog_exit(generation, cx);
+            });
+        }));
+        cx.notify();
+    }
+
+    fn finish_managed_key_dialog_exit(&mut self, generation: u64, cx: &mut Context<Self>) {
+        self.managed_key_dialog_exit_task = None;
+        if self.managed_key_dialog_presence.finish_exit(generation) {
+            self.managed_key_dialog = None;
+            self.clear_managed_key_dialog_drafts();
+            self.managed_key_dialog_presence.reopen();
+            cx.notify();
+        }
+    }
+
+    fn clear_managed_key_dialog_drafts(&mut self) {
+        self.managed_key_file_path.clear();
+        self.managed_key_file_name.clear();
+        zeroize::Zeroize::zeroize(&mut *self.managed_key_file_passphrase);
+        self.managed_key_paste_name.clear();
+        zeroize::Zeroize::zeroize(&mut *self.managed_key_paste_private_key);
+        zeroize::Zeroize::zeroize(&mut *self.managed_key_paste_passphrase);
+        self.managed_key_rename_name.clear();
+        if self
+            .settings_focused_input
+            .is_some_and(is_managed_key_input)
+        {
+            self.settings_focused_input = None;
+        }
+    }
+
+    pub(in crate::workspace) fn set_managed_key_import_file(
+        &mut self,
+        path: String,
+        default_name: String,
+        cx: &mut Context<Self>,
+    ) {
+        if !matches!(
+            self.managed_key_dialog,
+            Some(SettingsManagedKeyDialog::ImportFile)
+        ) {
+            return;
+        }
+        self.managed_key_file_path = path;
+        if self.managed_key_file_name.trim().is_empty() {
+            self.managed_key_file_name = default_name;
+        }
+        self.managed_key_status = None;
+        cx.notify();
+    }
+
+    fn take_managed_key_file_import_request(&mut self) -> Option<ManagedKeyFileImportRequest> {
+        if !matches!(
+            self.managed_key_dialog,
+            Some(SettingsManagedKeyDialog::ImportFile)
+        ) {
+            return None;
+        }
+        let path = self.managed_key_file_path.trim();
+        if path.is_empty() {
+            return None;
+        }
+        let request = ManagedKeyFileImportRequest {
+            path: path.to_string(),
+            name: optional_trimmed_string(&self.managed_key_file_name),
+            passphrase: take_optional_managed_key_secret(&mut self.managed_key_file_passphrase),
+        };
+        self.settings_focused_input = None;
+        Some(request)
+    }
+
+    fn take_managed_key_paste_import_request(&mut self) -> Option<ManagedKeyPasteImportRequest> {
+        if !matches!(
+            self.managed_key_dialog,
+            Some(SettingsManagedKeyDialog::Paste)
+        ) || self.managed_key_paste_private_key.trim().is_empty()
+        {
+            return None;
+        }
+        let private_key = std::mem::replace(
+            &mut self.managed_key_paste_private_key,
+            zeroize::Zeroizing::new(String::new()),
+        );
+        let request = ManagedKeyPasteImportRequest {
+            private_key: SecretString::from(private_key),
+            name: optional_trimmed_string(&self.managed_key_paste_name),
+            passphrase: take_optional_managed_key_secret(&mut self.managed_key_paste_passphrase),
+        };
+        self.settings_focused_input = None;
+        Some(request)
+    }
+
+    fn take_managed_key_rename_request(&mut self) -> Option<(String, String)> {
+        let SettingsManagedKeyDialog::Rename { key_id } = self.managed_key_dialog.as_ref()? else {
+            return None;
+        };
+        let name = self.managed_key_rename_name.trim();
+        if name.is_empty() {
+            return None;
+        }
+        Some((key_id.clone(), name.to_string()))
+    }
+
+    fn managed_key_delete_id(&self) -> Option<String> {
+        let SettingsManagedKeyDialog::Delete { key, .. } = self.managed_key_dialog.as_ref()? else {
+            return None;
+        };
+        Some(key.id.clone())
+    }
+
+    pub(in crate::workspace) fn finish_managed_key_action(
+        &mut self,
+        status: String,
+        success: bool,
+        cx: &mut Context<Self>,
+    ) {
+        self.managed_key_status = Some(status);
+        if success {
+            self.managed_key_dialog = None;
+            self.managed_key_dialog_exit_task = None;
+            self.clear_managed_key_dialog_drafts();
+            self.managed_key_dialog_presence.reopen();
+        }
+        cx.notify();
+    }
+}
+
+fn is_managed_key_input(input: SettingsInput) -> bool {
+    matches!(
+        input,
+        SettingsInput::ManagedKeyFilePath
+            | SettingsInput::ManagedKeyFileName
+            | SettingsInput::ManagedKeyFilePassphrase
+            | SettingsInput::ManagedKeyPasteName
+            | SettingsInput::ManagedKeyPastePrivateKey
+            | SettingsInput::ManagedKeyPastePassphrase
+            | SettingsInput::ManagedKeyRenameName
+    )
+}
+
+fn optional_trimmed_string(value: &str) -> Option<String> {
+    let trimmed = value.trim();
+    (!trimmed.is_empty()).then(|| trimmed.to_string())
+}
+
+fn take_optional_managed_key_secret(
+    value: &mut zeroize::Zeroizing<String>,
+) -> Option<SecretString> {
+    if value.trim().is_empty() {
+        zeroize::Zeroize::zeroize(&mut **value);
+        return None;
+    }
+    let owned = std::mem::replace(value, zeroize::Zeroizing::new(String::new()));
+    let trimmed = owned.trim();
+    if trimmed.len() == owned.len() {
+        return Some(SecretString::from(owned));
+    }
+    Some(SecretString::from(zeroize::Zeroizing::new(
+        trimmed.to_string(),
+    )))
+}
+
 impl WorkspaceApp {
     pub(in crate::workspace) fn settings_connections_section(
         &self,
@@ -84,7 +366,10 @@ impl WorkspaceApp {
                 Some(self.managed_ssh_key_toolbar(cx)),
             ))
             .when_some(
-                self.settings_managed_key_status.clone(),
+                self.settings_workspace
+                    .read(cx)
+                    .managed_key_status()
+                    .map(str::to_string),
                 |section, status| section.child(self.connection_status_row(status)),
             )
             .child(if self.connection_store.managed_ssh_keys().is_empty() {
@@ -1458,9 +1743,10 @@ impl WorkspaceApp {
                 ButtonVariant::Ghost,
                 cx,
                 |this, _event, _window, cx| {
-                    this.settings_managed_key_status = None;
+                    this.settings_workspace.update(cx, |settings, cx| {
+                        settings.clear_managed_key_status(cx);
+                    });
                     cx.stop_propagation();
-                    cx.notify();
                 },
             ))
             .into_any_element()
@@ -1678,27 +1964,55 @@ impl WorkspaceApp {
         &self,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
-        match self.settings_managed_key_dialog.clone()? {
-            SettingsManagedKeyDialog::ImportFile => {
-                Some(self.render_settings_managed_key_import_file_dialog(cx))
+        match self
+            .settings_workspace
+            .read(cx)
+            .managed_key_dialog_snapshot()?
+        {
+            ManagedKeyDialogSnapshot::ImportFile {
+                file_path,
+                file_name,
+                file_passphrase,
+                presence,
+            } => Some(self.render_settings_managed_key_import_file_dialog(
+                file_path,
+                file_name,
+                file_passphrase,
+                presence,
+                cx,
+            )),
+            ManagedKeyDialogSnapshot::Paste {
+                name,
+                private_key,
+                passphrase,
+                presence,
+            } => Some(self.render_settings_managed_key_paste_dialog(
+                name,
+                private_key,
+                passphrase,
+                presence,
+                cx,
+            )),
+            ManagedKeyDialogSnapshot::Rename { name, presence } => {
+                Some(self.render_settings_managed_key_rename_dialog(name, presence, cx))
             }
-            SettingsManagedKeyDialog::Paste => {
-                Some(self.render_settings_managed_key_paste_dialog(cx))
-            }
-            SettingsManagedKeyDialog::Rename { key_id } => {
-                Some(self.render_settings_managed_key_rename_dialog(key_id, cx))
-            }
-            SettingsManagedKeyDialog::Delete { key, usage } => {
-                Some(self.render_settings_managed_key_delete_dialog(key, usage, cx))
-            }
+            ManagedKeyDialogSnapshot::Delete {
+                key,
+                usage,
+                presence,
+            } => Some(self.render_settings_managed_key_delete_dialog(key, usage, presence, cx)),
         }
     }
 
     pub(in crate::workspace) fn render_settings_managed_key_import_file_dialog(
         &self,
+        file_path: String,
+        file_name: String,
+        file_passphrase: zeroize::Zeroizing<String>,
+        presence: oxideterm_gpui_ui::motion::ExitPresence,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let can_import = !self.settings_managed_key_file_path.trim().is_empty();
+        let can_import = !file_path.trim().is_empty();
         self.settings_managed_key_dialog_frame(
             "modals.managed_key.import_file.title",
             "modals.managed_key.import_file.description",
@@ -1706,7 +2020,7 @@ impl WorkspaceApp {
                 self.settings_managed_key_input_field(
                     "modals.managed_key.import_file.path",
                     SettingsInput::ManagedKeyFilePath,
-                    self.settings_managed_key_file_path.clone(),
+                    file_path,
                     "~/.ssh/id_ed25519".to_string(),
                     420.0,
                     cx,
@@ -1727,7 +2041,7 @@ impl WorkspaceApp {
                 self.settings_managed_key_input_field(
                     "modals.managed_key.display_name",
                     SettingsInput::ManagedKeyFileName,
-                    self.settings_managed_key_file_name.clone(),
+                    file_name,
                     "Managed SSH Key".to_string(),
                     420.0,
                     cx,
@@ -1735,7 +2049,7 @@ impl WorkspaceApp {
                 self.settings_managed_key_secret_input_field(
                     "modals.managed_key.passphrase",
                     SettingsInput::ManagedKeyFilePassphrase,
-                    self.settings_managed_key_file_passphrase.clone(),
+                    file_passphrase,
                     self.i18n.t("modals.managed_key.passphrase_placeholder"),
                     420.0,
                     cx,
@@ -1747,18 +2061,20 @@ impl WorkspaceApp {
             |this, _event, _window, cx| {
                 this.import_managed_key_from_file(cx);
             },
+            presence,
             cx,
         )
     }
 
     pub(in crate::workspace) fn render_settings_managed_key_paste_dialog(
         &self,
+        name: String,
+        private_key: zeroize::Zeroizing<String>,
+        passphrase: zeroize::Zeroizing<String>,
+        presence: oxideterm_gpui_ui::motion::ExitPresence,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let can_import = !self
-            .settings_managed_key_paste_private_key
-            .trim()
-            .is_empty();
+        let can_import = !private_key.trim().is_empty();
         self.settings_managed_key_dialog_frame(
             "modals.managed_key.paste.title",
             "modals.managed_key.paste.description",
@@ -1766,16 +2082,16 @@ impl WorkspaceApp {
                 self.settings_managed_key_input_field(
                     "modals.managed_key.display_name",
                     SettingsInput::ManagedKeyPasteName,
-                    self.settings_managed_key_paste_name.clone(),
+                    name,
                     "Managed SSH Key".to_string(),
                     420.0,
                     cx,
                 ),
-                self.settings_managed_key_private_key_textarea(cx),
+                self.settings_managed_key_private_key_textarea(&private_key, cx),
                 self.settings_managed_key_secret_input_field(
                     "modals.managed_key.passphrase",
                     SettingsInput::ManagedKeyPastePassphrase,
-                    self.settings_managed_key_paste_passphrase.clone(),
+                    passphrase,
                     self.i18n.t("modals.managed_key.passphrase_placeholder"),
                     420.0,
                     cx,
@@ -1787,32 +2103,35 @@ impl WorkspaceApp {
             |this, _event, _window, cx| {
                 this.import_managed_key_from_paste(cx);
             },
+            presence,
             cx,
         )
     }
 
     pub(in crate::workspace) fn render_settings_managed_key_rename_dialog(
         &self,
-        key_id: String,
+        name: String,
+        presence: oxideterm_gpui_ui::motion::ExitPresence,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let can_save = !self.settings_managed_key_rename_name.trim().is_empty();
+        let can_save = !name.trim().is_empty();
         self.settings_managed_key_dialog_frame(
             "settings_view.ssh_keys.rename_title",
             "settings_view.ssh_keys.managed_description",
             vec![self.settings_managed_key_input_field(
                 "settings_view.ssh_keys.rename_name",
                 SettingsInput::ManagedKeyRenameName,
-                self.settings_managed_key_rename_name.clone(),
+                name,
                 "Managed SSH Key".to_string(),
                 420.0,
                 cx,
             )],
             self.i18n.t("settings_view.ssh_keys.rename"),
             can_save,
-            move |this, _event, _window, cx| {
-                this.rename_managed_key(key_id.clone(), cx);
+            |this, _event, _window, cx| {
+                this.rename_managed_key(cx);
             },
+            presence,
             cx,
         )
     }
@@ -1821,6 +2140,7 @@ impl WorkspaceApp {
         &self,
         key: ManagedSshKeyInfo,
         usage: ManagedSshKeyUsage,
+        presence: oxideterm_gpui_ui::motion::ExitPresence,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let can_delete = usage.count == 0;
@@ -1855,9 +2175,10 @@ impl WorkspaceApp {
             ],
             self.i18n.t("settings_view.ssh_keys.delete"),
             can_delete,
-            move |this, _event, _window, cx| {
-                this.delete_managed_key(key.id.clone(), cx);
+            |this, _event, _window, cx| {
+                this.delete_managed_key(cx);
             },
+            presence,
             cx,
         )
     }
@@ -1870,6 +2191,7 @@ impl WorkspaceApp {
         confirm_label: String,
         can_confirm: bool,
         confirm: impl Fn(&mut Self, &MouseDownEvent, &mut Window, &mut Context<Self>) + 'static,
+        presence: oxideterm_gpui_ui::motion::ExitPresence,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let backdrop = dismissible_dialog_backdrop().on_mouse_down(
@@ -1931,7 +2253,7 @@ impl WorkspaceApp {
             "managed-key-dialog-form",
             backdrop,
             form,
-            self.managed_key_dialog_presence,
+            presence,
         )
     }
 
@@ -1939,7 +2261,7 @@ impl WorkspaceApp {
         &self,
         label_key: &str,
         input: SettingsInput,
-        value: String,
+        value: impl AsRef<str>,
         placeholder: String,
         width: f32,
         cx: &mut Context<Self>,
@@ -1963,7 +2285,7 @@ impl WorkspaceApp {
         &self,
         label_key: &str,
         input: SettingsInput,
-        value: String,
+        value: impl AsRef<str>,
         placeholder: String,
         width: f32,
         cx: &mut Context<Self>,
@@ -1985,15 +2307,15 @@ impl WorkspaceApp {
 
     pub(in crate::workspace) fn settings_managed_key_private_key_textarea(
         &self,
+        value: &str,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let input = SettingsInput::ManagedKeyPastePrivateKey;
-        let focused = self.focused_settings_input == Some(input);
-        let value = if focused {
-            self.settings_input_draft.clone()
-        } else {
-            self.settings_managed_key_paste_private_key.clone()
-        };
+        let focused = self
+            .settings_workspace
+            .read(cx)
+            .settings_entity_focused_input()
+            == Some(input);
         let target = WorkspaceImeTarget::Settings(input);
         let workspace = cx.entity();
         let theme = self.tokens.ui;
@@ -2050,7 +2372,7 @@ impl WorkspaceApp {
             textarea = self.render_settings_multiline_textarea_lines(
                 textarea,
                 target,
-                &value,
+                value,
                 false,
                 line_height,
                 cx,
@@ -2114,19 +2436,15 @@ impl WorkspaceApp {
         &mut self,
         cx: &mut Context<Self>,
     ) {
-        self.clear_managed_key_dialog_drafts();
-        self.settings_managed_key_status = None;
-        self.managed_key_dialog_presence.reopen();
-        self.settings_managed_key_dialog = Some(SettingsManagedKeyDialog::ImportFile);
-        cx.notify();
+        self.settings_workspace.update(cx, |settings, cx| {
+            settings.open_managed_key_import_file_dialog(cx);
+        });
     }
 
     pub(in crate::workspace) fn open_managed_key_paste_dialog(&mut self, cx: &mut Context<Self>) {
-        self.clear_managed_key_dialog_drafts();
-        self.settings_managed_key_status = None;
-        self.managed_key_dialog_presence.reopen();
-        self.settings_managed_key_dialog = Some(SettingsManagedKeyDialog::Paste);
-        cx.notify();
+        self.settings_workspace.update(cx, |settings, cx| {
+            settings.open_managed_key_paste_dialog(cx);
+        });
     }
 
     pub(in crate::workspace) fn open_managed_key_rename_dialog(
@@ -2135,11 +2453,9 @@ impl WorkspaceApp {
         key_name: String,
         cx: &mut Context<Self>,
     ) {
-        self.clear_managed_key_dialog_drafts();
-        self.settings_managed_key_rename_name = key_name;
-        self.managed_key_dialog_presence.reopen();
-        self.settings_managed_key_dialog = Some(SettingsManagedKeyDialog::Rename { key_id });
-        cx.notify();
+        self.settings_workspace.update(cx, |settings, cx| {
+            settings.open_managed_key_rename_dialog(key_id, key_name, cx);
+        });
     }
 
     pub(in crate::workspace) fn open_managed_key_delete_dialog(
@@ -2149,74 +2465,23 @@ impl WorkspaceApp {
     ) {
         match self.connection_store.managed_ssh_key_usage(&key.id) {
             Ok(usage) => {
-                self.managed_key_dialog_presence.reopen();
-                self.settings_managed_key_dialog =
-                    Some(SettingsManagedKeyDialog::Delete { key, usage });
+                self.settings_workspace.update(cx, |settings, cx| {
+                    settings.open_managed_key_delete_dialog(key, usage, cx);
+                });
             }
-            Err(error) => self.set_managed_key_action_error(error),
+            Err(error) => self.set_managed_key_action_error(error, cx),
         }
-        cx.notify();
     }
 
     pub(in crate::workspace) fn close_managed_key_dialog(&mut self, cx: &mut Context<Self>) {
         self.clear_standard_confirm_focus();
-        let Some(generation) = self.managed_key_dialog_presence.begin_exit() else {
-            return;
-        };
         let delay = oxideterm_gpui_ui::motion::duration(
             &self.tokens,
             oxideterm_gpui_ui::motion::MotionDuration::Overlay,
         );
-        if delay.is_zero() {
-            self.settings_managed_key_dialog = None;
-            self.clear_managed_key_dialog_drafts();
-            self.managed_key_dialog_presence.reopen();
-            cx.notify();
-            return;
-        }
-        cx.spawn(async move |weak, cx| {
-            gpui::Timer::after(delay).await;
-            let _ = weak.update(cx, |this, cx| {
-                if this.managed_key_dialog_presence.finish_exit(generation) {
-                    this.settings_managed_key_dialog = None;
-                    this.clear_managed_key_dialog_drafts();
-                    this.managed_key_dialog_presence.reopen();
-                    cx.notify();
-                }
-            });
-        })
-        .detach();
-        cx.notify();
-    }
-
-    pub(in crate::workspace) fn clear_managed_key_dialog_drafts(&mut self) {
-        self.settings_managed_key_file_path.clear();
-        self.settings_managed_key_file_name.clear();
-        zeroize::Zeroize::zeroize(&mut self.settings_managed_key_file_passphrase);
-        self.settings_managed_key_paste_name.clear();
-        zeroize::Zeroize::zeroize(&mut self.settings_managed_key_paste_private_key);
-        zeroize::Zeroize::zeroize(&mut self.settings_managed_key_paste_passphrase);
-        self.settings_managed_key_rename_name.clear();
-        if matches!(
-            self.focused_settings_input,
-            Some(SettingsInput::ManagedKeyFilePath)
-                | Some(SettingsInput::ManagedKeyFileName)
-                | Some(SettingsInput::ManagedKeyFilePassphrase)
-                | Some(SettingsInput::ManagedKeyPasteName)
-                | Some(SettingsInput::ManagedKeyPastePrivateKey)
-                | Some(SettingsInput::ManagedKeyPastePassphrase)
-                | Some(SettingsInput::ManagedKeyRenameName)
-        ) {
-            if self
-                .focused_settings_input
-                .is_some_and(|input| input.is_secret())
-            {
-                zeroize::Zeroize::zeroize(&mut self.settings_input_draft);
-            } else {
-                self.settings_input_draft.clear();
-            }
-            self.focused_settings_input = None;
-        }
+        self.settings_workspace.update(cx, |settings, cx| {
+            settings.close_managed_key_dialog(delay, cx);
+        });
     }
 
     pub(in crate::workspace) fn pick_managed_key_import_file(&mut self, cx: &mut Context<Self>) {
@@ -2241,158 +2506,113 @@ impl WorkspaceApp {
                 .unwrap_or("Managed SSH Key")
                 .to_string();
             let _ = weak.update(cx, |this, cx| {
-                this.settings_managed_key_file_path = path.display().to_string();
-                if this.settings_managed_key_file_name.trim().is_empty() {
-                    this.settings_managed_key_file_name = file_name;
-                }
-                cx.notify();
+                this.settings_workspace.update(cx, |settings, cx| {
+                    settings.set_managed_key_import_file(path.display().to_string(), file_name, cx);
+                });
             });
         })
         .detach();
     }
 
     pub(in crate::workspace) fn import_managed_key_from_file(&mut self, cx: &mut Context<Self>) {
-        let path = self.current_settings_managed_key_file_path();
-        let name = self.optional_trimmed_string(&self.settings_managed_key_file_name);
-        let passphrase =
-            self.optional_managed_key_secret(&self.settings_managed_key_file_passphrase);
-        match self
-            .connection_store
-            .create_managed_ssh_key_from_file(path.trim(), name, passphrase)
-        {
+        let Some(request) = self.settings_workspace.update(cx, |settings, _cx| {
+            settings.take_managed_key_file_import_request()
+        }) else {
+            return;
+        };
+        match self.connection_store.create_managed_ssh_key_from_file(
+            &request.path,
+            request.name,
+            request.passphrase,
+        ) {
             Ok(info) => {
-                self.settings_managed_key_status = Some(
-                    self.i18n
-                        .t("settings_view.ssh_keys.import_success")
-                        .replace("{{name}}", &info.name),
-                );
-                self.settings_managed_key_dialog = None;
-                self.clear_managed_key_dialog_drafts();
+                let status = self
+                    .i18n
+                    .t("settings_view.ssh_keys.import_success")
+                    .replace("{{name}}", &info.name);
+                self.finish_managed_key_action(status, true, cx);
                 self.queue_cloud_sync_dirty_refresh(cx);
             }
-            Err(error) => self.set_managed_key_action_error(error),
+            Err(error) => self.set_managed_key_action_error(error, cx),
         }
-        cx.notify();
     }
 
     pub(in crate::workspace) fn import_managed_key_from_paste(&mut self, cx: &mut Context<Self>) {
-        let private_key = self.current_settings_managed_key_private_key();
-        let name = self.optional_trimmed_string(&self.settings_managed_key_paste_name);
-        let passphrase =
-            self.optional_managed_key_secret(&self.settings_managed_key_paste_passphrase);
-        // Transfer the pasted private key into SecretString before clearing UI drafts.
-        let private_key_secret = SecretString::from(private_key);
+        let Some(request) = self.settings_workspace.update(cx, |settings, _cx| {
+            settings.take_managed_key_paste_import_request()
+        }) else {
+            return;
+        };
+        // The Entity moves the private key into this one-shot request without a plaintext clone.
         match self.connection_store.create_managed_ssh_key_from_text(
-            private_key_secret,
-            name,
-            passphrase,
+            request.private_key,
+            request.name,
+            request.passphrase,
         ) {
             Ok(info) => {
-                self.settings_managed_key_status = Some(
-                    self.i18n
-                        .t("settings_view.ssh_keys.import_success")
-                        .replace("{{name}}", &info.name),
-                );
-                self.settings_managed_key_dialog = None;
-                self.clear_managed_key_dialog_drafts();
+                let status = self
+                    .i18n
+                    .t("settings_view.ssh_keys.import_success")
+                    .replace("{{name}}", &info.name);
+                self.finish_managed_key_action(status, true, cx);
                 self.queue_cloud_sync_dirty_refresh(cx);
             }
-            Err(error) => self.set_managed_key_action_error(error),
+            Err(error) => self.set_managed_key_action_error(error, cx),
         }
-        cx.notify();
     }
 
-    pub(in crate::workspace) fn rename_managed_key(
-        &mut self,
-        key_id: String,
-        cx: &mut Context<Self>,
-    ) {
-        let name = self.current_settings_managed_key_rename_name();
-        match self
-            .connection_store
-            .rename_managed_ssh_key(&key_id, name.trim().to_string())
-        {
+    pub(in crate::workspace) fn rename_managed_key(&mut self, cx: &mut Context<Self>) {
+        let Some((key_id, name)) = self.settings_workspace.update(cx, |settings, _cx| {
+            settings.take_managed_key_rename_request()
+        }) else {
+            return;
+        };
+        match self.connection_store.rename_managed_ssh_key(&key_id, name) {
             Ok(info) => {
-                self.settings_managed_key_status = Some(
-                    self.i18n
-                        .t("settings_view.ssh_keys.rename_success")
-                        .replace("{{name}}", &info.name),
-                );
-                self.settings_managed_key_dialog = None;
-                self.clear_managed_key_dialog_drafts();
+                let status = self
+                    .i18n
+                    .t("settings_view.ssh_keys.rename_success")
+                    .replace("{{name}}", &info.name);
+                self.finish_managed_key_action(status, true, cx);
                 self.queue_cloud_sync_dirty_refresh(cx);
             }
-            Err(error) => self.set_managed_key_action_error(error),
+            Err(error) => self.set_managed_key_action_error(error, cx),
         }
-        cx.notify();
     }
 
-    pub(in crate::workspace) fn delete_managed_key(
-        &mut self,
-        key_id: String,
-        cx: &mut Context<Self>,
-    ) {
+    pub(in crate::workspace) fn delete_managed_key(&mut self, cx: &mut Context<Self>) {
+        let Some(key_id) = self.settings_workspace.read(cx).managed_key_delete_id() else {
+            return;
+        };
         match self.connection_store.delete_managed_ssh_key(&key_id, false) {
             Ok(result) => {
-                self.settings_managed_key_status = Some(
-                    self.i18n
-                        .t("settings_view.ssh_keys.delete_success")
-                        .replace("{{count}}", &result.deleted.to_string()),
-                );
-                self.settings_managed_key_dialog = None;
+                let status = self
+                    .i18n
+                    .t("settings_view.ssh_keys.delete_success")
+                    .replace("{{count}}", &result.deleted.to_string());
+                self.finish_managed_key_action(status, true, cx);
                 self.queue_cloud_sync_dirty_refresh(cx);
             }
-            Err(error) => self.set_managed_key_action_error(error),
+            Err(error) => self.set_managed_key_action_error(error, cx),
         }
-        cx.notify();
+    }
+
+    fn finish_managed_key_action(&mut self, status: String, success: bool, cx: &mut Context<Self>) {
+        self.settings_workspace.update(cx, |settings, cx| {
+            settings.finish_managed_key_action(status, success, cx);
+        });
     }
 
     pub(in crate::workspace) fn set_managed_key_action_error(
         &mut self,
         error: impl std::fmt::Display,
+        cx: &mut Context<Self>,
     ) {
-        self.settings_managed_key_status = Some(
-            self.i18n
-                .t("settings_view.ssh_keys.action_failed")
-                .replace("{{error}}", &error.to_string()),
-        );
-    }
-
-    pub(in crate::workspace) fn current_settings_managed_key_file_path(&self) -> String {
-        if self.focused_settings_input == Some(SettingsInput::ManagedKeyFilePath) {
-            self.settings_input_draft.clone()
-        } else {
-            self.settings_managed_key_file_path.clone()
-        }
-    }
-
-    pub(in crate::workspace) fn current_settings_managed_key_private_key(&self) -> String {
-        if self.focused_settings_input == Some(SettingsInput::ManagedKeyPastePrivateKey) {
-            self.settings_input_draft.clone()
-        } else {
-            self.settings_managed_key_paste_private_key.clone()
-        }
-    }
-
-    pub(in crate::workspace) fn current_settings_managed_key_rename_name(&self) -> String {
-        if self.focused_settings_input == Some(SettingsInput::ManagedKeyRenameName) {
-            self.settings_input_draft.clone()
-        } else {
-            self.settings_managed_key_rename_name.clone()
-        }
-    }
-
-    pub(in crate::workspace) fn optional_trimmed_string(&self, value: &str) -> Option<String> {
-        let trimmed = value.trim();
-        (!trimmed.is_empty()).then(|| trimmed.to_string())
-    }
-
-    pub(in crate::workspace) fn optional_managed_key_secret(
-        &self,
-        value: &str,
-    ) -> Option<SecretString> {
-        let trimmed = value.trim();
-        (!trimmed.is_empty()).then(|| SecretString::from(trimmed.to_string()))
+        let status = self
+            .i18n
+            .t("settings_view.ssh_keys.action_failed")
+            .replace("{{error}}", &error.to_string());
+        self.finish_managed_key_action(status, false, cx);
     }
 
     pub(in crate::workspace) fn ssh_keys_empty_state(&self) -> AnyElement {
@@ -2852,4 +3072,74 @@ pub(in crate::workspace) fn imported_auth_label(
 pub(in crate::workspace) fn non_empty_trimmed(value: &str) -> Option<String> {
     let trimmed = value.trim();
     (!trimmed.is_empty()).then(|| trimmed.to_string())
+}
+
+#[cfg(test)]
+mod managed_key_entity_tests {
+    use gpui::{AppContext, TestAppContext};
+
+    use super::*;
+
+    #[gpui::test]
+    fn managed_key_paste_request_moves_secrets_out_of_entity(cx: &mut TestAppContext) {
+        let settings = cx.new(SettingsWorkspaceEntity::new);
+        settings.update(cx, |settings, cx| {
+            settings.open_managed_key_paste_dialog(cx);
+            assert!(
+                settings.focus_settings_entity_input(SettingsInput::ManagedKeyPastePrivateKey, cx)
+            );
+            assert!(settings.replace_settings_entity_input(
+                SettingsInput::ManagedKeyPastePrivateKey,
+                None,
+                "private-key-material",
+                cx,
+            ));
+            assert!(
+                settings.focus_settings_entity_input(SettingsInput::ManagedKeyPastePassphrase, cx)
+            );
+            assert!(settings.replace_settings_entity_input(
+                SettingsInput::ManagedKeyPastePassphrase,
+                None,
+                " key-passphrase ",
+                cx,
+            ));
+
+            // Submission moves each secret into the one-shot store request.
+            let request = settings
+                .take_managed_key_paste_import_request()
+                .expect("paste request");
+            assert_eq!(request.private_key.expose_secret(), "private-key-material");
+            assert_eq!(
+                request.passphrase.as_ref().map(SecretString::expose_secret),
+                Some("key-passphrase")
+            );
+            assert!(settings.managed_key_paste_private_key.is_empty());
+            assert!(settings.managed_key_paste_passphrase.is_empty());
+            assert_eq!(settings.settings_entity_focused_input(), None);
+        });
+    }
+
+    #[gpui::test]
+    fn closing_managed_key_dialog_clears_entity_owned_drafts(cx: &mut TestAppContext) {
+        let settings = cx.new(SettingsWorkspaceEntity::new);
+        settings.update(cx, |settings, cx| {
+            settings.open_managed_key_import_file_dialog(cx);
+            assert!(
+                settings.focus_settings_entity_input(SettingsInput::ManagedKeyFilePassphrase, cx)
+            );
+            assert!(settings.replace_settings_entity_input(
+                SettingsInput::ManagedKeyFilePassphrase,
+                None,
+                "secret-passphrase",
+                cx,
+            ));
+
+            settings.close_managed_key_dialog(std::time::Duration::ZERO, cx);
+
+            assert!(settings.managed_key_dialog.is_none());
+            assert!(settings.managed_key_file_passphrase.is_empty());
+            assert_eq!(settings.settings_entity_focused_input(), None);
+            assert!(settings.managed_key_dialog_exit_task.is_none());
+        });
+    }
 }

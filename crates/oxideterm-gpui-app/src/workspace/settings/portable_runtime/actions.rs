@@ -1,20 +1,10 @@
 use gpui::Context;
-use oxideterm_gpui_settings_view::SettingsInput;
 use zeroize::Zeroizing;
 
 use super::{
     PortablePasswordDialogSnapshot, PortableSettingsAction, PortableSettingsDialog,
     PortableStatusRefresh, SettingsWorkspaceEntity, SettingsWorkspaceEvent, WorkspaceApp,
 };
-
-fn is_portable_password_input(input: SettingsInput) -> bool {
-    matches!(
-        input,
-        SettingsInput::PortableCurrentPassword
-            | SettingsInput::PortableNewPassword
-            | SettingsInput::PortableConfirmPassword
-    )
-}
 
 impl SettingsWorkspaceEntity {
     pub(in crate::workspace) fn portable_password_dialog_snapshot(
@@ -32,81 +22,6 @@ impl SettingsWorkspaceEntity {
         }
     }
 
-    pub(in crate::workspace) fn portable_focused_input(&self) -> Option<SettingsInput> {
-        self.portable_focused_input
-    }
-
-    pub(in crate::workspace) fn portable_input_value(&self, input: SettingsInput) -> Option<&str> {
-        match input {
-            SettingsInput::PortableCurrentPassword => Some(&self.portable_current_password),
-            SettingsInput::PortableNewPassword => Some(&self.portable_new_password),
-            SettingsInput::PortableConfirmPassword => Some(&self.portable_confirm_password),
-            _ => None,
-        }
-    }
-
-    pub(in crate::workspace) fn focus_portable_password_input(
-        &mut self,
-        input: SettingsInput,
-        cx: &mut Context<Self>,
-    ) -> bool {
-        if !is_portable_password_input(input)
-            || self.portable_dialog != Some(PortableSettingsDialog::ChangePassword)
-        {
-            return false;
-        }
-        self.portable_focused_input = Some(input);
-        cx.notify();
-        true
-    }
-
-    pub(in crate::workspace) fn blur_portable_password_input(
-        &mut self,
-        cx: &mut Context<Self>,
-    ) -> bool {
-        let changed = self.portable_focused_input.take().is_some();
-        if changed {
-            cx.notify();
-        }
-        changed
-    }
-
-    pub(in crate::workspace) fn replace_portable_password_input(
-        &mut self,
-        input: SettingsInput,
-        replacement_range: Option<std::ops::Range<usize>>,
-        text: &str,
-        cx: &mut Context<Self>,
-    ) -> bool {
-        if self.portable_focused_input != Some(input) {
-            return false;
-        }
-        let Some(value) = self.portable_password_mut(input) else {
-            return false;
-        };
-        oxideterm_editor_core::utf16::replace_utf16(value, replacement_range, text);
-        self.portable_action_error = None;
-        cx.notify();
-        true
-    }
-
-    pub(in crate::workspace) fn pop_portable_password_input(
-        &mut self,
-        input: SettingsInput,
-        cx: &mut Context<Self>,
-    ) -> bool {
-        if self.portable_focused_input != Some(input) {
-            return false;
-        }
-        let Some(value) = self.portable_password_mut(input) else {
-            return false;
-        };
-        value.pop();
-        self.portable_action_error = None;
-        cx.notify();
-        true
-    }
-
     pub(in crate::workspace) fn open_portable_password_dialog(&mut self, cx: &mut Context<Self>) {
         self.portable_dialog_exit_task = None;
         self.portable_dialog_presence.reopen();
@@ -120,7 +35,7 @@ impl SettingsWorkspaceEntity {
         delay: std::time::Duration,
         cx: &mut Context<Self>,
     ) {
-        self.portable_focused_input = None;
+        self.settings_focused_input = None;
         let Some(generation) = self.portable_dialog_presence.begin_exit() else {
             return;
         };
@@ -168,7 +83,7 @@ impl SettingsWorkspaceEntity {
             Zeroizing::new(String::new()),
         );
         zeroize::Zeroize::zeroize(&mut *self.portable_confirm_password);
-        self.portable_focused_input = None;
+        self.settings_focused_input = None;
         self.portable_action_pending = Some(PortableSettingsAction::ChangePassword);
         self.portable_action_error = None;
 
@@ -215,15 +130,6 @@ impl SettingsWorkspaceEntity {
 
     pub(in crate::workspace) fn portable_action_error(&self) -> Option<&str> {
         self.portable_action_error.as_deref()
-    }
-
-    fn portable_password_mut(&mut self, input: SettingsInput) -> Option<&mut String> {
-        match input {
-            SettingsInput::PortableCurrentPassword => Some(&mut self.portable_current_password),
-            SettingsInput::PortableNewPassword => Some(&mut self.portable_new_password),
-            SettingsInput::PortableConfirmPassword => Some(&mut self.portable_confirm_password),
-            _ => None,
-        }
     }
 
     fn finish_portable_password_dialog_exit(&mut self, generation: u64, cx: &mut Context<Self>) {
@@ -341,6 +247,7 @@ mod tests {
     use std::sync::Arc;
 
     use gpui::{AppContext, TestAppContext};
+    use oxideterm_gpui_settings_view::SettingsInput;
 
     use super::*;
 
@@ -350,9 +257,9 @@ mod tests {
         settings.update(cx, |settings, cx| {
             settings.open_portable_password_dialog(cx);
             assert!(
-                settings.focus_portable_password_input(SettingsInput::PortableCurrentPassword, cx,)
+                settings.focus_settings_entity_input(SettingsInput::PortableCurrentPassword, cx,)
             );
-            assert!(settings.replace_portable_password_input(
+            assert!(settings.replace_settings_entity_input(
                 SettingsInput::PortableCurrentPassword,
                 None,
                 "current-secret",
@@ -363,7 +270,7 @@ mod tests {
             assert!(snapshot.open);
             assert_eq!(snapshot.current_password.as_str(), "current-secret");
             assert_eq!(
-                settings.portable_focused_input(),
+                settings.settings_entity_focused_input(),
                 Some(SettingsInput::PortableCurrentPassword)
             );
 
@@ -373,7 +280,7 @@ mod tests {
             assert!(snapshot.current_password.is_empty());
             assert!(snapshot.new_password.is_empty());
             assert!(snapshot.confirm_password.is_empty());
-            assert_eq!(settings.portable_focused_input(), None);
+            assert_eq!(settings.settings_entity_focused_input(), None);
         });
     }
 
@@ -389,8 +296,8 @@ mod tests {
         );
         settings.update(cx, |settings, cx| {
             settings.open_portable_password_dialog(cx);
-            settings.focus_portable_password_input(SettingsInput::PortableNewPassword, cx);
-            settings.replace_portable_password_input(
+            settings.focus_settings_entity_input(SettingsInput::PortableNewPassword, cx);
+            settings.replace_settings_entity_input(
                 SettingsInput::PortableNewPassword,
                 None,
                 "short",
