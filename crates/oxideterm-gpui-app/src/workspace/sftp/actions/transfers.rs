@@ -392,7 +392,7 @@ impl WorkspaceApp {
         });
     }
 
-    pub(in crate::workspace::sftp) fn resume_sftp_incomplete_transfer(
+    pub(in crate::workspace) fn resume_sftp_incomplete_transfer(
         &mut self,
         transfer_id: String,
         cx: &mut Context<Self>,
@@ -1146,7 +1146,7 @@ impl WorkspaceApp {
         });
     }
 
-    pub(in crate::workspace::sftp) fn set_sftp_transfer_state(
+    pub(in crate::workspace) fn set_sftp_transfer_state(
         &mut self,
         id: u64,
         state: SftpTransferState,
@@ -1185,7 +1185,7 @@ impl WorkspaceApp {
         }
     }
 
-    pub(in crate::workspace::sftp) fn cancel_or_remove_sftp_transfer(
+    pub(in crate::workspace) fn cancel_or_remove_sftp_transfer(
         &mut self,
         id: u64,
         cx: &mut Context<Self>,

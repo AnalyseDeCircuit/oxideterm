@@ -408,7 +408,7 @@ impl WorkspaceApp {
         }
     }
 
-    pub(super) fn open_file_manager_entry(
+    pub(in crate::workspace) fn open_file_manager_entry(
         &mut self,
         entry: LocalFileEntry,
         cx: &mut Context<Self>,
@@ -706,46 +706,6 @@ impl WorkspaceApp {
         }
     }
 
-    pub(super) fn select_file_manager_entry(
-        &mut self,
-        name: String,
-        modifiers: gpui::Modifiers,
-        visible_files: &[LocalFileEntry],
-        cx: &mut Context<Self>,
-    ) {
-        self.blur_file_manager_inline_inputs(cx);
-        self.file_manager.update(cx, |file_manager, cx| {
-            if modifiers.shift {
-                let anchor = file_manager
-                    .last_selected
-                    .clone()
-                    .unwrap_or_else(|| name.clone());
-                let start = visible_files
-                    .iter()
-                    .position(|file| file.name == anchor)
-                    .unwrap_or(0);
-                let end = visible_files
-                    .iter()
-                    .position(|file| file.name == name)
-                    .unwrap_or(start);
-                file_manager.selected.clear();
-                for file in &visible_files[start.min(end)..=start.max(end)] {
-                    file_manager.selected.insert(file.name.clone());
-                }
-            } else if modifiers.platform || modifiers.control {
-                if !file_manager.selected.insert(name.clone()) {
-                    file_manager.selected.remove(&name);
-                }
-                file_manager.last_selected = Some(name);
-            } else {
-                file_manager.selected.clear();
-                file_manager.selected.insert(name.clone());
-                file_manager.last_selected = Some(name);
-            }
-            cx.notify();
-        });
-    }
-
     pub(super) fn open_file_manager_context_menu(
         &mut self,
         file: Option<LocalFileEntry>,
@@ -932,6 +892,8 @@ impl WorkspaceApp {
             file_manager.preview_markdown_source = false;
             file_manager.preview_code_scroll = UniformListScrollHandle::new();
             file_manager.preview_markdown_scroll = MarkdownVirtualListScrollHandle::new();
+            file_manager.preview_document_scroll = ScrollHandle::new();
+            file_manager.preview_metadata_scroll = ScrollHandle::new();
             file_manager.preview_stream = FileManagerPreviewStreamState::default();
             file_manager.preview_font_family = None;
             file_manager.preview_font_error = None;

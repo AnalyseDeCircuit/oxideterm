@@ -137,7 +137,7 @@ impl WorkspaceApp {
                     .id("sftp-font-preview-scroll")
                     .flex_1()
                     .selectable_overflow_y_scroll(
-                        &self.selectable_text_scroll_handle("sftp-font-preview-scroll"),
+                        &self.sftp_view.read(cx).font_preview_scroll,
                     )
                     .p(px(24.0))
                     .bg(rgb(theme.bg_sunken))

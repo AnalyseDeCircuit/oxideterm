@@ -38,7 +38,7 @@ impl WorkspaceApp {
                     .when(!uses_virtual_text, |scroll| {
                         scroll
                             .selectable_overflow_y_scroll(
-                                &self.selectable_text_scroll_handle("sftp-preview-scroll"),
+                                &self.sftp_view.read(cx).preview_document_scroll,
                             )
                             .p(px(16.0))
                     })

@@ -135,9 +135,7 @@ impl WorkspaceApp {
                     .id("sftp-diff-scroll")
                     .w_full()
                     .flex_1()
-                    .selectable_overflow_y_scroll(
-                        &self.selectable_text_scroll_handle("sftp-diff-scroll"),
-                    )
+                    .selectable_overflow_y_scroll(&self.sftp_view.read(cx).diff_document_scroll)
                     .font_family(settings_mono_font_family(self.settings_store.settings()))
                     .text_size(px(SFTP_TEXT_XS))
                     .on_scroll_wheel(|_, _, cx| cx.stop_propagation())

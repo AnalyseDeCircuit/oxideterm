@@ -1356,12 +1356,11 @@ impl WorkspaceApp {
                 }
             }))
             .bg(file_manager_bg(theme.bg, has_background));
-        let (loading, error, selected, list_scroll) = {
+        let (loading, error, list_scroll) = {
             let file_manager = self.file_manager.read(cx);
             (
                 file_manager.loading,
                 file_manager.error.clone(),
-                Arc::new(file_manager.selected.clone()),
                 file_manager.list_scroll.clone(),
             )
         };
@@ -1447,12 +1446,10 @@ impl WorkspaceApp {
                 .into_any_element();
         }
 
-        let workspace = cx.entity();
+        let file_manager = self.file_manager.clone();
         let row_count = files.len();
         let list_items = files;
         let row_items = rows;
-        let row_selected = selected;
-        let row_workspace = workspace;
         list.child(
             tauri_virtual_uniform_list(
                 "file-manager-list-virtual",
@@ -1464,7 +1461,9 @@ impl WorkspaceApp {
                         .map(|index| {
                             let file = &list_items[index];
                             let row = &row_items[index];
-                            let selected = row_selected.contains(&file.name);
+                            // Selection remains page-owned and is sampled only
+                            // for rows requested by the virtual-list viewport.
+                            let selected = file_manager.read(_cx).selected.contains(&file.name);
                             let icon_color = if row.icon_color == 0 {
                                 theme.text_muted
                             } else {
@@ -1528,45 +1527,38 @@ impl WorkspaceApp {
                                         .child(row.modified_text.clone()),
                                 )
                                 .on_mouse_down(MouseButton::Left, {
-                                    let workspace = row_workspace.clone();
+                                    let file_manager = file_manager.clone();
                                     let visible = list_items.clone();
-                                    move |event: &MouseDownEvent, window, cx| {
-                                        let _ = workspace.update(cx, |this, cx| {
-                                            window.focus(&this.focus_handle, cx);
-                                            this.dismiss_file_manager_context_menu(cx);
-                                            this.blur_file_manager_inline_inputs(cx);
+                                    let entry = file.clone();
+                                    move |event: &MouseDownEvent, _window, cx| {
+                                        file_manager.update(cx, |file_manager, cx| {
                                             if event.click_count >= 2 {
-                                                this.open_file_manager_entry(
-                                                    visible[index].clone(),
-                                                    cx,
-                                                );
+                                                file_manager.activate_entry(entry.clone(), cx);
                                             } else {
-                                                this.select_file_manager_entry(
-                                                    visible[index].name.clone(),
+                                                file_manager.clear_context_menu_immediately();
+                                                file_manager.select_entry(
+                                                    entry.name.clone(),
                                                     event.modifiers,
                                                     visible.as_ref(),
-                                                    cx,
                                                 );
+                                                cx.notify();
                                             }
                                             cx.stop_propagation();
-                                            cx.notify();
                                         });
                                     }
                                 })
                                 .on_mouse_down(MouseButton::Right, {
-                                    let workspace = row_workspace.clone();
-                                    let visible = list_items.clone();
-                                    move |event: &MouseDownEvent, window, cx| {
-                                        let _ = workspace.update(cx, |this, cx| {
-                                            window.focus(&this.focus_handle, cx);
-                                            this.open_file_manager_context_menu(
-                                                Some(visible[index].clone()),
+                                    let file_manager = file_manager.clone();
+                                    let entry = file.clone();
+                                    move |event: &MouseDownEvent, _window, cx| {
+                                        file_manager.update(cx, |file_manager, cx| {
+                                            file_manager.open_context_menu(
+                                                Some(entry.clone()),
                                                 f32::from(event.position.x),
                                                 f32::from(event.position.y),
                                                 cx,
                                             );
                                             cx.stop_propagation();
-                                            cx.notify();
                                         });
                                     }
                                 })

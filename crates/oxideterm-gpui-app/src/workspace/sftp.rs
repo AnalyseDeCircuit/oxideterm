@@ -110,7 +110,6 @@ const SFTP_TRANSFER_ERROR_BORDER_ALPHA: u32 = 0x80; // Tauri border-red-500/50
 const SFTP_TRANSFER_CANCELLED_BORDER_ALPHA: u32 = 0x4d; // Tauri border-yellow-500/30
 const SFTP_TRANSFER_INCOMPLETE_BORDER_ALPHA: u32 = 0x4d; // Tauri border-yellow-500/30
 const SFTP_TRANSFER_INCOMPLETE_HOVER_BORDER_ALPHA: u32 = 0x80; // Tauri hover:border-yellow-500/50
-const SFTP_TRANSFER_CONTROL_HOVER_ALPHA: u32 = 0x1a; // Tauri hover:bg-*-500/10
 #[allow(dead_code)]
 const SFTP_DRAG_BG_ALPHA: u32 = 0x1a; // Tauri bg-theme-accent/10
 #[allow(dead_code)]
@@ -384,6 +383,29 @@ impl SftpWorkspaceEffects {
 
 pub(super) enum SftpWorkspaceEvent {
     WorkerEffectsReady(SftpWorkspaceEffects),
+    OpenFileRequested {
+        pane: SftpPane,
+        file: SftpFileEntry,
+    },
+    TransferStateRequested {
+        id: u64,
+        state: SftpTransferState,
+    },
+    CancelOrRemoveTransferRequested {
+        id: u64,
+    },
+    ResumeIncompleteTransferRequested {
+        transfer_id: String,
+    },
+    TooltipRequested {
+        id: String,
+        label: String,
+        x: f32,
+        y: f32,
+    },
+    TooltipCleared {
+        id: String,
+    },
     RemoteLoadReady {
         tab_id: TabId,
         node_id: NodeId,
@@ -753,6 +775,10 @@ pub(super) struct SftpWorkspaceEntity {
     diff_scroll: UniformListScrollHandle,
     preview_code_scroll: UniformListScrollHandle,
     preview_markdown_scroll: MarkdownVirtualListScrollHandle,
+    pub(in crate::workspace) diff_document_scroll: ScrollHandle,
+    pub(in crate::workspace) preview_document_scroll: ScrollHandle,
+    pub(in crate::workspace) font_preview_scroll: ScrollHandle,
+    pub(in crate::workspace) drives_scroll: ScrollHandle,
     local_last_selected: Option<String>,
     remote_last_selected: Option<String>,
     local_files: Vec<SftpFileEntry>,
@@ -869,6 +895,10 @@ impl Default for SftpWorkspaceEntity {
             diff_scroll: UniformListScrollHandle::new(),
             preview_code_scroll: UniformListScrollHandle::new(),
             preview_markdown_scroll: MarkdownVirtualListScrollHandle::new(),
+            diff_document_scroll: ScrollHandle::new(),
+            preview_document_scroll: ScrollHandle::new(),
+            font_preview_scroll: ScrollHandle::new(),
+            drives_scroll: ScrollHandle::new(),
             local_last_selected: None,
             remote_last_selected: None,
             local_files: list_local_files(&local_path).unwrap_or_else(|_| Vec::new()),
@@ -1255,6 +1285,18 @@ impl SftpWorkspaceEntity {
         changed
     }
 
+    pub(in crate::workspace::sftp) fn activate_file(
+        &mut self,
+        pane: SftpPane,
+        file: SftpFileEntry,
+        cx: &mut Context<Self>,
+    ) {
+        self.active_pane = pane;
+        self.clear_context_menu_immediately();
+        cx.emit(SftpWorkspaceEvent::OpenFileRequested { pane, file });
+        cx.notify();
+    }
+
     pub(super) fn has_drag_capture(&self) -> bool {
         // SFTP file drags use root-level pointer capture so releasing outside
         // both panes still clears the candidate and autoscroll state.
@@ -1311,6 +1353,63 @@ mod entity_delivery_tests {
             state: SftpTransferState::Pending,
             error: None,
         }
+    }
+
+    fn file_entry(name: &str) -> SftpFileEntry {
+        SftpFileEntry {
+            name: name.to_string(),
+            path: format!("/{name}"),
+            file_type: SftpFileType::File,
+            size: 1,
+            modified: None,
+            permissions: None,
+            owner: None,
+            group: None,
+            is_symlink: false,
+            symlink_target: None,
+        }
+    }
+
+    #[test]
+    fn file_row_selection_is_owned_by_sftp_entity() {
+        let mut sftp = SftpWorkspaceEntity::default();
+        sftp.local_files = vec![file_entry("alpha"), file_entry("beta")];
+
+        sftp.select_file(
+            SftpPane::Local,
+            "alpha".to_string(),
+            gpui::Modifiers::default(),
+        );
+
+        assert_eq!(sftp.local_selected, HashSet::from(["alpha".to_string()]));
+        assert_eq!(sftp.local_last_selected.as_deref(), Some("alpha"));
+        assert_eq!(sftp.active_pane, SftpPane::Local);
+    }
+
+    #[gpui::test]
+    fn file_activation_emits_typed_workspace_intent(cx: &mut TestAppContext) {
+        let entity = cx.new(SftpWorkspaceEntity::new);
+        let observed = Arc::new(AtomicBool::new(false));
+        let observed_event = observed.clone();
+        let _subscription = entity.update(cx, |_, cx| {
+            cx.subscribe(&entity, move |_, _, event: &SftpWorkspaceEvent, _cx| {
+                if matches!(
+                    event,
+                    SftpWorkspaceEvent::OpenFileRequested {
+                        pane: SftpPane::Remote,
+                        file
+                    } if file.name == "remote.txt"
+                ) {
+                    observed_event.store(true, Ordering::Release);
+                }
+            })
+        });
+
+        entity.update(cx, |sftp, cx| {
+            sftp.activate_file(SftpPane::Remote, file_entry("remote.txt"), cx);
+        });
+
+        assert!(observed.load(Ordering::Acquire));
     }
 
     #[gpui::test]

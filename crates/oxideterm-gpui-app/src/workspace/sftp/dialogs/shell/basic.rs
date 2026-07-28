@@ -124,6 +124,7 @@ impl WorkspaceApp {
         &self,
         files: Vec<String>,
         _has_background: bool,
+        cx: &App,
     ) -> AnyElement {
         let theme = self.tokens.ui;
         div()
@@ -133,9 +134,7 @@ impl WorkspaceApp {
                 div()
                     .id("sftp-drives-scroll")
                     .max_h(px(128.0))
-                    .selectable_overflow_y_scroll(
-                        &self.selectable_text_scroll_handle("sftp-drives-scroll"),
-                    )
+                    .selectable_overflow_y_scroll(&self.sftp_view.read(cx).drives_scroll)
                     .rounded(px(self.tokens.radii.sm))
                     .bg(rgb(theme.bg_sunken))
                     .p(px(8.0))

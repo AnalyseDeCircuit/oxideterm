@@ -2,7 +2,7 @@ use super::external::open_path_in_external_app;
 use super::*;
 
 impl WorkspaceApp {
-    pub(in crate::workspace::sftp) fn open_or_preview_sftp_file(
+    pub(in crate::workspace) fn open_or_preview_sftp_file(
         &mut self,
         pane: SftpPane,
         file: &SftpFileEntry,
@@ -27,6 +27,8 @@ impl WorkspaceApp {
                 sftp.preview_asset_owner = None;
                 sftp.preview_code_scroll = UniformListScrollHandle::new();
                 sftp.preview_markdown_scroll = MarkdownVirtualListScrollHandle::new();
+                sftp.preview_document_scroll = ScrollHandle::new();
+                sftp.font_preview_scroll = ScrollHandle::new();
                 sftp.preview_error = None;
                 sftp.preview_loading = true;
                 sftp.preview_hex_loading_more = false;
@@ -350,6 +352,7 @@ impl WorkspaceApp {
             Ok(local_content) => {
                 self.sftp_view.update(cx, |sftp, cx| {
                     sftp.diff_scroll = UniformListScrollHandle::new();
+                    sftp.diff_document_scroll = ScrollHandle::new();
                     sftp.set_dialog(SftpDialog::Diff {
                         local_path: local_file.path,
                         local_content,

@@ -38,7 +38,7 @@ impl WorkspaceApp {
                 self.i18n
                     .t("sftp.dialogs.delete_confirm")
                     .replace("{{count}}", &files.len().to_string()),
-                self.render_sftp_delete_dialog_body(files, has_background),
+                self.render_sftp_delete_dialog_body(files, has_background, cx),
                 Some(self.i18n.t("sftp.dialogs.delete")),
             ),
             SftpDialog::Conflict => (

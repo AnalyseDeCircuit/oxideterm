@@ -13,6 +13,91 @@ fn file_manager_archive_entry_signature(entry: &LocalArchiveEntry) -> u64 {
     hasher.finish()
 }
 
+fn render_file_manager_archive_row(
+    entry: &LocalArchiveEntry,
+    index: usize,
+    has_background: bool,
+    background_panel: u32,
+    text_color: u32,
+    muted_text_color: u32,
+) -> AnyElement {
+    let depth = entry
+        .path
+        .matches('/')
+        .count()
+        .saturating_sub(usize::from(entry.is_dir));
+    div()
+        .min_h(px(28.0))
+        .px(px(12.0))
+        .flex()
+        .gap(px(8.0))
+        .items_center()
+        .bg(if index % 2 == 0 {
+            file_manager_panel_bg(background_panel, has_background, 0x33)
+        } else {
+            rgba(0)
+        })
+        .text_size(px(FILE_MANAGER_TEXT_XS))
+        .child(
+            div()
+                .flex()
+                .items_center()
+                .gap(px(6.0))
+                .pl(px((depth * 16) as f32))
+                .child(WorkspaceApp::render_lucide_icon(
+                    if entry.is_dir {
+                        LucideIcon::Folder
+                    } else {
+                        LucideIcon::File
+                    },
+                    FILE_MANAGER_ICON_SM,
+                    rgb(if entry.is_dir {
+                        FILE_MANAGER_ORANGE
+                    } else {
+                        muted_text_color
+                    }),
+                ))
+                // Archive rows are plain display text so the virtual-list
+                // closure does not retain WorkspaceApp through selection state.
+                .child(
+                    div()
+                        .truncate()
+                        .text_color(rgb(text_color))
+                        .child(entry.name.clone()),
+                ),
+        )
+        .child(
+            div()
+                .w(px(80.0))
+                .text_align(gpui::TextAlign::Right)
+                .text_color(rgb(muted_text_color))
+                .child(if entry.is_dir {
+                    "-".to_string()
+                } else {
+                    format_file_size(entry.size)
+                }),
+        )
+        .child(
+            div()
+                .w(px(80.0))
+                .text_align(gpui::TextAlign::Right)
+                .text_color(rgb(muted_text_color))
+                .child(if entry.is_dir {
+                    "-".to_string()
+                } else {
+                    format_file_size(entry.compressed_size)
+                }),
+        )
+        .child(
+            div()
+                .w(px(120.0))
+                .text_align(gpui::TextAlign::Right)
+                .text_color(rgb(muted_text_color))
+                .child(entry.modified.clone().unwrap_or_else(|| "-".to_string())),
+        )
+        .into_any_element()
+}
+
 impl WorkspaceApp {
     pub(super) fn render_file_manager_preview_dialog(
         &self,
@@ -247,7 +332,7 @@ impl WorkspaceApp {
                     .flex_1()
                     .min_h(px(0.0))
                     .selectable_overflow_y_scrollbar(
-                        &self.selectable_text_scroll_handle("file-manager-preview-scroll"),
+                        &self.file_manager.read(cx).preview_document_scroll,
                     )
                     .bg(file_manager_bg(self.tokens.ui.bg_sunken, has_background))
                     .child(self.render_file_manager_preview_content(
@@ -817,7 +902,7 @@ impl WorkspaceApp {
                     .id("file-manager-metadata-scroll")
                     .flex_1()
                     .selectable_overflow_y_scrollbar(
-                        &self.selectable_text_scroll_handle("file-manager-metadata-scroll"),
+                        &self.file_manager.read(cx).preview_metadata_scroll,
                     )
                     .p(px(24.0))
                     .flex()
@@ -1398,20 +1483,25 @@ impl WorkspaceApp {
             .preview_archive_list_state
             .clone();
         let spec = self.file_manager_archive_entry_list_spec();
-        let workspace = cx.entity();
+        let theme = self.tokens.ui;
         let has_background_for_rows = has_background;
         let entries = info.entries.clone();
         let list_height = entries.len() as f32 * FILE_MANAGER_ARCHIVE_ROW_HEIGHT;
         body = body.child(div().h(px(list_height)).child(tauri_virtual_list(
             state,
             spec,
-            move |index, _window, cx| {
+            move |index, _window, _cx| {
                 let Some(entry) = entries.get(index).cloned() else {
                     return div().into_any_element();
                 };
-                workspace.update(cx, |this, cx| {
-                    this.render_file_manager_archive_row(&entry, index, has_background_for_rows, cx)
-                })
+                render_file_manager_archive_row(
+                    &entry,
+                    index,
+                    has_background_for_rows,
+                    theme.bg_panel,
+                    theme.text,
+                    theme.text_muted,
+                )
             },
         )));
         body.into_any_element()
@@ -1499,107 +1589,6 @@ impl WorkspaceApp {
                     cx,
                 ),
             ))
-            .into_any_element()
-    }
-
-    fn render_file_manager_archive_row(
-        &self,
-        entry: &LocalArchiveEntry,
-        index: usize,
-        has_background: bool,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let depth = entry
-            .path
-            .matches('/')
-            .count()
-            .saturating_sub(usize::from(entry.is_dir));
-        div()
-            .min_h(px(28.0))
-            .px(px(12.0))
-            .flex()
-            .gap(px(8.0))
-            .items_center()
-            .bg(if index % 2 == 0 {
-                file_manager_panel_bg(self.tokens.ui.bg_panel, has_background, 0x33)
-            } else {
-                rgba(0)
-            })
-            .text_size(px(FILE_MANAGER_TEXT_XS))
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap(px(6.0))
-                    .pl(px((depth * 16) as f32))
-                    .child(Self::render_lucide_icon(
-                        if entry.is_dir {
-                            LucideIcon::Folder
-                        } else {
-                            LucideIcon::File
-                        },
-                        FILE_MANAGER_ICON_SM,
-                        rgb(if entry.is_dir {
-                            FILE_MANAGER_ORANGE
-                        } else {
-                            self.tokens.ui.text_muted
-                        }),
-                    ))
-                    .child(div().truncate().child(self.render_selectable_display_text(
-                        "file-manager-archive-name",
-                        &entry.path,
-                        entry.name.clone(),
-                        self.tokens.ui.text,
-                        cx,
-                    ))),
-            )
-            .child(
-                div()
-                    .w(px(80.0))
-                    .text_align(gpui::TextAlign::Right)
-                    .text_color(rgb(self.tokens.ui.text_muted))
-                    .child(self.render_selectable_display_text(
-                        "file-manager-archive-size",
-                        &entry.path,
-                        if entry.is_dir {
-                            "-".to_string()
-                        } else {
-                            format_file_size(entry.size)
-                        },
-                        self.tokens.ui.text_muted,
-                        cx,
-                    )),
-            )
-            .child(
-                div()
-                    .w(px(80.0))
-                    .text_align(gpui::TextAlign::Right)
-                    .text_color(rgb(self.tokens.ui.text_muted))
-                    .child(self.render_selectable_display_text(
-                        "file-manager-archive-compressed",
-                        &entry.path,
-                        if entry.is_dir {
-                            "-".to_string()
-                        } else {
-                            format_file_size(entry.compressed_size)
-                        },
-                        self.tokens.ui.text_muted,
-                        cx,
-                    )),
-            )
-            .child(
-                div()
-                    .w(px(120.0))
-                    .text_align(gpui::TextAlign::Right)
-                    .text_color(rgb(self.tokens.ui.text_muted))
-                    .child(self.render_selectable_display_text(
-                        "file-manager-archive-modified",
-                        &entry.path,
-                        entry.modified.clone().unwrap_or_else(|| "-".to_string()),
-                        self.tokens.ui.text_muted,
-                        cx,
-                    )),
-            )
             .into_any_element()
     }
 

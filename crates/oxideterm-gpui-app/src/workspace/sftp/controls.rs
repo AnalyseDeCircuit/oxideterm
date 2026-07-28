@@ -255,21 +255,4 @@ impl WorkspaceApp {
         }
         title
     }
-
-    pub(in crate::workspace::sftp) fn transfer_status_text(
-        &self,
-        transfer: &SftpTransferItem,
-    ) -> String {
-        match transfer.state {
-            SftpTransferState::Pending => self.i18n.t("sftp.queue.status_waiting"),
-            SftpTransferState::Active => format_transfer_speed(transfer.speed),
-            SftpTransferState::Paused => self.i18n.t("sftp.queue.status_paused"),
-            SftpTransferState::Completed => self.i18n.t("sftp.queue.status_completed"),
-            SftpTransferState::Cancelled => self.i18n.t("sftp.queue.status_cancelled"),
-            SftpTransferState::Error => transfer
-                .error
-                .clone()
-                .unwrap_or_else(|| self.i18n.t("sftp.queue.status_error")),
-        }
-    }
 }

@@ -151,7 +151,7 @@ impl WorkspaceApp {
         self.selectable_text_autoscroll_position = Some(position);
         self.schedule_selectable_text_autoscroll(cx);
 
-        if self.apply_selectable_text_autoscroll(position) {
+        if self.apply_selectable_text_autoscroll(position, cx) {
             cx.notify();
         }
     }
@@ -172,7 +172,7 @@ impl WorkspaceApp {
                     this.stop_selectable_text_autoscroll();
                     return;
                 }
-                if this.apply_selectable_text_autoscroll(position) {
+                if this.apply_selectable_text_autoscroll(position, cx) {
                     this.update_read_only_selection_drag_at_position(position, cx);
                 }
                 this.schedule_selectable_text_autoscroll(cx);
@@ -181,7 +181,11 @@ impl WorkspaceApp {
         .detach();
     }
 
-    fn apply_selectable_text_autoscroll(&mut self, position: Point<Pixels>) -> bool {
+    fn apply_selectable_text_autoscroll(
+        &mut self,
+        position: Point<Pixels>,
+        cx: &Context<Self>,
+    ) -> bool {
         let mut scrolled = false;
         if let Some(delta) = self.selectable_text_ai_chat_autoscroll_delta(position) {
             self.ai.chat.message_list_state.scroll_by(px(delta));
@@ -193,7 +197,21 @@ impl WorkspaceApp {
             .values()
             .cloned()
             .collect::<Vec<_>>();
-        for handle in handles {
+        // IDE page entities own their scroll state; the root selection adapter
+        // borrows those handles only while applying a drag-autoscroll tick.
+        let page_handles = {
+            let file_manager = self.file_manager.read(cx);
+            let sftp = self.sftp_view.read(cx);
+            [
+                file_manager.preview_document_scroll.clone(),
+                file_manager.preview_metadata_scroll.clone(),
+                sftp.diff_document_scroll.clone(),
+                sftp.preview_document_scroll.clone(),
+                sftp.font_preview_scroll.clone(),
+                sftp.drives_scroll.clone(),
+            ]
+        };
+        for handle in handles.into_iter().chain(page_handles) {
             scrolled |= self.selectable_text_scroll_handle_autoscroll(&handle, position);
         }
         scrolled
@@ -956,28 +974,6 @@ impl SelectableTextRenderState {
                 ),
             SelectableTextRole::NonSelectable => render_non_selectable_styled_text(text, vec![run]),
         }
-    }
-
-    pub(super) fn render_row_safe_display_text_in_group(
-        &self,
-        group_id: u64,
-        scope: &str,
-        key: impl Hash,
-        order: usize,
-        text: impl Into<String>,
-        color: u32,
-        cx: &mut App,
-    ) -> AnyElement {
-        self.render_display_text_with_role_in_group(
-            SelectableTextRole::RowSafe,
-            group_id,
-            scope,
-            key,
-            order,
-            text,
-            color,
-            cx,
-        )
     }
 
     fn render_styled_text_in_group(

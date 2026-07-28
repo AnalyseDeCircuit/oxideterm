@@ -214,7 +214,6 @@ impl WorkspaceApp {
                 .into_any_element();
         }
 
-        let workspace = cx.entity();
         let sftp_view = self.sftp_view.clone();
         let visible_indices = std::sync::Arc::new(visible_indices);
         let scroll_handle = match pane {
@@ -222,8 +221,6 @@ impl WorkspaceApp {
             SftpPane::Remote => self.sftp_view.read(cx).remote_file_scroll.clone(),
         };
         let row_count = visible_indices.len();
-        let row_workspace = workspace;
-        let row_selectable_state = self.selectable_text_render_state(cx);
 
         list.child(tauri_virtual_uniform_list(
             ("sftp-file-list-virtual", pane as u64),
@@ -231,7 +228,6 @@ impl WorkspaceApp {
             scroll_handle,
             sftp_file_list_virtual_spec(),
             move |range, _window, _cx| {
-                let selectable_state = row_selectable_state.clone();
                 range
                     .map(|index| {
                         let source_index = visible_indices[index];
@@ -257,16 +253,6 @@ impl WorkspaceApp {
                         };
                         let _metadata_fields_consumed =
                             (&file.permissions, &file.owner, &file.group);
-                        let selection_group_id =
-                            crate::workspace::selectable_text::selectable_text_id(
-                                "sftp-file-list-row",
-                                (pane as u64, file.name.as_str()),
-                            );
-                        let row_text_color = if is_selected {
-                            theme.accent
-                        } else {
-                            theme.text
-                        };
                         let size_text = if file.file_type == SftpFileType::Directory {
                             "-".to_string()
                         } else {
@@ -321,17 +307,10 @@ impl WorkspaceApp {
                                             rgb(theme.text_muted)
                                         },
                                     ))
-                                    .child(div().truncate().child(
-                                        selectable_state.render_row_safe_display_text_in_group(
-                                            selection_group_id,
-                                            "sftp-file-list-cell",
-                                            ("name", pane as u64, file.name.as_str()),
-                                            0,
-                                            display_name,
-                                            row_text_color,
-                                            _cx,
-                                        ),
-                                    )),
+                                    // Tauri file rows are select-none. Plain
+                                    // display text also prevents retaining the
+                                    // root selectable-text adapter here.
+                                    .child(div().truncate().child(display_name)),
                             )
                             .child(
                                 div()
@@ -339,15 +318,7 @@ impl WorkspaceApp {
                                     .flex_none()
                                     .text_align(gpui::TextAlign::Right)
                                     .text_color(rgb(theme.text_muted))
-                                    .child(selectable_state.render_row_safe_display_text_in_group(
-                                        selection_group_id,
-                                        "sftp-file-list-cell",
-                                        ("size", pane as u64, file.name.as_str()),
-                                        1,
-                                        size_text,
-                                        theme.text_muted,
-                                        _cx,
-                                    )),
+                                    .child(size_text),
                             )
                             .child(
                                 div()
@@ -355,41 +326,21 @@ impl WorkspaceApp {
                                     .flex_none()
                                     .text_align(gpui::TextAlign::Right)
                                     .text_color(rgb(theme.text_muted))
-                                    .child(selectable_state.render_row_safe_display_text_in_group(
-                                        selection_group_id,
-                                        "sftp-file-list-cell",
-                                        ("modified", pane as u64, file.name.as_str()),
-                                        2,
-                                        modified_text,
-                                        theme.text_muted,
-                                        _cx,
-                                    )),
+                                    .child(modified_text),
                             )
                             .on_mouse_down(MouseButton::Left, {
-                                let workspace = row_workspace.clone();
-                                move |event: &MouseDownEvent, window, cx| {
-                                    let _ = workspace.update(cx, |this, cx| {
-                                        window.focus(&this.focus_handle, cx);
-                                        this.sftp_view.update(cx, |sftp, cx| {
-                                            sftp.dismiss_context_menu(cx);
-                                        });
+                                let sftp_view = sftp_view.clone();
+                                move |event: &MouseDownEvent, _window, cx| {
+                                    sftp_view.update(cx, |sftp, cx| {
                                         if event.click_count >= 2 {
-                                            this.open_or_preview_sftp_file(pane, &row_file, cx);
+                                            sftp.activate_file(pane, row_file.clone(), cx);
                                         } else {
-                                            this.select_sftp_file(
+                                            sftp.select_file(pane, name.clone(), event.modifiers);
+                                            sftp.start_drag_candidate(
                                                 pane,
-                                                name.clone(),
-                                                event.modifiers,
-                                                cx,
+                                                f32::from(event.position.x),
+                                                f32::from(event.position.y),
                                             );
-                                            if !this.read_only_selection_drag_active() {
-                                                this.start_sftp_drag_candidate(
-                                                    pane,
-                                                    f32::from(event.position.x),
-                                                    f32::from(event.position.y),
-                                                    cx,
-                                                );
-                                            }
                                         }
                                         cx.stop_propagation();
                                         cx.notify();
@@ -397,21 +348,17 @@ impl WorkspaceApp {
                                 }
                             })
                             .on_mouse_down(MouseButton::Right, {
-                                let workspace = row_workspace.clone();
-                                move |event: &MouseDownEvent, window, cx| {
-                                    let _ = workspace.update(cx, |this, cx| {
-                                        window.focus(&this.focus_handle, cx);
-                                        this.sftp_view.update(cx, |sftp, cx| {
-                                            sftp.open_context_menu(
-                                                pane,
-                                                Some(context_file.clone()),
-                                                f32::from(event.position.x),
-                                                f32::from(event.position.y),
-                                                cx,
-                                            );
-                                        });
+                                let sftp_view = sftp_view.clone();
+                                move |event: &MouseDownEvent, _window, cx| {
+                                    sftp_view.update(cx, |sftp, cx| {
+                                        sftp.open_context_menu(
+                                            pane,
+                                            Some(context_file.clone()),
+                                            f32::from(event.position.x),
+                                            f32::from(event.position.y),
+                                            cx,
+                                        );
                                         cx.stop_propagation();
-                                        cx.notify();
                                     });
                                 }
                             })

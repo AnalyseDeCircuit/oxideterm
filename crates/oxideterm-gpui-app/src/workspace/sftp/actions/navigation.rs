@@ -623,32 +623,6 @@ impl WorkspaceApp {
         });
     }
 
-    pub(in crate::workspace::sftp) fn select_sftp_file(
-        &mut self,
-        pane: SftpPane,
-        name: String,
-        modifiers: gpui::Modifiers,
-        cx: &mut Context<Self>,
-    ) {
-        self.sftp_view.update(cx, |sftp, cx| {
-            sftp.select_file(pane, name, modifiers);
-            cx.notify();
-        });
-    }
-
-    pub(in crate::workspace::sftp) fn start_sftp_drag_candidate(
-        &mut self,
-        pane: SftpPane,
-        x: f32,
-        y: f32,
-        cx: &mut Context<Self>,
-    ) {
-        self.sftp_view.update(cx, |sftp, cx| {
-            sftp.start_drag_candidate(pane, x, y);
-            cx.notify();
-        });
-    }
-
     pub(in crate::workspace::sftp) fn update_sftp_drag(
         &mut self,
         pane: SftpPane,
@@ -928,7 +902,12 @@ impl SftpWorkspaceEntity {
         }
     }
 
-    fn select_file(&mut self, pane: SftpPane, name: String, modifiers: gpui::Modifiers) {
+    pub(in crate::workspace::sftp) fn select_file(
+        &mut self,
+        pane: SftpPane,
+        name: String,
+        modifiers: gpui::Modifiers,
+    ) {
         self.active_pane = pane;
         self.clear_context_menu_immediately();
         let range_names = self.ordered_file_names(pane);
@@ -1016,7 +995,12 @@ impl SftpWorkspaceEntity {
         true
     }
 
-    fn start_drag_candidate(&mut self, pane: SftpPane, x: f32, y: f32) {
+    pub(in crate::workspace::sftp) fn start_drag_candidate(
+        &mut self,
+        pane: SftpPane,
+        x: f32,
+        y: f32,
+    ) {
         let names = self.selected_names(pane);
         if names.is_empty() {
             self.drag_state = None;

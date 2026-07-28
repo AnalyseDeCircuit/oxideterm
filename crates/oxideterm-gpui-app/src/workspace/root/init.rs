@@ -159,6 +159,9 @@ impl WorkspaceApp {
                             None,
                             TerminalNoticeVariant::Success,
                         ),
+                    FileManagerWorkspaceEvent::OpenEntry(entry) => {
+                        workspace.open_file_manager_entry(entry.clone(), cx);
+                    }
                 }
                 cx.notify();
             },
@@ -216,6 +219,26 @@ impl WorkspaceApp {
                 match event {
                     sftp::SftpWorkspaceEvent::WorkerEffectsReady(effects) => {
                         workspace.handle_sftp_worker_effects(effects, cx);
+                    }
+                    sftp::SftpWorkspaceEvent::OpenFileRequested { pane, file } => {
+                        workspace.open_or_preview_sftp_file(*pane, file, cx);
+                    }
+                    sftp::SftpWorkspaceEvent::TransferStateRequested { id, state } => {
+                        workspace.set_sftp_transfer_state(*id, *state, cx);
+                    }
+                    sftp::SftpWorkspaceEvent::CancelOrRemoveTransferRequested { id } => {
+                        workspace.cancel_or_remove_sftp_transfer(*id, cx);
+                    }
+                    sftp::SftpWorkspaceEvent::ResumeIncompleteTransferRequested { transfer_id } => {
+                        workspace.resume_sftp_incomplete_transfer(transfer_id.clone(), cx);
+                    }
+                    sftp::SftpWorkspaceEvent::TooltipRequested { id, label, x, y } => {
+                        workspace.queue_workspace_tooltip(id, label, *x, *y, cx);
+                    }
+                    sftp::SftpWorkspaceEvent::TooltipCleared { id } => {
+                        if workspace.clear_workspace_tooltip_state(id) {
+                            cx.notify();
+                        }
                     }
                     sftp::SftpWorkspaceEvent::PreviewSaveRequested {
                         path,

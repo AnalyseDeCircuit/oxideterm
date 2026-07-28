@@ -441,6 +441,7 @@ impl WorkspaceApp {
                     self.i18n.t("sftp.toolbar.show_drives"),
                     cx.listener(|this, _event, _window, cx| {
                         this.sftp_view.update(cx, |sftp, cx| {
+                            sftp.drives_scroll = ScrollHandle::new();
                             sftp.set_dialog(SftpDialog::Drives);
                             cx.notify();
                         });

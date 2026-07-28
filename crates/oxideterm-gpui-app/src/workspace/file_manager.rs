@@ -231,6 +231,7 @@ pub(super) struct FileManagerProperties {
 pub(super) enum FileManagerWorkspaceEvent {
     Error(String),
     OperationSucceeded,
+    OpenEntry(LocalFileEntry),
 }
 
 impl EventEmitter<FileManagerWorkspaceEvent> for FileManagerState {}
@@ -360,6 +361,8 @@ pub(super) struct FileManagerState {
     pub(super) preview_retired_images: RefCell<Vec<Arc<RenderImage>>>,
     pub(super) preview_code_scroll: UniformListScrollHandle,
     pub(super) preview_markdown_scroll: MarkdownVirtualListScrollHandle,
+    pub(in crate::workspace) preview_document_scroll: ScrollHandle,
+    pub(in crate::workspace) preview_metadata_scroll: ScrollHandle,
     pub(super) preview_archive_list_state: ListState,
     pub(super) preview_archive_list_cache: RefCell<VirtualListSignatureCache>,
     pub(super) preview_stream: FileManagerPreviewStreamState,
@@ -427,6 +430,8 @@ impl Default for FileManagerState {
             preview_retired_images: RefCell::new(Vec::new()),
             preview_code_scroll: UniformListScrollHandle::new(),
             preview_markdown_scroll: MarkdownVirtualListScrollHandle::new(),
+            preview_document_scroll: ScrollHandle::new(),
+            preview_metadata_scroll: ScrollHandle::new(),
             // Archive previews can contain thousands of entries. Keep the file
             // rows on ListState instead of rebuilding the entire archive tree.
             preview_archive_list_state: ListState::new(
@@ -473,6 +478,8 @@ impl FileManagerState {
         self.preview_markdown_source = false;
         self.preview_code_scroll = UniformListScrollHandle::new();
         self.preview_markdown_scroll = MarkdownVirtualListScrollHandle::new();
+        self.preview_document_scroll = ScrollHandle::new();
+        self.preview_metadata_scroll = ScrollHandle::new();
         self.preview_stream = FileManagerPreviewStreamState::default();
         self.properties_checksum = None;
         self.properties_checksum_loading = false;
@@ -721,6 +728,81 @@ impl FileManagerState {
         changed
     }
 
+    fn blur_inline_inputs(&mut self) {
+        // Row interactions mirror the browser's input blur behavior without
+        // routing page-local focus state through WorkspaceApp.
+        if self.editing_path || self.focused_input == Some(FileManagerInput::Path) {
+            self.path_input = self.path.clone();
+            self.path_completion.dismiss();
+            self.editing_path = false;
+            self.focused_input = None;
+        } else if self.focused_input == Some(FileManagerInput::Filter) {
+            self.focused_input = None;
+        }
+    }
+
+    fn select_entry(
+        &mut self,
+        name: String,
+        modifiers: gpui::Modifiers,
+        visible_files: &[LocalFileEntry],
+    ) {
+        self.blur_inline_inputs();
+        if modifiers.shift {
+            let anchor = self.last_selected.clone().unwrap_or_else(|| name.clone());
+            let start = visible_files
+                .iter()
+                .position(|file| file.name == anchor)
+                .unwrap_or(0);
+            let end = visible_files
+                .iter()
+                .position(|file| file.name == name)
+                .unwrap_or(start);
+            self.selected.clear();
+            for file in &visible_files[start.min(end)..=start.max(end)] {
+                self.selected.insert(file.name.clone());
+            }
+        } else if modifiers.platform || modifiers.control {
+            if !self.selected.insert(name.clone()) {
+                self.selected.remove(&name);
+            }
+            self.last_selected = Some(name);
+        } else {
+            self.selected.clear();
+            self.selected.insert(name.clone());
+            self.last_selected = Some(name);
+        }
+    }
+
+    fn activate_entry(&mut self, entry: LocalFileEntry, cx: &mut Context<Self>) {
+        self.blur_inline_inputs();
+        self.clear_context_menu_immediately();
+        cx.emit(FileManagerWorkspaceEvent::OpenEntry(entry));
+        cx.notify();
+    }
+
+    fn open_context_menu(
+        &mut self,
+        file: Option<LocalFileEntry>,
+        x: f32,
+        y: f32,
+        cx: &mut Context<Self>,
+    ) {
+        self.blur_inline_inputs();
+        if let Some(file) = file.as_ref()
+            && crate::workspace::browser_behavior::preserve_or_move_context_selection(
+                &mut self.selected,
+                file.name.clone(),
+            )
+        {
+            self.last_selected = Some(file.name.clone());
+        }
+        self.context_menu_presence.reopen();
+        self.context_menu_exit_generation = None;
+        self.context_menu = Some(FileManagerContextMenu { file, x, y });
+        cx.notify();
+    }
+
     fn selected_names(&self) -> Vec<String> {
         self.selected.iter().cloned().collect()
     }
@@ -920,6 +1002,7 @@ fn file_manager_border(color: u32, has_background: bool) -> Rgba {
 mod tests {
     use super::*;
     use gpui::TestAppContext;
+    use std::sync::atomic::{AtomicBool, Ordering};
 
     fn cache_entry(name: &str) -> LocalFileEntry {
         LocalFileEntry {
@@ -965,6 +1048,43 @@ mod tests {
         assert!(!Arc::ptr_eq(&filtered, &refreshed));
         assert!(!Arc::ptr_eq(&filtered_rows, &refreshed_rows));
         assert_eq!(refreshed.len(), 2);
+    }
+
+    #[test]
+    fn file_row_selection_is_owned_by_file_manager_entity() {
+        let mut state = FileManagerState::default();
+        let visible = vec![cache_entry("alpha"), cache_entry("beta")];
+
+        state.select_entry("alpha".to_string(), gpui::Modifiers::default(), &visible);
+
+        assert_eq!(state.selected, HashSet::from(["alpha".to_string()]));
+        assert_eq!(state.last_selected.as_deref(), Some("alpha"));
+    }
+
+    #[gpui::test]
+    fn file_activation_emits_typed_workspace_intent(cx: &mut TestAppContext) {
+        let file_manager = cx.new(|_| FileManagerState::default());
+        let observed = Arc::new(AtomicBool::new(false));
+        let observed_event = observed.clone();
+        let _subscription = file_manager.update(cx, |_, cx| {
+            cx.subscribe(
+                &file_manager,
+                move |_, _, event: &FileManagerWorkspaceEvent, _cx| {
+                    if matches!(
+                        event,
+                        FileManagerWorkspaceEvent::OpenEntry(entry) if entry.name == "alpha"
+                    ) {
+                        observed_event.store(true, Ordering::Release);
+                    }
+                },
+            )
+        });
+
+        file_manager.update(cx, |file_manager, cx| {
+            file_manager.activate_entry(cache_entry("alpha"), cx);
+        });
+
+        assert!(observed.load(Ordering::Acquire));
     }
 
     #[gpui::test]
