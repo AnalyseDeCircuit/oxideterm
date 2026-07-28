@@ -21,6 +21,22 @@ pub struct NativeProcessPluginRuntime {
     host_call_handler: Option<PluginHostCallHandler>,
 }
 
+struct ProcessPluginRequestOwner(PluginRequest);
+
+impl std::ops::Deref for ProcessPluginRequestOwner {
+    type Target = PluginRequest;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl Drop for ProcessPluginRequestOwner {
+    fn drop(&mut self) {
+        self.0.zeroize_sensitive_host_call_args();
+    }
+}
+
 impl NativeProcessPluginRuntime {
     pub fn new(
         plugin_id: impl Into<String>,
@@ -146,7 +162,8 @@ impl NativeProcessPluginRuntime {
                 "Native plugin process stdin is not available",
             )
         })?;
-        let envelope = PluginProtocolEnvelope::new(Some(request.request_id.clone()), request);
+        let request = ProcessPluginRequestOwner(request);
+        let envelope = PluginProtocolEnvelope::new(Some(request.request_id.clone()), &*request);
         let mut line = Zeroizing::new(serde_json::to_vec(&envelope).map_err(|error| {
             PluginError::protocol(
                 "process_request_encode_failed",
@@ -273,22 +290,25 @@ impl NativeProcessPluginRuntime {
                     return Ok(response);
                 }
                 PluginProcessFrame::Outbound(message) => {
-                    if matches!(
-                        &message,
-                        PluginOutboundMessage::CallHostApi { namespace, .. }
-                            if namespace == "secrets"
-                    ) {
-                        // Secret calls are synchronous and intentionally do not
+                    if message.host_call_sensitivity().is_sensitive() {
+                        // Sensitive calls are synchronous and intentionally do not
                         // enter the raw-message or effect audit queues.
-                        let host_call_response = self.returnable_secret_host_call_response(message);
+                        let host_call_response =
+                            self.returnable_sensitive_host_call_response(message);
                         if let Some(response) = host_call_response {
                             self.write_process_host_call_response(response).await?;
                         }
                         continue;
                     }
+                    let supervisor_message = message.clone_public().ok_or_else(|| {
+                        PluginError::protocol(
+                            "sensitive_host_call_clone_rejected",
+                            "Sensitive host calls cannot enter the outbound audit path",
+                        )
+                    })?;
                     let effect = self
                         .supervisor
-                        .handle_outbound_message(message.clone())
+                        .handle_outbound_message(supervisor_message)
                         .map_err(|error| {
                             PluginError::protocol(
                                 "process_outbound_rejected",
@@ -328,7 +348,7 @@ impl NativeProcessPluginRuntime {
         })
     }
 
-    fn returnable_secret_host_call_response(
+    fn returnable_sensitive_host_call_response(
         &self,
         message: PluginOutboundMessage,
     ) -> Option<PluginResponse> {
@@ -342,7 +362,7 @@ impl NativeProcessPluginRuntime {
             return None;
         };
         let Some(handler) = self.host_call_handler.as_ref() else {
-            // No consumer may inherit a secret when the optional host-call
+            // No consumer may inherit sensitive arguments when the optional host-call
             // resolver is absent.
             let mut call = PluginHostCall {
                 request_id,
@@ -462,8 +482,30 @@ impl Drop for PluginHostResponseOwner {
     }
 }
 
+struct PluginProcessEnvelopeOwner {
+    envelope: PluginProtocolEnvelope<Value>,
+}
+
+impl PluginProcessEnvelopeOwner {
+    fn new(envelope: PluginProtocolEnvelope<Value>) -> Self {
+        Self { envelope }
+    }
+
+    fn take_payload(&mut self) -> Value {
+        std::mem::replace(&mut self.envelope.payload, Value::Null)
+    }
+}
+
+impl Drop for PluginProcessEnvelopeOwner {
+    fn drop(&mut self) {
+        // Parsed JSON owns allocations distinct from the already-zeroizing line.
+        // Clear them on version, shape, and typed decoding failures.
+        oxideterm_plugin_protocol::zeroize_json_value(&mut self.envelope.payload);
+    }
+}
+
 #[derive(Debug, PartialEq)]
-enum PluginProcessFrame {
+pub(super) enum PluginProcessFrame {
     Response {
         envelope_request_id: Option<String>,
         response: PluginResponse,
@@ -471,36 +513,42 @@ enum PluginProcessFrame {
     Outbound(PluginOutboundMessage),
 }
 
-fn decode_process_output_frame(line: &str) -> Result<PluginProcessFrame, PluginError> {
+pub(super) fn decode_process_output_frame(line: &str) -> Result<PluginProcessFrame, PluginError> {
     let envelope: PluginProtocolEnvelope<Value> = serde_json::from_str(line).map_err(|error| {
         PluginError::protocol(
             "process_output_decode_failed",
             format!("Cannot decode native plugin process output: {error}"),
         )
     })?;
-    envelope.validate_version()?;
+    let mut envelope = PluginProcessEnvelopeOwner::new(envelope);
+    envelope.envelope.validate_version()?;
 
     // The stdio transport is line-oriented and intentionally keeps response
     // frames and spontaneous plugin->host frames in the same versioned envelope.
     // That matches Tauri's activate-time ctx registration semantics without
     // allowing arbitrary JS callbacks to run inside native render paths.
-    if envelope.payload.get("result").is_some() && envelope.payload.get("requestId").is_some() {
+    if envelope.envelope.payload.get("result").is_some()
+        && envelope.envelope.payload.get("requestId").is_some()
+    {
         let response =
-            serde_json::from_value::<PluginResponse>(envelope.payload).map_err(|error| {
+            serde_json::from_value::<PluginResponse>(envelope.take_payload()).map_err(|error| {
                 PluginError::protocol(
                     "process_response_decode_failed",
                     format!("Cannot decode native plugin response: {error}"),
                 )
             })?;
         return Ok(PluginProcessFrame::Response {
-            envelope_request_id: envelope.request_id,
+            envelope_request_id: std::mem::take(&mut envelope.envelope.request_id),
             response,
         });
     }
 
-    if envelope.payload.get("type").is_some() {
-        let message =
-            serde_json::from_value::<PluginOutboundMessage>(envelope.payload).map_err(|error| {
+    if envelope.envelope.payload.get("type").is_some() {
+        if let Some(message) = take_sensitive_host_call_message(&mut envelope.envelope.payload)? {
+            return Ok(PluginProcessFrame::Outbound(message));
+        }
+        let message = serde_json::from_value::<PluginOutboundMessage>(envelope.take_payload())
+            .map_err(|error| {
                 PluginError::protocol(
                     "process_outbound_decode_failed",
                     format!("Cannot decode native plugin outbound frame: {error}"),
@@ -513,4 +561,49 @@ fn decode_process_output_frame(line: &str) -> Result<PluginProcessFrame, PluginE
         "process_output_unknown_payload",
         "Native plugin process output is neither a response nor an outbound message",
     ))
+}
+
+fn take_sensitive_host_call_message(
+    payload: &mut Value,
+) -> Result<Option<PluginOutboundMessage>, PluginError> {
+    let Some(fields) = payload.as_object_mut() else {
+        return Ok(None);
+    };
+    if fields.get("type").and_then(Value::as_str) != Some("callHostApi") {
+        return Ok(None);
+    }
+    let namespace = fields.get("namespace").and_then(Value::as_str);
+    let method = fields.get("method").and_then(Value::as_str);
+    let sensitivity = match (namespace, method) {
+        (Some(namespace), Some(method)) => PluginHostCallSensitivity::classify(namespace, method),
+        _ => {
+            return Err(PluginError::protocol(
+                "process_outbound_decode_failed",
+                "Cannot decode native plugin host call without string namespace and method",
+            ));
+        }
+    };
+    if !sensitivity.is_sensitive() {
+        return Ok(None);
+    }
+
+    let request_id = fields
+        .get("requestId")
+        .and_then(Value::as_str)
+        .ok_or_else(|| {
+            PluginError::protocol(
+                "process_outbound_decode_failed",
+                "Cannot decode sensitive native plugin host call without string requestId",
+            )
+        })?;
+    let request_id = request_id.to_string();
+    let namespace = namespace.unwrap_or_default().to_string();
+    let method = method.unwrap_or_default().to_string();
+    let args = fields.remove("args").unwrap_or(Value::Null);
+    Ok(Some(PluginOutboundMessage::CallHostApi {
+        request_id,
+        namespace,
+        method,
+        args,
+    }))
 }

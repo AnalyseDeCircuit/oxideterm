@@ -82,8 +82,10 @@ fn read_password_from_stdin() -> CliResult<Zeroizing<String>> {
 }
 
 fn write_launch_request(launch: &TemporarySshLaunch) -> CliResult<PathBuf> {
-    let bytes = serde_json::to_vec(launch)
-        .map_err(|error| CliError::new("ssh_launch_serialize_failed", error.to_string(), false))?;
+    let bytes =
+        Zeroizing::new(serde_json::to_vec(launch).map_err(|error| {
+            CliError::new("ssh_launch_serialize_failed", error.to_string(), false)
+        })?);
     let path = unique_launch_path();
     let mut options = OpenOptions::new();
     options.write(true).create_new(true);

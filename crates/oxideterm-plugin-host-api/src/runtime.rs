@@ -28,10 +28,10 @@ use zeroize::{Zeroize, Zeroizing};
 
 use oxideterm_plugin_manifest::NativePluginManifest;
 pub use oxideterm_plugin_protocol::{
-    PluginActivateRequest, PluginError, PluginEvent, PluginHostCall, PluginOutboundEffect,
-    PluginOutboundMessage, PluginPermissionSet, PluginProtocolEnvelope, PluginRegistration,
-    PluginRegistrationKind, PluginRequest, PluginRequestKind, PluginResponse, PluginResponseResult,
-    PluginRuntimeHealth, PluginRuntimeSupervisorState,
+    PluginActivateRequest, PluginError, PluginEvent, PluginHostCall, PluginHostCallSensitivity,
+    PluginOutboundEffect, PluginOutboundMessage, PluginPermissionSet, PluginProtocolEnvelope,
+    PluginRegistration, PluginRegistrationKind, PluginRequest, PluginRequestKind, PluginResponse,
+    PluginResponseResult, PluginRuntimeHealth, PluginRuntimeSupervisorState,
 };
 use oxideterm_plugin_registry::validate_plugin_relative_path;
 
@@ -547,6 +547,8 @@ use permissions::{
     validate_outbound_message_permissions,
 };
 pub use process::NativeProcessPluginRuntime;
+#[cfg(test)]
+use process::{PluginProcessFrame, decode_process_output_frame};
 pub use sidecar_wasm::{
     NativeSidecarWasmPluginRuntime, installed_wasm_sidecar_binary_path, wasm_sidecar_install_dir,
 };

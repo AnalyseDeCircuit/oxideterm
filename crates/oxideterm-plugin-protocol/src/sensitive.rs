@@ -4,7 +4,29 @@
 use serde_json::Value;
 use zeroize::Zeroize;
 
-pub(crate) fn zeroize_json_value(value: &mut Value) {
+/// Classifies host calls whose arguments may contain plaintext credentials.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum PluginHostCallSensitivity {
+    Public,
+    Sensitive,
+}
+
+impl PluginHostCallSensitivity {
+    pub fn classify(namespace: &str, method: &str) -> Self {
+        match (namespace, method) {
+            ("secrets", _) | ("sync", "exportOxide" | "previewImport" | "importOxide") => {
+                Self::Sensitive
+            }
+            _ => Self::Public,
+        }
+    }
+
+    pub fn is_sensitive(self) -> bool {
+        matches!(self, Self::Sensitive)
+    }
+}
+
+pub fn zeroize_json_value(value: &mut Value) {
     match value {
         Value::String(secret) => secret.zeroize(),
         Value::Array(values) => {
@@ -23,4 +45,29 @@ pub(crate) fn zeroize_json_value(value: &mut Value) {
         Value::Null | Value::Bool(_) | Value::Number(_) => {}
     }
     *value = Value::Null;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn classifies_all_credential_bearing_host_calls() {
+        for (namespace, method) in [
+            ("secrets", "get"),
+            ("secrets", "set"),
+            ("sync", "exportOxide"),
+            ("sync", "previewImport"),
+            ("sync", "importOxide"),
+        ] {
+            assert!(
+                PluginHostCallSensitivity::classify(namespace, method).is_sensitive(),
+                "{namespace}.{method} must use sensitive transport ownership"
+            );
+        }
+        assert_eq!(
+            PluginHostCallSensitivity::classify("sync", "validateOxide"),
+            PluginHostCallSensitivity::Public
+        );
+    }
 }

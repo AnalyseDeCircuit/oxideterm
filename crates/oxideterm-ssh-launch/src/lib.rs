@@ -14,7 +14,7 @@ use zeroize::Zeroizing;
 /// Default port used by temporary SSH launch targets.
 pub const DEFAULT_SSH_PORT: u16 = 22;
 
-#[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Eq, PartialEq, Serialize, Deserialize)]
 pub struct TemporarySshLaunch {
     pub username: String,
     pub host: String,

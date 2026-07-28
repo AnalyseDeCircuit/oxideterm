@@ -6,7 +6,7 @@ use std::fmt;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::sensitive::zeroize_json_value;
+use crate::sensitive::{PluginHostCallSensitivity, zeroize_json_value};
 
 #[derive(PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -19,9 +19,13 @@ pub struct PluginHostCall {
 }
 
 impl PluginHostCall {
+    pub fn sensitivity(&self) -> PluginHostCallSensitivity {
+        PluginHostCallSensitivity::classify(&self.namespace, &self.method)
+    }
+
     pub fn zeroize_args(&mut self) {
-        // Secret handlers call this at their ownership boundary after moving
-        // any value needed by the key store out of the JSON object.
+        // Sensitive handlers call this at their ownership boundary after moving
+        // any value needed by the backend out of the JSON object.
         zeroize_json_value(&mut self.args);
     }
 }
@@ -33,7 +37,7 @@ impl fmt::Debug for PluginHostCall {
             .field("request_id", &self.request_id)
             .field("namespace", &self.namespace)
             .field("method", &self.method);
-        if self.namespace == "secrets" {
+        if self.sensitivity().is_sensitive() {
             debug.field("args", &"<redacted>");
         } else {
             debug.field("args", &self.args);
@@ -53,6 +57,21 @@ mod tests {
             namespace: "secrets".to_string(),
             method: "set".to_string(),
             args: serde_json::json!({ "key": "token", "value": "sensitive-value" }),
+        };
+
+        let rendered = format!("{call:?}");
+
+        assert!(rendered.contains("<redacted>"));
+        assert!(!rendered.contains("sensitive-value"));
+    }
+
+    #[test]
+    fn sync_password_host_call_debug_redacts_arguments() {
+        let call = PluginHostCall {
+            request_id: "sync-1".to_string(),
+            namespace: "sync".to_string(),
+            method: "importOxide".to_string(),
+            args: serde_json::json!({ "password": "sensitive-value" }),
         };
 
         let rendered = format!("{call:?}");

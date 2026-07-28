@@ -6,9 +6,13 @@ use std::fmt;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::{error::PluginError, event::PluginEvent};
+use crate::{
+    error::PluginError,
+    event::PluginEvent,
+    sensitive::{PluginHostCallSensitivity, zeroize_json_value},
+};
 
-#[derive(Clone, PartialEq, Serialize, Deserialize)]
+#[derive(PartialEq, Serialize, Deserialize)]
 #[serde(
     tag = "type",
     rename_all = "camelCase",
@@ -42,6 +46,69 @@ pub enum PluginOutboundMessage {
         method: String,
         args: Value,
     },
+}
+
+impl PluginOutboundMessage {
+    pub fn host_call_sensitivity(&self) -> PluginHostCallSensitivity {
+        match self {
+            Self::CallHostApi {
+                namespace, method, ..
+            } => PluginHostCallSensitivity::classify(namespace, method),
+            _ => PluginHostCallSensitivity::Public,
+        }
+    }
+
+    pub fn zeroize_sensitive_host_call_args(&mut self) {
+        if !self.host_call_sensitivity().is_sensitive() {
+            return;
+        }
+        if let Self::CallHostApi { args, .. } = self {
+            zeroize_json_value(args);
+        }
+    }
+
+    pub fn clone_public(&self) -> Option<Self> {
+        if self.host_call_sensitivity().is_sensitive() {
+            return None;
+        }
+        Some(match self {
+            Self::RegisterContribution { registration } => Self::RegisterContribution {
+                registration: registration.clone(),
+            },
+            Self::DisposeContribution { registration_id } => Self::DisposeContribution {
+                registration_id: registration_id.clone(),
+            },
+            Self::Log { level, message } => Self::Log {
+                level: *level,
+                message: message.clone(),
+            },
+            Self::ReportProgress {
+                registration_id,
+                value,
+            } => Self::ReportProgress {
+                registration_id: registration_id.clone(),
+                value: value.clone(),
+            },
+            Self::RuntimeReady => Self::RuntimeReady,
+            Self::RuntimeError { error } => Self::RuntimeError {
+                error: error.clone(),
+            },
+            Self::EmitEvent { event } => Self::EmitEvent {
+                event: event.clone(),
+            },
+            Self::CallHostApi {
+                request_id,
+                namespace,
+                method,
+                args,
+            } => Self::CallHostApi {
+                request_id: request_id.clone(),
+                namespace: namespace.clone(),
+                method: method.clone(),
+                args: args.clone(),
+            },
+        })
+    }
 }
 
 impl fmt::Debug for PluginOutboundMessage {
@@ -88,7 +155,7 @@ impl fmt::Debug for PluginOutboundMessage {
                     .field("request_id", request_id)
                     .field("namespace", namespace)
                     .field("method", method);
-                if namespace == "secrets" {
+                if PluginHostCallSensitivity::classify(namespace, method).is_sensitive() {
                     debug.field("args", &"<redacted>");
                 } else {
                     debug.field("args", args);
@@ -162,5 +229,18 @@ mod tests {
 
         assert!(rendered.contains("<redacted>"));
         assert!(!rendered.contains("sensitive-value"));
+    }
+
+    #[test]
+    fn sync_password_host_call_cannot_use_public_clone_path() {
+        let message = PluginOutboundMessage::CallHostApi {
+            request_id: "sync-1".to_string(),
+            namespace: "sync".to_string(),
+            method: "exportOxide".to_string(),
+            args: serde_json::json!({ "password": "sensitive-value" }),
+        };
+
+        assert!(message.clone_public().is_none());
+        assert!(!format!("{message:?}").contains("sensitive-value"));
     }
 }

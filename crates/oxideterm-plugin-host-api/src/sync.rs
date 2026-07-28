@@ -141,14 +141,17 @@ pub fn native_plugin_settings_revision_map(
 }
 
 pub fn native_plugin_sync_import_oxide_args(
-    args: &Value,
+    args: &mut Value,
 ) -> Result<(Vec<u8>, Zeroizing<String>, NativePluginOxideImportOptions), String> {
     let bytes = native_plugin_file_data_arg(args)?;
     let password = args
-        .get("password")
-        .and_then(Value::as_str)
-        .ok_or_else(|| "sync.importOxide requires args.password".to_string())
-        .map(|password| Zeroizing::new(password.to_string()))?;
+        .as_object_mut()
+        .and_then(|fields| fields.get_mut("password"))
+        .ok_or_else(|| "sync.importOxide requires args.password".to_string())?;
+    let Value::String(password) = std::mem::replace(password, Value::Null) else {
+        return Err("sync.importOxide requires args.password".to_string());
+    };
+    let password = Zeroizing::new(password);
     let conflict_strategy =
         ImportConflictStrategy::parse(args.get("conflictStrategy").and_then(Value::as_str))
             .map_err(|error| error.to_string())?;

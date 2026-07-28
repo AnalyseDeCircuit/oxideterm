@@ -15,8 +15,8 @@ pub(super) fn install_process_host_call_handler(
     runtime.set_host_call_handler(Box::new(move |mut call| {
         if !host_api_allowed(&permissions, &call.namespace, &call.method) {
             let request_id = std::mem::take(&mut call.request_id);
-            if call.namespace == "secrets" {
-                // Rejected secret calls still own process-provided JSON and
+            if call.sensitivity().is_sensitive() {
+                // Rejected sensitive calls still own process-provided JSON and
                 // must clear it before returning the permission error.
                 call.zeroize_args();
             }
@@ -237,7 +237,7 @@ mod tests {
             },
         };
         let error = validate_outbound_message_permissions(
-            &[message.clone()],
+            &[message.clone_public().unwrap()],
             &PluginPermissionSet {
                 capabilities: vec![NATIVE_PLUGIN_CAPABILITY_TERMINAL_CONTENT_READ.to_string()],
                 allowed_host_apis: Vec::new(),
@@ -275,7 +275,7 @@ mod tests {
                 },
             };
             let error = validate_outbound_message_permissions(
-                &[message.clone()],
+                &[message.clone_public().unwrap()],
                 &PluginPermissionSet::default(),
             )
             .unwrap_err();

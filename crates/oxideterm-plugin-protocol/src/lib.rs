@@ -28,4 +28,5 @@ pub use permissions::PluginPermissionSet;
 pub use request::{PluginActivateRequest, PluginRequest, PluginRequestKind};
 pub use response::{PluginResponse, PluginResponseResult};
 pub use runtime_state::{PluginRuntimeHealth, PluginRuntimeLifecycleState, PluginRuntimeLogEntry};
+pub use sensitive::{PluginHostCallSensitivity, zeroize_json_value};
 pub use supervisor::{PluginOutboundEffect, PluginRuntimeSupervisorState};
