@@ -647,6 +647,45 @@ impl WorkspaceApp {
                 }
                 cx.notify();
             }
+            SettingsWorkspaceEvent::ThemeImportReady => {
+                let results =
+                    settings.update(cx, |settings, _cx| settings.take_theme_import_results());
+                for result in results {
+                    match result {
+                        ThemeImportResult::Imported {
+                            theme_id,
+                            name,
+                            value,
+                        } => {
+                            // The identifier is persisted both as the map key
+                            // and as the active theme, requiring two owners.
+                            let selected_theme_id = theme_id.clone();
+                            self.edit_settings(
+                                move |settings| {
+                                    settings.custom_themes.insert(theme_id, value);
+                                    settings.terminal.theme = selected_theme_id;
+                                },
+                                cx,
+                            );
+                            self.send_settings_notice(
+                                self.i18n
+                                    .t("settings_view.appearance.theme_import_success")
+                                    .replace("{{name}}", &name),
+                                TerminalNoticeVariant::Success,
+                            );
+                        }
+                        ThemeImportResult::Failed(error) => {
+                            self.send_settings_notice(
+                                self.i18n
+                                    .t("settings_view.appearance.theme_import_error")
+                                    .replace("{{error}}", &error),
+                                TerminalNoticeVariant::Error,
+                            );
+                        }
+                    }
+                }
+                cx.notify();
+            }
             SettingsWorkspaceEvent::PortablePasswordChangeFinished { success } => {
                 if *success {
                     self.push_ai_settings_toast(

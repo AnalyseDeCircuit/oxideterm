@@ -1702,46 +1702,16 @@ impl WorkspaceApp {
                 self.i18n.t("settings_view.appearance.theme_import"),
             )),
         });
-        cx.spawn(async move |weak, cx| {
+        let selection = async move {
             let Ok(Ok(Some(paths))) = receiver.await else {
-                return;
+                return None;
             };
-            let Some(path) = paths.into_iter().next() else {
-                return;
-            };
-            let result = fs::read_to_string(&path)
-                .map_err(|err| err.to_string())
-                .and_then(|contents| import_custom_theme(&contents));
-            let _ = weak.update(cx, |this, cx| match result {
-                Ok((theme_id, name, value)) => {
-                    let selected_theme_id = theme_id.clone();
-                    this.edit_settings(
-                        move |settings| {
-                            settings
-                                .custom_themes
-                                .insert(theme_id.clone(), value.clone());
-                            settings.terminal.theme = selected_theme_id;
-                        },
-                        cx,
-                    );
-                    this.send_settings_notice(
-                        this.i18n
-                            .t("settings_view.appearance.theme_import_success")
-                            .replace("{{name}}", &name),
-                        TerminalNoticeVariant::Success,
-                    );
-                }
-                Err(error) => {
-                    this.send_settings_notice(
-                        this.i18n
-                            .t("settings_view.appearance.theme_import_error")
-                            .replace("{{error}}", &error),
-                        TerminalNoticeVariant::Error,
-                    );
-                }
-            });
-        })
-        .detach();
+            paths.into_iter().next()
+        };
+        let runtime = self.forwarding_runtime.handle().clone();
+        self.settings_workspace.update(cx, |settings, cx| {
+            settings.start_theme_import(selection, runtime, cx);
+        });
     }
 
     pub(in crate::workspace) fn send_settings_notice(

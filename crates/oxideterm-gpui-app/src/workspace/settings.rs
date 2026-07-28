@@ -26,12 +26,11 @@ use oxideterm_settings_model::{
     ai_update_provider, app_ui_colors_to_colors, apply_cloud_sync_form_input_draft,
     apply_persisted_settings_input_draft, cloud_sync_form_input_value, current_time_millis,
     custom_theme_display_name, delete_custom_theme_from_settings, editor_terminal_theme,
-    editor_ui_colors, import_custom_theme, import_knowledge_file, is_custom_theme_id,
-    parse_color_hex, persisted_settings_input_value, plugin_setting_draft_to_value,
-    plugin_setting_input_value, reconnect_attempt_label, reconnect_base_delay_options,
-    reconnect_delay_label, reconnect_max_attempt_options, reconnect_max_delay_options,
-    save_theme_editor_to_settings, set_ai_user_context_window, settings_multiline_line_ranges,
-    settings_multiline_line_selection,
+    editor_ui_colors, import_knowledge_file, is_custom_theme_id, parse_color_hex,
+    persisted_settings_input_value, plugin_setting_draft_to_value, plugin_setting_input_value,
+    reconnect_attempt_label, reconnect_base_delay_options, reconnect_delay_label,
+    reconnect_max_attempt_options, reconnect_max_delay_options, save_theme_editor_to_settings,
+    set_ai_user_context_window, settings_multiline_line_ranges, settings_multiline_line_selection,
     settings_section_list_identity as settings_model_section_list_identity,
     settings_section_list_item_count as settings_model_section_list_item_count,
     terminal_theme_to_colors, theme_editor_from_settings, toggle_string_set,
@@ -176,7 +175,7 @@ pub(in crate::workspace) use entity::{
     ManagedKeyDialogSnapshot, NetworkProxyPasswordSnapshot, NetworkProxyTestSnapshot,
     PortablePasswordDialogSnapshot, PortableStatusRefresh, PrivilegeCredentialDraft,
     PrivilegeCredentialSnapshot, SettingsWorkspaceEntity, SettingsWorkspaceEvent,
-    SettingsWorkspaceToast, SshConfigImportSnapshot,
+    SettingsWorkspaceToast, SshConfigImportSnapshot, ThemeImportResult,
 };
 mod general_terminal_pages;
 pub(in crate::workspace) use general_terminal_pages::SETTINGS_TERMINAL_CUSTOM_FONT_INPUT_WIDTH;

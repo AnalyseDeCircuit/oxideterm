@@ -170,6 +170,15 @@ pub(in crate::workspace) enum BackgroundGalleryOperationResult {
     Failed,
 }
 
+pub(in crate::workspace) enum ThemeImportResult {
+    Imported {
+        theme_id: String,
+        name: String,
+        value: serde_json::Value,
+    },
+    Failed(String),
+}
+
 /// Converts managed gallery paths once at the filesystem boundary.
 fn background_gallery_strings(settings_path: &Path) -> anyhow::Result<Vec<String>> {
     Ok(oxideterm_settings::list_background_images(settings_path)?
@@ -246,6 +255,8 @@ pub(in crate::workspace) struct SettingsWorkspaceEntity {
     background_images: Arc<[String]>,
     background_gallery_task: Option<Task<()>>,
     background_gallery_results: VecDeque<BackgroundGalleryOperationResult>,
+    theme_import_task: Option<Task<()>>,
+    theme_import_results: VecDeque<ThemeImportResult>,
     pub(super) native_update: NativeUpdateRuntime,
 }
 
@@ -267,6 +278,7 @@ pub(in crate::workspace) enum SettingsWorkspaceEvent {
     DataDirectoryOperationReady,
     BackgroundBlurCommitReady(i64),
     BackgroundGalleryOperationReady,
+    ThemeImportReady,
     PortablePasswordChangeFinished {
         success: bool,
     },
@@ -347,6 +359,8 @@ impl SettingsWorkspaceEntity {
             background_images: Arc::from([]),
             background_gallery_task: None,
             background_gallery_results: VecDeque::new(),
+            theme_import_task: None,
+            theme_import_results: VecDeque::new(),
             native_update: NativeUpdateRuntime::new(cx),
         }
     }
@@ -754,6 +768,66 @@ impl SettingsWorkspaceEntity {
         &mut self,
     ) -> VecDeque<BackgroundGalleryOperationResult> {
         std::mem::take(&mut self.background_gallery_results)
+    }
+
+    pub(in crate::workspace) fn start_theme_import(
+        &mut self,
+        selection: impl std::future::Future<Output = Option<PathBuf>> + 'static,
+        runtime: tokio::runtime::Handle,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if self.theme_import_task.is_some() {
+            return false;
+        }
+
+        self.theme_import_task = Some(cx.spawn(async move |settings, cx| {
+            let Some(path) = selection.await else {
+                let _ = settings.update(cx, |settings, cx| {
+                    settings.theme_import_task = None;
+                    cx.notify();
+                });
+                return;
+            };
+            let result = runtime
+                .spawn_blocking(move || {
+                    std::fs::read_to_string(path)
+                        .map_err(|error| error.to_string())
+                        .and_then(|contents| {
+                            oxideterm_settings_model::import_custom_theme(&contents)
+                        })
+                })
+                .await
+                .map_err(|error| error.to_string())
+                .and_then(|result| result);
+
+            let _ = settings.update(cx, |settings, cx| {
+                settings.theme_import_task = None;
+                match result {
+                    Ok((theme_id, name, value)) => {
+                        settings
+                            .theme_import_results
+                            .push_back(ThemeImportResult::Imported {
+                                theme_id,
+                                name,
+                                value,
+                            });
+                    }
+                    Err(error) => settings
+                        .theme_import_results
+                        .push_back(ThemeImportResult::Failed(error)),
+                }
+                cx.emit(SettingsWorkspaceEvent::ThemeImportReady);
+                cx.notify();
+            });
+        }));
+        cx.notify();
+        true
+    }
+
+    pub(in crate::workspace) fn take_theme_import_results(
+        &mut self,
+    ) -> VecDeque<ThemeImportResult> {
+        std::mem::take(&mut self.theme_import_results)
     }
 
     pub(in crate::workspace) fn portable_status_snapshot(&self) -> PortableStatusSnapshot {
@@ -1195,6 +1269,30 @@ mod tests {
                 entity.take_background_gallery_results().pop_front(),
                 Some(BackgroundGalleryOperationResult::Failed)
             ));
+        });
+    }
+
+    #[gpui::test]
+    fn theme_import_picker_and_worker_task_are_entity_owned(cx: &mut TestAppContext) {
+        let runtime = tokio::runtime::Runtime::new().expect("create theme import runtime");
+        let entity = cx.new(SettingsWorkspaceEntity::new);
+        entity.update(cx, |entity, cx| {
+            assert!(entity.start_theme_import(
+                std::future::ready(None),
+                runtime.handle().clone(),
+                cx,
+            ));
+            assert!(entity.theme_import_task.is_some());
+            assert!(!entity.start_theme_import(
+                std::future::ready(None),
+                runtime.handle().clone(),
+                cx,
+            ));
+        });
+        cx.run_until_parked();
+        entity.update(cx, |entity, _cx| {
+            assert!(entity.theme_import_task.is_none());
+            assert!(entity.take_theme_import_results().is_empty());
         });
     }
 }
