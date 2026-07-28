@@ -1273,6 +1273,11 @@ impl WorkspaceApp {
         input: SettingsInput,
         cx: &Context<Self>,
     ) -> String {
+        if input.is_secret() {
+            // Generic render/focus snapshots must never duplicate credentials.
+            // Secret owners expose masked views or move the draft at focus.
+            return String::new();
+        }
         let settings = self.settings_store.settings();
         if let Some(value) = persisted_settings_input_value(settings, input) {
             return value;

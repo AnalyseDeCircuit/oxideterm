@@ -649,16 +649,14 @@ impl ConnectionFlowEntity {
             .map(|challenge| challenge.focused_prompt)
     }
 
-    pub(in crate::workspace) fn keyboard_interactive_response(
-        &self,
-        index: usize,
-    ) -> Option<String> {
-        // GPUI's platform input API requires an owned value at this boundary.
+    pub(in crate::workspace) fn keyboard_interactive_response(&self, index: usize) -> Option<&str> {
+        // The IME adapter builds a masked platform projection while this
+        // Entity remains the only owner of the authentication response.
         self.keyboard_interactive_challenge
             .as_ref()?
             .responses
             .get(index)
-            .cloned()
+            .map(String::as_str)
     }
 
     pub(in crate::workspace) fn open_keyboard_interactive_challenge(

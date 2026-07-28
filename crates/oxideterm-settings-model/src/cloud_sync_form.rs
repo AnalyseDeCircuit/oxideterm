@@ -254,13 +254,6 @@ fn restore_touched_secret(
     *touched = true;
 }
 
-pub fn cloud_sync_form_input_value(
-    form: &CloudSyncFormDraft,
-    input: SettingsInput,
-) -> Option<String> {
-    cloud_sync_form_input_value_ref(form, input).map(str::to_owned)
-}
-
 pub fn cloud_sync_form_input_value_ref(
     form: &CloudSyncFormDraft,
     input: SettingsInput,
@@ -385,69 +378,6 @@ pub fn apply_cloud_sync_form_input_owned(
     Ok(())
 }
 
-pub fn apply_cloud_sync_form_input_draft(
-    form: &mut CloudSyncFormDraft,
-    input: SettingsInput,
-    draft: &str,
-) -> bool {
-    match input {
-        SettingsInput::CloudSyncEndpoint => form.endpoint = draft.to_string(),
-        SettingsInput::CloudSyncNamespace => form.namespace = draft.to_string(),
-        SettingsInput::CloudSyncS3Bucket => form.s3_bucket = draft.to_string(),
-        SettingsInput::CloudSyncS3Region => form.s3_region = draft.to_string(),
-        SettingsInput::CloudSyncGitRepository => form.git_repository = draft.to_string(),
-        SettingsInput::CloudSyncGitBranch => form.git_branch = draft.to_string(),
-        SettingsInput::CloudSyncGithubOauthClientId => {
-            form.github_oauth_client_id = draft.to_string();
-        }
-        SettingsInput::CloudSyncMicrosoftOauthClientId => {
-            form.microsoft_oauth_client_id = draft.to_string();
-        }
-        SettingsInput::CloudSyncGoogleOauthClientId => {
-            form.google_oauth_client_id = draft.to_string();
-        }
-        SettingsInput::CloudSyncAutoUploadInterval => {
-            form.auto_upload_interval_mins = draft.to_string();
-        }
-        SettingsInput::CloudSyncToken => {
-            // Secret fields track whether the user explicitly edited them so
-            // save can preserve untouched keychain values.
-            form.token = draft.to_string();
-            form.token_touched = true;
-        }
-        SettingsInput::CloudSyncGitToken => {
-            form.git_token = draft.to_string();
-            form.git_token_touched = true;
-        }
-        SettingsInput::CloudSyncBasicUsername => {
-            form.basic_username = draft.to_string();
-            form.basic_username_touched = true;
-        }
-        SettingsInput::CloudSyncBasicPassword => {
-            form.basic_password = draft.to_string();
-            form.basic_password_touched = true;
-        }
-        SettingsInput::CloudSyncAccessKeyId => {
-            form.access_key_id = draft.to_string();
-            form.access_key_id_touched = true;
-        }
-        SettingsInput::CloudSyncSecretAccessKey => {
-            form.secret_access_key = draft.to_string();
-            form.secret_access_key_touched = true;
-        }
-        SettingsInput::CloudSyncSessionToken => {
-            form.session_token = draft.to_string();
-            form.session_token_touched = true;
-        }
-        SettingsInput::CloudSyncSyncPassword => {
-            form.sync_password = draft.to_string();
-            form.sync_password_touched = true;
-        }
-        _ => return false,
-    }
-    true
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -457,14 +387,15 @@ mod tests {
         let settings = CloudSyncSettings::default();
         let mut draft = CloudSyncFormDraft::from_settings(&settings);
 
-        assert!(apply_cloud_sync_form_input_draft(
+        apply_cloud_sync_form_input_owned(
             &mut draft,
             SettingsInput::CloudSyncToken,
-            "token"
-        ));
+            "token".to_string(),
+        )
+        .expect("cloud sync token input");
 
         assert_eq!(
-            cloud_sync_form_input_value(&draft, SettingsInput::CloudSyncToken).as_deref(),
+            cloud_sync_form_input_value_ref(&draft, SettingsInput::CloudSyncToken),
             Some("token")
         );
         assert!(draft.token_touched);

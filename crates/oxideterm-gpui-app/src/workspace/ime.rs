@@ -1,4 +1,4 @@
-use std::{cell::RefCell, collections::HashMap, ops::Range, rc::Rc, time::Instant};
+use std::{cell::RefCell, collections::HashMap, fmt, ops::Range, rc::Rc, time::Instant};
 
 use gpui::{
     App, Bounds, ClipboardItem, Context, Element, ElementId, Entity, FocusHandle, GlobalElementId,
@@ -31,6 +31,7 @@ use oxideterm_gpui_ui::{
         TextInputAnchor, TextInputAnchorId, TextInputContentAlign, text_input_secret_mask,
     },
 };
+use zeroize::{Zeroize, Zeroizing};
 
 const READ_ONLY_TEXT_EM_WIDTH: f32 = 16.0;
 const READ_ONLY_TEXT_LINE_HEIGHT_ESTIMATE: f32 = 28.0;
@@ -53,6 +54,14 @@ fn secret_ime_proxy(secret: &str) -> String {
         .collect()
 }
 
+fn ime_text_snapshot(target: WorkspaceImeTarget, value: &str) -> String {
+    if ime_target_is_secret(target) {
+        secret_ime_proxy(value)
+    } else {
+        value.to_owned()
+    }
+}
+
 fn session_manager_ime_text(
     session_manager: &SessionManagerState,
     input: SessionManagerInput,
@@ -61,11 +70,10 @@ fn session_manager_ime_text(
         return None;
     }
     let value = session_manager.input_value(input)?;
-    if input.is_secret() {
-        Some(secret_ime_proxy(value))
-    } else {
-        Some(value.to_string())
-    }
+    Some(ime_text_snapshot(
+        WorkspaceImeTarget::SessionManager(input),
+        value,
+    ))
 }
 
 /// Shares layout-only text input anchors without retaining the workspace entity.
@@ -398,27 +406,58 @@ pub(super) struct WorkspaceImeDragSelection {
     anchor: usize,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Eq, PartialEq)]
 pub(super) struct PendingPlatformTextCommit {
     target: WorkspaceImeTarget,
-    text: String,
+    text: Zeroizing<String>,
     generation: u64,
     consumed: bool,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+impl fmt::Debug for PendingPlatformTextCommit {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("PendingPlatformTextCommit")
+            .field("target", &self.target)
+            .field("text", &"<redacted>")
+            .field("generation", &self.generation)
+            .field("consumed", &self.consumed)
+            .finish()
+    }
+}
+
+#[derive(Eq, PartialEq)]
 pub(super) struct WorkspaceImeMarkedText {
     // IME marked text is rendered in a virtual text buffer but commits into the
     // original value range that was selected when composition started.
     target: WorkspaceImeTarget,
     replacement_range: Range<usize>,
-    text: String,
+    text: Zeroizing<String>,
+}
+
+impl fmt::Debug for WorkspaceImeMarkedText {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("WorkspaceImeMarkedText")
+            .field("target", &self.target)
+            .field("replacement_range", &self.replacement_range)
+            .field("text", &"<redacted>")
+            .finish()
+    }
 }
 
 impl WorkspaceImeMarkedText {
     fn virtual_range(&self) -> Range<usize> {
         let marked_len = self.text.encode_utf16().count();
         self.replacement_range.start..self.replacement_range.start + marked_len
+    }
+
+    fn replace(&mut self, replacement_range: Range<usize>, text: &str) {
+        // Reuse the composition allocation only after clearing its previous
+        // contents, so repeated IME updates do not leave stale secret bytes.
+        self.text.zeroize();
+        self.text.push_str(text);
+        self.replacement_range = replacement_range;
     }
 }
 
@@ -685,11 +724,21 @@ impl InputHandler for WorkspaceInputHandler {
             }
             let replacement_range =
                 view.marked_text_replacement_range_for_platform_range(target, range_utf16, cx);
-            view.ime_marked_text = Some(WorkspaceImeMarkedText {
-                target,
-                replacement_range: replacement_range.clone(),
-                text: new_text.to_string(),
-            });
+            if let Some(marked) = view
+                .ime_marked_text
+                .as_mut()
+                .filter(|marked| marked.target == target)
+            {
+                marked.replace(replacement_range.clone(), new_text);
+            } else {
+                view.ime_marked_text = Some(WorkspaceImeMarkedText {
+                    target,
+                    replacement_range: replacement_range.clone(),
+                    // Composition may contain a password or token. The marked
+                    // owner zeroizes it on replacement, cancellation, or release.
+                    text: Zeroizing::new(new_text.to_string()),
+                });
+            }
             view.set_ime_selection_from_anchor(
                 target,
                 replacement_range.start,
@@ -767,7 +816,9 @@ impl WorkspaceApp {
             self.next_platform_text_commit_generation.wrapping_add(1);
         self.pending_platform_text_commit = Some(PendingPlatformTextCommit {
             target,
-            text: text.to_string(),
+            // The duplicate marker survives one event turn and therefore owns
+            // a zeroizing copy regardless of the active input classification.
+            text: Zeroizing::new(text.to_string()),
             generation,
             consumed: false,
         });
@@ -1487,10 +1538,11 @@ impl WorkspaceApp {
         let target = self.active_ime_target(cx)?;
         let mut text = self.text_for_ime_target(target, cx)?;
         if let Some(marked) = self.marked_text_state_for_target(target, cx) {
+            let marked_projection = ime_text_snapshot(target, &marked.text);
             replace_utf16(
                 &mut text,
                 Some(marked.replacement_range.clone()),
-                &marked.text,
+                &marked_projection,
             );
         }
         Some(text)
@@ -1551,7 +1603,7 @@ impl WorkspaceApp {
             return 0;
         }
 
-        if self.ime_target_is_secret(target) {
+        if ime_target_is_secret(target) {
             return self.secret_ime_index_for_relative_x(target, text, relative_x, window);
         }
 
@@ -1617,23 +1669,6 @@ impl WorkspaceApp {
             }
             _ => tauri_ui_font_family(&self.settings_store.settings().appearance.ui_font_family),
         }
-    }
-
-    fn ime_target_is_secret(&self, target: WorkspaceImeTarget) -> bool {
-        matches!(
-            target,
-            WorkspaceImeTarget::NewConnection(
-                NewConnectionField::Password
-                    | NewConnectionField::Passphrase
-                    | NewConnectionField::JumpPassword
-                    | NewConnectionField::JumpPassphrase
-            ) | WorkspaceImeTarget::KeyboardInteractive(_)
-        ) || matches!(target, WorkspaceImeTarget::Settings(input) if input.is_secret())
-            || matches!(target, WorkspaceImeTarget::SessionManager(input) if input.is_secret())
-            || matches!(
-                target,
-                WorkspaceImeTarget::PluginControl { secret: true, .. }
-            )
     }
 
     fn text_for_ime_target(&self, target: WorkspaceImeTarget, cx: &App) -> Option<String> {
@@ -1715,8 +1750,7 @@ impl WorkspaceApp {
                 .read(cx)
                 .ui
                 .input_value(HostToolsTextInput::TmuxDialog)
-                // GPUI's platform InputHandler requires an owned frame-boundary value.
-                .map(str::to_string),
+                .map(|value| ime_text_snapshot(target, value)),
             WorkspaceImeTarget::HostPortSearch => self
                 .host_tools
                 .read(cx)
@@ -1752,22 +1786,16 @@ impl WorkspaceApp {
                     self.settings_workspace
                         .read(cx)
                         .settings_entity_input_value(input)
-                        .map(str::to_owned)
+                        .map(|value| ime_text_snapshot(target, value))
                 } else if self.ai_entity.read(cx).focused_settings_input() == Some(input) {
-                    // GPUI's InputHandler requires an owned frame snapshot.
-                    // The Entity remains the sole persistent owner of the draft.
+                    // Platform IME receives only a length-preserving projection
+                    // for secrets; the Entity remains the sole plaintext owner.
                     self.ai_entity
                         .read(cx)
                         .settings_input_value(input)
-                        .map(str::to_owned)
+                        .map(|value| ime_text_snapshot(target, value))
                 } else if self.focused_settings_input == Some(input) {
-                    if input.is_secret() {
-                        // GPUI requires an owned IME snapshot. Preserve UTF-16
-                        // caret geometry without duplicating credential text.
-                        Some("•".repeat(self.settings_input_draft.encode_utf16().count()))
-                    } else {
-                        Some(self.settings_input_draft.clone())
-                    }
+                    Some(ime_text_snapshot(target, &self.settings_input_draft))
                 } else {
                     None
                 }
@@ -1827,7 +1855,11 @@ impl WorkspaceApp {
                 .then(|| self.ai.chat.editing_message_draft.clone()),
             WorkspaceImeTarget::PluginControl { key, .. } => self
                 .native_plugin_ui_control_is_visible(key, cx)
-                .then(|| self.plugin_ui_state(cx).text(key).map(str::to_string))
+                .then(|| {
+                    self.plugin_ui_state(cx)
+                        .text(key)
+                        .map(|value| ime_text_snapshot(target, value))
+                })
                 .flatten(),
             WorkspaceImeTarget::Sftp(input) => {
                 if self.sftp_view.read(cx).focused_input() == Some(input) {
@@ -1838,12 +1870,14 @@ impl WorkspaceApp {
             }
             WorkspaceImeTarget::NewConnection(field) => {
                 let form = self.connection_form_state(cx).form.as_ref()?;
-                new_connection_field_value(form, field).map(str::to_string)
+                new_connection_field_value(form, field)
+                    .map(|value| ime_text_snapshot(target, value))
             }
             WorkspaceImeTarget::KeyboardInteractive(index) => self
                 .connection_flow
                 .read(cx)
-                .keyboard_interactive_response(index),
+                .keyboard_interactive_response(index)
+                .map(|value| ime_text_snapshot(target, value)),
         }
     }
 
@@ -2118,6 +2152,11 @@ impl WorkspaceApp {
         };
         if ime_target_is_read_only(target) {
             return false;
+        }
+        if ime_target_is_secret(target) {
+            // Secret IME text is a geometry-only mask. Transposing that mask
+            // would overwrite the real owner with proxy characters.
+            return true;
         }
         let Some(text) = self.text_for_ime_target(target, cx) else {
             return false;
@@ -2926,6 +2965,25 @@ fn ime_target_is_read_only(target: WorkspaceImeTarget) -> bool {
     matches!(target, WorkspaceImeTarget::ReadOnlyText(_))
 }
 
+fn ime_target_is_secret(target: WorkspaceImeTarget) -> bool {
+    matches!(
+        target,
+        WorkspaceImeTarget::NewConnection(
+            NewConnectionField::Password
+                | NewConnectionField::Passphrase
+                | NewConnectionField::UpstreamProxyPassword
+                | NewConnectionField::JumpPassword
+                | NewConnectionField::JumpPassphrase
+        ) | WorkspaceImeTarget::KeyboardInteractive(_)
+            | WorkspaceImeTarget::HostTmuxDialogInput
+    ) || matches!(target, WorkspaceImeTarget::Settings(input) if input.is_secret())
+        || matches!(target, WorkspaceImeTarget::SessionManager(input) if input.is_secret())
+        || matches!(
+            target,
+            WorkspaceImeTarget::PluginControl { secret: true, .. }
+        )
+}
+
 fn ime_target_should_blink_caret(target: WorkspaceImeTarget) -> bool {
     !ime_target_is_read_only(target)
 }
@@ -3098,7 +3156,7 @@ fn platform_text_commit_is_duplicate(
     let Some(pending) = pending_commit.as_mut() else {
         return false;
     };
-    if pending.target != target || pending.text != text {
+    if pending.target != target || pending.text.as_str() != text {
         return false;
     }
     if pending.consumed {
@@ -3148,21 +3206,23 @@ fn path_completion_owns_vertical_navigation(
 #[cfg(test)]
 mod tests {
     use gpui::{Bounds, Keystroke, Modifiers, point, px, size};
+    use zeroize::{Zeroize, Zeroizing};
 
     use super::{
         CopyShortcutOwner, FileManagerInput, HostToolsPlainTextImeFrame, HostToolsTextInput,
-        PendingPlatformTextCommit, SettingsInput, SftpInput, TextInputAnchor, TextInputAnchorId,
-        TextInputAnchorStore, TextInputContentAlign, WorkspaceApp, WorkspaceCaretState,
-        WorkspaceCaretVisibility, WorkspaceImeMarkedText, WorkspaceImeTarget,
+        NewConnectionField, PendingPlatformTextCommit, SettingsInput, SftpInput, TextInputAnchor,
+        TextInputAnchorId, TextInputAnchorStore, TextInputContentAlign, WorkspaceApp,
+        WorkspaceCaretState, WorkspaceCaretVisibility, WorkspaceImeMarkedText, WorkspaceImeTarget,
         active_ime_should_defer_input_key, collapsed_copy_shortcut_is_owned_by_target,
         control_k_delete_end, copy_shortcut_owner_for_target,
         effective_platform_text_replacement_range, ime_target_accepts_newline,
-        ime_target_should_blink_caret, keystroke_commits_platform_text,
-        keystroke_uses_text_edit_modifier, line_end_for_utf16_offset, line_range_for_utf16_offset,
-        line_start_for_utf16_offset, next_utf16_boundary, next_word_boundary,
-        normalize_clipboard_text_for_ime_target, path_completion_owns_vertical_navigation,
-        platform_text_commit_is_duplicate, previous_utf16_boundary, previous_word_boundary,
-        secret_ime_proxy, soft_wrapped_line_ranges_utf16, transpose_text_at_utf16_offset,
+        ime_target_is_secret, ime_target_should_blink_caret, ime_text_snapshot,
+        keystroke_commits_platform_text, keystroke_uses_text_edit_modifier,
+        line_end_for_utf16_offset, line_range_for_utf16_offset, line_start_for_utf16_offset,
+        next_utf16_boundary, next_word_boundary, normalize_clipboard_text_for_ime_target,
+        path_completion_owns_vertical_navigation, platform_text_commit_is_duplicate,
+        previous_utf16_boundary, previous_word_boundary, secret_ime_proxy,
+        soft_wrapped_line_ranges_utf16, transpose_text_at_utf16_offset,
         utf16_offset_for_char_index, vertical_line_navigation_destination,
         word_range_for_utf16_offset, workspace_ime_target_for_plain_host_tools_input,
     };
@@ -3448,7 +3508,7 @@ mod tests {
     fn platform_text_commit_dedupes_only_same_deferred_key() {
         let mut pending = Some(PendingPlatformTextCommit {
             target: WorkspaceImeTarget::CommandPalette,
-            text: "a".to_string(),
+            text: Zeroizing::new("a".to_string()),
             generation: 7,
             consumed: false,
         });
@@ -3467,7 +3527,7 @@ mod tests {
 
         let mut next_key = Some(PendingPlatformTextCommit {
             target: WorkspaceImeTarget::CommandPalette,
-            text: "a".to_string(),
+            text: Zeroizing::new("a".to_string()),
             generation: 8,
             consumed: false,
         });
@@ -3482,7 +3542,7 @@ mod tests {
     fn platform_text_commit_does_not_dedupe_other_targets_or_text() {
         let mut pending = Some(PendingPlatformTextCommit {
             target: WorkspaceImeTarget::CommandPalette,
-            text: "a".to_string(),
+            text: Zeroizing::new("a".to_string()),
             generation: 1,
             consumed: true,
         });
@@ -3526,7 +3586,7 @@ mod tests {
         let marked = WorkspaceImeMarkedText {
             target: WorkspaceImeTarget::CommandPalette,
             replacement_range: 2..2,
-            text: "拼".to_string(),
+            text: Zeroizing::new("拼".to_string()),
         };
         let virtual_range = marked.virtual_range();
 
@@ -3578,6 +3638,79 @@ mod tests {
                 utf16_offset_for_char_index(secret, character_index)
             );
         }
+    }
+
+    #[test]
+    fn classified_secret_ime_targets_project_only_masked_utf16_geometry() {
+        let secret = "token密😄";
+        let targets = [
+            WorkspaceImeTarget::Settings(SettingsInput::AiProviderApiKey(0)),
+            WorkspaceImeTarget::NewConnection(NewConnectionField::Password),
+            WorkspaceImeTarget::NewConnection(NewConnectionField::UpstreamProxyPassword),
+            WorkspaceImeTarget::KeyboardInteractive(0),
+            WorkspaceImeTarget::HostTmuxDialogInput,
+            WorkspaceImeTarget::PluginControl {
+                key: 42,
+                secret: true,
+            },
+        ];
+
+        for target in targets {
+            assert!(ime_target_is_secret(target));
+            let projection = ime_text_snapshot(target, secret);
+            assert!(!projection.contains(secret));
+            assert_eq!(
+                projection.encode_utf16().count(),
+                secret.encode_utf16().count()
+            );
+        }
+        assert_eq!(
+            ime_text_snapshot(WorkspaceImeTarget::Search, secret),
+            secret
+        );
+    }
+
+    #[test]
+    fn platform_commit_and_marked_text_debug_are_redacted() {
+        let secret = "debug-secret";
+        let mut pending = PendingPlatformTextCommit {
+            target: WorkspaceImeTarget::Settings(SettingsInput::AiProviderApiKey(0)),
+            text: Zeroizing::new(secret.to_string()),
+            generation: 9,
+            consumed: false,
+        };
+        let marked = WorkspaceImeMarkedText {
+            target: pending.target,
+            replacement_range: 0..0,
+            text: Zeroizing::new(secret.to_string()),
+        };
+
+        assert!(!format!("{pending:?}").contains(secret));
+        assert!(!format!("{marked:?}").contains(secret));
+        assert!(format!("{pending:?}").contains("<redacted>"));
+        assert!(format!("{marked:?}").contains("<redacted>"));
+
+        pending.text.zeroize();
+        assert!(pending.text.is_empty());
+    }
+
+    #[test]
+    fn marked_text_replacement_and_release_clear_owned_secret() {
+        let mut marked = WorkspaceImeMarkedText {
+            target: WorkspaceImeTarget::KeyboardInteractive(0),
+            replacement_range: 0..0,
+            text: Zeroizing::new("old-composition-secret".to_string()),
+        };
+        let allocation = marked.text.as_ptr();
+
+        marked.replace(2..4, "新值");
+
+        assert_eq!(marked.replacement_range, 2..4);
+        assert_eq!(marked.text.as_str(), "新值");
+        assert_eq!(marked.text.as_ptr(), allocation);
+
+        marked.text.zeroize();
+        assert!(marked.text.is_empty());
     }
 
     #[test]
