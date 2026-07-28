@@ -36,6 +36,26 @@ pub struct ForwardingManager {
     port_scan_platform: Mutex<Option<RemotePortScanPlatform>>,
 }
 
+pub(crate) struct ForwardingStopBatch {
+    local_forwards: Vec<LocalForward>,
+    dynamic_forwards: Vec<DynamicForward>,
+    remote_forwards: Vec<RemoteForward>,
+}
+
+impl ForwardingStopBatch {
+    pub(crate) async fn stop(self) {
+        for forward in self.local_forwards {
+            let _ = forward.stop().await;
+        }
+        for forward in self.dynamic_forwards {
+            let _ = forward.stop().await;
+        }
+        for forward in self.remote_forwards {
+            let _ = forward.stop_best_effort().await;
+        }
+    }
+}
+
 impl ForwardingManager {
     pub fn new(session_id: impl Into<String>, ssh_connection: SshConnectionHandle) -> Self {
         Self::new_with_event_sender(session_id, ssh_connection, None)
@@ -471,7 +491,7 @@ impl ForwardingManager {
         }
     }
 
-    pub async fn stop_all(&self) {
+    pub(crate) fn begin_stop_all(&self) -> ForwardingStopBatch {
         // Tauri `stop_all` drains active handles without preserving them in
         // `stopped_forwards`; only explicit per-rule stop keeps a restartable
         // stopped row. Keep native's bulk stop destructive in the same way.
@@ -506,15 +526,15 @@ impl ForwardingManager {
             })
             .collect();
 
-        for forward in local_forwards {
-            let _ = forward.stop().await;
+        ForwardingStopBatch {
+            local_forwards,
+            dynamic_forwards,
+            remote_forwards,
         }
-        for forward in dynamic_forwards {
-            let _ = forward.stop().await;
-        }
-        for forward in remote_forwards {
-            let _ = forward.stop_best_effort().await;
-        }
+    }
+
+    pub async fn stop_all(&self) {
+        self.begin_stop_all().stop().await;
     }
 
     pub async fn suspend_all_and_save_rules(&self) -> Vec<ForwardRule> {

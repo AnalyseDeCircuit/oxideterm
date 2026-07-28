@@ -89,20 +89,44 @@ impl RemoteForward {
             .wait_zero(FORWARD_STOP_GRACE_PERIOD)
             .await;
 
-        let mut stopped = self.rule;
+        let mut stopped = self.rule.clone();
         stopped.status = ForwardStatus::Stopped;
         stopped
     }
 
     pub(crate) async fn stop_best_effort(self) -> ForwardRule {
-        if let Err(error) = self.cancel_on_server().await {
-            tracing::warn!(
-                "failed to cancel remote forward {}:{}: {error}",
-                self.rule.bind_address,
-                self.rule.bind_port
-            );
+        // Stop local routing first so a slow server cancellation cannot admit
+        // new forwarded channels during bounded session shutdown.
+        let _ = self.shutdown_tx.send(true);
+        self.router
+            .unregister(&self.rule.bind_address, self.rule.bind_port);
+        match tokio::time::timeout(FORWARD_STOP_GRACE_PERIOD, self.cancel_on_server()).await {
+            Ok(Ok(())) => {}
+            Ok(Err(error)) => {
+                tracing::warn!(
+                    "failed to cancel remote forward {}:{}: {error}",
+                    self.rule.bind_address,
+                    self.rule.bind_port
+                );
+            }
+            Err(_) => {
+                tracing::warn!(
+                    "timed out cancelling remote forward {}:{}",
+                    self.rule.bind_address,
+                    self.rule.bind_port
+                );
+            }
         }
         self.finish_stop().await
+    }
+}
+
+impl Drop for RemoteForward {
+    fn drop(&mut self) {
+        // Future cancellation must still unregister the synchronous router target.
+        let _ = self.shutdown_tx.send(true);
+        self.router
+            .unregister(&self.rule.bind_address, self.rule.bind_port);
     }
 }
 
@@ -249,6 +273,8 @@ fn validate_remote_rule(rule: &ForwardRule) -> Result<(), ForwardingError> {
 
 #[cfg(test)]
 mod tests {
+    use oxideterm_ssh::{ConnectionConsumer, SshConfig, SshConnectionRegistry};
+
     use super::*;
 
     #[test]
@@ -322,5 +348,41 @@ mod tests {
                 .target_for("0.0.0.0", 9000, "new-connection")
                 .is_some()
         );
+    }
+
+    #[test]
+    fn dropping_remote_forward_unregisters_router_target() {
+        let router = Arc::new(RemoteForwardRouter::default());
+        let ssh_connection = SshConnectionRegistry::default().acquire(
+            SshConfig::password("remote.example", 22, "tester", "pw"),
+            ConnectionConsumer::PortForward("node:a".into()),
+        );
+        let mut rule = ForwardRule::remote("0.0.0.0", 9000, "localhost", 3000);
+        rule.status = ForwardStatus::Active;
+        let (shutdown_tx, shutdown_rx) = watch::channel(false);
+        router.register(
+            RemoteForwardKey {
+                address: rule.bind_address.clone(),
+                port: rule.bind_port,
+            },
+            RemoteForwardTarget {
+                connection_id: ssh_connection.connection_id().to_string(),
+                local_host: rule.target_host.clone(),
+                local_port: rule.target_port,
+                stats: BridgeStatsRecorder::default(),
+                shutdown_rx,
+            },
+        );
+        let forward = RemoteForward {
+            rule,
+            stats: BridgeStatsRecorder::default(),
+            router: router.clone(),
+            ssh_connection,
+            shutdown_tx,
+        };
+
+        drop(forward);
+
+        assert!(router.targets.is_empty());
     }
 }

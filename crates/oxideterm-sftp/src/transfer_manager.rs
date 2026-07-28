@@ -5,9 +5,9 @@ use std::{
     future::Future,
     sync::{
         Arc,
-        atomic::{AtomicUsize, Ordering},
+        atomic::{AtomicU8, AtomicUsize, Ordering},
     },
-    time::{SystemTime, UNIX_EPOCH},
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
 use parking_lot::RwLock;
@@ -26,6 +26,9 @@ pub const DEFAULT_SFTP_DIRECTORY_PARALLELISM: usize = 4;
 pub const MAX_SFTP_CONCURRENT_TRANSFERS: usize = 10;
 pub const MAX_SFTP_DIRECTORY_PARALLELISM: usize = 16;
 const FINISHED_BACKGROUND_TRANSFER_RETENTION_MS: u64 = 5 * 60 * 1000;
+const TRANSFER_MANAGER_RUNNING: u8 = 0;
+const TRANSFER_MANAGER_SHUTTING_DOWN: u8 = 1;
+const TRANSFER_MANAGER_STOPPED: u8 = 2;
 
 fn now_ms() -> u64 {
     SystemTime::now()
@@ -135,6 +138,14 @@ pub struct SftpTransferStats {
     pub active: usize,
     pub queued: usize,
     pub completed: usize,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct SftpTransferShutdownReport {
+    pub started: bool,
+    pub drained: bool,
+    pub cancelled_transfers: usize,
+    pub remaining_transfers: usize,
 }
 
 impl Default for SftpTransferRuntimeSettings {
@@ -264,6 +275,8 @@ pub struct SftpTransferManager {
     directory_parallelism: AtomicUsize,
     speed_limit_bps: AtomicUsize,
     availability_notify: Arc<Notify>,
+    shutdown_state: AtomicU8,
+    shutdown_notify: Arc<Notify>,
     background_transfers: RwLock<HashMap<String, BackgroundTransferSnapshot>>,
     background_notify: Arc<Notify>,
     tar_capability_probes: RwLock<HashMap<String, Arc<OnceCell<TarCapabilities>>>>,
@@ -287,6 +300,8 @@ impl SftpTransferManager {
             directory_parallelism: AtomicUsize::new(DEFAULT_SFTP_DIRECTORY_PARALLELISM),
             speed_limit_bps: AtomicUsize::new(0),
             availability_notify: Arc::new(Notify::new()),
+            shutdown_state: AtomicU8::new(TRANSFER_MANAGER_RUNNING),
+            shutdown_notify: Arc::new(Notify::new()),
             background_transfers: RwLock::new(HashMap::new()),
             background_notify: Arc::new(Notify::new()),
             tar_capability_probes: RwLock::new(HashMap::new()),
@@ -465,6 +480,10 @@ impl SftpTransferManager {
         }
 
         let control = Arc::new(SftpTransferControl::new());
+        if self.shutdown_state.load(Ordering::Acquire) != TRANSFER_MANAGER_RUNNING {
+            // A producer racing final session shutdown must not start new work.
+            control.cancel();
+        }
         controls.insert(
             transfer_id.to_string(),
             RegisteredTransferControl {
@@ -491,6 +510,7 @@ impl SftpTransferManager {
         });
         if should_remove {
             controls.remove(transfer_id);
+            self.shutdown_notify.notify_waiters();
         }
     }
 
@@ -516,7 +536,14 @@ impl SftpTransferManager {
         self.cleanup_background_transfers();
         // Match Tauri: callers may seed a speculative state, but registration
         // always exposes a queued background transfer until the task starts.
-        snapshot.state = BackgroundTransferState::Pending;
+        if self.shutdown_state.load(Ordering::Acquire) == TRANSFER_MANAGER_RUNNING {
+            snapshot.state = BackgroundTransferState::Pending;
+        } else {
+            // Late delivery after session release is terminal, never resumable.
+            snapshot.state = BackgroundTransferState::Cancelled;
+            snapshot.backend_speed = Some(0);
+            snapshot.end_time = Some(now_ms());
+        }
         self.background_transfers
             .write()
             .insert(snapshot.id.clone(), snapshot);
@@ -535,7 +562,9 @@ impl SftpTransferManager {
     }
 
     pub fn mark_background_transfer_active(&self, transfer_id: &str) {
-        if let Some(snapshot) = self.background_transfers.write().get_mut(transfer_id) {
+        if let Some(snapshot) = self.background_transfers.write().get_mut(transfer_id)
+            && !snapshot.state.is_finished()
+        {
             snapshot.state = BackgroundTransferState::Active;
             self.background_notify.notify_waiters();
         }
@@ -548,15 +577,15 @@ impl SftpTransferManager {
         total: u64,
         speed: u64,
     ) {
-        if let Some(snapshot) = self.background_transfers.write().get_mut(transfer_id) {
+        if let Some(snapshot) = self.background_transfers.write().get_mut(transfer_id)
+            && !snapshot.state.is_finished()
+        {
             snapshot.transferred = transferred;
             if total > 0 {
                 snapshot.size = total;
             }
             snapshot.backend_speed = Some(speed);
-            if !snapshot.state.is_finished() {
-                snapshot.state = BackgroundTransferState::Active;
-            }
+            snapshot.state = BackgroundTransferState::Active;
             self.background_notify.notify_waiters();
         }
     }
@@ -570,11 +599,18 @@ impl SftpTransferManager {
     ) -> Option<BackgroundTransferSnapshot> {
         let mut transfers = self.background_transfers.write();
         let snapshot = transfers.get_mut(transfer_id)?;
-        snapshot.state = state;
-        snapshot.error = error;
+        let shutdown_cancelled = self.shutdown_state.load(Ordering::Acquire)
+            != TRANSFER_MANAGER_RUNNING
+            && snapshot.state == BackgroundTransferState::Cancelled;
+        snapshot.state = if shutdown_cancelled {
+            BackgroundTransferState::Cancelled
+        } else {
+            state
+        };
+        snapshot.error = if shutdown_cancelled { None } else { error };
         snapshot.item_count = item_count;
         snapshot.end_time = Some(now_ms());
-        if state == BackgroundTransferState::Completed && snapshot.size > 0 {
+        if snapshot.state == BackgroundTransferState::Completed && snapshot.size > 0 {
             snapshot.transferred = snapshot.size;
         }
         let snapshot = snapshot.clone();
@@ -684,6 +720,79 @@ impl SftpTransferManager {
     pub fn cancel_all(&self) {
         for registered in self.controls.read().values() {
             registered.control.cancel();
+        }
+    }
+
+    /// Cancels session-owned transfers once and waits only for the supplied grace period.
+    pub async fn shutdown_session_transfers(
+        &self,
+        grace_period: Duration,
+    ) -> SftpTransferShutdownReport {
+        if self
+            .shutdown_state
+            .compare_exchange(
+                TRANSFER_MANAGER_RUNNING,
+                TRANSFER_MANAGER_SHUTTING_DOWN,
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            )
+            .is_err()
+        {
+            let remaining_transfers = self.registered_count();
+            return SftpTransferShutdownReport {
+                started: false,
+                drained: remaining_transfers == 0,
+                cancelled_transfers: 0,
+                remaining_transfers,
+            };
+        }
+
+        let controls = self
+            .controls
+            .read()
+            .values()
+            .map(|registered| registered.control.clone())
+            .collect::<Vec<_>>();
+        for control in &controls {
+            control.cancel();
+        }
+
+        {
+            let shutdown_time = now_ms();
+            let mut transfers = self.background_transfers.write();
+            for snapshot in transfers.values_mut() {
+                if !snapshot.state.is_finished() {
+                    // Session exit is an explicit cancellation, not a resumable transport error.
+                    snapshot.state = BackgroundTransferState::Cancelled;
+                    snapshot.backend_speed = Some(0);
+                    snapshot.error = None;
+                    snapshot.end_time = Some(shutdown_time);
+                }
+            }
+        }
+        self.background_notify.notify_waiters();
+
+        let drained = tokio::time::timeout(grace_period, async {
+            loop {
+                let notified = self.shutdown_notify.notified();
+                if self.registered_count() == 0 {
+                    break;
+                }
+                notified.await;
+            }
+        })
+        .await
+        .is_ok();
+        let remaining_transfers = self.registered_count();
+        self.shutdown_state
+            .store(TRANSFER_MANAGER_STOPPED, Ordering::Release);
+        self.shutdown_notify.notify_waiters();
+
+        SftpTransferShutdownReport {
+            started: true,
+            drained,
+            cancelled_transfers: controls.len(),
+            remaining_transfers,
         }
     }
 
@@ -1021,5 +1130,82 @@ mod tests {
         assert!(manager.resume("tx-1"));
         let resumed = manager.get_background_transfer("tx-1").unwrap();
         assert_eq!(resumed.state, BackgroundTransferState::Pending);
+    }
+
+    #[tokio::test]
+    async fn session_shutdown_cancels_once_and_terminalizes_background_progress() {
+        let manager = Arc::new(SftpTransferManager::new());
+        let control = manager.register_for_node("tx-1", "node-a");
+        manager.register_background_transfer(make_background_snapshot("tx-1", "node-a"));
+        manager.mark_background_transfer_active("tx-1");
+
+        let unregistering_manager = manager.clone();
+        let mut cancellation = control.subscribe_cancellation();
+        let worker = tokio::spawn(async move {
+            cancellation
+                .changed()
+                .await
+                .expect("shutdown should deliver cancellation");
+            unregistering_manager.unregister("tx-1");
+        });
+
+        let first = manager
+            .shutdown_session_transfers(Duration::from_millis(300))
+            .await;
+        worker.await.expect("worker should unregister cleanly");
+        let second = manager
+            .shutdown_session_transfers(Duration::from_millis(300))
+            .await;
+
+        assert_eq!(
+            first,
+            SftpTransferShutdownReport {
+                started: true,
+                drained: true,
+                cancelled_transfers: 1,
+                remaining_transfers: 0,
+            }
+        );
+        assert_eq!(
+            second,
+            SftpTransferShutdownReport {
+                started: false,
+                drained: true,
+                cancelled_transfers: 0,
+                remaining_transfers: 0,
+            }
+        );
+        let snapshot = manager.get_background_transfer("tx-1").unwrap();
+        assert_eq!(snapshot.state, BackgroundTransferState::Cancelled);
+        assert_eq!(snapshot.backend_speed, Some(0));
+        assert!(snapshot.end_time.is_some());
+
+        let late_control = manager.register("tx-late");
+        manager.register_background_transfer(make_background_snapshot("tx-late", "node-a"));
+        assert!(late_control.is_cancelled());
+        assert_eq!(
+            manager
+                .get_background_transfer("tx-late")
+                .expect("late progress should remain inspectable")
+                .state,
+            BackgroundTransferState::Cancelled
+        );
+        manager.unregister("tx-late");
+    }
+
+    #[tokio::test]
+    async fn session_shutdown_is_bounded_when_a_worker_does_not_unregister() {
+        let manager = SftpTransferManager::new();
+        let control = manager.register("tx-1");
+
+        let report = manager
+            .shutdown_session_transfers(Duration::from_millis(10))
+            .await;
+
+        assert!(control.is_cancelled());
+        assert!(report.started);
+        assert!(!report.drained);
+        assert_eq!(report.remaining_transfers, 1);
+        manager.unregister("tx-1");
     }
 }

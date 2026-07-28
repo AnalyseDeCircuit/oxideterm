@@ -53,7 +53,7 @@ pub use model::{ForwardRule, ForwardStats, ForwardStatus, ForwardType, ForwardUp
 #[cfg(feature = "runtime")]
 pub use profiler::PortDetectionProfiler;
 #[cfg(feature = "runtime")]
-pub use registry::ForwardingRegistry;
+pub use registry::{ForwardingRegistry, ForwardingShutdownReport};
 #[cfg(not(feature = "runtime"))]
 pub use registry_saved::ForwardingRegistry;
 pub use saved::{
