@@ -54,7 +54,7 @@ impl WorkspaceApp {
     }
 
     pub(in crate::workspace) fn help_version_card(&self, cx: &mut Context<Self>) -> AnyElement {
-        let is_portable = self.resolved_help_portable_mode();
+        let is_portable = self.resolved_help_portable_mode(cx);
         let channel_label = update_channel_label(
             self.settings_store.settings().general.update_channel,
             &self.i18n,
@@ -658,10 +658,10 @@ impl WorkspaceApp {
             .into_any_element()
     }
 
-    pub(in crate::workspace) fn resolved_help_portable_mode(&self) -> bool {
-        self.portable_status_snapshot
-            .as_ref()
-            .map(|status| status.is_portable)
+    pub(in crate::workspace) fn resolved_help_portable_mode(&self, cx: &App) -> bool {
+        self.settings_workspace
+            .read(cx)
+            .portable_mode()
             .unwrap_or_else(|| oxideterm_portable_runtime::is_portable_mode().unwrap_or(false))
     }
 

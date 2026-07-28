@@ -2,19 +2,14 @@ use gpui::Context;
 use oxideterm_gpui_terminal::TerminalNoticeVariant;
 use zeroize::Zeroizing;
 
-use super::{PortableSettingsAction, PortableSettingsDialog, WorkspaceApp};
+use super::{PortableSettingsAction, PortableSettingsDialog, PortableStatusRefresh, WorkspaceApp};
 
 impl WorkspaceApp {
     pub(in crate::workspace) fn ensure_portable_settings_snapshot(
         &mut self,
         cx: &mut Context<Self>,
     ) {
-        if self.portable_status_snapshot.is_none()
-            && self.portable_status_error.is_none()
-            && self.portable_exportable_secret_count.is_none()
-        {
-            self.refresh_portable_settings_snapshot(false, cx);
-        }
+        self.refresh_portable_settings_snapshot(false, cx);
     }
 
     pub(in crate::workspace) fn refresh_portable_settings_snapshot(
@@ -22,57 +17,28 @@ impl WorkspaceApp {
         force: bool,
         cx: &mut Context<Self>,
     ) {
-        if self.portable_settings_refresh_pending {
-            return;
-        }
-        if !force
-            && (self.portable_status_snapshot.is_some() || self.portable_status_error.is_some())
-            && self.portable_exportable_secret_count.is_some()
-        {
-            return;
-        }
-
-        self.portable_settings_refresh_pending = true;
         let runtime = self.forwarding_runtime.clone();
         let key_store = self.ai.models.key_store.clone();
         let ai_providers = self.settings_store.settings().ai.providers.clone();
-
-        cx.spawn(async move |weak, cx| {
-            let result = runtime
-                .spawn_blocking(move || {
+        self.settings_workspace.update(cx, |settings, cx| {
+            settings.start_portable_status_refresh(
+                force,
+                runtime,
+                move || {
                     let status = oxideterm_portable_runtime::portable_status_snapshot()
                         .map_err(|error| error.to_string());
-                    let secret_count = oxideterm_ai::provider_views(&ai_providers)
+                    let exportable_secret_count = oxideterm_ai::provider_views(&ai_providers)
                         .into_iter()
                         .filter(|provider| key_store.has_provider_key(&provider.id))
                         .count();
-                    (status, secret_count)
-                })
-                .await
-                .map_err(|error| error.to_string());
-
-            let _ = weak.update(cx, |this, cx| {
-                this.portable_settings_refresh_pending = false;
-                match result {
-                    Ok((Ok(status), secret_count)) => {
-                        this.portable_status_snapshot = Some(status);
-                        this.portable_status_error = None;
-                        this.portable_exportable_secret_count = Some(secret_count);
+                    PortableStatusRefresh {
+                        status,
+                        exportable_secret_count,
                     }
-                    Ok((Err(error), secret_count)) => {
-                        this.portable_status_snapshot = None;
-                        this.portable_status_error = Some(error);
-                        this.portable_exportable_secret_count = Some(secret_count);
-                    }
-                    Err(error) => {
-                        this.portable_status_snapshot = None;
-                        this.portable_status_error = Some(error);
-                    }
-                }
-                cx.notify();
-            });
-        })
-        .detach();
+                },
+                cx,
+            );
+        });
     }
 
     pub(in crate::workspace) fn open_portable_password_change_dialog(
@@ -190,8 +156,9 @@ impl WorkspaceApp {
                     Ok(()) => {
                         this.close_portable_password_change_dialog(cx);
                         this.portable_settings_action_error = None;
-                        this.portable_status_snapshot = None;
-                        this.portable_status_error = None;
+                        this.settings_workspace.update(cx, |settings, cx| {
+                            settings.invalidate_portable_status(cx);
+                        });
                         this.push_ai_settings_toast(success_title, TerminalNoticeVariant::Success);
                         this.refresh_portable_settings_snapshot(true, cx);
                     }

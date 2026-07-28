@@ -38,7 +38,7 @@ impl WorkspaceApp {
         &mut self,
         cx: &mut Context<Self>,
     ) {
-        if self.native_update_is_portable() {
+        if self.native_update_is_portable(cx) {
             return;
         }
 
@@ -96,20 +96,20 @@ impl WorkspaceApp {
         }
         let update_proxy = self.settings_store.settings().general.update_proxy.clone();
         let current_version = env!("CARGO_PKG_VERSION").to_string();
-        let install_flavor =
-            match oxideterm_update::NativeInstallContext::current(self.native_update_is_portable())
-            {
-                Ok(context) => context.install_flavor,
-                Err(error) => {
-                    self.native_update_state = if check_kind == NativeUpdateCheckKind::Automatic {
-                        NativeUpdateUiState::Idle
-                    } else {
-                        NativeUpdateUiState::Error(error.to_string())
-                    };
-                    cx.notify();
-                    return;
-                }
-            };
+        let install_flavor = match oxideterm_update::NativeInstallContext::current(
+            self.native_update_is_portable(cx),
+        ) {
+            Ok(context) => context.install_flavor,
+            Err(error) => {
+                self.native_update_state = if check_kind == NativeUpdateCheckKind::Automatic {
+                    NativeUpdateUiState::Idle
+                } else {
+                    NativeUpdateUiState::Error(error.to_string())
+                };
+                cx.notify();
+                return;
+            }
+        };
         let runtime = self.forwarding_runtime.clone();
 
         cx.spawn(async move |weak, cx| {
@@ -206,17 +206,17 @@ impl WorkspaceApp {
             _ => return,
         };
 
-        let context =
-            match oxideterm_update::NativeInstallContext::current(self.native_update_is_portable())
-            {
-                Ok(context) => context,
-                Err(error) => {
-                    self.native_update_state = NativeUpdateUiState::Error(error.to_string());
-                    self.show_native_update_notification();
-                    cx.notify();
-                    return;
-                }
-            };
+        let context = match oxideterm_update::NativeInstallContext::current(
+            self.native_update_is_portable(cx),
+        ) {
+            Ok(context) => context,
+            Err(error) => {
+                self.native_update_state = NativeUpdateUiState::Error(error.to_string());
+                self.show_native_update_notification();
+                cx.notify();
+                return;
+            }
+        };
         let plan = oxideterm_update::plan_native_install(&download.path, &context);
 
         let (tx, rx) =
@@ -411,12 +411,12 @@ impl WorkspaceApp {
             .unwrap_or_else(|| std::path::PathBuf::from("updates"))
     }
 
-    pub(in crate::workspace) fn native_update_is_portable(&self) -> bool {
+    pub(in crate::workspace) fn native_update_is_portable(&self, cx: &App) -> bool {
         // The portable runtime marker is the persisted source of truth. The
         // cached snapshot avoids repeating filesystem detection when available.
-        self.portable_status_snapshot
-            .as_ref()
-            .map(|status| status.is_portable)
+        self.settings_workspace
+            .read(cx)
+            .portable_mode()
             .unwrap_or_else(|| oxideterm_portable_runtime::is_portable_mode().unwrap_or(false))
     }
 

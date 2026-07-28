@@ -88,6 +88,12 @@ impl WorkspaceApp {
             forwarding_runtime.clone(),
         );
         let connection_flow = cx.new(ConnectionFlowEntity::new);
+        let settings_workspace = cx.new(|_| settings::SettingsWorkspaceEntity::new());
+        let settings_workspace_observation =
+            cx.observe(&settings_workspace, |_workspace, _settings, cx| {
+                // Entity-owned settings workers repaint mounted settings surfaces.
+                cx.notify();
+            });
         let ssh_worker_tx = connection_flow.read(cx).ssh_worker_sender();
         let workspace_runtime = cx.new(|cx| {
             runtime_entity::WorkspaceRuntimeEntity::new_with_ssh_worker_sender(
@@ -326,6 +332,8 @@ impl WorkspaceApp {
                 scroll_handle: UniformListScrollHandle::new(),
             },
             settings_page: SettingsPageModel::default(),
+            settings_workspace,
+            _settings_workspace_observation: settings_workspace_observation,
             settings_navigation_draft: None,
             segmented_control_user_motion:
                 selection_motion::UserSegmentedControlMotionState::default(),
@@ -480,10 +488,6 @@ impl WorkspaceApp {
             portable_settings_dialog: None,
             portable_settings_action_pending: None,
             portable_settings_action_error: None,
-            portable_status_snapshot: None,
-            portable_status_error: None,
-            portable_exportable_secret_count: None,
-            portable_settings_refresh_pending: false,
             native_update_state: settings::NativeUpdateUiState::Idle,
             native_update_rx: None,
             native_update_wake: delivery::ActiveDeliveryWake::default(),

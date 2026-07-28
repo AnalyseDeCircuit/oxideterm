@@ -527,10 +527,11 @@ impl WorkspaceApp {
                     .hash(&mut hasher);
             }
             SettingsTab::Portable => {
-                self.portable_settings_refresh_pending.hash(&mut hasher);
-                self.portable_status_error.is_some().hash(&mut hasher);
-                self.portable_exportable_secret_count.hash(&mut hasher);
-                if let Some(status) = self.portable_status_snapshot.as_ref() {
+                let portable = self.settings_workspace.read(cx).portable_status_snapshot();
+                portable.refresh_pending.hash(&mut hasher);
+                portable.error.is_some().hash(&mut hasher);
+                portable.exportable_secret_count.hash(&mut hasher);
+                if let Some(status) = portable.status.as_ref() {
                     status.is_portable.hash(&mut hasher);
                     format!("{:?}", status.status).hash(&mut hasher);
                     status.is_unlocked.hash(&mut hasher);
