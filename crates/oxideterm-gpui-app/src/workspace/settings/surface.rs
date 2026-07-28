@@ -399,9 +399,10 @@ impl WorkspaceApp {
 
         match self.settings_page.active_tab {
             SettingsTab::General => {
-                self.launch_at_login_enabled.hash(&mut hasher);
-                self.launch_at_login_loading.hash(&mut hasher);
-                self.launch_at_login_error.hash(&mut hasher);
+                let launch_at_login = self.settings_workspace.read(cx).launch_at_login_snapshot();
+                launch_at_login.enabled.hash(&mut hasher);
+                launch_at_login.pending.hash(&mut hasher);
+                launch_at_login.error.hash(&mut hasher);
                 settings.general.minimize_to_tray_on_close.hash(&mut hasher);
                 let cli = self.settings_workspace.read(cx).cli_companion_snapshot();
                 cli.loading.hash(&mut hasher);

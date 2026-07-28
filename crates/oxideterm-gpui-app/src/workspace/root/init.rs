@@ -625,9 +625,6 @@ impl WorkspaceApp {
             )
             .measure_all(),
             settings_section_list_cache: RefCell::new(VirtualListSignatureCache::default()),
-            launch_at_login_enabled: false,
-            launch_at_login_loading: false,
-            launch_at_login_error: None,
             standard_confirm_focused_action: None,
             settings_reset_confirm_presence: oxideterm_gpui_ui::motion::ExitPresence::visible(),
             ai_clear_all_confirm_presence: oxideterm_gpui_ui::motion::ExitPresence::visible(),

@@ -260,6 +260,22 @@ pub(in crate::workspace) enum KeybindingFileOperationResult {
     ImportFailed,
 }
 
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+pub(in crate::workspace) enum LaunchAtLoginError {
+    #[cfg(not(target_os = "macos"))]
+    ApprovalRequired,
+    OperationFailed(Arc<str>),
+    #[cfg(not(target_os = "macos"))]
+    TaskFailed(Arc<str>),
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(in crate::workspace) struct LaunchAtLoginSnapshot {
+    pub(in crate::workspace) enabled: bool,
+    pub(in crate::workspace) pending: bool,
+    pub(in crate::workspace) error: Option<LaunchAtLoginError>,
+}
+
 /// Converts managed gallery paths once at the filesystem boundary.
 fn background_gallery_strings(settings_path: &Path) -> anyhow::Result<Vec<String>> {
     Ok(oxideterm_settings::list_background_images(settings_path)?
@@ -354,6 +370,11 @@ pub(in crate::workspace) struct SettingsWorkspaceEntity {
     keybinding_reset_confirm_presence: oxideterm_gpui_ui::motion::ExitPresence,
     keybinding_reset_confirm_focused_action: Option<ConfirmDialogAction>,
     keybinding_reset_confirm_exit_task: Option<Task<()>>,
+    launch_at_login_enabled: bool,
+    launch_at_login_pending: bool,
+    launch_at_login_error: Option<LaunchAtLoginError>,
+    launch_at_login_generation: u64,
+    launch_at_login_task: Option<Task<()>>,
     pub(super) native_update: NativeUpdateRuntime,
 }
 
@@ -489,8 +510,82 @@ impl SettingsWorkspaceEntity {
             keybinding_reset_confirm_presence: oxideterm_gpui_ui::motion::ExitPresence::visible(),
             keybinding_reset_confirm_focused_action: None,
             keybinding_reset_confirm_exit_task: None,
+            launch_at_login_enabled: false,
+            launch_at_login_pending: false,
+            launch_at_login_error: None,
+            launch_at_login_generation: 0,
+            launch_at_login_task: None,
             native_update: NativeUpdateRuntime::new(cx),
         }
+    }
+
+    pub(in crate::workspace) fn launch_at_login_snapshot(&self) -> LaunchAtLoginSnapshot {
+        LaunchAtLoginSnapshot {
+            enabled: self.launch_at_login_enabled,
+            pending: self.launch_at_login_pending,
+            error: self.launch_at_login_error.clone(),
+        }
+    }
+
+    pub(in crate::workspace) fn start_launch_at_login_operation(
+        &mut self,
+        operation: impl std::future::Future<Output = Result<bool, LaunchAtLoginError>> + 'static,
+        cx: &mut Context<Self>,
+    ) -> u64 {
+        self.launch_at_login_generation = self.launch_at_login_generation.wrapping_add(1);
+        let generation = self.launch_at_login_generation;
+        // Replacing the retained task cancels the old foreground completion;
+        // the generation also rejects a result already queued for delivery.
+        self.launch_at_login_task = None;
+        self.launch_at_login_pending = true;
+        self.launch_at_login_error = None;
+        self.launch_at_login_task = Some(cx.spawn(async move |settings, cx| {
+            let result = operation.await;
+            let _ = settings.update(cx, |settings, cx| {
+                settings.finish_launch_at_login_operation(generation, result, cx);
+            });
+        }));
+        cx.notify();
+        generation
+    }
+
+    fn finish_launch_at_login_operation(
+        &mut self,
+        generation: u64,
+        result: Result<bool, LaunchAtLoginError>,
+        cx: &mut Context<Self>,
+    ) {
+        if generation != self.launch_at_login_generation {
+            return;
+        }
+        self.launch_at_login_task = None;
+        self.launch_at_login_pending = false;
+        match result {
+            Ok(enabled) => {
+                self.launch_at_login_enabled = enabled;
+                self.launch_at_login_error = None;
+            }
+            Err(error) => self.launch_at_login_error = Some(error),
+        }
+        cx.notify();
+    }
+
+    #[cfg(target_os = "macos")]
+    pub(in crate::workspace) fn finish_launch_at_login_settings_handoff(
+        &mut self,
+        result: Result<(), String>,
+        cx: &mut Context<Self>,
+    ) {
+        self.launch_at_login_generation = self.launch_at_login_generation.wrapping_add(1);
+        let generation = self.launch_at_login_generation;
+        let enabled = self.launch_at_login_enabled;
+        self.finish_launch_at_login_operation(
+            generation,
+            result
+                .map(|()| enabled)
+                .map_err(|error| LaunchAtLoginError::OperationFailed(error.into())),
+            cx,
+        );
     }
 
     pub(in crate::workspace) fn keybinding_scope_filter(&self) -> SettingsKeybindingScopeFilter {
@@ -1690,7 +1785,7 @@ mod tests {
     use super::{
         BackgroundGalleryOperationResult, DataDirectoryConfirm, ExternalStoreWatch,
         KeybindingFileOperationResult, KeybindingRecordingFooterAction,
-        KeybindingResetConfirmKeyAction, SettingsWorkspaceEntity,
+        KeybindingResetConfirmKeyAction, LaunchAtLoginError, SettingsWorkspaceEntity,
     };
 
     struct DropSignal(Arc<AtomicBool>);
@@ -1809,6 +1904,105 @@ mod tests {
             assert_eq!(snapshot.error.as_deref(), Some("unavailable"));
             assert_eq!(snapshot.exportable_secret_count, Some(2));
         });
+    }
+
+    #[gpui::test]
+    fn launch_at_login_replacement_and_late_completion_are_generation_safe(
+        cx: &mut TestAppContext,
+    ) {
+        let first_dropped = Arc::new(AtomicBool::new(false));
+        let entity = cx.new(SettingsWorkspaceEntity::new);
+        let first_generation = entity.update(cx, |entity, cx| {
+            let first_dropped_for_future = Arc::clone(&first_dropped);
+            entity.start_launch_at_login_operation(
+                async move {
+                    let _signal = DropSignal(first_dropped_for_future);
+                    std::future::pending::<Result<bool, LaunchAtLoginError>>().await
+                },
+                cx,
+            )
+        });
+        cx.run_until_parked();
+
+        let second_generation = entity.update(cx, |entity, cx| {
+            entity.start_launch_at_login_operation(
+                std::future::ready(Ok::<bool, LaunchAtLoginError>(true)),
+                cx,
+            )
+        });
+        cx.run_until_parked();
+
+        assert_ne!(first_generation, second_generation);
+        assert!(first_dropped.load(Ordering::Acquire));
+        entity.update(cx, |entity, cx| {
+            let snapshot = entity.launch_at_login_snapshot();
+            assert!(snapshot.enabled);
+            assert!(!snapshot.pending);
+            assert_eq!(snapshot.error, None);
+
+            entity.finish_launch_at_login_operation(
+                first_generation,
+                Err(LaunchAtLoginError::OperationFailed(Arc::from(
+                    "stale result",
+                ))),
+                cx,
+            );
+            assert_eq!(
+                entity.launch_at_login_snapshot(),
+                super::LaunchAtLoginSnapshot {
+                    enabled: true,
+                    pending: false,
+                    error: None,
+                }
+            );
+        });
+    }
+
+    #[gpui::test]
+    fn settings_entity_release_cancels_launch_at_login_task(cx: &mut TestAppContext) {
+        let dropped = Arc::new(AtomicBool::new(false));
+        let entity = cx.new(SettingsWorkspaceEntity::new);
+        entity.update(cx, |entity, cx| {
+            let dropped_for_future = Arc::clone(&dropped);
+            entity.start_launch_at_login_operation(
+                async move {
+                    let _signal = DropSignal(dropped_for_future);
+                    std::future::pending::<Result<bool, LaunchAtLoginError>>().await
+                },
+                cx,
+            );
+        });
+        cx.run_until_parked();
+
+        drop(entity);
+        cx.update(|_cx| {});
+        cx.run_until_parked();
+
+        assert!(dropped.load(Ordering::Acquire));
+    }
+
+    #[cfg(target_os = "macos")]
+    #[gpui::test]
+    fn launch_at_login_macos_handoff_uses_typed_shallow_error_state(cx: &mut TestAppContext) {
+        let entity = cx.new(SettingsWorkspaceEntity::new);
+        entity.update(cx, |entity, cx| {
+            entity.finish_launch_at_login_settings_handoff(
+                Err("system settings unavailable".to_string()),
+                cx,
+            );
+        });
+
+        let first = entity.read_with(cx, |entity, _cx| entity.launch_at_login_snapshot());
+        let second = entity.read_with(cx, |entity, _cx| entity.launch_at_login_snapshot());
+        let (
+            Some(LaunchAtLoginError::OperationFailed(first_error)),
+            Some(LaunchAtLoginError::OperationFailed(second_error)),
+        ) = (first.error, second.error)
+        else {
+            panic!("macOS handoff should retain a typed platform error");
+        };
+        // Render snapshots share the immutable message instead of copying it.
+        assert!(Arc::ptr_eq(&first_error, &second_error));
     }
 
     #[gpui::test]
@@ -2020,7 +2214,10 @@ mod tests {
         let action_source = include_str!("../actions.rs");
         let update_source = include_str!("update.rs");
         let init_source = include_str!("../root/init.rs");
-        let compact_update_source = update_source.split_whitespace().collect::<Vec<_>>().concat();
+        let compact_update_source = update_source
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .concat();
 
         assert!(action_source.contains("let target_window = window.window_handle();"));
         assert!(

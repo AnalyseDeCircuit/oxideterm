@@ -174,10 +174,11 @@ pub(in crate::workspace) use entity::{
     BackgroundGalleryOperationResult, CliCompanionOperation, CliCompanionSnapshot,
     ConnectionImportSnapshot, DataDirectoryConfirm, DataDirectoryOperationResult,
     KeybindingFileOperationResult, KeybindingRecordingFooterAction, KeybindingRecordingKeyAction,
-    KeybindingResetConfirmKeyAction, ManagedKeyDialogSnapshot, NetworkProxyPasswordSnapshot,
-    NetworkProxyTestSnapshot, PortablePasswordDialogSnapshot, PortableStatusRefresh,
-    PrivilegeCredentialDraft, PrivilegeCredentialSnapshot, SettingsWorkspaceEntity,
-    SettingsWorkspaceEvent, SettingsWorkspaceToast, SshConfigImportSnapshot, ThemeImportResult,
+    KeybindingResetConfirmKeyAction, LaunchAtLoginError, ManagedKeyDialogSnapshot,
+    NetworkProxyPasswordSnapshot, NetworkProxyTestSnapshot, PortablePasswordDialogSnapshot,
+    PortableStatusRefresh, PrivilegeCredentialDraft, PrivilegeCredentialSnapshot,
+    SettingsWorkspaceEntity, SettingsWorkspaceEvent, SettingsWorkspaceToast,
+    SshConfigImportSnapshot, ThemeImportResult,
 };
 mod general_terminal_pages;
 pub(in crate::workspace) use general_terminal_pages::SETTINGS_TERMINAL_CUSTOM_FONT_INPUT_WIDTH;
