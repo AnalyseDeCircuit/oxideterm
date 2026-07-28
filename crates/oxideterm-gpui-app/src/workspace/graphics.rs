@@ -1,7 +1,7 @@
 use std::{
     collections::HashMap,
     sync::{
-        Arc,
+        Arc, Mutex,
         atomic::{AtomicBool, Ordering},
         mpsc,
     },
@@ -216,10 +216,77 @@ impl GraphicsWorkerWake {
     }
 }
 
+#[derive(Default)]
+struct GraphicsFrameDeliveryState {
+    visible: bool,
+    latest: Option<(String, GraphicsVncFrame)>,
+}
+
+#[derive(Clone, Default)]
+struct GraphicsFrameDeliverySlot {
+    state: Arc<Mutex<GraphicsFrameDeliveryState>>,
+}
+
+impl GraphicsFrameDeliverySlot {
+    fn push(&self, session_id: String, frame: GraphicsVncFrame) -> bool {
+        let Ok(mut state) = self.state.lock() else {
+            return false;
+        };
+        // Full VNC frames supersede one another before GPUI image allocation.
+        state.latest = Some((session_id, frame));
+        state.visible
+    }
+
+    fn set_visible(&self, visible: bool) -> Option<(String, GraphicsVncFrame)> {
+        let Ok(mut state) = self.state.lock() else {
+            return None;
+        };
+        state.visible = visible;
+        if visible { state.latest.take() } else { None }
+    }
+
+    fn take_visible(&self) -> Option<(String, GraphicsVncFrame)> {
+        let Ok(mut state) = self.state.lock() else {
+            return None;
+        };
+        if state.visible {
+            state.latest.take()
+        } else {
+            None
+        }
+    }
+
+    fn clear(&self) {
+        if let Ok(mut state) = self.state.lock() {
+            state.latest = None;
+        }
+    }
+
+    fn clear_session(&self, session_id: &str) {
+        if let Ok(mut state) = self.state.lock()
+            && state
+                .latest
+                .as_ref()
+                .is_some_and(|(pending_session_id, _)| pending_session_id == session_id)
+        {
+            state.latest = None;
+        }
+    }
+
+    #[cfg(test)]
+    fn has_pending_frame(&self) -> bool {
+        self.state
+            .lock()
+            .map(|state| state.latest.is_some())
+            .unwrap_or(false)
+    }
+}
+
 #[derive(Clone)]
 struct GraphicsWorkerDelivery {
     sender: mpsc::Sender<GraphicsWorkerResult>,
     wake: GraphicsWorkerWake,
+    frame_slot: GraphicsFrameDeliverySlot,
 }
 
 impl GraphicsWorkerDelivery {
@@ -227,13 +294,31 @@ impl GraphicsWorkerDelivery {
         Self {
             sender,
             wake: GraphicsWorkerWake::default(),
+            frame_slot: GraphicsFrameDeliverySlot::default(),
         }
     }
 
     fn send(&self, result: GraphicsWorkerResult) {
-        // Publish before waking so the foreground task always observes the queued result.
-        if self.sender.send(result).is_ok() {
-            self.wake.mark();
+        match result {
+            GraphicsWorkerResult::VncEvent(GraphicsVncWorkerEvent::Frame { session_id, frame }) => {
+                if self.frame_slot.push(session_id, frame) {
+                    self.wake.mark();
+                }
+            }
+            other => {
+                if let GraphicsWorkerResult::VncEvent(GraphicsVncWorkerEvent::Disconnected {
+                    session_id,
+                    ..
+                }) = &other
+                {
+                    // A disconnect is a lifecycle boundary; never recover its preceding frame later.
+                    self.frame_slot.clear_session(session_id);
+                }
+                // Publish before waking so the foreground task observes the queued result.
+                if self.sender.send(other).is_ok() {
+                    self.wake.mark();
+                }
+            }
         }
     }
 }
@@ -482,6 +567,9 @@ impl GraphicsWorkspaceEntity {
                 }
             }
         }
+        if let Some((session_id, frame)) = self.worker_delivery.frame_slot.take_visible() {
+            changed |= self.apply_vnc_frame(session_id, frame);
+        }
         if changed {
             self.ensure_vnc_worker();
             cx.notify();
@@ -572,11 +660,30 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        self.graphics.update(cx, |graphics, cx| {
+            graphics.set_surface_visible(true, cx);
+        });
         let graphics = self.graphics.read(cx);
         if graphics.session.is_some() || graphics.status != GraphicsStatus::Idle {
             return self.render_graphics_active_surface(window, cx);
         }
         self.render_graphics_distro_selector(cx)
+    }
+
+    pub(in crate::workspace) fn sync_graphics_surface_visibility(&self, cx: &mut App) {
+        let visible = self
+            .tabs
+            .iter()
+            .find(|tab| tab.kind == TabKind::Graphics)
+            .is_some_and(|tab| {
+                let tab_host = self.tab_host.read(cx);
+                (self.main_window_tabs.active_tab_id == Some(tab.id)
+                    && !tab_host.is_outside_main_window(tab.id))
+                    || tab_host.is_detached(tab.id)
+            });
+        self.graphics.update(cx, |graphics, cx| {
+            graphics.set_surface_visible(visible, cx);
+        });
     }
 
     pub(super) fn handle_graphics_key(
@@ -1814,6 +1921,19 @@ impl WorkspaceApp {
 }
 
 impl GraphicsWorkspaceEntity {
+    fn set_surface_visible(&mut self, visible: bool, cx: &mut Context<Self>) -> bool {
+        let pending_frame = self.worker_delivery.frame_slot.set_visible(visible);
+        let Some((session_id, frame)) = pending_frame else {
+            return false;
+        };
+        // Visibility resumes only presentation; the session and VNC worker survive hiding.
+        let changed = self.apply_vnc_frame(session_id, frame);
+        if changed {
+            cx.notify();
+        }
+        changed
+    }
+
     fn start_graphics_load_if_needed(&mut self, force: bool) {
         if self.loading || (!force && !self.distros.is_empty()) {
             return;
@@ -2021,17 +2141,7 @@ impl GraphicsWorkspaceEntity {
                 true
             }
             GraphicsVncWorkerEvent::Frame { session_id, frame } => {
-                if !self.session_matches(&session_id) {
-                    return false;
-                }
-                if let Some(render_image) = frame.render_image() {
-                    let old_image = self.vnc_render_image.replace(render_image);
-                    self.retire_vnc_image(old_image);
-                }
-                self.vnc_frame = Some(frame);
-                self.status = GraphicsStatus::Active;
-                self.error = None;
-                true
+                self.apply_vnc_frame(session_id, frame)
             }
             GraphicsVncWorkerEvent::Disconnected { session_id, reason } => {
                 if !self.session_matches(&session_id) {
@@ -2041,6 +2151,8 @@ impl GraphicsWorkspaceEntity {
                 self.vnc_input = None;
                 self.vnc_stop = None;
                 self.vnc_button_mask = 0;
+                self.vnc_frame = None;
+                self.worker_delivery.frame_slot.clear();
                 let old_image = self.vnc_render_image.take();
                 self.retire_vnc_image(old_image);
                 if let Some(reason) = reason {
@@ -2052,6 +2164,20 @@ impl GraphicsWorkspaceEntity {
                 true
             }
         }
+    }
+
+    fn apply_vnc_frame(&mut self, session_id: String, frame: GraphicsVncFrame) -> bool {
+        if !self.session_matches(&session_id) {
+            return false;
+        }
+        if let Some(render_image) = frame.render_image() {
+            let old_image = self.vnc_render_image.replace(render_image);
+            self.retire_vnc_image(old_image);
+        }
+        self.vnc_frame = Some(frame);
+        self.status = GraphicsStatus::Active;
+        self.error = None;
+        true
     }
 
     fn retire_vnc_image(&mut self, image: Option<Arc<RenderImage>>) {
@@ -2080,6 +2206,7 @@ impl GraphicsWorkspaceEntity {
         self.vnc_button_mask = 0;
         self.vnc_geometry.clear();
         if clear_frame {
+            self.worker_delivery.frame_slot.clear();
             self.vnc_frame = None;
             let image = self.vnc_render_image.take();
             self.retire_vnc_image(image);
@@ -2212,6 +2339,24 @@ mod delivery_tests {
 
     use super::*;
 
+    fn test_graphics_session(session_id: &str) -> WslGraphicsSession {
+        WslGraphicsSession {
+            id: session_id.to_string(),
+            vnc_port: 5900,
+            distro: "test-distro".to_string(),
+            desktop_name: "Test Desktop".to_string(),
+            mode: GraphicsSessionMode::Desktop,
+        }
+    }
+
+    fn test_graphics_frame(marker: u8) -> GraphicsVncFrame {
+        GraphicsVncFrame {
+            width: 1,
+            height: 1,
+            bgra: vec![marker, 0, 0, u8::MAX],
+        }
+    }
+
     #[test]
     fn worker_delivery_marks_wake_after_enqueue() {
         let (sender, receiver) = mpsc::channel();
@@ -2281,6 +2426,88 @@ mod delivery_tests {
     }
 
     #[gpui::test]
+    fn visible_hidden_frames_resume_only_the_latest_frame(cx: &mut TestAppContext) {
+        let runtime = Arc::new(tokio::runtime::Runtime::new().expect("graphics test runtime"));
+        let graphics = cx.new(|cx| {
+            GraphicsWorkspaceEntity::new(
+                Arc::new(oxideterm_wsl_graphics::WslGraphicsState::new()),
+                runtime,
+                cx,
+            )
+        });
+        let (input_tx, _input_rx) = tokio::sync::mpsc::unbounded_channel();
+        graphics.update(cx, |graphics, cx| {
+            graphics.session = Some(test_graphics_session("graphics-session"));
+            graphics.vnc_session_id = Some("graphics-session".to_string());
+            graphics.vnc_input = Some(input_tx);
+            graphics.set_surface_visible(true, cx);
+            graphics
+                .worker_delivery
+                .send(GraphicsWorkerResult::VncEvent(
+                    GraphicsVncWorkerEvent::Frame {
+                        session_id: "graphics-session".to_string(),
+                        frame: test_graphics_frame(1),
+                    },
+                ));
+            assert!(graphics.worker_delivery.wake.take());
+            let _ = graphics.drain_worker_results(cx);
+        });
+        let visible_image = graphics.read_with(cx, |graphics, _cx| {
+            assert_eq!(
+                graphics.vnc_frame.as_ref().map(|frame| frame.bgra[0]),
+                Some(1)
+            );
+            graphics
+                .vnc_render_image
+                .clone()
+                .expect("visible frame image")
+        });
+
+        graphics.update(cx, |graphics, cx| {
+            graphics.set_surface_visible(false, cx);
+            for marker in [2, 3] {
+                graphics
+                    .worker_delivery
+                    .send(GraphicsWorkerResult::VncEvent(
+                        GraphicsVncWorkerEvent::Frame {
+                            session_id: "graphics-session".to_string(),
+                            frame: test_graphics_frame(marker),
+                        },
+                    ));
+            }
+            assert!(!graphics.worker_delivery.wake.take());
+            assert!(graphics.worker_delivery.frame_slot.has_pending_frame());
+            assert_eq!(
+                graphics.vnc_frame.as_ref().map(|frame| frame.bgra[0]),
+                Some(1)
+            );
+            assert!(Arc::ptr_eq(
+                graphics
+                    .vnc_render_image
+                    .as_ref()
+                    .expect("retained visible image"),
+                &visible_image
+            ));
+
+            assert!(graphics.set_surface_visible(true, cx));
+            assert!(!graphics.worker_delivery.frame_slot.has_pending_frame());
+            assert_eq!(
+                graphics.vnc_frame.as_ref().map(|frame| frame.bgra[0]),
+                Some(3)
+            );
+            assert!(!Arc::ptr_eq(
+                graphics
+                    .vnc_render_image
+                    .as_ref()
+                    .expect("resumed frame image"),
+                &visible_image
+            ));
+            assert!(graphics.session.is_some());
+            assert!(graphics.vnc_input.is_some());
+        });
+    }
+
+    #[gpui::test]
     fn hidden_surface_delivery_and_release_lifecycle_are_entity_owned(cx: &mut TestAppContext) {
         let runtime = Arc::new(tokio::runtime::Runtime::new().expect("graphics test runtime"));
         let graphics = cx.new(|cx| {
@@ -2314,6 +2541,64 @@ mod delivery_tests {
         graphics.read_with(cx, |graphics, _cx| {
             assert_eq!(graphics.status, GraphicsStatus::Error);
             assert_eq!(graphics.error.as_deref(), Some("test graphics failure"));
+        });
+
+        let (input_tx, mut input_rx) = tokio::sync::mpsc::unbounded_channel();
+        graphics.update(cx, |graphics, cx| {
+            graphics.session = Some(test_graphics_session("hidden-session"));
+            graphics.vnc_session_id = Some("hidden-session".to_string());
+            graphics.vnc_input = Some(input_tx);
+            graphics.status = GraphicsStatus::Starting;
+            graphics.set_surface_visible(false, cx);
+            graphics
+                .worker_delivery
+                .send(GraphicsWorkerResult::VncEvent(
+                    GraphicsVncWorkerEvent::Connected {
+                        session_id: "hidden-session".to_string(),
+                    },
+                ));
+        });
+        cx.run_until_parked();
+        graphics.update(cx, |graphics, _cx| {
+            assert_eq!(graphics.status, GraphicsStatus::Active);
+            assert!(graphics.send_vnc_input(GraphicsVncInput::Key {
+                keysym: 0x61,
+                down: true,
+            }));
+            graphics
+                .worker_delivery
+                .send(GraphicsWorkerResult::VncEvent(
+                    GraphicsVncWorkerEvent::Frame {
+                        session_id: "hidden-session".to_string(),
+                        frame: test_graphics_frame(7),
+                    },
+                ));
+            assert!(!graphics.worker_delivery.wake.take());
+            assert!(graphics.worker_delivery.frame_slot.has_pending_frame());
+            graphics
+                .worker_delivery
+                .send(GraphicsWorkerResult::VncEvent(
+                    GraphicsVncWorkerEvent::Disconnected {
+                        session_id: "hidden-session".to_string(),
+                        reason: Some("test disconnect".to_string()),
+                    },
+                ));
+        });
+        assert!(matches!(
+            input_rx.try_recv(),
+            Ok(GraphicsVncInput::Key {
+                keysym: 0x61,
+                down: true
+            })
+        ));
+        cx.run_until_parked();
+        graphics.read_with(cx, |graphics, _cx| {
+            assert_eq!(graphics.status, GraphicsStatus::Error);
+            assert_eq!(graphics.error.as_deref(), Some("test disconnect"));
+            assert!(graphics.session.is_some());
+            assert!(graphics.vnc_render_image.is_none());
+            assert!(!graphics.worker_delivery.frame_slot.has_pending_frame());
+            assert!(!wake.is_stopped());
         });
 
         drop(graphics);
