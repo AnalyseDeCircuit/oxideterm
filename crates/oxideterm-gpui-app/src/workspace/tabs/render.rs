@@ -732,8 +732,9 @@ impl WorkspaceApp {
                 .node_for_tab(tab.id)
                 .filter(|node_id| self.has_active_reconnect_job(node_id, cx)),
             TabKind::Ide => self
-                .ide_tab_nodes
-                .get(&tab.id)
+                .ide_workspace
+                .read(cx)
+                .node_for_tab(tab.id)
                 .cloned()
                 .filter(|node_id| self.has_active_reconnect_job(node_id, cx)),
             _ => None,

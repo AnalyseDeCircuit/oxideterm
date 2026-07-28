@@ -506,6 +506,17 @@ impl WorkspaceApp {
         let command_palette =
             cx.new(|_| command_palette::CommandPaletteEntity::new(forwarding_runtime.clone()));
         let command_palette_observation = cx.observe(&command_palette, |_, _, cx| cx.notify());
+        let ide_workspace = cx.new({
+            let fs = ai_entity.read(cx).agent_fs().clone();
+            let backend_runtime = forwarding_runtime.clone();
+            move |_| ide::IdeWorkspaceEntity::new(fs, backend_runtime)
+        });
+        let ide_workspace_subscription = cx.subscribe(
+            &ide_workspace,
+            |workspace, _ide_workspace, event: &ide::IdeWorkspaceEvent, cx| {
+                workspace.handle_ide_workspace_event(event, cx);
+            },
+        );
         let mut workspace = Self {
             focus_handle,
             tabs: Vec::new(),
@@ -699,10 +710,8 @@ impl WorkspaceApp {
             _file_manager_observation: file_manager_observation,
             _file_manager_subscription: file_manager_subscription,
             sftp_tab_nodes: HashMap::new(),
-            ide_tab_surfaces: HashMap::new(),
-            ide_surface_subscriptions: HashMap::new(),
-            ide_tab_nodes: HashMap::new(),
-            ide_last_closed_at_by_node: HashMap::new(),
+            ide_workspace,
+            _ide_workspace_subscription: ide_workspace_subscription,
             sftp_view,
             _sftp_observation: sftp_observation,
             _sftp_subscription: sftp_subscription,

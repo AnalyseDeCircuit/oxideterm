@@ -1,13 +1,459 @@
-use gpui::{AnyElement, App, AppContext, Context, IntoElement, div};
-use oxideterm_gpui_ide::{
-    IdeLabels, IdeRuntimeSettings, IdeSurface, IdeSurfaceEvent, IdeSurfaceMount, NodeAgentMode,
+use gpui::{
+    AnyElement, App, AppContext, Context, Entity, EventEmitter, IntoElement, Subscription, div,
 };
+use oxideterm_gpui_ide::{
+    IdeAiContextSnapshot, IdeLabels, IdePluginSnapshot, IdeRuntimeSettings, IdeSurface,
+    IdeSurfaceEvent, IdeSurfaceMount, NodeAgentMode,
+};
+use oxideterm_ide_fs::NodeAgentIdeFileSystem;
 use oxideterm_settings::{IdeAgentMode, PersistedSettings};
 use oxideterm_ssh::{NodeId, PhaseResult, ReconnectIdeSnapshot};
 use oxideterm_workspace::{Tab, TabKind, TabTitleSource};
-use std::time::SystemTime;
+use std::{
+    collections::{BTreeMap, BTreeSet, HashMap},
+    sync::Arc,
+    time::SystemTime,
+};
 
 use super::{TabId, WorkspaceApp};
+
+/// Cross-workspace IDE effects that require settings, tabs, or reconnect coordination.
+pub(super) enum IdeWorkspaceEvent {
+    RememberAgentMode(NodeAgentMode),
+    TransientSurfaceClosed {
+        tab_id: TabId,
+    },
+    ReconnectRestoreCompleted {
+        reconnect_node_id: NodeId,
+        result: PhaseResult,
+        message: String,
+    },
+}
+
+impl EventEmitter<IdeWorkspaceEvent> for IdeWorkspaceEntity {}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum IdeSurfaceCloseReason {
+    UserProjectClose,
+    TransientFolderPickerCancel,
+}
+
+struct IdeSurfaceEntry {
+    node_id: NodeId,
+    surface: Entity<IdeSurface>,
+    _subscription: Subscription,
+}
+
+pub(super) struct IdeWorkspaceTargetSnapshot {
+    pub(super) node_id: NodeId,
+    pub(super) project_root_path: Option<String>,
+    pub(super) project_name: Option<String>,
+    pub(super) active_editor_tab_id: Option<String>,
+}
+
+enum ExistingReconnectRestore {
+    Suppressed,
+    Missing(ReconnectIdeSnapshot),
+    Restored {
+        tab_id: TabId,
+        same_project_was_open: bool,
+    },
+    Failed,
+}
+
+/// Owns the IDE surface registry, node index, subscriptions, and reconnect-close history.
+///
+/// The registry deliberately does not own tabs, settings persistence, windows, or SSH transport.
+/// Each `IdeSurface` retains its own node consumer and mount lifecycle, so removing one entry only
+/// releases that surface owner and cannot disconnect a shared node or another IDE consumer.
+pub(super) struct IdeWorkspaceEntity {
+    fs: NodeAgentIdeFileSystem,
+    backend_runtime: Arc<tokio::runtime::Runtime>,
+    surfaces_by_tab: BTreeMap<u64, IdeSurfaceEntry>,
+    tabs_by_node: HashMap<NodeId, BTreeSet<u64>>,
+    last_closed_at_by_node: HashMap<NodeId, SystemTime>,
+}
+
+impl IdeWorkspaceEntity {
+    pub(super) fn new(
+        fs: NodeAgentIdeFileSystem,
+        backend_runtime: Arc<tokio::runtime::Runtime>,
+    ) -> Self {
+        Self {
+            fs,
+            backend_runtime,
+            surfaces_by_tab: BTreeMap::new(),
+            tabs_by_node: HashMap::new(),
+            last_closed_at_by_node: HashMap::new(),
+        }
+    }
+
+    pub(super) fn create_folder_picker_surface(
+        &mut self,
+        tab_id: TabId,
+        node_id: NodeId,
+        initial_path: String,
+        tokens: oxideterm_theme::ThemeTokens,
+        labels: IdeLabels,
+        runtime_settings: IdeRuntimeSettings,
+        cx: &mut Context<Self>,
+    ) {
+        let fs = self.fs.clone();
+        let backend_runtime = self.backend_runtime.clone();
+        let surface =
+            cx.new(|cx| IdeSurface::new(fs, tokens, labels, runtime_settings, backend_runtime, cx));
+        surface.update(cx, |surface, cx| {
+            surface.open_remote_folder_picker_for_node(node_id.0.clone(), initial_path, cx);
+        });
+        self.register_surface(tab_id, node_id, surface, cx);
+    }
+
+    pub(super) fn create_reconnect_surface(
+        &mut self,
+        tab_id: TabId,
+        reconnect_node_id: &NodeId,
+        target_node_id: NodeId,
+        ide_snapshot: ReconnectIdeSnapshot,
+        tokens: oxideterm_theme::ThemeTokens,
+        labels: IdeLabels,
+        runtime_settings: IdeRuntimeSettings,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let fs = self.fs.clone();
+        let backend_runtime = self.backend_runtime.clone();
+        let surface =
+            cx.new(|cx| IdeSurface::new(fs, tokens, labels, runtime_settings, backend_runtime, cx));
+        let restored = surface.update(cx, |surface, cx| {
+            surface.restore_reconnect_snapshot(ide_snapshot, reconnect_node_id.0.clone(), cx)
+        });
+        if !restored {
+            return false;
+        }
+        self.register_surface(tab_id, target_node_id, surface, cx);
+        true
+    }
+
+    pub(super) fn register_surface(
+        &mut self,
+        tab_id: TabId,
+        node_id: NodeId,
+        surface: Entity<IdeSurface>,
+        cx: &mut Context<Self>,
+    ) {
+        if self.surfaces_by_tab.contains_key(&tab_id.0) {
+            self.close_surface_at(
+                tab_id,
+                IdeSurfaceCloseReason::TransientFolderPickerCancel,
+                SystemTime::now(),
+                cx,
+            );
+        }
+
+        let subscription = cx.subscribe(
+            &surface,
+            move |workspace, _surface, event: &IdeSurfaceEvent, cx| match event {
+                IdeSurfaceEvent::RememberAgentMode(mode) => {
+                    // The registry propagates the mode before notifying the root persistence
+                    // adapter, avoiding a re-entrant update back into this Entity.
+                    workspace.apply_agent_mode_to_surfaces(*mode, cx);
+                    cx.emit(IdeWorkspaceEvent::RememberAgentMode(*mode));
+                }
+                IdeSurfaceEvent::ProjectOpened => {
+                    if let Some(node_id) = workspace.node_for_tab(tab_id).cloned() {
+                        // A successful project open supersedes an earlier explicit-close marker.
+                        workspace.last_closed_at_by_node.remove(&node_id);
+                    }
+                }
+                IdeSurfaceEvent::TransientFolderPickerCancelled => {
+                    // Removing the subscription during its own callback is unsafe. A one-turn
+                    // registry-owned task performs the close without capturing WorkspaceApp.
+                    cx.spawn(async move |weak_registry, cx| {
+                        let _ = weak_registry.update(cx, |workspace, cx| {
+                            if workspace.close_surface(
+                                tab_id,
+                                IdeSurfaceCloseReason::TransientFolderPickerCancel,
+                                cx,
+                            ) {
+                                cx.emit(IdeWorkspaceEvent::TransientSurfaceClosed { tab_id });
+                            }
+                        });
+                    })
+                    .detach();
+                }
+                IdeSurfaceEvent::ReconnectRestoreProjectOpened { reconnect_node_id } => {
+                    cx.emit(IdeWorkspaceEvent::ReconnectRestoreCompleted {
+                        reconnect_node_id: NodeId::new(reconnect_node_id.clone()),
+                        result: PhaseResult::Ok,
+                        message: "restored IDE project and open files".to_string(),
+                    });
+                }
+                IdeSurfaceEvent::ReconnectRestoreProjectFailed {
+                    reconnect_node_id,
+                    message,
+                } => {
+                    cx.emit(IdeWorkspaceEvent::ReconnectRestoreCompleted {
+                        reconnect_node_id: NodeId::new(reconnect_node_id.clone()),
+                        result: PhaseResult::Failed,
+                        message: message.clone(),
+                    });
+                }
+            },
+        );
+
+        self.tabs_by_node
+            .entry(node_id.clone())
+            .or_default()
+            .insert(tab_id.0);
+        self.surfaces_by_tab.insert(
+            tab_id.0,
+            IdeSurfaceEntry {
+                node_id,
+                surface,
+                _subscription: subscription,
+            },
+        );
+    }
+
+    pub(super) fn close_surface(
+        &mut self,
+        tab_id: TabId,
+        reason: IdeSurfaceCloseReason,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        self.close_surface_at(tab_id, reason, SystemTime::now(), cx)
+    }
+
+    fn close_surface_at(
+        &mut self,
+        tab_id: TabId,
+        reason: IdeSurfaceCloseReason,
+        closed_at: SystemTime,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let Some(entry) = self.surfaces_by_tab.remove(&tab_id.0) else {
+            return false;
+        };
+        if let Some(tab_ids) = self.tabs_by_node.get_mut(&entry.node_id) {
+            tab_ids.remove(&tab_id.0);
+            if tab_ids.is_empty() {
+                self.tabs_by_node.remove(&entry.node_id);
+            }
+        }
+        if reason == IdeSurfaceCloseReason::UserProjectClose
+            && !self.tabs_by_node.contains_key(&entry.node_id)
+        {
+            // A close marker represents the node's final IDE project surface.
+            // Closing one same-node surface must not suppress the surviving owner.
+            self.last_closed_at_by_node
+                .insert(entry.node_id.clone(), closed_at);
+        }
+        entry.surface.update(cx, |surface, cx| {
+            // This releases only the surface-scoped IDE consumer and watch owner.
+            surface.release_remote_session(cx);
+        });
+        true
+    }
+
+    pub(super) fn surface(&self, tab_id: TabId) -> Option<Entity<IdeSurface>> {
+        self.surfaces_by_tab
+            .get(&tab_id.0)
+            .map(|entry| entry.surface.clone())
+    }
+
+    pub(super) fn node_for_tab(&self, tab_id: TabId) -> Option<&NodeId> {
+        self.surfaces_by_tab
+            .get(&tab_id.0)
+            .map(|entry| &entry.node_id)
+    }
+
+    pub(super) fn tab_for_node(&self, node_id: &NodeId) -> Option<TabId> {
+        self.tabs_by_node
+            .get(node_id)
+            .and_then(|tab_ids| tab_ids.first().copied())
+            .map(TabId)
+    }
+
+    pub(super) fn surface_for_node(&self, node_id: &NodeId) -> Option<Entity<IdeSurface>> {
+        self.tab_for_node(node_id)
+            .and_then(|tab_id| self.surface(tab_id))
+    }
+
+    pub(super) fn set_mount(
+        &mut self,
+        tab_id: TabId,
+        mount: IdeSurfaceMount,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(entry) = self.surfaces_by_tab.get(&tab_id.0) {
+            entry
+                .surface
+                .update(cx, |surface, cx| surface.set_mount(mount, cx));
+        }
+    }
+
+    pub(super) fn apply_runtime_settings(
+        &mut self,
+        tokens: oxideterm_theme::ThemeTokens,
+        runtime_settings: IdeRuntimeSettings,
+        cx: &mut Context<Self>,
+    ) {
+        for entry in self.surfaces_by_tab.values() {
+            entry.surface.update(cx, |surface, cx| {
+                surface.set_visual_and_runtime_settings(tokens, runtime_settings, cx);
+            });
+        }
+    }
+
+    fn apply_agent_mode_to_surfaces(&mut self, mode: NodeAgentMode, cx: &mut Context<Self>) {
+        for entry in self.surfaces_by_tab.values() {
+            entry
+                .surface
+                .update(cx, |surface, cx| surface.set_agent_mode(mode, cx));
+        }
+    }
+
+    pub(super) fn reconnect_snapshot_for_nodes(
+        &mut self,
+        node_ids: &[NodeId],
+        cx: &mut Context<Self>,
+    ) -> Option<ReconnectIdeSnapshot> {
+        self.surfaces_by_tab
+            .values()
+            .filter(|entry| node_ids.contains(&entry.node_id))
+            .find_map(|entry| {
+                entry
+                    .surface
+                    .update(cx, |surface, cx| surface.reconnect_snapshot(cx))
+            })
+    }
+
+    fn restore_existing_for_reconnect(
+        &mut self,
+        reconnect_node_id: &NodeId,
+        target_node_id: &NodeId,
+        ide_snapshot: ReconnectIdeSnapshot,
+        snapshot_at: Option<SystemTime>,
+        cx: &mut Context<Self>,
+    ) -> ExistingReconnectRestore {
+        if ide_restore_was_closed_after_snapshot(
+            self.last_closed_at_by_node.get(target_node_id).copied(),
+            snapshot_at,
+        ) {
+            return ExistingReconnectRestore::Suppressed;
+        }
+        let Some(surface) = self.surface_for_node(target_node_id) else {
+            return ExistingReconnectRestore::Missing(ide_snapshot);
+        };
+        let tab_id = self
+            .tab_for_node(target_node_id)
+            .expect("surface lookup and node index must stay in sync");
+        let same_project_was_open = surface.update(cx, |surface, _cx| {
+            surface.project_root_path().as_deref() == Some(ide_snapshot.project_path.as_str())
+        });
+        let restored = surface.update(cx, |surface, cx| {
+            surface.restore_reconnect_snapshot(ide_snapshot, reconnect_node_id.0.clone(), cx)
+        });
+        if restored {
+            ExistingReconnectRestore::Restored {
+                tab_id,
+                same_project_was_open,
+            }
+        } else {
+            ExistingReconnectRestore::Failed
+        }
+    }
+
+    pub(super) fn mark_connection_interrupted(&mut self, node_id: &NodeId, cx: &mut Context<Self>) {
+        let tab_ids = self
+            .tabs_by_node
+            .get(node_id)
+            .into_iter()
+            .flatten()
+            .copied()
+            .collect::<Vec<_>>();
+        for tab_id in tab_ids {
+            if let Some(entry) = self.surfaces_by_tab.get(&tab_id) {
+                entry.surface.update(cx, |surface, cx| {
+                    surface.mark_connection_interrupted(cx);
+                });
+            }
+        }
+    }
+
+    pub(super) fn ai_context_snapshot(
+        &self,
+        active_tab_id: Option<TabId>,
+        cx: &App,
+    ) -> Option<IdeAiContextSnapshot> {
+        if let Some(active_tab_id) = active_tab_id
+            && let Some(snapshot) = self
+                .surfaces_by_tab
+                .get(&active_tab_id.0)
+                .and_then(|entry| entry.surface.read(cx).ai_context_snapshot())
+        {
+            return Some(snapshot);
+        }
+        self.surfaces_by_tab
+            .iter()
+            .filter(|(tab_id, _)| Some(TabId(**tab_id)) != active_tab_id)
+            .find_map(|(_, entry)| entry.surface.read(cx).ai_context_snapshot())
+    }
+
+    pub(super) fn plugin_snapshot(
+        &self,
+        active_tab_id: Option<TabId>,
+        cx: &App,
+    ) -> Option<IdePluginSnapshot> {
+        if let Some(active_tab_id) = active_tab_id
+            && let Some(snapshot) = self
+                .surfaces_by_tab
+                .get(&active_tab_id.0)
+                .and_then(|entry| entry.surface.read(cx).plugin_snapshot())
+        {
+            return Some(snapshot);
+        }
+        self.surfaces_by_tab
+            .iter()
+            .filter(|(tab_id, _)| Some(TabId(**tab_id)) != active_tab_id)
+            .find_map(|(_, entry)| entry.surface.read(cx).plugin_snapshot())
+    }
+
+    pub(super) fn surface_for_effect(
+        &self,
+        active_tab_id: Option<TabId>,
+        requested_node_id: Option<&str>,
+    ) -> Option<Entity<IdeSurface>> {
+        if let Some(requested_node_id) = requested_node_id {
+            let requested_node_id = NodeId::new(requested_node_id);
+            if let Some(surface) = self.surface_for_node(&requested_node_id) {
+                return Some(surface);
+            }
+        }
+        active_tab_id
+            .and_then(|tab_id| self.surface(tab_id))
+            .or_else(|| {
+                self.surfaces_by_tab
+                    .first_key_value()
+                    .map(|(_, entry)| entry.surface.clone())
+            })
+    }
+
+    pub(super) fn target_snapshots(&self, cx: &App) -> Vec<IdeWorkspaceTargetSnapshot> {
+        self.surfaces_by_tab
+            .values()
+            .map(|entry| {
+                let surface = entry.surface.read(cx);
+                let context = surface.ai_context_snapshot();
+                IdeWorkspaceTargetSnapshot {
+                    node_id: entry.node_id.clone(),
+                    project_root_path: surface.project_root_path(),
+                    project_name: context.map(|snapshot| snapshot.project_name),
+                    active_editor_tab_id: surface.active_editor_tab_id(),
+                }
+            })
+            .collect()
+    }
+}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum IdeReconnectRestoreStatus {
@@ -35,11 +481,10 @@ impl WorkspaceApp {
             self.detached_tabs.contains(&tab_id),
             self.detached_tab_windows.contains_key(&tab_id),
         );
-        if let Some(surface) = self.ide_tab_surfaces.get(&tab_id) {
-            // WorkspaceApp only reports window placement. The IDE entity owns
-            // the sampling, watcher, action, and node-session transitions.
-            surface.update(cx, |surface, cx| surface.set_mount(mount, cx));
-        }
+        // WorkspaceApp reports only window placement; the IDE owner performs
+        // the sampling, watcher, and node-session mount transition.
+        self.ide_workspace
+            .update(cx, |workspace, cx| workspace.set_mount(tab_id, mount, cx));
     }
 
     pub(super) fn open_ide_folder_picker_tab(&mut self, node_id: NodeId, cx: &mut Context<Self>) {
@@ -84,13 +529,10 @@ impl WorkspaceApp {
             .map(|node| node.title.clone())
             .unwrap_or_else(|| node_id.0.clone());
         let title = format!("IDE · {node_title}");
-        let tab_id = if let Some((tab_id, _)) = self
-            .ide_tab_nodes
-            .iter()
-            .find(|(_, existing_node_id)| existing_node_id.0 == node_id.0)
-        {
+        let existing_tab_id = self.ide_workspace.read(cx).tab_for_node(&node_id);
+        let tab_id = if let Some(tab_id) = existing_tab_id {
             if intent.reopens_folder_picker()
-                && let Some(surface) = self.ide_tab_surfaces.get(tab_id)
+                && let Some(surface) = self.ide_workspace.read(cx).surface(tab_id)
             {
                 // Explicit folder-selection actions may replace the workspace,
                 // while the node sidebar entry only activates its existing tab.
@@ -103,21 +545,13 @@ impl WorkspaceApp {
                     surface.open_remote_folder_picker_for_node(node_id.0.clone(), initial_path, cx);
                 });
             }
-            *tab_id
+            tab_id
         } else {
             let tab_id = self.alloc_tab_id(cx);
-            let fs = self.ai_entity.read(cx).agent_fs().clone();
             let tokens = self.tokens;
             let labels = self.ide_labels();
             let runtime_settings = self.ide_runtime_settings();
-            let backend_runtime = self.forwarding_runtime.clone();
-            let surface = cx.new(|cx| {
-                IdeSurface::new(fs, tokens, labels, runtime_settings, backend_runtime, cx)
-            });
-            surface.update(cx, |surface: &mut IdeSurface, cx| {
-                let initial_path = initial_path_override.unwrap_or_else(|| "/".to_string());
-                surface.open_remote_folder_picker_for_node(node_id.0.clone(), initial_path, cx);
-            });
+            let initial_path = initial_path_override.unwrap_or_else(|| "/".to_string());
 
             self.tabs.push(Tab {
                 id: tab_id,
@@ -127,9 +561,17 @@ impl WorkspaceApp {
                 root_pane: None,
                 active_pane_id: None,
             });
-            self.subscribe_ide_surface(tab_id, &surface, cx);
-            self.ide_tab_surfaces.insert(tab_id, surface);
-            self.ide_tab_nodes.insert(tab_id, node_id.clone());
+            self.ide_workspace.update(cx, |workspace, cx| {
+                workspace.create_folder_picker_surface(
+                    tab_id,
+                    node_id.clone(),
+                    initial_path,
+                    tokens,
+                    labels,
+                    runtime_settings,
+                    cx,
+                );
+            });
             tab_id
         };
 
@@ -152,18 +594,8 @@ impl WorkspaceApp {
         node_ids: &[NodeId],
         cx: &mut Context<Self>,
     ) -> Option<ReconnectIdeSnapshot> {
-        let Some((tab_id, _)) = self.ide_tab_nodes.iter().find(|(_, existing_node_id)| {
-            node_ids
-                .iter()
-                .any(|node_id| existing_node_id.0 == node_id.0)
-        }) else {
-            return None;
-        };
-        let Some(surface) = self.ide_tab_surfaces.get(tab_id) else {
-            return None;
-        };
-        surface.update(cx, |surface: &mut IdeSurface, cx| {
-            surface.reconnect_snapshot(cx)
+        self.ide_workspace.update(cx, |workspace, cx| {
+            workspace.reconnect_snapshot_for_nodes(node_ids, cx)
         })
     }
 
@@ -183,18 +615,16 @@ impl WorkspaceApp {
         if !self.ssh_nodes.contains_key(&target_node_id) {
             return IdeReconnectRestoreStatus::Skipped;
         }
-        if ide_restore_was_closed_after_snapshot(
-            self.ide_last_closed_at_by_node
-                .get(&target_node_id)
-                .copied(),
-            snapshot_at,
-        ) {
-            return IdeReconnectRestoreStatus::Skipped;
-        }
         // Tauri's reconnect phase restores the IDE after SFTP has been brought
         // back. Re-open through the same node-first IDE owner so the restored
         // surface consumes NodeRouter/SFTP directly rather than a terminal pane.
-        self.open_ide_tab_with_reconnect_snapshot(node_id.clone(), target_node_id, ide_snapshot, cx)
+        self.open_ide_tab_with_reconnect_snapshot(
+            node_id.clone(),
+            target_node_id,
+            ide_snapshot,
+            snapshot_at,
+            cx,
+        )
     }
 
     fn open_ide_tab_with_reconnect_snapshot(
@@ -202,6 +632,7 @@ impl WorkspaceApp {
         reconnect_node_id: NodeId,
         target_node_id: NodeId,
         ide_snapshot: ReconnectIdeSnapshot,
+        snapshot_at: Option<SystemTime>,
         cx: &mut Context<Self>,
     ) -> IdeReconnectRestoreStatus {
         let node_title = self
@@ -210,61 +641,54 @@ impl WorkspaceApp {
             .map(|node| node.title.clone())
             .unwrap_or_else(|| target_node_id.0.clone());
         let title = format!("IDE · {node_title}");
-        let same_project_open = self
-            .ide_tab_nodes
-            .iter()
-            .find(|(_, existing_node_id)| existing_node_id.0 == target_node_id.0)
-            .and_then(|(tab_id, _)| self.ide_tab_surfaces.get(tab_id))
-            .is_some_and(|surface| {
-                surface.update(cx, |surface: &mut IdeSurface, _cx| {
-                    surface.project_root_path().as_deref()
-                        == Some(ide_snapshot.project_path.as_str())
-                })
-            });
-        let tab_id = if let Some((tab_id, _)) = self
-            .ide_tab_nodes
-            .iter()
-            .find(|(_, existing_node_id)| existing_node_id.0 == target_node_id.0)
-        {
-            let Some(surface) = self.ide_tab_surfaces.get(tab_id) else {
-                return IdeReconnectRestoreStatus::Skipped;
-            };
-            let restored = surface.update(cx, |surface: &mut IdeSurface, cx| {
-                surface.restore_reconnect_snapshot(ide_snapshot, reconnect_node_id.0.clone(), cx)
-            });
-            if !restored {
+        let restore = self.ide_workspace.update(cx, |workspace, cx| {
+            workspace.restore_existing_for_reconnect(
+                &reconnect_node_id,
+                &target_node_id,
+                ide_snapshot,
+                snapshot_at,
+                cx,
+            )
+        });
+        let (tab_id, same_project_open) = match restore {
+            ExistingReconnectRestore::Suppressed | ExistingReconnectRestore::Failed => {
                 return IdeReconnectRestoreStatus::Skipped;
             }
-            *tab_id
-        } else {
-            let tab_id = self.alloc_tab_id(cx);
-            let fs = self.ai_entity.read(cx).agent_fs().clone();
-            let tokens = self.tokens;
-            let labels = self.ide_labels();
-            let runtime_settings = self.ide_runtime_settings();
-            let backend_runtime = self.forwarding_runtime.clone();
-            let surface = cx.new(|cx| {
-                IdeSurface::new(fs, tokens, labels, runtime_settings, backend_runtime, cx)
-            });
-            let restored = surface.update(cx, |surface: &mut IdeSurface, cx| {
-                surface.restore_reconnect_snapshot(ide_snapshot, reconnect_node_id.0.clone(), cx)
-            });
-            if !restored {
-                return IdeReconnectRestoreStatus::Skipped;
-            }
+            ExistingReconnectRestore::Restored {
+                tab_id,
+                same_project_was_open,
+            } => (tab_id, same_project_was_open),
+            ExistingReconnectRestore::Missing(ide_snapshot) => {
+                let tab_id = self.alloc_tab_id(cx);
+                let tokens = self.tokens;
+                let labels = self.ide_labels();
+                let runtime_settings = self.ide_runtime_settings();
+                let restored = self.ide_workspace.update(cx, |workspace, cx| {
+                    workspace.create_reconnect_surface(
+                        tab_id,
+                        &reconnect_node_id,
+                        target_node_id.clone(),
+                        ide_snapshot,
+                        tokens,
+                        labels,
+                        runtime_settings,
+                        cx,
+                    )
+                });
+                if !restored {
+                    return IdeReconnectRestoreStatus::Skipped;
+                }
 
-            self.tabs.push(Tab {
-                id: tab_id,
-                kind: TabKind::Ide,
-                title,
-                title_source: TabTitleSource::Static,
-                root_pane: None,
-                active_pane_id: None,
-            });
-            self.subscribe_ide_surface(tab_id, &surface, cx);
-            self.ide_tab_surfaces.insert(tab_id, surface);
-            self.ide_tab_nodes.insert(tab_id, target_node_id.clone());
-            tab_id
+                self.tabs.push(Tab {
+                    id: tab_id,
+                    kind: TabKind::Ide,
+                    title,
+                    title_source: TabTitleSource::Static,
+                    root_pane: None,
+                    active_pane_id: None,
+                });
+                (tab_id, false)
+            }
         };
 
         if !self.detached_tabs.contains(&tab_id) {
@@ -286,20 +710,9 @@ impl WorkspaceApp {
         node_id: &NodeId,
         cx: &mut Context<Self>,
     ) {
-        let tab_ids = self
-            .ide_tab_nodes
-            .iter()
-            .filter_map(|(tab_id, existing_node_id)| {
-                (existing_node_id.0 == node_id.0).then_some(*tab_id)
-            })
-            .collect::<Vec<_>>();
-        for tab_id in tab_ids {
-            if let Some(surface) = self.ide_tab_surfaces.get(&tab_id) {
-                surface.update(cx, |surface: &mut IdeSurface, cx| {
-                    surface.mark_connection_interrupted(cx);
-                });
-            }
-        }
+        self.ide_workspace.update(cx, |workspace, cx| {
+            workspace.mark_connection_interrupted(node_id, cx);
+        });
     }
 
     pub(super) fn release_ide_runtime_for_saved_connection(
@@ -326,51 +739,55 @@ impl WorkspaceApp {
         self.saved_ssh_nodes.remove(saved_connection_id);
     }
 
-    pub(super) fn render_ide_surface(&self, _cx: &mut Context<Self>) -> AnyElement {
+    pub(super) fn render_ide_surface(&self, cx: &mut Context<Self>) -> AnyElement {
         let Some(tab_id) = self.main_window_tabs.active_tab_id else {
             return div().into_any_element();
         };
-        self.render_ide_surface_for_tab(tab_id)
+        self.render_ide_surface_for_tab(tab_id, cx)
     }
 
-    pub(super) fn render_ide_surface_for_tab(&self, tab_id: TabId) -> AnyElement {
-        self.ide_tab_surfaces
-            .get(&tab_id)
-            .cloned()
+    pub(super) fn render_ide_surface_for_tab(
+        &self,
+        tab_id: TabId,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        self.ide_workspace
+            .read(cx)
+            .surface(tab_id)
             .map(IntoElement::into_any_element)
             .unwrap_or_else(|| div().into_any_element())
     }
 
     pub(super) fn copy_active_ide_selection(&mut self, cx: &mut Context<Self>) -> bool {
-        let Some(surface) = self.active_ide_surface() else {
+        let Some(surface) = self.active_ide_surface(cx) else {
             return false;
         };
         surface.update(cx, |surface, cx| surface.copy_active_editor_selection(cx))
     }
 
     pub(super) fn cut_active_ide_selection(&mut self, cx: &mut Context<Self>) -> bool {
-        let Some(surface) = self.active_ide_surface() else {
+        let Some(surface) = self.active_ide_surface(cx) else {
             return false;
         };
         surface.update(cx, |surface, cx| surface.cut_active_editor_selection(cx))
     }
 
     pub(super) fn paste_into_active_ide_editor(&mut self, cx: &mut Context<Self>) -> bool {
-        let Some(surface) = self.active_ide_surface() else {
+        let Some(surface) = self.active_ide_surface(cx) else {
             return false;
         };
         surface.update(cx, |surface, cx| surface.paste_into_active_editor(cx))
     }
 
     pub(super) fn open_active_ide_search(&mut self, cx: &mut Context<Self>) -> bool {
-        let Some(surface) = self.active_ide_surface() else {
+        let Some(surface) = self.active_ide_surface(cx) else {
             return false;
         };
         surface.update(cx, |surface, cx| surface.open_active_editor_search(cx))
     }
 
     pub(super) fn select_next_active_ide_search_match(&mut self, cx: &mut Context<Self>) -> bool {
-        let Some(surface) = self.active_ide_surface() else {
+        let Some(surface) = self.active_ide_surface(cx) else {
             return false;
         };
         surface.update(cx, |surface, cx| {
@@ -382,7 +799,7 @@ impl WorkspaceApp {
         &mut self,
         cx: &mut Context<Self>,
     ) -> bool {
-        let Some(surface) = self.active_ide_surface() else {
+        let Some(surface) = self.active_ide_surface(cx) else {
             return false;
         };
         surface.update(cx, |surface, cx| {
@@ -390,11 +807,14 @@ impl WorkspaceApp {
         })
     }
 
-    pub(in crate::workspace) fn active_ide_surface(&self) -> Option<gpui::Entity<IdeSurface>> {
+    pub(in crate::workspace) fn active_ide_surface(
+        &self,
+        cx: &App,
+    ) -> Option<gpui::Entity<IdeSurface>> {
         let tab_id = self.main_window_tabs.active_tab_id?;
         let tab = self.tabs.iter().find(|tab| tab.id == tab_id)?;
         (tab.kind == TabKind::Ide)
-            .then(|| self.ide_tab_surfaces.get(&tab_id).cloned())
+            .then(|| self.ide_workspace.read(cx).surface(tab_id))
             .flatten()
     }
 
@@ -536,66 +956,36 @@ impl WorkspaceApp {
     pub(super) fn apply_ide_runtime_settings_to_surfaces(&mut self, cx: &mut Context<Self>) {
         let tokens = self.tokens;
         let runtime_settings = self.ide_runtime_settings();
-        for surface in self.ide_tab_surfaces.values() {
-            surface.update(cx, |surface, cx| {
-                surface.set_visual_and_runtime_settings(tokens, runtime_settings, cx);
-            });
-        }
+        self.ide_workspace.update(cx, |workspace, cx| {
+            workspace.apply_runtime_settings(tokens, runtime_settings, cx);
+        });
     }
 
-    fn subscribe_ide_surface(
+    pub(super) fn handle_ide_workspace_event(
         &mut self,
-        tab_id: oxideterm_workspace::TabId,
-        surface: &gpui::Entity<IdeSurface>,
+        event: &IdeWorkspaceEvent,
         cx: &mut Context<Self>,
     ) {
-        let subscription = cx.subscribe(
-            surface,
-            move |this, _surface, event: &IdeSurfaceEvent, cx| match event {
-                IdeSurfaceEvent::RememberAgentMode(mode) => {
-                    this.remember_ide_agent_mode(*mode, cx);
-                }
-                IdeSurfaceEvent::ProjectOpened => {
-                    if let Some(node_id) = this.ide_tab_nodes.get(&tab_id).cloned() {
-                        // Tauri ideStore.openProject clears lastClosedAt.
-                        // Native records it per node because it can keep
-                        // independent IDE surfaces for different nodes.
-                        this.ide_last_closed_at_by_node.remove(&node_id);
-                    }
-                }
-                IdeSurfaceEvent::TransientFolderPickerCancelled => {
-                    // Closing the temporary IDE tab drops the surface subscription.
-                    // Defer it so we do not tear down the current subscription
-                    // while GPUI is still dispatching this surface event.
-                    cx.spawn(async move |weak, cx| {
-                        let _ = weak.update(cx, |this, cx| {
-                            this.close_transient_ide_tab_after_folder_cancel(tab_id, cx);
-                        });
-                    })
-                    .detach();
-                }
-                IdeSurfaceEvent::ReconnectRestoreProjectOpened { reconnect_node_id } => {
-                    this.complete_pending_ide_reconnect_restore(
-                        &NodeId::new(reconnect_node_id.clone()),
-                        PhaseResult::Ok,
-                        "restored IDE project and open files".to_string(),
-                        cx,
-                    );
-                }
-                IdeSurfaceEvent::ReconnectRestoreProjectFailed {
+        match event {
+            IdeWorkspaceEvent::RememberAgentMode(mode) => {
+                self.remember_ide_agent_mode(*mode, cx);
+            }
+            IdeWorkspaceEvent::TransientSurfaceClosed { tab_id } => {
+                self.close_transient_ide_tab_after_folder_cancel(*tab_id, cx);
+            }
+            IdeWorkspaceEvent::ReconnectRestoreCompleted {
+                reconnect_node_id,
+                result,
+                message,
+            } => {
+                self.complete_pending_ide_reconnect_restore(
                     reconnect_node_id,
-                    message,
-                } => {
-                    this.complete_pending_ide_reconnect_restore(
-                        &NodeId::new(reconnect_node_id.clone()),
-                        PhaseResult::Failed,
-                        message.clone(),
-                        cx,
-                    );
-                }
-            },
-        );
-        self.ide_surface_subscriptions.insert(tab_id, subscription);
+                    *result,
+                    message.clone(),
+                    cx,
+                );
+            }
+        }
     }
 
     fn close_transient_ide_tab_after_folder_cancel(
@@ -610,9 +1000,6 @@ impl WorkspaceApp {
         let tab = self.tabs.remove(index);
         self.detached_tabs.remove(&tab.id);
         self.detached_tab_windows.remove(&tab.id);
-        self.ide_tab_surfaces.remove(&tab.id);
-        self.ide_surface_subscriptions.remove(&tab.id);
-        self.ide_tab_nodes.remove(&tab.id);
 
         if removed_was_active {
             // Picker cancellation is not a user project-close action. Pick the
@@ -652,7 +1039,6 @@ impl WorkspaceApp {
         });
         self.ai_entity
             .update(cx, |ai, _cx| ai.set_agent_fs_mode(mode));
-        self.apply_ide_runtime_settings_to_surfaces(cx);
         cx.notify();
     }
 }
@@ -689,7 +1075,46 @@ fn ide_surface_mount_for_location(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use gpui::TestAppContext;
+    use oxideterm_ssh::{NodeRouter, SshConnectionRegistry};
     use std::time::Duration;
+
+    fn test_runtime() -> Arc<tokio::runtime::Runtime> {
+        Arc::new(
+            tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .expect("build IDE registry test runtime"),
+        )
+    }
+
+    fn test_file_system() -> NodeAgentIdeFileSystem {
+        NodeAgentIdeFileSystem::new(
+            NodeRouter::new(SshConnectionRegistry::default()),
+            NodeAgentMode::Ask,
+        )
+    }
+
+    fn test_registry(cx: &mut TestAppContext) -> Entity<IdeWorkspaceEntity> {
+        let fs = test_file_system();
+        let backend_runtime = test_runtime();
+        cx.new(move |_| IdeWorkspaceEntity::new(fs, backend_runtime))
+    }
+
+    fn test_surface(cx: &mut TestAppContext) -> Entity<IdeSurface> {
+        let fs = test_file_system();
+        let backend_runtime = test_runtime();
+        cx.new(move |cx| {
+            IdeSurface::new(
+                fs,
+                oxideterm_theme::default_tokens(),
+                IdeLabels::default(),
+                IdeRuntimeSettings::default(),
+                backend_runtime,
+                cx,
+            )
+        })
+    }
 
     #[test]
     fn ide_restore_skips_when_close_happened_after_snapshot() {
@@ -745,5 +1170,105 @@ mod tests {
             ide_surface_mount_for_location(false, true, true),
             IdeSurfaceMount::DetachedWindow
         );
+    }
+
+    #[gpui::test]
+    fn ide_registry_owns_surfaces_node_index_and_deterministic_target(cx: &mut TestAppContext) {
+        let registry = test_registry(cx);
+        let later_surface = test_surface(cx);
+        let earlier_surface = test_surface(cx);
+        let later_tab_id = TabId(9);
+        let earlier_tab_id = TabId(3);
+        let later_node_id = NodeId::new("node-b");
+        let earlier_node_id = NodeId::new("node-a");
+
+        registry.update(cx, |registry, cx| {
+            registry.register_surface(
+                later_tab_id,
+                later_node_id.clone(),
+                later_surface.clone(),
+                cx,
+            );
+            registry.register_surface(
+                earlier_tab_id,
+                earlier_node_id.clone(),
+                earlier_surface.clone(),
+                cx,
+            );
+            assert_eq!(registry.tab_for_node(&later_node_id), Some(later_tab_id));
+            assert_eq!(
+                registry.tab_for_node(&earlier_node_id),
+                Some(earlier_tab_id)
+            );
+            assert_eq!(
+                registry
+                    .surface_for_effect(None, None)
+                    .map(|surface| surface.entity_id()),
+                Some(earlier_surface.entity_id())
+            );
+            assert_eq!(
+                registry
+                    .surface_for_effect(None, Some("node-b"))
+                    .map(|surface| surface.entity_id()),
+                Some(later_surface.entity_id())
+            );
+        });
+    }
+
+    #[gpui::test]
+    fn same_node_close_only_suppresses_restore_after_final_surface(cx: &mut TestAppContext) {
+        let registry = test_registry(cx);
+        let first_surface = test_surface(cx);
+        let second_surface = test_surface(cx);
+        let node_id = NodeId::new("shared-node");
+        let snapshot_at = SystemTime::UNIX_EPOCH + Duration::from_secs(10);
+        let closed_at = snapshot_at + Duration::from_secs(1);
+
+        registry.update(cx, |registry, cx| {
+            registry.register_surface(TabId(2), node_id.clone(), first_surface, cx);
+            registry.register_surface(TabId(1), node_id.clone(), second_surface, cx);
+
+            assert!(registry.close_surface_at(
+                TabId(1),
+                IdeSurfaceCloseReason::UserProjectClose,
+                closed_at,
+                cx,
+            ));
+            assert_eq!(registry.tab_for_node(&node_id), Some(TabId(2)));
+            assert!(!ide_restore_was_closed_after_snapshot(
+                registry.last_closed_at_by_node.get(&node_id).copied(),
+                Some(snapshot_at),
+            ));
+
+            assert!(registry.close_surface_at(
+                TabId(2),
+                IdeSurfaceCloseReason::UserProjectClose,
+                closed_at,
+                cx,
+            ));
+            assert!(ide_restore_was_closed_after_snapshot(
+                registry.last_closed_at_by_node.get(&node_id).copied(),
+                Some(snapshot_at),
+            ));
+        });
+    }
+
+    #[gpui::test]
+    fn transient_surface_close_does_not_record_reconnect_suppression(cx: &mut TestAppContext) {
+        let registry = test_registry(cx);
+        let surface = test_surface(cx);
+        let node_id = NodeId::new("picker-node");
+
+        registry.update(cx, |registry, cx| {
+            registry.register_surface(TabId(7), node_id.clone(), surface, cx);
+            assert!(registry.close_surface_at(
+                TabId(7),
+                IdeSurfaceCloseReason::TransientFolderPickerCancel,
+                SystemTime::now(),
+                cx,
+            ));
+            assert!(!registry.last_closed_at_by_node.contains_key(&node_id));
+            assert!(registry.surface(TabId(7)).is_none());
+        });
     }
 }

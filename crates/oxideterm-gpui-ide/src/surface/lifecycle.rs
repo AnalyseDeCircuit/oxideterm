@@ -129,6 +129,12 @@ impl IdeSurface {
         cx.notify();
     }
 
+    pub fn set_agent_mode(&mut self, agent_mode: NodeAgentMode, cx: &mut Context<Self>) {
+        let mut runtime_settings = self.runtime_settings;
+        runtime_settings.agent_mode = agent_mode;
+        self.set_visual_and_runtime_settings(self.tokens, runtime_settings, cx);
+    }
+
     pub fn snapshot(&mut self, cx: &mut Context<Self>) -> Option<WorkspaceSnapshot> {
         self.sync_all_editors(cx);
         self.workspace.snapshot().ok()
@@ -390,10 +396,7 @@ mod lifecycle_tests {
         let node_id = NodeId::new(node_id);
         let config = SshConfig::password(host, 22, "ide-user", "pw");
         router.upsert_node(node_id.clone(), config.clone());
-        let handle = registry.acquire(
-            config,
-            ConnectionConsumer::NodeRouter(node_id.0.clone()),
-        );
+        let handle = registry.acquire(config, ConnectionConsumer::NodeRouter(node_id.0.clone()));
         handle.set_physical(Arc::new(()));
         registry.mark_state(handle.connection_id(), ConnectionState::Active);
         router
@@ -686,9 +689,7 @@ mod lifecycle_tests {
     }
 
     #[gpui::test]
-    fn stopping_agent_watch_cancels_tasks_and_orders_same_path_restart(
-        cx: &mut TestAppContext,
-    ) {
+    fn stopping_agent_watch_cancels_tasks_and_orders_same_path_restart(cx: &mut TestAppContext) {
         let registry = SshConnectionRegistry::default();
         let router = NodeRouter::new(registry);
         let fs = NodeAgentIdeFileSystem::new(router, NodeAgentMode::Disabled);

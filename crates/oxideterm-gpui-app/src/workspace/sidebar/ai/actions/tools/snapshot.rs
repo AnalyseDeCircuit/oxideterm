@@ -278,30 +278,16 @@ impl WorkspaceApp {
             targets.push(ai_sftp_target_for_node(node_id, node, sftp_session_id));
         }
 
-        for (tab_id, node_id) in &self.ide_tab_nodes {
-            let Some(node) = self.ssh_nodes.get(node_id) else {
+        for ide_target in self.ide_workspace.read(cx).target_snapshots(cx) {
+            let Some(node) = self.ssh_nodes.get(&ide_target.node_id) else {
                 continue;
             };
-            let (project_root_path, project_name, active_editor_tab_id) = self
-                .ide_tab_surfaces
-                .get(tab_id)
-                .map(|surface| {
-                    surface.update(cx, |surface, _cx| {
-                        let context = surface.ai_context_snapshot();
-                        (
-                            surface.project_root_path(),
-                            context.map(|snapshot| snapshot.project_name),
-                            surface.active_editor_tab_id(),
-                        )
-                    })
-                })
-                .unwrap_or((None, None, None));
             targets.push(ai_ide_workspace_target_for_node(
-                node_id,
+                &ide_target.node_id,
                 node,
-                active_editor_tab_id,
-                project_root_path,
-                project_name,
+                ide_target.active_editor_tab_id,
+                ide_target.project_root_path,
+                ide_target.project_name,
             ));
         }
 
@@ -961,10 +947,10 @@ impl WorkspaceApp {
                 };
                 // Tauri reconnects stale ssh-node targets and creates a fresh terminal;
                 // stale pane metadata must not be reported as an already-live target.
-                let Some((title, saved_connection_id)) =
-                    self.ssh_nodes.get(&node_id).map(|node| {
-                        (node.title.clone(), node.saved_connection_id.clone())
-                    })
+                let Some((title, saved_connection_id)) = self
+                    .ssh_nodes
+                    .get(&node_id)
+                    .map(|node| (node.title.clone(), node.saved_connection_id.clone()))
                 else {
                     return snapshot
                         .fail(

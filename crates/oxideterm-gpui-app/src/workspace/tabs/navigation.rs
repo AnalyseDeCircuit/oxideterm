@@ -192,7 +192,7 @@ impl WorkspaceApp {
             Some(TabKind::Ide) => {
                 self.active_surface = ActiveSurface::Terminal;
                 if let Some(active_tab_id) = self.main_window_tabs.active_tab_id
-                    && let Some(node_id) = self.ide_tab_nodes.get(&active_tab_id)
+                    && let Some(node_id) = self.ide_workspace.read(cx).node_for_tab(active_tab_id)
                 {
                     self.active_ssh_node_id = Some(node_id.clone());
                     self.expanded_ssh_nodes.insert(node_id.clone());
@@ -859,20 +859,11 @@ impl WorkspaceApp {
         // Tauri keeps node SFTP alive when the SFTP tab is closed; the tab is
         // only a view over the node-owned ConnectionEntry session.
         self.sftp_tab_nodes.remove(&tab.id);
-        if let Some(surface) = self.ide_tab_surfaces.remove(&tab.id) {
-            surface.update(cx, |surface, cx| {
-                surface.release_remote_session(cx);
-            });
-        }
-        self.ide_surface_subscriptions.remove(&tab.id);
-        if let Some(node_id) = self.ide_tab_nodes.remove(&tab.id) {
-            // Tauri appStore.closeTab() calls ideStore.closeProject(true) when
-            // the IDE tab goes away, and closeProject records lastClosedAt so
-            // reconnect does not resurrect a project the user intentionally
-            // closed after the snapshot.
-            self.ide_last_closed_at_by_node
-                .insert(node_id, SystemTime::now());
-        }
+        self.ide_workspace.update(cx, |workspace, cx| {
+            // The IDE owner records a real project close and releases only this
+            // surface's node consumer; shared node users remain registered.
+            workspace.close_surface(tab.id, ide::IdeSurfaceCloseReason::UserProjectClose, cx);
+        });
         self.forwarding
             .update(cx, |forwarding, _cx| forwarding.unmap_tab(tab.id));
         let mut pane_ids = Vec::new();
@@ -1016,7 +1007,7 @@ impl WorkspaceApp {
         if self.sftp_tab_nodes.get(&tab.id) == Some(node_id) {
             return true;
         }
-        if self.ide_tab_nodes.get(&tab.id) == Some(node_id) {
+        if self.ide_workspace.read(cx).node_for_tab(tab.id) == Some(node_id) {
             return true;
         }
         if self.forwarding.read(cx).tab_matches_node(tab.id, node_id) {

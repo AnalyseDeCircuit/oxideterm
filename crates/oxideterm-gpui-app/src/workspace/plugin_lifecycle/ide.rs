@@ -14,15 +14,8 @@ pub(super) fn native_plugin_ide_workspace_snapshot(
     workspace: &WorkspaceApp,
     cx: &mut Context<WorkspaceApp>,
 ) -> Option<IdePluginSnapshot> {
-    let active_surface = workspace
-        .main_window_tabs
-        .active_tab_id
-        .and_then(|tab_id| workspace.ide_tab_surfaces.get(&tab_id))
-        .and_then(|surface| surface.read(cx).plugin_snapshot());
-    active_surface.or_else(|| {
-        workspace
-            .ide_tab_surfaces
-            .values()
-            .find_map(|surface| surface.read(cx).plugin_snapshot())
-    })
+    workspace
+        .ide_workspace
+        .read(cx)
+        .plugin_snapshot(workspace.main_window_tabs.active_tab_id, cx)
 }

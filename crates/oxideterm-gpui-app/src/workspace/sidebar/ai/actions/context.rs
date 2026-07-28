@@ -489,14 +489,9 @@ impl WorkspaceApp {
         let active_ide_tab = self
             .active_tab()
             .and_then(|tab| (tab.kind == TabKind::Ide).then_some(tab.id));
-        active_ide_tab
-            .and_then(|tab_id| self.ide_tab_surfaces.get(&tab_id))
-            .and_then(|surface| surface.read(cx).ai_context_snapshot())
-            .or_else(|| {
-                self.ide_tab_surfaces
-                    .values()
-                    .find_map(|surface| surface.read(cx).ai_context_snapshot())
-            })
+        self.ide_workspace
+            .read(cx)
+            .ai_context_snapshot(active_ide_tab, cx)
     }
 
     pub(in crate::workspace) fn ai_active_sftp_context(

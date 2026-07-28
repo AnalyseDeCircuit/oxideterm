@@ -208,19 +208,10 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) {
         let requested_node_id = string_arg(&args, "nodeId").map(str::to_string);
-        let surface = requested_node_id
-            .as_deref()
-            .and_then(|node_id| {
-                self.ide_tab_surfaces.values().find_map(|surface| {
-                    surface
-                        .read(cx)
-                        .plugin_snapshot()
-                        .filter(|snapshot| snapshot.project.node_id == node_id)
-                        .map(|_| surface.clone())
-                })
-            })
-            .or_else(|| self.active_ide_surface())
-            .or_else(|| self.ide_tab_surfaces.values().next().cloned());
+        let surface = self.ide_workspace.read(cx).surface_for_effect(
+            self.main_window_tabs.active_tab_id,
+            requested_node_id.as_deref(),
+        );
         let Some(surface) = surface else {
             return;
         };

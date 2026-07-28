@@ -152,7 +152,6 @@ use oxideterm_connections::{
 use oxideterm_forwarding::{
     ForwardEventDeliverySender, ForwardStatus, ForwardingRegistry, SavedForwardStore,
 };
-use oxideterm_gpui_ide::IdeSurface;
 use oxideterm_gpui_platform::{
     rendering::detect_graphics,
     vibrancy::{NativeVibrancyMode, VibrancySupport, apply_window_vibrancy},
@@ -810,10 +809,8 @@ pub(crate) struct WorkspaceApp {
     _file_manager_observation: Subscription,
     _file_manager_subscription: Subscription,
     sftp_tab_nodes: HashMap<TabId, NodeId>,
-    ide_tab_surfaces: HashMap<TabId, gpui::Entity<IdeSurface>>,
-    ide_surface_subscriptions: HashMap<TabId, Subscription>,
-    ide_tab_nodes: HashMap<TabId, NodeId>,
-    ide_last_closed_at_by_node: HashMap<NodeId, SystemTime>,
+    ide_workspace: Entity<ide::IdeWorkspaceEntity>,
+    _ide_workspace_subscription: Subscription,
     sftp_view: Entity<sftp::SftpWorkspaceEntity>,
     _sftp_observation: Subscription,
     _sftp_subscription: Subscription,
