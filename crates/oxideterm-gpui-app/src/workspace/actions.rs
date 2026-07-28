@@ -1969,21 +1969,22 @@ impl WorkspaceApp {
         cx.notify();
     }
 
-    pub(super) fn active_terminal_recording_status(
-        &self,
-        cx: &mut Context<Self>,
-    ) -> TerminalRecordingStatus {
+    pub(super) fn active_terminal_recording_status(&self, cx: &App) -> TerminalRecordingStatus {
         self.active_pane(cx)
             .map(|pane| pane.read(cx).recording_status())
             .unwrap_or_default()
     }
 
-    pub(super) fn any_terminal_recording_active(&self, cx: &mut Context<Self>) -> bool {
-        self.tab_host
-            .read(cx)
-            .panes()
-            .values()
-            .any(|pane| pane.read(cx).recording_status().state != TerminalRecordingState::Idle)
+    pub(in crate::workspace) fn sync_active_terminal_recording_elapsed_tick(
+        &mut self,
+        cx: &mut App,
+    ) {
+        let pane_id = self.active_pane_id();
+        let recording =
+            self.active_terminal_recording_status(cx).state == TerminalRecordingState::Recording;
+        self.tab_host.update(cx, |tab_host, cx| {
+            tab_host.sync_recording_elapsed_tick(pane_id, recording, cx)
+        });
     }
 
     pub(super) fn active_terminal_timestamps_enabled(&self, cx: &mut Context<Self>) -> bool {

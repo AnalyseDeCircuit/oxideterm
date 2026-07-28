@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use super::*;
+use gpui::Task;
 use oxideterm_editor_core::utf16::replace_utf16;
 use oxideterm_environment::{
     GitProbeError, GitProbeKey, GitProbeOutcome, GitProbeScope, GitRepositorySnapshot,
@@ -49,12 +50,18 @@ pub(in crate::workspace) struct WorkspaceTerminalEntity {
     git_tx: delivery::ActiveDeliverySender<TerminalGitProbeDelivery>,
     git_rx: std::sync::mpsc::Receiver<TerminalGitProbeDelivery>,
     git_store: GitStatusStore,
+    active_git_probe_key: Option<GitProbeKey>,
+    git_probe_schedule_generation: u64,
+    git_probe_schedule_task: Option<Task<()>>,
     pub(super) git_action_tx: delivery::ActiveDeliverySender<terminal_git::TerminalGitDelivery>,
     pub(super) git_action_rx: std::sync::mpsc::Receiver<terminal_git::TerminalGitDelivery>,
     pub(super) git_panel: terminal_git::TerminalGitBranchPickerState,
     project_tx: delivery::ActiveDeliverySender<terminal_project::TerminalProjectDelivery>,
     project_rx: std::sync::mpsc::Receiver<terminal_project::TerminalProjectDelivery>,
     project_store: ProjectStatusStore,
+    active_project_probe_key: Option<ProjectProbeKey>,
+    project_probe_schedule_generation: u64,
+    project_probe_schedule_task: Option<Task<()>>,
     project_tasks_enabled: bool,
     project_panel: terminal_project::TerminalProjectPanelState,
     pub(super) cwd_tx: delivery::ActiveDeliverySender<terminal_cwd::TerminalCwdDelivery>,
@@ -121,12 +128,18 @@ impl WorkspaceTerminalEntity {
             git_tx,
             git_rx,
             git_store: GitStatusStore::default(),
+            active_git_probe_key: None,
+            git_probe_schedule_generation: 0,
+            git_probe_schedule_task: None,
             git_action_tx,
             git_action_rx,
             git_panel: terminal_git::TerminalGitBranchPickerState::default(),
             project_tx,
             project_rx,
             project_store: ProjectStatusStore::default(),
+            active_project_probe_key: None,
+            project_probe_schedule_generation: 0,
+            project_probe_schedule_task: None,
             project_tasks_enabled: false,
             project_panel: terminal_project::TerminalProjectPanelState::default(),
             cwd_tx,
@@ -396,6 +409,46 @@ impl WorkspaceTerminalEntity {
         }
     }
 
+    pub(in crate::workspace) fn set_active_git_probe_key(
+        &mut self,
+        key: Option<GitProbeKey>,
+        cx: &mut Context<Self>,
+    ) {
+        if self.active_git_probe_key == key {
+            return;
+        }
+        self.active_git_probe_key = key.clone();
+        self.git_probe_schedule_generation = self.git_probe_schedule_generation.wrapping_add(1);
+        self.git_probe_schedule_task = None;
+        let Some(key) = key else {
+            return;
+        };
+        self.maybe_refresh_git(key.clone(), cx);
+        let generation = self.git_probe_schedule_generation;
+        self.git_probe_schedule_task = Some(cx.spawn(async move |terminal, cx| {
+            loop {
+                Timer::after(Duration::from_millis(
+                    terminal_git::TERMINAL_GIT_PROBE_TTL_MS,
+                ))
+                .await;
+                let should_continue = terminal
+                    .update(cx, |terminal, cx| {
+                        if terminal.git_probe_schedule_generation != generation
+                            || terminal.active_git_probe_key.as_ref() != Some(&key)
+                        {
+                            return false;
+                        }
+                        terminal.maybe_refresh_git(key.clone(), cx);
+                        true
+                    })
+                    .unwrap_or(false);
+                if !should_continue {
+                    break;
+                }
+            }
+        }));
+    }
+
     pub(in crate::workspace) fn set_project_tasks_enabled(
         &mut self,
         enabled: bool,
@@ -406,12 +459,55 @@ impl WorkspaceTerminalEntity {
         }
         self.project_tasks_enabled = enabled;
         if !enabled {
+            self.set_active_project_probe_key(None, cx);
             // Disabling invalidates in-flight generations so late completions
             // cannot leave a permanently loading cache entry.
             self.project_store.retain_keys(|_| false);
             self.project_panel.close();
             cx.emit(WorkspaceTerminalEvent::ProjectMetadataChanged);
         }
+    }
+
+    pub(in crate::workspace) fn set_active_project_probe_key(
+        &mut self,
+        key: Option<ProjectProbeKey>,
+        cx: &mut Context<Self>,
+    ) {
+        if self.active_project_probe_key == key {
+            return;
+        }
+        self.active_project_probe_key = key.clone();
+        self.project_probe_schedule_generation =
+            self.project_probe_schedule_generation.wrapping_add(1);
+        self.project_probe_schedule_task = None;
+        let Some(key) = key else {
+            return;
+        };
+        if !self.project_tasks_enabled {
+            return;
+        }
+        self.maybe_refresh_project(key.clone(), cx);
+        let generation = self.project_probe_schedule_generation;
+        self.project_probe_schedule_task = Some(cx.spawn(async move |terminal, cx| {
+            loop {
+                Timer::after(Duration::from_millis(TERMINAL_PROJECT_PROBE_TTL_MS)).await;
+                let should_continue = terminal
+                    .update(cx, |terminal, cx| {
+                        if terminal.project_probe_schedule_generation != generation
+                            || terminal.active_project_probe_key.as_ref() != Some(&key)
+                            || !terminal.project_tasks_enabled
+                        {
+                            return false;
+                        }
+                        terminal.maybe_refresh_project(key.clone(), cx);
+                        true
+                    })
+                    .unwrap_or(false);
+                if !should_continue {
+                    break;
+                }
+            }
+        }));
     }
 
     pub(in crate::workspace) fn maybe_refresh_project(
@@ -623,6 +719,21 @@ impl WorkspaceTerminalEntity {
                 generation,
                 outcome,
             });
+        });
+    }
+}
+
+impl WorkspaceApp {
+    pub(in crate::workspace) fn sync_active_terminal_metadata_context(&mut self, cx: &mut App) {
+        let project_tasks_enabled = self.terminal_project_tasks_enabled();
+        let git_key = self.active_terminal_git_key(cx);
+        let project_key = project_tasks_enabled
+            .then(|| self.active_terminal_project_key(cx))
+            .flatten();
+        self.terminal.update(cx, |terminal, cx| {
+            terminal.set_project_tasks_enabled(project_tasks_enabled, cx);
+            terminal.set_active_git_probe_key(git_key, cx);
+            terminal.set_active_project_probe_key(project_key, cx);
         });
     }
 }
@@ -979,6 +1090,50 @@ mod tests {
             recorder.read_with(cx, |recorder, _cx| recorder.project_metadata_changes),
             1
         );
+    }
+
+    #[gpui::test]
+    fn active_metadata_keys_replace_only_entity_owned_schedules(cx: &mut TestAppContext) {
+        let terminal = new_terminal_entity(cx);
+        let git_first =
+            GitProbeKey::new(GitProbeScope::ssh_node("node-a"), "/repo-a").expect("git key");
+        let git_second =
+            GitProbeKey::new(GitProbeScope::ssh_node("node-b"), "/repo-b").expect("git key");
+        let project_first =
+            ProjectProbeKey::new(ProjectProbeScope::ssh_node("node-a"), "/project-a")
+                .expect("project key");
+        let project_second =
+            ProjectProbeKey::new(ProjectProbeScope::ssh_node("node-b"), "/project-b")
+                .expect("project key");
+
+        terminal.update(cx, |terminal, cx| {
+            terminal.set_project_tasks_enabled(true, cx);
+            terminal.set_active_git_probe_key(Some(git_first.clone()), cx);
+            terminal.set_active_project_probe_key(Some(project_first.clone()), cx);
+            let git_generation = terminal.git_probe_schedule_generation;
+            let project_generation = terminal.project_probe_schedule_generation;
+            assert!(terminal.git_probe_schedule_task.is_some());
+            assert!(terminal.project_probe_schedule_task.is_some());
+
+            terminal.set_active_git_probe_key(Some(git_second.clone()), cx);
+            terminal.set_active_project_probe_key(Some(project_second.clone()), cx);
+            assert_ne!(terminal.git_probe_schedule_generation, git_generation);
+            assert_ne!(
+                terminal.project_probe_schedule_generation,
+                project_generation
+            );
+            // Switching the active context stops only future scheduling. The
+            // previous key's cache and any in-flight delivery remain valid.
+            assert!(terminal.git_store.get(&git_first).is_some());
+            assert!(terminal.project_store.get(&project_first).is_some());
+
+            terminal.set_active_git_probe_key(None, cx);
+            terminal.set_active_project_probe_key(None, cx);
+            assert!(terminal.git_probe_schedule_task.is_none());
+            assert!(terminal.project_probe_schedule_task.is_none());
+            assert!(terminal.git_store.get(&git_first).is_some());
+            assert!(terminal.project_store.get(&project_first).is_some());
+        });
     }
 
     #[gpui::test]

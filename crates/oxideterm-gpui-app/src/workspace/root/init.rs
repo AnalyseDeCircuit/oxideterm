@@ -753,6 +753,8 @@ impl WorkspaceApp {
         workspace.bootstrap_cloud_sync_controller(cx);
         workspace.sync_ssh_config_sync_service();
         workspace.restore_session_tree_snapshot();
+        workspace.sync_active_terminal_metadata_context(cx);
+        workspace.sync_active_terminal_recording_elapsed_tick(cx);
         let window_handle = window.window_handle();
         cx.spawn(async move |weak, cx| {
             loop {
@@ -763,11 +765,6 @@ impl WorkspaceApp {
                 if cx
                     .update_window(window_handle, |_, _window, cx| {
                         weak.update(cx, |workspace, cx| {
-                            workspace.maybe_refresh_active_terminal_git(cx);
-                            workspace.maybe_refresh_active_terminal_project(cx);
-                            if workspace.any_terminal_recording_active(cx) {
-                                cx.notify();
-                            }
                             if workspace.sync_active_privilege_prompt_inline_hint(cx) {
                                 // Privilege prompts are rendered as terminal ghost text,
                                 // so the workspace heartbeat only mirrors the prompt

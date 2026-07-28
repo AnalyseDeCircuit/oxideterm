@@ -91,6 +91,16 @@ impl WorkspaceApp {
                 })
                 .detach();
             }
+            WorkspaceTabHostEvent::RecordingElapsedTick { pane_id } => {
+                if self.active_pane_id() == Some(*pane_id)
+                    && self.active_terminal_recording_status(cx).state
+                        == TerminalRecordingState::Recording
+                {
+                    cx.notify();
+                } else {
+                    self.sync_active_terminal_recording_elapsed_tick(cx);
+                }
+            }
             WorkspaceTabHostEvent::TerminalPaneDelivery {
                 pane_id,
                 session_id,
@@ -284,6 +294,8 @@ impl WorkspaceApp {
         } else {
             window.focus(&self.focus_handle, cx);
         }
+        self.sync_active_terminal_metadata_context(cx);
+        self.sync_active_terminal_recording_elapsed_tick(cx);
     }
 
     fn focus_active_tab_keyboard_owner(&mut self, window: &mut Window, cx: &mut Context<Self>) {

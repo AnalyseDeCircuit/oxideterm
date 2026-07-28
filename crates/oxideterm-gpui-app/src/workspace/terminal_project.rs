@@ -44,24 +44,6 @@ impl WorkspaceApp {
         self.terminal.read(cx).project_snapshot(&key)
     }
 
-    pub(in crate::workspace) fn maybe_refresh_active_terminal_project(
-        &mut self,
-        cx: &mut Context<Self>,
-    ) {
-        let project_tasks_enabled = self.terminal_project_tasks_enabled();
-        self.terminal.update(cx, |terminal, cx| {
-            terminal.set_project_tasks_enabled(project_tasks_enabled, cx);
-        });
-        if !project_tasks_enabled {
-            return;
-        }
-        let Some(key) = self.active_terminal_project_key(cx) else {
-            return;
-        };
-        self.terminal
-            .update(cx, |terminal, cx| terminal.maybe_refresh_project(key, cx));
-    }
-
     pub(in crate::workspace) fn open_terminal_project_panel(&mut self, cx: &mut Context<Self>) {
         let Some(key) = self.active_terminal_project_key(cx) else {
             return;
@@ -179,7 +161,7 @@ impl WorkspaceApp {
 
     pub(in crate::workspace) fn active_terminal_project_key(
         &self,
-        cx: &mut Context<Self>,
+        cx: &App,
     ) -> Option<ProjectProbeKey> {
         if !self.terminal_project_tasks_enabled() {
             return None;

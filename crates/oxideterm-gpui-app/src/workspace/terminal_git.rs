@@ -757,17 +757,6 @@ impl WorkspaceApp {
         self.terminal.read(cx).git_snapshot(&key)
     }
 
-    pub(in crate::workspace) fn maybe_refresh_active_terminal_git(
-        &mut self,
-        cx: &mut Context<Self>,
-    ) {
-        let Some(key) = self.active_terminal_git_key(cx) else {
-            return;
-        };
-        self.terminal
-            .update(cx, |terminal, cx| terminal.maybe_refresh_git(key, cx));
-    }
-
     pub(in crate::workspace) fn open_terminal_git_branch_picker(&mut self, cx: &mut Context<Self>) {
         let Some(key) = self.active_terminal_git_key(cx) else {
             return;
@@ -1131,7 +1120,7 @@ impl WorkspaceApp {
         }
     }
 
-    fn active_terminal_git_key(&self, cx: &mut Context<Self>) -> Option<GitProbeKey> {
+    pub(in crate::workspace) fn active_terminal_git_key(&self, cx: &App) -> Option<GitProbeKey> {
         let command_bar_settings = &self.settings_store.settings().terminal.command_bar;
         if !command_bar_settings.enabled || !command_bar_settings.git_status {
             return None;
@@ -1161,7 +1150,7 @@ impl WorkspaceApp {
         &self,
         pane_id: PaneId,
         scope: &GitProbeScope,
-        cx: &mut Context<Self>,
+        cx: &App,
     ) -> Option<String> {
         let snapshot_cwd = self
             .active_terminal_cwd_snapshot(cx)

@@ -52,6 +52,16 @@ impl WorkspaceApp {
             TerminalPaneEvent::Exited { .. } => {
                 self.queue_auto_close_terminal_session(session_id, cx);
             }
+            TerminalPaneEvent::CurrentDirectoryChanged => {
+                if self.active_pane_id() == Some(pane_id) {
+                    self.sync_active_terminal_metadata_context(cx);
+                }
+            }
+            TerminalPaneEvent::RecordingStatusChanged => {
+                if self.active_pane_id() == Some(pane_id) {
+                    self.sync_active_terminal_recording_elapsed_tick(cx);
+                }
+            }
             TerminalPaneEvent::PrivilegePromptSubmitRequested => self
                 .deliver_terminal_pane_interaction(
                     pane_id,

@@ -83,6 +83,10 @@ const EDITOR_CLIPBOARD_REQUEST_TIMEOUT: Duration = Duration::from_secs(2);
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum TerminalPaneEvent {
     Exited { exit_code: Option<i32> },
+    // CWD payloads stay pane-owned; Workspace only recomputes the active metadata key.
+    CurrentDirectoryChanged,
+    // Recording contents stay pane-owned; consumers only reschedule visible elapsed chrome.
+    RecordingStatusChanged,
     // The event carries intent only; Workspace resolves any credential in the active scope.
     PrivilegePromptSubmitRequested,
     // The requested action remains pane-owned until the active Workspace consumes it.
@@ -852,6 +856,7 @@ impl TerminalPane {
         self.cwd = Some(cwd.to_string());
         self.cwd_source = Some(TerminalWorkingDirectorySource::VisibleCommand);
         self.pending_cwd = None;
+        cx.emit(TerminalPaneEvent::CurrentDirectoryChanged);
         cx.notify();
     }
 
@@ -869,6 +874,7 @@ impl TerminalPane {
         // shell; OSC 7 or a visible user `cd` will replace it when available.
         self.cwd = Some(cwd.to_string());
         self.cwd_source = Some(TerminalWorkingDirectorySource::SessionDefault);
+        cx.emit(TerminalPaneEvent::CurrentDirectoryChanged);
         cx.notify();
     }
 
@@ -894,6 +900,7 @@ impl TerminalPane {
             command: command.to_string(),
             created_at: Instant::now(),
         });
+        cx.emit(TerminalPaneEvent::CurrentDirectoryChanged);
         cx.notify();
     }
 
@@ -1543,6 +1550,7 @@ impl TerminalPane {
             needs_notify = true;
         }
         if self.expire_pending_terminal_cwd(now) {
+            cx.emit(TerminalPaneEvent::CurrentDirectoryChanged);
             needs_notify = true;
         }
         if needs_notify {
@@ -1992,6 +2000,7 @@ impl TerminalPane {
                 self.cwd_shell_integration_status = TerminalCwdShellIntegrationStatus::Active;
                 self.pending_cwd = None;
                 self.cwd_host = host;
+                cx.emit(TerminalPaneEvent::CurrentDirectoryChanged);
                 TerminalEventEffect::notify()
             }
             TerminalEvent::ClipboardStore(text) => {

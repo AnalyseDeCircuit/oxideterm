@@ -30,6 +30,8 @@ impl WorkspaceApp {
         if active_tab_changed {
             // Host Tools owns its timer; root only pushes mount visibility changes.
             self.sync_host_tools_lifecycle(false, cx);
+            self.sync_active_terminal_metadata_context(cx);
+            self.sync_active_terminal_recording_elapsed_tick(cx);
         }
     }
 

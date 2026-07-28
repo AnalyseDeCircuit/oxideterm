@@ -703,7 +703,7 @@ impl WorkspaceApp {
 
     pub(in crate::workspace) fn active_terminal_cwd_snapshot(
         &self,
-        cx: &mut Context<Self>,
+        cx: &App,
     ) -> Option<CurrentDirectorySnapshot> {
         let (scope, pane_id) = self.active_terminal_cwd_scope_and_pane(cx)?;
         self.terminal_cwd_snapshot_for_pane(scope, pane_id, cx)
@@ -793,7 +793,7 @@ impl WorkspaceApp {
         &self,
         scope: CurrentDirectoryScope,
         pane_id: PaneId,
-        cx: &mut Context<Self>,
+        cx: &App,
     ) -> Option<CurrentDirectorySnapshot> {
         let tab_host = self.tab_host.read(cx);
         let pane = tab_host.panes().get(&pane_id)?.read(cx);
