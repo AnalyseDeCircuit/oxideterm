@@ -33,11 +33,16 @@ impl WorkspaceApp {
         collapsed: bool,
         cx: &mut Context<Self>,
     ) {
-        if collapsed && self.session_manager.focused_input == Some(SessionManagerInput::SavedSearch)
-        {
-            // A closing sidebar must release its synthetic IME owner before
-            // the visual exit animation finishes, or it can swallow terminal keys.
-            self.session_manager.focused_input = None;
+        let released_saved_search = collapsed
+            && self.session_manager.update(cx, |session_manager, cx| {
+                if session_manager.focused_input() != Some(SessionManagerInput::SavedSearch) {
+                    return false;
+                }
+                // A closing sidebar must release its synthetic IME owner before
+                // the visual exit animation finishes, or it can swallow terminal keys.
+                session_manager.clear_input_focus(cx)
+            });
+        if released_saved_search {
             self.ime_marked_text = None;
         }
         self.sidebar_collapsed = collapsed;
@@ -140,12 +145,16 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) {
         self.clear_ai_sidebar_keyboard_focus(cx);
-        if section != SidebarSection::Connections
-            && self.session_manager.focused_input == Some(SessionManagerInput::SavedSearch)
-        {
-            // Switching the sidebar body transfers keyboard ownership away
-            // from the saved-connections search field.
-            self.session_manager.focused_input = None;
+        let released_saved_search = section != SidebarSection::Connections
+            && self.session_manager.update(cx, |session_manager, cx| {
+                if session_manager.focused_input() != Some(SessionManagerInput::SavedSearch) {
+                    return false;
+                }
+                // Switching the sidebar body transfers keyboard ownership away
+                // from the saved-connections search field.
+                session_manager.clear_input_focus(cx)
+            });
+        if released_saved_search {
             self.ime_marked_text = None;
         }
         self.active_sidebar_section = section;

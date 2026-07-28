@@ -242,7 +242,7 @@ pub(super) fn oxide_dialog_inputs_are_active_outside_the_session_manager_tab() {
     ));
 
     let mut import_dialog = OxideImportDialogState::default();
-    import_dialog.file_data = Some(vec![1]);
+    import_dialog.file_data = Some(vec![1].into());
     assert!(session_manager_input_is_active(
         SessionManagerInput::OxideImportPassword,
         false,

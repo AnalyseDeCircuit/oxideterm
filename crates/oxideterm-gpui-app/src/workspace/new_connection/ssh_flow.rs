@@ -267,12 +267,14 @@ impl WorkspaceApp {
             .node_metadata(&parent_node_id)
             .is_some_and(|snapshot| snapshot.readiness == NodeReadiness::Ready);
         if !parent_ready {
-            self.session_manager.status = Some(format!(
+            let message = format!(
                 "{}: {}",
                 self.i18n.t("sessions.tree.actions.drill_in"),
                 self.i18n.t("ssh.drill_down.parent_not_ready")
-            ));
-            cx.notify();
+            );
+            self.session_manager.update(cx, |session_manager, cx| {
+                session_manager.set_status(Some(message), cx);
+            });
             return;
         }
 
@@ -356,7 +358,10 @@ impl WorkspaceApp {
             connection_flow.clear_host_key_challenge(cx);
         });
         self.update_connection_form_state(cx, ConnectionFormState::clear);
-        self.session_manager.status = Some(self.i18n.t("ssh.drill_down.connecting"));
+        let message = self.i18n.t("ssh.drill_down.connecting");
+        self.session_manager.update(cx, |session_manager, cx| {
+            session_manager.set_status(Some(message), cx);
+        });
         self.ensure_node_connection_started(&target_node_id, cx);
         let _ = self.connection_store.mark_used(&saved_connection_id);
         self.persist_session_tree_snapshot();

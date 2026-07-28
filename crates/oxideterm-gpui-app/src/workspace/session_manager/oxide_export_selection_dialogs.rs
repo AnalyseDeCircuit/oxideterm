@@ -59,15 +59,22 @@ pub(super) fn oxide_export_count_label(template: String, count: usize) -> String
 }
 
 impl WorkspaceApp {
-    pub(super) fn toggle_oxide_export_connection_selection(&mut self, connection_id: &str) {
-        if let Some(dialog) = self.session_manager.oxide_export_dialog.as_mut() {
-            if dialog.selected_ids.contains(connection_id) {
-                dialog.selected_ids.remove(connection_id);
-            } else {
-                dialog.selected_ids.insert(connection_id.to_string());
+    pub(super) fn toggle_oxide_export_connection_selection(
+        &mut self,
+        connection_id: &str,
+        cx: &mut Context<Self>,
+    ) {
+        self.session_manager.update(cx, |manager, cx| {
+            if let Some(dialog) = manager.oxide_export_dialog.as_mut() {
+                if dialog.selected_ids.contains(connection_id) {
+                    dialog.selected_ids.remove(connection_id);
+                } else {
+                    dialog.selected_ids.insert(connection_id.to_string());
+                }
             }
-        }
-        self.refresh_oxide_export_preflight();
+            cx.notify();
+        });
+        self.refresh_oxide_export_preflight(cx);
     }
 
     pub(super) fn handle_oxide_export_connection_list_wheel(
@@ -81,10 +88,14 @@ impl WorkspaceApp {
             return;
         }
 
-        let before = self.oxide_export_connection_list_state.logical_scroll_top();
-        self.oxide_export_connection_list_state
-            .scroll_by(px(scroll_distance));
-        let after = self.oxide_export_connection_list_state.logical_scroll_top();
+        let list_state = self
+            .session_manager
+            .read(cx)
+            .oxide_export_connection_list_state
+            .clone();
+        let before = list_state.logical_scroll_top();
+        list_state.scroll_by(px(scroll_distance));
+        let after = list_state.logical_scroll_top();
         if oxide_export_logical_scroll_changed(
             before.item_ix,
             f32::from(before.offset_in_item),
@@ -120,6 +131,7 @@ impl WorkspaceApp {
         };
         let new_connection_count = self
             .session_manager
+            .read(cx)
             .oxide_export_dialog
             .as_ref()
             .and_then(|dialog| dialog.last_export_timestamp)
@@ -155,8 +167,12 @@ impl WorkspaceApp {
                 )
                 .into_any_element()
         } else {
-            self.sync_oxide_export_connection_list_state(connections);
-            let state = self.oxide_export_connection_list_state.clone();
+            self.sync_oxide_export_connection_list_state(connections, cx);
+            let state = self
+                .session_manager
+                .read(cx)
+                .oxide_export_connection_list_state
+                .clone();
             let spec = self.oxide_export_connection_list_spec();
             let workspace = cx.entity();
             let list_height = (connections.len() as f32
@@ -235,17 +251,17 @@ impl WorkspaceApp {
                                     .iter()
                                     .map(|connection| connection.id.clone())
                                     .collect::<HashSet<_>>();
-                                if let Some(dialog) =
-                                    this.session_manager.oxide_export_dialog.as_mut()
-                                {
-                                    if dialog.selected_ids.len() == all_ids.len() {
-                                        dialog.selected_ids.clear();
-                                    } else {
-                                        dialog.selected_ids = all_ids;
+                                this.session_manager.update(cx, |manager, cx| {
+                                    if let Some(dialog) = manager.oxide_export_dialog.as_mut() {
+                                        if dialog.selected_ids.len() == all_ids.len() {
+                                            dialog.selected_ids.clear();
+                                        } else {
+                                            dialog.selected_ids = all_ids;
+                                        }
                                     }
-                                }
-                                this.refresh_oxide_export_preflight();
-                                cx.notify();
+                                    cx.notify();
+                                });
+                                this.refresh_oxide_export_preflight(cx);
                                 cx.stop_propagation();
                             }),
                         ),
@@ -281,14 +297,19 @@ impl WorkspaceApp {
             .into_any_element()
     }
 
-    pub(super) fn sync_oxide_export_connection_list_state(&self, connections: &[SavedConnection]) {
+    pub(super) fn sync_oxide_export_connection_list_state(
+        &self,
+        connections: &[SavedConnection],
+        cx: &App,
+    ) {
         let signatures = connections
             .iter()
             .map(oxide_export_connection_signature)
             .collect::<Vec<_>>();
+        let manager = self.session_manager.read(cx);
         sync_tauri_variable_list_state_by_signatures(
-            &self.oxide_export_connection_list_state,
-            &mut self.oxide_export_connection_list_cache.borrow_mut(),
+            &manager.oxide_export_connection_list_state,
+            &mut manager.oxide_export_connection_list_cache.borrow_mut(),
             "oxide-export-connections",
             &signatures,
             self.oxide_export_connection_list_spec(),
@@ -330,6 +351,7 @@ impl WorkspaceApp {
         let row_key = id.clone();
         let checked = self
             .session_manager
+            .read(cx)
             .oxide_export_dialog
             .as_ref()
             .is_some_and(|dialog| dialog.selected_ids.contains(&connection.id));
@@ -346,6 +368,7 @@ impl WorkspaceApp {
         );
         let is_new_since_last_export = self
             .session_manager
+            .read(cx)
             .oxide_export_dialog
             .as_ref()
             .and_then(|dialog| dialog.last_export_timestamp)
@@ -361,8 +384,7 @@ impl WorkspaceApp {
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |this, _event, _window, cx| {
-                    this.toggle_oxide_export_connection_selection(&row_id);
-                    cx.notify();
+                    this.toggle_oxide_export_connection_selection(&row_id, cx);
                     cx.stop_propagation();
                 }),
             )
@@ -370,8 +392,7 @@ impl WorkspaceApp {
                 String::new(),
                 checked,
                 cx.listener(move |this, _event, _window, cx| {
-                    this.toggle_oxide_export_connection_selection(&id);
-                    cx.notify();
+                    this.toggle_oxide_export_connection_selection(&id, cx);
                     cx.stop_propagation();
                 }),
             ))
@@ -446,31 +467,63 @@ impl WorkspaceApp {
             .into_any_element()
     }
 
-    pub(super) fn render_oxide_export_options(
-        &self,
-        dialog: &OxideExportDialogState,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
+    pub(super) fn render_oxide_export_options(&self, cx: &mut Context<Self>) -> AnyElement {
+        let Some((
+            include_app_settings,
+            selected_app_settings_sections,
+            include_local_terminal_env_vars,
+            include_quick_commands,
+            include_serial_profiles,
+            include_remote_desktop_profiles,
+            include_plugin_settings,
+            plugin_groups,
+            selected_plugin_ids,
+            include_portable_secrets,
+        )) = ({
+            self.session_manager
+                .read(cx)
+                .oxide_export_dialog
+                .as_ref()
+                .map(|dialog| {
+                    (
+                        dialog.include_app_settings,
+                        dialog.selected_app_settings_sections.clone(),
+                        dialog.include_local_terminal_env_vars,
+                        dialog.include_quick_commands,
+                        dialog.include_serial_profiles,
+                        dialog.include_remote_desktop_profiles,
+                        dialog.include_plugin_settings,
+                        dialog.plugin_groups.clone(),
+                        dialog.selected_plugin_ids.clone(),
+                        dialog.include_portable_secrets,
+                    )
+                })
+        })
+        else {
+            return div().into_any_element();
+        };
         div()
             .flex()
             .flex_col()
             .gap(px(OXIDE_MODAL_SECTION_GAP))
-            .child(self.render_oxide_forward_card(dialog, cx))
+            .child(self.render_oxide_forward_card(cx))
             .child(self.render_oxide_option_row(
                 "包含全局设置".to_string(),
                 "导出终端外观、操作习惯和其他 OxideTerm 应用设置。".to_string(),
-                dialog.include_app_settings,
+                include_app_settings,
                 cx.listener(|this, _event, _window, cx| {
-                    if let Some(dialog) = this.session_manager.oxide_export_dialog.as_mut() {
-                        dialog.include_app_settings = !dialog.include_app_settings;
-                    }
-                    this.refresh_oxide_export_preflight();
-                    cx.notify();
+                    this.session_manager.update(cx, |manager, cx| {
+                        if let Some(dialog) = manager.oxide_export_dialog.as_mut() {
+                            dialog.include_app_settings = !dialog.include_app_settings;
+                        }
+                        cx.notify();
+                    });
+                    this.refresh_oxide_export_preflight(cx);
                     cx.stop_propagation();
                 }),
                 cx,
             ))
-            .when(dialog.include_app_settings, |options| {
+            .when(include_app_settings, |options| {
                 let mut children = vec![
                     div()
                         .flex()
@@ -505,12 +558,12 @@ impl WorkspaceApp {
                         )
                         .into_any_element(),
                     self.render_oxide_settings_section_grid(
-                        &dialog.selected_app_settings_sections,
+                        &selected_app_settings_sections,
                         false,
                         cx,
                     ),
                 ];
-                if dialog.selected_app_settings_sections.is_empty() {
+                if selected_app_settings_sections.is_empty() {
                     children.push(self.render_oxide_section_empty_warning(
                         "尚未选择任何应用设置分组".to_string(),
                         cx,
@@ -519,25 +572,22 @@ impl WorkspaceApp {
                 options.child(self.render_oxide_card(None, children, cx))
             })
             .when(
-                dialog.include_app_settings
-                    && dialog
-                        .selected_app_settings_sections
-                        .contains("localTerminal"),
+                include_app_settings && selected_app_settings_sections.contains("localTerminal"),
                 |options| {
                     options.child(self.render_oxide_card(
                         None,
                         vec![self.render_oxide_option_row(
                             "包含本地终端环境变量".to_string(),
                             "可能包含机器相关或敏感值。".to_string(),
-                            dialog.include_local_terminal_env_vars,
+                            include_local_terminal_env_vars,
                             cx.listener(|this, _event, _window, cx| {
-                                if let Some(dialog) =
-                                    this.session_manager.oxide_export_dialog.as_mut()
-                                {
-                                    dialog.include_local_terminal_env_vars =
-                                        !dialog.include_local_terminal_env_vars;
-                                }
-                                cx.notify();
+                                this.session_manager.update(cx, |manager, cx| {
+                                    if let Some(dialog) = manager.oxide_export_dialog.as_mut() {
+                                        dialog.include_local_terminal_env_vars =
+                                            !dialog.include_local_terminal_env_vars;
+                                    }
+                                    cx.notify();
+                                });
                                 cx.stop_propagation();
                             }),
                             cx,
@@ -549,13 +599,15 @@ impl WorkspaceApp {
             .child(self.render_oxide_option_row(
                 "包含快捷命令".to_string(),
                 "快捷命令可能包含主机名、路径或命令中的敏感信息。".to_string(),
-                dialog.include_quick_commands,
+                include_quick_commands,
                 cx.listener(|this, _event, _window, cx| {
-                    if let Some(dialog) = this.session_manager.oxide_export_dialog.as_mut() {
-                        dialog.include_quick_commands = !dialog.include_quick_commands;
-                    }
-                    this.refresh_oxide_export_preflight();
-                    cx.notify();
+                    this.session_manager.update(cx, |manager, cx| {
+                        if let Some(dialog) = manager.oxide_export_dialog.as_mut() {
+                            dialog.include_quick_commands = !dialog.include_quick_commands;
+                        }
+                        cx.notify();
+                    });
+                    this.refresh_oxide_export_preflight(cx);
                     cx.stop_propagation();
                 }),
                 cx,
@@ -569,13 +621,15 @@ impl WorkspaceApp {
                             "{{count}}",
                             &self.connection_store.serial_profiles().len().to_string(),
                         ),
-                    dialog.include_serial_profiles,
+                    include_serial_profiles,
                     cx.listener(|this, _event, _window, cx| {
-                        if let Some(dialog) = this.session_manager.oxide_export_dialog.as_mut() {
-                            dialog.include_serial_profiles = !dialog.include_serial_profiles;
-                        }
-                        this.refresh_oxide_export_preflight();
-                        cx.notify();
+                        this.session_manager.update(cx, |manager, cx| {
+                            if let Some(dialog) = manager.oxide_export_dialog.as_mut() {
+                                dialog.include_serial_profiles = !dialog.include_serial_profiles;
+                            }
+                            cx.notify();
+                        });
+                        this.refresh_oxide_export_preflight(cx);
                         cx.stop_propagation();
                     }),
                     cx,
@@ -594,14 +648,16 @@ impl WorkspaceApp {
                                 .len()
                                 .to_string(),
                         ),
-                    dialog.include_remote_desktop_profiles,
+                    include_remote_desktop_profiles,
                     cx.listener(|this, _event, _window, cx| {
-                        if let Some(dialog) = this.session_manager.oxide_export_dialog.as_mut() {
-                            dialog.include_remote_desktop_profiles =
-                                !dialog.include_remote_desktop_profiles;
-                        }
-                        this.refresh_oxide_export_preflight();
-                        cx.notify();
+                        this.session_manager.update(cx, |manager, cx| {
+                            if let Some(dialog) = manager.oxide_export_dialog.as_mut() {
+                                dialog.include_remote_desktop_profiles =
+                                    !dialog.include_remote_desktop_profiles;
+                            }
+                            cx.notify();
+                        });
+                        this.refresh_oxide_export_preflight(cx);
                         cx.stop_propagation();
                     }),
                     cx,
@@ -610,28 +666,37 @@ impl WorkspaceApp {
             .child(self.render_oxide_option_row(
                 "包含插件偏好设置".to_string(),
                 "导出存放在 OxideTerm 本地存储中的声明式插件 settings。".to_string(),
-                dialog.include_plugin_settings,
+                include_plugin_settings,
                 cx.listener(|this, _event, _window, cx| {
-                    if let Some(dialog) = this.session_manager.oxide_export_dialog.as_mut() {
-                        dialog.include_plugin_settings = !dialog.include_plugin_settings;
-                    }
-                    this.refresh_oxide_export_preflight();
-                    cx.notify();
+                    this.session_manager.update(cx, |manager, cx| {
+                        if let Some(dialog) = manager.oxide_export_dialog.as_mut() {
+                            dialog.include_plugin_settings = !dialog.include_plugin_settings;
+                        }
+                        cx.notify();
+                    });
+                    this.refresh_oxide_export_preflight(cx);
                     cx.stop_propagation();
                 }),
                 cx,
             ))
-            .child(self.render_oxide_export_plugin_settings(dialog, cx))
+            .child(self.render_oxide_export_plugin_settings(
+                plugin_groups,
+                selected_plugin_ids,
+                include_plugin_settings,
+                cx,
+            ))
             .child(self.render_oxide_option_row(
                 "包含便携秘密项".to_string(),
                 "导出可在导入时恢复的便携安全秘密项，例如 AI 提供商密钥。".to_string(),
-                dialog.include_portable_secrets,
+                include_portable_secrets,
                 cx.listener(|this, _event, _window, cx| {
-                    if let Some(dialog) = this.session_manager.oxide_export_dialog.as_mut() {
-                        dialog.include_portable_secrets = !dialog.include_portable_secrets;
-                    }
-                    this.refresh_oxide_export_preflight();
-                    cx.notify();
+                    this.session_manager.update(cx, |manager, cx| {
+                        if let Some(dialog) = manager.oxide_export_dialog.as_mut() {
+                            dialog.include_portable_secrets = !dialog.include_portable_secrets;
+                        }
+                        cx.notify();
+                    });
+                    this.refresh_oxide_export_preflight(cx);
                     cx.stop_propagation();
                 }),
                 cx,
@@ -639,11 +704,14 @@ impl WorkspaceApp {
             .into_any_element()
     }
 
-    pub(super) fn render_oxide_forward_card(
-        &self,
-        dialog: &OxideExportDialogState,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
+    pub(super) fn render_oxide_forward_card(&self, cx: &mut Context<Self>) -> AnyElement {
+        let available_forward_count = self
+            .session_manager
+            .read(cx)
+            .oxide_export_dialog
+            .as_ref()
+            .map(|dialog| dialog.available_forwards.len())
+            .unwrap_or_default();
         let mut children = vec![
             div()
                 .text_size(px(self.tokens.metrics.ui_text_xs))
@@ -659,7 +727,7 @@ impl WorkspaceApp {
                 ))
                 .into_any_element(),
         ];
-        if dialog.available_forwards.is_empty() {
+        if available_forward_count == 0 {
             children.push(
                 div()
                     .text_size(px(self.tokens.metrics.ui_text_xs))
@@ -675,26 +743,32 @@ impl WorkspaceApp {
                     .into_any_element(),
             );
         } else {
-            children.push(self.render_oxide_forward_selection(dialog, cx));
+            children.push(self.render_oxide_forward_selection(cx));
         }
         self.render_oxide_card(
             Some((
                 LucideIcon::Shield,
-                format!("已保存的端口转发（{}）", dialog.available_forwards.len()),
+                format!("已保存的端口转发（{available_forward_count}）"),
             )),
             children,
             cx,
         )
     }
 
-    pub(super) fn render_oxide_forward_selection(
-        &self,
-        dialog: &OxideExportDialogState,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let entries = self.oxide_export_forward_groups(dialog);
-        self.sync_oxide_export_forward_group_list_state(&entries);
-        let state = self.oxide_export_forward_group_list_state.clone();
+    pub(super) fn render_oxide_forward_selection(&self, cx: &mut Context<Self>) -> AnyElement {
+        let entries = self
+            .session_manager
+            .read(cx)
+            .oxide_export_dialog
+            .as_ref()
+            .map(|dialog| self.oxide_export_forward_groups(dialog))
+            .unwrap_or_default();
+        self.sync_oxide_export_forward_group_list_state(&entries, cx);
+        let state = self
+            .session_manager
+            .read(cx)
+            .oxide_export_forward_group_list_state
+            .clone();
         let spec = self.oxide_export_forward_group_list_spec();
         let workspace = cx.entity();
         let list_height = (entries.len() as f32 * OXIDE_EXPORT_FORWARD_GROUP_LIST_ESTIMATED_HEIGHT)
@@ -741,14 +815,16 @@ impl WorkspaceApp {
     pub(super) fn sync_oxide_export_forward_group_list_state(
         &self,
         entries: &[(String, Vec<PersistedForward>)],
+        cx: &App,
     ) {
         let signatures = entries
             .iter()
             .map(|(owner, forwards)| oxide_export_forward_group_signature(owner, forwards))
             .collect::<Vec<_>>();
+        let manager = self.session_manager.read(cx);
         sync_tauri_variable_list_state_by_signatures(
-            &self.oxide_export_forward_group_list_state,
-            &mut self.oxide_export_forward_group_list_cache.borrow_mut(),
+            &manager.oxide_export_forward_group_list_state,
+            &mut manager.oxide_export_forward_group_list_cache.borrow_mut(),
             "oxide-export-forward-groups",
             &signatures,
             self.oxide_export_forward_group_list_spec(),
@@ -767,24 +843,34 @@ impl WorkspaceApp {
         index: usize,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let Some(dialog) = self.session_manager.oxide_export_dialog.as_ref() else {
-            return div().into_any_element();
-        };
-        let entries = self.oxide_export_forward_groups(dialog);
-        let Some((owner, forwards)) = entries.get(index).cloned() else {
+        let Some((owner, forwards)) = ({
+            let manager = self.session_manager.read(cx);
+            manager.oxide_export_dialog.as_ref().and_then(|dialog| {
+                let entries = self.oxide_export_forward_groups(dialog);
+                entries.get(index).cloned().map(|(owner, forwards)| {
+                    let forwards = forwards
+                        .into_iter()
+                        .map(|forward| {
+                            let checked = dialog.selected_forward_ids.contains(&forward.id);
+                            (forward, checked)
+                        })
+                        .collect();
+                    (owner, forwards)
+                })
+            })
+        }) else {
             return div().into_any_element();
         };
         div()
             .pb(px(12.0))
-            .child(self.render_oxide_export_forward_group(owner, forwards, dialog, cx))
+            .child(self.render_oxide_export_forward_group(owner, forwards, cx))
             .into_any_element()
     }
 
     pub(super) fn render_oxide_export_forward_group(
         &self,
         owner: String,
-        forwards: Vec<PersistedForward>,
-        dialog: &OxideExportDialogState,
+        forwards: Vec<(PersistedForward, bool)>,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let mut group = div().flex().flex_col().gap(px(4.0)).child(
@@ -794,9 +880,8 @@ impl WorkspaceApp {
                 .text_color(rgb(self.tokens.ui.text))
                 .child(owner),
         );
-        for forward in forwards {
+        for (forward, checked) in forwards {
             let forward_id = forward.id.clone();
-            let checked = dialog.selected_forward_ids.contains(&forward.id);
             group = group.child(
                 div()
                     .px_1()
@@ -811,16 +896,17 @@ impl WorkspaceApp {
                         String::new(),
                         checked,
                         cx.listener(move |this, _event, _window, cx| {
-                            if let Some(dialog) = this.session_manager.oxide_export_dialog.as_mut()
-                            {
-                                if dialog.selected_forward_ids.contains(&forward_id) {
-                                    dialog.selected_forward_ids.remove(&forward_id);
-                                } else {
-                                    dialog.selected_forward_ids.insert(forward_id.clone());
+                            this.session_manager.update(cx, |manager, cx| {
+                                if let Some(dialog) = manager.oxide_export_dialog.as_mut() {
+                                    if dialog.selected_forward_ids.contains(&forward_id) {
+                                        dialog.selected_forward_ids.remove(&forward_id);
+                                    } else {
+                                        dialog.selected_forward_ids.insert(forward_id.clone());
+                                    }
                                 }
-                            }
-                            this.refresh_oxide_export_preflight();
-                            cx.notify();
+                                cx.notify();
+                            });
+                            this.refresh_oxide_export_preflight(cx);
                             cx.stop_propagation();
                         }),
                     ))
@@ -848,11 +934,12 @@ impl WorkspaceApp {
 
     pub(super) fn render_oxide_export_plugin_settings(
         &self,
-        dialog: &OxideExportDialogState,
+        plugin_groups: HashMap<String, usize>,
+        selected_plugin_ids: HashSet<String>,
+        include_plugin_settings: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let mut entries = dialog
-            .plugin_groups
+        let mut entries = plugin_groups
             .iter()
             .map(|(plugin_id, count)| (plugin_id.clone(), *count))
             .collect::<Vec<_>>();
@@ -880,8 +967,8 @@ impl WorkspaceApp {
 
         let mut children = Vec::new();
         for (plugin_id, count) in entries {
-            let selected = dialog.selected_plugin_ids.contains(&plugin_id);
-            let enabled = dialog.include_plugin_settings;
+            let selected = selected_plugin_ids.contains(&plugin_id);
+            let enabled = include_plugin_settings;
             let row_plugin_id = plugin_id.clone();
             children.push(
                 div()
@@ -894,15 +981,16 @@ impl WorkspaceApp {
                         String::new(),
                         selected,
                         cx.listener(move |this, _event, _window, cx| {
-                            if let Some(dialog) = this.session_manager.oxide_export_dialog.as_mut()
-                            {
-                                if dialog.selected_plugin_ids.contains(&row_plugin_id) {
-                                    dialog.selected_plugin_ids.remove(&row_plugin_id);
-                                } else {
-                                    dialog.selected_plugin_ids.insert(row_plugin_id.clone());
+                            this.session_manager.update(cx, |manager, cx| {
+                                if let Some(dialog) = manager.oxide_export_dialog.as_mut() {
+                                    if dialog.selected_plugin_ids.contains(&row_plugin_id) {
+                                        dialog.selected_plugin_ids.remove(&row_plugin_id);
+                                    } else {
+                                        dialog.selected_plugin_ids.insert(row_plugin_id.clone());
+                                    }
                                 }
-                            }
-                            cx.notify();
+                                cx.notify();
+                            });
                             cx.stop_propagation();
                         }),
                     ))

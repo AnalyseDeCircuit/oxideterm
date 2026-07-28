@@ -980,8 +980,14 @@ impl WorkspaceApp {
         {
             changed = true;
         }
-        if self.session_manager.show_batch_move {
-            self.session_manager.show_batch_move = false;
+        if self.session_manager.update(cx, |session_manager, cx| {
+            if !session_manager.show_batch_move {
+                return false;
+            }
+            session_manager.show_batch_move = false;
+            cx.notify();
+            true
+        }) {
             changed = true;
         }
         if self.dismiss_workspace_context_menus(cx) {
@@ -1040,7 +1046,7 @@ impl WorkspaceApp {
         {
             changed = true;
         }
-        if self.close_session_row_menus() {
+        if self.close_session_row_menus(cx) {
             changed = true;
         }
         if self.dismiss_file_manager_context_menu(cx) {

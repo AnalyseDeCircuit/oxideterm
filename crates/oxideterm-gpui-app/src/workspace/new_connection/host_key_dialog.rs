@@ -67,7 +67,9 @@ impl WorkspaceApp {
                     }
                 });
             } else {
-                self.session_manager.status = Some(message);
+                self.session_manager.update(cx, |session_manager, cx| {
+                    session_manager.set_status(Some(message), cx);
+                });
             }
             self.accept_active_proxy_connect_host_key(persist, fingerprint, window, cx);
             cx.notify();
@@ -109,7 +111,9 @@ impl WorkspaceApp {
                 }
             });
         } else {
-            self.session_manager.status = None;
+            self.session_manager.update(cx, |session_manager, cx| {
+                session_manager.set_status(None, cx);
+            });
         }
         cx.notify();
     }
@@ -148,7 +152,9 @@ impl WorkspaceApp {
                         }
                     });
                 } else {
-                    self.session_manager.status = Some(message);
+                    self.session_manager.update(cx, |session_manager, cx| {
+                        session_manager.set_status(Some(message), cx);
+                    });
                 }
                 if challenge.session_tree_challenge {
                     self.continue_active_proxy_session_tree_preflight_only(cx);
@@ -170,7 +176,9 @@ impl WorkspaceApp {
                         }
                     });
                 } else {
-                    self.session_manager.status = Some(message);
+                    self.session_manager.update(cx, |session_manager, cx| {
+                        session_manager.set_status(Some(message), cx);
+                    });
                 }
                 self.connection_flow.update(cx, |connection_flow, cx| {
                     connection_flow.restore_host_key_challenge(challenge, cx);

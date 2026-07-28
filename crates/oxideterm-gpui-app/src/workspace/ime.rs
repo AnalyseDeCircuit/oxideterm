@@ -22,7 +22,7 @@ use super::graphics::GraphicsInput;
 use super::launcher::LauncherInput;
 use super::new_connection::NewConnectionField;
 use super::quick_commands::QuickCommandInput;
-use super::session_manager::SessionManagerInput;
+use super::session_manager::{SessionManagerInput, SessionManagerState};
 use super::sftp::SftpInput;
 use oxideterm_gpui_settings_view::SettingsInput;
 use oxideterm_gpui_ui::{
@@ -35,6 +35,38 @@ use oxideterm_workspace::parse_command_palette_query;
 
 const READ_ONLY_TEXT_EM_WIDTH: f32 = 16.0;
 const READ_ONLY_TEXT_LINE_HEIGHT_ESTIMATE: f32 = 28.0;
+const SECRET_IME_BMP_PROXY: char = '\u{2022}';
+const SECRET_IME_ASTRAL_PROXY: char = '\u{1f512}';
+
+fn secret_ime_proxy(secret: &str) -> String {
+    // Preserve every UTF-16 boundary without copying secret content across the
+    // Entity boundary. Editing ranges remain valid for both BMP and astral input.
+    secret
+        .chars()
+        .map(|character| {
+            if character.len_utf16() == 1 {
+                SECRET_IME_BMP_PROXY
+            } else {
+                SECRET_IME_ASTRAL_PROXY
+            }
+        })
+        .collect()
+}
+
+fn session_manager_ime_text(
+    session_manager: &SessionManagerState,
+    input: SessionManagerInput,
+) -> Option<String> {
+    if session_manager.focused_input() != Some(input) {
+        return None;
+    }
+    let value = session_manager.input_value(input)?;
+    if input.is_secret() {
+        Some(secret_ime_proxy(value))
+    } else {
+        Some(value.to_string())
+    }
+}
 
 /// Shares layout-only text input anchors without retaining the workspace entity.
 #[derive(Clone, Default)]
@@ -636,7 +668,7 @@ impl WorkspaceApp {
             return Some(WorkspaceImeTarget::NewConnection(form.focused_field));
         }
 
-        if let Some(input) = self.focused_oxide_dialog_input() {
+        if let Some(input) = self.focused_oxide_dialog_input(cx) {
             // Oxide import/export dialogs are workspace-level overlays, so
             // their focused field takes priority over the underlying surface.
             return Some(WorkspaceImeTarget::SessionManager(input));
@@ -705,7 +737,7 @@ impl WorkspaceApp {
             return Some(WorkspaceImeTarget::TerminalProjectSearch);
         }
 
-        if let Some(input) = self.active_session_manager_input() {
+        if let Some(input) = self.active_session_manager_input(cx) {
             return Some(WorkspaceImeTarget::SessionManager(input));
         }
 
@@ -1554,45 +1586,19 @@ impl WorkspaceApp {
                         .settings_input_value(input)
                         .map(str::to_owned)
                 } else if self.focused_settings_input == Some(input) {
-                    Some(self.settings_input_draft.clone())
+                    if input.is_secret() {
+                        // GPUI requires an owned IME snapshot. Preserve UTF-16
+                        // caret geometry without duplicating credential text.
+                        Some("•".repeat(self.settings_input_draft.encode_utf16().count()))
+                    } else {
+                        Some(self.settings_input_draft.clone())
+                    }
                 } else {
                     None
                 }
             }
             WorkspaceImeTarget::SessionManager(input) => {
-                if self.session_manager.focused_input == Some(input) {
-                    Some(match input {
-                        SessionManagerInput::Search => self.session_manager.search_query.clone(),
-                        SessionManagerInput::SavedSearch => {
-                            self.session_manager.saved_search_query.clone()
-                        }
-                        SessionManagerInput::NewGroup => {
-                            self.session_manager.new_group_name.clone()
-                        }
-                        SessionManagerInput::OxideImportPassword => self
-                            .session_manager
-                            .oxide_import_dialog
-                            .as_ref()
-                            .map(|dialog| dialog.password.clone())?,
-                        SessionManagerInput::OxideExportPassword => self
-                            .session_manager
-                            .oxide_export_dialog
-                            .as_ref()
-                            .map(|dialog| dialog.password.clone())?,
-                        SessionManagerInput::OxideExportConfirmPassword => self
-                            .session_manager
-                            .oxide_export_dialog
-                            .as_ref()
-                            .map(|dialog| dialog.confirm_password.clone())?,
-                        SessionManagerInput::OxideExportDescription => self
-                            .session_manager
-                            .oxide_export_dialog
-                            .as_ref()
-                            .map(|dialog| dialog.description.clone())?,
-                    })
-                } else {
-                    None
-                }
+                session_manager_ime_text(self.session_manager.read(cx), input)
             }
             WorkspaceImeTarget::Forwards(input) => {
                 if self.forwarding.read(cx).view().focused_input == Some(input) {
@@ -2424,64 +2430,19 @@ impl WorkspaceApp {
                 }
             }
             WorkspaceImeTarget::SessionManager(input) => {
-                if self.session_manager.focused_input == Some(input) {
-                    match input {
-                        SessionManagerInput::Search => {
-                            replace_utf16(
-                                &mut self.session_manager.search_query,
-                                replacement_range,
-                                text,
-                            );
-                            self.clear_session_selection_for_invisible_rows();
-                        }
-                        SessionManagerInput::SavedSearch => {
-                            replace_utf16(
-                                &mut self.session_manager.saved_search_query,
-                                replacement_range,
-                                text,
-                            );
-                        }
-                        SessionManagerInput::NewGroup => {
-                            replace_utf16(
-                                &mut self.session_manager.new_group_name,
-                                replacement_range,
-                                text,
-                            );
-                        }
-                        SessionManagerInput::OxideImportPassword => {
-                            if let Some(dialog) = self.session_manager.oxide_import_dialog.as_mut()
-                            {
-                                replace_utf16(&mut dialog.password, replacement_range, text);
-                                dialog.error = None;
-                            }
-                        }
-                        SessionManagerInput::OxideExportPassword => {
-                            if let Some(dialog) = self.session_manager.oxide_export_dialog.as_mut()
-                            {
-                                replace_utf16(&mut dialog.password, replacement_range, text);
-                                dialog.error = None;
-                            }
-                        }
-                        SessionManagerInput::OxideExportConfirmPassword => {
-                            if let Some(dialog) = self.session_manager.oxide_export_dialog.as_mut()
-                            {
-                                replace_utf16(
-                                    &mut dialog.confirm_password,
-                                    replacement_range,
-                                    text,
-                                );
-                                dialog.error = None;
-                            }
-                        }
-                        SessionManagerInput::OxideExportDescription => {
-                            if let Some(dialog) = self.session_manager.oxide_export_dialog.as_mut()
-                            {
-                                replace_utf16(&mut dialog.description, replacement_range, text);
-                                dialog.error = None;
-                            }
-                        }
+                let search_changed = self.session_manager.update(cx, |session_manager, cx| {
+                    if session_manager.focused_input() != Some(input) {
+                        return false;
                     }
-                    cx.notify();
+                    // The Entity owns secret buffers and applies the platform
+                    // replacement without copying their contents to WorkspaceApp.
+                    if !session_manager.replace_input(input, replacement_range, text, cx) {
+                        return false;
+                    }
+                    input == SessionManagerInput::Search
+                });
+                if search_changed {
+                    self.clear_session_selection_for_invisible_rows(cx);
                 }
             }
             WorkspaceImeTarget::Forwards(input) => {
@@ -3026,9 +2987,9 @@ mod tests {
         line_start_for_utf16_offset, next_utf16_boundary, next_word_boundary,
         normalize_clipboard_text_for_ime_target, path_completion_owns_vertical_navigation,
         platform_text_commit_is_duplicate, previous_utf16_boundary, previous_word_boundary,
-        soft_wrapped_line_ranges_utf16, transpose_text_at_utf16_offset,
-        vertical_line_navigation_destination, word_range_for_utf16_offset,
-        workspace_ime_target_for_plain_host_tools_input,
+        secret_ime_proxy, soft_wrapped_line_ranges_utf16, transpose_text_at_utf16_offset,
+        utf16_offset_for_char_index, vertical_line_navigation_destination,
+        word_range_for_utf16_offset, workspace_ime_target_for_plain_host_tools_input,
     };
 
     fn key(key: &str, key_char: Option<&str>, modifiers: Modifiers) -> Keystroke {
@@ -3386,6 +3347,23 @@ mod tests {
         assert_eq!(next_utf16_boundary(value, 1), 3);
         assert_eq!(previous_utf16_boundary(value, 3), 1);
         assert_eq!(previous_utf16_boundary(value, 4), 3);
+    }
+
+    #[test]
+    fn secret_ime_proxy_redacts_content_and_preserves_utf16_boundaries() {
+        let secret = "a密😄b";
+        let proxy = secret_ime_proxy(secret);
+
+        assert!(!proxy.contains('a'));
+        assert!(!proxy.contains('密'));
+        assert!(!proxy.contains('😄'));
+        assert_eq!(proxy.encode_utf16().count(), secret.encode_utf16().count());
+        for character_index in 0..=secret.chars().count() {
+            assert_eq!(
+                utf16_offset_for_char_index(&proxy, character_index),
+                utf16_offset_for_char_index(secret, character_index)
+            );
+        }
     }
 
     #[test]

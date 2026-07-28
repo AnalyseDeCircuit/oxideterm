@@ -46,7 +46,10 @@ impl WorkspaceApp {
                     radius: ButtonRadius::Md,
                     disabled,
                 },
-                focus_visible: self.session_manager.focused_basic_dialog_footer_action
+                focus_visible: self
+                    .session_manager
+                    .read(cx)
+                    .focused_basic_dialog_footer_action
                     == Some(action),
                 ..ToolbarButtonOptions::default()
             },
@@ -59,18 +62,21 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
-        let can_create_group = !self.session_manager.new_group_name.trim().is_empty();
+        let new_group_name = self.session_manager.read(cx).new_group_name.clone();
+        let can_create_group = !new_group_name.trim().is_empty();
         modal_backdrop(rgba(
             (0x000000 << 8) | SESSION_MANAGER_LIGHT_DIALOG_BACKDROP_ALPHA,
         ))
         .on_mouse_down(
             MouseButton::Left,
             cx.listener(|this, _event, _window, cx| {
-                this.session_manager.show_new_group = false;
-                this.session_manager.focused_input = None;
-                this.session_manager.focused_basic_dialog_footer_action = None;
+                this.session_manager.update(cx, |session_manager, cx| {
+                    session_manager.show_new_group = false;
+                    session_manager.focused_input = None;
+                    session_manager.focused_basic_dialog_footer_action = None;
+                    cx.notify();
+                });
                 cx.stop_propagation();
-                cx.notify();
             }),
         )
         .child(overlay_content_boundary(
@@ -102,7 +108,7 @@ impl WorkspaceApp {
                 .child(
                     self.render_session_text_input(
                         SessionManagerInput::NewGroup,
-                        &self.session_manager.new_group_name,
+                        &new_group_name,
                         self.i18n
                             .t("sessionManager.folder_tree.new_group_placeholder"),
                         cx,
@@ -119,10 +125,12 @@ impl WorkspaceApp {
                             SessionManagerBasicDialogFooterAction::Cancel,
                             false,
                             |this, _event, _window, cx| {
-                                this.session_manager.show_new_group = false;
-                                this.session_manager.focused_input = None;
-                                this.session_manager.focused_basic_dialog_footer_action = None;
-                                cx.notify();
+                                this.session_manager.update(cx, |session_manager, cx| {
+                                    session_manager.show_new_group = false;
+                                    session_manager.focused_input = None;
+                                    session_manager.focused_basic_dialog_footer_action = None;
+                                    cx.notify();
+                                });
                             },
                             cx,
                         ))
@@ -132,7 +140,10 @@ impl WorkspaceApp {
                             SessionManagerBasicDialogFooterAction::Primary,
                             !can_create_group,
                             |this, _event, _window, cx| {
-                                this.session_manager.focused_basic_dialog_footer_action = None;
+                                this.session_manager.update(cx, |session_manager, cx| {
+                                    session_manager.focused_basic_dialog_footer_action = None;
+                                    cx.notify();
+                                });
                                 this.create_session_group(cx);
                             },
                             cx,

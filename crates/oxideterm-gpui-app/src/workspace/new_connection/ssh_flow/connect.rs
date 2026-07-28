@@ -234,7 +234,9 @@ impl WorkspaceApp {
                             connection_flow.set_form_feedback(Some(false), Some(form_message), cx)
                         });
                     if !reported_to_form {
-                        self.session_manager.status = Some(session_message);
+                        self.session_manager.update(cx, |session_manager, cx| {
+                            session_manager.set_status(Some(session_message), cx);
+                        });
                     }
                     cx.notify();
                 }
@@ -293,7 +295,9 @@ impl WorkspaceApp {
                     connection_flow.set_form_feedback(None, Some(message.clone()), cx)
                 });
                 if !reported_to_form {
-                    self.session_manager.status = Some(message);
+                    self.session_manager.update(cx, |session_manager, cx| {
+                        session_manager.set_status(Some(message), cx);
+                    });
                 }
                 cx.notify();
             }
@@ -564,7 +568,9 @@ impl WorkspaceApp {
             connection_flow.set_form_feedback(Some(true), Some(message.clone()), cx)
         });
         if !reported_to_form {
-            self.session_manager.status = Some(message);
+            self.session_manager.update(cx, |session_manager, cx| {
+                session_manager.set_status(Some(message), cx);
+            });
         }
         let tx = self.ssh_worker_sender(cx);
         let router = self.node_router.clone();
@@ -718,7 +724,9 @@ impl WorkspaceApp {
                 {
                     self.update_connection_form_state(cx, ConnectionFormState::clear);
                 }
-                self.session_manager.status = None;
+                self.session_manager.update(cx, |session_manager, cx| {
+                    session_manager.set_status(None, cx);
+                });
                 let post_connect_command = target_config.post_connect_command.clone();
                 let _ = self.queue_ssh_terminal_tab_for_node_with_mark_used(
                     target_node_id,
@@ -902,7 +910,9 @@ impl WorkspaceApp {
             connection_flow.set_form_feedback(Some(false), Some(error.clone()), cx)
         });
         if !reported_to_form {
-            self.session_manager.status = Some(error);
+            self.session_manager.update(cx, |session_manager, cx| {
+                session_manager.set_status(Some(error), cx);
+            });
         }
         cx.notify();
     }
@@ -928,7 +938,9 @@ impl WorkspaceApp {
             connection_flow.set_form_feedback(Some(true), Some(message.clone()), cx)
         });
         if !reported_to_form {
-            self.session_manager.status = Some(message);
+            self.session_manager.update(cx, |session_manager, cx| {
+                session_manager.set_status(Some(message), cx);
+            });
         }
         self.start_ssh_preflight(config, title, SshConnectionIntent::Test, cx);
         cx.notify();
@@ -1016,7 +1028,10 @@ impl WorkspaceApp {
                             }
                         }
                         Err(error) => {
-                            self.session_manager.status = Some(error.to_string());
+                            let message = error.to_string();
+                            self.session_manager.update(cx, |session_manager, cx| {
+                                session_manager.set_status(Some(message), cx);
+                            });
                         }
                     }
                     return;
@@ -1046,7 +1061,9 @@ impl WorkspaceApp {
                 {
                     self.update_connection_form_state(cx, ConnectionFormState::clear);
                 }
-                self.session_manager.status = None;
+                self.session_manager.update(cx, |session_manager, cx| {
+                    session_manager.set_status(None, cx);
+                });
                 let _ = self.open_or_create_saved_ssh_terminal_tab(id, config, title, window, cx);
             }
             SshConnectionIntent::DrillDown(parent_id) => {
@@ -1069,7 +1086,9 @@ impl WorkspaceApp {
                                 )
                             });
                         if !reported_to_form {
-                            self.session_manager.status = Some(message);
+                            self.session_manager.update(cx, |session_manager, cx| {
+                                session_manager.set_status(Some(message), cx);
+                            });
                         }
                         cx.notify();
                         return;
@@ -1089,7 +1108,10 @@ impl WorkspaceApp {
                 self.expanded_ssh_nodes.insert(child_id.clone());
                 self.active_ssh_node_id = Some(child_id.clone());
                 self.update_connection_form_state(cx, ConnectionFormState::clear);
-                self.session_manager.status = Some(self.i18n.t("ssh.drill_down.connecting"));
+                let message = self.i18n.t("ssh.drill_down.connecting");
+                self.session_manager.update(cx, |session_manager, cx| {
+                    session_manager.set_status(Some(message), cx);
+                });
                 self.ensure_node_connection_started(&child_id, cx);
                 self.persist_session_tree_snapshot();
             }
@@ -1107,7 +1129,9 @@ impl WorkspaceApp {
             connection_flow.set_form_feedback(Some(true), Some(message.clone()), cx)
         });
         if !reported_to_form {
-            self.session_manager.status = Some(message);
+            self.session_manager.update(cx, |session_manager, cx| {
+                session_manager.set_status(Some(message), cx);
+            });
         }
         let tx = self.ssh_worker_sender(cx);
         let managed_key_resolver = managed_key_resolver_from_store(&self.connection_store);

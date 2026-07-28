@@ -239,12 +239,17 @@ impl WorkspaceApp {
 
     pub(in crate::workspace) fn focus_active_pane(&mut self, window: &mut Window, cx: &mut App) {
         self.clear_ai_sidebar_keyboard_focus(cx);
-        if self.session_manager.focused_input
-            == Some(crate::workspace::session_manager::SessionManagerInput::SavedSearch)
-        {
+        let released_saved_search = self.session_manager.update(cx, |session_manager, cx| {
+            if session_manager.focused_input()
+                != Some(crate::workspace::session_manager::SessionManagerInput::SavedSearch)
+            {
+                return false;
+            }
             // An explicit pane focus handoff must prevent a previously clicked
             // sidebar search field from continuing to own terminal keystrokes.
-            self.session_manager.focused_input = None;
+            session_manager.clear_input_focus(cx)
+        });
+        if released_saved_search {
             self.ime_marked_text = None;
         }
         if self.terminal_command_bar_focused {

@@ -267,7 +267,7 @@ use self::root::state::{
     PendingSshTerminalOpen, ReconnectWorkerResult, WorkspaceSshNode, WorkspaceSshNodeEndpoint,
 };
 use self::root::{background::*, helpers::*};
-use self::session_manager::SessionManagerState;
+use self::session_manager::{SessionManagerState, SessionManagerWorkspaceEvent};
 use self::sidebar::AiInlinePanelState;
 use self::sidebar::{ActiveSessionSidebarViewMode, SidebarSection};
 use self::sidebar::{
@@ -884,20 +884,10 @@ pub(crate) struct WorkspaceApp {
     ssh_config_sync_service: Option<SshConfigSyncService>,
     settings_store_last_modified: Option<SystemTime>,
     connection_store_last_modified: Option<SystemTime>,
-    session_manager: SessionManagerState,
+    session_manager: Entity<SessionManagerState>,
+    _session_manager_observation: Subscription,
+    _session_manager_subscription: Subscription,
     remote_desktop: Entity<remote_desktop::RemoteDesktopWorkspaceEntity>,
-    oxide_export_connection_list_state: ListState,
-    oxide_export_connection_list_cache: RefCell<VirtualListSignatureCache>,
-    oxide_import_connection_preview_list_state: ListState,
-    oxide_import_connection_preview_list_cache: RefCell<VirtualListSignatureCache>,
-    oxide_export_forward_group_list_state: ListState,
-    oxide_export_forward_group_list_cache: RefCell<VirtualListSignatureCache>,
-    oxide_export_summary_line_list_state: ListState,
-    oxide_export_summary_line_list_cache: RefCell<VirtualListSignatureCache>,
-    oxide_import_forward_detail_list_state: ListState,
-    oxide_import_forward_detail_list_cache: RefCell<VirtualListSignatureCache>,
-    oxide_import_name_group_list_states: RefCell<HashMap<String, ListState>>,
-    oxide_import_name_group_list_caches: RefCell<HashMap<String, VirtualListSignatureCache>>,
     local_shells: Vec<ShellInfo>,
     local_shell_launcher_open: bool,
     local_shell_launcher_selected_id: Option<String>,

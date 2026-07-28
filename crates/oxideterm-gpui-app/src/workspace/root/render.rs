@@ -74,10 +74,17 @@ impl WorkspaceApp {
                 }
             }
             TabKind::SessionManager => {
-                if self.session_manager.show_new_group {
+                let (show_new_group, show_delete_confirm) = {
+                    let session_manager = self.session_manager.read(cx);
+                    (
+                        session_manager.show_new_group,
+                        session_manager.delete_confirm.is_some(),
+                    )
+                };
+                if show_new_group {
                     modals.push(self.render_new_group_dialog(cx));
                 }
-                if self.session_manager.delete_confirm.is_some() {
+                if show_delete_confirm {
                     modals.push(self.render_session_manager_delete_confirm(cx));
                 }
             }
@@ -500,7 +507,7 @@ impl Render for WorkspaceApp {
                 } else if this.forward_terminal_tab_from_capture(event, window, cx) {
                     window.prevent_default();
                     cx.stop_propagation();
-                } else if this.active_session_manager_input().is_some() {
+                } else if this.active_session_manager_input(cx).is_some() {
                     let _ = this.handle_session_manager_key(event, cx);
                     window.prevent_default();
                     cx.stop_propagation();
@@ -1126,16 +1133,22 @@ impl Render for WorkspaceApp {
                 // settings list keeps compact, independently measured cards.
                 root.child(self.render_ai_text_editor_modal(cx))
             })
-            .when(self.session_manager.oxide_import_dialog.is_some(), |root| {
-                // .oxide dialogs are application-level import flows. Portal
-                // them beside the command palette so their backdrop covers
-                // activity, session, tab, content, and companion sidebars.
-                root.child(self.render_oxide_import_dialog(cx))
-            })
-            .when(self.session_manager.oxide_export_dialog.is_some(), |root| {
-                // Export uses the same workspace-wide modal ownership as import.
-                root.child(self.render_oxide_export_dialog(cx))
-            })
+            .when(
+                self.session_manager.read(cx).oxide_import_dialog.is_some(),
+                |root| {
+                    // .oxide dialogs are application-level import flows. Portal
+                    // them beside the command palette so their backdrop covers
+                    // activity, session, tab, content, and companion sidebars.
+                    root.child(self.render_oxide_import_dialog(cx))
+                },
+            )
+            .when(
+                self.session_manager.read(cx).oxide_export_dialog.is_some(),
+                |root| {
+                    // Export uses the same workspace-wide modal ownership as import.
+                    root.child(self.render_oxide_export_dialog(cx))
+                },
+            )
             .when(self.command_palette.open, |root| {
                 root.child(self.render_command_palette(cx))
             })

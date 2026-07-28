@@ -241,8 +241,13 @@ impl WorkspaceApp {
         surface.rounded(px(radius))
     }
 
-    pub(super) fn session_manager_display_items(&self) -> Vec<SessionManagerDisplayItem> {
-        let query = self.session_manager.search_query.trim().to_lowercase();
+    pub(super) fn session_manager_display_items(&self, cx: &App) -> Vec<SessionManagerDisplayItem> {
+        let query = self
+            .session_manager
+            .read(cx)
+            .search_query
+            .trim()
+            .to_lowercase();
         let mut items = self
             .connection_store
             .connection_infos()
@@ -271,6 +276,7 @@ impl WorkspaceApp {
             )
             .chain(
                 self.session_manager
+                    .read(cx)
                     .ssh_config_hosts
                     .iter()
                     .filter(|host| !host.already_imported)
@@ -281,16 +287,18 @@ impl WorkspaceApp {
                 query.is_empty() || item.search_text().to_lowercase().contains(query.as_str())
             })
             .collect::<Vec<_>>();
-        self.sort_session_manager_display_items(&mut items);
+        self.sort_session_manager_display_items(&mut items, cx);
         items
     }
 
     pub(super) fn sort_session_manager_display_items(
         &self,
         items: &mut [SessionManagerDisplayItem],
+        cx: &App,
     ) {
-        let field = self.session_manager.sort_field;
-        let direction = self.session_manager.sort_direction;
+        let manager = self.session_manager.read(cx);
+        let field = manager.sort_field;
+        let direction = manager.sort_direction;
         // Sort once at the display-model boundary so grid/list/tree cannot
         // drift apart and reintroduce view-specific ordering bugs.
         items.sort_by(|left, right| {
@@ -318,13 +326,13 @@ impl WorkspaceApp {
         has_background: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let items = self.session_manager_display_items();
+        let items = self.session_manager_display_items(cx);
         if items.is_empty() {
             return self
-                .render_session_manager_empty_view(has_background)
+                .render_session_manager_empty_view(has_background, cx)
                 .into_any_element();
         }
-        match self.session_manager.view_mode {
+        match self.session_manager.read(cx).view_mode {
             SessionManagerViewMode::Grid => {
                 self.render_session_manager_grid_view(items, has_background, cx)
             }
@@ -337,7 +345,7 @@ impl WorkspaceApp {
         }
     }
 
-    pub(super) fn render_session_manager_empty_view(&self, has_background: bool) -> Div {
+    pub(super) fn render_session_manager_empty_view(&self, has_background: bool, cx: &App) -> Div {
         let theme = self.tokens.ui;
         div()
             .size_full()
@@ -361,11 +369,13 @@ impl WorkspaceApp {
                 div()
                     .text_size(px(MANAGER_ROW_TEXT_SIZE))
                     .font_weight(gpui::FontWeight::MEDIUM)
-                    .child(if self.session_manager.search_query.trim().is_empty() {
-                        self.i18n.t("sessionManager.table.no_connections")
-                    } else {
-                        self.i18n.t("sessionManager.table.no_search_results")
-                    }),
+                    .child(
+                        if self.session_manager.read(cx).search_query.trim().is_empty() {
+                            self.i18n.t("sessionManager.table.no_connections")
+                        } else {
+                            self.i18n.t("sessionManager.table.no_search_results")
+                        },
+                    ),
             )
     }
 
@@ -480,9 +490,12 @@ impl WorkspaceApp {
         let selection_target = item.selection_target();
         let open_button_item = item.clone();
         let last_used = format_last_used(item.last_used().as_deref(), &self.i18n);
-        let is_selected = selection_target
-            .as_ref()
-            .is_some_and(|target| self.session_manager.selected_items.contains(target));
+        let is_selected = selection_target.as_ref().is_some_and(|target| {
+            self.session_manager
+                .read(cx)
+                .selected_items
+                .contains(target)
+        });
         self.session_manager_card_surface(self.tokens.radii.md, has_background)
             .min_w(px(MANAGER_RECENT_ITEM_MIN_WIDTH))
             .flex_basis(px(MANAGER_RECENT_ITEM_BASIS))
@@ -501,7 +514,7 @@ impl WorkspaceApp {
                     ) {
                         SessionManagerItemPointerAction::Select => {
                             if let Some(target) = selection_target.clone() {
-                                this.toggle_session_selection(target);
+                                this.toggle_session_selection(target, cx);
                                 cx.notify();
                             }
                         }
@@ -611,9 +624,12 @@ impl WorkspaceApp {
             item.subtitle()
         };
         // Keep the selected connection name aligned with the checkbox's accent treatment.
-        let is_selected = selection_target
-            .as_ref()
-            .is_some_and(|target| self.session_manager.selected_items.contains(target));
+        let is_selected = selection_target.as_ref().is_some_and(|target| {
+            self.session_manager
+                .read(cx)
+                .selected_items
+                .contains(target)
+        });
         self.session_manager_card_surface(self.tokens.radii.lg, has_background)
             .min_w(px(260.0))
             .flex_grow()
@@ -632,7 +648,7 @@ impl WorkspaceApp {
                     ) {
                         SessionManagerItemPointerAction::Select => {
                             if let Some(target) = selection_target.clone() {
-                                this.toggle_session_selection(target);
+                                this.toggle_session_selection(target, cx);
                                 cx.notify();
                             }
                         }
@@ -648,7 +664,7 @@ impl WorkspaceApp {
                     checkbox(&self.tokens, String::new(), is_selected).on_mouse_down(
                         MouseButton::Left,
                         cx.listener(move |this, _event, _window, cx| {
-                            this.toggle_session_selection(target.clone());
+                            this.toggle_session_selection(target.clone(), cx);
                             cx.notify();
                             cx.stop_propagation();
                         }),
@@ -817,8 +833,10 @@ impl WorkspaceApp {
                         let (roots, children) = this.session_group_tree();
                         let mut groups = HashSet::new();
                         collect_session_group_paths(&roots, &children, &mut groups);
-                        this.session_manager.expanded_groups = groups;
-                        cx.notify();
+                        this.session_manager.update(cx, |manager, cx| {
+                            manager.expanded_groups = groups;
+                            cx.notify();
+                        });
                         cx.stop_propagation();
                     }),
                     cx,
@@ -828,8 +846,10 @@ impl WorkspaceApp {
                     self.i18n.t("sessionManager.views.collapse_all"),
                     has_background,
                     cx.listener(|this, _event, _window, cx| {
-                        this.session_manager.expanded_groups.clear();
-                        cx.notify();
+                        this.session_manager.update(cx, |manager, cx| {
+                            manager.expanded_groups.clear();
+                            cx.notify();
+                        });
                         cx.stop_propagation();
                     }),
                     cx,
@@ -842,11 +862,13 @@ impl WorkspaceApp {
             self.i18n.t("sessionManager.folder_tree.new_group"),
             has_background,
             cx.listener(|this, _event, _window, cx| {
-                this.close_session_row_menus();
-                this.session_manager.show_new_group = true;
-                this.session_manager.new_group_name.clear();
-                this.session_manager.focused_input = Some(SessionManagerInput::NewGroup);
-                cx.notify();
+                this.close_session_row_menus(cx);
+                this.session_manager.update(cx, |manager, cx| {
+                    manager.show_new_group = true;
+                    manager.new_group_name.clear();
+                    manager.focused_input = Some(SessionManagerInput::NewGroup);
+                    cx.notify();
+                });
                 cx.stop_propagation();
             }),
             cx,
@@ -856,7 +878,7 @@ impl WorkspaceApp {
             self.i18n.t("settings_view.connections.ssh_config.title"),
             has_background,
             cx.listener(|this, _event, _window, cx| {
-                this.close_session_row_menus();
+                this.close_session_row_menus(cx);
                 this.open_settings_ssh_config_import_dialog(cx);
                 cx.stop_propagation();
             }),
@@ -867,7 +889,7 @@ impl WorkspaceApp {
             self.i18n.t("settings_view.connections.importers.title"),
             has_background,
             cx.listener(|this, _event, window, cx| {
-                this.close_session_row_menus();
+                this.close_session_row_menus(cx);
                 this.open_connection_importers_settings(window, cx);
                 cx.stop_propagation();
             }),
@@ -917,7 +939,11 @@ impl WorkspaceApp {
         let (_roots, children) = self.session_group_tree();
         let group_items = direct_session_items_for_group(items, Some(group));
         let child_groups = children.get(group).cloned().unwrap_or_default();
-        let expanded = self.session_manager.expanded_groups.contains(group);
+        let expanded = self
+            .session_manager
+            .read(cx)
+            .expanded_groups
+            .contains(group);
         let has_children = !child_groups.is_empty() || !group_items.is_empty();
         let group_name = group.rsplit('/').next().unwrap_or(group).to_string();
         let group_id = group.to_string();
@@ -936,7 +962,7 @@ impl WorkspaceApp {
                     MouseButton::Left,
                     cx.listener(move |this, _event, _window, cx| {
                         if has_children {
-                            this.toggle_session_group_expanded(&group_id);
+                            this.toggle_session_group_expanded(&group_id, cx);
                             cx.notify();
                         }
                         cx.stop_propagation();
@@ -1026,15 +1052,18 @@ impl WorkspaceApp {
             item.subtitle()
         };
         // List rows mirror the card view so selection feedback is consistent.
-        let is_selected = selection_target
-            .as_ref()
-            .is_some_and(|target| self.session_manager.selected_items.contains(target));
+        let is_selected = selection_target.as_ref().is_some_and(|target| {
+            self.session_manager
+                .read(cx)
+                .selected_items
+                .contains(target)
+        });
         let selection = if let Some(target) = checkbox_target {
             checkbox(&self.tokens, String::new(), is_selected)
                 .on_mouse_down(
                     MouseButton::Left,
                     cx.listener(move |this, _event, _window, cx| {
-                        this.toggle_session_selection(target.clone());
+                        this.toggle_session_selection(target.clone(), cx);
                         cx.notify();
                         cx.stop_propagation();
                     }),
@@ -1067,7 +1096,7 @@ impl WorkspaceApp {
                     ) {
                         SessionManagerItemPointerAction::Select => {
                             if let Some(target) = selection_target.clone() {
-                                this.toggle_session_selection(target);
+                                this.toggle_session_selection(target, cx);
                                 cx.notify();
                             }
                         }
@@ -1567,10 +1596,11 @@ impl WorkspaceApp {
                 hover_background: Some(theme_hover_bg(self.tokens.ui.bg_hover, has_background)),
                 hover_text_color: None,
             },
-            |this| {
-                this.close_session_row_menus();
+            |_| {},
+            move |this, event, window, cx| {
+                this.close_session_row_menus(cx);
+                listener(this, event, window, cx);
             },
-            listener,
             cx,
         )
     }

@@ -23,7 +23,9 @@ impl WorkspaceApp {
             connection_flow.set_form_feedback(Some(false), Some(message.clone()), cx)
         });
         if !reported_to_form {
-            self.session_manager.status = Some(message);
+            self.session_manager.update(cx, |session_manager, cx| {
+                session_manager.set_status(Some(message), cx);
+            });
         }
         cx.notify();
     }
@@ -35,13 +37,17 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) {
         let Some(title) = self.ssh_nodes.get(&node_id).map(|node| node.title.clone()) else {
-            self.session_manager.status = Some(self.i18n.t("ssh.form.runtime_node_missing"));
-            cx.notify();
+            let message = self.i18n.t("ssh.form.runtime_node_missing");
+            self.session_manager.update(cx, |session_manager, cx| {
+                session_manager.set_status(Some(message), cx);
+            });
             return;
         };
         let Some(runtime_snapshot) = self.node_router.node_runtime_snapshot(&node_id) else {
-            self.session_manager.status = Some(self.i18n.t("ssh.form.runtime_node_missing"));
-            cx.notify();
+            let message = self.i18n.t("ssh.form.runtime_node_missing");
+            self.session_manager.update(cx, |session_manager, cx| {
+                session_manager.set_status(Some(message), cx);
+            });
             return;
         };
         let parent_id = runtime_snapshot.parent_id.clone();
@@ -52,8 +58,10 @@ impl WorkspaceApp {
         {
             Ok(hops) => hops.unwrap_or_default(),
             Err(error) => {
-                self.session_manager.status = Some(error.to_string());
-                cx.notify();
+                let message = error.to_string();
+                self.session_manager.update(cx, |session_manager, cx| {
+                    session_manager.set_status(Some(message), cx);
+                });
                 return;
             }
         };
@@ -482,10 +490,13 @@ impl WorkspaceApp {
                     match self.connection_store.upsert_serial_profile(request) {
                         Ok(_) => self.queue_cloud_sync_dirty_refresh(cx),
                         Err(error) => {
-                            self.session_manager.status = Some(format!(
+                            let message = format!(
                                 "{}: {error}",
                                 self.i18n.t("modals.new_connection.serial_save_failed")
-                            ));
+                            );
+                            self.session_manager.update(cx, |session_manager, cx| {
+                                session_manager.set_status(Some(message), cx);
+                            });
                         }
                     }
                 }
@@ -598,10 +609,13 @@ impl WorkspaceApp {
                     match self.connection_store.upsert_telnet_profile(request) {
                         Ok(_) => {}
                         Err(error) => {
-                            self.session_manager.status = Some(format!(
+                            let message = format!(
                                 "{}: {error}",
                                 self.i18n.t("modals.new_connection.telnet_save_failed")
-                            ));
+                            );
+                            self.session_manager.update(cx, |session_manager, cx| {
+                                session_manager.set_status(Some(message), cx);
+                            });
                         }
                     }
                 }
@@ -837,7 +851,9 @@ impl WorkspaceApp {
                 connection_flow.set_form_feedback(None, Some(error.clone()), cx)
             });
             if !reported_to_form {
-                self.session_manager.status = Some(error);
+                self.session_manager.update(cx, |session_manager, cx| {
+                    session_manager.set_status(Some(error), cx);
+                });
             }
             cx.notify();
             return;
@@ -1154,8 +1170,10 @@ impl WorkspaceApp {
                                 );
                             }
                         } else {
-                            self.session_manager.status =
-                                Some(self.i18n.t("sessionManager.edit_properties.save"));
+                            let message = self.i18n.t("sessionManager.edit_properties.save");
+                            self.session_manager.update(cx, |session_manager, cx| {
+                                session_manager.set_status(Some(message), cx);
+                            });
                             self.focus_active_pane(window, cx);
                         }
                     }
@@ -1215,8 +1233,10 @@ impl WorkspaceApp {
             Ok(request) => match self.connection_store.upsert(request) {
                 Ok(_) => {
                     self.update_connection_form_state(cx, ConnectionFormState::clear);
-                    self.session_manager.status =
-                        Some(self.i18n.t("sessionManager.toast.connection_duplicated"));
+                    let message = self.i18n.t("sessionManager.toast.connection_duplicated");
+                    self.session_manager.update(cx, |session_manager, cx| {
+                        session_manager.set_status(Some(message), cx);
+                    });
                     self.queue_cloud_sync_dirty_refresh(cx);
                     self.focus_active_pane(window, cx);
                 }
@@ -1252,12 +1272,17 @@ impl WorkspaceApp {
                 connection_flow.set_form_feedback(None, Some(error.clone()), cx)
             });
             if !reported_to_form {
-                self.session_manager.status = Some(error);
+                self.session_manager.update(cx, |session_manager, cx| {
+                    session_manager.set_status(Some(error), cx);
+                });
             }
             cx.notify();
             return;
         }
-        self.session_manager.status = Some(self.i18n.t("ssh.form.checking_host_key"));
+        let message = self.i18n.t("ssh.form.checking_host_key");
+        self.session_manager.update(cx, |session_manager, cx| {
+            session_manager.set_status(Some(message), cx);
+        });
         if config.proxy_chain.is_some() {
             self.start_proxy_session_tree_connect(
                 config,

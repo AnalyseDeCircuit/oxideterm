@@ -332,12 +332,17 @@ impl WorkspaceApp {
         let entering = !settings.sidebar_ui.zen_mode;
         settings.sidebar_ui.zen_mode = entering;
         if entering {
-            if self.session_manager.focused_input
-                == Some(crate::workspace::session_manager::SessionManagerInput::SavedSearch)
-            {
+            let released_saved_search = self.session_manager.update(cx, |session_manager, cx| {
+                if session_manager.focused_input()
+                    != Some(crate::workspace::session_manager::SessionManagerInput::SavedSearch)
+                {
+                    return false;
+                }
                 // Zen mode hides the primary sidebar immediately, so release
                 // the saved-search IME owner before returning focus to content.
-                self.session_manager.focused_input = None;
+                session_manager.clear_input_focus(cx)
+            });
+            if released_saved_search {
                 self.ime_marked_text = None;
             }
             self.sidebar_collapsed = true;
@@ -831,7 +836,7 @@ impl WorkspaceApp {
             return;
         }
 
-        if self.active_session_manager_input().is_some() {
+        if self.active_session_manager_input(cx).is_some() {
             let _ = self.handle_session_manager_key(event, cx);
             return;
         }

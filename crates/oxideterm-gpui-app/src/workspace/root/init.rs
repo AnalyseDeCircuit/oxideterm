@@ -289,6 +289,18 @@ impl WorkspaceApp {
             host_tools.set_messages(host_tools_messages);
             host_tools
         });
+        let session_manager = cx.new(SessionManagerState::new);
+        let session_manager_observation =
+            cx.observe(&session_manager, |_workspace, _session_manager, cx| {
+                // Entity-owned manager state repaints every mounted manager surface.
+                cx.notify();
+            });
+        let session_manager_subscription = cx.subscribe(
+            &session_manager,
+            |workspace, _session_manager, event: &SessionManagerWorkspaceEvent, cx| {
+                workspace.handle_session_manager_workspace_event(event, cx);
+            },
+        );
         let remote_desktop = cx.new(|_cx| remote_desktop::RemoteDesktopWorkspaceEntity::new());
         let graphics_backend = Arc::new(oxideterm_wsl_graphics::WslGraphicsState::new());
         let graphics = cx.new(|cx| {
@@ -679,86 +691,10 @@ impl WorkspaceApp {
             ssh_config_sync_service: None,
             settings_store_last_modified,
             connection_store_last_modified,
-            session_manager: SessionManagerState::default(),
+            session_manager,
+            _session_manager_observation: session_manager_observation,
+            _session_manager_subscription: session_manager_subscription,
             remote_desktop,
-            // .oxide export can contain many saved connections. Keep the
-            // selectable record rows on the shared variable-list path while the
-            // dialog chrome remains ordinary GPUI layout.
-            oxide_export_connection_list_state: ListState::new(
-                OXIDE_EXPORT_CONNECTION_LIST_INITIAL_ITEM_COUNT,
-                ListAlignment::Top,
-                TauriVirtualListSpec::new(
-                    px(OXIDE_EXPORT_CONNECTION_LIST_ESTIMATED_HEIGHT),
-                    OXIDE_EXPORT_CONNECTION_LIST_OVERSCAN,
-                )
-                .overdraw(),
-            )
-            .measure_all(),
-            oxide_export_connection_list_cache: RefCell::new(VirtualListSignatureCache::default()),
-            // Import file metadata may preview many connection names before the
-            // full import preview is opened; keep that read-only list virtual.
-            oxide_import_connection_preview_list_state: ListState::new(
-                OXIDE_IMPORT_CONNECTION_PREVIEW_LIST_INITIAL_ITEM_COUNT,
-                ListAlignment::Top,
-                TauriVirtualListSpec::new(
-                    px(OXIDE_IMPORT_CONNECTION_PREVIEW_LIST_ESTIMATED_HEIGHT),
-                    OXIDE_IMPORT_CONNECTION_PREVIEW_LIST_OVERSCAN,
-                )
-                .overdraw(),
-            )
-            .measure_all(),
-            oxide_import_connection_preview_list_cache: RefCell::new(
-                VirtualListSignatureCache::default(),
-            ),
-            // Forward export is grouped by owner connection. Virtualize group
-            // rows so a large forwarding registry does not rebuild every group.
-            oxide_export_forward_group_list_state: ListState::new(
-                OXIDE_EXPORT_FORWARD_GROUP_LIST_INITIAL_ITEM_COUNT,
-                ListAlignment::Top,
-                TauriVirtualListSpec::new(
-                    px(OXIDE_EXPORT_FORWARD_GROUP_LIST_ESTIMATED_HEIGHT),
-                    OXIDE_EXPORT_FORWARD_GROUP_LIST_OVERSCAN,
-                )
-                .overdraw(),
-            )
-            .measure_all(),
-            oxide_export_forward_group_list_cache: RefCell::new(
-                VirtualListSignatureCache::default(),
-            ),
-            // Export preflight warnings can grow with selected content; keep
-            // the compact warning body virtual while preserving the Tauri
-            // 64px scroll window.
-            oxide_export_summary_line_list_state: ListState::new(
-                OXIDE_EXPORT_SUMMARY_LINE_LIST_INITIAL_ITEM_COUNT,
-                ListAlignment::Top,
-                TauriVirtualListSpec::new(
-                    px(OXIDE_EXPORT_SUMMARY_LINE_LIST_ESTIMATED_HEIGHT),
-                    OXIDE_EXPORT_SUMMARY_LINE_LIST_OVERSCAN,
-                )
-                .overdraw(),
-            )
-            .measure_all(),
-            oxide_export_summary_line_list_cache: RefCell::new(VirtualListSignatureCache::default()),
-            // Import preview forward details are read-only rows inside the
-            // .oxide dialog, so keep them on a dedicated ListState.
-            oxide_import_forward_detail_list_state: ListState::new(
-                OXIDE_IMPORT_FORWARD_DETAIL_LIST_INITIAL_ITEM_COUNT,
-                ListAlignment::Top,
-                TauriVirtualListSpec::new(
-                    px(OXIDE_IMPORT_FORWARD_DETAIL_LIST_ESTIMATED_HEIGHT),
-                    OXIDE_IMPORT_FORWARD_DETAIL_LIST_OVERSCAN,
-                )
-                .overdraw(),
-            )
-            .measure_all(),
-            oxide_import_forward_detail_list_cache: RefCell::new(
-                VirtualListSignatureCache::default(),
-            ),
-            // Import preview can show several connection-name groups at once.
-            // Each group needs an isolated ListState/cache so virtual row
-            // measurements do not leak between conflict categories.
-            oxide_import_name_group_list_states: RefCell::new(HashMap::new()),
-            oxide_import_name_group_list_caches: RefCell::new(HashMap::new()),
             local_shells,
             local_shell_launcher_open: false,
             local_shell_launcher_selected_id: None,

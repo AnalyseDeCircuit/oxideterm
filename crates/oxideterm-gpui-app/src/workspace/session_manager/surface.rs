@@ -6,7 +6,15 @@ impl WorkspaceApp {
         event: &KeyDownEvent,
         cx: &mut Context<Self>,
     ) -> bool {
-        if !self.session_manager.show_new_group {
+        let (show_new_group, focused_input, focused_footer_action) = {
+            let session_manager = self.session_manager.read(cx);
+            (
+                session_manager.show_new_group,
+                session_manager.focused_input,
+                session_manager.focused_basic_dialog_footer_action,
+            )
+        };
+        if !show_new_group {
             return false;
         }
         if event.keystroke.modifiers.platform || event.keystroke.modifiers.control {
@@ -17,9 +25,9 @@ impl WorkspaceApp {
             event.keystroke.key.as_str(),
             event.keystroke.modifiers.shift,
             &SESSION_MANAGER_BASIC_DIALOG_FOOTER_ACTIONS,
-            self.session_manager.show_new_group,
-            self.session_manager.focused_input == Some(SessionManagerInput::NewGroup),
-            self.session_manager.focused_basic_dialog_footer_action,
+            show_new_group,
+            focused_input == Some(SessionManagerInput::NewGroup),
+            focused_footer_action,
             SessionManagerBasicDialogFooterAction::Cancel,
             None,
         ) {
@@ -28,17 +36,21 @@ impl WorkspaceApp {
                 true
             }
             Some(browser_behavior::ModalFooterInputKeyAction::FocusInput) => {
-                self.session_manager.focused_input = Some(SessionManagerInput::NewGroup);
-                self.session_manager.focused_basic_dialog_footer_action = None;
+                self.session_manager.update(cx, |session_manager, cx| {
+                    session_manager.focused_input = Some(SessionManagerInput::NewGroup);
+                    session_manager.focused_basic_dialog_footer_action = None;
+                    cx.notify();
+                });
                 self.ime_marked_text = None;
-                cx.notify();
                 true
             }
             Some(browser_behavior::ModalFooterInputKeyAction::FocusFooter(action)) => {
-                self.session_manager.focused_input = None;
-                self.session_manager.focused_basic_dialog_footer_action = Some(action);
+                self.session_manager.update(cx, |session_manager, cx| {
+                    session_manager.focused_input = None;
+                    session_manager.focused_basic_dialog_footer_action = Some(action);
+                    cx.notify();
+                });
                 self.ime_marked_text = None;
-                cx.notify();
                 true
             }
             Some(browser_behavior::ModalFooterInputKeyAction::Activate(action)) => {
@@ -58,29 +70,38 @@ impl WorkspaceApp {
             SessionManagerBasicDialogFooterAction::Cancel => {
                 self.close_session_manager_basic_dialog(cx)
             }
-            SessionManagerBasicDialogFooterAction::Primary
-                if self.session_manager.show_new_group =>
-            {
-                if self.session_manager.new_group_name.trim().is_empty() {
+            SessionManagerBasicDialogFooterAction::Primary => {
+                let (show_new_group, group_name_empty) = {
+                    let session_manager = self.session_manager.read(cx);
+                    (
+                        session_manager.show_new_group,
+                        session_manager.new_group_name.trim().is_empty(),
+                    )
+                };
+                if !show_new_group || group_name_empty {
                     // Match Tauri's disabled create button: keyboard activation
                     // cannot submit while the visible primary action is disabled.
                     return;
                 }
-                self.session_manager.focused_basic_dialog_footer_action = None;
+                self.session_manager.update(cx, |session_manager, cx| {
+                    session_manager.focused_basic_dialog_footer_action = None;
+                    cx.notify();
+                });
                 self.create_session_group(cx);
             }
-            SessionManagerBasicDialogFooterAction::Primary => {}
         }
     }
 
     pub(super) fn close_session_manager_basic_dialog(&mut self, cx: &mut Context<Self>) {
-        if self.session_manager.show_new_group {
-            self.session_manager.show_new_group = false;
-            self.session_manager.focused_input = None;
-        }
-        self.session_manager.focused_basic_dialog_footer_action = None;
+        self.session_manager.update(cx, |session_manager, cx| {
+            if session_manager.show_new_group {
+                session_manager.show_new_group = false;
+                session_manager.focused_input = None;
+            }
+            session_manager.focused_basic_dialog_footer_action = None;
+            cx.notify();
+        });
         self.ime_marked_text = None;
-        cx.notify();
     }
 
     pub(in crate::workspace) fn render_session_manager_surface(
@@ -90,7 +111,26 @@ impl WorkspaceApp {
     ) -> AnyElement {
         let theme = self.tokens.ui;
         let has_background = self.background_surface_active("session_manager");
-        let view_mode = self.session_manager.view_mode;
+        let (
+            view_mode,
+            status,
+            row_action_menu,
+            view_mode_menu_open,
+            sort_menu_open,
+            show_batch_move,
+            has_selection,
+        ) = {
+            let session_manager = self.session_manager.read(cx);
+            (
+                session_manager.view_mode,
+                session_manager.status.clone(),
+                session_manager.row_action_menu.clone(),
+                session_manager.view_mode_menu_open,
+                session_manager.sort_menu_open,
+                session_manager.show_batch_move,
+                !session_manager.selected_items.is_empty(),
+            )
+        };
         let content = self.render_session_manager_view_content(has_background, cx);
         let content = oxideterm_gpui_ui::motion::fade_in(
             &self.tokens,
@@ -117,7 +157,7 @@ impl WorkspaceApp {
             .text_color(rgb(theme.text))
             .child(self.render_session_manager_toolbar(window, has_background, cx))
             .child(div().flex_1().min_h(px(0.0)).min_w(px(0.0)).child(content))
-            .when_some(self.session_manager.status.clone(), |surface, status| {
+            .when_some(status, |surface, status| {
                 surface.child(
                     div()
                         .h(px(32.0))
@@ -132,42 +172,30 @@ impl WorkspaceApp {
                         .child(status),
                 )
             })
-            .when_some(
-                self.session_manager.row_action_menu.clone(),
-                |surface, menu| {
-                    surface.child(self.workspace_context_menu_backdrop(
-                        self.render_session_manager_row_action_menu(
-                            menu,
-                            window,
-                            has_background,
-                            cx,
-                        ),
-                        cx,
-                    ))
-                },
-            )
-            .when(self.session_manager.view_mode_menu_open, |surface| {
+            .when_some(row_action_menu, |surface, menu| {
+                surface.child(self.workspace_context_menu_backdrop(
+                    self.render_session_manager_row_action_menu(menu, window, has_background, cx),
+                    cx,
+                ))
+            })
+            .when(view_mode_menu_open, |surface| {
                 surface.child(self.workspace_context_menu_backdrop(
                     self.render_session_manager_view_mode_menu(window, has_background, cx),
                     cx,
                 ))
             })
-            .when(self.session_manager.sort_menu_open, |surface| {
+            .when(sort_menu_open, |surface| {
                 surface.child(self.workspace_context_menu_backdrop(
                     self.render_session_manager_sort_menu(window, has_background, cx),
                     cx,
                 ))
             })
-            .when(
-                !self.session_manager.selected_items.is_empty()
-                    && self.session_manager.show_batch_move,
-                |surface| {
-                    surface.child(self.workspace_context_menu_backdrop(
-                        self.render_batch_move_popover(window, cx),
-                        cx,
-                    ))
-                },
-            )
+            .when(has_selection && show_batch_move, |surface| {
+                surface.child(self.workspace_context_menu_backdrop(
+                    self.render_batch_move_popover(window, cx),
+                    cx,
+                ))
+            })
             .into_any_element()
     }
 
@@ -175,10 +203,10 @@ impl WorkspaceApp {
         &self,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let Some(confirm) = self.session_manager.delete_confirm.as_ref() else {
+        let Some(confirm) = self.session_manager.read(cx).delete_confirm.clone() else {
             return div().into_any_element();
         };
-        let (title, confirm_label) = match confirm {
+        let (title, confirm_label) = match &confirm {
             SessionManagerDeleteConfirm::Single { name, .. } => (
                 confirm_delete_connection_label(&self.i18n, name),
                 self.i18n.t("sessionManager.actions.delete"),
@@ -233,7 +261,7 @@ impl WorkspaceApp {
         event: &KeyDownEvent,
         cx: &mut Context<Self>,
     ) -> bool {
-        let Some(input) = self.session_manager.focused_input else {
+        let Some(input) = self.session_manager.read(cx).focused_input else {
             return false;
         };
         let key = event.keystroke.key.as_str();
@@ -242,19 +270,12 @@ impl WorkspaceApp {
         }
         match key {
             "escape" => {
-                match input {
-                    SessionManagerInput::OxideImportPassword
-                    | SessionManagerInput::OxideExportPassword
-                    | SessionManagerInput::OxideExportConfirmPassword
-                    | SessionManagerInput::OxideExportDescription => {
-                        self.session_manager.focused_input = None;
-                    }
-                    _ => {
-                        self.session_manager.focused_input = None;
-                    }
-                }
+                self.session_manager.update(cx, |session_manager, cx| {
+                    // Escape clears focus without copying any secret input draft.
+                    session_manager.focused_input = None;
+                    cx.notify();
+                });
                 self.ime_marked_text = None;
-                cx.notify();
                 true
             }
             "enter" if input == SessionManagerInput::NewGroup => {
@@ -262,52 +283,48 @@ impl WorkspaceApp {
                 true
             }
             "backspace" => {
-                let changed = match input {
-                    SessionManagerInput::Search => {
-                        self.session_manager.search_query.pop().is_some()
-                    }
-                    SessionManagerInput::SavedSearch => {
-                        self.session_manager.saved_search_query.pop().is_some()
-                    }
-                    SessionManagerInput::NewGroup => {
-                        self.session_manager.new_group_name.pop().is_some()
-                    }
-                    SessionManagerInput::OxideImportPassword => {
-                        if let Some(dialog) = self.session_manager.oxide_import_dialog.as_mut() {
-                            dialog.password.pop().is_some() || dialog.error.take().is_some()
-                        } else {
-                            false
+                let changed = self.session_manager.update(cx, |session_manager, cx| {
+                    let changed = match input {
+                        SessionManagerInput::Search => session_manager.search_query.pop().is_some(),
+                        SessionManagerInput::SavedSearch => {
+                            session_manager.saved_search_query.pop().is_some()
                         }
-                    }
-                    SessionManagerInput::OxideExportPassword => {
-                        if let Some(dialog) = self.session_manager.oxide_export_dialog.as_mut() {
-                            dialog.password.pop().is_some() || dialog.error.take().is_some()
-                        } else {
-                            false
+                        SessionManagerInput::NewGroup => {
+                            session_manager.new_group_name.pop().is_some()
                         }
+                        SessionManagerInput::OxideImportPassword => session_manager
+                            .oxide_import_dialog
+                            .as_mut()
+                            .is_some_and(|dialog| {
+                                dialog.password.pop().is_some() || dialog.error.take().is_some()
+                            }),
+                        SessionManagerInput::OxideExportPassword => session_manager
+                            .oxide_export_dialog
+                            .as_mut()
+                            .is_some_and(|dialog| {
+                                dialog.password.pop().is_some() || dialog.error.take().is_some()
+                            }),
+                        SessionManagerInput::OxideExportConfirmPassword => session_manager
+                            .oxide_export_dialog
+                            .as_mut()
+                            .is_some_and(|dialog| {
+                                dialog.confirm_password.pop().is_some()
+                                    || dialog.error.take().is_some()
+                            }),
+                        SessionManagerInput::OxideExportDescription => session_manager
+                            .oxide_export_dialog
+                            .as_mut()
+                            .is_some_and(|dialog| {
+                                dialog.description.pop().is_some() || dialog.error.take().is_some()
+                            }),
+                    };
+                    if changed {
+                        cx.notify();
                     }
-                    SessionManagerInput::OxideExportConfirmPassword => {
-                        if let Some(dialog) = self.session_manager.oxide_export_dialog.as_mut() {
-                            dialog.confirm_password.pop().is_some() || dialog.error.take().is_some()
-                        } else {
-                            false
-                        }
-                    }
-                    SessionManagerInput::OxideExportDescription => {
-                        if let Some(dialog) = self.session_manager.oxide_export_dialog.as_mut() {
-                            dialog.description.pop().is_some() || dialog.error.take().is_some()
-                        } else {
-                            false
-                        }
-                    }
-                };
+                    changed
+                });
                 if changed && input == SessionManagerInput::Search {
-                    self.clear_session_selection_for_invisible_rows();
-                }
-                if changed {
-                    // Empty Backspace should not repaint session-manager inputs
-                    // unless it deletes text or clears a visible validation error.
-                    cx.notify();
+                    self.clear_session_selection_for_invisible_rows(cx);
                 }
                 true
             }
@@ -360,7 +377,9 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) {
         if !self.settings_store.settings().ssh_config.auto_load_hosts {
-            self.session_manager.ssh_config_hosts.clear();
+            self.session_manager.update(cx, |session_manager, cx| {
+                session_manager.clear_ssh_config_hosts(cx);
+            });
             return;
         }
 
@@ -371,34 +390,18 @@ impl WorkspaceApp {
             .iter()
             .map(|connection| connection.name.clone())
             .collect::<HashSet<_>>();
-        // Reading nested Include files may touch slow network-mounted homes, so
-        // discovery must never block GPUI's render thread.
-        cx.spawn(async move |weak, cx| {
-            let result = runtime
-                .spawn_blocking(move || {
-                    oxideterm_connections::list_ssh_config_hosts(&existing_names)
-                })
-                .await
-                .map_err(|error| error.to_string())
-                .and_then(|result| result.map_err(|error| error.to_string()));
-            let _ = weak.update(cx, |this, cx| {
-                match result {
-                    Ok(hosts) => {
-                        this.session_manager.ssh_config_hosts = hosts;
-                    }
-                    Err(error) => {
-                        this.session_manager.ssh_config_hosts.clear();
-                        this.session_manager.status = Some(
-                            this.i18n
-                                .t("settings_view.connections.ssh_config.load_failed")
-                                .replace("{{error}}", &error),
-                        );
-                    }
-                }
-                cx.notify();
-            });
-        })
-        .detach();
+        let load_failed_template = self
+            .i18n
+            .t("settings_view.connections.ssh_config.load_failed");
+        self.session_manager.update(cx, |session_manager, cx| {
+            // Nested Include files may touch slow network-mounted homes.
+            session_manager.begin_ssh_config_host_load(
+                runtime,
+                existing_names,
+                load_failed_template,
+                cx,
+            );
+        });
     }
 
     pub(super) fn import_session_manager_ssh_config_host(
@@ -408,31 +411,34 @@ impl WorkspaceApp {
     ) {
         match oxideterm_connections::import_ssh_config_alias(&mut self.connection_store, &alias) {
             Ok(true) => {
-                self.session_manager
-                    .ssh_config_hosts
-                    .retain(|host| host.alias != alias);
-                self.session_manager.status = Some(
-                    self.i18n
-                        .t("settings_view.errors.import_success")
-                        .replace("{{name}}", &alias),
-                );
+                let status = self
+                    .i18n
+                    .t("settings_view.errors.import_success")
+                    .replace("{{name}}", &alias);
+                self.session_manager.update(cx, |session_manager, cx| {
+                    session_manager.remove_ssh_config_host_alias(&alias, cx);
+                    session_manager.set_status(Some(status), cx);
+                });
                 self.queue_cloud_sync_dirty_refresh(cx);
             }
             Ok(false) => {
-                self.session_manager.status = Some(
-                    self.i18n
-                        .t("settings_view.connections.ssh_config.batch_import_skipped")
-                        .replace("{{count}}", "1"),
-                );
+                let status = self
+                    .i18n
+                    .t("settings_view.connections.ssh_config.batch_import_skipped")
+                    .replace("{{count}}", "1");
+                self.session_manager.update(cx, |session_manager, cx| {
+                    session_manager.set_status(Some(status), cx)
+                });
             }
             Err(error) => {
-                self.session_manager.status = Some(
-                    self.i18n
-                        .t("settings_view.errors.import_failed")
-                        .replace("{{error}}", &error.to_string()),
-                );
+                let status = self
+                    .i18n
+                    .t("settings_view.errors.import_failed")
+                    .replace("{{error}}", &error.to_string());
+                self.session_manager.update(cx, |session_manager, cx| {
+                    session_manager.set_status(Some(status), cx)
+                });
             }
         }
-        cx.notify();
     }
 }

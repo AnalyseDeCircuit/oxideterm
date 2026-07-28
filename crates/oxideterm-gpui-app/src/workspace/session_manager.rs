@@ -1,7 +1,8 @@
 use std::{
-    collections::{HashMap, HashSet, hash_map::DefaultHasher},
+    collections::{HashMap, HashSet, VecDeque, hash_map::DefaultHasher},
     hash::{Hash, Hasher},
     path::PathBuf,
+    sync::Arc,
     time::Duration,
 };
 
@@ -11,7 +12,7 @@ use crate::workspace::new_connection::{
 use crate::workspace::quick_commands::QuickCommandImportStrategy;
 use crate::workspace::session_icons;
 use chrono::{DateTime, Datelike, Local, Utc};
-use gpui::{Div, prelude::*, rgba};
+use gpui::{Div, EventEmitter, Task, prelude::*, rgba};
 use oxideterm_connections::{
     AuthType, ConnectionAuthDraft, ConnectionAuthDraftKind, ConnectionDraft, ConnectionInfo,
     ConnectionStore, ProxyHopDraft, RemoteDesktopProfile, SaveConnectionRequest, SavedAuth,
@@ -26,6 +27,7 @@ use oxideterm_connections::{
     },
     save_request_from_draft,
 };
+use oxideterm_editor_core::utf16::replace_utf16;
 use oxideterm_forwarding::{ForwardType, OwnedForwardImportRecord, PersistedForward};
 use oxideterm_gpui_ui::{
     ConfirmDialogVariant, ConfirmDialogView,
@@ -51,6 +53,7 @@ use oxideterm_settings::{
     export_oxide_settings_snapshot_json, merge_oxide_settings_snapshot,
 };
 use oxideterm_ssh::{UpstreamProxyAuth, UpstreamProxyConfig, UpstreamProxyProtocol};
+use zeroize::Zeroizing;
 
 use super::*;
 use crate::workspace::ime::WorkspaceImeTarget;
@@ -244,6 +247,10 @@ pub(super) enum SessionTransferAction {
     ExportOxide,
 }
 
+pub(super) enum SessionManagerWorkspaceEvent {
+    OxideEffectsReady(oxide_actions::OxideWorkspaceEffects),
+}
+
 #[derive(Clone, Debug)]
 pub(super) enum SessionManagerDeleteConfirm {
     Single {
@@ -338,7 +345,6 @@ impl OxideTransferProgress {
     }
 }
 
-#[derive(Clone, Debug)]
 pub(super) struct SessionManagerState {
     pub(super) selected_group: Option<String>,
     pub(super) view_mode: SessionManagerViewMode,
@@ -362,6 +368,30 @@ pub(super) struct SessionManagerState {
     pub(super) status: Option<String>,
     pub(super) ssh_config_hosts: Vec<SshConfigHost>,
     pub(super) saved_sidebar_scroll_handle: UniformListScrollHandle,
+    pub(super) oxide_export_connection_list_state: ListState,
+    pub(super) oxide_export_connection_list_cache: RefCell<VirtualListSignatureCache>,
+    pub(super) oxide_import_connection_preview_list_state: ListState,
+    pub(super) oxide_import_connection_preview_list_cache: RefCell<VirtualListSignatureCache>,
+    pub(super) oxide_export_forward_group_list_state: ListState,
+    pub(super) oxide_export_forward_group_list_cache: RefCell<VirtualListSignatureCache>,
+    pub(super) oxide_export_summary_line_list_state: ListState,
+    pub(super) oxide_export_summary_line_list_cache: RefCell<VirtualListSignatureCache>,
+    pub(super) oxide_import_forward_detail_list_state: ListState,
+    pub(super) oxide_import_forward_detail_list_cache: RefCell<VirtualListSignatureCache>,
+    pub(super) oxide_import_name_group_list_states: RefCell<HashMap<String, ListState>>,
+    pub(super) oxide_import_name_group_list_caches:
+        RefCell<HashMap<String, VirtualListSignatureCache>>,
+    pub(super) import_dialog_exit_task: Option<Task<()>>,
+    pub(super) export_dialog_exit_task: Option<Task<()>>,
+    pub(super) dialog_auto_close_task: Option<Task<()>>,
+    pub(super) import_file_picker_task: Option<Task<()>>,
+    pub(super) export_file_picker_task: Option<Task<()>>,
+    oxide_worker_tx: Option<delivery::ActiveDeliverySender<oxide_actions::OxideWorkerDelivery>>,
+    oxide_worker_rx: Option<std::sync::mpsc::Receiver<oxide_actions::OxideWorkerDelivery>>,
+    _oxide_delivery_task: Option<Task<()>>,
+    oxide_worker_threads: HashMap<oxide_actions::OxideWorkerKey, std::thread::JoinHandle<()>>,
+    ssh_config_load_generation: u64,
+    ssh_config_load_task: Option<Task<()>>,
 }
 
 impl Default for SessionManagerState {
@@ -389,20 +419,253 @@ impl Default for SessionManagerState {
             status: None,
             ssh_config_hosts: Vec::new(),
             saved_sidebar_scroll_handle: UniformListScrollHandle::new(),
+            oxide_export_connection_list_state: ListState::new(
+                OXIDE_EXPORT_CONNECTION_LIST_INITIAL_ITEM_COUNT,
+                ListAlignment::Top,
+                TauriVirtualListSpec::new(
+                    px(OXIDE_EXPORT_CONNECTION_LIST_ESTIMATED_HEIGHT),
+                    OXIDE_EXPORT_CONNECTION_LIST_OVERSCAN,
+                )
+                .overdraw(),
+            )
+            .measure_all(),
+            oxide_export_connection_list_cache: RefCell::new(VirtualListSignatureCache::default()),
+            oxide_import_connection_preview_list_state: ListState::new(
+                OXIDE_IMPORT_CONNECTION_PREVIEW_LIST_INITIAL_ITEM_COUNT,
+                ListAlignment::Top,
+                TauriVirtualListSpec::new(
+                    px(OXIDE_IMPORT_CONNECTION_PREVIEW_LIST_ESTIMATED_HEIGHT),
+                    OXIDE_IMPORT_CONNECTION_PREVIEW_LIST_OVERSCAN,
+                )
+                .overdraw(),
+            )
+            .measure_all(),
+            oxide_import_connection_preview_list_cache: RefCell::new(
+                VirtualListSignatureCache::default(),
+            ),
+            oxide_export_forward_group_list_state: ListState::new(
+                OXIDE_EXPORT_FORWARD_GROUP_LIST_INITIAL_ITEM_COUNT,
+                ListAlignment::Top,
+                TauriVirtualListSpec::new(
+                    px(OXIDE_EXPORT_FORWARD_GROUP_LIST_ESTIMATED_HEIGHT),
+                    OXIDE_EXPORT_FORWARD_GROUP_LIST_OVERSCAN,
+                )
+                .overdraw(),
+            )
+            .measure_all(),
+            oxide_export_forward_group_list_cache: RefCell::new(
+                VirtualListSignatureCache::default(),
+            ),
+            oxide_export_summary_line_list_state: ListState::new(
+                OXIDE_EXPORT_SUMMARY_LINE_LIST_INITIAL_ITEM_COUNT,
+                ListAlignment::Top,
+                TauriVirtualListSpec::new(
+                    px(OXIDE_EXPORT_SUMMARY_LINE_LIST_ESTIMATED_HEIGHT),
+                    OXIDE_EXPORT_SUMMARY_LINE_LIST_OVERSCAN,
+                )
+                .overdraw(),
+            )
+            .measure_all(),
+            oxide_export_summary_line_list_cache: RefCell::new(VirtualListSignatureCache::default()),
+            oxide_import_forward_detail_list_state: ListState::new(
+                OXIDE_IMPORT_FORWARD_DETAIL_LIST_INITIAL_ITEM_COUNT,
+                ListAlignment::Top,
+                TauriVirtualListSpec::new(
+                    px(OXIDE_IMPORT_FORWARD_DETAIL_LIST_ESTIMATED_HEIGHT),
+                    OXIDE_IMPORT_FORWARD_DETAIL_LIST_OVERSCAN,
+                )
+                .overdraw(),
+            )
+            .measure_all(),
+            oxide_import_forward_detail_list_cache: RefCell::new(
+                VirtualListSignatureCache::default(),
+            ),
+            oxide_import_name_group_list_states: RefCell::new(HashMap::new()),
+            oxide_import_name_group_list_caches: RefCell::new(HashMap::new()),
+            import_dialog_exit_task: None,
+            export_dialog_exit_task: None,
+            dialog_auto_close_task: None,
+            import_file_picker_task: None,
+            export_file_picker_task: None,
+            oxide_worker_tx: None,
+            oxide_worker_rx: None,
+            _oxide_delivery_task: None,
+            oxide_worker_threads: HashMap::new(),
+            ssh_config_load_generation: 0,
+            ssh_config_load_task: None,
         }
     }
 }
 
-#[derive(Clone)]
+impl EventEmitter<SessionManagerWorkspaceEvent> for SessionManagerState {}
+
+impl SessionManagerState {
+    pub(super) fn new(cx: &mut Context<Self>) -> Self {
+        let mut state = Self::default();
+        state.initialize_oxide_delivery(cx);
+        state
+    }
+
+    pub(in crate::workspace) fn set_status(
+        &mut self,
+        status: Option<String>,
+        cx: &mut Context<Self>,
+    ) {
+        if self.status != status {
+            self.status = status;
+            cx.notify();
+        }
+    }
+
+    pub(in crate::workspace) fn focused_input(&self) -> Option<SessionManagerInput> {
+        self.focused_input
+    }
+
+    pub(in crate::workspace) fn clear_input_focus(&mut self, cx: &mut Context<Self>) -> bool {
+        let changed = self.focused_input.take().is_some();
+        if changed {
+            cx.notify();
+        }
+        changed
+    }
+
+    pub(in crate::workspace) fn input_value(&self, input: SessionManagerInput) -> Option<&str> {
+        match input {
+            SessionManagerInput::Search => Some(&self.search_query),
+            SessionManagerInput::SavedSearch => Some(&self.saved_search_query),
+            SessionManagerInput::NewGroup => Some(&self.new_group_name),
+            SessionManagerInput::OxideImportPassword => self
+                .oxide_import_dialog
+                .as_ref()
+                .map(|dialog| dialog.password.as_str()),
+            SessionManagerInput::OxideExportPassword => self
+                .oxide_export_dialog
+                .as_ref()
+                .map(|dialog| dialog.password.as_str()),
+            SessionManagerInput::OxideExportConfirmPassword => self
+                .oxide_export_dialog
+                .as_ref()
+                .map(|dialog| dialog.confirm_password.as_str()),
+            SessionManagerInput::OxideExportDescription => self
+                .oxide_export_dialog
+                .as_ref()
+                .map(|dialog| dialog.description.as_str()),
+        }
+    }
+
+    pub(in crate::workspace) fn replace_input(
+        &mut self,
+        input: SessionManagerInput,
+        replacement_range: Option<std::ops::Range<usize>>,
+        text: &str,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let value = match input {
+            SessionManagerInput::Search => &mut self.search_query,
+            SessionManagerInput::SavedSearch => &mut self.saved_search_query,
+            SessionManagerInput::NewGroup => &mut self.new_group_name,
+            SessionManagerInput::OxideImportPassword => {
+                let Some(dialog) = self.oxide_import_dialog.as_mut() else {
+                    return false;
+                };
+                dialog.error = None;
+                &mut dialog.password
+            }
+            SessionManagerInput::OxideExportPassword => {
+                let Some(dialog) = self.oxide_export_dialog.as_mut() else {
+                    return false;
+                };
+                dialog.error = None;
+                &mut dialog.password
+            }
+            SessionManagerInput::OxideExportConfirmPassword => {
+                let Some(dialog) = self.oxide_export_dialog.as_mut() else {
+                    return false;
+                };
+                dialog.error = None;
+                &mut dialog.confirm_password
+            }
+            SessionManagerInput::OxideExportDescription => {
+                let Some(dialog) = self.oxide_export_dialog.as_mut() else {
+                    return false;
+                };
+                dialog.error = None;
+                &mut dialog.description
+            }
+        };
+        replace_utf16(value, replacement_range, text);
+        cx.notify();
+        true
+    }
+
+    pub(in crate::workspace) fn clear_ssh_config_hosts(&mut self, cx: &mut Context<Self>) {
+        self.ssh_config_load_generation = self.ssh_config_load_generation.wrapping_add(1);
+        self.ssh_config_load_task = None;
+        if !self.ssh_config_hosts.is_empty() {
+            self.ssh_config_hosts.clear();
+            cx.notify();
+        }
+    }
+
+    pub(in crate::workspace) fn begin_ssh_config_host_load(
+        &mut self,
+        runtime: Arc<tokio::runtime::Runtime>,
+        existing_names: HashSet<String>,
+        load_failed_template: String,
+        cx: &mut Context<Self>,
+    ) {
+        self.ssh_config_load_generation = self.ssh_config_load_generation.wrapping_add(1);
+        let generation = self.ssh_config_load_generation;
+        // Entity lifetime owns discovery; closing its tab only hides the view.
+        self.ssh_config_load_task = Some(cx.spawn(async move |entity, cx| {
+            let result = runtime
+                .spawn_blocking(move || {
+                    oxideterm_connections::list_ssh_config_hosts(&existing_names)
+                })
+                .await
+                .map_err(|error| error.to_string())
+                .and_then(|result| result.map_err(|error| error.to_string()));
+            let _ = entity.update(cx, |session_manager, cx| {
+                if generation != session_manager.ssh_config_load_generation {
+                    return;
+                }
+                match result {
+                    Ok(hosts) => {
+                        session_manager.ssh_config_hosts = hosts;
+                    }
+                    Err(error) => {
+                        session_manager.ssh_config_hosts.clear();
+                        session_manager.status =
+                            Some(load_failed_template.replace("{{error}}", &error));
+                    }
+                }
+                cx.notify();
+            });
+        }));
+    }
+
+    pub(in crate::workspace) fn remove_ssh_config_host_alias(
+        &mut self,
+        alias: &str,
+        cx: &mut Context<Self>,
+    ) {
+        let previous_count = self.ssh_config_hosts.len();
+        self.ssh_config_hosts.retain(|host| host.alias != alias);
+        if self.ssh_config_hosts.len() != previous_count {
+            cx.notify();
+        }
+    }
+}
+
 pub(super) struct OxideImportDialogState {
     pub(super) presence: oxideterm_gpui_ui::motion::ExitPresence,
     pub(super) file_path: Option<PathBuf>,
-    pub(super) file_data: Option<Vec<u8>>,
+    pub(super) file_data: Option<Arc<[u8]>>,
     pub(super) metadata_summary: Option<String>,
     pub(super) metadata: Option<OxideMetadata>,
-    pub(super) password: String,
+    pub(super) password: Zeroizing<String>,
     pub(super) conflict_strategy: ImportConflictStrategy,
-    pub(super) preview: Option<ImportPreview>,
+    pub(super) preview: Option<Arc<ImportPreview>>,
     pub(super) selected_names: HashSet<String>,
     pub(super) import_app_settings: bool,
     pub(super) selected_app_settings_sections: HashSet<String>,
@@ -421,7 +684,7 @@ pub(super) struct OxideImportDialogState {
     pub(super) focused_footer_action: Option<OxideDialogFooterAction>,
     pub(super) error: Option<String>,
     pub(super) result_summary: Option<String>,
-    pub(super) result: Option<OxideImportResultView>,
+    pub(super) result: Option<Arc<OxideImportResultView>>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -439,7 +702,7 @@ impl Default for OxideImportDialogState {
             file_data: None,
             metadata_summary: None,
             metadata: None,
-            password: String::new(),
+            password: Zeroizing::new(String::new()),
             conflict_strategy: ImportConflictStrategy::Rename,
             preview: None,
             selected_names: HashSet::new(),
@@ -511,7 +774,6 @@ impl std::fmt::Debug for OxideImportDialogState {
     }
 }
 
-#[derive(Clone)]
 pub(super) struct OxideExportDialogState {
     pub(super) presence: oxideterm_gpui_ui::motion::ExitPresence,
     pub(super) selected_ids: HashSet<String>,
@@ -533,8 +795,8 @@ pub(super) struct OxideExportDialogState {
     pub(super) include_key_passphrases: bool,
     pub(super) include_managed_keys: bool,
     pub(super) include_managed_key_passphrases: bool,
-    pub(super) password: String,
-    pub(super) confirm_password: String,
+    pub(super) password: Zeroizing<String>,
+    pub(super) confirm_password: Zeroizing<String>,
     pub(super) description: String,
     pub(super) busy: bool,
     pub(super) operation_generation: u64,
@@ -572,8 +834,8 @@ impl Default for OxideExportDialogState {
             include_key_passphrases: true,
             include_managed_keys: true,
             include_managed_key_passphrases: false,
-            password: String::new(),
-            confirm_password: String::new(),
+            password: Zeroizing::new(String::new()),
+            confirm_password: Zeroizing::new(String::new()),
             description: String::new(),
             busy: false,
             operation_generation: 0,

@@ -131,7 +131,7 @@ impl WorkspaceApp {
     ) -> AnyElement {
         let theme = self.tokens.ui;
         let workspace = cx.entity();
-        let active = self.session_manager.focused_input == Some(target);
+        let active = self.session_manager.read(cx).focused_input() == Some(target);
         let has_background = self.background_surface_active("session_manager");
         let marked = self
             .marked_text_for_target(WorkspaceImeTarget::SessionManager(target), cx)
@@ -246,7 +246,10 @@ impl WorkspaceApp {
                 .on_mouse_down(
                     MouseButton::Left,
                     cx.listener(move |this, event: &gpui::MouseDownEvent, window, cx| {
-                        this.session_manager.focused_input = Some(target);
+                        this.session_manager.update(cx, |manager, cx| {
+                            manager.focused_input = Some(target);
+                            cx.notify();
+                        });
                         this.ime_marked_text = None;
                         this.needs_active_pane_focus = false;
                         window.focus(&this.focus_handle, cx);
@@ -276,10 +279,31 @@ impl WorkspaceApp {
     pub(in crate::workspace) fn render_session_password_input(
         &self,
         target: SessionManagerInput,
-        value: &str,
         placeholder: String,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        self.render_session_text_input_with_options(target, value, placeholder, true, cx)
+        let masked_value = {
+            let manager = self.session_manager.read(cx);
+            let value = match target {
+                SessionManagerInput::OxideExportPassword => manager
+                    .oxide_export_dialog
+                    .as_ref()
+                    .map(|dialog| dialog.password.as_str()),
+                SessionManagerInput::OxideExportConfirmPassword => manager
+                    .oxide_export_dialog
+                    .as_ref()
+                    .map(|dialog| dialog.confirm_password.as_str()),
+                SessionManagerInput::OxideImportPassword => manager
+                    .oxide_import_dialog
+                    .as_ref()
+                    .map(|dialog| dialog.password.as_str()),
+                _ => None,
+            }
+            .unwrap_or_default();
+            // Only the bullet mask crosses the Entity render boundary; the
+            // secret remains owned by SessionManagerState.
+            text_input_secret_mask(value)
+        };
+        self.render_session_text_input_with_options(target, &masked_value, placeholder, true, cx)
     }
 }
