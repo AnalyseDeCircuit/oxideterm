@@ -171,11 +171,11 @@ mod connections_page;
 mod controls;
 mod entity;
 pub(in crate::workspace) use entity::{
-    CliCompanionOperation, CliCompanionSnapshot, ConnectionImportSnapshot,
-    ManagedKeyDialogSnapshot, NetworkProxyPasswordSnapshot, NetworkProxyTestSnapshot,
-    PortablePasswordDialogSnapshot, PortableStatusRefresh, PrivilegeCredentialDraft,
-    PrivilegeCredentialSnapshot, SettingsWorkspaceEntity, SettingsWorkspaceEvent,
-    SettingsWorkspaceToast, SshConfigImportSnapshot,
+    CliCompanionOperation, CliCompanionSnapshot, ConnectionImportSnapshot, DataDirectoryConfirm,
+    DataDirectoryOperationResult, ManagedKeyDialogSnapshot, NetworkProxyPasswordSnapshot,
+    NetworkProxyTestSnapshot, PortablePasswordDialogSnapshot, PortableStatusRefresh,
+    PrivilegeCredentialDraft, PrivilegeCredentialSnapshot, SettingsWorkspaceEntity,
+    SettingsWorkspaceEvent, SettingsWorkspaceToast, SshConfigImportSnapshot,
 };
 mod general_terminal_pages;
 pub(in crate::workspace) use general_terminal_pages::SETTINGS_TERMINAL_CUSTOM_FONT_INPUT_WIDTH;

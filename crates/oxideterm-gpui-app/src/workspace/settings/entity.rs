@@ -1,6 +1,11 @@
-use std::{collections::HashSet, sync::Arc};
+use std::{
+    collections::{HashSet, VecDeque},
+    path::PathBuf,
+    sync::Arc,
+    time::Duration,
+};
 
-use gpui::{Context, EventEmitter, Task};
+use gpui::{Context, EventEmitter, Task, Timer};
 use oxideterm_connections::{
     ConnectionImportDuplicateStrategy, ConnectionImportPreview, ConnectionImportSource,
     PrivilegeCredentialKind,
@@ -145,6 +150,21 @@ pub(in crate::workspace) enum CliCompanionOperation {
     Migrate,
 }
 
+#[derive(Debug, Eq, PartialEq)]
+pub(in crate::workspace) enum DataDirectoryConfirm {
+    Conflict {
+        path: PathBuf,
+        files_found: Vec<String>,
+    },
+    Reset,
+}
+
+pub(in crate::workspace) enum DataDirectoryOperationResult {
+    Changed,
+    Reset,
+    Failed(String),
+}
+
 /// Owns settings work that must complete independently from root rendering.
 pub(in crate::workspace) struct SettingsWorkspaceEntity {
     portable_status: Option<oxideterm_portable_runtime::PortableStatusSnapshot>,
@@ -202,6 +222,11 @@ pub(in crate::workspace) struct SettingsWorkspaceEntity {
     pub(super) connection_import_path_picker_task: Option<Task<()>>,
     pub(super) ssh_config_import_dialog_presence: oxideterm_gpui_ui::motion::ExitPresence,
     pub(super) ssh_config_import_dialog_exit_task: Option<Task<()>>,
+    data_directory_confirm: Option<DataDirectoryConfirm>,
+    data_directory_confirm_presence: oxideterm_gpui_ui::motion::ExitPresence,
+    data_directory_picker_task: Option<Task<()>>,
+    data_directory_confirm_exit_task: Option<Task<()>>,
+    data_directory_results: VecDeque<DataDirectoryOperationResult>,
     pub(super) native_update: NativeUpdateRuntime,
 }
 
@@ -219,6 +244,8 @@ pub(in crate::workspace) enum SettingsWorkspaceEvent {
     ShowNativeUpdateToast(SettingsWorkspaceToast),
     RequestAutomaticNativeUpdateCheck,
     RequestQuitAfterNativeUpdate,
+    DataDirectoryConfirmOpened,
+    DataDirectoryOperationReady,
     PortablePasswordChangeFinished {
         success: bool,
     },
@@ -288,8 +315,154 @@ impl SettingsWorkspaceEntity {
             connection_import_path_picker_task: None,
             ssh_config_import_dialog_presence: oxideterm_gpui_ui::motion::ExitPresence::visible(),
             ssh_config_import_dialog_exit_task: None,
+            data_directory_confirm: None,
+            data_directory_confirm_presence: oxideterm_gpui_ui::motion::ExitPresence::visible(),
+            data_directory_picker_task: None,
+            data_directory_confirm_exit_task: None,
+            data_directory_results: VecDeque::new(),
             native_update: NativeUpdateRuntime::new(cx),
         }
+    }
+
+    pub(in crate::workspace) fn data_directory_confirm(&self) -> Option<&DataDirectoryConfirm> {
+        self.data_directory_confirm.as_ref()
+    }
+
+    pub(in crate::workspace) fn data_directory_confirm_is_visible(&self) -> bool {
+        self.data_directory_confirm.is_some()
+            && self.data_directory_confirm_presence.phase()
+                == oxideterm_gpui_ui::motion::ExitPhase::Visible
+    }
+
+    pub(in crate::workspace) fn data_directory_confirm_phase(
+        &self,
+    ) -> oxideterm_gpui_ui::motion::ExitPhase {
+        self.data_directory_confirm_presence.phase()
+    }
+
+    pub(in crate::workspace) fn open_data_directory_reset_confirm(
+        &mut self,
+        cx: &mut Context<Self>,
+    ) {
+        self.data_directory_confirm_exit_task = None;
+        self.data_directory_confirm_presence.reopen();
+        self.data_directory_confirm = Some(DataDirectoryConfirm::Reset);
+        cx.emit(SettingsWorkspaceEvent::DataDirectoryConfirmOpened);
+        cx.notify();
+    }
+
+    pub(in crate::workspace) fn start_data_directory_picker(
+        &mut self,
+        selection: impl std::future::Future<Output = Option<PathBuf>> + 'static,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if self.data_directory_picker_task.is_some() {
+            return false;
+        }
+        self.data_directory_picker_task = Some(cx.spawn(async move |settings, cx| {
+            let selected_path = selection.await;
+            let _ = settings.update(cx, |settings, cx| {
+                settings.data_directory_picker_task = None;
+                let Some(path) = selected_path else {
+                    return;
+                };
+                match oxideterm_settings::check_data_directory(&path) {
+                    Ok(check) if check.has_existing_data => {
+                        // Preserve the selected path until the user resolves
+                        // the overwrite confirmation, even if settings hides.
+                        settings.data_directory_confirm = Some(DataDirectoryConfirm::Conflict {
+                            path,
+                            files_found: check.files_found,
+                        });
+                        settings.data_directory_confirm_presence.reopen();
+                        cx.emit(SettingsWorkspaceEvent::DataDirectoryConfirmOpened);
+                    }
+                    Ok(_) => settings.apply_data_directory(path, cx),
+                    Err(error) => {
+                        settings
+                            .data_directory_results
+                            .push_back(DataDirectoryOperationResult::Failed(error.to_string()));
+                        cx.emit(SettingsWorkspaceEvent::DataDirectoryOperationReady);
+                    }
+                }
+                cx.notify();
+            });
+        }));
+        true
+    }
+
+    pub(in crate::workspace) fn begin_data_directory_confirm_exit(
+        &mut self,
+        confirmed: bool,
+        delay: Duration,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if self.data_directory_confirm.is_none() {
+            return false;
+        }
+        let Some(generation) = self.data_directory_confirm_presence.begin_exit() else {
+            return false;
+        };
+        if delay.is_zero() {
+            self.finish_data_directory_confirm_exit(generation, confirmed, cx);
+            return true;
+        }
+        self.data_directory_confirm_exit_task = Some(cx.spawn(async move |settings, cx| {
+            Timer::after(delay).await;
+            let _ = settings.update(cx, |settings, cx| {
+                settings.data_directory_confirm_exit_task = None;
+                settings.finish_data_directory_confirm_exit(generation, confirmed, cx);
+            });
+        }));
+        cx.notify();
+        true
+    }
+
+    fn finish_data_directory_confirm_exit(
+        &mut self,
+        generation: u64,
+        confirmed: bool,
+        cx: &mut Context<Self>,
+    ) {
+        if !self.data_directory_confirm_presence.finish_exit(generation) {
+            return;
+        }
+        self.data_directory_confirm_presence.reopen();
+        let confirm = self.data_directory_confirm.take();
+        if confirmed {
+            match confirm {
+                Some(DataDirectoryConfirm::Conflict { path, .. }) => {
+                    self.apply_data_directory(path, cx);
+                }
+                Some(DataDirectoryConfirm::Reset) => self.reset_data_directory(cx),
+                None => {}
+            }
+        }
+        cx.notify();
+    }
+
+    fn apply_data_directory(&mut self, path: PathBuf, cx: &mut Context<Self>) {
+        let result = match oxideterm_settings::set_data_directory(&path) {
+            Ok(()) => DataDirectoryOperationResult::Changed,
+            Err(error) => DataDirectoryOperationResult::Failed(error.to_string()),
+        };
+        self.data_directory_results.push_back(result);
+        cx.emit(SettingsWorkspaceEvent::DataDirectoryOperationReady);
+    }
+
+    fn reset_data_directory(&mut self, cx: &mut Context<Self>) {
+        let result = match oxideterm_settings::reset_data_directory() {
+            Ok(()) => DataDirectoryOperationResult::Reset,
+            Err(error) => DataDirectoryOperationResult::Failed(error.to_string()),
+        };
+        self.data_directory_results.push_back(result);
+        cx.emit(SettingsWorkspaceEvent::DataDirectoryOperationReady);
+    }
+
+    pub(in crate::workspace) fn take_data_directory_results(
+        &mut self,
+    ) -> VecDeque<DataDirectoryOperationResult> {
+        std::mem::take(&mut self.data_directory_results)
     }
 
     pub(in crate::workspace) fn portable_status_snapshot(&self) -> PortableStatusSnapshot {
@@ -571,11 +744,11 @@ impl Drop for SettingsWorkspaceEntity {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
+    use std::{sync::Arc, time::Duration};
 
     use gpui::{AppContext, TestAppContext};
 
-    use super::SettingsWorkspaceEntity;
+    use super::{DataDirectoryConfirm, SettingsWorkspaceEntity};
 
     #[gpui::test]
     fn portable_status_refresh_is_single_flight_and_entity_owned(cx: &mut TestAppContext) {
@@ -627,6 +800,38 @@ mod tests {
             assert!(!snapshot.refresh_pending);
             assert_eq!(snapshot.error.as_deref(), Some("unavailable"));
             assert_eq!(snapshot.exportable_secret_count, Some(2));
+        });
+    }
+
+    #[gpui::test]
+    fn data_directory_picker_and_confirm_exit_are_entity_owned(cx: &mut TestAppContext) {
+        let entity = cx.new(SettingsWorkspaceEntity::new);
+        entity.update(cx, |entity, cx| {
+            assert!(!entity.data_directory_confirm_is_visible());
+            assert!(entity.start_data_directory_picker(std::future::ready(None), cx));
+            assert!(entity.data_directory_picker_task.is_some());
+        });
+        cx.run_until_parked();
+        entity.update(cx, |entity, cx| {
+            assert!(entity.data_directory_picker_task.is_none());
+            entity.open_data_directory_reset_confirm(cx);
+            assert!(matches!(
+                entity.data_directory_confirm(),
+                Some(DataDirectoryConfirm::Reset)
+            ));
+            assert!(entity.data_directory_confirm_is_visible());
+            assert!(
+                entity.begin_data_directory_confirm_exit(false, Duration::from_millis(10), cx,)
+            );
+            assert!(entity.data_directory_confirm_exit_task.is_some());
+
+            // Reopening cancels the stale exit generation and preserves one
+            // final confirmation owner.
+            entity.open_data_directory_reset_confirm(cx);
+            assert!(entity.data_directory_confirm_exit_task.is_none());
+            assert!(entity.begin_data_directory_confirm_exit(false, Duration::ZERO, cx));
+            assert!(entity.data_directory_confirm().is_none());
+            assert!(!entity.data_directory_confirm_is_visible());
         });
     }
 }

@@ -729,8 +729,9 @@ impl WorkspaceApp {
                 ..ToolbarButtonOptions::default()
             },
             cx.listener(|this, _event, _window, cx| {
-                this.settings_data_directory_confirm = Some(DataDirectoryConfirm::Reset);
-                this.settings_data_directory_confirm_presence.reopen();
+                this.settings_workspace.update(cx, |settings, cx| {
+                    settings.open_data_directory_reset_confirm(cx);
+                });
                 this.reset_standard_confirm_focus();
                 cx.stop_propagation();
                 cx.notify();
@@ -748,107 +749,50 @@ impl WorkspaceApp {
                 self.i18n.t("settings_view.general.select_data_directory"),
             )),
         });
-        cx.spawn(async move |weak, cx| {
+        let selection = async move {
             let Ok(Ok(Some(paths))) = receiver.await else {
-                return;
+                return None;
             };
-            let Some(path) = paths.into_iter().next() else {
-                return;
-            };
-            let _ = weak.update(cx, |this, cx| {
-                match oxideterm_settings::check_data_directory(&path) {
-                    Ok(check) if check.has_existing_data => {
-                        // Tauri asks for a second confirmation before writing
-                        // bootstrap.json when known OxideTerm data already
-                        // exists in the target directory.
-                        this.settings_data_directory_confirm =
-                            Some(DataDirectoryConfirm::Conflict {
-                                path,
-                                files_found: check.files_found,
-                            });
-                        this.settings_data_directory_confirm_presence.reopen();
-                        this.reset_standard_confirm_focus();
-                        cx.notify();
-                    }
-                    Ok(_) => this.apply_settings_data_directory(path, cx),
-                    Err(error) => {
-                        this.push_ai_settings_toast(
-                            error.to_string(),
-                            TerminalNoticeVariant::Error,
-                        );
-                        cx.notify();
-                    }
-                }
-            });
-        })
-        .detach();
-    }
-
-    pub(in crate::workspace) fn apply_settings_data_directory(
-        &mut self,
-        path: PathBuf,
-        cx: &mut Context<Self>,
-    ) {
-        match oxideterm_settings::set_data_directory(&path) {
-            Ok(()) => {
-                self.push_ai_settings_toast(
-                    self.i18n.t("settings_view.general.data_directory_changed"),
-                    TerminalNoticeVariant::Success,
-                );
-            }
-            Err(error) => {
-                self.push_ai_settings_toast(error.to_string(), TerminalNoticeVariant::Error);
-            }
-        }
-        cx.notify();
-    }
-
-    pub(in crate::workspace) fn reset_settings_data_directory(&mut self, cx: &mut Context<Self>) {
-        match oxideterm_settings::reset_data_directory() {
-            Ok(()) => {
-                self.push_ai_settings_toast(
-                    self.i18n.t("settings_view.general.data_directory_reset"),
-                    TerminalNoticeVariant::Success,
-                );
-            }
-            Err(error) => {
-                self.push_ai_settings_toast(error.to_string(), TerminalNoticeVariant::Error);
-            }
-        }
-        cx.notify();
+            paths.into_iter().next()
+        };
+        self.settings_workspace.update(cx, |settings, cx| {
+            settings.start_data_directory_picker(selection, cx);
+        });
     }
 
     pub(in crate::workspace) fn cancel_settings_data_directory_confirm(
         &mut self,
         cx: &mut Context<Self>,
     ) {
-        if self.begin_settings_data_directory_confirm_exit(cx) {
-            cx.notify();
-        }
+        let delay = oxideterm_gpui_ui::motion::duration(
+            &self.tokens,
+            oxideterm_gpui_ui::motion::MotionDuration::Control,
+        );
+        self.clear_standard_confirm_focus();
+        self.settings_workspace.update(cx, |settings, cx| {
+            settings.begin_data_directory_confirm_exit(false, delay, cx);
+        });
+        cx.notify();
     }
 
     pub(in crate::workspace) fn confirm_settings_data_directory(&mut self, cx: &mut Context<Self>) {
-        let Some(confirm) = self.settings_data_directory_confirm.clone() else {
-            return;
-        };
-        if !self.begin_settings_data_directory_confirm_exit(cx) {
-            return;
-        }
-        match confirm {
-            DataDirectoryConfirm::Conflict { path, .. } => {
-                self.apply_settings_data_directory(path, cx);
-            }
-            DataDirectoryConfirm::Reset => {
-                self.reset_settings_data_directory(cx);
-            }
-        }
+        let delay = oxideterm_gpui_ui::motion::duration(
+            &self.tokens,
+            oxideterm_gpui_ui::motion::MotionDuration::Control,
+        );
+        self.clear_standard_confirm_focus();
+        self.settings_workspace.update(cx, |settings, cx| {
+            settings.begin_data_directory_confirm_exit(true, delay, cx);
+        });
+        cx.notify();
     }
 
     pub(in crate::workspace) fn render_settings_data_directory_confirm_dialog(
         &self,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
-        let confirm = self.settings_data_directory_confirm.as_ref()?;
+        let settings_workspace = self.settings_workspace.read(cx);
+        let confirm = settings_workspace.data_directory_confirm()?;
         let (title_key, description) = match confirm {
             DataDirectoryConfirm::Conflict { files_found, .. } => (
                 "settings_view.general.data_directory_conflict",
@@ -866,7 +810,7 @@ impl WorkspaceApp {
             oxideterm_gpui_ui::confirm::confirm_dialog_with_focus_motion(
                 &self.tokens,
                 "settings-data-directory-confirm-motion",
-                self.settings_data_directory_confirm_presence.phase(),
+                settings_workspace.data_directory_confirm_phase(),
                 ConfirmDialogView {
                     variant: ConfirmDialogVariant::Default,
                     title: div().child(self.i18n.t(title_key)).into_any_element(),

@@ -157,13 +157,6 @@ impl WorkspaceApp {
                 self.tab_host
                     .update(cx, |tab_host, _| tab_host.clear_close_confirm());
             }
-            SimpleConfirmExitTarget::SettingsDataDirectory
-                if self
-                    .settings_data_directory_confirm_presence
-                    .finish_exit(generation) =>
-            {
-                self.settings_data_directory_confirm = None;
-            }
             SimpleConfirmExitTarget::KeybindingResetAll
                 if self
                     .keybinding_reset_all_confirm_presence
@@ -222,22 +215,6 @@ impl WorkspaceApp {
         };
         self.clear_standard_confirm_focus();
         self.schedule_simple_confirm_exit(SimpleConfirmExitTarget::TabClose, generation, cx);
-        true
-    }
-
-    pub(in crate::workspace) fn begin_settings_data_directory_confirm_exit(
-        &mut self,
-        cx: &mut Context<Self>,
-    ) -> bool {
-        let Some(generation) = self.settings_data_directory_confirm_presence.begin_exit() else {
-            return false;
-        };
-        self.clear_standard_confirm_focus();
-        self.schedule_simple_confirm_exit(
-            SimpleConfirmExitTarget::SettingsDataDirectory,
-            generation,
-            cx,
-        );
         true
     }
 
@@ -1094,9 +1071,10 @@ impl WorkspaceApp {
                 Some(ConfirmKeyboardAction::Handled) => true,
                 None => false,
             }
-        } else if self.settings_data_directory_confirm.is_some()
-            && self.settings_data_directory_confirm_presence.phase()
-                == oxideterm_gpui_ui::motion::ExitPhase::Visible
+        } else if self
+            .settings_workspace
+            .read(cx)
+            .data_directory_confirm_is_visible()
         {
             match self.handle_standard_confirm_key(event, cx) {
                 Some(ConfirmKeyboardAction::Cancel) => {

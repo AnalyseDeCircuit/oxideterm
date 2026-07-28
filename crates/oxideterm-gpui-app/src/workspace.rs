@@ -691,17 +691,7 @@ enum SimpleConfirmExitTarget {
     AiDeleteMessage,
     NodeDisconnect,
     TabClose,
-    SettingsDataDirectory,
     KeybindingResetAll,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-enum DataDirectoryConfirm {
-    Conflict {
-        path: PathBuf,
-        files_found: Vec<String>,
-    },
-    Reset,
 }
 
 #[derive(Clone)]
@@ -789,8 +779,6 @@ pub(crate) struct WorkspaceApp {
     launch_at_login_enabled: bool,
     launch_at_login_loading: bool,
     launch_at_login_error: Option<String>,
-    settings_data_directory_confirm: Option<DataDirectoryConfirm>,
-    settings_data_directory_confirm_presence: oxideterm_gpui_ui::motion::ExitPresence,
     standard_confirm_focused_action: Option<ConfirmDialogAction>,
     settings_reset_confirm_presence: oxideterm_gpui_ui::motion::ExitPresence,
     keybinding_reset_all_confirm_presence: oxideterm_gpui_ui::motion::ExitPresence,

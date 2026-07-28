@@ -427,9 +427,6 @@ impl WorkspaceApp {
             launch_at_login_enabled: false,
             launch_at_login_loading: false,
             launch_at_login_error: None,
-            settings_data_directory_confirm: None,
-            settings_data_directory_confirm_presence:
-                oxideterm_gpui_ui::motion::ExitPresence::visible(),
             standard_confirm_focused_action: None,
             settings_reset_confirm_presence: oxideterm_gpui_ui::motion::ExitPresence::visible(),
             keybinding_reset_all_confirm_presence: oxideterm_gpui_ui::motion::ExitPresence::visible(

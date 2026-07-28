@@ -585,6 +585,34 @@ impl WorkspaceApp {
             SettingsWorkspaceEvent::RequestQuitAfterNativeUpdate => {
                 self.schedule_native_update_quit(cx);
             }
+            SettingsWorkspaceEvent::DataDirectoryConfirmOpened => {
+                self.reset_standard_confirm_focus();
+                cx.notify();
+            }
+            SettingsWorkspaceEvent::DataDirectoryOperationReady => {
+                let results =
+                    settings.update(cx, |settings, _cx| settings.take_data_directory_results());
+                for result in results {
+                    match result {
+                        DataDirectoryOperationResult::Changed => {
+                            self.push_ai_settings_toast(
+                                self.i18n.t("settings_view.general.data_directory_changed"),
+                                TerminalNoticeVariant::Success,
+                            );
+                        }
+                        DataDirectoryOperationResult::Reset => {
+                            self.push_ai_settings_toast(
+                                self.i18n.t("settings_view.general.data_directory_reset"),
+                                TerminalNoticeVariant::Success,
+                            );
+                        }
+                        DataDirectoryOperationResult::Failed(error) => {
+                            self.push_ai_settings_toast(error, TerminalNoticeVariant::Error);
+                        }
+                    }
+                }
+                cx.notify();
+            }
             SettingsWorkspaceEvent::PortablePasswordChangeFinished { success } => {
                 if *success {
                     self.push_ai_settings_toast(
