@@ -162,10 +162,47 @@ const AI_TERMINAL_INLINE_DELIVERY_BUDGET: crate::workspace::delivery::DeliveryBu
 const AI_CHAT_STREAM_DELIVERY_BUDGET: crate::workspace::delivery::DeliveryBudget =
     crate::workspace::delivery::DeliveryBudget::new(256, Duration::from_millis(4));
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(in crate::workspace) enum AiSettingsViewSection {
+    ProviderSettings,
+    ToolUse,
+    ContextWindows,
+}
+
+/// Owns AI-settings-only presentation state and its state transitions.
+struct AiSettingsViewState {
+    new_provider_type: String,
+    provider_settings_expanded: bool,
+    tool_use_expanded: bool,
+    context_windows_expanded: bool,
+    expanded_providers: std::collections::BTreeMap<String, bool>,
+    expanded_provider_models: std::collections::BTreeSet<String>,
+    expanded_context_providers: std::collections::BTreeSet<String>,
+}
+
+impl Default for AiSettingsViewState {
+    fn default() -> Self {
+        // The provider catalog defines the fallback used by provider creation.
+        let new_provider_type = oxideterm_ai::AI_PROVIDER_TEMPLATES[0]
+            .provider_type
+            .to_owned();
+        Self {
+            new_provider_type,
+            provider_settings_expanded: true,
+            tool_use_expanded: true,
+            context_windows_expanded: true,
+            expanded_providers: std::collections::BTreeMap::new(),
+            expanded_provider_models: std::collections::BTreeSet::new(),
+            expanded_context_providers: std::collections::BTreeSet::new(),
+        }
+    }
+}
+
 /// Owns AI worker delivery slices as they move out of the workspace root.
 pub(in crate::workspace) struct AiWorkspaceEntity {
     task_runtime: Arc<tokio::runtime::Runtime>,
     key_store: oxideterm_ai::AiProviderKeyStore,
+    settings_view: AiSettingsViewState,
     settings_secret_drafts: HashMap<SettingsInput, zeroize::Zeroizing<String>>,
     focused_settings_input: Option<SettingsInput>,
     provider_key_operation_tasks: HashMap<String, Task<()>>,
@@ -300,6 +337,7 @@ impl AiWorkspaceEntity {
         let entity = Self {
             task_runtime,
             key_store,
+            settings_view: AiSettingsViewState::default(),
             settings_secret_drafts: HashMap::new(),
             focused_settings_input: None,
             provider_key_operation_tasks: HashMap::new(),
@@ -396,6 +434,178 @@ impl AiWorkspaceEntity {
 
     pub(in crate::workspace) fn model_is_refreshing(&self, provider_id: &str) -> bool {
         self.refreshing_models.contains(provider_id)
+    }
+
+    pub(in crate::workspace) fn settings_new_provider_type(&self) -> &str {
+        &self.settings_view.new_provider_type
+    }
+
+    pub(in crate::workspace) fn select_settings_provider_type(
+        &mut self,
+        provider_type: &str,
+        cx: &mut Context<Self>,
+    ) {
+        if self.settings_view.new_provider_type == provider_type {
+            return;
+        }
+        self.settings_view.new_provider_type.clear();
+        self.settings_view.new_provider_type.push_str(provider_type);
+        cx.notify();
+    }
+
+    pub(in crate::workspace) fn settings_section_expanded(
+        &self,
+        section: AiSettingsViewSection,
+    ) -> bool {
+        match section {
+            AiSettingsViewSection::ProviderSettings => {
+                self.settings_view.provider_settings_expanded
+            }
+            AiSettingsViewSection::ToolUse => self.settings_view.tool_use_expanded,
+            AiSettingsViewSection::ContextWindows => self.settings_view.context_windows_expanded,
+        }
+    }
+
+    pub(in crate::workspace) fn toggle_settings_section(
+        &mut self,
+        section: AiSettingsViewSection,
+        cx: &mut Context<Self>,
+    ) {
+        match section {
+            AiSettingsViewSection::ProviderSettings => {
+                self.settings_view.provider_settings_expanded =
+                    !self.settings_view.provider_settings_expanded;
+            }
+            AiSettingsViewSection::ToolUse => {
+                self.settings_view.tool_use_expanded = !self.settings_view.tool_use_expanded;
+            }
+            AiSettingsViewSection::ContextWindows => {
+                self.settings_view.context_windows_expanded =
+                    !self.settings_view.context_windows_expanded;
+            }
+        }
+        cx.notify();
+    }
+
+    pub(in crate::workspace) fn settings_provider_expanded(
+        &self,
+        provider_id: &str,
+        default_expanded: bool,
+    ) -> bool {
+        self.settings_view
+            .expanded_providers
+            .get(provider_id)
+            .copied()
+            .unwrap_or(default_expanded)
+    }
+
+    pub(in crate::workspace) fn toggle_settings_provider_expanded(
+        &mut self,
+        provider_id: &str,
+        default_expanded: bool,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(expanded) = self.settings_view.expanded_providers.get_mut(provider_id) {
+            *expanded = !*expanded;
+        } else {
+            self.settings_view
+                .expanded_providers
+                .insert(provider_id.to_owned(), !default_expanded);
+        }
+        cx.notify();
+    }
+
+    pub(in crate::workspace) fn settings_provider_models_expanded(
+        &self,
+        provider_id: &str,
+    ) -> bool {
+        self.settings_view
+            .expanded_provider_models
+            .contains(provider_id)
+    }
+
+    pub(in crate::workspace) fn toggle_settings_provider_models(
+        &mut self,
+        provider_id: &str,
+        cx: &mut Context<Self>,
+    ) {
+        if !self
+            .settings_view
+            .expanded_provider_models
+            .remove(provider_id)
+        {
+            self.settings_view
+                .expanded_provider_models
+                .insert(provider_id.to_owned());
+        }
+        cx.notify();
+    }
+
+    pub(in crate::workspace) fn settings_context_provider_expanded(
+        &self,
+        provider_id: &str,
+    ) -> bool {
+        self.settings_view
+            .expanded_context_providers
+            .contains(provider_id)
+    }
+
+    pub(in crate::workspace) fn toggle_settings_context_provider(
+        &mut self,
+        provider_id: &str,
+        cx: &mut Context<Self>,
+    ) {
+        if !self
+            .settings_view
+            .expanded_context_providers
+            .remove(provider_id)
+        {
+            self.settings_view
+                .expanded_context_providers
+                .insert(provider_id.to_owned());
+        }
+        cx.notify();
+    }
+
+    pub(in crate::workspace) fn remove_settings_provider_view_state(
+        &mut self,
+        provider_id: &str,
+        cx: &mut Context<Self>,
+    ) {
+        let provider_changed = self
+            .settings_view
+            .expanded_providers
+            .remove(provider_id)
+            .is_some();
+        let models_changed = self
+            .settings_view
+            .expanded_provider_models
+            .remove(provider_id);
+        let context_changed = self
+            .settings_view
+            .expanded_context_providers
+            .remove(provider_id);
+        if provider_changed || models_changed || context_changed {
+            cx.notify();
+        }
+    }
+
+    pub(in crate::workspace) fn hash_settings_provider_layout(&self, hasher: &mut impl Hasher) {
+        self.settings_view.provider_settings_expanded.hash(hasher);
+        for (provider_id, expanded) in &self.settings_view.expanded_providers {
+            provider_id.hash(hasher);
+            expanded.hash(hasher);
+        }
+        for provider_id in &self.settings_view.expanded_provider_models {
+            provider_id.hash(hasher);
+        }
+    }
+
+    pub(in crate::workspace) fn hash_settings_context_layout(&self, hasher: &mut impl Hasher) {
+        self.settings_view.context_windows_expanded.hash(hasher);
+        for provider_id in &self.settings_view.expanded_context_providers {
+            provider_id.hash(hasher);
+        }
     }
 
     pub(in crate::workspace) fn owns_settings_input(input: SettingsInput) -> bool {
@@ -3478,6 +3688,39 @@ mod entity_tests {
             entity.open_provider_key_remove_confirm(4, "provider-key".to_string(), cx);
             assert!(entity.begin_settings_confirm_exit(false, Duration::ZERO, cx));
             assert!(entity.take_settings_confirm_intents().is_empty());
+        });
+    }
+
+    #[gpui::test]
+    fn ai_settings_view_state_and_transitions_are_entity_owned(cx: &mut TestAppContext) {
+        let entity = cx.new(|cx| {
+            AiWorkspaceEntity::new(test_runtime(), oxideterm_ai::AiProviderKeyStore::new(), cx)
+        });
+        entity.update(cx, |entity, cx| {
+            assert_eq!(
+                entity.settings_new_provider_type(),
+                oxideterm_ai::AI_PROVIDER_TEMPLATES[0].provider_type
+            );
+            assert!(entity.settings_section_expanded(AiSettingsViewSection::ProviderSettings));
+            assert!(entity.settings_section_expanded(AiSettingsViewSection::ToolUse));
+            assert!(entity.settings_section_expanded(AiSettingsViewSection::ContextWindows));
+
+            entity.select_settings_provider_type("ollama", cx);
+            entity.toggle_settings_section(AiSettingsViewSection::ToolUse, cx);
+            entity.toggle_settings_provider_expanded("provider-test", true, cx);
+            entity.toggle_settings_provider_models("provider-test", cx);
+            entity.toggle_settings_context_provider("provider-test", cx);
+
+            assert_eq!(entity.settings_new_provider_type(), "ollama");
+            assert!(!entity.settings_section_expanded(AiSettingsViewSection::ToolUse));
+            assert!(!entity.settings_provider_expanded("provider-test", true));
+            assert!(entity.settings_provider_models_expanded("provider-test"));
+            assert!(entity.settings_context_provider_expanded("provider-test"));
+
+            entity.remove_settings_provider_view_state("provider-test", cx);
+            assert!(entity.settings_provider_expanded("provider-test", true));
+            assert!(!entity.settings_provider_models_expanded("provider-test"));
+            assert!(!entity.settings_context_provider_expanded("provider-test"));
         });
     }
 

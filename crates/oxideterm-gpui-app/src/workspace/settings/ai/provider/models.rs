@@ -11,9 +11,9 @@ impl WorkspaceApp {
     ) -> AnyElement {
         let provider_id = provider.id.clone();
         let models_expanded = self
-            .settings_page
-            .expanded_ai_provider_models
-            .contains(&provider.id);
+            .ai_entity
+            .read(cx)
+            .settings_provider_models_expanded(&provider.id);
         let mut body = div()
             .w_full()
             .min_w(px(0.0))
@@ -57,11 +57,14 @@ impl WorkspaceApp {
                                     .on_mouse_down(
                                         MouseButton::Left,
                                         cx.listener(move |this, _event, _window, cx| {
-                                            toggle_string_set(
-                                                &mut this.settings_page.expanded_ai_provider_models,
-                                                &provider_id,
-                                            );
+                                            this.ai_entity.update(cx, |ai, cx| {
+                                                ai.toggle_settings_provider_models(
+                                                    &provider_id,
+                                                    cx,
+                                                );
+                                            });
                                             cx.stop_propagation();
+                                            // WorkspaceApp owns the surrounding settings render.
                                             cx.notify();
                                         }),
                                     ),
@@ -197,9 +200,9 @@ impl WorkspaceApp {
             return div().into_any_element();
         };
         let models_expanded = self
-            .settings_page
-            .expanded_ai_provider_models
-            .contains(&provider.id);
+            .ai_entity
+            .read(_cx)
+            .settings_provider_models_expanded(&provider.id);
         let visible_model_count = if models_expanded {
             provider.models.len()
         } else {

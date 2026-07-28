@@ -603,12 +603,11 @@ impl WorkspaceApp {
             return;
         };
         let provider_id = provider_id.to_string();
-        self.ai_entity.update(cx, |ai, _cx| {
+        self.ai_entity.update(cx, |ai, cx| {
             ai.invalidate_provider_key_status(&provider_id);
             ai.invalidate_selector_provider_status(&provider_id);
+            ai.remove_settings_provider_view_state(&provider_id, cx);
         });
-        self.settings_page
-            .remove_ai_provider_page_state(&provider_id);
         self.edit_settings(
             |settings| {
                 ai_remove_provider_at_with_scoped_settings(

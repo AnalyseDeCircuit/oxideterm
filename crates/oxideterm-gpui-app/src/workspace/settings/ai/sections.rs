@@ -707,7 +707,10 @@ impl WorkspaceApp {
         providers: &[AiProviderView],
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let expanded = self.settings_page.ai_provider_settings_expanded;
+        let expanded = self
+            .ai_entity
+            .read(cx)
+            .settings_section_expanded(AiSettingsViewSection::ProviderSettings);
         let summary = self.i18n_count(
             "settings_view.ai.provider_settings_summary",
             self.settings_store.settings().ai.providers.len(),
@@ -748,9 +751,11 @@ impl WorkspaceApp {
                 summary,
                 expanded,
                 |this, _event, _window, cx| {
-                    this.settings_page
-                        .toggle_ai_section(AiSettingsSection::ProviderSettings);
+                    this.ai_entity.update(cx, |ai, cx| {
+                        ai.toggle_settings_section(AiSettingsViewSection::ProviderSettings, cx);
+                    });
                     cx.stop_propagation();
+                    // WorkspaceApp owns the surrounding settings render.
                     cx.notify();
                 },
                 cx,
@@ -786,18 +791,16 @@ impl WorkspaceApp {
             .as_deref()
             == Some(provider.id.as_str());
         let expanded = self
-            .settings_page
-            .expanded_ai_providers
-            .get(&provider.id)
-            .copied()
-            .unwrap_or(active_provider);
+            .ai_entity
+            .read(cx)
+            .settings_provider_expanded(&provider.id, active_provider);
         if !expanded {
             return 72.0;
         }
         let models_expanded = self
-            .settings_page
-            .expanded_ai_provider_models
-            .contains(&provider.id);
+            .ai_entity
+            .read(cx)
+            .settings_provider_models_expanded(&provider.id);
         let visible_model_count = if models_expanded {
             provider.models.len()
         } else {
@@ -840,17 +843,15 @@ impl WorkspaceApp {
                     .as_deref()
                     == Some(provider.id.as_str());
                 let expanded = self
-                    .settings_page
-                    .expanded_ai_providers
-                    .get(&provider.id)
-                    .copied()
-                    .unwrap_or(active_provider);
+                    .ai_entity
+                    .read(cx)
+                    .settings_provider_expanded(&provider.id, active_provider);
                 ai_provider_card_signature(
                     provider,
                     expanded,
-                    self.settings_page
-                        .expanded_ai_provider_models
-                        .contains(&provider.id),
+                    self.ai_entity
+                        .read(cx)
+                        .settings_provider_models_expanded(&provider.id),
                     self.ai_provider_has_key_cached(&provider.id, cx),
                 )
             })
@@ -1095,7 +1096,11 @@ impl WorkspaceApp {
                 .collect(),
         );
 
-        let collapsed_summary = (!self.settings_page.ai_tool_use_expanded).then(|| {
+        let tool_use_expanded = self
+            .ai_entity
+            .read(cx)
+            .settings_section_expanded(AiSettingsViewSection::ToolUse);
+        let collapsed_summary = (!tool_use_expanded).then(|| {
             settings_ai_tool_collapsed_summary(
                 &self.tokens,
                 format!(
@@ -1108,7 +1113,7 @@ impl WorkspaceApp {
                 ),
             )
         });
-        let expanded_body = self.settings_page.ai_tool_use_expanded.then(|| {
+        let expanded_body = tool_use_expanded.then(|| {
             settings_ai_tool_expanded_body(
                 &self.tokens,
                 settings.ai.tool_use.enabled,
@@ -1333,25 +1338,30 @@ impl WorkspaceApp {
             .flex()
             .flex_col()
             .child(self.ai_context_windows_header(cx))
-            .when(self.settings_page.ai_context_windows_expanded, |section| {
-                if provider_panels.is_empty() {
-                    section.child(settings_ai_model_empty_text(
-                        &self.tokens,
-                        self.i18n.t("settings_view.ai.model_context_windows_empty"),
-                    ))
-                } else {
-                    let mut list = div()
-                        .w_full()
-                        .min_w(px(0.0))
-                        .flex()
-                        .flex_col()
-                        .gap(px(16.0));
-                    for panel in provider_panels {
-                        list = list.child(self.ai_context_window_provider(settings, panel, cx));
+            .when(
+                self.ai_entity
+                    .read(cx)
+                    .settings_section_expanded(AiSettingsViewSection::ContextWindows),
+                |section| {
+                    if provider_panels.is_empty() {
+                        section.child(settings_ai_model_empty_text(
+                            &self.tokens,
+                            self.i18n.t("settings_view.ai.model_context_windows_empty"),
+                        ))
+                    } else {
+                        let mut list = div()
+                            .w_full()
+                            .min_w(px(0.0))
+                            .flex()
+                            .flex_col()
+                            .gap(px(16.0));
+                        for panel in provider_panels {
+                            list = list.child(self.ai_context_window_provider(settings, panel, cx));
+                        }
+                        section.child(list)
                     }
-                    section.child(list)
-                }
-            })
+                },
+            )
             .into_any_element()
     }
 
@@ -1359,16 +1369,17 @@ impl WorkspaceApp {
         &self,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        let expanded = self
+            .ai_entity
+            .read(cx)
+            .settings_section_expanded(AiSettingsViewSection::ContextWindows);
         settings_ai_context_windows_header(
             &self.tokens,
             self.i18n.t("settings_view.ai.model_context_windows"),
             self.i18n.t("settings_view.ai.model_context_windows_hint"),
             self.render_animated_chevron(
-                (
-                    "ai-context-windows-chevron",
-                    self.settings_page.ai_context_windows_expanded as usize,
-                ),
-                self.settings_page.ai_context_windows_expanded,
+                ("ai-context-windows-chevron", expanded as usize),
+                expanded,
                 16.0,
                 rgb(self.tokens.ui.text_muted),
             ),
@@ -1377,9 +1388,11 @@ impl WorkspaceApp {
         .on_mouse_down(
             MouseButton::Left,
             cx.listener(|this, _event, _window, cx| {
-                this.settings_page
-                    .toggle_ai_section(AiSettingsSection::ContextWindows);
+                this.ai_entity.update(cx, |ai, cx| {
+                    ai.toggle_settings_section(AiSettingsViewSection::ContextWindows, cx);
+                });
                 cx.stop_propagation();
+                // WorkspaceApp owns the surrounding settings render.
                 cx.notify();
             }),
         )
@@ -1394,9 +1407,9 @@ impl WorkspaceApp {
     ) -> AnyElement {
         let provider_id = panel.provider_id.clone();
         let expanded = self
-            .settings_page
-            .expanded_ai_context_providers
-            .contains(&provider_id);
+            .ai_entity
+            .read(cx)
+            .settings_context_provider_expanded(&provider_id);
         let header_provider_id = provider_id.clone();
         let header = settings_ai_model_provider_header(
             &self.tokens,
@@ -1418,9 +1431,11 @@ impl WorkspaceApp {
         .on_mouse_down(
             MouseButton::Left,
             cx.listener(move |this, _event, _window, cx| {
-                this.settings_page
-                    .toggle_ai_context_provider(header_provider_id.clone());
+                this.ai_entity.update(cx, |ai, cx| {
+                    ai.toggle_settings_context_provider(&header_provider_id, cx);
+                });
                 cx.stop_propagation();
+                // WorkspaceApp owns the surrounding settings render.
                 cx.notify();
             }),
         );
@@ -1607,7 +1622,10 @@ impl WorkspaceApp {
     }
 
     pub(in crate::workspace) fn ai_tool_expand_button(&self, cx: &mut Context<Self>) -> AnyElement {
-        let expanded = self.settings_page.ai_tool_use_expanded;
+        let expanded = self
+            .ai_entity
+            .read(cx)
+            .settings_section_expanded(AiSettingsViewSection::ToolUse);
         // Tool-policy expand/collapse is an outline small Button in Tauri.
         // Route it through the same shared primitive as other settings
         // command buttons.
@@ -1628,9 +1646,11 @@ impl WorkspaceApp {
                 ..ToolbarButtonOptions::default()
             },
             cx.listener(|this, _event, _window, cx| {
-                this.settings_page
-                    .toggle_ai_section(AiSettingsSection::ToolUse);
+                this.ai_entity.update(cx, |ai, cx| {
+                    ai.toggle_settings_section(AiSettingsViewSection::ToolUse, cx);
+                });
                 cx.stop_propagation();
+                // WorkspaceApp owns the surrounding settings render.
                 cx.notify();
             }),
         )

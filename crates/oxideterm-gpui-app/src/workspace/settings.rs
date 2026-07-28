@@ -13,7 +13,7 @@ use oxideterm_settings::{
 };
 use oxideterm_settings_model::{
     AcpAgentPreset, AiProviderModelChipItem, AiProviderModelPanel, AiSettingsPage,
-    AiSettingsSection, AiToolPolicyGroup, CliCompanionStatus, KnowledgeDeleteTarget,
+    AiToolPolicyGroup, CliCompanionStatus, KnowledgeDeleteTarget,
     SETTINGS_SECTION_HEADER_ITEM_COUNT, SettingsDynamicSectionCounts, SettingsInputDraftApply,
     TERMINAL_THEME_COLOR_FIELDS, ThemeColorField, ThemeEditorSection, ThemeEditorState,
     UI_THEME_COLOR_FIELDS, ai_add_acp_agent, ai_add_acp_agent_preset,
@@ -33,13 +33,13 @@ use oxideterm_settings_model::{
     settings_multiline_line_ranges, settings_multiline_line_selection,
     settings_section_list_identity as settings_model_section_list_identity,
     settings_section_list_item_count as settings_model_section_list_item_count,
-    take_cloud_sync_form_input_value, theme_editor_from_settings, toggle_string_set,
+    take_cloud_sync_form_input_value, theme_editor_from_settings,
 };
 use oxideterm_ssh::{HostKeyStatus, UpstreamProxyConfig, probe_upstream_proxy_route};
 use oxideterm_theme::BUILT_IN_THEMES;
 
-use super::ime::WorkspaceImeTarget;
 use super::*;
+use super::{ai_state::AiSettingsViewSection, ime::WorkspaceImeTarget};
 use oxideterm_ai::{
     AI_PROVIDER_TEMPLATES, AiProviderKeyDisplayState, AiProviderView,
     add_provider_from_template as ai_add_provider_from_template,

@@ -970,20 +970,20 @@ impl WorkspaceApp {
             (SettingsTab::Ai, SettingsSelect::AiProviderTemplate) => {
                 let mut popup = select_overlay_popup(&self.tokens, width.max(AI_PROVIDER_SELECT_W));
                 for template in AI_PROVIDER_TEMPLATES {
-                    let provider_type = template.provider_type.to_string();
+                    let provider_type = template.provider_type;
+                    let is_selected =
+                        self.ai_entity.read(cx).settings_new_provider_type() == provider_type;
                     popup = popup.child(select_option_action(
-                        select_option(
-                            &self.tokens,
-                            self.i18n.t(template.label_key),
-                            self.settings_page.ai_new_provider_type == template.provider_type,
-                        ),
+                        select_option(&self.tokens, self.i18n.t(template.label_key), is_selected),
                         false,
                         false,
                         cx.listener(move |this, _event, _window, cx| {
                             this.close_settings_select();
-                            this.settings_page
-                                .select_ai_provider_type(provider_type.clone());
+                            this.ai_entity.update(cx, |ai, cx| {
+                                ai.select_settings_provider_type(provider_type, cx);
+                            });
                             cx.stop_propagation();
+                            // WorkspaceApp owns the surrounding settings render.
                             cx.notify();
                         }),
                     ));

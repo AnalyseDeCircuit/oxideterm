@@ -5,7 +5,8 @@ impl WorkspaceApp {
         &self,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let selected = ai_provider_template_by_type(&self.settings_page.ai_new_provider_type);
+        let selected =
+            ai_provider_template_by_type(self.ai_entity.read(cx).settings_new_provider_type());
         let provider_template_select = self.settings_select_control(
             SettingsSelect::AiProviderTemplate,
             self.i18n.t(selected.label_key),

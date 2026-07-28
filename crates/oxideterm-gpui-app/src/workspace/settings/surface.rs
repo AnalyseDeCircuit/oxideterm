@@ -531,33 +531,24 @@ impl WorkspaceApp {
                 match (self.settings_page.ai_page, index) {
                     (AiSettingsPage::Providers, 2) => {
                         settings.ai.providers.len().hash(&mut hasher);
-                        self.settings_page
-                            .ai_provider_settings_expanded
-                            .hash(&mut hasher);
-                        hash_string_bool_map(
-                            &self.settings_page.expanded_ai_providers,
-                            &mut hasher,
-                        );
-                        hash_string_set(
-                            &self.settings_page.expanded_ai_provider_models,
-                            &mut hasher,
-                        );
+                        self.ai_entity
+                            .read(cx)
+                            .hash_settings_provider_layout(&mut hasher);
                     }
                     (AiSettingsPage::Agents, 2) => {
                         settings.ai.acp_agents.len().hash(&mut hasher);
                     }
                     (AiSettingsPage::Context, 5) => {
                         settings.ai.providers.len().hash(&mut hasher);
-                        self.settings_page
-                            .ai_context_windows_expanded
-                            .hash(&mut hasher);
-                        hash_string_set(
-                            &self.settings_page.expanded_ai_context_providers,
-                            &mut hasher,
-                        );
+                        self.ai_entity
+                            .read(cx)
+                            .hash_settings_context_layout(&mut hasher);
                     }
                     (AiSettingsPage::Tools, 2) => {
-                        self.settings_page.ai_tool_use_expanded.hash(&mut hasher);
+                        self.ai_entity
+                            .read(cx)
+                            .settings_section_expanded(AiSettingsViewSection::ToolUse)
+                            .hash(&mut hasher);
                     }
                     _ => {}
                 }
@@ -1223,26 +1214,6 @@ impl WorkspaceApp {
                 cx,
             );
         }
-    }
-}
-
-pub(in crate::workspace) fn hash_string_set(values: &HashSet<String>, hasher: &mut impl Hasher) {
-    let mut values = values.iter().collect::<Vec<_>>();
-    values.sort();
-    for value in values {
-        value.hash(hasher);
-    }
-}
-
-pub(in crate::workspace) fn hash_string_bool_map(
-    values: &HashMap<String, bool>,
-    hasher: &mut impl Hasher,
-) {
-    let mut values = values.iter().collect::<Vec<_>>();
-    values.sort_by(|(left, _), (right, _)| left.cmp(right));
-    for (key, value) in values {
-        key.hash(hasher);
-        value.hash(hasher);
     }
 }
 
