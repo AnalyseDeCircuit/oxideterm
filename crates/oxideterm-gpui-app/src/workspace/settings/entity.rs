@@ -1129,7 +1129,9 @@ impl SettingsWorkspaceEntity {
         // Retaining the task makes Entity release the only cancellation boundary.
         self.external_store_watch_task = Some(cx.spawn(async move |settings, cx| {
             loop {
-                Timer::after(EXTERNAL_STORE_WATCH_INTERVAL).await;
+                cx.background_executor()
+                    .timer(EXTERNAL_STORE_WATCH_INTERVAL)
+                    .await;
                 let should_continue = settings
                     .update(cx, |settings, cx| {
                         let Some(watch) = settings.external_store_watch.as_mut() else {
@@ -1326,7 +1328,7 @@ impl SettingsWorkspaceEntity {
         // Replacing this retained task cancels the previous debounce without
         // leaving a detached root timer alive after another slider movement.
         self.background_blur_commit_task = Some(cx.spawn(async move |settings, cx| {
-            Timer::after(delay).await;
+            cx.background_executor().timer(delay).await;
             let _ = settings.update(cx, |settings, cx| {
                 settings.background_blur_commit_task = None;
                 settings.finish_background_blur_commit(generation, cx);
@@ -2263,7 +2265,7 @@ mod tests {
         path::PathBuf,
         sync::{
             Arc,
-            atomic::{AtomicBool, Ordering},
+            atomic::{AtomicBool, AtomicUsize, Ordering},
         },
         time::{Duration, SystemTime},
     };
@@ -2426,6 +2428,211 @@ mod tests {
                 Some(Vec::new())
             );
             assert!(entity.navigation_draft_snapshot().is_none());
+        });
+    }
+
+    #[gpui::test]
+    fn hidden_settings_page_keeps_picker_completion_exact_once(cx: &mut TestAppContext) {
+        let entity = cx.new(SettingsWorkspaceEntity::new);
+        let picker_completions = Arc::new(AtomicUsize::new(0));
+        let picker_completions_for_future = Arc::clone(&picker_completions);
+        let (picker_tx, picker_rx) = tokio::sync::oneshot::channel::<Option<(String, String)>>();
+        entity.update(cx, |entity, cx| {
+            entity.set_active_tab(SettingsTab::Connections, cx);
+            entity.open_managed_key_import_file_dialog(cx);
+            entity.start_managed_key_file_picker(
+                async move {
+                    let selected_file = picker_rx.await.ok().flatten();
+                    picker_completions_for_future.fetch_add(1, Ordering::AcqRel);
+                    selected_file
+                },
+                cx,
+            );
+            // Leaving Connections hides the picker owner without canceling its result.
+            entity.set_active_tab(SettingsTab::Help, cx);
+        });
+        picker_tx
+            .send(Some((
+                "/tmp/id_visibility_test".to_string(),
+                "id_visibility_test".to_string(),
+            )))
+            .expect("picker receiver should remain alive while hidden");
+        cx.run_until_parked();
+        entity.read_with(cx, |entity, _cx| {
+            assert_eq!(picker_completions.load(Ordering::Acquire), 1);
+            assert_eq!(entity.managed_key_file_path, "/tmp/id_visibility_test");
+            assert_eq!(entity.managed_key_file_name, "id_visibility_test");
+            assert!(entity.managed_key_file_picker_task.is_none());
+        });
+    }
+
+    #[gpui::test]
+    fn hidden_settings_page_keeps_worker_completion_exact_once(cx: &mut TestAppContext) {
+        let entity = cx.new(SettingsWorkspaceEntity::new);
+        let runtime = Arc::new(
+            tokio::runtime::Builder::new_multi_thread()
+                .worker_threads(1)
+                .enable_all()
+                .build()
+                .expect("visibility test runtime"),
+        );
+        let worker_completions = Arc::new(AtomicUsize::new(0));
+        let worker_completions_for_task = Arc::clone(&worker_completions);
+        let (worker_release_tx, worker_release_rx) = std::sync::mpsc::sync_channel(1);
+        let (worker_done_tx, worker_done_rx) = std::sync::mpsc::sync_channel(1);
+        entity.update(cx, |entity, cx| {
+            entity.set_active_tab(SettingsTab::Portable, cx);
+            assert!(entity.start_portable_status_refresh(
+                true,
+                runtime,
+                move || {
+                    worker_release_rx
+                        .recv()
+                        .expect("worker release sender should remain alive");
+                    worker_completions_for_task.fetch_add(1, Ordering::AcqRel);
+                    worker_done_tx
+                        .send(())
+                        .expect("worker completion receiver should remain alive");
+                    super::PortableStatusRefresh {
+                        status: Err("portable unavailable while hidden".to_string()),
+                        exportable_secret_count: 0,
+                    }
+                },
+                cx,
+            ));
+            // The worker result remains lifecycle-significant after the page hides.
+            entity.set_active_tab(SettingsTab::Help, cx);
+        });
+        cx.executor().allow_parking();
+        cx.run_until_parked();
+        worker_release_tx
+            .send(())
+            .expect("portable worker should remain alive while hidden");
+        worker_done_rx
+            .recv_timeout(Duration::from_secs(2))
+            .expect("portable worker should finish after release");
+        let worker_delivery_deadline = std::time::Instant::now() + Duration::from_secs(2);
+        while entity.read_with(cx, |entity, _cx| entity.portable_refresh_pending) {
+            assert!(
+                std::time::Instant::now() < worker_delivery_deadline,
+                "portable worker completion should reach the Entity while hidden"
+            );
+            cx.run_until_parked();
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        entity.read_with(cx, |entity, _cx| {
+            let snapshot = entity.portable_status_snapshot();
+            assert_eq!(worker_completions.load(Ordering::Acquire), 1);
+            assert!(!snapshot.refresh_pending);
+            assert_eq!(
+                snapshot.error.as_deref(),
+                Some("portable unavailable while hidden")
+            );
+            assert!(entity.portable_refresh_task.is_none());
+        });
+    }
+
+    #[gpui::test]
+    fn hidden_settings_page_keeps_debounce_completion_exact_once(cx: &mut TestAppContext) {
+        let entity = cx.new(SettingsWorkspaceEntity::new);
+        let mut events = cx.events(&entity);
+        entity.update(cx, |entity, cx| {
+            entity.set_active_tab(SettingsTab::Appearance, cx);
+            assert!(entity.update_background_blur_preview(0, 12, Duration::from_millis(20), cx,));
+            // Debounce completion is a user result and must survive page hiding.
+            entity.set_active_tab(SettingsTab::Help, cx);
+        });
+        cx.executor().advance_clock(Duration::from_millis(20));
+        cx.run_until_parked();
+        assert_eq!(
+            events.try_recv().expect("one hidden-page debounce result"),
+            super::SettingsWorkspaceEvent::BackgroundBlurCommitReady(12)
+        );
+        cx.executor().advance_clock(Duration::from_millis(40));
+        cx.run_until_parked();
+        assert!(events.try_recv().is_err());
+        entity.read_with(cx, |entity, _cx| {
+            assert_eq!(entity.background_blur_preview(), None);
+            assert!(entity.background_blur_commit_task.is_none());
+        });
+    }
+
+    #[gpui::test]
+    fn external_store_watch_continues_across_hidden_settings_routes(cx: &mut TestAppContext) {
+        let entity = cx.new(SettingsWorkspaceEntity::new);
+        let mut events = cx.events(&entity);
+        entity.update(cx, |entity, cx| {
+            entity.start_external_store_watch(PathBuf::new(), PathBuf::new(), cx);
+            entity.set_active_tab(SettingsTab::Help, cx);
+        });
+        // A retained long-running watch parks between ticks instead of ending
+        // when no Settings page is currently mounted.
+        cx.executor().allow_parking();
+        cx.run_until_parked();
+
+        entity.update(cx, |entity, _cx| {
+            entity
+                .external_store_watch
+                .as_mut()
+                .expect("external watch state")
+                .settings_modified = Some(SystemTime::UNIX_EPOCH);
+        });
+        cx.executor()
+            .advance_clock(super::EXTERNAL_STORE_WATCH_INTERVAL + Duration::from_millis(1));
+        cx.run_until_parked();
+        assert_eq!(
+            events.try_recv().expect("settings file change event"),
+            super::SettingsWorkspaceEvent::ExternalStoresChanged
+        );
+        assert!(events.try_recv().is_err());
+
+        entity.update(cx, |entity, _cx| {
+            entity
+                .external_store_watch
+                .as_mut()
+                .expect("external watch state")
+                .connections_modified = Some(SystemTime::UNIX_EPOCH);
+        });
+        cx.executor()
+            .advance_clock(super::EXTERNAL_STORE_WATCH_INTERVAL + Duration::from_millis(1));
+        cx.run_until_parked();
+        assert_eq!(
+            events.try_recv().expect("connections file change event"),
+            super::SettingsWorkspaceEvent::ExternalStoresChanged
+        );
+        assert!(events.try_recv().is_err());
+        entity.read_with(cx, |entity, _cx| {
+            assert_eq!(entity.route_snapshot().active_tab, SettingsTab::Help);
+            assert!(entity.external_store_watch_task.is_some());
+        });
+
+        drop(entity);
+        cx.update(|_cx| {});
+        cx.run_until_parked();
+    }
+
+    #[gpui::test]
+    fn route_visibility_changes_do_not_schedule_page_refresh_or_probe(cx: &mut TestAppContext) {
+        let entity = cx.new(SettingsWorkspaceEntity::new);
+        entity.update(cx, |entity, cx| {
+            for tab in SettingsTab::all() {
+                entity.set_active_tab(*tab, cx);
+            }
+
+            assert!(!entity.portable_refresh_pending);
+            assert!(entity.portable_refresh_task.is_none());
+            assert!(!entity.cli_companion_loading);
+            assert!(entity.cli_companion_task.is_none());
+            assert!(!entity.network_proxy_test_pending);
+            assert!(entity.network_proxy_test_task.is_none());
+            assert!(entity.network_proxy_test_abort.is_none());
+            assert!(!entity.launch_at_login_pending);
+            assert!(entity.launch_at_login_task.is_none());
+            assert!(entity.data_directory_picker_task.is_none());
+            assert!(entity.managed_key_file_picker_task.is_none());
+            assert!(entity.connection_import_path_picker_task.is_none());
+            assert!(entity.background_gallery_task.is_none());
+            assert!(entity.theme_import_task.is_none());
         });
     }
 
