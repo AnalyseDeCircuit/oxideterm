@@ -1,7 +1,10 @@
 use std::{collections::HashSet, sync::Arc};
 
 use gpui::{Context, EventEmitter, Task};
-use oxideterm_connections::PrivilegeCredentialKind;
+use oxideterm_connections::{
+    ConnectionImportDuplicateStrategy, ConnectionImportPreview, ConnectionImportSource,
+    PrivilegeCredentialKind,
+};
 use oxideterm_gpui_settings_view::SettingsInput;
 use zeroize::Zeroizing;
 
@@ -123,6 +126,16 @@ pub(in crate::workspace) struct SshConfigImportSnapshot {
     pub(in crate::workspace) presence: oxideterm_gpui_ui::motion::ExitPresence,
 }
 
+/// Read-only projection for the connection importer settings surface.
+pub(in crate::workspace) struct ConnectionImportSnapshot {
+    pub(in crate::workspace) source: ConnectionImportSource,
+    pub(in crate::workspace) paths: Vec<String>,
+    pub(in crate::workspace) preview: Option<ConnectionImportPreview>,
+    pub(in crate::workspace) selected_draft_ids: HashSet<String>,
+    pub(in crate::workspace) duplicate_strategy: ConnectionImportDuplicateStrategy,
+    pub(in crate::workspace) status: Option<String>,
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(in crate::workspace) enum CliCompanionOperation {
     Refresh,
@@ -179,6 +192,13 @@ pub(in crate::workspace) struct SettingsWorkspaceEntity {
     pub(super) ssh_config_import_dialog_open: bool,
     pub(super) ssh_config_selected_hosts: HashSet<String>,
     pub(super) connection_import_status: Option<String>,
+    pub(super) connection_import_source: ConnectionImportSource,
+    pub(super) connection_import_paths: Vec<String>,
+    pub(super) connection_import_preview: Option<ConnectionImportPreview>,
+    pub(super) selected_connection_import_drafts: HashSet<String>,
+    pub(super) connection_import_duplicate_strategy: ConnectionImportDuplicateStrategy,
+    pub(super) connection_import_target_group: String,
+    pub(super) connection_import_path_picker_task: Option<Task<()>>,
     pub(super) ssh_config_import_dialog_presence: oxideterm_gpui_ui::motion::ExitPresence,
     pub(super) ssh_config_import_dialog_exit_task: Option<Task<()>>,
     pub(super) native_update: NativeUpdateRuntime,
@@ -257,6 +277,13 @@ impl SettingsWorkspaceEntity {
             ssh_config_import_dialog_open: false,
             ssh_config_selected_hosts: HashSet::new(),
             connection_import_status: None,
+            connection_import_source: ConnectionImportSource::SecureCrt,
+            connection_import_paths: Vec::new(),
+            connection_import_preview: None,
+            selected_connection_import_drafts: HashSet::new(),
+            connection_import_duplicate_strategy: ConnectionImportDuplicateStrategy::Skip,
+            connection_import_target_group: String::new(),
+            connection_import_path_picker_task: None,
             ssh_config_import_dialog_presence: oxideterm_gpui_ui::motion::ExitPresence::visible(),
             ssh_config_import_dialog_exit_task: None,
             native_update: NativeUpdateRuntime::new(cx),
@@ -373,6 +400,9 @@ impl SettingsWorkspaceEntity {
             SettingsInput::LocalPrivilegePromptPatterns => {
                 Some(&self.privilege_draft.prompt_patterns)
             }
+            SettingsInput::ConnectionImportTargetGroup => {
+                Some(&self.connection_import_target_group)
+            }
             _ => None,
         }
     }
@@ -412,6 +442,7 @@ impl SettingsWorkspaceEntity {
             | SettingsInput::LocalPrivilegeUsernameHint
             | SettingsInput::LocalPrivilegeSecret
             | SettingsInput::LocalPrivilegePromptPatterns => true,
+            SettingsInput::ConnectionImportTargetGroup => true,
             _ => false,
         };
         if !can_focus {
@@ -519,6 +550,9 @@ impl SettingsWorkspaceEntity {
             SettingsInput::LocalPrivilegeSecret => Some(&mut self.privilege_draft.secret),
             SettingsInput::LocalPrivilegePromptPatterns => {
                 Some(&mut self.privilege_draft.prompt_patterns)
+            }
+            SettingsInput::ConnectionImportTargetGroup => {
+                Some(&mut self.connection_import_target_group)
             }
             _ => None,
         }

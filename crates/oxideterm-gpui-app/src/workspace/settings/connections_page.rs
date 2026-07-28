@@ -120,8 +120,183 @@ impl SettingsWorkspaceEntity {
         cx.notify();
     }
 
-    pub(in crate::workspace) fn connection_import_status(&self) -> Option<&str> {
-        self.connection_import_status.as_deref()
+    pub(in crate::workspace) fn connection_import_snapshot(&self) -> ConnectionImportSnapshot {
+        ConnectionImportSnapshot {
+            source: self.connection_import_source,
+            paths: self.connection_import_paths.clone(),
+            preview: self.connection_import_preview.clone(),
+            selected_draft_ids: self.selected_connection_import_drafts.clone(),
+            duplicate_strategy: self.connection_import_duplicate_strategy,
+            status: self.connection_import_status.clone(),
+        }
+    }
+
+    pub(in crate::workspace) fn connection_import_source(&self) -> ConnectionImportSource {
+        self.connection_import_source
+    }
+
+    pub(in crate::workspace) fn connection_import_duplicate_strategy(
+        &self,
+    ) -> ConnectionImportDuplicateStrategy {
+        self.connection_import_duplicate_strategy
+    }
+
+    pub(in crate::workspace) fn connection_import_list_signature(
+        &self,
+    ) -> (
+        bool,
+        &'static str,
+        usize,
+        Option<usize>,
+        usize,
+        &'static str,
+    ) {
+        (
+            self.connection_import_status.is_some(),
+            self.connection_import_source.tag(),
+            self.connection_import_paths.len(),
+            self.connection_import_preview
+                .as_ref()
+                .map(|preview| preview.drafts.len()),
+            self.selected_connection_import_drafts.len(),
+            self.connection_import_duplicate_strategy.tag(),
+        )
+    }
+
+    pub(in crate::workspace) fn set_connection_import_source(
+        &mut self,
+        source: ConnectionImportSource,
+        cx: &mut Context<Self>,
+    ) {
+        if self.connection_import_source == source {
+            return;
+        }
+        self.connection_import_source = source;
+        self.connection_import_paths.clear();
+        self.clear_connection_import_preview();
+        self.connection_import_status = None;
+        cx.notify();
+    }
+
+    pub(in crate::workspace) fn set_connection_import_duplicate_strategy(
+        &mut self,
+        strategy: ConnectionImportDuplicateStrategy,
+        cx: &mut Context<Self>,
+    ) {
+        if self.connection_import_duplicate_strategy != strategy {
+            self.connection_import_duplicate_strategy = strategy;
+            cx.notify();
+        }
+    }
+
+    pub(in crate::workspace) fn start_connection_import_path_picker(
+        &mut self,
+        selected_paths: impl std::future::Future<Output = Option<Vec<String>>> + 'static,
+        cx: &mut Context<Self>,
+    ) {
+        // Retaining the task keeps picker completion owned by the settings surface.
+        self.connection_import_path_picker_task = Some(cx.spawn(async move |settings, cx| {
+            let selected_paths = selected_paths.await.filter(|paths| !paths.is_empty());
+            let _ = settings.update(cx, |settings, cx| {
+                settings.connection_import_path_picker_task = None;
+                if let Some(paths) = selected_paths {
+                    settings.connection_import_paths = paths;
+                    settings.clear_connection_import_preview();
+                    settings.connection_import_status = None;
+                    cx.notify();
+                }
+            });
+        }));
+    }
+
+    pub(in crate::workspace) fn connection_import_preview_request(
+        &self,
+    ) -> Option<(ConnectionImportSource, Vec<String>)> {
+        (!self.connection_import_paths.is_empty()).then(|| {
+            (
+                self.connection_import_source,
+                self.connection_import_paths.clone(),
+            )
+        })
+    }
+
+    pub(in crate::workspace) fn apply_connection_import_preview(
+        &mut self,
+        result: Result<ConnectionImportPreview, String>,
+        cx: &mut Context<Self>,
+    ) {
+        match result {
+            Ok(preview) => {
+                self.selected_connection_import_drafts = preview
+                    .drafts
+                    .iter()
+                    .filter(|draft| draft.importable && !draft.duplicate)
+                    .map(|draft| draft.id.clone())
+                    .collect();
+                self.connection_import_preview = Some(preview);
+                self.connection_import_status = None;
+            }
+            Err(status) => self.connection_import_status = Some(status),
+        }
+        cx.notify();
+    }
+
+    pub(in crate::workspace) fn toggle_connection_import_draft(
+        &mut self,
+        draft_id: String,
+        cx: &mut Context<Self>,
+    ) {
+        if !self
+            .selected_connection_import_drafts
+            .insert(draft_id.clone())
+        {
+            self.selected_connection_import_drafts.remove(&draft_id);
+        }
+        cx.notify();
+    }
+
+    pub(in crate::workspace) fn toggle_all_connection_import_drafts(
+        &mut self,
+        all_selected: bool,
+        cx: &mut Context<Self>,
+    ) {
+        if all_selected {
+            self.selected_connection_import_drafts.clear();
+        } else if let Some(preview) = self.connection_import_preview.as_ref() {
+            self.selected_connection_import_drafts = preview
+                .drafts
+                .iter()
+                .filter(|draft| draft.importable)
+                .map(|draft| draft.id.clone())
+                .collect();
+        }
+        cx.notify();
+    }
+
+    pub(in crate::workspace) fn connection_import_apply_request(
+        &self,
+    ) -> Option<ConnectionImportApplyRequest> {
+        if self.selected_connection_import_drafts.is_empty()
+            || self.connection_import_paths.is_empty()
+        {
+            return None;
+        }
+        Some(ConnectionImportApplyRequest {
+            source: self.connection_import_source,
+            paths: self.connection_import_paths.clone(),
+            selected_draft_ids: self
+                .selected_connection_import_drafts
+                .iter()
+                .cloned()
+                .collect(),
+            duplicate_strategy: self.connection_import_duplicate_strategy,
+            target_group: non_empty_trimmed(&self.connection_import_target_group),
+        })
+    }
+
+    fn clear_connection_import_preview(&mut self) {
+        self.connection_import_preview = None;
+        self.selected_connection_import_drafts.clear();
     }
 
     pub(in crate::workspace) fn managed_key_status(&self) -> Option<&str> {
@@ -1130,13 +1305,26 @@ impl WorkspaceApp {
         &self,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let mut rows = vec![self.connection_import_input_row(cx)];
+        let mut importer = self
+            .settings_workspace
+            .read(cx)
+            .connection_import_snapshot();
+        let mut rows = vec![self.connection_import_input_row(importer.source, &importer.paths, cx)];
 
-        if let Some(preview) = self.settings_connection_import_preview.clone() {
-            rows.push(self.connection_import_preview_toolbar(&preview, cx));
-            rows.push(self.connection_import_preview_list(preview, cx));
+        if let Some(preview) = importer.preview.take() {
+            rows.push(self.connection_import_preview_toolbar(
+                &preview,
+                &importer.selected_draft_ids,
+                importer.duplicate_strategy,
+                cx,
+            ));
+            rows.push(self.connection_import_preview_list(
+                preview,
+                &importer.selected_draft_ids,
+                cx,
+            ));
         }
-        if let Some(status) = self.settings_workspace.read(cx).connection_import_status() {
+        if let Some(status) = importer.status {
             rows.push(self.connection_status_row(status.to_string()));
         }
 
@@ -1149,6 +1337,8 @@ impl WorkspaceApp {
 
     pub(in crate::workspace) fn connection_import_input_row(
         &self,
+        source: ConnectionImportSource,
+        paths: &[String],
         cx: &mut Context<Self>,
     ) -> AnyElement {
         div()
@@ -1164,7 +1354,7 @@ impl WorkspaceApp {
                     .max_w_full()
                     .flex_1()
                     .flex_basis(px(CONNECTION_IMPORT_SOURCE_BASIS))
-                    .child(self.connection_import_source_picker(cx)),
+                    .child(self.connection_import_source_picker(source, cx)),
             )
             .child(
                 div()
@@ -1181,18 +1371,18 @@ impl WorkspaceApp {
                             .text_color(rgb(self.tokens.ui.text))
                             .child(self.i18n.t("settings_view.connections.importers.paths")),
                     )
-                    .child(self.connection_import_path_toolbar(cx))
-                    .child(self.connection_import_path_summary()),
+                    .child(self.connection_import_path_toolbar(source, !paths.is_empty(), cx))
+                    .child(self.connection_import_path_summary(paths)),
             )
             .into_any_element()
     }
 
     pub(in crate::workspace) fn connection_import_source_picker(
         &self,
+        source: ConnectionImportSource,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let selected_label =
-            connection_import_source_label(self.settings_connection_import_source, &self.i18n);
+        let selected_label = connection_import_source_label(source, &self.i18n);
         div()
             .w_full()
             .min_w_0()
@@ -1217,9 +1407,10 @@ impl WorkspaceApp {
 
     pub(in crate::workspace) fn connection_import_path_toolbar(
         &self,
+        source: ConnectionImportSource,
+        has_paths: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let has_paths = !self.settings_connection_import_paths.is_empty();
         div()
             .w_full()
             .min_w_0()
@@ -1227,14 +1418,12 @@ impl WorkspaceApp {
             .flex_row()
             .flex_wrap()
             .gap(px(8.0))
-            .when(
-                connection_import_supports_files(self.settings_connection_import_source),
-                |row| row.child(self.connection_import_pick_files_button(cx)),
-            )
-            .when(
-                connection_import_supports_directory(self.settings_connection_import_source),
-                |row| row.child(self.connection_import_pick_directory_button(cx)),
-            )
+            .when(connection_import_supports_files(source), |row| {
+                row.child(self.connection_import_pick_files_button(cx))
+            })
+            .when(connection_import_supports_directory(source), |row| {
+                row.child(self.connection_import_pick_directory_button(cx))
+            })
             .child(self.connection_import_preview_button(has_paths, cx))
             .into_any_element()
     }
@@ -1336,11 +1525,14 @@ impl WorkspaceApp {
         }
     }
 
-    pub(in crate::workspace) fn connection_import_path_summary(&self) -> AnyElement {
-        let summary = if self.settings_connection_import_paths.is_empty() {
+    pub(in crate::workspace) fn connection_import_path_summary(
+        &self,
+        paths: &[String],
+    ) -> AnyElement {
+        let summary = if paths.is_empty() {
             self.i18n.t("settings_view.connections.importers.no_paths")
         } else {
-            self.settings_connection_import_paths.join(" · ")
+            paths.join(" · ")
         };
         div()
             .w_full()
@@ -1355,6 +1547,8 @@ impl WorkspaceApp {
     pub(in crate::workspace) fn connection_import_preview_toolbar(
         &self,
         preview: &ConnectionImportPreview,
+        selected_draft_ids: &HashSet<String>,
+        duplicate_strategy: ConnectionImportDuplicateStrategy,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let importable = preview
@@ -1367,10 +1561,7 @@ impl WorkspaceApp {
                 .drafts
                 .iter()
                 .filter(|draft| draft.importable)
-                .all(|draft| {
-                    self.settings_selected_connection_import_drafts
-                        .contains(&draft.id)
-                });
+                .all(|draft| selected_draft_ids.contains(&draft.id));
         div()
             .w_full()
             .min_w_0()
@@ -1393,11 +1584,11 @@ impl WorkspaceApp {
                     .items_center()
                     .justify_end()
                     .gap(px(8.0))
-                    .child(self.connection_import_duplicate_strategy_picker(cx))
+                    .child(self.connection_import_duplicate_strategy_picker(duplicate_strategy, cx))
                     .child(
                         self.settings_text_input_control(
                             SettingsInput::ConnectionImportTargetGroup,
-                            self.settings_connection_import_target_group.clone(),
+                            String::new(),
                             self.i18n
                                 .t("settings_view.connections.importers.target_group"),
                             192.0,
@@ -1405,7 +1596,7 @@ impl WorkspaceApp {
                         )
                         .into_any_element(),
                     )
-                    .child(self.connection_import_apply_button(cx)),
+                    .child(self.connection_import_apply_button(selected_draft_ids.len(), cx)),
             )
             .into_any_element()
     }
@@ -1445,12 +1636,10 @@ impl WorkspaceApp {
 
     pub(in crate::workspace) fn connection_import_duplicate_strategy_picker(
         &self,
+        strategy: ConnectionImportDuplicateStrategy,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let selected_label = connection_import_duplicate_strategy_label(
-            self.settings_connection_import_duplicate_strategy,
-            &self.i18n,
-        );
+        let selected_label = connection_import_duplicate_strategy_label(strategy, &self.i18n);
         // Tauri renders duplicate strategy as a compact SelectTrigger (w-36 h-8)
         // in the import preview toolbar, not as adjacent action buttons.
         self.settings_select_control_with_trigger_style(
@@ -1469,9 +1658,9 @@ impl WorkspaceApp {
 
     pub(in crate::workspace) fn connection_import_apply_button(
         &self,
+        selected_count: usize,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let selected_count = self.settings_selected_connection_import_drafts.len();
         let label = self
             .i18n
             .t("settings_view.connections.importers.import_selected")
@@ -1510,6 +1699,7 @@ impl WorkspaceApp {
     pub(in crate::workspace) fn connection_import_preview_list(
         &self,
         preview: ConnectionImportPreview,
+        selected_draft_ids: &HashSet<String>,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         if preview.drafts.is_empty() {
@@ -1541,7 +1731,8 @@ impl WorkspaceApp {
             .border_color(rgb(self.tokens.ui.border))
             .bg(self.settings_panel_background(self.tokens.ui.bg_panel));
         for draft in preview.drafts {
-            list = list.child(self.connection_import_preview_row(draft, cx));
+            let selected = selected_draft_ids.contains(&draft.id);
+            list = list.child(self.connection_import_preview_row(draft, selected, cx));
         }
         list.into_any_element()
     }
@@ -1549,11 +1740,9 @@ impl WorkspaceApp {
     pub(in crate::workspace) fn connection_import_preview_row(
         &self,
         draft: oxideterm_connections::ImportedConnectionDraft,
+        selected: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let checked = self
-            .settings_selected_connection_import_drafts
-            .contains(&draft.id);
         let disabled = !draft.importable;
         let detail = format!("{}@{}:{}", draft.username, draft.host, draft.port);
         let origin_detail = [
@@ -1588,7 +1777,7 @@ impl WorkspaceApp {
                 div()
                     .w(px(28.0))
                     .flex_none()
-                    .child(self.ssh_config_checkbox(checked)),
+                    .child(self.ssh_config_checkbox(selected)),
             )
             .child(
                 div()
@@ -2859,14 +3048,8 @@ impl WorkspaceApp {
         source: ConnectionImportSource,
         cx: &mut Context<Self>,
     ) {
-        if self.settings_connection_import_source == source {
-            return;
-        }
-        self.settings_connection_import_source = source;
-        self.clear_connection_import_preview();
-        self.settings_connection_import_paths.clear();
         self.settings_workspace.update(cx, |settings, cx| {
-            settings.set_connection_import_status(None, cx);
+            settings.set_connection_import_source(source, cx);
         });
     }
 
@@ -2875,8 +3058,8 @@ impl WorkspaceApp {
         directories: bool,
         cx: &mut Context<Self>,
     ) {
-        let multiple = !directories
-            && self.settings_connection_import_source != ConnectionImportSource::Termius;
+        let source = self.settings_workspace.read(cx).connection_import_source();
+        let multiple = !directories && source != ConnectionImportSource::Termius;
         let prompt_key = if directories {
             "settings_view.connections.importers.choose_directory"
         } else {
@@ -2888,57 +3071,42 @@ impl WorkspaceApp {
             multiple,
             prompt: Some(SharedString::from(self.i18n.t(prompt_key))),
         });
-        cx.spawn(async move |weak, cx| {
+        let selected_paths = async move {
             let Ok(Ok(Some(paths))) = receiver.await else {
-                return;
+                return None;
             };
             let selected = paths
                 .into_iter()
                 .map(|path| path.display().to_string())
                 .collect::<Vec<_>>();
-            if selected.is_empty() {
-                return;
-            }
-            let _ = weak.update(cx, |this, cx| {
-                this.settings_connection_import_paths = selected;
-                this.clear_connection_import_preview();
-                this.settings_workspace.update(cx, |settings, cx| {
-                    settings.set_connection_import_status(None, cx);
-                });
-                cx.notify();
-            });
-        })
-        .detach();
+            (!selected.is_empty()).then_some(selected)
+        };
+        self.settings_workspace.update(cx, |settings, cx| {
+            settings.start_connection_import_path_picker(selected_paths, cx);
+        });
     }
 
     pub(in crate::workspace) fn preview_settings_connection_import(
         &mut self,
         cx: &mut Context<Self>,
     ) {
-        if self.settings_connection_import_paths.is_empty() {
+        let Some((source, paths)) = self
+            .settings_workspace
+            .read(cx)
+            .connection_import_preview_request()
+        else {
             return;
-        }
+        };
         let existing_names = self
             .connection_store
             .connections()
             .iter()
             .map(|conn| conn.name.clone())
             .collect::<HashSet<_>>();
-        match preview_connection_import(
-            self.settings_connection_import_source,
-            &self.settings_connection_import_paths,
-            &existing_names,
-        ) {
+        match preview_connection_import(source, &paths, &existing_names) {
             Ok(preview) => {
-                self.settings_selected_connection_import_drafts = preview
-                    .drafts
-                    .iter()
-                    .filter(|draft| draft.importable && !draft.duplicate)
-                    .map(|draft| draft.id.clone())
-                    .collect();
-                self.settings_connection_import_preview = Some(preview);
                 self.settings_workspace.update(cx, |settings, cx| {
-                    settings.set_connection_import_status(None, cx);
+                    settings.apply_connection_import_preview(Ok(preview), cx);
                 });
             }
             Err(error) => {
@@ -2947,11 +3115,10 @@ impl WorkspaceApp {
                     .t("settings_view.connections.importers.preview_failed")
                     .replace("{{error}}", &error.to_string());
                 self.settings_workspace.update(cx, |settings, cx| {
-                    settings.set_connection_import_status(Some(status), cx);
+                    settings.apply_connection_import_preview(Err(status), cx);
                 });
             }
         }
-        cx.notify();
     }
 
     pub(in crate::workspace) fn toggle_settings_connection_import_draft(
@@ -2959,14 +3126,9 @@ impl WorkspaceApp {
         draft_id: String,
         cx: &mut Context<Self>,
     ) {
-        if !self
-            .settings_selected_connection_import_drafts
-            .insert(draft_id.clone())
-        {
-            self.settings_selected_connection_import_drafts
-                .remove(&draft_id);
-        }
-        cx.notify();
+        self.settings_workspace.update(cx, |settings, cx| {
+            settings.toggle_connection_import_draft(draft_id, cx);
+        });
     }
 
     pub(in crate::workspace) fn toggle_all_settings_connection_import_drafts(
@@ -2974,38 +3136,21 @@ impl WorkspaceApp {
         all_selected: bool,
         cx: &mut Context<Self>,
     ) {
-        if all_selected {
-            self.settings_selected_connection_import_drafts.clear();
-        } else if let Some(preview) = self.settings_connection_import_preview.as_ref() {
-            self.settings_selected_connection_import_drafts = preview
-                .drafts
-                .iter()
-                .filter(|draft| draft.importable)
-                .map(|draft| draft.id.clone())
-                .collect();
-        }
-        cx.notify();
+        self.settings_workspace.update(cx, |settings, cx| {
+            settings.toggle_all_connection_import_drafts(all_selected, cx);
+        });
     }
 
     pub(in crate::workspace) fn apply_settings_connection_import(
         &mut self,
         cx: &mut Context<Self>,
     ) {
-        if self.settings_selected_connection_import_drafts.is_empty()
-            || self.settings_connection_import_paths.is_empty()
-        {
+        let Some(request) = self
+            .settings_workspace
+            .read(cx)
+            .connection_import_apply_request()
+        else {
             return;
-        }
-        let request = ConnectionImportApplyRequest {
-            source: self.settings_connection_import_source,
-            paths: self.settings_connection_import_paths.clone(),
-            selected_draft_ids: self
-                .settings_selected_connection_import_drafts
-                .iter()
-                .cloned()
-                .collect(),
-            duplicate_strategy: self.settings_connection_import_duplicate_strategy,
-            target_group: non_empty_trimmed(&self.settings_connection_import_target_group),
         };
         match apply_connection_import(&mut self.connection_store, request) {
             Ok(result) => {
@@ -3062,12 +3207,6 @@ impl WorkspaceApp {
                 });
             }
         }
-        cx.notify();
-    }
-
-    pub(in crate::workspace) fn clear_connection_import_preview(&mut self) {
-        self.settings_connection_import_preview = None;
-        self.settings_selected_connection_import_drafts.clear();
     }
 }
 
@@ -3265,6 +3404,55 @@ mod settings_connection_entity_tests {
             settings.close_ssh_config_import_dialog(std::time::Duration::ZERO, cx);
             assert!(!settings.ssh_config_import_dialog_open);
             assert!(settings.ssh_config_import_dialog_exit_task.is_none());
+        });
+    }
+
+    #[gpui::test]
+    fn connection_import_state_input_and_picker_completion_are_entity_owned(
+        cx: &mut TestAppContext,
+    ) {
+        let settings = cx.new(SettingsWorkspaceEntity::new);
+        settings.update(cx, |settings, cx| {
+            settings.set_connection_import_source(ConnectionImportSource::Xshell, cx);
+            settings.set_connection_import_duplicate_strategy(
+                ConnectionImportDuplicateStrategy::Rename,
+                cx,
+            );
+            assert!(
+                settings
+                    .focus_settings_entity_input(SettingsInput::ConnectionImportTargetGroup, cx,)
+            );
+            assert!(settings.replace_settings_entity_input(
+                SettingsInput::ConnectionImportTargetGroup,
+                None,
+                "imported",
+                cx,
+            ));
+            settings.start_connection_import_path_picker(
+                std::future::ready(Some(vec!["/tmp/connections.ini".into()])),
+                cx,
+            );
+            assert!(settings.connection_import_path_picker_task.is_some());
+        });
+
+        cx.run_until_parked();
+
+        cx.read(|cx| {
+            let settings = settings.read(cx);
+            assert_eq!(
+                settings.connection_import_source,
+                ConnectionImportSource::Xshell
+            );
+            assert_eq!(
+                settings.connection_import_duplicate_strategy,
+                ConnectionImportDuplicateStrategy::Rename
+            );
+            assert_eq!(settings.connection_import_target_group, "imported");
+            assert_eq!(
+                settings.connection_import_paths,
+                ["/tmp/connections.ini".to_string()]
+            );
+            assert!(settings.connection_import_path_picker_task.is_none());
         });
     }
 }

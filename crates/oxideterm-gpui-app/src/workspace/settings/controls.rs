@@ -740,13 +740,14 @@ impl WorkspaceApp {
                 Some(popup)
             }
             (SettingsTab::Connections, SettingsSelect::ConnectionImportSource) => {
+                let selected_source = self.settings_workspace.read(cx).connection_import_source();
                 let mut popup = select_overlay_popup(&self.tokens, width);
                 for source in connection_import_source_options().iter().copied() {
                     popup = popup.child(select_option_action(
                         select_option(
                             &self.tokens,
                             connection_import_source_label(source, &self.i18n),
-                            source == self.settings_connection_import_source,
+                            source == selected_source,
                         ),
                         false,
                         false,
@@ -760,6 +761,10 @@ impl WorkspaceApp {
                 Some(popup)
             }
             (SettingsTab::Connections, SettingsSelect::ConnectionImportDuplicateStrategy) => {
+                let selected_strategy = self
+                    .settings_workspace
+                    .read(cx)
+                    .connection_import_duplicate_strategy();
                 let mut popup = select_overlay_popup(&self.tokens, width);
                 for strategy in [
                     ConnectionImportDuplicateStrategy::Skip,
@@ -769,14 +774,15 @@ impl WorkspaceApp {
                         select_option(
                             &self.tokens,
                             connection_import_duplicate_strategy_label(strategy, &self.i18n),
-                            strategy == self.settings_connection_import_duplicate_strategy,
+                            strategy == selected_strategy,
                         ),
                         false,
                         false,
                         cx.listener(move |this, _event, _window, cx| {
                             this.close_settings_select();
-                            this.settings_connection_import_duplicate_strategy = strategy;
-                            cx.notify();
+                            this.settings_workspace.update(cx, |settings, cx| {
+                                settings.set_connection_import_duplicate_strategy(strategy, cx);
+                            });
                             cx.stop_propagation();
                         }),
                     ));

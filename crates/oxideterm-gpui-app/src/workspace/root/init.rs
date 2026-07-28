@@ -353,12 +353,6 @@ impl WorkspaceApp {
             ai_text_editor_dialog: None,
             ai_text_editor: None,
             remote_shell_integration: settings::RemoteShellIntegrationUiState::default(),
-            settings_connection_import_source: ConnectionImportSource::SecureCrt,
-            settings_connection_import_paths: Vec::new(),
-            settings_connection_import_preview: None,
-            settings_selected_connection_import_drafts: HashSet::new(),
-            settings_connection_import_duplicate_strategy: ConnectionImportDuplicateStrategy::Skip,
-            settings_connection_import_target_group: String::new(),
             // Detached local terminals are a bounded popover list, but the
             // number of retained background shells is user-driven, so keep it
             // on the same ListState path as other browser-style popovers.

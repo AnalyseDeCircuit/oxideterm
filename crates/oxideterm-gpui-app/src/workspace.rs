@@ -146,7 +146,6 @@ use oxideterm_connection_monitor::{
     visible_tmux_session_rows,
 };
 use oxideterm_connections::{
-    ConnectionImportDuplicateStrategy, ConnectionImportPreview, ConnectionImportSource,
     ConnectionStore, PrivilegeCredentialKind, SaveConnectionRequest, SavedPrivilegeCredential,
     SshConfigSyncService,
 };
@@ -761,12 +760,6 @@ pub(crate) struct WorkspaceApp {
     ai_text_editor_dialog: Option<settings::AiTextEditorDialog>,
     ai_text_editor: Option<Entity<oxideterm_gpui_editor::TextEditorView>>,
     remote_shell_integration: settings::RemoteShellIntegrationUiState,
-    settings_connection_import_source: ConnectionImportSource,
-    settings_connection_import_paths: Vec<String>,
-    settings_connection_import_preview: Option<ConnectionImportPreview>,
-    settings_selected_connection_import_drafts: HashSet<String>,
-    settings_connection_import_duplicate_strategy: ConnectionImportDuplicateStrategy,
-    settings_connection_import_target_group: String,
     detached_local_terminal_list_state: ListState,
     detached_local_terminal_list_cache: RefCell<VirtualListSignatureCache>,
     plugin_entity: Entity<plugin_entity::PluginWorkspaceEntity>,

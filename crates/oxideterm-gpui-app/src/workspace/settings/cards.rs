@@ -1161,10 +1161,8 @@ impl WorkspaceApp {
             | SettingsInput::ManagedKeyPasteName
             | SettingsInput::ManagedKeyPastePrivateKey
             | SettingsInput::ManagedKeyPastePassphrase
-            | SettingsInput::ManagedKeyRenameName => String::new(),
-            SettingsInput::ConnectionImportTargetGroup => {
-                self.settings_connection_import_target_group.clone()
-            }
+            | SettingsInput::ManagedKeyRenameName
+            | SettingsInput::ConnectionImportTargetGroup => String::new(),
             SettingsInput::LocalPrivilegeLabel
             | SettingsInput::LocalPrivilegeUsernameHint
             | SettingsInput::LocalPrivilegeSecret
@@ -1278,11 +1276,8 @@ impl WorkspaceApp {
             | SettingsInput::ManagedKeyPasteName
             | SettingsInput::ManagedKeyPastePrivateKey
             | SettingsInput::ManagedKeyPastePassphrase
-            | SettingsInput::ManagedKeyRenameName => {}
-            SettingsInput::ConnectionImportTargetGroup => {
-                self.settings_connection_import_target_group = self.settings_input_draft.clone();
-                cx.notify();
-            }
+            | SettingsInput::ManagedKeyRenameName
+            | SettingsInput::ConnectionImportTargetGroup => {}
             SettingsInput::LocalPrivilegeLabel
             | SettingsInput::LocalPrivilegeUsernameHint
             | SettingsInput::LocalPrivilegeSecret

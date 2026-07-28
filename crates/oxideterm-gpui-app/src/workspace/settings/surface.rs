@@ -490,24 +490,7 @@ impl WorkspaceApp {
                     // earlier measured rows makes GPUI move the current scroll anchor.
                     self.settings_workspace
                         .read(cx)
-                        .connection_import_status()
-                        .is_some()
-                        .hash(&mut hasher);
-                    self.settings_connection_import_source
-                        .tag()
-                        .hash(&mut hasher);
-                    self.settings_connection_import_paths
-                        .len()
-                        .hash(&mut hasher);
-                    self.settings_connection_import_preview
-                        .as_ref()
-                        .map(|preview| preview.drafts.len())
-                        .hash(&mut hasher);
-                    self.settings_selected_connection_import_drafts
-                        .len()
-                        .hash(&mut hasher);
-                    self.settings_connection_import_duplicate_strategy
-                        .tag()
+                        .connection_import_list_signature()
                         .hash(&mut hasher);
                 }
             }
