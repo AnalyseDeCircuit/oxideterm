@@ -1,16 +1,40 @@
 // Copyright (C) 2026 AnalyseDeCircuit
 // SPDX-License-Identifier: GPL-3.0-only
 
-use std::{ops::Range, time::Duration};
+use std::{collections::VecDeque, ops::Range, time::Duration};
 
 use gpui::{Context, EventEmitter, Task, Timer};
+use oxideterm_connections::SaveConnectionRequest;
 use oxideterm_editor_core::utf16::replace_utf16;
 use oxideterm_ssh::{
     HostKeyStatus, KeyboardInteractivePromptRequest, KeyboardInteractiveResponses, SshPromptError,
+    UpstreamProxyConfig,
 };
 use tokio::sync::oneshot;
 
-use super::{ConnectionFormState, HostKeyChallenge, KeyboardInteractiveChallenge};
+use super::{
+    ConnectionFormState, HostKeyChallenge, KeyboardInteractiveChallenge,
+    NativeSessionTreeConnectAction, NativeSessionTreeConnectPlan, SshConnectionIntent,
+    SshConnectionWorkerResult,
+};
+use crate::workspace::delivery;
+
+/// Owns one proxy-chain connection attempt without duplicating authentication material.
+pub(in crate::workspace) struct NativeProxyConnectRun {
+    pub(in crate::workspace) generation: u64,
+    pub(in crate::workspace) plan: NativeSessionTreeConnectPlan,
+    pub(in crate::workspace) title: String,
+    pub(in crate::workspace) intent: SshConnectionIntent,
+    pub(in crate::workspace) save_after_open: Option<SaveConnectionRequest>,
+    pub(in crate::workspace) upstream_proxy: Option<UpstreamProxyConfig>,
+}
+
+/// Moves the one upstream-proxy value through a single preflight worker.
+pub(in crate::workspace) struct ProxyConnectPreflightContext {
+    pub(in crate::workspace) generation: u64,
+    pub(in crate::workspace) step_index: usize,
+    pub(in crate::workspace) upstream_proxy: Option<UpstreamProxyConfig>,
+}
 
 /// Contains only non-secret values needed to render the host-key dialog.
 pub(in crate::workspace) struct HostKeyDialogSnapshot {
@@ -23,6 +47,12 @@ pub(in crate::workspace) struct HostKeyDialogSnapshot {
 /// Owns connection-flow state that must survive independently of root rendering.
 pub(in crate::workspace) struct ConnectionFlowEntity {
     pub(in crate::workspace) form: ConnectionFormState,
+    ssh_worker_tx: delivery::ActiveDeliverySender<SshConnectionWorkerResult>,
+    ssh_worker_rx: std::sync::mpsc::Receiver<SshConnectionWorkerResult>,
+    ssh_worker_results: VecDeque<SshConnectionWorkerResult>,
+    active_proxy_connect_run: Option<NativeProxyConnectRun>,
+    cancelled_proxy_connect_runs: VecDeque<NativeProxyConnectRun>,
+    next_proxy_connect_generation: u64,
     connection_form_exit_task: Option<Task<()>>,
     jump_server_exit_task: Option<Task<()>>,
     host_key_challenge: Option<HostKeyChallenge>,
@@ -36,6 +66,7 @@ pub(in crate::workspace) struct ConnectionFlowEntity {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(in crate::workspace) enum ConnectionFlowEvent {
     ConnectionFormClosed,
+    WorkerResultsReady,
 }
 
 impl EventEmitter<ConnectionFlowEvent> for ConnectionFlowEntity {}
@@ -55,9 +86,46 @@ pub(in crate::workspace) enum KeyboardInteractiveSubmitResult {
 }
 
 impl ConnectionFlowEntity {
-    pub(in crate::workspace) fn new() -> Self {
+    pub(in crate::workspace) fn new(cx: &mut Context<Self>) -> Self {
+        let delivery_wake = delivery::ActiveDeliveryWake::default();
+        let (ssh_worker_tx, ssh_worker_rx) =
+            delivery::ActiveDeliverySender::channel_with_wake(delivery_wake.clone());
+        let release_wake = delivery_wake.clone();
+        cx.on_release(move |_, _| {
+            // External SSH tasks may finish after the window owner is released.
+            release_wake.stop();
+        })
+        .detach();
+        cx.spawn(async move |connection_flow, cx| {
+            loop {
+                delivery_wake.wait().await;
+                let should_drain = delivery_wake.take();
+                let stopped = delivery_wake.is_stopped();
+                if should_drain {
+                    let backlog_remaining = connection_flow
+                        .update(cx, |connection_flow, cx| {
+                            connection_flow.drain_worker_results(cx)
+                        })
+                        .unwrap_or(false);
+                    if backlog_remaining {
+                        delivery_wake.mark();
+                    }
+                }
+                if stopped {
+                    break;
+                }
+            }
+        })
+        .detach();
+
         Self {
             form: ConnectionFormState::new(),
+            ssh_worker_tx,
+            ssh_worker_rx,
+            ssh_worker_results: VecDeque::new(),
+            active_proxy_connect_run: None,
+            cancelled_proxy_connect_runs: VecDeque::new(),
+            next_proxy_connect_generation: 0,
             connection_form_exit_task: None,
             jump_server_exit_task: None,
             host_key_challenge: None,
@@ -67,6 +135,197 @@ impl ConnectionFlowEntity {
             keyboard_interactive_timer_task: None,
             keyboard_interactive_exit_task: None,
         }
+    }
+
+    pub(in crate::workspace) fn ssh_worker_sender(
+        &self,
+    ) -> delivery::ActiveDeliverySender<SshConnectionWorkerResult> {
+        // Worker tasks receive only a shallow delivery endpoint.
+        self.ssh_worker_tx.clone()
+    }
+
+    pub(in crate::workspace) fn take_worker_results(
+        &mut self,
+    ) -> VecDeque<SshConnectionWorkerResult> {
+        std::mem::take(&mut self.ssh_worker_results)
+    }
+
+    fn drain_worker_results(&mut self, cx: &mut Context<Self>) -> bool {
+        let delivery_batch =
+            delivery::drain_channel(&self.ssh_worker_rx, delivery::USER_ACTION_DELIVERY_BUDGET);
+        if !delivery_batch.items.is_empty() {
+            self.ssh_worker_results.extend(delivery_batch.items);
+            cx.emit(ConnectionFlowEvent::WorkerResultsReady);
+        }
+        delivery_batch.outcome.backlog_remaining
+    }
+
+    pub(in crate::workspace) fn has_active_proxy_connect_run(&self) -> bool {
+        self.active_proxy_connect_run.is_some()
+    }
+
+    pub(in crate::workspace) fn start_proxy_connect_run(
+        &mut self,
+        mut run: NativeProxyConnectRun,
+        cx: &mut Context<Self>,
+    ) -> Result<(), NativeProxyConnectRun> {
+        if self.active_proxy_connect_run.is_some() {
+            return Err(run);
+        }
+        self.next_proxy_connect_generation = self.next_proxy_connect_generation.wrapping_add(1);
+        run.generation = self.next_proxy_connect_generation;
+        self.active_proxy_connect_run = Some(run);
+        cx.notify();
+        Ok(())
+    }
+
+    pub(in crate::workspace) fn proxy_connect_next_action(
+        &self,
+    ) -> Option<NativeSessionTreeConnectAction> {
+        self.active_proxy_connect_run
+            .as_ref()
+            .map(|run| run.plan.next_action())
+    }
+
+    pub(in crate::workspace) fn take_proxy_connect_preflight_context(
+        &mut self,
+        cx: &mut Context<Self>,
+    ) -> Option<ProxyConnectPreflightContext> {
+        let run = self.active_proxy_connect_run.as_mut()?;
+        let context = ProxyConnectPreflightContext {
+            generation: run.generation,
+            step_index: run.plan.current_index,
+            upstream_proxy: run.upstream_proxy.take(),
+        };
+        cx.notify();
+        Some(context)
+    }
+
+    pub(in crate::workspace) fn restore_proxy_connect_preflight_context(
+        &mut self,
+        context: ProxyConnectPreflightContext,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let Some(run) = self.active_proxy_connect_run.as_mut() else {
+            return false;
+        };
+        if run.generation != context.generation || run.plan.current_index != context.step_index {
+            return false;
+        }
+        run.upstream_proxy = context.upstream_proxy;
+        cx.notify();
+        true
+    }
+
+    pub(in crate::workspace) fn open_active_proxy_host_key_challenge(
+        &mut self,
+        status: HostKeyStatus,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let Some(run) = self.active_proxy_connect_run.as_ref() else {
+            return false;
+        };
+        let Some(step) = run.plan.steps.get(run.plan.current_index) else {
+            return false;
+        };
+        let challenge = HostKeyChallenge {
+            presence: oxideterm_gpui_ui::motion::ExitPresence::visible(),
+            config: oxideterm_ssh::SshConfig::default(),
+            title: run.title.clone(),
+            status,
+            intent: run.intent.clone(),
+            session_tree_challenge: true,
+            host: step.host.clone(),
+            port: step.port,
+        };
+        self.open_host_key_challenge(challenge, cx);
+        true
+    }
+
+    pub(in crate::workspace) fn mark_current_proxy_connect_step_verified(
+        &mut self,
+        cx: &mut Context<Self>,
+    ) -> Result<(), String> {
+        let Some(run) = self.active_proxy_connect_run.as_mut() else {
+            return Ok(());
+        };
+        let result = run.plan.mark_current_preflight_verified();
+        cx.notify();
+        result
+    }
+
+    pub(in crate::workspace) fn accept_active_proxy_connect_host_key(
+        &mut self,
+        persist: bool,
+        fingerprint: String,
+        cx: &mut Context<Self>,
+    ) -> Result<(), String> {
+        let Some(run) = self.active_proxy_connect_run.as_mut() else {
+            return Ok(());
+        };
+        let result = run.plan.accept_current_host_key(persist, fingerprint);
+        cx.notify();
+        result
+    }
+
+    pub(in crate::workspace) fn active_proxy_connect_waits_for_node(
+        &self,
+        node_id: &oxideterm_ssh::NodeId,
+    ) -> bool {
+        self.active_proxy_connect_run
+            .as_ref()
+            .and_then(|run| run.plan.steps.get(run.plan.current_index))
+            .is_some_and(|step| &step.node_id == node_id)
+    }
+
+    pub(in crate::workspace) fn advance_active_proxy_connect_after_node_connected(
+        &mut self,
+        node_id: &oxideterm_ssh::NodeId,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if !self.active_proxy_connect_waits_for_node(node_id) {
+            return false;
+        }
+        if let Some(run) = self.active_proxy_connect_run.as_mut() {
+            run.plan.advance_after_connected_step();
+            cx.notify();
+        }
+        true
+    }
+
+    pub(in crate::workspace) fn take_active_proxy_upstream_proxy_for_node(
+        &mut self,
+        node_id: &oxideterm_ssh::NodeId,
+        cx: &mut Context<Self>,
+    ) -> Option<UpstreamProxyConfig> {
+        if !self.active_proxy_connect_waits_for_node(node_id) {
+            return None;
+        }
+        let upstream_proxy = self
+            .active_proxy_connect_run
+            .as_mut()
+            .and_then(|run| run.upstream_proxy.take());
+        if upstream_proxy.is_some() {
+            cx.notify();
+        }
+        upstream_proxy
+    }
+
+    pub(in crate::workspace) fn take_active_proxy_connect_run(
+        &mut self,
+        cx: &mut Context<Self>,
+    ) -> Option<NativeProxyConnectRun> {
+        let run = self.active_proxy_connect_run.take();
+        if run.is_some() {
+            cx.notify();
+        }
+        run
+    }
+
+    pub(in crate::workspace) fn take_cancelled_proxy_connect_runs(
+        &mut self,
+    ) -> VecDeque<NativeProxyConnectRun> {
+        std::mem::take(&mut self.cancelled_proxy_connect_runs)
     }
 
     pub(in crate::workspace) fn begin_connection_form_exit(
@@ -116,6 +375,10 @@ impl ConnectionFlowEntity {
         }
         self.connection_form_exit_task = None;
         self.jump_server_exit_task = None;
+        if let Some(run) = self.active_proxy_connect_run.take() {
+            // Window/runtime cleanup is emitted as a typed effect after state ownership is cleared.
+            self.cancelled_proxy_connect_runs.push_back(run);
+        }
         self.form.clear();
         self.form.presence.reopen();
         self.clear_host_key_challenge(cx);
@@ -540,20 +803,28 @@ impl ConnectionFlowEntity {
 
 #[cfg(test)]
 mod tests {
-    use std::time::Duration;
+    use std::{
+        sync::{
+            Arc,
+            atomic::{AtomicBool, Ordering},
+        },
+        time::Duration,
+    };
 
     use gpui::{AppContext, TestAppContext};
     use oxideterm_ssh::{
-        HostKeyStatus, KeyboardInteractivePrompt, KeyboardInteractivePromptRequest, SshConfig,
-        SshPromptError,
+        HostKeyStatus, KeyboardInteractivePrompt, KeyboardInteractivePromptRequest, NodeId,
+        SshConfig, SshPromptError,
     };
     use tokio::sync::oneshot;
 
-    use super::ConnectionFlowEntity;
+    use super::{ConnectionFlowEntity, ConnectionFlowEvent, NativeProxyConnectRun};
     use crate::workspace::new_connection::{
-        HostKeyChallenge, NewConnectionForm, NewConnectionProxyHop, SavedConnectionPromptAction,
-        SshConnectionIntent,
+        HostKeyChallenge, NativeSessionTreeConnectAction, NativeSessionTreeConnectPlan,
+        NewConnectionForm, NewConnectionProxyHop, SavedConnectionPromptAction, SshConnectionIntent,
+        SshConnectionWorkerResult,
     };
+    use oxideterm_ssh::NativeSessionTreeConnectStep;
 
     fn unknown_host_key_challenge() -> HostKeyChallenge {
         HostKeyChallenge {
@@ -565,7 +836,7 @@ mod tests {
                 key_type: "ssh-ed25519".to_string(),
             },
             intent: SshConnectionIntent::Test,
-            session_tree_challenge: None,
+            session_tree_challenge: false,
             host: "example.test".to_string(),
             port: 22,
         }
@@ -584,9 +855,138 @@ mod tests {
         }
     }
 
+    fn proxy_connect_run() -> NativeProxyConnectRun {
+        NativeProxyConnectRun {
+            generation: 0,
+            plan: NativeSessionTreeConnectPlan {
+                target_node_id: NodeId::new("target"),
+                cleanup_node_id: Some(NodeId::new("target")),
+                steps: vec![NativeSessionTreeConnectStep {
+                    node_id: NodeId::new("target"),
+                    host: "target.example.test".to_string(),
+                    port: 22,
+                    trust_host_key: None,
+                    expected_host_key_fingerprint: None,
+                    preflight_verified: false,
+                }],
+                current_index: 0,
+            },
+            title: "Target".to_string(),
+            intent: SshConnectionIntent::Connect,
+            save_after_open: None,
+            upstream_proxy: None,
+        }
+    }
+
+    #[gpui::test]
+    fn ssh_worker_delivery_and_release_lifecycle_are_entity_owned(cx: &mut TestAppContext) {
+        let entity = cx.new(ConnectionFlowEntity::new);
+        let worker_results_ready = Arc::new(AtomicBool::new(false));
+        let event_flag = worker_results_ready.clone();
+        let _subscription = entity.update(cx, |_, cx| {
+            cx.subscribe(&entity, move |_, _, event: &ConnectionFlowEvent, _cx| {
+                if *event == ConnectionFlowEvent::WorkerResultsReady {
+                    event_flag.store(true, Ordering::Release);
+                }
+            })
+        });
+        let sender = cx.read(|cx| entity.read(cx).ssh_worker_sender());
+        let wake = sender.wake();
+
+        sender
+            .send(SshConnectionWorkerResult::Test { result: Ok(()) })
+            .expect("SSH worker delivery");
+        cx.run_until_parked();
+
+        entity.update(cx, |entity, _cx| {
+            assert!(matches!(
+                entity.take_worker_results().front(),
+                Some(SshConnectionWorkerResult::Test { result: Ok(()) })
+            ));
+        });
+        assert!(worker_results_ready.load(Ordering::Acquire));
+
+        drop(entity);
+        cx.update(|_cx| {});
+        assert!(wake.is_stopped());
+    }
+
+    #[gpui::test]
+    fn form_close_moves_proxy_run_to_typed_cleanup_queue(cx: &mut TestAppContext) {
+        let entity = cx.new(ConnectionFlowEntity::new);
+
+        entity.update(cx, |entity, cx| {
+            entity
+                .form
+                .replace_with_new_form(NewConnectionForm::default());
+            assert!(
+                entity
+                    .start_proxy_connect_run(proxy_connect_run(), cx)
+                    .is_ok()
+            );
+            assert!(entity.has_active_proxy_connect_run());
+
+            assert!(entity.begin_connection_form_exit(Duration::ZERO, cx));
+            assert!(!entity.has_active_proxy_connect_run());
+            let cancelled = entity.take_cancelled_proxy_connect_runs();
+            assert_eq!(cancelled.len(), 1);
+            assert_eq!(cancelled[0].generation, 1);
+        });
+    }
+
+    #[gpui::test]
+    fn proxy_run_transitions_and_host_key_state_stay_inside_entity(cx: &mut TestAppContext) {
+        let entity = cx.new(ConnectionFlowEntity::new);
+        let target_node_id = NodeId::new("target");
+
+        entity.update(cx, |entity, cx| {
+            assert!(
+                entity
+                    .start_proxy_connect_run(proxy_connect_run(), cx)
+                    .is_ok()
+            );
+            assert!(matches!(
+                entity.proxy_connect_next_action(),
+                Some(NativeSessionTreeConnectAction::Preflight { .. })
+            ));
+
+            let context = entity
+                .take_proxy_connect_preflight_context(cx)
+                .expect("preflight context");
+            assert_eq!(context.generation, 1);
+            assert_eq!(context.step_index, 0);
+            assert!(entity.restore_proxy_connect_preflight_context(context, cx));
+
+            assert!(entity.open_active_proxy_host_key_challenge(
+                HostKeyStatus::Unknown {
+                    fingerprint: "SHA256:test".to_string(),
+                    key_type: "ssh-ed25519".to_string(),
+                },
+                cx,
+            ));
+            let challenge = entity
+                .take_host_key_challenge(cx)
+                .expect("proxy host-key challenge");
+            assert!(challenge.session_tree_challenge);
+
+            entity
+                .accept_active_proxy_connect_host_key(false, "SHA256:test".to_string(), cx)
+                .expect("accepted host key");
+            assert!(matches!(
+                entity.proxy_connect_next_action(),
+                Some(NativeSessionTreeConnectAction::Connect { .. })
+            ));
+            assert!(entity.advance_active_proxy_connect_after_node_connected(&target_node_id, cx));
+            assert!(matches!(
+                entity.proxy_connect_next_action(),
+                Some(NativeSessionTreeConnectAction::Complete { .. })
+            ));
+        });
+    }
+
     #[gpui::test]
     fn host_key_state_and_exit_lifecycle_are_entity_owned(cx: &mut TestAppContext) {
-        let entity = cx.new(|_| ConnectionFlowEntity::new());
+        let entity = cx.new(ConnectionFlowEntity::new);
 
         entity.update(cx, |entity, cx| {
             entity.open_host_key_challenge(unknown_host_key_challenge(), cx);
@@ -602,7 +1002,7 @@ mod tests {
 
     #[gpui::test]
     fn taking_and_restoring_host_key_challenge_preserves_single_ownership(cx: &mut TestAppContext) {
-        let entity = cx.new(|_| ConnectionFlowEntity::new());
+        let entity = cx.new(ConnectionFlowEntity::new);
 
         entity.update(cx, |entity, cx| {
             entity.open_host_key_challenge(unknown_host_key_challenge(), cx);
@@ -617,7 +1017,7 @@ mod tests {
 
     #[gpui::test]
     fn keyboard_interactive_responses_move_once_to_the_prompt_waiter(cx: &mut TestAppContext) {
-        let entity = cx.new(|_| ConnectionFlowEntity::new());
+        let entity = cx.new(ConnectionFlowEntity::new);
         let (response_tx, mut response_rx) = oneshot::channel();
 
         entity.update(cx, |entity, cx| {
@@ -645,7 +1045,7 @@ mod tests {
     fn competing_keyboard_interactive_flow_is_cancelled_without_replacing_owner(
         cx: &mut TestAppContext,
     ) {
-        let entity = cx.new(|_| ConnectionFlowEntity::new());
+        let entity = cx.new(ConnectionFlowEntity::new);
         let (first_tx, _first_rx) = oneshot::channel();
         let (second_tx, mut second_rx) = oneshot::channel();
 
@@ -673,7 +1073,7 @@ mod tests {
     fn cancelling_keyboard_interactive_challenge_rejects_waiter_and_drops_answers(
         cx: &mut TestAppContext,
     ) {
-        let entity = cx.new(|_| ConnectionFlowEntity::new());
+        let entity = cx.new(ConnectionFlowEntity::new);
         let (response_tx, mut response_rx) = oneshot::channel();
 
         entity.update(cx, |entity, cx| {
@@ -695,7 +1095,7 @@ mod tests {
 
     #[gpui::test]
     fn connection_form_close_clears_secret_owner_and_mode_metadata(cx: &mut TestAppContext) {
-        let entity = cx.new(|_| ConnectionFlowEntity::new());
+        let entity = cx.new(ConnectionFlowEntity::new);
 
         entity.update(cx, |entity, cx| {
             let mut form = NewConnectionForm::default();
@@ -713,7 +1113,7 @@ mod tests {
 
     #[gpui::test]
     fn jump_server_exit_commits_once_inside_the_connection_entity(cx: &mut TestAppContext) {
-        let entity = cx.new(|_| ConnectionFlowEntity::new());
+        let entity = cx.new(ConnectionFlowEntity::new);
 
         entity.update(cx, |entity, cx| {
             let mut form = NewConnectionForm::default();

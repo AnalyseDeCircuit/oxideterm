@@ -228,7 +228,7 @@ use oxideterm_ssh::{
     ReconnectNodeConnectionSnapshot, ReconnectNodeTerminalSnapshot, ReconnectNodeTransferSnapshot,
     ReconnectOrchestratorStore, ReconnectPhase, ReconnectProgress, ReconnectSnapshot,
     SshAlgorithmDiagnosticKind, SshConfig, SshConnectionRegistry, SshTransportClient,
-    TerminalEndpoint, UpstreamProxyConfig,
+    TerminalEndpoint,
 };
 use oxideterm_ssh_launch::TemporarySshLaunch;
 use oxideterm_terminal::{
@@ -260,10 +260,9 @@ use self::ime::{
 };
 use self::launcher::LauncherState;
 use self::new_connection::{
-    ConnectionFlowEntity, ConnectionFlowEvent, NativeSessionTreeConnectPlan,
-    NativeSshPromptHandler, NewConnectionField, NewConnectionForm, NewConnectionSelect,
-    PrivilegeCredentialDraft, SavedConnectionPromptAction, SshAuthTab, SshConnectionIntent,
-    SshConnectionWorkerResult,
+    ConnectionFlowEntity, ConnectionFlowEvent, NativeSshPromptHandler, NewConnectionField,
+    NewConnectionForm, NewConnectionSelect, PrivilegeCredentialDraft, SavedConnectionPromptAction,
+    SshAuthTab, SshConnectionIntent,
 };
 use self::onboarding::OnboardingState;
 use self::pane_tree::SplitDrag;
@@ -880,7 +879,6 @@ pub(crate) struct WorkspaceApp {
     connection_flow: Entity<ConnectionFlowEntity>,
     _connection_flow_observation: Subscription,
     _connection_flow_subscription: Subscription,
-    active_proxy_connect_run: Option<NativeProxyConnectRun>,
     workspace_runtime: Entity<runtime_entity::WorkspaceRuntimeEntity>,
     _workspace_runtime_subscription: Subscription,
     ssh_registry: SshConnectionRegistry,
@@ -1157,15 +1155,6 @@ struct ActiveConnectionTrace {
     flush_generation: u64,
     expires_at: Option<Instant>,
     presence: oxideterm_gpui_ui::motion::ExitPresence,
-}
-
-#[derive(Clone, Debug)]
-struct NativeProxyConnectRun {
-    plan: NativeSessionTreeConnectPlan,
-    title: String,
-    intent: SshConnectionIntent,
-    save_after_open: Option<SaveConnectionRequest>,
-    upstream_proxy: Option<UpstreamProxyConfig>,
 }
 
 #[derive(Clone, Debug)]

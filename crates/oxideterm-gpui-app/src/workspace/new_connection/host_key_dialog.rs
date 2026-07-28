@@ -8,7 +8,7 @@ use oxideterm_gpui_ui::{
 };
 use oxideterm_ssh::{HostKeyStatus, SshConfig, remove_host_key};
 
-use super::{NativeSessionTreeConnectChallenge, ssh_flow::SshConnectionIntent};
+use super::ssh_flow::SshConnectionIntent;
 use crate::workspace::WorkspaceApp;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -25,7 +25,7 @@ pub(in crate::workspace) struct HostKeyChallenge {
     pub(in crate::workspace) title: String,
     pub(in crate::workspace) status: HostKeyStatus,
     pub(in crate::workspace) intent: SshConnectionIntent,
-    pub(in crate::workspace) session_tree_challenge: Option<NativeSessionTreeConnectChallenge>,
+    pub(in crate::workspace) session_tree_challenge: bool,
     pub(in crate::workspace) host: String,
     pub(in crate::workspace) port: u16,
 }
@@ -57,7 +57,7 @@ impl WorkspaceApp {
             HostKeyStatus::Verified | HostKeyStatus::Error { .. } => return,
         };
 
-        if challenge.session_tree_challenge.is_some() {
+        if challenge.session_tree_challenge {
             let message = self.i18n.t("ssh.form.checking_host_key");
             if self.connection_form_state(cx).form.is_some() {
                 self.update_connection_form_state(cx, |state| {
@@ -150,7 +150,7 @@ impl WorkspaceApp {
                 } else {
                     self.session_manager.status = Some(message);
                 }
-                if challenge.session_tree_challenge.is_some() {
+                if challenge.session_tree_challenge {
                     self.continue_active_proxy_session_tree_preflight_only(cx);
                 } else {
                     self.start_ssh_preflight(

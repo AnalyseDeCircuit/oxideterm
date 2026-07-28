@@ -80,10 +80,9 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let (ssh_results, reconnect_results) = self
+        let reconnect_results = self
             .workspace_runtime
             .update(cx, |runtime, _cx| runtime.take_worker_results());
-        self.apply_ssh_worker_results(ssh_results, window, cx);
         self.apply_reconnect_worker_results(reconnect_results, window, cx);
     }
 
@@ -380,7 +379,7 @@ impl WorkspaceApp {
                         });
                         self.schedule_next_reconnect_cascade_node(cx);
                     }
-                    if self.active_proxy_connect_waits_for_node(&node_id) {
+                    if self.active_proxy_connect_waits_for_node(&node_id, cx) {
                         self.advance_active_proxy_connect_after_node_connected(
                             &node_id, window, cx,
                         );

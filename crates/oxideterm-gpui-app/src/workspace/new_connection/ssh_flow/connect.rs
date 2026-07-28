@@ -2,8 +2,36 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use super::*;
+use gpui::{AnyWindowHandle, AppContext};
 
 impl WorkspaceApp {
+    pub(in crate::workspace) fn ssh_worker_sender(
+        &self,
+        cx: &App,
+    ) -> ActiveDeliverySender<SshConnectionWorkerResult> {
+        self.connection_flow.read(cx).ssh_worker_sender()
+    }
+
+    pub(in crate::workspace) fn schedule_connection_flow_worker_delivery(
+        &mut self,
+        window_handle: AnyWindowHandle,
+        cx: &mut Context<Self>,
+    ) {
+        cx.spawn(async move |workspace, cx| {
+            let _ = cx.update_window(window_handle, |_, window, cx| {
+                workspace.update(cx, |workspace, cx| {
+                    let results = workspace
+                        .connection_flow
+                        .update(cx, |connection_flow, _cx| {
+                            connection_flow.take_worker_results()
+                        });
+                    workspace.apply_ssh_worker_results(results, window, cx);
+                })
+            });
+        })
+        .detach();
+    }
+
     pub(super) fn save_after_open_request_for_connect_intent(
         &mut self,
         cx: &mut Context<Self>,
@@ -164,14 +192,29 @@ impl WorkspaceApp {
         for result in results {
             match result {
                 SshConnectionWorkerResult::Preflight {
-                    config,
+                    mut config,
+                    upstream_proxy,
                     title,
                     intent,
                     status,
-                } => self.handle_ssh_preflight_result(config, title, intent, status, window, cx),
-                SshConnectionWorkerResult::SessionTreePreflight { run, status } => {
-                    self.handle_session_tree_preflight_result(run, status, window, cx)
+                } => {
+                    // Restore the only upstream-proxy value before continuing the flow.
+                    config.upstream_proxy = upstream_proxy;
+                    self.handle_ssh_preflight_result(config, title, intent, status, window, cx)
                 }
+                SshConnectionWorkerResult::SessionTreePreflight {
+                    generation,
+                    step_index,
+                    upstream_proxy,
+                    status,
+                } => self.handle_session_tree_preflight_result(
+                    generation,
+                    step_index,
+                    upstream_proxy,
+                    status,
+                    window,
+                    cx,
+                ),
                 SshConnectionWorkerResult::Test { result } => {
                     let (form_message, session_message) = match result {
                         Ok(()) => (
@@ -235,7 +278,7 @@ impl WorkspaceApp {
                     title,
                     status,
                     intent,
-                    session_tree_challenge: None,
+                    session_tree_challenge: false,
                     host,
                     port,
                 };
@@ -259,21 +302,21 @@ impl WorkspaceApp {
 
     pub(super) fn start_proxy_session_tree_connect(
         &mut self,
-        config: SshConfig,
+        mut config: SshConfig,
         title: String,
         intent: SshConnectionIntent,
         save_after_open: Option<SaveConnectionRequest>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.active_proxy_connect_run.is_some() {
+        if self.connection_flow.read(cx).has_active_proxy_connect_run() {
             self.report_proxy_session_tree_error(
                 "CHAIN_LOCK_BUSY: Another connection chain is in progress".to_string(),
                 cx,
             );
             return;
         }
-        let upstream_proxy = config.upstream_proxy.clone();
+        let upstream_proxy = config.upstream_proxy.take();
         let endpoints = proxy_session_tree_endpoints(&config);
         let expansion_id = match &intent {
             SshConnectionIntent::ConnectSaved(id) => id.clone(),
@@ -299,12 +342,16 @@ impl WorkspaceApp {
                 return;
             }
         };
-        self.active_proxy_connect_run = Some(NativeProxyConnectRun {
+        let run = NativeProxyConnectRun {
+            generation: 0,
             plan,
             title,
             intent,
             save_after_open,
             upstream_proxy,
+        };
+        let _ = self.connection_flow.update(cx, |connection_flow, cx| {
+            connection_flow.start_proxy_connect_run(run, cx)
         });
         self.continue_active_proxy_session_tree_connect(window, cx);
     }
@@ -318,7 +365,7 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
-        if self.active_proxy_connect_run.is_some()
+        if self.connection_flow.read(cx).has_active_proxy_connect_run()
             || self
                 .workspace_runtime
                 .read(cx)
@@ -396,12 +443,16 @@ impl WorkspaceApp {
             }
         };
 
-        self.active_proxy_connect_run = Some(NativeProxyConnectRun {
+        let run = NativeProxyConnectRun {
+            generation: 0,
             plan,
             title,
             intent,
             save_after_open,
             upstream_proxy,
+        };
+        let _ = self.connection_flow.update(cx, |connection_flow, cx| {
+            connection_flow.start_proxy_connect_run(run, cx)
         });
         self.continue_active_proxy_session_tree_connect(window, cx);
         true
@@ -409,12 +460,24 @@ impl WorkspaceApp {
 
     pub(super) fn handle_session_tree_preflight_result(
         &mut self,
-        run: NativeProxyConnectRun,
+        generation: u64,
+        step_index: usize,
+        upstream_proxy: Option<UpstreamProxyConfig>,
         status: HostKeyStatus,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if !self.active_proxy_connect_result_is_current(&run) {
+        let result_is_current = self.connection_flow.update(cx, |connection_flow, cx| {
+            connection_flow.restore_proxy_connect_preflight_context(
+                ProxyConnectPreflightContext {
+                    generation,
+                    step_index,
+                    upstream_proxy,
+                },
+                cx,
+            )
+        });
+        if !result_is_current {
             return;
         }
         self.update_connection_form_state(cx, |state| {
@@ -430,28 +493,13 @@ impl WorkspaceApp {
                 self.continue_active_proxy_session_tree_connect(window, cx);
             }
             HostKeyStatus::Unknown { .. } | HostKeyStatus::Changed { .. } => {
-                let Some(active_run) = self.active_proxy_connect_run.as_ref() else {
-                    return;
-                };
-                let Ok(challenge) = active_run.plan.challenge_for_current_step(status) else {
-                    return;
-                };
-                let title = active_run.title.clone();
-                let intent = active_run.intent.clone();
                 self.prepare_modal_interaction_boundary(cx);
-                let host_key_challenge = HostKeyChallenge {
-                    presence: oxideterm_gpui_ui::motion::ExitPresence::visible(),
-                    config: SshConfig::default(),
-                    title,
-                    status: challenge.status.clone(),
-                    intent,
-                    session_tree_challenge: Some(challenge.clone()),
-                    host: challenge.step.host,
-                    port: challenge.step.port,
-                };
-                self.connection_flow.update(cx, |connection_flow, cx| {
-                    connection_flow.open_host_key_challenge(host_key_challenge, cx);
+                let challenge_opened = self.connection_flow.update(cx, |connection_flow, cx| {
+                    connection_flow.open_active_proxy_host_key_challenge(status, cx)
                 });
+                if !challenge_opened {
+                    return;
+                }
                 self.needs_active_pane_focus = false;
                 cx.notify();
             }
@@ -467,17 +515,22 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(run) = self.active_proxy_connect_run.clone() else {
+        let Some(action) = self.connection_flow.read(cx).proxy_connect_next_action() else {
             return;
         };
-        match run.plan.next_action() {
+        match action {
             NativeSessionTreeConnectAction::Preflight { step } => {
-                self.start_session_tree_step_preflight(run, step, cx);
+                self.start_session_tree_step_preflight(step, cx);
             }
             NativeSessionTreeConnectAction::Connect { step } => {
                 self.connect_session_tree_step(step, window, cx);
             }
             NativeSessionTreeConnectAction::Complete { target_node_id } => {
+                let Some(run) = self.connection_flow.update(cx, |connection_flow, cx| {
+                    connection_flow.take_active_proxy_connect_run(cx)
+                }) else {
+                    return;
+                };
                 self.finish_proxy_session_tree_connect(target_node_id, run, window, cx);
             }
         }
@@ -487,12 +540,12 @@ impl WorkspaceApp {
         &mut self,
         cx: &mut Context<Self>,
     ) {
-        let Some(run) = self.active_proxy_connect_run.clone() else {
+        let Some(action) = self.connection_flow.read(cx).proxy_connect_next_action() else {
             return;
         };
-        match run.plan.next_action() {
+        match action {
             NativeSessionTreeConnectAction::Preflight { step } => {
-                self.start_session_tree_step_preflight(run, step, cx);
+                self.start_session_tree_step_preflight(step, cx);
             }
             _ => self.report_proxy_session_tree_error(
                 "proxy connect plan is not waiting for host-key preflight".to_string(),
@@ -503,7 +556,6 @@ impl WorkspaceApp {
 
     pub(super) fn start_session_tree_step_preflight(
         &mut self,
-        run: NativeProxyConnectRun,
         step: NativeSessionTreeConnectStep,
         cx: &mut Context<Self>,
     ) {
@@ -516,10 +568,19 @@ impl WorkspaceApp {
         }
         let tx = self.ssh_worker_sender(cx);
         let router = self.node_router.clone();
+        let Some(preflight_context) = self.connection_flow.update(cx, |connection_flow, cx| {
+            connection_flow.take_proxy_connect_preflight_context(cx)
+        }) else {
+            return;
+        };
+        let ProxyConnectPreflightContext {
+            generation,
+            step_index,
+            upstream_proxy,
+        } = preflight_context;
         std::thread::spawn(move || {
-            let root_upstream_proxy = run.upstream_proxy.clone();
             let status = match tokio::runtime::Runtime::new() {
-                Ok(runtime) => runtime.block_on(async move {
+                Ok(runtime) => runtime.block_on(async {
                     match router
                         .node_runtime_snapshot(&step.node_id)
                         .and_then(|snapshot| snapshot.parent_id)
@@ -561,7 +622,7 @@ impl WorkspaceApp {
                                 &step.host,
                                 step.port,
                                 10,
-                                root_upstream_proxy.as_ref(),
+                                upstream_proxy.as_ref(),
                             )
                             .await
                         }
@@ -571,7 +632,12 @@ impl WorkspaceApp {
                     message: format!("failed to initialize SSH runtime: {error}"),
                 },
             };
-            let _ = tx.send(SshConnectionWorkerResult::SessionTreePreflight { run, status });
+            let _ = tx.send(SshConnectionWorkerResult::SessionTreePreflight {
+                generation,
+                step_index,
+                upstream_proxy,
+                status,
+            });
         });
         cx.notify();
     }
@@ -583,15 +649,19 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) {
         if self.connection_trace_node_is_ready(&step.node_id) {
-            if let Some(run) = self.active_proxy_connect_run.as_mut() {
-                run.plan.advance_after_connected_step();
-            }
+            self.connection_flow.update(cx, |connection_flow, cx| {
+                connection_flow
+                    .advance_active_proxy_connect_after_node_connected(&step.node_id, cx);
+            });
             self.continue_active_proxy_session_tree_connect(_window, cx);
             cx.notify();
             return;
         }
 
-        self.apply_session_tree_step_host_key_options(&step);
+        let upstream_proxy = self.connection_flow.update(cx, |connection_flow, cx| {
+            connection_flow.take_active_proxy_upstream_proxy_for_node(&step.node_id, cx)
+        });
+        self.apply_session_tree_step_connection_options(&step, upstream_proxy);
         if !self.ensure_node_connection_started_without_ancestors(&step.node_id, cx) {
             self.cancel_active_proxy_connect_run(cx);
             self.report_proxy_session_tree_error(
@@ -608,7 +678,6 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.active_proxy_connect_run = None;
         self.connection_flow.update(cx, |connection_flow, cx| {
             connection_flow.clear_host_key_challenge(cx);
         });
@@ -667,26 +736,14 @@ impl WorkspaceApp {
         }
     }
 
-    pub(super) fn active_proxy_connect_result_is_current(
-        &self,
-        run: &NativeProxyConnectRun,
-    ) -> bool {
-        self.active_proxy_connect_run
-            .as_ref()
-            .is_some_and(|active| {
-                active.plan.target_node_id == run.plan.target_node_id
-                    && active.plan.current_index == run.plan.current_index
-            })
-    }
-
     pub(in crate::workspace) fn active_proxy_connect_waits_for_node(
         &self,
         node_id: &NodeId,
+        cx: &App,
     ) -> bool {
-        self.active_proxy_connect_run
-            .as_ref()
-            .and_then(|run| run.plan.steps.get(run.plan.current_index))
-            .is_some_and(|step| &step.node_id == node_id)
+        self.connection_flow
+            .read(cx)
+            .active_proxy_connect_waits_for_node(node_id)
     }
 
     pub(in crate::workspace) fn advance_active_proxy_connect_after_node_connected(
@@ -695,11 +752,11 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if !self.active_proxy_connect_waits_for_node(node_id) {
+        let advanced = self.connection_flow.update(cx, |connection_flow, cx| {
+            connection_flow.advance_active_proxy_connect_after_node_connected(node_id, cx)
+        });
+        if !advanced {
             return;
-        }
-        if let Some(run) = self.active_proxy_connect_run.as_mut() {
-            run.plan.advance_after_connected_step();
         }
         self.continue_active_proxy_session_tree_connect(window, cx);
     }
@@ -710,7 +767,7 @@ impl WorkspaceApp {
         error: String,
         cx: &mut Context<Self>,
     ) {
-        if self.active_proxy_connect_waits_for_node(node_id) {
+        if self.active_proxy_connect_waits_for_node(node_id, cx) {
             self.cancel_active_proxy_connect_run(cx);
             self.report_proxy_session_tree_error(error, cx);
         }
@@ -723,10 +780,10 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(run) = self.active_proxy_connect_run.as_mut() else {
-            return;
-        };
-        if let Err(error) = run.plan.accept_current_host_key(persist, fingerprint) {
+        let result = self.connection_flow.update(cx, |connection_flow, cx| {
+            connection_flow.accept_active_proxy_connect_host_key(persist, fingerprint, cx)
+        });
+        if let Err(error) = result {
             self.report_proxy_session_tree_error(error, cx);
             return;
         }
@@ -734,42 +791,64 @@ impl WorkspaceApp {
     }
 
     pub(super) fn mark_current_proxy_connect_step_verified(&mut self, cx: &mut Context<Self>) {
-        let Some(run) = self.active_proxy_connect_run.as_mut() else {
-            return;
-        };
-        if let Err(error) = run.plan.mark_current_preflight_verified() {
+        let result = self.connection_flow.update(cx, |connection_flow, cx| {
+            connection_flow.mark_current_proxy_connect_step_verified(cx)
+        });
+        if let Err(error) = result {
             self.report_proxy_session_tree_error(error, cx);
         }
     }
 
-    pub(super) fn apply_session_tree_step_host_key_options(
+    pub(super) fn apply_session_tree_step_connection_options(
         &mut self,
         step: &NativeSessionTreeConnectStep,
+        upstream_proxy: Option<UpstreamProxyConfig>,
     ) {
-        let Some(trust_host_key) = step.trust_host_key else {
+        if step.trust_host_key.is_none() && upstream_proxy.is_none() {
             return;
-        };
-        let Some(fingerprint) = step.expected_host_key_fingerprint.clone() else {
-            return;
-        };
+        }
         if let Some(snapshot) = self.node_router.node_runtime_snapshot(&step.node_id) {
             let mut config = snapshot.config;
-            config.strict_host_key_checking = true;
-            config.trust_host_key = Some(trust_host_key);
-            config.expected_host_key_fingerprint = Some(fingerprint);
+            if let Some(upstream_proxy) = upstream_proxy {
+                // The root hop receives the same proxy value that preflight borrowed.
+                config.upstream_proxy = Some(upstream_proxy);
+            }
+            if let (Some(trust_host_key), Some(fingerprint)) = (
+                step.trust_host_key,
+                step.expected_host_key_fingerprint.clone(),
+            ) {
+                config.strict_host_key_checking = true;
+                config.trust_host_key = Some(trust_host_key);
+                config.expected_host_key_fingerprint = Some(fingerprint);
+            }
             // Tauri passes host-key acceptance as connectNode options. Native
             // stores the same one-step options on the node config immediately
             // before starting connect_tree_node.
             self.node_router
                 .upsert_node_with_origin(step.node_id.clone(), config, snapshot.origin);
+            self.persist_session_tree_snapshot();
         }
     }
 
     pub(in crate::workspace) fn cancel_active_proxy_connect_run(&mut self, cx: &mut Context<Self>) {
-        let Some(run) = self.active_proxy_connect_run.take() else {
+        let Some(run) = self.connection_flow.update(cx, |connection_flow, cx| {
+            connection_flow.take_active_proxy_connect_run(cx)
+        }) else {
             return;
         };
         self.cleanup_proxy_session_tree_run(&run, cx);
+    }
+
+    pub(in crate::workspace) fn cleanup_cancelled_proxy_connect_runs(
+        &mut self,
+        cx: &mut Context<Self>,
+    ) {
+        let runs = self.connection_flow.update(cx, |connection_flow, _cx| {
+            connection_flow.take_cancelled_proxy_connect_runs()
+        });
+        for run in runs {
+            self.cleanup_proxy_session_tree_run(&run, cx);
+        }
     }
 
     pub(super) fn cleanup_proxy_session_tree_run(

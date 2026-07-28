@@ -1276,7 +1276,7 @@ impl WorkspaceApp {
 
     pub(in crate::workspace) fn start_ssh_preflight(
         &self,
-        config: SshConfig,
+        mut config: SshConfig,
         title: String,
         intent: SshConnectionIntent,
         cx: &App,
@@ -1284,7 +1284,7 @@ impl WorkspaceApp {
         let tx = self.ssh_worker_sender(cx);
         let host = config.host.clone();
         let port = config.port;
-        let upstream_proxy = config.upstream_proxy.clone();
+        let upstream_proxy = config.upstream_proxy.take();
         let worker_config = config;
         let worker_title = title;
         std::thread::spawn(move || {
@@ -1301,6 +1301,7 @@ impl WorkspaceApp {
             };
             let _ = tx.send(SshConnectionWorkerResult::Preflight {
                 config: worker_config,
+                upstream_proxy,
                 title: worker_title,
                 intent,
                 status,

@@ -87,8 +87,11 @@ impl WorkspaceApp {
             node_router.clone(),
             forwarding_runtime.clone(),
         );
+        let connection_flow = cx.new(ConnectionFlowEntity::new);
+        let ssh_worker_tx = connection_flow.read(cx).ssh_worker_sender();
         let workspace_runtime = cx.new(|cx| {
-            runtime_entity::WorkspaceRuntimeEntity::new(
+            runtime_entity::WorkspaceRuntimeEntity::new_with_ssh_worker_sender(
+                ssh_worker_tx,
                 ssh_registry.clone(),
                 node_router.clone(),
                 forwarding_runtime.clone(),
@@ -143,7 +146,6 @@ impl WorkspaceApp {
                 workspace.handle_workspace_terminal_event(event, cx);
             },
         );
-        let connection_flow = cx.new(|_| ConnectionFlowEntity::new());
         let connection_flow_observation =
             cx.observe(&connection_flow, |_workspace, _connection_flow, cx| {
                 // Connection-flow lifecycle changes repaint mounted dialogs without root mirrors.
@@ -151,11 +153,15 @@ impl WorkspaceApp {
             });
         let connection_flow_subscription = cx.subscribe(
             &connection_flow,
-            |workspace, _connection_flow, event: &ConnectionFlowEvent, cx| {
+            move |workspace, _connection_flow, event: &ConnectionFlowEvent, cx| {
                 match event {
                     ConnectionFlowEvent::ConnectionFormClosed => {
-                        // Proxy workers are root-coordinated until their runtime slice moves.
-                        workspace.cancel_active_proxy_connect_run(cx);
+                        // Apply runtime cleanup after the Entity has already cleared ownership.
+                        workspace.cleanup_cancelled_proxy_connect_runs(cx);
+                    }
+                    ConnectionFlowEvent::WorkerResultsReady => {
+                        workspace
+                            .schedule_connection_flow_worker_delivery(runtime_window_handle, cx);
                     }
                 }
                 cx.notify();
@@ -499,7 +505,6 @@ impl WorkspaceApp {
             connection_flow,
             _connection_flow_observation: connection_flow_observation,
             _connection_flow_subscription: connection_flow_subscription,
-            active_proxy_connect_run: None,
             workspace_runtime,
             _workspace_runtime_subscription: workspace_runtime_subscription,
             ssh_registry,

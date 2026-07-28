@@ -1,6 +1,7 @@
 // Copyright (C) 2026 AnalyseDeCircuit
 // SPDX-License-Identifier: GPL-3.0-only
 
+use super::new_connection::SshConnectionWorkerResult;
 use super::*;
 use oxideterm_settings::RemoteShellIntegrationMode;
 use oxideterm_ssh::{ManagedKeyResolver, ReconnectTiming};
@@ -102,14 +103,12 @@ struct ConnectionChainRun {
 /// Owns runtime worker endpoints and reliable delivery independently from tabs.
 pub(in crate::workspace) struct WorkspaceRuntimeEntity {
     ssh_worker_tx: delivery::ActiveDeliverySender<SshConnectionWorkerResult>,
-    ssh_worker_rx: std::sync::mpsc::Receiver<SshConnectionWorkerResult>,
     reconnect_worker_tx: delivery::ActiveDeliverySender<ReconnectWorkerResult>,
     reconnect_worker_rx: std::sync::mpsc::Receiver<ReconnectWorkerResult>,
     active_probe_tx: delivery::ActiveDeliverySender<usize>,
     active_probe_rx: std::sync::mpsc::Receiver<usize>,
     _node_event_subscription: NodeEventSubscription,
     node_event_rx: NodeEventReceiver,
-    ssh_results: VecDeque<SshConnectionWorkerResult>,
     reconnect_results: VecDeque<ReconnectWorkerResult>,
     node_events: VecDeque<NodeStateEvent>,
     node_event_generations: HashMap<NodeId, u64>,
@@ -143,6 +142,7 @@ pub(in crate::workspace) struct WorkspaceRuntimeEntity {
 }
 
 impl WorkspaceRuntimeEntity {
+    #[cfg(test)]
     pub(in crate::workspace) fn new(
         ssh_registry: SshConnectionRegistry,
         node_router: NodeRouter,
@@ -152,9 +152,32 @@ impl WorkspaceRuntimeEntity {
         reconnect_max_attempts: u32,
         cx: &mut Context<Self>,
     ) -> Self {
+        let (ssh_worker_tx, _ssh_worker_rx) = delivery::ActiveDeliverySender::channel_with_wake(
+            delivery::ActiveDeliveryWake::default(),
+        );
+        Self::new_with_ssh_worker_sender(
+            ssh_worker_tx,
+            ssh_registry,
+            node_router,
+            task_runtime,
+            reconnect_enabled,
+            reconnect_timing,
+            reconnect_max_attempts,
+            cx,
+        )
+    }
+
+    pub(in crate::workspace) fn new_with_ssh_worker_sender(
+        ssh_worker_tx: delivery::ActiveDeliverySender<SshConnectionWorkerResult>,
+        ssh_registry: SshConnectionRegistry,
+        node_router: NodeRouter,
+        task_runtime: Arc<tokio::runtime::Runtime>,
+        reconnect_enabled: bool,
+        reconnect_timing: ReconnectTiming,
+        reconnect_max_attempts: u32,
+        cx: &mut Context<Self>,
+    ) -> Self {
         let runtime_wake = delivery::ActiveDeliveryWake::default();
-        let (ssh_worker_tx, ssh_worker_rx) =
-            delivery::ActiveDeliverySender::channel_with_wake(runtime_wake.clone());
         let (reconnect_worker_tx, reconnect_worker_rx) =
             delivery::ActiveDeliverySender::channel_with_wake(runtime_wake.clone());
         let (active_probe_tx, active_probe_rx) =
@@ -168,14 +191,12 @@ impl WorkspaceRuntimeEntity {
             .subscribe_bounded_with_wake(256, Some(Arc::new(move || emitter_wake.mark())));
         let mut entity = Self {
             ssh_worker_tx,
-            ssh_worker_rx,
             reconnect_worker_tx,
             reconnect_worker_rx,
             active_probe_tx,
             active_probe_rx,
             _node_event_subscription: node_event_subscription,
             node_event_rx,
-            ssh_results: VecDeque::new(),
             reconnect_results: VecDeque::new(),
             node_events: VecDeque::new(),
             node_event_generations: HashMap::new(),
@@ -1010,29 +1031,14 @@ impl WorkspaceRuntimeEntity {
         }
     }
 
-    pub(in crate::workspace) fn ssh_worker_sender(
-        &self,
-    ) -> delivery::ActiveDeliverySender<SshConnectionWorkerResult> {
-        // Worker tasks need only a shallow channel endpoint, never runtime state.
-        self.ssh_worker_tx.clone()
-    }
-
     #[cfg(test)]
     fn reconnect_worker_sender(&self) -> delivery::ActiveDeliverySender<ReconnectWorkerResult> {
         // Tests inject results through the same reliable wake path used by workers.
         self.reconnect_worker_tx.clone()
     }
 
-    pub(in crate::workspace) fn take_worker_results(
-        &mut self,
-    ) -> (
-        VecDeque<SshConnectionWorkerResult>,
-        VecDeque<ReconnectWorkerResult>,
-    ) {
-        (
-            std::mem::take(&mut self.ssh_results),
-            std::mem::take(&mut self.reconnect_results),
-        )
+    pub(in crate::workspace) fn take_worker_results(&mut self) -> VecDeque<ReconnectWorkerResult> {
+        std::mem::take(&mut self.reconnect_results)
     }
 
     pub(in crate::workspace) fn take_node_events(&mut self) -> VecDeque<NodeStateEvent> {
@@ -1370,7 +1376,7 @@ impl WorkspaceRuntimeEntity {
     }
 
     fn schedule_worker_delivery(&self, cx: &mut Context<Self>) {
-        let runtime_wake = self.ssh_worker_tx.wake();
+        let runtime_wake = self.reconnect_worker_tx.wake();
         let release_wake = runtime_wake.clone();
         cx.on_release(move |_, _| {
             // Workspace release stops UI delivery, not in-flight backend work.
@@ -1435,8 +1441,6 @@ impl WorkspaceRuntimeEntity {
     }
 
     fn drain_worker_results(&mut self, cx: &mut Context<Self>) -> bool {
-        let ssh_batch =
-            delivery::drain_channel(&self.ssh_worker_rx, delivery::USER_ACTION_DELIVERY_BUDGET);
         let reconnect_batch = delivery::drain_channel(
             &self.reconnect_worker_rx,
             delivery::LIFECYCLE_DELIVERY_BUDGET,
@@ -1445,8 +1449,6 @@ impl WorkspaceRuntimeEntity {
             delivery::drain_channel(&self.active_probe_rx, delivery::LIFECYCLE_DELIVERY_BUDGET);
         let (node_event_items, node_event_backlog_remaining) =
             drain_node_event_mailbox(&self.node_event_rx);
-        let received_ssh_results = !ssh_batch.items.is_empty();
-        self.ssh_results.extend(ssh_batch.items);
         let received_reconnect_results = !reconnect_batch.items.is_empty();
         self.reconnect_results.extend(reconnect_batch.items);
         let mut received_node_events = false;
@@ -1465,7 +1467,7 @@ impl WorkspaceRuntimeEntity {
             self.ssh_active_probe_in_flight = false;
             self.schedule_active_probe_after(self.reconnect_timing.ssh_keepalive_interval, cx);
         }
-        if received_ssh_results || received_reconnect_results {
+        if received_reconnect_results {
             cx.emit(WorkspaceRuntimeEvent::WorkerResultsReady);
         }
         if received_node_events {
@@ -1474,8 +1476,7 @@ impl WorkspaceRuntimeEntity {
         if active_connections_changed {
             cx.emit(WorkspaceRuntimeEvent::ActiveConnectionsChanged);
         }
-        ssh_batch.outcome.backlog_remaining
-            || reconnect_batch.outcome.backlog_remaining
+        reconnect_batch.outcome.backlog_remaining
             || active_probe_batch.outcome.backlog_remaining
             || node_event_backlog_remaining
     }
@@ -1577,15 +1578,6 @@ fn node_event_generation(event: &NodeStateEvent) -> Option<(NodeId, u64)> {
 
 impl gpui::EventEmitter<WorkspaceRuntimeEvent> for WorkspaceRuntimeEntity {}
 
-impl WorkspaceApp {
-    pub(in crate::workspace) fn ssh_worker_sender(
-        &self,
-        cx: &App,
-    ) -> delivery::ActiveDeliverySender<SshConnectionWorkerResult> {
-        self.workspace_runtime.read(cx).ssh_worker_sender()
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1659,19 +1651,15 @@ mod tests {
     }
 
     #[gpui::test]
-    fn worker_results_and_release_lifecycle_are_entity_owned(cx: &mut TestAppContext) {
+    fn reconnect_worker_results_and_release_lifecycle_are_entity_owned(cx: &mut TestAppContext) {
         let entity = test_runtime_entity(cx);
-        let (ssh_tx, reconnect_tx, wake) = cx.read(|cx| {
+        let (reconnect_tx, wake) = cx.read(|cx| {
             let entity = entity.read(cx);
             (
-                entity.ssh_worker_sender(),
                 entity.reconnect_worker_sender(),
-                entity.ssh_worker_tx.wake(),
+                entity.reconnect_worker_tx.wake(),
             )
         });
-        ssh_tx
-            .send(SshConnectionWorkerResult::Test { result: Ok(()) })
-            .expect("SSH worker delivery");
         reconnect_tx
             .send(ReconnectWorkerResult::GraceExpired {
                 node_id: NodeId::new("node-a"),
@@ -1684,11 +1672,7 @@ mod tests {
         cx.run_until_parked();
 
         entity.update(cx, |entity, _cx| {
-            let (ssh_results, reconnect_results) = entity.take_worker_results();
-            assert!(matches!(
-                ssh_results.front(),
-                Some(SshConnectionWorkerResult::Test { result: Ok(()) })
-            ));
+            let reconnect_results = entity.take_worker_results();
             assert!(matches!(
                 reconnect_results.front(),
                 Some(ReconnectWorkerResult::GraceExpired { .. })
@@ -1723,7 +1707,7 @@ mod tests {
         cx.run_until_parked();
 
         entity.update(cx, |entity, _cx| {
-            let (_ssh_results, reconnect_results) = entity.take_worker_results();
+            let reconnect_results = entity.take_worker_results();
             assert!(reconnect_results.is_empty());
             assert!(!entity.ssh_active_probe_in_flight);
         });
@@ -2518,7 +2502,7 @@ mod tests {
                 entity.take_reconnect_schedule_actions().front(),
                 Some(ReconnectScheduleAction::ContinueConnectionChain { .. })
             ));
-            let (_ssh_results, reconnect_results) = entity.take_worker_results();
+            let reconnect_results = entity.take_worker_results();
             assert!(reconnect_results.is_empty());
         });
         assert!(schedule_event_seen.load(Ordering::Acquire));

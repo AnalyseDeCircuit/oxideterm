@@ -17,12 +17,12 @@ use oxideterm_ssh::{
     AuthMethod, ConnectionConsumer, HostKeyStatus, KeyboardInteractivePromptRequest,
     KeyboardInteractiveResponses, NodeId, NodeReadiness, NodeTreeExpansion, ProxyHopConfig,
     SshConfig, SshPromptError, SshPromptHandler, SshTransportClient, UpstreamProxyAuth,
-    UpstreamProxyProtocol, check_host_key_with_upstream_proxy,
+    UpstreamProxyConfig, UpstreamProxyProtocol, check_host_key_with_upstream_proxy,
 };
 use tokio::sync::oneshot;
 
 use super::{
-    ConnectionFormState,
+    ConnectionFormState, NativeProxyConnectRun, ProxyConnectPreflightContext,
     form_state::{
         NewConnectionForm, NewConnectionFormMode, NewConnectionProxyHop, NewConnectionSubmitAction,
         NewConnectionTransport, NewConnectionUpstreamProxyAuth, NewConnectionUpstreamProxyPolicy,
@@ -35,7 +35,7 @@ use super::{
     },
 };
 use crate::workspace::{
-    NativeProxyConnectRun, WorkspaceApp, WorkspaceSshNode,
+    WorkspaceApp, WorkspaceSshNode,
     delivery::ActiveDeliverySender,
     session_manager::{
         duplicate_connection_template_name, form_from_saved_connection, save_request_from_form,
@@ -66,12 +66,15 @@ pub(in crate::workspace) enum SshConnectionIntent {
 pub(in crate::workspace) enum SshConnectionWorkerResult {
     Preflight {
         config: SshConfig,
+        upstream_proxy: Option<UpstreamProxyConfig>,
         title: String,
         intent: SshConnectionIntent,
         status: HostKeyStatus,
     },
     SessionTreePreflight {
-        run: NativeProxyConnectRun,
+        generation: u64,
+        step_index: usize,
+        upstream_proxy: Option<UpstreamProxyConfig>,
         status: HostKeyStatus,
     },
     Test {
