@@ -68,8 +68,10 @@ impl WorkspaceApp {
         self.onboarding.step = step;
         self.onboarding.scroll_handle = ScrollHandle::new();
         if OnboardingStep::from_index(step) == OnboardingStep::CliCompanion
-            && self.settings_page.cli_companion_status.is_none()
-            && !self.settings_page.cli_companion_loading
+            && self
+                .settings_workspace
+                .read(cx)
+                .cli_companion_needs_refresh()
         {
             self.refresh_cli_companion_status(cx);
         }

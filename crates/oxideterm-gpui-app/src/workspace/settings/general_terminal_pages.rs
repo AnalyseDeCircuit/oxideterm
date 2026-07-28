@@ -87,8 +87,9 @@ impl WorkspaceApp {
                 ])
             }
             2 => {
-                let cli_status = self.settings_page.cli_companion_status.as_ref();
-                let cli_loading = self.settings_page.cli_companion_loading;
+                let cli = self.settings_workspace.read(cx).cli_companion_snapshot();
+                let cli_status = cli.status.as_ref();
+                let cli_loading = cli.loading;
                 let cli_installed = cli_status.is_some_and(|status| status.installed);
                 let cli_bundled = cli_status.is_some_and(|status| status.bundled);
                 let cli_needs_reinstall = cli_status.is_some_and(|status| status.needs_reinstall);
@@ -99,8 +100,7 @@ impl WorkspaceApp {
                 let cli_path = cli_status
                     .and_then(|status| status.install_path.clone())
                     .unwrap_or_else(|| cli_install_path().display().to_string());
-                let (badge_label, badge_color) = if self.settings_page.cli_companion_error.is_some()
-                {
+                let (badge_label, badge_color) = if cli.error.is_some() {
                     (
                         self.i18n.t("settings_view.general.cli_status_error"),
                         self.tokens.ui.error,
@@ -211,7 +211,7 @@ impl WorkspaceApp {
                                     )
                                 })
                                 .when_some(
-                                    self.settings_page.cli_companion_error.clone(),
+                                    cli.error.clone(),
                                     |column, error| {
                                         column.child(
                                             div()
@@ -264,7 +264,7 @@ impl WorkspaceApp {
                             ))
                         })
                         .when(
-                            !cli_loading && self.settings_page.cli_companion_error.is_some(),
+                            !cli_loading && cli.error.is_some(),
                             |row| {
                                 row.child(self.cli_companion_action_button(
                                     self.i18n.t("settings_view.help.retry"),

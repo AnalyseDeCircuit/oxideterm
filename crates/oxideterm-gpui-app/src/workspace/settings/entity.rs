@@ -6,7 +6,9 @@ use oxideterm_gpui_settings_view::SettingsInput;
 use zeroize::Zeroizing;
 
 use super::update::NativeUpdateRuntime;
-use super::{PortableSettingsAction, PortableSettingsDialog, SettingsManagedKeyDialog};
+use super::{
+    CliCompanionStatus, PortableSettingsAction, PortableSettingsDialog, SettingsManagedKeyDialog,
+};
 
 /// Non-secret result produced by the portable runtime status worker.
 pub(in crate::workspace) struct PortableStatusRefresh {
@@ -106,6 +108,22 @@ pub(in crate::workspace) struct PrivilegeCredentialSnapshot {
     pub(in crate::workspace) error: Option<String>,
 }
 
+#[derive(Clone)]
+pub(in crate::workspace) struct CliCompanionSnapshot {
+    pub(in crate::workspace) status: Option<CliCompanionStatus>,
+    pub(in crate::workspace) loading: bool,
+    pub(in crate::workspace) error: Option<String>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(in crate::workspace) enum CliCompanionOperation {
+    Refresh,
+    Install,
+    Uninstall,
+    UninstallLegacy,
+    Migrate,
+}
+
 /// Owns settings work that must complete independently from root rendering.
 pub(in crate::workspace) struct SettingsWorkspaceEntity {
     portable_status: Option<oxideterm_portable_runtime::PortableStatusSnapshot>,
@@ -146,6 +164,10 @@ pub(in crate::workspace) struct SettingsWorkspaceEntity {
     pub(super) privilege_error: Option<String>,
     pub(super) privilege_editor_open: bool,
     pub(super) privilege_scope_id: Option<String>,
+    pub(super) cli_companion_status: Option<CliCompanionStatus>,
+    pub(super) cli_companion_loading: bool,
+    pub(super) cli_companion_error: Option<String>,
+    pub(super) cli_companion_task: Option<Task<()>>,
     pub(super) native_update: NativeUpdateRuntime,
 }
 
@@ -163,7 +185,13 @@ pub(in crate::workspace) enum SettingsWorkspaceEvent {
     ShowNativeUpdateToast(SettingsWorkspaceToast),
     RequestAutomaticNativeUpdateCheck,
     RequestQuitAfterNativeUpdate,
-    PortablePasswordChangeFinished { success: bool },
+    PortablePasswordChangeFinished {
+        success: bool,
+    },
+    CliCompanionFinished {
+        operation: CliCompanionOperation,
+        success: bool,
+    },
 }
 
 impl EventEmitter<SettingsWorkspaceEvent> for SettingsWorkspaceEntity {}
@@ -209,6 +237,10 @@ impl SettingsWorkspaceEntity {
             privilege_error: None,
             privilege_editor_open: false,
             privilege_scope_id: None,
+            cli_companion_status: None,
+            cli_companion_loading: false,
+            cli_companion_error: None,
+            cli_companion_task: None,
             native_update: NativeUpdateRuntime::new(cx),
         }
     }

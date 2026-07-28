@@ -72,9 +72,6 @@ pub struct SettingsPageModel {
     pub ssh_config_import_dialog_open: bool,
     pub settings_selected_ssh_hosts: HashSet<String>,
     pub settings_connection_status: Option<String>,
-    pub cli_companion_status: Option<CliCompanionStatus>,
-    pub cli_companion_loading: bool,
-    pub cli_companion_error: Option<String>,
 }
 
 impl Default for SettingsPageModel {
@@ -122,9 +119,6 @@ impl Default for SettingsPageModel {
             ssh_config_import_dialog_open: false,
             settings_selected_ssh_hosts: HashSet::new(),
             settings_connection_status: None,
-            cli_companion_status: None,
-            cli_companion_loading: false,
-            cli_companion_error: None,
         }
     }
 }
@@ -162,24 +156,6 @@ impl SettingsPageModel {
     /// Opens or closes the settings reset confirmation without exposing the flag layout.
     pub fn set_settings_reset_confirm_open(&mut self, is_open: bool) {
         self.settings_reset_confirm_open = is_open;
-    }
-
-    /// Marks the CLI companion row busy while the app inspects or changes the installed binary.
-    pub fn set_cli_companion_loading(&mut self, loading: bool) {
-        self.cli_companion_loading = loading;
-    }
-
-    /// Replaces the CLI companion status returned by the native app-side installer.
-    pub fn set_cli_companion_status(&mut self, status: CliCompanionStatus) {
-        self.cli_companion_status = Some(status);
-        self.cli_companion_error = None;
-        self.cli_companion_loading = false;
-    }
-
-    /// Records a CLI companion error without dropping the last known status.
-    pub fn set_cli_companion_error(&mut self, error: impl Into<String>) {
-        self.cli_companion_error = Some(error.into());
-        self.cli_companion_loading = false;
     }
 
     /// Selects the AI provider template used by the add-provider controls.

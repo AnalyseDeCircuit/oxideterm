@@ -599,6 +599,30 @@ impl WorkspaceApp {
                     self.push_ai_settings_toast(error, TerminalNoticeVariant::Error);
                 }
             }
+            SettingsWorkspaceEvent::CliCompanionFinished { operation, success } => {
+                if *operation == CliCompanionOperation::Refresh {
+                    return;
+                }
+                if *success {
+                    let message_key = match operation {
+                        CliCompanionOperation::Install => "settings_view.general.cli_installed",
+                        CliCompanionOperation::Uninstall => "settings_view.general.cli_uninstalled",
+                        CliCompanionOperation::UninstallLegacy => {
+                            "migration.cli_legacy_uninstalled"
+                        }
+                        CliCompanionOperation::Migrate => "migration.cli_migrated",
+                        CliCompanionOperation::Refresh => unreachable!("handled above"),
+                    };
+                    self.push_ai_settings_toast(
+                        self.i18n.t(message_key),
+                        TerminalNoticeVariant::Success,
+                    );
+                } else if let Some(error) =
+                    settings.read(cx).cli_companion_error().map(str::to_owned)
+                {
+                    self.push_ai_settings_toast(error, TerminalNoticeVariant::Error);
+                }
+            }
         }
     }
 

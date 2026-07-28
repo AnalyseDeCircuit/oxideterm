@@ -403,12 +403,10 @@ impl WorkspaceApp {
                 self.launch_at_login_loading.hash(&mut hasher);
                 self.launch_at_login_error.hash(&mut hasher);
                 settings.general.minimize_to_tray_on_close.hash(&mut hasher);
-                self.settings_page.cli_companion_loading.hash(&mut hasher);
-                self.settings_page
-                    .cli_companion_error
-                    .is_some()
-                    .hash(&mut hasher);
-                self.settings_page.cli_companion_status.hash(&mut hasher);
+                let cli = self.settings_workspace.read(cx).cli_companion_snapshot();
+                cli.loading.hash(&mut hasher);
+                cli.error.is_some().hash(&mut hasher);
+                cli.status.hash(&mut hasher);
                 let app_lock_section_index =
                     if cfg!(any(target_os = "windows", target_os = "macos")) {
                         5
