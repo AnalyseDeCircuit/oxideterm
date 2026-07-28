@@ -156,6 +156,8 @@ impl WorkspaceApp {
         else {
             return;
         };
+        let window_registration =
+            self.reserve_workspace_window(window_registry::WindowRole::Detached { tab_id });
         // Capture the source tab before it leaves the live strip. The snapshot
         // is committed only after native window creation succeeds.
         let exiting_visual = self.tab_exit_visual(tab_index, cx);
@@ -177,6 +179,7 @@ impl WorkspaceApp {
                         workspace,
                         tab_id,
                         mount_id,
+                        window_registration,
                         entry_handoff_origin,
                         entry_handoff_duration,
                         detached_window,
@@ -189,6 +192,20 @@ impl WorkspaceApp {
         match open_result {
             Ok(handle) => {
                 let detached_window_handle = handle.into();
+                let window_registered =
+                    self.commit_workspace_window(window_registration, detached_window_handle, cx);
+                if !window_registered {
+                    let _ = detached_window_handle
+                        .update(cx, |_root, window, _cx| window.remove_window());
+                    if self.tab_host.update(cx, |tab_host, _cx| {
+                        tab_host.rollback_detach(tab_id, mount_id)
+                    }) {
+                        self.set_main_window_active_tab(Some(tab_id), cx);
+                    }
+                    self.sync_active_tab_surface(cx);
+                    cx.notify();
+                    return;
+                }
                 let committed = self.tab_host.update(cx, |tab_host, _cx| {
                     tab_host.commit_detach(tab_id, mount_id, detached_window_handle)
                 });
@@ -197,6 +214,11 @@ impl WorkspaceApp {
                     // while the native window is being constructed.
                     let _ = detached_window_handle
                         .update(cx, |_root, window, _cx| window.remove_window());
+                    self.release_workspace_window(
+                        window_registration,
+                        detached_window_handle.window_id(),
+                        cx,
+                    );
                     self.sync_active_tab_surface(cx);
                     cx.notify();
                     return;
@@ -210,6 +232,7 @@ impl WorkspaceApp {
                 }
             }
             Err(_) => {
+                self.rollback_workspace_window(window_registration);
                 if self.tab_host.update(cx, |tab_host, _cx| {
                     tab_host.rollback_detach(tab_id, mount_id)
                 }) {
@@ -271,9 +294,11 @@ impl WorkspaceApp {
         &mut self,
         tab_id: TabId,
         mount_id: tabs::TabMountId,
+        window_registration: window_registry::WindowRegistration,
         window_id: gpui::WindowId,
         cx: &mut Context<Self>,
     ) {
+        self.release_workspace_window(window_registration, window_id, cx);
         let cleanup = self.tab_host.update(cx, |tab_host, _cx| {
             tab_host.release_detached_window(tab_id, mount_id, window_id)
         });

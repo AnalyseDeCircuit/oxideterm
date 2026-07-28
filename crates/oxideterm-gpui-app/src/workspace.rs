@@ -61,6 +61,7 @@ mod terminal_project;
 mod version_migration;
 mod virtual_list;
 mod window_intent;
+mod window_registry;
 
 use std::{
     cell::{Cell, RefCell},
@@ -758,6 +759,9 @@ pub(crate) struct WorkspaceApp {
     settings_legal_notice_scroll: MarkdownVirtualListScrollHandle,
     _window_intents: Entity<WorkspaceWindowIntentEntity>,
     _window_intent_subscription: Subscription,
+    window_registry: window_registry::WorkspaceWindowRegistry,
+    window_effect_delivery_scheduled: bool,
+    _main_window_release_subscription: Subscription,
     connection_flow: Entity<ConnectionFlowEntity>,
     _connection_flow_observation: Subscription,
     _connection_flow_subscription: Subscription,
@@ -795,6 +799,7 @@ pub(crate) struct WorkspaceApp {
     _launcher_subscription: Subscription,
     graphics: Entity<GraphicsWorkspaceEntity>,
     _graphics_observation: Subscription,
+    _graphics_subscription: Subscription,
     host_tools: Entity<HostToolsEntity>,
     _host_tools_subscription: Subscription,
     cloud_sync: Entity<cloud_sync::CloudSyncWorkspaceEntity>,

@@ -10,14 +10,28 @@ impl WorkspaceApp {
         single_instance_rx: Option<crate::single_instance::SingleInstanceReceiver>,
     ) -> Result<Self> {
         let focus_handle = cx.focus_handle();
+        let main_window_handle = window.window_handle();
+        let mut window_registry = window_registry::WorkspaceWindowRegistry::default();
+        let main_window_registration = window_registry.register(
+            window_registry::WindowRole::Main,
+            main_window_handle.window_id(),
+            main_window_handle,
+        );
+        let main_window_release_subscription =
+            cx.on_release_in(window, move |workspace, window, _cx| {
+                // Native-window release invalidates only the main route. Runtime
+                // shutdown remains owned by the later session-lifetime boundary.
+                workspace
+                    .window_registry
+                    .release(main_window_registration, window.window_handle().window_id());
+            });
         let window_intents = cx.new(|cx| {
             WorkspaceWindowIntentEntity::new(desktop_presence_rx, single_instance_rx, cx)
         });
-        let window_intent_window_handle = window.window_handle();
         let window_intent_subscription = cx.subscribe(
             &window_intents,
-            move |workspace, _window_intents, intent: &window_intent::WindowIntent, cx| {
-                workspace.handle_window_intent(intent, window_intent_window_handle, cx);
+            |workspace, _window_intents, intent: &window_intent::WindowIntent, cx| {
+                workspace.enqueue_window_intent(intent, cx);
             },
         );
         let mut settings_store = SettingsStore::load_default()?;
@@ -210,16 +224,10 @@ impl WorkspaceApp {
                 settings.terminal.command_bar.current_directory_awareness,
             );
         });
-        let runtime_window_handle = window.window_handle();
-        let workspace_runtime_subscription = cx.subscribe_in(
+        let workspace_runtime_subscription = cx.subscribe(
             &workspace_runtime,
-            window,
-            move |workspace,
-                  _runtime,
-                  event: &runtime_entity::WorkspaceRuntimeEvent,
-                  window,
-                  cx| {
-                workspace.handle_workspace_runtime_event(event, window, cx);
+            |workspace, _runtime, event: &runtime_entity::WorkspaceRuntimeEvent, cx| {
+                workspace.enqueue_runtime_window_effect(*event, cx);
             },
         );
         let (forwarding_worker_tx, forwarding_worker_rx) =
@@ -344,8 +352,7 @@ impl WorkspaceApp {
                         workspace.cleanup_cancelled_proxy_connect_runs(cx);
                     }
                     ConnectionFlowEvent::WorkerResultsReady => {
-                        workspace
-                            .schedule_connection_flow_worker_delivery(runtime_window_handle, cx);
+                        workspace.enqueue_connection_flow_window_effect(cx);
                     }
                 }
                 cx.notify();
@@ -378,17 +385,20 @@ impl WorkspaceApp {
         let remote_desktop = cx.new(|_cx| remote_desktop::RemoteDesktopWorkspaceEntity::new());
         let graphics_backend = Arc::new(oxideterm_wsl_graphics::WslGraphicsState::new());
         let graphics = cx.new(|cx| {
-            GraphicsWorkspaceEntity::new(
-                graphics_backend,
-                forwarding_runtime.clone(),
-                window.window_handle(),
-                cx,
-            )
+            GraphicsWorkspaceEntity::new(graphics_backend, forwarding_runtime.clone(), cx)
         });
         let graphics_observation = cx.observe(&graphics, |_workspace, _graphics, cx| {
             // Entity-owned session and frame delivery repaints mounted graphics surfaces.
             cx.notify();
         });
+        let graphics_subscription = cx.subscribe(
+            &graphics,
+            |workspace, _graphics, event: &graphics::GraphicsWorkspaceEvent, cx| match event {
+                graphics::GraphicsWorkspaceEvent::WorkerResultsReady => {
+                    workspace.enqueue_graphics_window_effect(cx);
+                }
+            },
+        );
         let host_tools_subscription = cx.subscribe(
             &host_tools,
             |workspace, _host_tools, event: &HostToolsEvent, cx| match event {
@@ -431,11 +441,10 @@ impl WorkspaceApp {
             // Entity-owned delivery and timers repaint every mounted Cloud Sync surface.
             cx.notify();
         });
-        let cloud_sync_subscription = cx.subscribe_in(
+        let cloud_sync_subscription = cx.subscribe(
             &cloud_sync,
-            window,
-            |workspace, _cloud_sync, event: &cloud_sync::CloudSyncWorkspaceEvent, window, cx| {
-                workspace.handle_cloud_sync_workspace_event(event, window, cx);
+            |workspace, _cloud_sync, event: &cloud_sync::CloudSyncWorkspaceEvent, cx| {
+                workspace.enqueue_cloud_sync_window_effect(event.clone(), cx);
             },
         );
         let initial_vibrancy_mode = effective_vibrancy_mode(&settings, &render_policy);
@@ -477,30 +486,27 @@ impl WorkspaceApp {
                 cx,
             )
         });
-        let ai_window_handle = window.window_handle();
         let ai_entity_subscription = cx.subscribe(
             &ai_entity,
-            move |workspace, _ai_entity, event: &ai_state::AiWorkspaceEvent, cx| {
-                workspace.handle_ai_workspace_event(event, ai_window_handle, cx);
+            |workspace, _ai_entity, event: &ai_state::AiWorkspaceEvent, cx| {
+                workspace.enqueue_ai_window_effect(event, cx);
             },
         );
         let plugin_task_runtime = forwarding_runtime.clone();
         let plugin_entity = cx.new(move |cx| {
             plugin_entity::PluginWorkspaceEntity::new(plugin_task_runtime, plugin_registry, cx)
         });
-        let plugin_window_handle = window.window_handle();
         let plugin_entity_subscription = cx.subscribe(
             &plugin_entity,
-            move |workspace, _plugin_entity, event: &plugin_entity::PluginWorkspaceEvent, cx| {
-                workspace.handle_plugin_workspace_event(event, plugin_window_handle, cx);
+            |workspace, _plugin_entity, event: &plugin_entity::PluginWorkspaceEvent, cx| {
+                workspace.enqueue_plugin_window_effect(event, cx);
             },
         );
         let tab_host = cx.new(|_| tabs::WorkspaceTabHostEntity::new());
-        let tab_host_window_handle = window.window_handle();
         let tab_host_subscription = cx.subscribe(
             &tab_host,
-            move |workspace, _tab_host, event: &tabs::WorkspaceTabHostEvent, cx| {
-                workspace.handle_tab_host_event(event, tab_host_window_handle, cx);
+            |workspace, _tab_host, event: &tabs::WorkspaceTabHostEvent, cx| {
+                workspace.enqueue_tab_host_window_effect(*event, cx);
             },
         );
         let command_palette =
@@ -662,6 +668,9 @@ impl WorkspaceApp {
             settings_legal_notice_scroll: MarkdownVirtualListScrollHandle::new(),
             _window_intents: window_intents,
             _window_intent_subscription: window_intent_subscription,
+            window_registry,
+            window_effect_delivery_scheduled: false,
+            _main_window_release_subscription: main_window_release_subscription,
             connection_flow,
             _connection_flow_observation: connection_flow_observation,
             _connection_flow_subscription: connection_flow_subscription,
@@ -706,6 +715,7 @@ impl WorkspaceApp {
             _launcher_subscription: launcher_subscription,
             graphics,
             _graphics_observation: graphics_observation,
+            _graphics_subscription: graphics_subscription,
             host_tools,
             _host_tools_subscription: host_tools_subscription,
             cloud_sync,

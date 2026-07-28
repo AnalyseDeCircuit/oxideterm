@@ -4,6 +4,7 @@ pub(super) struct DetachedTabWindow {
     workspace: WeakEntity<WorkspaceApp>,
     tab_id: TabId,
     mount_id: tabs::TabMountId,
+    window_registration: window_registry::WindowRegistration,
     entry_handoff_origin: Option<TabWindowHandoffOrigin>,
     entry_handoff_duration: Duration,
     focus_handle: FocusHandle,
@@ -17,6 +18,7 @@ impl DetachedTabWindow {
         workspace: WeakEntity<WorkspaceApp>,
         tab_id: TabId,
         mount_id: tabs::TabMountId,
+        window_registration: window_registry::WindowRegistration,
         entry_handoff_origin: Option<TabWindowHandoffOrigin>,
         entry_handoff_duration: Duration,
         window: &mut Window,
@@ -50,6 +52,7 @@ impl DetachedTabWindow {
                 workspace.release_detached_tab_window(
                     detached.tab_id,
                     detached.mount_id,
+                    detached.window_registration,
                     window_id,
                     cx,
                 );
@@ -60,6 +63,7 @@ impl DetachedTabWindow {
             workspace,
             tab_id,
             mount_id,
+            window_registration,
             entry_handoff_origin,
             entry_handoff_duration,
             focus_handle,

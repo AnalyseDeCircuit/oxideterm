@@ -266,11 +266,15 @@ pub(super) struct GraphicsWorkspaceEntity {
     runtime: Arc<tokio::runtime::Runtime>,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum GraphicsWorkspaceEvent {
+    WorkerResultsReady,
+}
+
 impl GraphicsWorkspaceEntity {
     pub(super) fn new(
         backend: Arc<oxideterm_wsl_graphics::WslGraphicsState>,
         runtime: Arc<tokio::runtime::Runtime>,
-        window_handle: AnyWindowHandle,
         cx: &mut Context<Self>,
     ) -> Self {
         let (worker_tx, worker_rx) = mpsc::channel();
@@ -301,7 +305,7 @@ impl GraphicsWorkspaceEntity {
             backend,
             runtime,
         };
-        entity.schedule_worker_delivery(window_handle, cx);
+        entity.schedule_worker_delivery(cx);
         entity
     }
 
@@ -488,7 +492,7 @@ impl GraphicsWorkspaceEntity {
         std::mem::take(&mut self.vnc_retired_images)
     }
 
-    fn schedule_worker_delivery(&self, window_handle: AnyWindowHandle, cx: &mut Context<Self>) {
+    fn schedule_worker_delivery(&self, cx: &mut Context<Self>) {
         let worker_wake = self.worker_delivery.wake.clone();
         cx.spawn(async move |entity, cx| {
             loop {
@@ -499,15 +503,11 @@ impl GraphicsWorkspaceEntity {
                 if !worker_wake.take() {
                     continue;
                 }
-                if cx
-                    .update_window(window_handle, |_, window, cx| {
-                        let retired_images = entity
-                            .update(cx, |graphics, cx| graphics.drain_worker_results(cx))
-                            .unwrap_or_default();
-                        for image in retired_images {
-                            // The delivery owner also releases superseded atlas entries.
-                            cx.drop_image(image, Some(window));
-                        }
+                if entity
+                    .update(cx, |_graphics, cx| {
+                        // The registry retains this typed notification until a
+                        // current native window can release retired image entries.
+                        cx.emit(GraphicsWorkspaceEvent::WorkerResultsReady);
                     })
                     .is_err()
                 {
@@ -519,7 +519,23 @@ impl GraphicsWorkspaceEntity {
     }
 }
 
+impl gpui::EventEmitter<GraphicsWorkspaceEvent> for GraphicsWorkspaceEntity {}
+
 impl WorkspaceApp {
+    pub(in crate::workspace) fn apply_graphics_worker_results(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let retired_images = self
+            .graphics
+            .update(cx, |graphics, cx| graphics.drain_worker_results(cx));
+        for image in retired_images {
+            // Retired atlas entries must be dropped against a live window.
+            cx.drop_image(image, Some(window));
+        }
+    }
+
     pub(super) fn open_graphics_tab(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let tab_id = if let Some(tab) = self.tabs.iter().find(|tab| tab.kind == TabKind::Graphics) {
             tab.id
@@ -2196,14 +2212,6 @@ mod delivery_tests {
 
     use super::*;
 
-    struct GraphicsTestRoot;
-
-    impl Render for GraphicsTestRoot {
-        fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
-            div()
-        }
-    }
-
     #[test]
     fn worker_delivery_marks_wake_after_enqueue() {
         let (sender, receiver) = mpsc::channel();
@@ -2274,37 +2282,38 @@ mod delivery_tests {
 
     #[gpui::test]
     fn hidden_surface_delivery_and_release_lifecycle_are_entity_owned(cx: &mut TestAppContext) {
-        let window = cx.add_window(|_window, _cx| GraphicsTestRoot);
         let runtime = Arc::new(tokio::runtime::Runtime::new().expect("graphics test runtime"));
         let graphics = cx.new(|cx| {
             GraphicsWorkspaceEntity::new(
                 Arc::new(oxideterm_wsl_graphics::WslGraphicsState::new()),
                 runtime,
-                window.into(),
                 cx,
+            )
+        });
+        let _subscription = graphics.update(cx, |_, cx| {
+            cx.subscribe(
+                &graphics,
+                |graphics, _, event: &GraphicsWorkspaceEvent, cx| match event {
+                    GraphicsWorkspaceEvent::WorkerResultsReady => {
+                        let _ = graphics.drain_worker_results(cx);
+                    }
+                },
             )
         });
         let wake = graphics.update(cx, |graphics, _cx| graphics.worker_delivery.wake.clone());
         graphics.update(cx, |graphics, _cx| {
             graphics.generation = 9;
-            graphics
-                .worker_delivery
-                .send(GraphicsWorkerResult::LoadDistros {
-                    generation: 9,
-                    result: Ok(vec![WslDistro {
-                        name: "Ubuntu".to_string(),
-                        is_default: true,
-                        is_running: false,
-                    }]),
-                });
+            graphics.worker_delivery.send(GraphicsWorkerResult::Start {
+                generation: 9,
+                result: Err("test graphics failure".to_string()),
+            });
         });
 
         // No graphics page is rendered; the entity still applies reliable completion.
         cx.run_until_parked();
         graphics.read_with(cx, |graphics, _cx| {
-            assert_eq!(graphics.distros.len(), 1);
-            assert_eq!(graphics.selected_distro.as_deref(), Some("Ubuntu"));
-            assert!(!graphics.loading);
+            assert_eq!(graphics.status, GraphicsStatus::Error);
+            assert_eq!(graphics.error.as_deref(), Some("test graphics failure"));
         });
 
         drop(graphics);

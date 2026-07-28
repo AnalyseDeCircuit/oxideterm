@@ -11,7 +11,7 @@ use std::{
     time::Instant,
 };
 
-use gpui::{AnyWindowHandle, AppContext, Context, EventEmitter, Task, Window};
+use gpui::{Context, EventEmitter, Task, Window};
 use oxideterm_ssh_launch::TemporarySshLaunch;
 use tokio::sync::Notify;
 
@@ -407,13 +407,10 @@ fn drain_with<T>(
 impl WorkspaceApp {
     pub(in crate::workspace) fn handle_window_intent(
         &mut self,
-        intent: &WindowIntent,
-        window_handle: AnyWindowHandle,
+        action: WindowIntentAction,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(action) = intent.take() else {
-            return;
-        };
         match action {
             WindowIntentAction::ShowMainWindow => {
                 oxideterm_desktop_presence::show_main_window();
@@ -440,18 +437,10 @@ impl WorkspaceApp {
             }
             WindowIntentAction::OpenTemporarySsh(launch) => {
                 oxideterm_desktop_presence::show_main_window();
-                // Delivery stays scoped to the owning workspace window without
-                // making the runtime Entity capture a root or Window handle.
-                cx.spawn(async move |workspace, cx| {
-                    let _ = cx.update_window(window_handle, |_, _window: &mut Window, cx| {
-                        let _ = workspace.update(cx, |workspace, cx| {
-                            if let Err(error) = workspace.open_temporary_ssh_launch(launch, cx) {
-                                eprintln!("failed to open forwarded SSH launch: {error:#}");
-                            }
-                        });
-                    });
-                })
-                .detach();
+                if let Err(error) = self.open_temporary_ssh_launch(launch, cx) {
+                    eprintln!("failed to open forwarded SSH launch: {error:#}");
+                }
+                window.activate_window();
             }
         }
     }

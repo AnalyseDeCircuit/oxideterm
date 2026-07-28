@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use super::*;
-use gpui::{AnyWindowHandle, AppContext};
 
 impl WorkspaceApp {
     pub(in crate::workspace) fn ssh_worker_sender(
@@ -12,24 +11,17 @@ impl WorkspaceApp {
         self.connection_flow.read(cx).ssh_worker_sender()
     }
 
-    pub(in crate::workspace) fn schedule_connection_flow_worker_delivery(
+    pub(in crate::workspace) fn apply_connection_flow_worker_delivery(
         &mut self,
-        window_handle: AnyWindowHandle,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        cx.spawn(async move |workspace, cx| {
-            let _ = cx.update_window(window_handle, |_, window, cx| {
-                workspace.update(cx, |workspace, cx| {
-                    let results = workspace
-                        .connection_flow
-                        .update(cx, |connection_flow, _cx| {
-                            connection_flow.take_worker_results()
-                        });
-                    workspace.apply_ssh_worker_results(results, window, cx);
-                })
-            });
-        })
-        .detach();
+        // Secret-bearing worker results stay in ConnectionFlowEntity until the
+        // registry supplies a live native window for their root adapter.
+        let results = self.connection_flow.update(cx, |connection_flow, _cx| {
+            connection_flow.take_worker_results()
+        });
+        self.apply_ssh_worker_results(results, window, cx);
     }
 
     pub(super) fn build_new_connection_config(
