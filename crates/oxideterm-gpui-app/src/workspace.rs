@@ -260,8 +260,8 @@ use self::ime::{
 use self::launcher::LauncherState;
 use self::new_connection::{
     ConnectionFlowEntity, ConnectionFlowEvent, NativeSshPromptHandler, NewConnectionField,
-    NewConnectionForm, NewConnectionSelect, PrivilegeCredentialDraft, SavedConnectionPromptAction,
-    SshAuthTab, SshConnectionIntent,
+    NewConnectionForm, NewConnectionSelect, SavedConnectionPromptAction, SshAuthTab,
+    SshConnectionIntent,
 };
 use self::onboarding::OnboardingState;
 use self::pane_tree::SplitDrag;
@@ -768,10 +768,6 @@ pub(crate) struct WorkspaceApp {
     settings_selected_connection_import_drafts: HashSet<String>,
     settings_connection_import_duplicate_strategy: ConnectionImportDuplicateStrategy,
     settings_connection_import_target_group: String,
-    settings_local_privilege_draft: PrivilegeCredentialDraft,
-    settings_local_privilege_error: Option<String>,
-    // The editor stays collapsed for populated scopes until the user starts an add or edit flow.
-    settings_privilege_editor_open: bool,
     detached_local_terminal_list_state: ListState,
     detached_local_terminal_list_cache: RefCell<VirtualListSignatureCache>,
     plugin_entity: Entity<plugin_entity::PluginWorkspaceEntity>,

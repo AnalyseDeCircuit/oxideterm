@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use gpui::{Context, EventEmitter, Task};
+use oxideterm_connections::PrivilegeCredentialKind;
 use oxideterm_gpui_settings_view::SettingsInput;
 use zeroize::Zeroizing;
 
@@ -70,6 +71,41 @@ pub(in crate::workspace) struct NetworkProxyTestSnapshot {
     pub(in crate::workspace) test_result: Option<Result<u128, String>>,
 }
 
+/// Editable privilege credential state with a zeroizing secret owner.
+pub(in crate::workspace) struct PrivilegeCredentialDraft {
+    pub(super) credential_id: Option<String>,
+    pub(super) label: String,
+    pub(super) kind: PrivilegeCredentialKind,
+    pub(super) username_hint: String,
+    pub(super) prompt_patterns: String,
+    pub(super) secret: Zeroizing<String>,
+    pub(super) enabled: bool,
+}
+
+impl Default for PrivilegeCredentialDraft {
+    fn default() -> Self {
+        Self {
+            credential_id: None,
+            label: String::new(),
+            kind: PrivilegeCredentialKind::SudoPassword,
+            username_hint: String::new(),
+            prompt_patterns: String::new(),
+            secret: Zeroizing::new(String::new()),
+            enabled: true,
+        }
+    }
+}
+
+pub(in crate::workspace) struct PrivilegeCredentialSnapshot {
+    pub(in crate::workspace) credential_id: Option<String>,
+    pub(in crate::workspace) label: String,
+    pub(in crate::workspace) kind: PrivilegeCredentialKind,
+    pub(in crate::workspace) username_hint: String,
+    pub(in crate::workspace) prompt_patterns: String,
+    pub(in crate::workspace) enabled: bool,
+    pub(in crate::workspace) error: Option<String>,
+}
+
 /// Owns settings work that must complete independently from root rendering.
 pub(in crate::workspace) struct SettingsWorkspaceEntity {
     portable_status: Option<oxideterm_portable_runtime::PortableStatusSnapshot>,
@@ -106,6 +142,10 @@ pub(in crate::workspace) struct SettingsWorkspaceEntity {
     pub(super) network_proxy_test_result: Option<Result<u128, String>>,
     pub(super) network_proxy_test_task: Option<Task<()>>,
     pub(super) network_proxy_test_abort: Option<tokio::task::AbortHandle>,
+    pub(super) privilege_draft: PrivilegeCredentialDraft,
+    pub(super) privilege_error: Option<String>,
+    pub(super) privilege_editor_open: bool,
+    pub(super) privilege_scope_id: Option<String>,
     pub(super) native_update: NativeUpdateRuntime,
 }
 
@@ -165,6 +205,10 @@ impl SettingsWorkspaceEntity {
             network_proxy_test_result: None,
             network_proxy_test_task: None,
             network_proxy_test_abort: None,
+            privilege_draft: PrivilegeCredentialDraft::default(),
+            privilege_error: None,
+            privilege_editor_open: false,
+            privilege_scope_id: None,
             native_update: NativeUpdateRuntime::new(cx),
         }
     }
@@ -273,6 +317,12 @@ impl SettingsWorkspaceEntity {
             SettingsInput::NetworkProxyPassword => Some(&self.network_proxy_password),
             SettingsInput::NetworkProxyTestHost => Some(&self.network_proxy_test_host),
             SettingsInput::NetworkProxyTestPort => Some(&self.network_proxy_test_port),
+            SettingsInput::LocalPrivilegeLabel => Some(&self.privilege_draft.label),
+            SettingsInput::LocalPrivilegeUsernameHint => Some(&self.privilege_draft.username_hint),
+            SettingsInput::LocalPrivilegeSecret => Some(&self.privilege_draft.secret),
+            SettingsInput::LocalPrivilegePromptPatterns => {
+                Some(&self.privilege_draft.prompt_patterns)
+            }
             _ => None,
         }
     }
@@ -308,6 +358,10 @@ impl SettingsWorkspaceEntity {
             SettingsInput::NetworkProxyPassword
             | SettingsInput::NetworkProxyTestHost
             | SettingsInput::NetworkProxyTestPort => true,
+            SettingsInput::LocalPrivilegeLabel
+            | SettingsInput::LocalPrivilegeUsernameHint
+            | SettingsInput::LocalPrivilegeSecret
+            | SettingsInput::LocalPrivilegePromptPatterns => true,
             _ => false,
         };
         if !can_focus {
@@ -381,6 +435,10 @@ impl SettingsWorkspaceEntity {
             SettingsInput::NetworkProxyTestHost | SettingsInput::NetworkProxyTestPort => {
                 self.network_proxy_test_result = None;
             }
+            SettingsInput::LocalPrivilegeLabel
+            | SettingsInput::LocalPrivilegeUsernameHint
+            | SettingsInput::LocalPrivilegeSecret
+            | SettingsInput::LocalPrivilegePromptPatterns => self.privilege_error = None,
             _ => {}
         }
     }
@@ -404,6 +462,14 @@ impl SettingsWorkspaceEntity {
             SettingsInput::NetworkProxyPassword => Some(&mut self.network_proxy_password),
             SettingsInput::NetworkProxyTestHost => Some(&mut self.network_proxy_test_host),
             SettingsInput::NetworkProxyTestPort => Some(&mut self.network_proxy_test_port),
+            SettingsInput::LocalPrivilegeLabel => Some(&mut self.privilege_draft.label),
+            SettingsInput::LocalPrivilegeUsernameHint => {
+                Some(&mut self.privilege_draft.username_hint)
+            }
+            SettingsInput::LocalPrivilegeSecret => Some(&mut self.privilege_draft.secret),
+            SettingsInput::LocalPrivilegePromptPatterns => {
+                Some(&mut self.privilege_draft.prompt_patterns)
+            }
             _ => None,
         }
     }

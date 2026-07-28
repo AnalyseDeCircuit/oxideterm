@@ -360,9 +360,6 @@ impl WorkspaceApp {
             settings_selected_connection_import_drafts: HashSet::new(),
             settings_connection_import_duplicate_strategy: ConnectionImportDuplicateStrategy::Skip,
             settings_connection_import_target_group: String::new(),
-            settings_local_privilege_draft: PrivilegeCredentialDraft::default(),
-            settings_local_privilege_error: None,
-            settings_privilege_editor_open: false,
             // Detached local terminals are a bounded popover list, but the
             // number of retained background shells is user-driven, so keep it
             // on the same ListState path as other browser-style popovers.

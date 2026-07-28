@@ -1,9 +1,8 @@
 use std::fmt;
 
 use oxideterm_connections::{
-    AuthType, ConnectionInfo, PrivilegeCredentialKind, RemoteDesktopProfile,
-    SavedUpstreamProxyProtocol, TransportUsernameTransition, transport_port_replacement,
-    transport_username_transition,
+    AuthType, ConnectionInfo, RemoteDesktopProfile, SavedUpstreamProxyProtocol,
+    TransportUsernameTransition, transport_port_replacement, transport_username_transition,
 };
 pub(in crate::workspace) use oxideterm_connections::{
     ConnectionTransport as NewConnectionTransport, RDP_DEFAULT_PORT_TEXT, SSH_DEFAULT_PORT_TEXT,
@@ -304,58 +303,6 @@ pub(in crate::workspace) fn toggle_remote_desktop_feature(
         RemoteDesktopSessionFeature::MultiMonitor => {
             options.display.use_all_monitors = !selected;
         }
-    }
-}
-
-pub(in crate::workspace) struct PrivilegeCredentialDraft {
-    pub(in crate::workspace) credential_id: Option<String>,
-    pub(in crate::workspace) label: String,
-    pub(in crate::workspace) kind: PrivilegeCredentialKind,
-    pub(in crate::workspace) username_hint: String,
-    pub(in crate::workspace) prompt_patterns: String,
-    pub(in crate::workspace) secret: String,
-    pub(in crate::workspace) enabled: bool,
-}
-
-impl fmt::Debug for PrivilegeCredentialDraft {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter
-            .debug_struct("PrivilegeCredentialDraft")
-            .field("credential_id", &self.credential_id)
-            .field("label", &self.label)
-            .field("kind", &self.kind)
-            .field("username_hint", &self.username_hint)
-            .field("prompt_patterns", &self.prompt_patterns)
-            .field("secret", &"[redacted secret]")
-            .field("enabled", &self.enabled)
-            .finish()
-    }
-}
-
-impl Default for PrivilegeCredentialDraft {
-    fn default() -> Self {
-        Self {
-            credential_id: None,
-            label: String::new(),
-            kind: PrivilegeCredentialKind::SudoPassword,
-            username_hint: String::new(),
-            prompt_patterns: String::new(),
-            secret: String::new(),
-            enabled: true,
-        }
-    }
-}
-
-impl PrivilegeCredentialDraft {
-    fn zeroize_secret_drafts(&mut self) {
-        self.secret.zeroize();
-    }
-}
-
-impl Drop for PrivilegeCredentialDraft {
-    fn drop(&mut self) {
-        // The settings draft is the last plain-text owner before keychain storage.
-        self.zeroize_secret_drafts();
     }
 }
 
@@ -1249,21 +1196,20 @@ mod tests {
 
     use super::{
         NewConnectionField, NewConnectionForm, NewConnectionFormMode, NewConnectionProxyHop,
-        NewConnectionTransport, PrivilegeCredentialDraft, RDP_DEFAULT_PORT_TEXT,
-        RemoteDesktopSessionFeature, RemoteDesktopSessionOptions, RemoteDesktopVncCompression,
-        RemoteDesktopVncImageQuality, RemoteDesktopVncOptions, RemoteDesktopVncPreference,
-        RemoteDesktopVncSecurityPolicy, RemoteDesktopVncSessionMode, SSH_DEFAULT_PORT_TEXT,
-        SavedConnectionPromptAction, SshAuthFamily, SshAuthTab, SshKeyAuthSource,
-        TELNET_DEFAULT_PORT_TEXT, VNC_DEFAULT_PORT_TEXT, apply_remote_desktop_vnc_preference,
-        apply_transport_default_port, apply_transport_default_username, auth_family_from_tab,
-        auth_tab_from_key_source, backspace_current_connection_field,
-        connection_icon_field_visible, connection_secret_field_visible,
-        default_auth_tab_for_family, form_from_remote_desktop_profile,
-        insert_text_into_current_connection_field, key_source_from_tab, new_connection_form_mode,
-        next_connection_field, remote_desktop_feature_supported,
-        remote_desktop_vnc_preference_selected, select_current_connection_field,
-        text_from_keystroke, toggle_connection_secret_field_visibility,
-        toggle_remote_desktop_feature,
+        NewConnectionTransport, RDP_DEFAULT_PORT_TEXT, RemoteDesktopSessionFeature,
+        RemoteDesktopSessionOptions, RemoteDesktopVncCompression, RemoteDesktopVncImageQuality,
+        RemoteDesktopVncOptions, RemoteDesktopVncPreference, RemoteDesktopVncSecurityPolicy,
+        RemoteDesktopVncSessionMode, SSH_DEFAULT_PORT_TEXT, SavedConnectionPromptAction,
+        SshAuthFamily, SshAuthTab, SshKeyAuthSource, TELNET_DEFAULT_PORT_TEXT,
+        VNC_DEFAULT_PORT_TEXT, apply_remote_desktop_vnc_preference, apply_transport_default_port,
+        apply_transport_default_username, auth_family_from_tab, auth_tab_from_key_source,
+        backspace_current_connection_field, connection_icon_field_visible,
+        connection_secret_field_visible, default_auth_tab_for_family,
+        form_from_remote_desktop_profile, insert_text_into_current_connection_field,
+        key_source_from_tab, new_connection_form_mode, next_connection_field,
+        remote_desktop_feature_supported, remote_desktop_vnc_preference_selected,
+        select_current_connection_field, text_from_keystroke,
+        toggle_connection_secret_field_visibility, toggle_remote_desktop_feature,
     };
 
     fn keystroke(key: &str, key_char: Option<&str>, modifiers: Modifiers) -> Keystroke {
@@ -1328,7 +1274,7 @@ mod tests {
     }
 
     #[test]
-    fn connection_and_privilege_secret_drafts_are_zeroized() {
+    fn connection_secret_drafts_are_zeroized() {
         let mut form = NewConnectionForm::default();
         form.password = "password-value".to_string();
         form.passphrase = "passphrase-value".to_string();
@@ -1340,16 +1286,11 @@ mod tests {
         proxy_hop.passphrase = "hop-passphrase-value".to_string();
         proxy_hop.zeroize_secret_drafts();
 
-        let mut privilege_draft = PrivilegeCredentialDraft::default();
-        privilege_draft.secret = "privilege-secret-value".to_string();
-        privilege_draft.zeroize_secret_drafts();
-
         assert!(form.password.is_empty());
         assert!(form.passphrase.is_empty());
         assert!(form.upstream_proxy_password.is_empty());
         assert!(proxy_hop.password.is_empty());
         assert!(proxy_hop.passphrase.is_empty());
-        assert!(privilege_draft.secret.is_empty());
     }
 
     #[test]

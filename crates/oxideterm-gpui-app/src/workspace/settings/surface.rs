@@ -513,7 +513,6 @@ impl WorkspaceApp {
                 }
             }
             SettingsTab::Privilege => {
-                self.settings_page.privilege_scope_id.hash(&mut hasher);
                 self.connection_store.connections().len().hash(&mut hasher);
                 self.connection_store
                     .connections()
@@ -526,12 +525,9 @@ impl WorkspaceApp {
                     .map(|credentials| credentials.len())
                     .unwrap_or(0)
                     .hash(&mut hasher);
-                self.settings_local_privilege_draft
-                    .credential_id
-                    .hash(&mut hasher);
-                self.settings_privilege_editor_open.hash(&mut hasher);
-                self.settings_local_privilege_error
-                    .is_some()
+                self.settings_workspace
+                    .read(cx)
+                    .privilege_layout_flags()
                     .hash(&mut hasher);
             }
             SettingsTab::Portable => {

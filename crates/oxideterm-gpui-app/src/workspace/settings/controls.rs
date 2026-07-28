@@ -691,6 +691,7 @@ impl WorkspaceApp {
             }
             (SettingsTab::Privilege, SettingsSelect::LocalPrivilegeKind) => {
                 let mut popup = select_overlay_popup(&self.tokens, width);
+                let current_kind = self.settings_workspace.read(cx).privilege_kind();
                 for kind in [
                     PrivilegeCredentialKind::SudoPassword,
                     PrivilegeCredentialKind::SuPassword,
@@ -700,16 +701,16 @@ impl WorkspaceApp {
                         select_option(
                             &self.tokens,
                             self.settings_privilege_kind_label(kind),
-                            self.settings_local_privilege_draft.kind == kind,
+                            current_kind == kind,
                         ),
                         false,
                         false,
                         cx.listener(move |this, _event, _window, cx| {
                             this.close_settings_select();
-                            this.settings_local_privilege_draft.kind = kind;
-                            this.settings_local_privilege_error = None;
+                            this.settings_workspace.update(cx, |settings, cx| {
+                                settings.set_privilege_kind(kind, cx);
+                            });
                             cx.stop_propagation();
-                            cx.notify();
                         }),
                     ));
                 }

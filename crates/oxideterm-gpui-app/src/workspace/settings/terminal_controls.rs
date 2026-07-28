@@ -300,15 +300,18 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let settings_workspace = self.settings_workspace.read(cx);
-        let entity_owned = settings_workspace
-            .settings_entity_input_value(input)
-            .is_some();
+        let entity_value = settings_workspace.settings_entity_input_value(input);
+        let entity_owned = entity_value.is_some();
         let focused = if entity_owned {
             settings_workspace.settings_entity_focused_input() == Some(input)
         } else {
             self.focused_settings_input == Some(input)
         };
-        let display_value = if focused && !entity_owned {
+        let display_value = if let Some(entity_value) = entity_value {
+            // Borrow Entity-owned drafts for this frame instead of cloning them
+            // into root rendering snapshots, especially for secret inputs.
+            entity_value
+        } else if focused {
             self.settings_input_draft.as_str()
         } else {
             value.as_ref()
