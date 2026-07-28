@@ -8,7 +8,6 @@ mod cloud_sync;
 mod command_palette;
 mod connection_monitor;
 mod delivery;
-mod desktop_presence;
 mod detached_tab_window;
 mod file_manager;
 mod forwards;
@@ -50,7 +49,6 @@ mod session_manager;
 mod settings;
 mod sftp;
 mod sidebar;
-mod single_instance;
 mod tabs;
 mod terminal_cast;
 mod terminal_command_bar;
@@ -61,6 +59,7 @@ mod terminal_git;
 mod terminal_project;
 mod version_migration;
 mod virtual_list;
+mod window_intent;
 
 use std::{
     cell::{Cell, RefCell},
@@ -278,6 +277,7 @@ use self::sidebar::{
 use self::sidebar::{AiCompactionDeliveryKind, AiStreamDeliveryEvent};
 use self::tabs::TerminalLocation;
 use self::terminal_entity::{WorkspaceTerminalEntity, WorkspaceTerminalEvent};
+use self::window_intent::WorkspaceWindowIntentEntity;
 use crate::{
     CloseOtherTabs, ClosePane, CloseSearch, CloseTab, CommandPalette, Copy, Cut, Find, FindNext,
     FindPrev, FontDecrease, FontIncrease, FontReset, GoToTab1, GoToTab2, GoToTab3, GoToTab4,
@@ -811,8 +811,8 @@ pub(crate) struct WorkspaceApp {
     native_update_release_notes_presence: oxideterm_gpui_ui::motion::ExitPresence,
     native_update_release_notes_scroll: MarkdownVirtualListScrollHandle,
     settings_legal_notice_scroll: MarkdownVirtualListScrollHandle,
-    desktop_presence_rx: Option<oxideterm_desktop_presence::DesktopPresenceReceiver>,
-    single_instance_rx: Option<crate::single_instance::SingleInstanceReceiver>,
+    _window_intents: Entity<WorkspaceWindowIntentEntity>,
+    _window_intent_subscription: Subscription,
     new_connection_caret_visible: bool,
     connection_flow: Entity<ConnectionFlowEntity>,
     _connection_flow_observation: Subscription,

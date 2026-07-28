@@ -285,10 +285,6 @@ fn open_main_workspace_window(
                 },
             )
         });
-        let _ = workspace.update(cx, |workspace, cx| {
-            workspace.start_desktop_presence_delivery(cx);
-            workspace.start_single_instance_delivery(window, cx);
-        });
         if let Some(launch) = ssh_launch
             && let Err(error) = workspace.update(cx, |workspace, cx| {
                 workspace.open_temporary_ssh_launch(launch, window, cx)

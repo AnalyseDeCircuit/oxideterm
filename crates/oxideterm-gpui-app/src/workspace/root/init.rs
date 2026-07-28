@@ -10,6 +10,16 @@ impl WorkspaceApp {
         single_instance_rx: Option<crate::single_instance::SingleInstanceReceiver>,
     ) -> Result<Self> {
         let focus_handle = cx.focus_handle();
+        let window_intents = cx.new(|cx| {
+            WorkspaceWindowIntentEntity::new(desktop_presence_rx, single_instance_rx, cx)
+        });
+        let window_intent_window_handle = window.window_handle();
+        let window_intent_subscription = cx.subscribe(
+            &window_intents,
+            move |workspace, _window_intents, intent: &window_intent::WindowIntent, cx| {
+                workspace.handle_window_intent(intent, window_intent_window_handle, cx);
+            },
+        );
         let mut settings_store = SettingsStore::load_default()?;
         settings_store.settings_mut().sidebar_ui.zen_mode = false;
         if let Err(error) = ensure_bundled_workspace_backgrounds(settings_store.path()) {
@@ -614,8 +624,8 @@ impl WorkspaceApp {
             ),
             native_update_release_notes_scroll: MarkdownVirtualListScrollHandle::new(),
             settings_legal_notice_scroll: MarkdownVirtualListScrollHandle::new(),
-            desktop_presence_rx,
-            single_instance_rx,
+            _window_intents: window_intents,
+            _window_intent_subscription: window_intent_subscription,
             new_connection_caret_visible: true,
             connection_flow,
             _connection_flow_observation: connection_flow_observation,
