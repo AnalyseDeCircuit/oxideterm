@@ -57,9 +57,6 @@ pub struct SettingsPageModel {
     pub knowledge_delete_confirm: Option<KnowledgeDeleteConfirm>,
     pub knowledge_external_edit: Option<KnowledgeExternalEdit>,
     pub knowledge_error: Option<String>,
-    pub show_ai_enable_confirm: bool,
-    pub ai_provider_key_remove_confirm: Option<(usize, String)>,
-    pub ai_provider_remove_confirm: Option<(String, String)>,
     pub keybinding_recording_action_id: Option<String>,
     pub keybinding_conflict_action_ids: Vec<String>,
     pub keybinding_search_query: String,
@@ -101,9 +98,6 @@ impl Default for SettingsPageModel {
             knowledge_delete_confirm: None,
             knowledge_external_edit: None,
             knowledge_error: None,
-            show_ai_enable_confirm: false,
-            ai_provider_key_remove_confirm: None,
-            ai_provider_remove_confirm: None,
             keybinding_recording_action_id: None,
             keybinding_conflict_action_ids: Vec::new(),
             keybinding_search_query: String::new(),
@@ -189,49 +183,6 @@ impl SettingsPageModel {
         self.expanded_ai_providers.remove(provider_id);
         self.expanded_ai_provider_models.remove(provider_id);
         self.expanded_ai_context_providers.remove(provider_id);
-    }
-
-    /// Opens or closes the AI enable confirmation modal.
-    pub fn set_ai_enable_confirm_open(&mut self, is_open: bool) {
-        self.show_ai_enable_confirm = is_open;
-    }
-
-    /// Stores the pending provider key removal target.
-    pub fn request_ai_provider_key_remove(
-        &mut self,
-        provider_index: usize,
-        key_label: impl Into<String>,
-    ) {
-        self.ai_provider_key_remove_confirm = Some((provider_index, key_label.into()));
-    }
-
-    /// Clears the pending provider key removal target.
-    pub fn clear_ai_provider_key_remove(&mut self) {
-        self.ai_provider_key_remove_confirm = None;
-    }
-
-    /// Takes the pending provider key removal target for execution.
-    pub fn take_ai_provider_key_remove(&mut self) -> Option<(usize, String)> {
-        self.ai_provider_key_remove_confirm.take()
-    }
-
-    /// Stores the pending provider removal target.
-    pub fn request_ai_provider_remove(
-        &mut self,
-        provider_id: impl Into<String>,
-        provider_name: impl Into<String>,
-    ) {
-        self.ai_provider_remove_confirm = Some((provider_id.into(), provider_name.into()));
-    }
-
-    /// Clears the pending provider removal target.
-    pub fn clear_ai_provider_remove(&mut self) {
-        self.ai_provider_remove_confirm = None;
-    }
-
-    /// Takes the pending provider removal target for execution.
-    pub fn take_ai_provider_remove(&mut self) -> Option<(String, String)> {
-        self.ai_provider_remove_confirm.take()
     }
 
     /// Opens the create-collection dialog while preserving any draft name already typed.

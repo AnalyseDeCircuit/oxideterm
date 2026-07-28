@@ -348,7 +348,6 @@ impl WorkspaceApp {
             knowledge_create_presence: oxideterm_gpui_ui::motion::ExitPresence::visible(),
             knowledge_document_presence: oxideterm_gpui_ui::motion::ExitPresence::visible(),
             help_legal_notice_presence: oxideterm_gpui_ui::motion::ExitPresence::visible(),
-            ai_settings_dialog_presence: oxideterm_gpui_ui::motion::ExitPresence::visible(),
             ai_text_editor_dialog: None,
             ai_text_editor: None,
             remote_shell_integration: settings::RemoteShellIntegrationUiState::default(),

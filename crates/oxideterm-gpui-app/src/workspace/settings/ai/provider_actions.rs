@@ -240,6 +240,34 @@ impl WorkspaceApp {
             ai_state::AiWorkspaceEvent::ProviderKeyStatusChanged
             | ai_state::AiWorkspaceEvent::SelectorProviderStatusChanged
             | ai_state::AiWorkspaceEvent::TerminalInlineDeliveryReady => cx.notify(),
+            ai_state::AiWorkspaceEvent::SettingsConfirmChanged => {
+                let intents = self
+                    .ai_entity
+                    .update(cx, |ai, _cx| ai.take_settings_confirm_intents());
+                for intent in intents {
+                    match intent {
+                        ai_state::AiSettingsConfirmIntent::Enable => {
+                            self.edit_settings(
+                                |settings| {
+                                    settings.ai.enabled = true;
+                                    settings.ai.enabled_confirmed = true;
+                                },
+                                cx,
+                            );
+                        }
+                        ai_state::AiSettingsConfirmIntent::RemoveProviderKey {
+                            index,
+                            provider_id,
+                        } => {
+                            self.remove_ai_provider_api_key(index, &provider_id, cx);
+                        }
+                        ai_state::AiSettingsConfirmIntent::RemoveProvider { provider_id } => {
+                            self.remove_ai_provider(&provider_id, cx);
+                        }
+                    }
+                }
+                cx.notify();
+            }
         }
     }
 

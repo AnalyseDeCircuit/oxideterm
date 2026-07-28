@@ -986,15 +986,21 @@ impl Render for WorkspaceApp {
                     .has_keyboard_interactive_challenge(),
                 |root| root.child(self.render_keyboard_interactive_dialog(cx)),
             )
-            .when(self.settings_page.show_ai_enable_confirm, |root| {
-                root.child(self.render_ai_enable_confirm_dialog(cx))
-            })
             .when(
-                self.settings_page.ai_provider_key_remove_confirm.is_some(),
+                self.ai_entity.read(cx).settings_confirm_is_enable(),
+                |root| root.child(self.render_ai_enable_confirm_dialog(cx)),
+            )
+            .when(
+                self.ai_entity
+                    .read(cx)
+                    .settings_confirm_is_provider_key_remove(),
                 |root| root.child(self.render_ai_provider_key_remove_confirm_dialog(cx)),
             )
             .when(
-                self.settings_page.ai_provider_remove_confirm.is_some(),
+                self.ai_entity
+                    .read(cx)
+                    .settings_confirm_provider_name()
+                    .is_some(),
                 |root| root.child(self.render_ai_provider_remove_confirm_dialog(cx)),
             )
             .when(self.ai.chat.safety_confirm_open, |root| {

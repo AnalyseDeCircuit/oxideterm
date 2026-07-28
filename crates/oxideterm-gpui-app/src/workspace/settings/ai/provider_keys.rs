@@ -168,9 +168,13 @@ impl WorkspaceApp {
                                 ..ToolbarButtonOptions::default()
                             },
                             cx.listener(move |this, _event, _window, cx| {
-                                this.ai_settings_dialog_presence.reopen();
-                                this.settings_page
-                                    .request_ai_provider_key_remove(index, provider_id.clone());
+                                this.ai_entity.update(cx, |ai, cx| {
+                                    ai.open_provider_key_remove_confirm(
+                                        index,
+                                        provider_id.clone(),
+                                        cx,
+                                    );
+                                });
                                 this.reset_standard_confirm_focus();
                                 cx.stop_propagation();
                                 cx.notify();

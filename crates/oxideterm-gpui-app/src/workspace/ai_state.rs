@@ -25,6 +25,7 @@ pub(in crate::workspace) enum AiWorkspaceEvent {
     ModelRefreshDeliveryReady,
     ProviderKeyStatusChanged,
     SelectorProviderStatusChanged,
+    SettingsConfirmChanged,
     TerminalInlineDeliveryReady,
 }
 
@@ -74,6 +75,24 @@ pub(in crate::workspace) enum AiCredentialIntent {
     McpServerReady { config: serde_json::Value },
     McpServerRemoved { server_id: String },
     Failed(AiCredentialFailure),
+}
+
+enum AiSettingsConfirm {
+    Enable,
+    RemoveProviderKey {
+        index: usize,
+        provider_id: String,
+    },
+    RemoveProvider {
+        provider_id: String,
+        provider_name: String,
+    },
+}
+
+pub(in crate::workspace) enum AiSettingsConfirmIntent {
+    Enable,
+    RemoveProviderKey { index: usize, provider_id: String },
+    RemoveProvider { provider_id: String },
 }
 
 #[derive(Clone, Copy)]
@@ -147,6 +166,7 @@ pub(in crate::workspace) struct AiWorkspaceEntity {
     settings_secret_drafts: HashMap<SettingsInput, zeroize::Zeroizing<String>>,
     focused_settings_input: Option<SettingsInput>,
     provider_key_operation_tasks: HashMap<String, Task<()>>,
+    pending_provider_key_removals: HashSet<String>,
     acp_token_operation_tasks: HashMap<String, Task<()>>,
     credential_intents: VecDeque<AiCredentialIntent>,
     mcp_add_dialog: Option<AiMcpServerDraft>,
@@ -155,6 +175,10 @@ pub(in crate::workspace) struct AiWorkspaceEntity {
     mcp_save_task: Option<Task<()>>,
     mcp_runtime_tasks: HashMap<String, Task<()>>,
     mcp_status_tick_task: Option<Task<()>>,
+    settings_confirm: Option<AiSettingsConfirm>,
+    settings_confirm_presence: oxideterm_gpui_ui::motion::ExitPresence,
+    settings_confirm_exit_task: Option<Task<()>>,
+    settings_confirm_intents: VecDeque<AiSettingsConfirmIntent>,
     model_refresh_generations: HashMap<String, u64>,
     refreshing_models: HashSet<String>,
     model_refresh_tx:
@@ -273,6 +297,7 @@ impl AiWorkspaceEntity {
             settings_secret_drafts: HashMap::new(),
             focused_settings_input: None,
             provider_key_operation_tasks: HashMap::new(),
+            pending_provider_key_removals: HashSet::new(),
             acp_token_operation_tasks: HashMap::new(),
             credential_intents: VecDeque::new(),
             mcp_add_dialog: None,
@@ -281,6 +306,10 @@ impl AiWorkspaceEntity {
             mcp_save_task: None,
             mcp_runtime_tasks: HashMap::new(),
             mcp_status_tick_task: None,
+            settings_confirm: None,
+            settings_confirm_presence: oxideterm_gpui_ui::motion::ExitPresence::visible(),
+            settings_confirm_exit_task: None,
+            settings_confirm_intents: VecDeque::new(),
             model_refresh_generations: HashMap::new(),
             refreshing_models: HashSet::new(),
             model_refresh_tx,
@@ -866,6 +895,12 @@ impl AiWorkspaceEntity {
         provider_id: String,
         cx: &mut Context<Self>,
     ) -> bool {
+        if self.provider_key_operation_tasks.contains_key(&provider_id) {
+            // Provider removal must be serialized after an in-flight store;
+            // racing delete with the keychain write could recreate the key.
+            self.pending_provider_key_removals.insert(provider_id);
+            return true;
+        }
         let key_store = self.key_store.clone();
         let task_runtime = self.task_runtime.clone();
         let provider_id_for_delete = provider_id.clone();
@@ -903,6 +938,10 @@ impl AiWorkspaceEntity {
                 entity
                     .provider_key_operation_tasks
                     .remove(&operation_provider_id);
+                let queued_removal = entity
+                    .pending_provider_key_removals
+                    .remove(&operation_provider_id);
+                let queued_removal_provider_id = operation_provider_id.clone();
                 let intent = match (operation_kind, succeeded) {
                     (AiProviderKeyOperation::Store { index }, true) => {
                         entity.set_provider_key_status(operation_provider_id.clone(), true);
@@ -924,6 +963,10 @@ impl AiWorkspaceEntity {
                 };
                 entity.credential_intents.push_back(intent);
                 cx.emit(AiWorkspaceEvent::CredentialOperationReady);
+                if queued_removal && matches!(operation_kind, AiProviderKeyOperation::Store { .. })
+                {
+                    entity.remove_provider_key(queued_removal_provider_id, cx);
+                }
                 cx.notify();
             });
         });
@@ -934,6 +977,138 @@ impl AiWorkspaceEntity {
 
     pub(in crate::workspace) fn take_credential_intents(&mut self) -> VecDeque<AiCredentialIntent> {
         std::mem::take(&mut self.credential_intents)
+    }
+
+    pub(in crate::workspace) fn settings_confirm_is_open(&self) -> bool {
+        self.settings_confirm.is_some()
+    }
+
+    pub(in crate::workspace) fn settings_confirm_is_enable(&self) -> bool {
+        matches!(self.settings_confirm, Some(AiSettingsConfirm::Enable))
+    }
+
+    pub(in crate::workspace) fn settings_confirm_is_provider_key_remove(&self) -> bool {
+        matches!(
+            self.settings_confirm,
+            Some(AiSettingsConfirm::RemoveProviderKey { .. })
+        )
+    }
+
+    pub(in crate::workspace) fn settings_confirm_provider_name(&self) -> Option<&str> {
+        match self.settings_confirm.as_ref() {
+            Some(AiSettingsConfirm::RemoveProvider { provider_name, .. }) => Some(provider_name),
+            _ => None,
+        }
+    }
+
+    pub(in crate::workspace) fn settings_confirm_is_visible(&self) -> bool {
+        self.settings_confirm_presence.phase() == oxideterm_gpui_ui::motion::ExitPhase::Visible
+    }
+
+    pub(in crate::workspace) fn open_ai_enable_confirm(&mut self, cx: &mut Context<Self>) {
+        self.open_settings_confirm(AiSettingsConfirm::Enable, cx);
+    }
+
+    pub(in crate::workspace) fn open_provider_key_remove_confirm(
+        &mut self,
+        index: usize,
+        provider_id: String,
+        cx: &mut Context<Self>,
+    ) {
+        self.open_settings_confirm(
+            AiSettingsConfirm::RemoveProviderKey { index, provider_id },
+            cx,
+        );
+    }
+
+    pub(in crate::workspace) fn open_provider_remove_confirm(
+        &mut self,
+        provider_id: String,
+        provider_name: String,
+        cx: &mut Context<Self>,
+    ) {
+        self.open_settings_confirm(
+            AiSettingsConfirm::RemoveProvider {
+                provider_id,
+                provider_name,
+            },
+            cx,
+        );
+    }
+
+    fn open_settings_confirm(&mut self, confirm: AiSettingsConfirm, cx: &mut Context<Self>) {
+        self.settings_confirm_exit_task = None;
+        self.settings_confirm_presence.reopen();
+        self.settings_confirm = Some(confirm);
+        cx.emit(AiWorkspaceEvent::SettingsConfirmChanged);
+        cx.notify();
+    }
+
+    pub(in crate::workspace) fn begin_settings_confirm_exit(
+        &mut self,
+        confirmed: bool,
+        delay: Duration,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if self.settings_confirm.is_none() {
+            return false;
+        }
+        let Some(generation) = self.settings_confirm_presence.begin_exit() else {
+            return false;
+        };
+        if delay.is_zero() {
+            self.finish_settings_confirm_exit(generation, confirmed, cx);
+            return true;
+        }
+
+        // The AI owner retains modal completion across settings visibility
+        // changes so a confirmed user action cannot be stranded in the root.
+        self.settings_confirm_exit_task = Some(cx.spawn(async move |entity, cx| {
+            Timer::after(delay).await;
+            let _ = entity.update(cx, |entity, cx| {
+                entity.settings_confirm_exit_task = None;
+                entity.finish_settings_confirm_exit(generation, confirmed, cx);
+            });
+        }));
+        cx.emit(AiWorkspaceEvent::SettingsConfirmChanged);
+        cx.notify();
+        true
+    }
+
+    fn finish_settings_confirm_exit(
+        &mut self,
+        generation: u64,
+        confirmed: bool,
+        cx: &mut Context<Self>,
+    ) {
+        if !self.settings_confirm_presence.finish_exit(generation) {
+            return;
+        }
+        self.settings_confirm_presence.reopen();
+        let confirm = self.settings_confirm.take();
+        if confirmed {
+            let intent = match confirm {
+                Some(AiSettingsConfirm::Enable) => Some(AiSettingsConfirmIntent::Enable),
+                Some(AiSettingsConfirm::RemoveProviderKey { index, provider_id }) => {
+                    Some(AiSettingsConfirmIntent::RemoveProviderKey { index, provider_id })
+                }
+                Some(AiSettingsConfirm::RemoveProvider { provider_id, .. }) => {
+                    Some(AiSettingsConfirmIntent::RemoveProvider { provider_id })
+                }
+                None => None,
+            };
+            if let Some(intent) = intent {
+                self.settings_confirm_intents.push_back(intent);
+            }
+        }
+        cx.emit(AiWorkspaceEvent::SettingsConfirmChanged);
+        cx.notify();
+    }
+
+    pub(in crate::workspace) fn take_settings_confirm_intents(
+        &mut self,
+    ) -> VecDeque<AiSettingsConfirmIntent> {
+        std::mem::take(&mut self.settings_confirm_intents)
     }
 
     pub(in crate::workspace) fn store_acp_auth_token(
@@ -3025,6 +3200,28 @@ mod entity_tests {
     }
 
     #[gpui::test]
+    fn provider_removal_is_queued_behind_an_inflight_store(cx: &mut TestAppContext) {
+        let entity = cx.new(|cx| {
+            AiWorkspaceEntity::new(test_runtime(), oxideterm_ai::AiProviderKeyStore::new(), cx)
+        });
+        entity.update(cx, |entity, cx| {
+            assert!(entity.start_provider_key_operation(
+                "provider-test".to_string(),
+                AiProviderKeyOperation::Store { index: 2 },
+                std::future::pending(),
+                cx,
+            ));
+            assert!(entity.remove_provider_key("provider-test".to_string(), cx));
+            assert!(
+                entity
+                    .pending_provider_key_removals
+                    .contains("provider-test")
+            );
+            assert_eq!(entity.provider_key_operation_tasks.len(), 1);
+        });
+    }
+
+    #[gpui::test]
     fn acp_token_draft_and_operation_are_entity_owned(cx: &mut TestAppContext) {
         let entity = cx.new(|cx| {
             AiWorkspaceEntity::new(test_runtime(), oxideterm_ai::AiProviderKeyStore::new(), cx)
@@ -3215,6 +3412,42 @@ mod entity_tests {
                     if server_id == "server-test"
             ));
             assert!(entity.take_credential_intents().is_empty());
+        });
+    }
+
+    #[gpui::test]
+    fn ai_settings_confirm_payload_exit_and_intent_are_entity_owned(cx: &mut TestAppContext) {
+        let entity = cx.new(|cx| {
+            AiWorkspaceEntity::new(test_runtime(), oxideterm_ai::AiProviderKeyStore::new(), cx)
+        });
+        entity.update(cx, |entity, cx| {
+            entity.open_provider_remove_confirm(
+                "provider-test".to_string(),
+                "Provider Test".to_string(),
+                cx,
+            );
+            assert_eq!(
+                entity.settings_confirm_provider_name(),
+                Some("Provider Test")
+            );
+            assert!(entity.begin_settings_confirm_exit(true, Duration::from_millis(10), cx,));
+            assert!(entity.settings_confirm_exit_task.is_some());
+
+            // A newer confirmation cancels the retained exit generation.
+            entity.open_ai_enable_confirm(cx);
+            assert!(entity.settings_confirm_exit_task.is_none());
+            assert!(entity.settings_confirm_is_enable());
+            assert!(entity.begin_settings_confirm_exit(true, Duration::ZERO, cx));
+            assert!(!entity.settings_confirm_is_open());
+            let intent = entity
+                .take_settings_confirm_intents()
+                .pop_front()
+                .expect("AI settings confirmation intent");
+            assert!(matches!(intent, AiSettingsConfirmIntent::Enable));
+
+            entity.open_provider_key_remove_confirm(4, "provider-key".to_string(), cx);
+            assert!(entity.begin_settings_confirm_exit(false, Duration::ZERO, cx));
+            assert!(entity.take_settings_confirm_intents().is_empty());
         });
     }
 

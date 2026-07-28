@@ -145,9 +145,9 @@ impl WorkspaceApp {
                         .get(index)
                         .and_then(|provider| ai_provider_string(provider, "name"))
                         .unwrap_or_else(|| _name.clone());
-                    this.ai_settings_dialog_presence.reopen();
-                    this.settings_page
-                        .request_ai_provider_remove(provider_id, provider_name);
+                    this.ai_entity.update(cx, |ai, cx| {
+                        ai.open_provider_remove_confirm(provider_id, provider_name, cx);
+                    });
                     this.reset_standard_confirm_focus();
                 }
                 cx.stop_propagation();

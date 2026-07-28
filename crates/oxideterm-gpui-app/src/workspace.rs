@@ -754,7 +754,6 @@ pub(crate) struct WorkspaceApp {
     knowledge_create_presence: oxideterm_gpui_ui::motion::ExitPresence,
     knowledge_document_presence: oxideterm_gpui_ui::motion::ExitPresence,
     help_legal_notice_presence: oxideterm_gpui_ui::motion::ExitPresence,
-    ai_settings_dialog_presence: oxideterm_gpui_ui::motion::ExitPresence,
     // Prompt and memory documents are edited outside the virtual settings list.
     ai_text_editor_dialog: Option<settings::AiTextEditorDialog>,
     ai_text_editor: Option<Entity<oxideterm_gpui_editor::TextEditorView>>,
