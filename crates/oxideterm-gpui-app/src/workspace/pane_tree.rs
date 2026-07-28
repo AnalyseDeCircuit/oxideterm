@@ -303,7 +303,7 @@ impl WorkspaceApp {
             .and_then(|root_pane| root_pane.session_id_for_pane(active_pane_id))
         {
             self.serial_terminal_configs.remove(&session_id);
-            self.unregister_ssh_terminal_session(session_id);
+            self.unregister_ssh_terminal_session(session_id, cx);
         }
 
         if let Some(pane) = self.remove_terminal_pane(&active_pane_id, cx) {
@@ -356,7 +356,7 @@ impl WorkspaceApp {
             .filter(|session_id| *session_id != active_session_id)
         {
             self.serial_terminal_configs.remove(&session_id);
-            self.unregister_ssh_terminal_session(session_id);
+            self.unregister_ssh_terminal_session(session_id, cx);
         }
         for pane_id in pane_ids
             .into_iter()

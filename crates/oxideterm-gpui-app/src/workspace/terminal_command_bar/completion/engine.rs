@@ -124,8 +124,11 @@ impl WorkspaceApp {
         let session_id = tab.and_then(|tab| {
             pane_id.and_then(|pane_id| tab.root_pane.as_ref()?.session_id_for_pane(pane_id))
         });
-        let node_id =
-            session_id.and_then(|session_id| self.terminal_ssh_nodes.get(&session_id).cloned());
+        let node_id = session_id.and_then(|session_id| {
+            self.workspace_runtime
+                .read(cx)
+                .ssh_terminal_node_id(session_id)
+        });
         let cwd = self.terminal_command_context_cwd(pane_id, tab.map(|tab| &tab.kind), cx);
         let cwd_host = pane_id
             .and_then(|pane_id| self.tab_host.read(cx).panes().get(&pane_id))

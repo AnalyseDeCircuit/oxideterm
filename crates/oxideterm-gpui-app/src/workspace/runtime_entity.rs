@@ -22,6 +22,9 @@ pub(in crate::workspace) enum WorkspaceRuntimeEvent {
 pub(in crate::workspace) enum WorkspaceRuntimeEffect {
     Reconnect(ReconnectRuntimeEffect),
     Node(NodeRuntimeEffect),
+    OpenReadySshTerminals {
+        requests: Vec<PendingSshTerminalOpen>,
+    },
     StartReconnectRoot {
         node_id: NodeId,
     },
@@ -43,6 +46,31 @@ pub(in crate::workspace) enum WorkspaceRuntimeEffect {
     ReconnectJobCleaned,
     ConnectionTrace(ConnectionTraceEvent),
     ActiveConnectionsChanged,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum WorkspaceRuntimeLifecycle {
+    Running,
+    ShuttingDown,
+    Stopped,
+}
+
+#[derive(Debug)]
+pub(in crate::workspace) struct PendingSshTerminalOpen {
+    pub(in crate::workspace) node_id: NodeId,
+    pub(in crate::workspace) post_connect_command: Option<String>,
+    pub(in crate::workspace) mark_used_connection_id: Option<String>,
+    pub(in crate::workspace) save_after_open: Option<SaveConnectionRequest>,
+    pub(in crate::workspace) cleanup_node_id: Option<NodeId>,
+    pub(in crate::workspace) title: String,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(in crate::workspace) enum QueueSshTerminalOpenOutcome {
+    Queued,
+    Coalesced,
+    Ready,
+    WorkspaceShuttingDown,
 }
 
 #[derive(Debug)]
@@ -219,6 +247,9 @@ pub(in crate::workspace) struct WorkspaceRuntimeEntity {
     node_event_rx: NodeEventReceiver,
     runtime_effects: VecDeque<WorkspaceRuntimeEffect>,
     runtime_effect_delivery_pending: bool,
+    lifecycle: WorkspaceRuntimeLifecycle,
+    terminal_ssh_nodes: HashMap<TerminalSessionId, NodeId>,
+    pending_ssh_terminal_opens: VecDeque<PendingSshTerminalOpen>,
     node_transport_attempts: HashMap<NodeId, NodeTransportAttempt>,
     next_node_transport_attempt_id: u64,
     node_event_generations: HashMap<NodeId, u64>,
@@ -305,6 +336,9 @@ impl WorkspaceRuntimeEntity {
             node_event_rx,
             runtime_effects: VecDeque::new(),
             runtime_effect_delivery_pending: false,
+            lifecycle: WorkspaceRuntimeLifecycle::Running,
+            terminal_ssh_nodes: HashMap::new(),
+            pending_ssh_terminal_opens: VecDeque::new(),
             node_transport_attempts: HashMap::new(),
             next_node_transport_attempt_id: 0,
             node_event_generations: HashMap::new(),
@@ -356,6 +390,165 @@ impl WorkspaceRuntimeEntity {
             .configure(reconnect_timing, reconnect_max_attempts);
         self.reconnect_timing = reconnect_timing;
         self.schedule_active_probe_after(ACTIVE_PROBE_START_DELAY, cx);
+    }
+
+    pub(in crate::workspace) fn register_ssh_terminal_session(
+        &mut self,
+        session_id: TerminalSessionId,
+        node_id: NodeId,
+    ) -> bool {
+        if self.lifecycle != WorkspaceRuntimeLifecycle::Running {
+            return false;
+        }
+        self.terminal_ssh_nodes.insert(session_id, node_id);
+        true
+    }
+
+    pub(in crate::workspace) fn unregister_ssh_terminal_session(
+        &mut self,
+        session_id: TerminalSessionId,
+    ) -> Option<NodeId> {
+        // Removing a terminal consumer never changes node or transport ownership.
+        self.terminal_ssh_nodes.remove(&session_id)
+    }
+
+    pub(in crate::workspace) fn ssh_terminal_node_id(
+        &self,
+        session_id: TerminalSessionId,
+    ) -> Option<NodeId> {
+        self.terminal_ssh_nodes.get(&session_id).cloned()
+    }
+
+    pub(in crate::workspace) fn ssh_terminal_nodes(&self) -> Vec<(TerminalSessionId, NodeId)> {
+        self.terminal_ssh_nodes
+            .iter()
+            .map(|(session_id, node_id)| (*session_id, node_id.clone()))
+            .collect()
+    }
+
+    pub(in crate::workspace) fn ssh_terminal_session_belongs_to_node(
+        &self,
+        session_id: TerminalSessionId,
+        node_id: &NodeId,
+    ) -> bool {
+        self.terminal_ssh_nodes.get(&session_id) == Some(node_id)
+    }
+
+    pub(in crate::workspace) fn queue_ssh_terminal_open(
+        &mut self,
+        mut request: PendingSshTerminalOpen,
+        cx: &mut Context<Self>,
+    ) -> QueueSshTerminalOpenOutcome {
+        if self.lifecycle != WorkspaceRuntimeLifecycle::Running {
+            return QueueSshTerminalOpenOutcome::WorkspaceShuttingDown;
+        }
+        let outcome = if let Some(existing) = self
+            .pending_ssh_terminal_opens
+            .iter_mut()
+            .find(|pending| pending.node_id == request.node_id)
+        {
+            // Preserve the first visible terminal request while adopting later
+            // one-shot side effects without cloning secret-bearing save state.
+            if existing.mark_used_connection_id.is_none() {
+                existing.mark_used_connection_id = request.mark_used_connection_id.take();
+            }
+            if existing.save_after_open.is_none() {
+                existing.save_after_open = request.save_after_open.take();
+            }
+            if existing.post_connect_command.is_none() {
+                existing.post_connect_command = request.post_connect_command.take();
+            }
+            QueueSshTerminalOpenOutcome::Coalesced
+        } else {
+            self.pending_ssh_terminal_opens.push_back(request);
+            QueueSshTerminalOpenOutcome::Queued
+        };
+        let requests = self.take_ready_ssh_terminal_opens();
+        if requests.is_empty() {
+            outcome
+        } else {
+            self.push_runtime_effect(
+                WorkspaceRuntimeEffect::OpenReadySshTerminals { requests },
+                cx,
+            );
+            QueueSshTerminalOpenOutcome::Ready
+        }
+    }
+
+    pub(in crate::workspace) fn mark_pending_ssh_terminal_open_cleanup(
+        &mut self,
+        node_id: &NodeId,
+        cleanup_node_id: NodeId,
+    ) {
+        if let Some(pending) = self
+            .pending_ssh_terminal_opens
+            .iter_mut()
+            .find(|pending| pending.node_id == *node_id)
+        {
+            // Only newly materialized direct roots are removed after failure.
+            pending.cleanup_node_id = Some(cleanup_node_id);
+        }
+    }
+
+    pub(in crate::workspace) fn pending_ssh_terminal_open_cleanup_for_node(
+        &self,
+        node_id: &NodeId,
+    ) -> Option<NodeId> {
+        self.pending_ssh_terminal_opens
+            .iter()
+            .find(|pending| pending.node_id == *node_id)
+            .and_then(|pending| pending.cleanup_node_id.clone())
+    }
+
+    pub(in crate::workspace) fn remove_pending_ssh_terminal_opens_for_node(
+        &mut self,
+        node_id: &NodeId,
+    ) -> bool {
+        let before = self.pending_ssh_terminal_opens.len();
+        self.pending_ssh_terminal_opens
+            .retain(|pending| pending.node_id != *node_id);
+        self.pending_ssh_terminal_opens.len() != before
+    }
+
+    fn take_ready_ssh_terminal_opens(&mut self) -> Vec<PendingSshTerminalOpen> {
+        let mut remaining = VecDeque::new();
+        let mut ready = Vec::new();
+        while let Some(request) = self.pending_ssh_terminal_opens.pop_front() {
+            let node_is_ready = self
+                .node_router
+                .node_state(&request.node_id)
+                .is_ok_and(|snapshot| snapshot.state.readiness == NodeReadiness::Ready);
+            if node_is_ready {
+                ready.push(request);
+            } else {
+                remaining.push_back(request);
+            }
+        }
+        self.pending_ssh_terminal_opens = remaining;
+        ready
+    }
+
+    fn publish_ssh_terminal_opens_for_connected_node(
+        &mut self,
+        node_id: &NodeId,
+        cx: &mut Context<Self>,
+    ) {
+        let mut remaining = VecDeque::new();
+        let mut ready = Vec::new();
+        while let Some(request) = self.pending_ssh_terminal_opens.pop_front() {
+            if request.node_id == *node_id {
+                ready.push(request);
+            } else {
+                remaining.push_back(request);
+            }
+        }
+        self.pending_ssh_terminal_opens = remaining;
+        if !ready.is_empty() {
+            self.push_runtime_effect(
+                WorkspaceRuntimeEffect::OpenReadySshTerminals { requests: ready },
+                cx,
+            );
+        }
     }
 
     pub(in crate::workspace) fn has_active_reconnect_job(&self, node_id: &NodeId) -> bool {
@@ -740,6 +933,73 @@ impl WorkspaceRuntimeEntity {
                 )
             )
         });
+    }
+
+    fn shutdown_workspace_runtime(&mut self) {
+        if self.lifecycle != WorkspaceRuntimeLifecycle::Running {
+            return;
+        }
+        self.lifecycle = WorkspaceRuntimeLifecycle::ShuttingDown;
+
+        // Stop producers and invalidate deferred transitions before touching
+        // any node or registry owner they could otherwise reacquire.
+        self.shutdown_node_transport_attempts();
+        self.reconnect_debounce_generation = self.reconnect_debounce_generation.wrapping_add(1);
+        self.reconnect_cascade_generation = self.reconnect_cascade_generation.wrapping_add(1);
+        self.active_probe_timer_generation = self.active_probe_timer_generation.wrapping_add(1);
+        self.pending_reconnect_node_ids.clear();
+        self.pending_reconnect_cascade_nodes.clear();
+        self.reconnect_requeue_states.clear();
+        self.reconnect_pipeline_active_node = None;
+        self.active_connection_chain = None;
+        self.connecting_node_locks.clear();
+        self.connection_trace_state = ConnectionTraceState::default();
+        for cancellation in self
+            .reconnect_forward_restore_tokens
+            .drain()
+            .map(|(_, value)| value)
+        {
+            cancellation.store(false, Ordering::Release);
+        }
+        for node_id in self.reconnect_orchestrator.active_node_ids() {
+            let _ = self.reconnect_orchestrator.cancel(&node_id);
+        }
+        self.runtime_effects.clear();
+        self.runtime_effect_delivery_pending = false;
+        self.pending_ssh_terminal_opens.clear();
+        self.terminal_ssh_nodes.clear();
+
+        // Nodes are disconnected child-first so jump-host ancestors outlive
+        // every dependent route. Registry entries are retired only afterward.
+        let mut disconnected_node_ids = HashSet::new();
+        for root_node_id in self.node_router.root_node_ids() {
+            for node_id in self.node_router.subtree_postorder(&root_node_id) {
+                if !disconnected_node_ids.insert(node_id.clone()) {
+                    continue;
+                }
+                if let Some(connection_id) = self.node_router.connection_id_for_node(&node_id) {
+                    self.retire_node_connection(&node_id, &connection_id);
+                }
+                let _ = self
+                    .node_router
+                    .disconnect_node_runtime(&node_id, "workspace shutdown");
+            }
+        }
+        for connection in self.ssh_registry.list() {
+            let connection_id = connection.connection_id;
+            if let Some(handle) = self.ssh_registry.get(&connection_id) {
+                self.task_runtime.spawn(async move {
+                    handle.clear_physical().await;
+                });
+            }
+            self.node_router.emitter().unregister(&connection_id);
+            let _ = self
+                .ssh_registry
+                .mark_state_without_event(&connection_id, ConnectionState::Disconnected);
+            let _ = self.ssh_registry.retire_connection(&connection_id);
+        }
+
+        self.lifecycle = WorkspaceRuntimeLifecycle::Stopped;
     }
 
     pub(in crate::workspace) fn start_remote_shell_integration_gate(
@@ -1792,8 +2052,9 @@ impl WorkspaceRuntimeEntity {
         let runtime_wake = self.reconnect_worker_tx.wake();
         let release_wake = runtime_wake.clone();
         cx.on_release(move |entity, _| {
-            // Workspace release invalidates Entity-owned attempts before delivery stops.
-            entity.shutdown_node_transport_attempts();
+            // Entity release is the explicit Workspace owner boundary. Tabs,
+            // pages, and detached windows never execute this shutdown path.
+            entity.shutdown_workspace_runtime();
             release_wake.stop();
         })
         .detach();
@@ -1865,7 +2126,14 @@ impl WorkspaceRuntimeEntity {
             drain_node_event_mailbox(&self.node_event_rx);
         for result in reconnect_batch.items {
             if let Some(effect) = self.reduce_reconnect_worker_result(result, cx) {
+                let connected_node_id = match &effect {
+                    ReconnectRuntimeEffect::NodeConnected { node_id, .. } => Some(node_id.clone()),
+                    _ => None,
+                };
                 self.push_runtime_effect(WorkspaceRuntimeEffect::Reconnect(effect), cx);
+                if let Some(node_id) = connected_node_id {
+                    self.publish_ssh_terminal_opens_for_connected_node(&node_id, cx);
+                }
             }
         }
         for event in node_event_items {
@@ -2729,18 +2997,24 @@ mod tests {
     }
 
     #[gpui::test]
-    fn entity_release_preserves_registry_consumers(cx: &mut TestAppContext) {
+    fn closing_last_terminal_consumer_preserves_node_and_registry(cx: &mut TestAppContext) {
         let ssh_registry = SshConnectionRegistry::new(ConnectionPoolConfig::default());
-        let node_consumer = ConnectionConsumer::NodeRouter("test-node".to_string());
-        let connection_handle = ssh_registry.acquire(SshConfig::default(), node_consumer.clone());
+        let node_id = NodeId::new("test-node");
+        let node_consumer = ConnectionConsumer::NodeRouter(node_id.0.clone());
+        let config = SshConfig::default();
+        let connection_handle = ssh_registry.acquire(config.clone(), node_consumer.clone());
         let connection_id = connection_handle.connection_id().to_string();
-        let entity_registry = ssh_registry.clone();
-        let node_router = NodeRouter::new(entity_registry.clone());
+        let _ = ssh_registry.mark_state(&connection_id, ConnectionState::Active);
+        let node_router = NodeRouter::new(ssh_registry.clone());
+        node_router.upsert_node(node_id.clone(), config);
+        node_router
+            .bind_connection(&node_id, connection_id.clone())
+            .expect("bind node connection");
         let task_runtime = test_task_runtime();
         let entity = cx.new(|cx| {
             WorkspaceRuntimeEntity::new(
-                entity_registry,
-                node_router,
+                ssh_registry.clone(),
+                node_router.clone(),
                 task_runtime,
                 true,
                 ReconnectTiming::default(),
@@ -2749,15 +3023,139 @@ mod tests {
             )
         });
 
-        drop(entity);
-        cx.update(|_cx| {});
+        let session_id = TerminalSessionId(7);
+        entity.update(cx, |entity, _cx| {
+            assert!(entity.register_ssh_terminal_session(session_id, node_id.clone()));
+            assert_eq!(
+                entity.unregister_ssh_terminal_session(session_id),
+                Some(node_id.clone())
+            );
+        });
 
         let connection_info = ssh_registry
             .get(&connection_id)
-            .expect("runtime connection remains registered")
+            .expect("closing the terminal must retain the node connection")
             .info();
         assert_eq!(connection_info.ref_count, 1);
         assert_eq!(connection_info.consumers, vec![node_consumer]);
+        assert_eq!(
+            node_router.connection_id_for_node(&node_id),
+            Some(connection_id)
+        );
+    }
+
+    #[gpui::test]
+    fn first_terminal_requests_are_runtime_owned_and_coalesced(cx: &mut TestAppContext) {
+        let entity = test_runtime_entity(cx);
+        let node_id = NodeId::new("node-a");
+        entity.update(cx, |entity, cx| {
+            let first = entity.queue_ssh_terminal_open(
+                PendingSshTerminalOpen {
+                    node_id: node_id.clone(),
+                    post_connect_command: None,
+                    mark_used_connection_id: None,
+                    save_after_open: None,
+                    cleanup_node_id: None,
+                    title: "First terminal".to_string(),
+                },
+                cx,
+            );
+            let second = entity.queue_ssh_terminal_open(
+                PendingSshTerminalOpen {
+                    node_id: node_id.clone(),
+                    post_connect_command: Some("pwd".to_string()),
+                    mark_used_connection_id: Some("saved-a".to_string()),
+                    save_after_open: None,
+                    cleanup_node_id: None,
+                    title: "Ignored duplicate".to_string(),
+                },
+                cx,
+            );
+
+            assert_eq!(first, QueueSshTerminalOpenOutcome::Queued);
+            assert_eq!(second, QueueSshTerminalOpenOutcome::Coalesced);
+            assert_eq!(entity.pending_ssh_terminal_opens.len(), 1);
+            let pending = entity
+                .pending_ssh_terminal_opens
+                .front()
+                .expect("coalesced terminal request");
+            assert_eq!(pending.title, "First terminal");
+            assert_eq!(pending.post_connect_command.as_deref(), Some("pwd"));
+            assert_eq!(pending.mark_used_connection_id.as_deref(), Some("saved-a"));
+        });
+    }
+
+    #[gpui::test]
+    fn node_connected_transition_emits_first_terminal_effect_once(cx: &mut TestAppContext) {
+        let entity = test_runtime_entity(cx);
+        let node_id = NodeId::new("node-ready");
+        entity.update(cx, |entity, cx| {
+            let outcome = entity.queue_ssh_terminal_open(
+                PendingSshTerminalOpen {
+                    node_id: node_id.clone(),
+                    post_connect_command: None,
+                    mark_used_connection_id: None,
+                    save_after_open: None,
+                    cleanup_node_id: None,
+                    title: "Ready terminal".to_string(),
+                },
+                cx,
+            );
+            assert_eq!(outcome, QueueSshTerminalOpenOutcome::Queued);
+            entity.publish_ssh_terminal_opens_for_connected_node(&node_id, cx);
+            assert!(entity.pending_ssh_terminal_opens.is_empty());
+
+            let effects = entity.take_runtime_effects(cx);
+            assert_eq!(effects.len(), 1);
+            let WorkspaceRuntimeEffect::OpenReadySshTerminals { requests } =
+                effects.into_iter().next().expect("typed open effect")
+            else {
+                panic!("expected typed SSH terminal open effect");
+            };
+            assert_eq!(requests.len(), 1);
+            assert_eq!(requests[0].node_id, node_id);
+            assert!(entity.take_runtime_effects(cx).is_empty());
+        });
+    }
+
+    #[gpui::test]
+    fn workspace_shutdown_stops_nodes_and_registry_once(cx: &mut TestAppContext) {
+        let ssh_registry = SshConnectionRegistry::new(ConnectionPoolConfig::default());
+        let node_router = NodeRouter::new(ssh_registry.clone());
+        let node_id = NodeId::new("node-a");
+        let config = SshConfig::default();
+        node_router.upsert_node(node_id.clone(), config.clone());
+        let connection =
+            ssh_registry.acquire(config, ConnectionConsumer::NodeRouter(node_id.0.clone()));
+        let connection_id = connection.connection_id().to_string();
+        let _ = ssh_registry.mark_state(&connection_id, ConnectionState::Active);
+        node_router
+            .bind_connection(&node_id, connection_id.clone())
+            .expect("bind node connection");
+        let task_runtime = test_task_runtime();
+        let entity = cx.new(|cx| {
+            WorkspaceRuntimeEntity::new(
+                ssh_registry.clone(),
+                node_router.clone(),
+                task_runtime,
+                true,
+                ReconnectTiming::default(),
+                3,
+                cx,
+            )
+        });
+
+        entity.update(cx, |entity, _cx| {
+            assert!(entity.register_ssh_terminal_session(TerminalSessionId(9), node_id.clone()));
+            entity.shutdown_workspace_runtime();
+            entity.shutdown_workspace_runtime();
+            assert_eq!(entity.lifecycle, WorkspaceRuntimeLifecycle::Stopped);
+            assert!(entity.terminal_ssh_nodes.is_empty());
+            assert!(entity.pending_ssh_terminal_opens.is_empty());
+        });
+
+        assert!(ssh_registry.get(&connection_id).is_none());
+        assert!(node_router.connection_id_for_node(&node_id).is_none());
     }
 
     #[gpui::test]

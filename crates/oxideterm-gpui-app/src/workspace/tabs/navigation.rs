@@ -241,7 +241,10 @@ impl WorkspaceApp {
             }
         }
         if let Some(session_id) = self.active_terminal_session_id()
-            && let Some(node_id) = self.terminal_ssh_nodes.get(&session_id)
+            && let Some(node_id) = self
+                .workspace_runtime
+                .read(cx)
+                .ssh_terminal_node_id(session_id)
         {
             self.active_ssh_node_id = Some(node_id.clone());
             self.expanded_ssh_nodes.insert(node_id.clone());
@@ -304,8 +307,14 @@ impl WorkspaceApp {
         config: SshConfig,
         title: String,
         session_id: TerminalSessionId,
-    ) {
-        self.terminal_ssh_nodes.insert(session_id, node_id.clone());
+        cx: &mut App,
+    ) -> Result<()> {
+        let registered = self.workspace_runtime.update(cx, |runtime, _cx| {
+            runtime.register_ssh_terminal_session(session_id, node_id.clone())
+        });
+        if !registered {
+            return Err(anyhow::anyhow!("workspace runtime is shutting down"));
+        }
         self.expanded_ssh_nodes.insert(node_id.clone());
         self.active_ssh_node_id = Some(node_id.clone());
         if let Some(saved_connection_id) = saved_connection_id.as_ref() {
@@ -332,12 +341,14 @@ impl WorkspaceApp {
                     NodeReadiness::Connecting,
                 )
             });
+        Ok(())
     }
 
     pub(super) fn register_existing_ssh_terminal_session(
         &mut self,
         node_id: &NodeId,
         session_id: TerminalSessionId,
+        cx: &mut App,
     ) -> Result<()> {
         let node = self
             .ssh_nodes
@@ -350,7 +361,12 @@ impl WorkspaceApp {
 
         // Existing terminals register only their consumer identity. The node
         // and registry keep owning the authentication config and transport.
-        self.terminal_ssh_nodes.insert(session_id, node_id.clone());
+        let registered = self.workspace_runtime.update(cx, |runtime, _cx| {
+            runtime.register_ssh_terminal_session(session_id, node_id.clone())
+        });
+        if !registered {
+            return Err(anyhow::anyhow!("workspace runtime is shutting down"));
+        }
         self.expanded_ssh_nodes.insert(node_id.clone());
         self.active_ssh_node_id = Some(node_id.clone());
         if let Some(saved_connection_id) = saved_connection_id {
@@ -363,6 +379,7 @@ impl WorkspaceApp {
     pub(in crate::workspace) fn unregister_ssh_terminal_session(
         &mut self,
         session_id: TerminalSessionId,
+        cx: &mut App,
     ) {
         let forwarding_registry = self.forwarding_service.registry().clone();
         let forwarding_runtime = self.forwarding_runtime.clone();
@@ -374,7 +391,10 @@ impl WorkspaceApp {
         });
 
         self.terminal_endpoint_sessions.remove(&session_id);
-        let Some(node_id) = self.terminal_ssh_nodes.remove(&session_id) else {
+        let node_id = self.workspace_runtime.update(cx, |runtime, _cx| {
+            runtime.unregister_ssh_terminal_session(session_id)
+        });
+        let Some(node_id) = node_id else {
             return;
         };
         // Tauri terminal close only removes the terminal/session mapping.
@@ -411,9 +431,13 @@ impl WorkspaceApp {
         if let Some(tab) = self.tab_mut_by_id(location.tab_id) {
             tab.active_pane_id = Some(location.pane_id);
         }
-        if let Some(node_id) = self.terminal_ssh_nodes.get(&session_id) {
+        if let Some(node_id) = self
+            .workspace_runtime
+            .read(cx)
+            .ssh_terminal_node_id(session_id)
+        {
             focus_terminal_node_projection(
-                node_id,
+                &node_id,
                 &mut self.active_ssh_node_id,
                 &mut self.expanded_ssh_nodes,
             );
@@ -904,7 +928,7 @@ impl WorkspaceApp {
         }
         for session_id in session_ids {
             self.serial_terminal_configs.remove(&session_id);
-            self.unregister_ssh_terminal_session(session_id);
+            self.unregister_ssh_terminal_session(session_id, cx);
         }
         for pane_id in pane_ids {
             if let Some(pane) = self.remove_terminal_pane(&pane_id, cx) {
@@ -1047,9 +1071,11 @@ impl WorkspaceApp {
         if let Some(root_pane) = &tab.root_pane {
             root_pane.collect_session_ids(&mut session_ids);
         }
-        session_ids
-            .into_iter()
-            .any(|session_id| self.terminal_ssh_nodes.get(&session_id) == Some(node_id))
+        session_ids.into_iter().any(|session_id| {
+            self.workspace_runtime
+                .read(cx)
+                .ssh_terminal_session_belongs_to_node(session_id, node_id)
+        })
     }
 
     pub(in crate::workspace) fn next_tab(

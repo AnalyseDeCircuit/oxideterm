@@ -327,7 +327,7 @@ impl WorkspaceApp {
         target_node_id: NodeId,
         title: String,
         intent: SshConnectionIntent,
-        save_after_open: Option<SaveConnectionRequest>,
+        save_after_open: &mut Option<SaveConnectionRequest>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
@@ -414,7 +414,7 @@ impl WorkspaceApp {
             plan,
             title,
             intent,
-            save_after_open,
+            save_after_open: save_after_open.take(),
             upstream_proxy,
         };
         let _ = self.connection_flow.update(cx, |connection_flow, cx| {
@@ -842,7 +842,9 @@ impl WorkspaceApp {
             runtime.remove_node_runtime_subtree(&cleanup_root, cx)
         });
         for node_id in removed_nodes {
-            self.remove_pending_ssh_terminal_opens_for_node(&node_id);
+            self.workspace_runtime.update(cx, |runtime, _cx| {
+                runtime.remove_pending_ssh_terminal_opens_for_node(&node_id);
+            });
             self.ssh_nodes.remove(&node_id);
             self.expanded_ssh_nodes.remove(&node_id);
             self.saved_ssh_nodes

@@ -46,6 +46,9 @@ impl WorkspaceApp {
             runtime_entity::WorkspaceRuntimeEffect::Node(effect) => {
                 self.apply_node_runtime_effect(effect, window, cx)
             }
+            runtime_entity::WorkspaceRuntimeEffect::OpenReadySshTerminals { requests } => {
+                self.open_ready_ssh_terminal_requests(requests, window, cx)
+            }
             runtime_entity::WorkspaceRuntimeEffect::StartReconnectRoot { node_id }
             | runtime_entity::WorkspaceRuntimeEffect::StartReconnectPipeline { node_id } => {
                 self.start_grace_period_reconnect(&node_id, cx);
@@ -93,7 +96,7 @@ impl WorkspaceApp {
     }
 
     fn refresh_ssh_terminal_input_locks(&mut self, cx: &mut Context<Self>) {
-        let terminal_nodes = self.terminal_ssh_nodes.clone();
+        let terminal_nodes = self.workspace_runtime.read(cx).ssh_terminal_nodes();
         for (session_id, node_id) in terminal_nodes {
             let locked = self.ssh_terminal_input_locked_for_node(&node_id);
             let Some(pane_id) = self
@@ -135,7 +138,9 @@ impl WorkspaceApp {
             runtime.remove_node_runtime_subtree(cleanup_root, cx)
         });
         for node_id in removed_nodes {
-            self.remove_pending_ssh_terminal_opens_for_node(&node_id);
+            self.workspace_runtime.update(cx, |runtime, _cx| {
+                runtime.remove_pending_ssh_terminal_opens_for_node(&node_id);
+            });
             self.ssh_nodes.remove(&node_id);
             self.expanded_ssh_nodes.remove(&node_id);
             self.saved_ssh_nodes
@@ -245,7 +250,6 @@ impl WorkspaceApp {
                             &node_id, window, cx,
                         );
                     }
-                    let _ = self.drain_ready_pending_ssh_terminal_opens(window, cx);
                     self.restore_forwarding_rules_for_reconnect(&node_id, cx);
                     if resume_transfers_without_forwards {
                         self.log_reconnect_phase(
@@ -378,8 +382,13 @@ impl WorkspaceApp {
                             }
                         }
                     }
-                    let cleanup_node_id = self.pending_ssh_terminal_open_cleanup_for_node(&node_id);
-                    self.remove_pending_ssh_terminal_opens_for_node(&node_id);
+                    let cleanup_node_id = self
+                        .workspace_runtime
+                        .read(cx)
+                        .pending_ssh_terminal_open_cleanup_for_node(&node_id);
+                    self.workspace_runtime.update(cx, |runtime, _cx| {
+                        runtime.remove_pending_ssh_terminal_opens_for_node(&node_id);
+                    });
                     if let Some(cleanup_node_id) = cleanup_node_id {
                         self.cleanup_temporary_session_tree_node(&cleanup_node_id, cx);
                         if !connection_chain_node {
@@ -896,13 +905,13 @@ impl WorkspaceApp {
                     let _ = pane.update(cx, |pane, _cx| pane.shutdown());
                 }
                 self.bind_terminal_location(tab_id, new_pane_id, new_session_id, cx);
-                self.unregister_ssh_terminal_session(old_session_id);
+                self.unregister_ssh_terminal_session(old_session_id, cx);
                 remounted += 1;
             } else {
                 if let Some(pane) = self.remove_terminal_pane(&new_pane_id, cx) {
                     let _ = pane.update(cx, |pane, _cx| pane.shutdown());
                 }
-                self.unregister_ssh_terminal_session(new_session_id);
+                self.unregister_ssh_terminal_session(new_session_id, cx);
             }
         }
         if remounted > 0 {

@@ -84,21 +84,23 @@ impl WorkspaceApp {
         self.remote_shell_integration.pending
     }
 
-    pub(in crate::workspace) fn active_ssh_terminal_node_id(&self) -> Option<NodeId> {
+    pub(in crate::workspace) fn active_ssh_terminal_node_id(&self, cx: &App) -> Option<NodeId> {
         let tab = self.active_tab()?;
         if tab.kind != TabKind::SshTerminal {
             return None;
         }
         let pane_id = tab.active_pane_id?;
         let session_id = tab.root_pane.as_ref()?.session_id_for_pane(pane_id)?;
-        self.terminal_ssh_nodes.get(&session_id).cloned()
+        self.workspace_runtime
+            .read(cx)
+            .ssh_terminal_node_id(session_id)
     }
 
     pub(in crate::workspace) fn open_remote_shell_integration_confirm(
         &mut self,
         cx: &mut Context<Self>,
     ) {
-        self.remote_shell_integration.confirm_node_id = self.active_ssh_terminal_node_id();
+        self.remote_shell_integration.confirm_node_id = self.active_ssh_terminal_node_id(cx);
         self.remote_shell_integration.confirm_source =
             Some(RemoteShellIntegrationConfirmSource::Toolbar);
         self.remote_shell_integration

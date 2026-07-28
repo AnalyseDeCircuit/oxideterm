@@ -146,7 +146,7 @@ impl WorkspaceApp {
             .then(|| self.active_terminal_cwd_snapshot(cx))
             .flatten();
         let cwd_supported =
-            cwd_display_enabled && self.active_terminal_cwd_scope_and_pane().is_some();
+            cwd_display_enabled && self.active_terminal_cwd_scope_and_pane(cx).is_some();
         let git_snapshot = self.active_terminal_git_snapshot(cx);
         let project_tasks_enabled = self.terminal_project_tasks_enabled();
         let project_snapshot = project_tasks_enabled
@@ -156,7 +156,7 @@ impl WorkspaceApp {
         let is_local_terminal = self
             .active_tab()
             .is_some_and(|tab| tab.kind == TabKind::LocalTerminal);
-        let can_configure_remote_integration = self.active_ssh_terminal_node_id().is_some();
+        let can_configure_remote_integration = self.active_ssh_terminal_node_id(cx).is_some();
         let remote_integration_pending = self.remote_shell_integration_pending();
         let remote_integration_tooltip_id = "terminal-command-configure-directory-tracking";
         let remote_integration_tooltip_title = self

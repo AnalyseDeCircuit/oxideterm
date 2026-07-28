@@ -705,7 +705,7 @@ impl WorkspaceApp {
         &self,
         cx: &mut Context<Self>,
     ) -> Option<CurrentDirectorySnapshot> {
-        let (scope, pane_id) = self.active_terminal_cwd_scope_and_pane()?;
+        let (scope, pane_id) = self.active_terminal_cwd_scope_and_pane(cx)?;
         self.terminal_cwd_snapshot_for_pane(scope, pane_id, cx)
     }
 
@@ -713,7 +713,7 @@ impl WorkspaceApp {
         &self,
         cx: &mut Context<Self>,
     ) -> Option<String> {
-        let (_, pane_id) = self.active_terminal_cwd_scope_and_pane()?;
+        let (_, pane_id) = self.active_terminal_cwd_scope_and_pane(cx)?;
         self.tab_host
             .read(cx)
             .panes()
@@ -726,7 +726,7 @@ impl WorkspaceApp {
         &self,
         cx: &mut Context<Self>,
     ) -> bool {
-        let Some((_, pane_id)) = self.active_terminal_cwd_scope_and_pane() else {
+        let Some((_, pane_id)) = self.active_terminal_cwd_scope_and_pane(cx) else {
             return false;
         };
         self.tab_host
@@ -743,7 +743,7 @@ impl WorkspaceApp {
         if !self.terminal_current_directory_awareness_enabled() {
             return None;
         }
-        let (scope, pane_id) = self.active_terminal_cwd_scope_and_pane()?;
+        let (scope, pane_id) = self.active_terminal_cwd_scope_and_pane(cx)?;
         if !matches!(&scope, CurrentDirectoryScope::Local) {
             return None;
         }
@@ -759,7 +759,7 @@ impl WorkspaceApp {
         if !self.terminal_current_directory_awareness_enabled() {
             return None;
         }
-        let (scope, pane_id) = self.active_terminal_cwd_scope_and_pane()?;
+        let (scope, pane_id) = self.active_terminal_cwd_scope_and_pane(cx)?;
         match &scope {
             CurrentDirectoryScope::SshNode(active_node_id) if active_node_id == &node_id.0 => {}
             _ => return None,
@@ -770,6 +770,7 @@ impl WorkspaceApp {
 
     pub(in crate::workspace) fn active_terminal_cwd_scope_and_pane(
         &self,
+        cx: &App,
     ) -> Option<(CurrentDirectoryScope, PaneId)> {
         let tab = self.active_tab()?;
         let pane_id = tab.active_pane_id?;
@@ -777,7 +778,10 @@ impl WorkspaceApp {
             TabKind::LocalTerminal => CurrentDirectoryScope::Local,
             TabKind::SshTerminal => {
                 let session_id = self.active_terminal_session_id()?;
-                let node_id = self.terminal_ssh_nodes.get(&session_id)?;
+                let node_id = self
+                    .workspace_runtime
+                    .read(cx)
+                    .ssh_terminal_node_id(session_id)?;
                 CurrentDirectoryScope::ssh_node(node_id.0.clone())
             }
             _ => return None,
@@ -809,7 +813,7 @@ impl WorkspaceApp {
             return;
         };
 
-        let Some((scope, pane_id)) = self.active_terminal_cwd_scope_and_pane() else {
+        let Some((scope, pane_id)) = self.active_terminal_cwd_scope_and_pane(cx) else {
             return;
         };
         let Some(pane) = self.tab_host.read(cx).panes().get(&pane_id).cloned() else {

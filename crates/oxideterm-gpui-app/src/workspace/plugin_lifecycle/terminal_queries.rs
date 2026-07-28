@@ -37,7 +37,7 @@ pub(super) fn native_plugin_terminal_snapshots(
     }
 
     (
-        native_plugin_active_terminal_target(workspace, connection_states),
+        native_plugin_active_terminal_target(workspace, connection_states, cx),
         terminal_nodes,
     )
 }
@@ -65,6 +65,7 @@ pub(super) fn native_plugin_pane_for_session(
 pub(super) fn native_plugin_active_terminal_target(
     workspace: &WorkspaceApp,
     connection_states: &HashMap<String, Value>,
+    cx: &App,
 ) -> Value {
     let Some(session_id) = workspace.active_terminal_session_id() else {
         return Value::Null;
@@ -94,7 +95,10 @@ pub(super) fn native_plugin_active_terminal_target(
         });
     }
 
-    let node_id = workspace.terminal_ssh_nodes.get(&session_id).cloned();
+    let node_id = workspace
+        .workspace_runtime
+        .read(cx)
+        .ssh_terminal_node_id(session_id);
     let connection_id = node_id
         .as_ref()
         .and_then(|node_id| workspace.node_router.connection_id_for_node(node_id));

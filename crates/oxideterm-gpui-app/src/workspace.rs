@@ -264,9 +264,7 @@ use self::new_connection::{
 use self::onboarding::OnboardingState;
 use self::overlay::{WorkspaceOverlayEntity, WorkspaceOverlayIntent};
 use self::pane_tree::SplitDrag;
-use self::root::state::{
-    PendingSshTerminalOpen, ReconnectWorkerResult, WorkspaceSshNode, WorkspaceSshNodeEndpoint,
-};
+use self::root::state::{ReconnectWorkerResult, WorkspaceSshNode, WorkspaceSshNodeEndpoint};
 use self::root::{background::*, helpers::*};
 use self::session_manager::{SessionManagerState, SessionManagerWorkspaceEvent};
 use self::sidebar::AiInlinePanelState;
@@ -821,8 +819,6 @@ pub(crate) struct WorkspaceApp {
     terminal_endpoint_sessions: HashMap<TerminalSessionId, WorkspaceTerminalEndpointSession>,
     ssh_nodes: HashMap<NodeId, WorkspaceSshNode>,
     saved_ssh_nodes: HashMap<String, NodeId>,
-    terminal_ssh_nodes: HashMap<TerminalSessionId, NodeId>,
-    pending_ssh_terminal_opens: VecDeque<PendingSshTerminalOpen>,
     expanded_ssh_nodes: HashSet<NodeId>,
     active_ssh_node_id: Option<NodeId>,
     next_ssh_node_id: u64,

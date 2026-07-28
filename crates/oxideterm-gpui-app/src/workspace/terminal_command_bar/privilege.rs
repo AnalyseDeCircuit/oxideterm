@@ -6,6 +6,7 @@ use super::*;
 impl WorkspaceApp {
     pub(super) fn active_privilege_scope_credentials(
         &self,
+        cx: &App,
     ) -> Option<(String, Vec<SavedPrivilegeCredential>)> {
         let Some(active_tab) = self.active_tab() else {
             log_privilege_prompt_helper(format_args!("scope unavailable: no active tab"));
@@ -40,13 +41,17 @@ impl WorkspaceApp {
                     ));
                     return None;
                 };
-                let Some(node_id) = self.terminal_ssh_nodes.get(&session_id) else {
+                let Some(node_id) = self
+                    .workspace_runtime
+                    .read(cx)
+                    .ssh_terminal_node_id(session_id)
+                else {
                     log_privilege_prompt_helper(format_args!(
                         "scope unavailable: ssh terminal session has no node mapping"
                     ));
                     return None;
                 };
-                let Some(connection_id) = self.ssh_privilege_scope_id_for_node(node_id) else {
+                let Some(connection_id) = self.ssh_privilege_scope_id_for_node(&node_id) else {
                     log_privilege_prompt_helper(format_args!(
                         "scope unavailable: ssh node has no saved owner"
                     ));
@@ -144,7 +149,7 @@ impl WorkspaceApp {
         // Tauri keeps the prompt state alive even when credential metadata
         // cannot be loaded. Do not let a missing credential row or transient
         // keychain/config error suppress the detected sudo/su prompt.
-        let Some((connection_id, credentials)) = self.active_privilege_scope_credentials() else {
+        let Some((connection_id, credentials)) = self.active_privilege_scope_credentials(cx) else {
             log_privilege_prompt_helper(format_args!(
                 "state unavailable: no credential scope tracked_prompt={} visible_chars={}",
                 tracked_prompt_kind, visible_shape.chars

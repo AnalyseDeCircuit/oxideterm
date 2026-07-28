@@ -346,10 +346,12 @@ impl WorkspaceApp {
                 cx,
             );
             if result.is_ok() {
-                self.mark_pending_ssh_terminal_open_cleanup(
-                    &cleanup_node_id,
-                    cleanup_node_id.clone(),
-                );
+                self.workspace_runtime.update(cx, |runtime, _cx| {
+                    runtime.mark_pending_ssh_terminal_open_cleanup(
+                        &cleanup_node_id,
+                        cleanup_node_id.clone(),
+                    );
+                });
             }
             result
         }
@@ -593,7 +595,8 @@ impl WorkspaceApp {
             config.clone(),
             title.clone(),
             session_id,
-        );
+            cx,
+        )?;
         if starting_node_connection {
             self.begin_connection_trace_for_node(
                 &node_id,
@@ -798,7 +801,7 @@ impl WorkspaceApp {
 
         let pane_id = self.alloc_pane_id(cx);
         let session_id = self.alloc_session_id(cx);
-        self.register_existing_ssh_terminal_session(node_id, session_id)?;
+        self.register_existing_ssh_terminal_session(node_id, session_id, cx)?;
 
         // Tauri remounts terminal tabs by replacing the old session id in the
         // pane tree after reconnect. The new GPUI pane is only a consumer of
@@ -942,7 +945,7 @@ impl WorkspaceApp {
         title: String,
         saved_connection_id: Option<String>,
         mark_used_connection_id: Option<String>,
-        save_after_open: Option<SaveConnectionRequest>,
+        mut save_after_open: Option<SaveConnectionRequest>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Result<()> {
@@ -989,7 +992,7 @@ impl WorkspaceApp {
                 node_id.clone(),
                 title.clone(),
                 intent,
-                save_after_open.clone(),
+                &mut save_after_open,
                 window,
                 cx,
             ) {
@@ -997,88 +1000,39 @@ impl WorkspaceApp {
                 return Ok(());
             }
         }
-        if let Some(existing) = self
-            .pending_ssh_terminal_opens
-            .iter()
-            .find(|pending| pending.node_id == node_id)
-        {
-            // Keep the first terminal-open request, but preserve the saved
-            // connection side effects when a later action joins an already
-            // pending node connection.
-            if (existing.mark_used_connection_id.is_none() && mark_used_connection_id.is_some())
-                || (existing.save_after_open.is_none() && save_after_open.is_some())
-            {
-                if let Some(existing) = self
-                    .pending_ssh_terminal_opens
-                    .iter_mut()
-                    .find(|pending| pending.node_id == node_id)
-                {
-                    if existing.mark_used_connection_id.is_none() {
-                        existing.mark_used_connection_id = mark_used_connection_id;
-                    }
-                    if existing.save_after_open.is_none() {
-                        existing.save_after_open = save_after_open;
-                    }
-                    if existing.post_connect_command.is_none() {
-                        existing.post_connect_command = post_connect_command;
-                    }
-                }
-            }
-        } else {
-            self.pending_ssh_terminal_opens
-                .push_back(PendingSshTerminalOpen {
+        let queue_outcome = self.workspace_runtime.update(cx, |runtime, runtime_cx| {
+            runtime.queue_ssh_terminal_open(
+                runtime_entity::PendingSshTerminalOpen {
                     node_id: node_id.clone(),
                     post_connect_command,
                     mark_used_connection_id,
                     save_after_open,
                     cleanup_node_id: None,
                     title,
-                });
+                },
+                runtime_cx,
+            )
+        });
+        if queue_outcome == runtime_entity::QueueSshTerminalOpenOutcome::WorkspaceShuttingDown {
+            return Err(anyhow::anyhow!("workspace runtime is shutting down"));
+        }
+        if queue_outcome == runtime_entity::QueueSshTerminalOpenOutcome::Ready {
+            cx.notify();
+            return Ok(());
         }
         self.ensure_node_connection_started(&node_id, cx);
         cx.notify();
         Ok(())
     }
 
-    pub(in crate::workspace) fn mark_pending_ssh_terminal_open_cleanup(
+    pub(in crate::workspace) fn open_ready_ssh_terminal_requests(
         &mut self,
-        node_id: &NodeId,
-        cleanup_node_id: NodeId,
-    ) {
-        if let Some(pending) = self
-            .pending_ssh_terminal_opens
-            .iter_mut()
-            .find(|pending| pending.node_id == *node_id)
-        {
-            // Tauri saved direct plans set cleanupNodeId only for freshly
-            // created roots. Existing direct nodes are reused without cleanup.
-            pending.cleanup_node_id = Some(cleanup_node_id);
-        }
-    }
-
-    pub(in crate::workspace) fn pending_ssh_terminal_open_cleanup_for_node(
-        &self,
-        node_id: &NodeId,
-    ) -> Option<NodeId> {
-        self.pending_ssh_terminal_opens
-            .iter()
-            .find(|pending| pending.node_id == *node_id)
-            .and_then(|pending| pending.cleanup_node_id.clone())
-    }
-
-    pub(in crate::workspace) fn drain_ready_pending_ssh_terminal_opens(
-        &mut self,
+        requests: Vec<runtime_entity::PendingSshTerminalOpen>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
-        let mut pending = std::mem::take(&mut self.pending_ssh_terminal_opens);
-        let mut remaining = VecDeque::new();
         let mut opened = false;
-        while let Some(request) = pending.pop_front() {
-            if !self.node_is_ready_for_terminal(&request.node_id) {
-                remaining.push_back(request);
-                continue;
-            }
+        for request in requests {
             if self
                 .create_ssh_terminal_tab_for_existing_node(
                     &request.node_id,
@@ -1099,18 +1053,7 @@ impl WorkspaceApp {
                 opened = true;
             }
         }
-        self.pending_ssh_terminal_opens = remaining;
         opened
-    }
-
-    pub(in crate::workspace) fn remove_pending_ssh_terminal_opens_for_node(
-        &mut self,
-        node_id: &NodeId,
-    ) -> bool {
-        let before = self.pending_ssh_terminal_opens.len();
-        self.pending_ssh_terminal_opens
-            .retain(|pending| pending.node_id != *node_id);
-        self.pending_ssh_terminal_opens.len() != before
     }
 
     pub(in crate::workspace) fn node_is_ready_for_terminal(&self, node_id: &NodeId) -> bool {

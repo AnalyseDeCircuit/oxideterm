@@ -677,8 +677,6 @@ impl WorkspaceApp {
             terminal_endpoint_sessions: HashMap::new(),
             ssh_nodes: HashMap::new(),
             saved_ssh_nodes: HashMap::new(),
-            terminal_ssh_nodes: HashMap::new(),
-            pending_ssh_terminal_opens: VecDeque::new(),
             expanded_ssh_nodes: HashSet::new(),
             active_ssh_node_id: None,
             next_ssh_node_id: 1,

@@ -1144,7 +1144,10 @@ impl WorkspaceApp {
             TabKind::LocalTerminal => GitProbeScope::Local,
             TabKind::SshTerminal => {
                 let session_id = self.active_terminal_session_id()?;
-                let node_id = self.terminal_ssh_nodes.get(&session_id)?;
+                let node_id = self
+                    .workspace_runtime
+                    .read(cx)
+                    .ssh_terminal_node_id(session_id)?;
                 GitProbeScope::ssh_node(node_id.0.clone())
             }
             _ => return None,

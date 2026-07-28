@@ -394,7 +394,7 @@ impl WorkspaceApp {
                 )
             })
             .collect::<HashMap<_, _>>();
-        let target = native_plugin_active_terminal_target(self, &connection_states);
+        let target = native_plugin_active_terminal_target(self, &connection_states, cx);
         if target
             .get("connectionState")
             .and_then(Value::as_str)

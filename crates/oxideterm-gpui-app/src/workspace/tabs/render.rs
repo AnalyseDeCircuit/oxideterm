@@ -690,9 +690,12 @@ impl WorkspaceApp {
                         .root_pane
                         .as_ref()
                         .and_then(|root| root.session_id_for_pane(active_pane_id))
-                    && let Some(node_id) = self.terminal_ssh_nodes.get(&session_id)
+                    && let Some(node_id) = self
+                        .workspace_runtime
+                        .read(cx)
+                        .ssh_terminal_node_id(session_id)
                 {
-                    return Some(node_id.clone());
+                    return Some(node_id);
                 }
                 let mut session_ids = Vec::new();
                 tab.root_pane
@@ -700,17 +703,21 @@ impl WorkspaceApp {
                     .map(|root| root.collect_session_ids(&mut session_ids));
                 session_ids
                     .into_iter()
-                    .filter_map(|session_id| self.terminal_ssh_nodes.get(&session_id))
+                    .filter_map(|session_id| {
+                        self.workspace_runtime
+                            .read(cx)
+                            .ssh_terminal_node_id(session_id)
+                    })
                     .find(|node_id| self.has_active_reconnect_job(node_id, cx))
-                    .cloned()
                     .or_else(|| {
                         tab.root_pane.as_ref().and_then(|root| {
                             let mut session_ids = Vec::new();
                             root.collect_session_ids(&mut session_ids);
-                            session_ids
-                                .first()
-                                .and_then(|session_id| self.terminal_ssh_nodes.get(session_id))
-                                .cloned()
+                            session_ids.first().and_then(|session_id| {
+                                self.workspace_runtime
+                                    .read(cx)
+                                    .ssh_terminal_node_id(*session_id)
+                            })
                         })
                     })
             }

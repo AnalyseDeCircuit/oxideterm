@@ -66,7 +66,7 @@ impl WorkspaceApp {
         }
         match self.active_tab().map(|tab| &tab.kind) {
             Some(TabKind::SshTerminal) => {
-                if let Some((session_id, node_id)) = self.ai_active_ssh_session()
+                if let Some((session_id, node_id)) = self.ai_active_ssh_session(cx)
                     && let Some(node) = self.ssh_nodes.get(&node_id)
                 {
                     parts.push(format!(
@@ -257,7 +257,10 @@ impl WorkspaceApp {
             let Some(session_id) = self.session_id_for_pane(*pane_id) else {
                 continue;
             };
-            let node_id = self.terminal_ssh_nodes.get(&session_id).cloned();
+            let node_id = self
+                .workspace_runtime
+                .read(cx)
+                .ssh_terminal_node_id(session_id);
             for record in pane.read(cx).ai_command_records() {
                 if !seen.insert(record.command_id.clone()) {
                     continue;
@@ -466,9 +469,13 @@ impl WorkspaceApp {
 
     pub(in crate::workspace) fn ai_active_ssh_session(
         &self,
+        cx: &App,
     ) -> Option<(TerminalSessionId, NodeId)> {
         let session_id = self.ai_active_terminal_session_id()?;
-        let node_id = self.terminal_ssh_nodes.get(&session_id)?.clone();
+        let node_id = self
+            .workspace_runtime
+            .read(cx)
+            .ssh_terminal_node_id(session_id)?;
         Some((session_id, node_id))
     }
 
