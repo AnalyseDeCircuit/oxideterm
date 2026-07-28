@@ -753,7 +753,7 @@ pub fn settings_background_thumbnail_remove_button(
     close_icon: AnyElement,
 ) -> Div {
     // The close button is visual chrome only; callers attach the destructive
-    // clear action so file/background state remains in WorkspaceApp.
+    // intent so file and gallery state remain in the owning settings Entity.
     div()
         .absolute()
         .top(px(6.0))

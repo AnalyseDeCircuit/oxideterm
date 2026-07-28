@@ -204,8 +204,7 @@ use oxideterm_settings::{
     CursorStyle as SettingsCursorStyle, FontFamily, FrostedGlassMode, HighlightRuleRenderMode,
     Language, MAX_TERMINAL_BACKGROUND_OPACITY, MAX_WINDOW_OPACITY, MIN_TERMINAL_BACKGROUND_OPACITY,
     MIN_WINDOW_OPACITY, PersistedSettings, SettingsStore, background_images_directory,
-    default_settings_path, ensure_bundled_background_image, import_background_images,
-    is_managed_background_image, list_background_images, remove_background_image,
+    default_settings_path, ensure_bundled_background_image, list_background_images,
 };
 use oxideterm_settings_model::{
     AiMcpServerDraft, AiProviderKeyStatusDelivery, SettingsNavigationLayout, SettingsPageModel,
@@ -877,8 +876,6 @@ pub(crate) struct WorkspaceApp {
     vibrancy_support: VibrancySupport,
     applied_window_opacity: f32,
     background_image_cache: BackgroundImageRenderCache,
-    // The gallery is loaded at explicit storage boundaries so settings renders never perform IO.
-    background_images: Vec<String>,
     app_lock: app_lock::AppLockState,
     settings_store: SettingsStore,
     connection_store: ConnectionStore,

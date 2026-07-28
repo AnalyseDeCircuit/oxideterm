@@ -1,6 +1,6 @@
 use std::{
     collections::{HashSet, VecDeque},
-    path::PathBuf,
+    path::{Path, PathBuf},
     sync::Arc,
     time::Duration,
 };
@@ -165,6 +165,19 @@ pub(in crate::workspace) enum DataDirectoryOperationResult {
     Failed(String),
 }
 
+pub(in crate::workspace) enum BackgroundGalleryOperationResult {
+    Updated(Option<String>),
+    Failed,
+}
+
+/// Converts managed gallery paths once at the filesystem boundary.
+fn background_gallery_strings(settings_path: &Path) -> anyhow::Result<Vec<String>> {
+    Ok(oxideterm_settings::list_background_images(settings_path)?
+        .into_iter()
+        .map(|path| path.to_string_lossy().into_owned())
+        .collect())
+}
+
 /// Owns settings work that must complete independently from root rendering.
 pub(in crate::workspace) struct SettingsWorkspaceEntity {
     portable_status: Option<oxideterm_portable_runtime::PortableStatusSnapshot>,
@@ -230,6 +243,9 @@ pub(in crate::workspace) struct SettingsWorkspaceEntity {
     background_blur_preview: Option<i64>,
     background_blur_commit_generation: u64,
     background_blur_commit_task: Option<Task<()>>,
+    background_images: Arc<[String]>,
+    background_gallery_task: Option<Task<()>>,
+    background_gallery_results: VecDeque<BackgroundGalleryOperationResult>,
     pub(super) native_update: NativeUpdateRuntime,
 }
 
@@ -250,6 +266,7 @@ pub(in crate::workspace) enum SettingsWorkspaceEvent {
     DataDirectoryConfirmOpened,
     DataDirectoryOperationReady,
     BackgroundBlurCommitReady(i64),
+    BackgroundGalleryOperationReady,
     PortablePasswordChangeFinished {
         success: bool,
     },
@@ -327,6 +344,9 @@ impl SettingsWorkspaceEntity {
             background_blur_preview: None,
             background_blur_commit_generation: 0,
             background_blur_commit_task: None,
+            background_images: Arc::from([]),
+            background_gallery_task: None,
+            background_gallery_results: VecDeque::new(),
             native_update: NativeUpdateRuntime::new(cx),
         }
     }
@@ -522,6 +542,218 @@ impl SettingsWorkspaceEntity {
         };
         cx.emit(SettingsWorkspaceEvent::BackgroundBlurCommitReady(value));
         cx.notify();
+    }
+
+    pub(in crate::workspace) fn initialize_background_gallery(&mut self, images: Vec<String>) {
+        self.background_images = Arc::from(images);
+    }
+
+    pub(in crate::workspace) fn background_images_snapshot(&self) -> Arc<[String]> {
+        Arc::clone(&self.background_images)
+    }
+
+    pub(in crate::workspace) fn start_background_image_import(
+        &mut self,
+        selection: impl std::future::Future<Output = Option<Vec<PathBuf>>> + 'static,
+        settings_path: PathBuf,
+        current_path: Option<PathBuf>,
+        runtime: tokio::runtime::Handle,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if self.background_gallery_task.is_some() {
+            return false;
+        }
+
+        self.background_gallery_task = Some(cx.spawn(async move |settings, cx| {
+            let Some(paths) = selection.await else {
+                let _ = settings.update(cx, |settings, cx| {
+                    settings.background_gallery_task = None;
+                    cx.notify();
+                });
+                return;
+            };
+            let source_paths = paths
+                .into_iter()
+                .filter(|path| oxideterm_settings::is_supported_background_image(path))
+                .collect::<Vec<_>>();
+            if source_paths.is_empty() {
+                let _ = settings.update(cx, |settings, cx| {
+                    settings.background_gallery_task = None;
+                    cx.notify();
+                });
+                return;
+            }
+
+            let result = runtime
+                .spawn_blocking(move || -> anyhow::Result<(Vec<String>, Option<String>)> {
+                    let mut active_path = current_path.filter(|path| {
+                        path.is_file()
+                            && oxideterm_settings::is_supported_background_image(path.as_path())
+                    });
+                    if let Some(current) = active_path.as_ref()
+                        && !oxideterm_settings::is_managed_background_image(&settings_path, current)
+                    {
+                        // Preserve a compatibility path inside the managed
+                        // gallery before another image becomes active.
+                        active_path = oxideterm_settings::import_background_images(
+                            &settings_path,
+                            std::slice::from_ref(current),
+                        )?
+                        .into_iter()
+                        .next();
+                    }
+
+                    let imported = oxideterm_settings::import_background_images(
+                        &settings_path,
+                        &source_paths,
+                    )?;
+                    if active_path.is_none() {
+                        active_path = imported.first().cloned();
+                    }
+                    let mut gallery = background_gallery_strings(&settings_path)?;
+                    let active_path = active_path.map(|path| path.to_string_lossy().into_owned());
+                    if let Some(active) = active_path.as_ref()
+                        && !gallery.contains(active)
+                    {
+                        gallery.insert(0, active.clone());
+                    }
+                    Ok((gallery, active_path))
+                })
+                .await
+                .map_err(|_| ())
+                .and_then(|result| result.map_err(|_| ()));
+
+            let _ = settings.update(cx, |settings, cx| {
+                settings.background_gallery_task = None;
+                settings.finish_background_gallery_operation(result, cx);
+            });
+        }));
+        cx.notify();
+        true
+    }
+
+    pub(in crate::workspace) fn remove_background_image(
+        &mut self,
+        settings_path: PathBuf,
+        image_path: String,
+        current_path: Option<String>,
+        runtime: tokio::runtime::Handle,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if self.background_gallery_task.is_some()
+            || crate::workspace::is_bundled_workspace_background(
+                &settings_path,
+                Path::new(&image_path),
+            )
+        {
+            return false;
+        }
+
+        if !oxideterm_settings::is_managed_background_image(&settings_path, Path::new(&image_path))
+        {
+            // Compatibility paths are user-owned; removing one only updates
+            // the gallery and never deletes the source file.
+            let mut gallery = self.background_images.to_vec();
+            gallery.retain(|candidate| candidate != &image_path);
+            let active_path = current_path.filter(|active| active != &image_path);
+            self.finish_background_gallery_operation(Ok((gallery, active_path)), cx);
+            return true;
+        }
+
+        self.background_gallery_task = Some(cx.spawn(async move |settings, cx| {
+            let result = runtime
+                .spawn_blocking(move || -> anyhow::Result<(Vec<String>, Option<String>)> {
+                    oxideterm_settings::remove_background_image(
+                        &settings_path,
+                        Path::new(&image_path),
+                    )?;
+                    let mut gallery = background_gallery_strings(&settings_path)?;
+                    let active_path = current_path.filter(|active| active != &image_path);
+                    if let Some(active) = active_path.as_ref()
+                        && !gallery.contains(active)
+                    {
+                        gallery.insert(0, active.clone());
+                    }
+                    Ok((gallery, active_path))
+                })
+                .await
+                .map_err(|_| ())
+                .and_then(|result| result.map_err(|_| ()));
+
+            let _ = settings.update(cx, |settings, cx| {
+                settings.background_gallery_task = None;
+                settings.finish_background_gallery_operation(result, cx);
+            });
+        }));
+        cx.notify();
+        true
+    }
+
+    pub(in crate::workspace) fn clear_background_image_gallery(
+        &mut self,
+        settings_path: PathBuf,
+        current_path: Option<String>,
+        runtime: tokio::runtime::Handle,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if self.background_gallery_task.is_some() {
+            return false;
+        }
+
+        self.background_gallery_task = Some(cx.spawn(async move |settings, cx| {
+            let result = runtime
+                .spawn_blocking(move || -> anyhow::Result<(Vec<String>, Option<String>)> {
+                    for image_path in oxideterm_settings::list_background_images(&settings_path)? {
+                        if !crate::workspace::is_bundled_workspace_background(
+                            &settings_path,
+                            &image_path,
+                        ) {
+                            oxideterm_settings::remove_background_image(
+                                &settings_path,
+                                &image_path,
+                            )?;
+                        }
+                    }
+                    let gallery = background_gallery_strings(&settings_path)?;
+                    let active_path = current_path.filter(|active| gallery.contains(active));
+                    Ok((gallery, active_path))
+                })
+                .await
+                .map_err(|_| ())
+                .and_then(|result| result.map_err(|_| ()));
+
+            let _ = settings.update(cx, |settings, cx| {
+                settings.background_gallery_task = None;
+                settings.finish_background_gallery_operation(result, cx);
+            });
+        }));
+        cx.notify();
+        true
+    }
+
+    fn finish_background_gallery_operation(
+        &mut self,
+        result: Result<(Vec<String>, Option<String>), ()>,
+        cx: &mut Context<Self>,
+    ) {
+        match result {
+            Ok((gallery, active_path)) => {
+                self.background_images = Arc::from(gallery);
+                self.background_gallery_results
+                    .push_back(BackgroundGalleryOperationResult::Updated(active_path));
+            }
+            Err(()) => self
+                .background_gallery_results
+                .push_back(BackgroundGalleryOperationResult::Failed),
+        }
+        cx.emit(SettingsWorkspaceEvent::BackgroundGalleryOperationReady);
+        cx.notify();
+    }
+
+    pub(in crate::workspace) fn take_background_gallery_results(
+        &mut self,
+    ) -> VecDeque<BackgroundGalleryOperationResult> {
+        std::mem::take(&mut self.background_gallery_results)
     }
 
     pub(in crate::workspace) fn portable_status_snapshot(&self) -> PortableStatusSnapshot {
@@ -803,11 +1035,11 @@ impl Drop for SettingsWorkspaceEntity {
 
 #[cfg(test)]
 mod tests {
-    use std::{sync::Arc, time::Duration};
+    use std::{path::PathBuf, sync::Arc, time::Duration};
 
     use gpui::{AppContext, TestAppContext};
 
-    use super::{DataDirectoryConfirm, SettingsWorkspaceEntity};
+    use super::{BackgroundGalleryOperationResult, DataDirectoryConfirm, SettingsWorkspaceEntity};
 
     #[gpui::test]
     fn portable_status_refresh_is_single_flight_and_entity_owned(cx: &mut TestAppContext) {
@@ -914,6 +1146,55 @@ mod tests {
             entity.background_blur_commit_task = None;
             entity.finish_background_blur_commit(second_generation, cx);
             assert_eq!(entity.background_blur_preview(), None);
+        });
+    }
+
+    #[gpui::test]
+    fn background_gallery_state_task_and_results_are_entity_owned(cx: &mut TestAppContext) {
+        let runtime = tokio::runtime::Runtime::new().expect("create background gallery runtime");
+        let entity = cx.new(SettingsWorkspaceEntity::new);
+        entity.update(cx, |entity, cx| {
+            entity.initialize_background_gallery(vec!["first.webp".to_string()]);
+            assert_eq!(&*entity.background_images_snapshot(), ["first.webp"]);
+            assert!(entity.start_background_image_import(
+                std::future::ready(None),
+                PathBuf::from("/tmp/settings.json"),
+                None,
+                runtime.handle().clone(),
+                cx,
+            ));
+            assert!(entity.background_gallery_task.is_some());
+            assert!(!entity.start_background_image_import(
+                std::future::ready(None),
+                PathBuf::from("/tmp/settings.json"),
+                None,
+                runtime.handle().clone(),
+                cx,
+            ));
+        });
+        cx.run_until_parked();
+        entity.update(cx, |entity, cx| {
+            assert!(entity.background_gallery_task.is_none());
+            entity.finish_background_gallery_operation(
+                Ok((
+                    vec!["second.webp".to_string()],
+                    Some("second.webp".to_string()),
+                )),
+                cx,
+            );
+            assert_eq!(&*entity.background_images_snapshot(), ["second.webp"]);
+            assert!(matches!(
+                entity.take_background_gallery_results().pop_front(),
+                Some(BackgroundGalleryOperationResult::Updated(Some(path)))
+                    if path == "second.webp"
+            ));
+
+            entity.finish_background_gallery_operation(Err(()), cx);
+            assert_eq!(&*entity.background_images_snapshot(), ["second.webp"]);
+            assert!(matches!(
+                entity.take_background_gallery_results().pop_front(),
+                Some(BackgroundGalleryOperationResult::Failed)
+            ));
         });
     }
 }

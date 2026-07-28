@@ -250,6 +250,9 @@ impl WorkspaceApp {
             // A pre-gallery GPUI setting may still point directly at a user file.
             background_images.insert(0, active_path.clone());
         }
+        settings_workspace.update(cx, |settings, _cx| {
+            settings.initialize_background_gallery(background_images);
+        });
         let app_lock = app_lock::AppLockState::load(oxideterm_app_lock::AppLockStore::new());
         let ai = ai_state::AiWorkspaceState::new(
             (settings.sidebar_ui.ai_sidebar_width as f32)
@@ -558,7 +561,6 @@ impl WorkspaceApp {
             vibrancy_support: initial_vibrancy_support,
             applied_window_opacity: initial_window_opacity,
             background_image_cache,
-            background_images,
             app_lock,
             settings_store,
             connection_store,

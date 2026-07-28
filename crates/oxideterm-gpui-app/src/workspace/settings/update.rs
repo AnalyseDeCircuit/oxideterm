@@ -619,6 +619,34 @@ impl WorkspaceApp {
                     self.edit_settings(|settings| settings.terminal.background_blur = value, cx);
                 }
             }
+            SettingsWorkspaceEvent::BackgroundGalleryOperationReady => {
+                let results = settings.update(cx, |settings, _cx| {
+                    settings.take_background_gallery_results()
+                });
+                for result in results {
+                    match result {
+                        BackgroundGalleryOperationResult::Updated(active_path) => {
+                            if self.settings_store.settings().terminal.background_image
+                                != active_path
+                            {
+                                self.edit_settings(
+                                    move |settings| {
+                                        settings.terminal.background_image = active_path
+                                    },
+                                    cx,
+                                );
+                            }
+                        }
+                        BackgroundGalleryOperationResult::Failed => {
+                            self.send_settings_notice(
+                                self.i18n.t("settings_view.terminal.bg_operation_failed"),
+                                TerminalNoticeVariant::Error,
+                            );
+                        }
+                    }
+                }
+                cx.notify();
+            }
             SettingsWorkspaceEvent::PortablePasswordChangeFinished { success } => {
                 if *success {
                     self.push_ai_settings_toast(
