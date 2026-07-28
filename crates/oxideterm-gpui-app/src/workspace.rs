@@ -249,7 +249,7 @@ use self::connection_monitor::{
     HostToolsWindowIntent, HostToolsWindowRequest,
 };
 use self::file_manager::FileManagerState;
-use self::graphics::GraphicsState;
+use self::graphics::GraphicsWorkspaceEntity;
 use self::ime::{
     HostToolsPlainTextImeFrame, TextInputAnchorStore, WorkspaceImeDragSelection,
     WorkspaceImeElement, WorkspaceImeSelection, WorkspaceImeTarget,
@@ -828,7 +828,6 @@ pub(crate) struct WorkspaceApp {
     ssh_registry: SshConnectionRegistry,
     forwarding_service: forwards::ForwardingRuntimeService,
     forwarding_runtime: Arc<tokio::runtime::Runtime>,
-    wsl_graphics: Arc<oxideterm_wsl_graphics::WslGraphicsState>,
     sftp_transfer_manager: Arc<SftpTransferManager>,
     sftp_progress_store: Arc<dyn ProgressStore>,
     node_router: NodeRouter,
@@ -864,7 +863,8 @@ pub(crate) struct WorkspaceApp {
     launcher_wsl_list_cache: RefCell<VirtualListSignatureCache>,
     launcher_app_grid_list_state: ListState,
     launcher_app_grid_list_cache: RefCell<VirtualListSignatureCache>,
-    graphics: GraphicsState,
+    graphics: Entity<GraphicsWorkspaceEntity>,
+    _graphics_observation: Subscription,
     host_tools: Entity<HostToolsEntity>,
     _host_tools_subscription: Subscription,
     cloud_sync: cloud_sync::CloudSyncWorkspaceState,

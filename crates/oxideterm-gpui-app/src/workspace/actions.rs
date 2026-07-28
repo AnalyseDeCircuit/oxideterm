@@ -856,7 +856,7 @@ impl WorkspaceApp {
         if self
             .active_tab()
             .is_some_and(|tab| tab.kind == TabKind::Graphics)
-            && self.graphics.focused_input.is_some()
+            && self.graphics.read(cx).focused_input().is_some()
         {
             let _ = self.handle_graphics_key(event, cx);
             return;

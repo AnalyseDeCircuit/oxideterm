@@ -852,7 +852,10 @@ impl WorkspaceApp {
             });
         }
         if tab.kind == TabKind::Graphics {
-            self.shutdown_graphics_session();
+            self.graphics.update(cx, |graphics, cx| {
+                // Closing the graphics page stops only its WSL graphics session.
+                graphics.shutdown_graphics_session(cx);
+            });
         }
         if tab.kind == TabKind::RemoteDesktop {
             self.close_remote_desktop_tab(tab.id, window, cx);

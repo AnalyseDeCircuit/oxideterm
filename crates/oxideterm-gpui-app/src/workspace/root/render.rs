@@ -523,7 +523,7 @@ impl Render for WorkspaceApp {
                 } else if this
                     .active_tab()
                     .is_some_and(|tab| tab.kind == TabKind::Graphics)
-                    && this.graphics.focused_input.is_some()
+                    && this.graphics.read(cx).focused_input().is_some()
                 {
                     let _ = this.handle_graphics_key(event, cx);
                     window.prevent_default();

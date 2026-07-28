@@ -736,7 +736,7 @@ impl WorkspaceApp {
         if self
             .active_tab()
             .is_some_and(|tab| tab.kind == oxideterm_workspace::TabKind::Graphics)
-            && let Some(input) = self.graphics.focused_input
+            && let Some(input) = self.graphics.read(cx).focused_input()
         {
             return Some(WorkspaceImeTarget::Graphics(input));
         }
@@ -1617,8 +1617,9 @@ impl WorkspaceApp {
                 }
             }
             WorkspaceImeTarget::Graphics(input) => {
-                if self.graphics.focused_input == Some(input) {
-                    Some(self.graphics_input_value(input).to_string())
+                let graphics = self.graphics.read(cx);
+                if graphics.focused_input() == Some(input) {
+                    Some(graphics.input_value(input).to_string())
                 } else {
                     None
                 }
@@ -2514,12 +2515,9 @@ impl WorkspaceApp {
                 }
             }
             WorkspaceImeTarget::Graphics(input) => {
-                if self.graphics.focused_input == Some(input) {
-                    replace_utf16(
-                        self.graphics_input_value_mut(input),
-                        replacement_range,
-                        text,
-                    );
+                if self.graphics.update(cx, |graphics, cx| {
+                    graphics.replace_input(input, replacement_range, text, cx)
+                }) {
                     self.new_connection_caret_visible = true;
                     cx.notify();
                 }

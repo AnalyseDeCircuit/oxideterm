@@ -212,6 +212,19 @@ impl WorkspaceApp {
             host_tools
         });
         let remote_desktop = cx.new(|_cx| remote_desktop::RemoteDesktopWorkspaceEntity::new());
+        let graphics_backend = Arc::new(oxideterm_wsl_graphics::WslGraphicsState::new());
+        let graphics = cx.new(|cx| {
+            GraphicsWorkspaceEntity::new(
+                graphics_backend,
+                forwarding_runtime.clone(),
+                window.window_handle(),
+                cx,
+            )
+        });
+        let graphics_observation = cx.observe(&graphics, |_workspace, _graphics, cx| {
+            // Entity-owned session and frame delivery repaints mounted graphics surfaces.
+            cx.notify();
+        });
         let host_tools_subscription = cx.subscribe(
             &host_tools,
             |workspace, _host_tools, event: &HostToolsEvent, _cx| match event {
@@ -502,7 +515,6 @@ impl WorkspaceApp {
             ssh_registry,
             forwarding_service,
             forwarding_runtime,
-            wsl_graphics: Arc::new(oxideterm_wsl_graphics::WslGraphicsState::new()),
             sftp_transfer_manager,
             sftp_progress_store,
             node_router,
@@ -569,7 +581,8 @@ impl WorkspaceApp {
             )
             .measure_all(),
             launcher_app_grid_list_cache: RefCell::new(VirtualListSignatureCache::default()),
-            graphics: GraphicsState::new(),
+            graphics,
+            _graphics_observation: graphics_observation,
             host_tools,
             _host_tools_subscription: host_tools_subscription,
             cloud_sync: cloud_sync::CloudSyncWorkspaceState::new(cloud_sync_store),
@@ -722,7 +735,6 @@ impl WorkspaceApp {
         workspace.sync_ssh_config_sync_service();
         workspace.restore_session_tree_snapshot();
         let window_handle = window.window_handle();
-        workspace.schedule_graphics_worker_delivery(window_handle, cx);
         cx.spawn(async move |weak, cx| {
             loop {
                 Timer::after(Duration::from_millis(530)).await;
