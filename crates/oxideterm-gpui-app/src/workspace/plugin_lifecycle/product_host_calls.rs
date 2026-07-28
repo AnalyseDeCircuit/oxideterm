@@ -304,12 +304,16 @@ impl WorkspaceApp {
                 let Some(enabled) = args.get("enabled").and_then(Value::as_bool) else {
                     return;
                 };
-                let state = self.cloud_sync.controller.store.state_mut();
-                state.settings.auto_upload_enabled = enabled;
-                if let Some(interval) = args.get("intervalMinutes").and_then(Value::as_f64) {
-                    state.settings.auto_upload_interval_mins = interval.max(5.0);
-                }
-                self.save_cloud_sync_state();
+                let interval = args.get("intervalMinutes").and_then(Value::as_f64);
+                self.cloud_sync.update(cx, |cloud_sync, cx| {
+                    let settings = &mut cloud_sync.controller.store.state_mut().settings;
+                    settings.auto_upload_enabled = enabled;
+                    if let Some(interval) = interval {
+                        settings.auto_upload_interval_mins = interval.max(5.0);
+                    }
+                    cx.notify();
+                });
+                self.save_cloud_sync_state(cx);
                 self.reschedule_cloud_sync_auto_upload(cx);
                 cx.notify();
             }

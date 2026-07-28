@@ -90,14 +90,18 @@ pub(super) fn native_plugin_host_api_snapshot_from_workspace(
     let theme_tokens =
         native_plugin_theme_tokens_snapshot(&workspace.tokens, &settings.terminal.theme);
     let available_themes = native_plugin_available_themes(settings);
-    let cloud_sync_summary = native_plugin_cloud_sync_summary(
-        workspace.cloud_sync.controller.store.state(),
-        workspace.cloud_sync.controller.active_action,
-        workspace.cloud_sync.controller.progress.as_ref(),
-    );
-    let cloud_sync_history = native_plugin_cloud_sync_history(
-        &workspace.cloud_sync.controller.store.state().sync_history,
-    );
+    let (cloud_sync_summary, cloud_sync_history) = {
+        let cloud_sync = workspace.cloud_sync.read(cx);
+        let persisted_state = cloud_sync.controller.store.state();
+        (
+            native_plugin_cloud_sync_summary(
+                persisted_state,
+                cloud_sync.controller.active_action,
+                cloud_sync.controller.progress.as_ref(),
+            ),
+            native_plugin_cloud_sync_history(&persisted_state.sync_history),
+        )
+    };
     let host_tools_snapshots =
         oxideterm_plugin_host_api::host_tools::native_plugin_host_tools_snapshot_array(
             workspace.host_tools.read(cx).profiler_registry(),

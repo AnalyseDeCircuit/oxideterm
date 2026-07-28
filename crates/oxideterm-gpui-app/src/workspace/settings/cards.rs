@@ -634,7 +634,7 @@ impl WorkspaceApp {
                 )
             )
             || matches!(
-                (self.cloud_sync.view.open_select, anchor.id),
+                (self.cloud_sync.read(cx).view.open_select, anchor.id),
                 (
                     Some(crate::workspace::cloud_sync::CloudSyncSelect::Backend),
                     SelectAnchorId::CloudSyncBackend
@@ -668,11 +668,11 @@ impl WorkspaceApp {
             || (anchor.id == SelectAnchorId::TerminalProjectMenu
                 && self.terminal.read(cx).project_panel_open())
             || (anchor.id == SelectAnchorId::SessionManagerViewMode
-                && self.session_manager.view_mode_menu_open)
+                && self.session_manager.read(cx).view_mode_menu_open)
             || (anchor.id == SelectAnchorId::SessionManagerSort
-                && self.session_manager.sort_menu_open)
+                && self.session_manager.read(cx).sort_menu_open)
             || (anchor.id == SelectAnchorId::SessionManagerBatchMove
-                && self.session_manager.show_batch_move)
+                && self.session_manager.read(cx).show_batch_move)
             || self
                 .settings_slider_drag
                 .is_some_and(|slider| settings_slider_anchor_id(slider) == anchor.id);
@@ -919,7 +919,9 @@ impl WorkspaceApp {
         if self.close_terminal_git_branch_picker(cx) {
             changed = true;
         }
-        if self.session_manager.focused_input.take().is_some() {
+        if self.session_manager.update(cx, |session_manager, cx| {
+            session_manager.clear_input_focus(cx)
+        }) {
             self.ime_marked_text = None;
             changed = true;
         }
@@ -1166,6 +1168,10 @@ impl WorkspaceApp {
                 | SettingsInput::AppLockNewPassword
                 | SettingsInput::AppLockConfirmPassword
         );
+        let cloud_sync_input = {
+            let cloud_sync = self.cloud_sync.read(cx);
+            cloud_sync_form_input_value_ref(&cloud_sync.view.form, input).is_some()
+        };
         if app_lock_input && self.focused_settings_input == Some(input) {
             self.clear_ime_selection();
             self.new_connection_caret_visible = true;
@@ -1183,6 +1189,8 @@ impl WorkspaceApp {
                     | SettingsInput::AppLockConfirmPassword
             ) {
                 self.commit_focused_app_lock_input();
+            } else if self.commit_focused_cloud_sync_input(previous_input, cx) {
+                self.focused_settings_input = None;
             } else {
                 self.clear_settings_input_draft(previous_input);
             }
@@ -1192,6 +1200,14 @@ impl WorkspaceApp {
         self.settings_input_draft = if app_lock_input {
             // Move the active secret into the editor so only one owner exists.
             self.take_app_lock_input_value(input).unwrap_or_default()
+        } else if cloud_sync_input {
+            // Cloud Sync form values move into the root only while it acts as
+            // the focused IME adapter. No second secret buffer is created.
+            self.cloud_sync
+                .update(cx, |cloud_sync, _cx| {
+                    take_cloud_sync_form_input_value(&mut cloud_sync.view.form, input)
+                })
+                .unwrap_or_default()
         } else {
             current_value
         };
@@ -1213,15 +1229,14 @@ impl WorkspaceApp {
         self.settings_input_draft.clear();
     }
 
-    pub(in crate::workspace) fn apply_focused_cloud_sync_input_draft(&mut self) -> bool {
+    pub(in crate::workspace) fn apply_focused_cloud_sync_input_draft(
+        &mut self,
+        cx: &mut Context<Self>,
+    ) -> bool {
         let Some(input) = self.focused_settings_input else {
             return false;
         };
-        if !apply_cloud_sync_form_input_draft(
-            &mut self.cloud_sync.view.form,
-            input,
-            &self.settings_input_draft,
-        ) {
+        if !self.commit_focused_cloud_sync_input(input, cx) {
             return false;
         }
         // Cloud Sync configuration commits can be triggered by tab/action
@@ -1230,6 +1245,27 @@ impl WorkspaceApp {
         self.focused_settings_input = None;
         self.clear_settings_input_draft(input);
         true
+    }
+
+    fn commit_focused_cloud_sync_input(
+        &mut self,
+        input: SettingsInput,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let draft = std::mem::take(&mut self.settings_input_draft);
+        match self.cloud_sync.update(cx, |cloud_sync, cx| {
+            let result = apply_cloud_sync_form_input_owned(&mut cloud_sync.view.form, input, draft);
+            if result.is_ok() {
+                cx.notify();
+            }
+            result
+        }) {
+            Ok(()) => true,
+            Err(draft) => {
+                self.settings_input_draft = draft;
+                false
+            }
+        }
     }
 
     pub(in crate::workspace) fn current_settings_input_value(
@@ -1247,8 +1283,17 @@ impl WorkspaceApp {
         if let Some(value) = self.ai_entity.read(cx).settings_input_value(input) {
             return value.to_owned();
         }
-        if let Some(value) = cloud_sync_form_input_value(&self.cloud_sync.view.form, input) {
-            return value;
+        if let Some(value) =
+            cloud_sync_form_input_value_ref(&self.cloud_sync.read(cx).view.form, input)
+        {
+            // Secret fields are moved into the focused IME adapter through
+            // `focus_settings_input`; this generic snapshot path must not copy
+            // their contents.
+            return if input.is_secret() {
+                String::new()
+            } else {
+                value.to_owned()
+            };
         }
         match input {
             SettingsInput::TerminalCommandSpecsJson => {
@@ -1329,11 +1374,13 @@ impl WorkspaceApp {
             cx.notify();
             return;
         }
-        if apply_cloud_sync_form_input_draft(
-            &mut self.cloud_sync.view.form,
-            input,
-            &self.settings_input_draft,
-        ) {
+        let cloud_sync_input = {
+            let cloud_sync = self.cloud_sync.read(cx);
+            cloud_sync_form_input_value_ref(&cloud_sync.view.form, input).is_some()
+        };
+        if cloud_sync_input {
+            // The root draft remains the only owner while the IME is focused;
+            // persistence moves it back through `apply_focused_*`.
             cx.notify();
             return;
         }

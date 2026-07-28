@@ -138,6 +138,7 @@ impl Render for WorkspaceApp {
         }
         let window_opacity =
             normalized_window_opacity(self.settings_store.settings().appearance.window_opacity);
+        let cloud_sync_confirm_open = self.cloud_sync.read(cx).view.confirm.is_some();
         if self.applied_window_opacity != window_opacity {
             let _ = apply_window_opacity(window, window_opacity as f64);
             self.applied_window_opacity = window_opacity;
@@ -1033,7 +1034,7 @@ impl Render for WorkspaceApp {
                 self.render_remote_shell_integration_confirm(cx),
                 |root, dialog| root.child(dialog),
             )
-            .when(self.cloud_sync.view.confirm.is_some(), |root| {
+            .when(cloud_sync_confirm_open, |root| {
                 root.child(self.render_cloud_sync_confirm_dialog(cx))
             })
             .when(self.node_disconnect_confirm.is_some(), |root| {

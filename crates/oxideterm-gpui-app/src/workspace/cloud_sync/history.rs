@@ -10,8 +10,13 @@ impl WorkspaceApp {
         busy: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        self.sync_cloud_sync_rollback_backup_list_state(&state.rollback_backups);
-        let state_handle = self.cloud_sync.view.rollback_backup_list_state.clone();
+        self.sync_cloud_sync_rollback_backup_list_state(&state.rollback_backups, cx);
+        let state_handle = self
+            .cloud_sync
+            .read(cx)
+            .view
+            .rollback_backup_list_state
+            .clone();
         let spec = self.cloud_sync_rollback_backup_list_spec();
         let workspace = cx.entity();
         let list_height =
@@ -33,7 +38,7 @@ impl WorkspaceApp {
                               _window,
                               cx: &mut Context<WorkspaceApp>| {
                             if !busy {
-                                this.open_cloud_sync_clear_backups_confirm();
+                                this.open_cloud_sync_clear_backups_confirm(cx);
                             }
                             cx.stop_propagation();
                             cx.notify();
@@ -62,20 +67,24 @@ impl WorkspaceApp {
     }
 
     pub(super) fn sync_cloud_sync_rollback_backup_list_state(
-        &self,
+        &mut self,
         backups: &[CloudSyncRollbackBackup],
+        cx: &mut Context<Self>,
     ) {
         let signatures = backups
             .iter()
             .map(cloud_sync_rollback_backup_signature)
             .collect::<Vec<_>>();
-        sync_tauri_variable_list_state_by_signatures(
-            &self.cloud_sync.view.rollback_backup_list_state,
-            &mut self.cloud_sync.view.rollback_backup_list_cache.borrow_mut(),
-            "cloud-sync-rollback-backups",
-            &signatures,
-            self.cloud_sync_rollback_backup_list_spec(),
-        );
+        let spec = self.cloud_sync_rollback_backup_list_spec();
+        self.cloud_sync.update(cx, |cloud_sync, _cx| {
+            sync_tauri_variable_list_state_by_signatures(
+                &cloud_sync.view.rollback_backup_list_state,
+                &mut cloud_sync.view.rollback_backup_list_cache.borrow_mut(),
+                "cloud-sync-rollback-backups",
+                &signatures,
+                spec,
+            );
+        });
     }
 
     pub(super) fn cloud_sync_rollback_backup_list_spec(&self) -> TauriVirtualListSpec {
@@ -92,8 +101,16 @@ impl WorkspaceApp {
         show_management: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let state = self.cloud_sync.controller.store.state().clone();
-        let Some(backup) = state.rollback_backups.get(index).cloned() else {
+        let backup = self
+            .cloud_sync
+            .read(cx)
+            .controller
+            .store
+            .state()
+            .rollback_backups
+            .get(index)
+            .cloned();
+        let Some(backup) = backup else {
             return div().into_any_element();
         };
         let id = backup.id.clone();
@@ -138,10 +155,10 @@ impl WorkspaceApp {
                               _window,
                               cx: &mut Context<WorkspaceApp>| {
                             if !busy {
-                                this.open_cloud_sync_restore_confirm(Some((
-                                    restore_id.clone(),
-                                    restore_created_at.clone(),
-                                )));
+                                this.open_cloud_sync_restore_confirm(
+                                    Some((restore_id.clone(), restore_created_at.clone())),
+                                    cx,
+                                );
                             }
                             cx.stop_propagation();
                             cx.notify();
@@ -161,6 +178,7 @@ impl WorkspaceApp {
                             this.open_cloud_sync_delete_backup_confirm(
                                 delete_id.clone(),
                                 delete_created_at.clone(),
+                                cx,
                             );
                         }
                         cx.stop_propagation();
@@ -198,7 +216,7 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
-        let busy = self.cloud_sync.controller.delivery_rx.is_some();
+        let busy = self.cloud_sync.read(cx).controller.delivery_rx.is_some();
         let title = self.render_display_text_with_role(
             SelectableTextRole::PlainDocument,
             "cloud-sync-history",
@@ -220,8 +238,8 @@ impl WorkspaceApp {
                 ),
             )
         } else {
-            self.sync_cloud_sync_history_list_state(&state.sync_history);
-            let state_handle = self.cloud_sync.view.history_list_state.clone();
+            self.sync_cloud_sync_history_list_state(&state.sync_history, cx);
+            let state_handle = self.cloud_sync.read(cx).view.history_list_state.clone();
             let spec = self.cloud_sync_history_list_spec();
             let workspace = cx.entity();
             let list_count = state.sync_history.len();
@@ -256,7 +274,7 @@ impl WorkspaceApp {
                               _window,
                               cx: &mut Context<WorkspaceApp>| {
                             if !busy {
-                                this.open_cloud_sync_clear_history_confirm();
+                                this.open_cloud_sync_clear_history_confirm(cx);
                             }
                             cx.stop_propagation();
                             cx.notify();
@@ -272,28 +290,42 @@ impl WorkspaceApp {
     }
 
     pub(super) fn render_cloud_sync_recent_history(&self, cx: &mut Context<Self>) -> AnyElement {
-        let state = self.cloud_sync.controller.store.state().clone();
+        let recent = self
+            .cloud_sync
+            .read(cx)
+            .controller
+            .store
+            .state()
+            .sync_history
+            .iter()
+            .rev()
+            .take(3)
+            .cloned()
+            .collect::<Vec<_>>();
         let theme = self.tokens.ui;
         let title =
             self.render_cloud_sync_section_title("plugin.cloud_sync.overview.recent_history", cx);
         let view_all = self.render_cloud_sync_inline_button(
             "plugin.cloud_sync.overview.view_all_history",
             cx.listener(|this, _event, _window, cx| {
-                if this.cloud_sync.view.active_tab != CloudSyncTab::History {
-                    this.cloud_sync.view.set_active_tab(CloudSyncTab::History);
+                if this.cloud_sync.read(cx).view.active_tab != CloudSyncTab::History {
+                    this.cloud_sync.update(cx, |cloud_sync, cx| {
+                        cloud_sync.view.set_active_tab(CloudSyncTab::History);
+                        cx.notify();
+                    });
                     this.begin_user_segmented_control_transition(
                         selection_motion::CLOUD_SYNC_SWITCHER_ID,
                         cloud_sync_tab_index(CloudSyncTab::History),
                         cx,
                     );
                 }
-                this.clear_cloud_sync_select_focus();
+                this.clear_cloud_sync_select_focus(cx);
                 cx.stop_propagation();
                 cx.notify();
             }),
             cx,
         );
-        let body = if state.sync_history.is_empty() {
+        let body = if recent.is_empty() {
             cloud_sync_history_empty(
                 &self.tokens,
                 self.render_display_text_with_role(
@@ -306,7 +338,6 @@ impl WorkspaceApp {
                 ),
             )
         } else {
-            let recent = state.sync_history.iter().rev().take(3).collect::<Vec<_>>();
             recent
                 .iter()
                 .fold(div().flex().flex_col().gap(px(8.0)), |list, entry| {
@@ -321,9 +352,7 @@ impl WorkspaceApp {
                     .items_center()
                     .justify_between()
                     .child(title)
-                    .when(!state.sync_history.is_empty(), |header| {
-                        header.child(view_all)
-                    }),
+                    .when(!recent.is_empty(), |header| header.child(view_all)),
             )
             .child(body)
             .into_any_element()
@@ -334,8 +363,15 @@ impl WorkspaceApp {
         busy: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let state = self.cloud_sync.controller.store.state().clone();
-        if state.rollback_backups.is_empty() {
+        let backup_count = self
+            .cloud_sync
+            .read(cx)
+            .controller
+            .store
+            .state()
+            .rollback_backups
+            .len();
+        if backup_count == 0 {
             return div().into_any_element();
         }
         let mut card = self
@@ -344,24 +380,31 @@ impl WorkspaceApp {
                 "plugin.cloud_sync.sections.rollback_backups",
                 cx,
             ));
-        for index in 0..state.rollback_backups.len().min(3) {
+        for index in 0..backup_count.min(3) {
             card = card.child(self.render_cloud_sync_rollback_backup_item(index, busy, false, cx));
         }
         card.into_any_element()
     }
 
-    pub(super) fn sync_cloud_sync_history_list_state(&self, history: &[CloudSyncHistoryEntry]) {
+    pub(super) fn sync_cloud_sync_history_list_state(
+        &mut self,
+        history: &[CloudSyncHistoryEntry],
+        cx: &mut Context<Self>,
+    ) {
         let signatures = history
             .iter()
             .map(cloud_sync_history_signature)
             .collect::<Vec<_>>();
-        sync_tauri_variable_list_state_by_signatures(
-            &self.cloud_sync.view.history_list_state,
-            &mut self.cloud_sync.view.history_list_cache.borrow_mut(),
-            "cloud-sync-history",
-            &signatures,
-            self.cloud_sync_history_list_spec(),
-        );
+        let spec = self.cloud_sync_history_list_spec();
+        self.cloud_sync.update(cx, |cloud_sync, _cx| {
+            sync_tauri_variable_list_state_by_signatures(
+                &cloud_sync.view.history_list_state,
+                &mut cloud_sync.view.history_list_cache.borrow_mut(),
+                "cloud-sync-history",
+                &signatures,
+                spec,
+            );
+        });
     }
 
     pub(super) fn cloud_sync_history_list_spec(&self) -> TauriVirtualListSpec {
@@ -376,8 +419,16 @@ impl WorkspaceApp {
         index: usize,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let state = self.cloud_sync.controller.store.state().clone();
-        let Some(entry) = state.sync_history.get(index).cloned() else {
+        let entry = self
+            .cloud_sync
+            .read(cx)
+            .controller
+            .store
+            .state()
+            .sync_history
+            .get(index)
+            .cloned();
+        let Some(entry) = entry else {
             return div().into_any_element();
         };
         div()
@@ -454,8 +505,8 @@ impl WorkspaceApp {
     }
 
     pub(super) fn render_cloud_sync_notes(&self, cx: &mut Context<Self>) -> AnyElement {
-        let state = self.cloud_sync.controller.store.state();
-        let local_snapshot = self.cloud_sync_local_snapshot(state).ok();
+        let state = self.cloud_sync.read(cx).controller.store.state().clone();
+        let local_snapshot = self.cloud_sync_local_snapshot(&state, cx).ok();
         let theme = self.tokens.ui;
         let sections = local_snapshot
             .map(|snapshot| {
@@ -499,9 +550,18 @@ impl WorkspaceApp {
         &self,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let form = &self.cloud_sync.view.form;
+        let (config_rows, auto_upload_enabled) = {
+            let cloud_sync = self.cloud_sync.read(cx);
+            (
+                cloud_sync_config_rows(
+                    &cloud_sync.view.form.backend_type,
+                    &cloud_sync.view.form.auth_mode,
+                ),
+                cloud_sync.view.form.auto_upload_enabled,
+            )
+        };
         let mut connection_rows = Vec::new();
-        for row in cloud_sync_config_rows(&form.backend_type, &form.auth_mode) {
+        for row in config_rows {
             connection_rows.push(match row {
                 CloudSyncConfigRow::BackendSelect => self.render_cloud_sync_backend_select(cx),
                 CloudSyncConfigRow::AuthModeSelect => self.render_cloud_sync_auth_mode_select(cx),
@@ -521,17 +581,19 @@ impl WorkspaceApp {
                 ),
                 CloudSyncConfigRow::AutoUploadToggle => self.render_cloud_sync_form_toggle(
                     "plugin.cloud_sync.settings.auto_upload_enabled",
-                    form.auto_upload_enabled,
+                    auto_upload_enabled,
                     cx.listener(
                         |this: &mut WorkspaceApp,
                          _event,
                          _window,
                          cx: &mut Context<WorkspaceApp>| {
-                            this.cloud_sync.view.form.auto_upload_enabled =
-                                !this.cloud_sync.view.form.auto_upload_enabled;
-                            this.clear_cloud_sync_select_focus();
+                            this.cloud_sync.update(cx, |cloud_sync, cx| {
+                                cloud_sync.view.form.auto_upload_enabled =
+                                    !cloud_sync.view.form.auto_upload_enabled;
+                                cx.notify();
+                            });
+                            this.clear_cloud_sync_select_focus(cx);
                             cx.stop_propagation();
-                            cx.notify();
                         },
                     ),
                     cx,
@@ -552,11 +614,11 @@ impl WorkspaceApp {
         &self,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let state = self.cloud_sync.controller.store.state();
-        let Some(local_snapshot) = self.cloud_sync_local_snapshot(state).ok() else {
+        let state = self.cloud_sync.read(cx).controller.store.state().clone();
+        let Some(local_snapshot) = self.cloud_sync_local_snapshot(&state, cx).ok() else {
             return div().into_any_element();
         };
-        let upload_diff = self.cloud_sync_upload_diff_items_cached(&local_snapshot, state);
+        let upload_diff = self.cloud_sync_upload_diff_items_cached(&local_snapshot, &state, cx);
         if upload_diff.is_empty() {
             return div().into_any_element();
         }
@@ -577,8 +639,11 @@ impl WorkspaceApp {
     }
 
     pub(super) fn render_cloud_sync_health_card(&self, cx: &mut Context<Self>) -> AnyElement {
-        let state = self.cloud_sync.controller.store.state();
-        let rows = cloud_sync_health_items(&self.cloud_sync.view.form, state)
+        let health_items = {
+            let cloud_sync = self.cloud_sync.read(cx);
+            cloud_sync_health_items(&cloud_sync.view.form, cloud_sync.controller.store.state())
+        };
+        let rows = health_items
             .into_iter()
             .map(|item| {
                 self.render_cloud_sync_health_row(item.label_key, item.detail_key, item.status, cx)
@@ -688,8 +753,11 @@ impl WorkspaceApp {
     }
 
     pub(super) fn render_cloud_sync_coverage_card(&self, cx: &mut Context<Self>) -> AnyElement {
-        let state = self.cloud_sync.controller.store.state();
-        let rows = cloud_sync_coverage_model(&state.sync_scope)
+        let coverage_items = {
+            let cloud_sync = self.cloud_sync.read(cx);
+            cloud_sync_coverage_model(&cloud_sync.controller.store.state().sync_scope)
+        };
+        let rows = coverage_items
             .into_iter()
             .map(|item| {
                 self.render_cloud_sync_status_row(

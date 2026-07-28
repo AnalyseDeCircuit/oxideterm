@@ -5,7 +5,7 @@ use super::*;
 
 impl WorkspaceApp {
     pub(super) fn render_cloud_sync_scope_card(&self, cx: &mut Context<Self>) -> AnyElement {
-        let raw_scope = &self.cloud_sync.controller.store.state().sync_scope;
+        let raw_scope = &self.cloud_sync.read(cx).controller.store.state().sync_scope;
         let scope = normalize_sync_scope(Some(raw_scope), &[]);
         let mut toggles = vec![
             self.render_cloud_sync_scope_bool_toggle(
@@ -104,19 +104,23 @@ impl WorkspaceApp {
                     if label_key == "plugin.cloud_sync.settings.sync_sensitive_credentials"
                         && !checked
                     {
-                        this.cloud_sync.view.confirm = Some(CloudSyncConfirm::EnableSensitiveSync);
-                        this.cloud_sync.view.confirm_presence.reopen();
-                        // Pointer-opened confirms should not paint a footer focus state
-                        // until keyboard navigation explicitly enters the footer.
-                        this.cloud_sync.view.confirm_focused_action = None;
+                        this.cloud_sync.update(cx, |cloud_sync, _cx| {
+                            cloud_sync.view.confirm = Some(CloudSyncConfirm::EnableSensitiveSync);
+                            cloud_sync.view.confirm_presence.reopen();
+                            // Pointer-opened confirms should not paint a footer focus state
+                            // until keyboard navigation explicitly enters the footer.
+                            cloud_sync.view.confirm_focused_action = None;
+                        });
                         cx.stop_propagation();
                         cx.notify();
                         return;
                     }
-                    update(
-                        &mut this.cloud_sync.controller.store.state_mut().sync_scope,
-                        !checked,
-                    );
+                    this.cloud_sync.update(cx, |cloud_sync, _cx| {
+                        update(
+                            &mut cloud_sync.controller.store.state_mut().sync_scope,
+                            !checked,
+                        );
+                    });
                     this.finish_cloud_sync_scope_edit(cx);
                     cx.stop_propagation();
                 },
@@ -147,7 +151,7 @@ impl WorkspaceApp {
             checked,
             cx.listener(
                 move |this: &mut WorkspaceApp, _event, _window, cx: &mut Context<WorkspaceApp>| {
-                    this.toggle_cloud_sync_app_settings_section(&section_id);
+                    this.toggle_cloud_sync_app_settings_section(&section_id, cx);
                     this.finish_cloud_sync_scope_edit(cx);
                     cx.stop_propagation();
                 },
@@ -155,9 +159,13 @@ impl WorkspaceApp {
         )
     }
 
-    pub(super) fn toggle_cloud_sync_app_settings_section(&mut self, section_id: &str) {
+    pub(super) fn toggle_cloud_sync_app_settings_section(
+        &mut self,
+        section_id: &str,
+        cx: &mut Context<Self>,
+    ) {
         let mut sections = normalize_sync_scope(
-            Some(&self.cloud_sync.controller.store.state().sync_scope),
+            Some(&self.cloud_sync.read(cx).controller.store.state().sync_scope),
             &[],
         )
         .app_settings_sections;
@@ -166,18 +174,20 @@ impl WorkspaceApp {
         } else {
             sections.push(section_id.to_string());
         }
-        self.cloud_sync
-            .controller
-            .store
-            .state_mut()
-            .sync_scope
-            .app_settings_sections = Some(sections);
+        self.cloud_sync.update(cx, |cloud_sync, _cx| {
+            cloud_sync
+                .controller
+                .store
+                .state_mut()
+                .sync_scope
+                .app_settings_sections = Some(sections);
+        });
     }
 
     pub(super) fn finish_cloud_sync_scope_edit(&mut self, cx: &mut Context<Self>) {
-        self.clear_cloud_sync_select_focus();
-        self.refresh_cloud_sync_local_dirty_state();
-        self.save_cloud_sync_state();
+        self.clear_cloud_sync_select_focus(cx);
+        self.refresh_cloud_sync_local_dirty_state(cx);
+        self.save_cloud_sync_state(cx);
         cx.notify();
     }
 
@@ -191,12 +201,33 @@ impl WorkspaceApp {
     ) -> AnyElement {
         let theme = self.tokens.ui;
         let focused = self.focused_settings_input == Some(input);
-        let value = if focused {
-            self.settings_input_draft.clone()
-        } else {
-            self.current_settings_input_value(input, cx)
-        };
         let target = WorkspaceImeTarget::Settings(input);
+        let selected_range = self.ime_selected_range_for_target(target, cx);
+        let marked_text = self.marked_text_for_target(target, cx);
+        let input_control = {
+            let cloud_sync = self.cloud_sync.read(cx);
+            let value = if focused {
+                self.settings_input_draft.as_str()
+            } else {
+                cloud_sync_form_input_value_ref(&cloud_sync.view.form, input).unwrap_or_default()
+            };
+            text_input(
+                &self.tokens,
+                TextInputView {
+                    value,
+                    placeholder: self.i18n.t(placeholder_key),
+                    focused,
+                    caret_visible: self.new_connection_caret_visible,
+                    secret,
+                    selected_all: false,
+                    selected_range,
+                    marked_text,
+                },
+            )
+            .w_full()
+            .min_w(px(0.0))
+            .cursor(CursorStyle::IBeam)
+        };
         let workspace = cx.entity();
         cloud_sync_field_row(
             &self.tokens,
@@ -215,39 +246,23 @@ impl WorkspaceApp {
                 .into_any_element(),
             text_input_anchor_probe(
                 target.anchor_id(),
-                text_input(
-                    &self.tokens,
-                    TextInputView {
-                        value: &value,
-                        placeholder: self.i18n.t(placeholder_key),
-                        focused,
-                        caret_visible: self.new_connection_caret_visible,
-                        secret,
-                        selected_all: false,
-                        selected_range: self.ime_selected_range_for_target(target, cx),
-                        marked_text: self.marked_text_for_target(target, cx),
-                    },
-                )
-                .w_full()
-                .min_w(px(0.0))
-                .cursor(CursorStyle::IBeam)
-                .on_mouse_down(
-                    MouseButton::Left,
-                    cx.listener(move |this, event: &gpui::MouseDownEvent, window, cx| {
-                        let current = this.current_settings_input_value(input, cx);
-                        this.focus_settings_input(input, current, cx);
-                        this.ime_marked_text = None;
-                        window.focus(&this.focus_handle, cx);
-                        this.begin_ime_selection_from_mouse_down(target, event, window, cx);
-                        this.clear_cloud_sync_select_focus();
-                        cx.stop_propagation();
-                    }),
-                )
-                .on_mouse_move(cx.listener(
-                    |this, event: &gpui::MouseMoveEvent, window, cx| {
-                        this.update_ime_selection_drag_from_mouse_move(event, window, cx);
-                    },
-                )),
+                input_control
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(move |this, event: &gpui::MouseDownEvent, window, cx| {
+                            this.focus_settings_input(input, String::new(), cx);
+                            this.ime_marked_text = None;
+                            window.focus(&this.focus_handle, cx);
+                            this.begin_ime_selection_from_mouse_down(target, event, window, cx);
+                            this.clear_cloud_sync_select_focus(cx);
+                            cx.stop_propagation();
+                        }),
+                    )
+                    .on_mouse_move(cx.listener(
+                        |this, event: &gpui::MouseMoveEvent, window, cx| {
+                            this.update_ime_selection_drag_from_mouse_move(event, window, cx);
+                        },
+                    )),
                 move |anchor, _window, cx| {
                     let _ = workspace.update(cx, |this, cx| {
                         this.update_text_input_anchor(anchor, cx);
@@ -268,6 +283,7 @@ impl WorkspaceApp {
     ) -> AnyElement {
         let stored = self
             .cloud_sync
+            .read(cx)
             .controller
             .store
             .state()
@@ -289,15 +305,17 @@ impl WorkspaceApp {
                           _event,
                           _window,
                           cx: &mut Context<WorkspaceApp>| {
-                        this.cloud_sync.view.confirm = Some(CloudSyncConfirm::ClearSecret {
-                            key: secret_key.to_string(),
-                            label: label.clone(),
+                        this.cloud_sync.update(cx, |cloud_sync, _cx| {
+                            cloud_sync.view.confirm = Some(CloudSyncConfirm::ClearSecret {
+                                key: secret_key.to_string(),
+                                label: label.clone(),
+                            });
+                            cloud_sync.view.confirm_presence.reopen();
+                            // Pointer-opened confirms should not paint a footer focus state
+                            // until keyboard navigation explicitly enters the footer.
+                            cloud_sync.view.confirm_focused_action = None;
                         });
-                        this.cloud_sync.view.confirm_presence.reopen();
-                        // Pointer-opened confirms should not paint a footer focus state
-                        // until keyboard navigation explicitly enters the footer.
-                        this.cloud_sync.view.confirm_focused_action = None;
-                        this.clear_cloud_sync_select_focus();
+                        this.clear_cloud_sync_select_focus(cx);
                         cx.stop_propagation();
                         cx.notify();
                     },
@@ -318,14 +336,14 @@ impl WorkspaceApp {
             "plugin.cloud_sync.settings.backend_type",
             CloudSyncSelect::Backend,
             self.i18n.t(cloud_sync_backend_label_key(
-                &self.cloud_sync.view.form.backend_type,
+                &self.cloud_sync.read(cx).view.form.backend_type,
             )),
             cx,
         )
     }
 
     pub(super) fn render_cloud_sync_auth_mode_select(&self, cx: &mut Context<Self>) -> AnyElement {
-        let current = match self.cloud_sync.view.form.auth_mode {
+        let current = match self.cloud_sync.read(cx).view.form.auth_mode {
             AuthMode::Bearer => self.i18n.t("plugin.cloud_sync.auth.bearer"),
             AuthMode::Basic => self.i18n.t("plugin.cloud_sync.auth.basic"),
             AuthMode::None => self.i18n.t("plugin.cloud_sync.auth.none"),
@@ -339,7 +357,7 @@ impl WorkspaceApp {
     }
 
     pub(super) fn render_cloud_sync_conflict_select(&self, cx: &mut Context<Self>) -> AnyElement {
-        let current = match self.cloud_sync.view.form.default_conflict_strategy {
+        let current = match self.cloud_sync.read(cx).view.form.default_conflict_strategy {
             ConflictStrategy::Merge => self.i18n.t("plugin.cloud_sync.conflict.merge"),
             ConflictStrategy::Replace => self.i18n.t("plugin.cloud_sync.conflict.replace"),
             ConflictStrategy::Skip => self.i18n.t("plugin.cloud_sync.conflict.skip"),
@@ -356,11 +374,18 @@ impl WorkspaceApp {
     pub(super) fn cloud_sync_select_options(
         &self,
         select: CloudSyncSelect,
+        cx: &App,
     ) -> Vec<CloudSyncSelectOption> {
         let settings = CloudSyncSettings {
-            backend_type: self.cloud_sync.view.form.backend_type.clone(),
-            auth_mode: self.cloud_sync.view.form.auth_mode.clone(),
-            default_conflict_strategy: self.cloud_sync.view.form.default_conflict_strategy.clone(),
+            backend_type: self.cloud_sync.read(cx).view.form.backend_type.clone(),
+            auth_mode: self.cloud_sync.read(cx).view.form.auth_mode.clone(),
+            default_conflict_strategy: self
+                .cloud_sync
+                .read(cx)
+                .view
+                .form
+                .default_conflict_strategy
+                .clone(),
             ..CloudSyncSettings::default()
         };
         cloud_sync_select_option_specs(&settings, select)
@@ -373,21 +398,37 @@ impl WorkspaceApp {
             .collect()
     }
 
-    pub(super) fn cloud_sync_selected_option_index(&self, select: CloudSyncSelect) -> usize {
+    pub(super) fn cloud_sync_selected_option_index(
+        &self,
+        select: CloudSyncSelect,
+        cx: &App,
+    ) -> usize {
         let settings = CloudSyncSettings {
-            backend_type: self.cloud_sync.view.form.backend_type.clone(),
-            auth_mode: self.cloud_sync.view.form.auth_mode.clone(),
-            default_conflict_strategy: self.cloud_sync.view.form.default_conflict_strategy.clone(),
+            backend_type: self.cloud_sync.read(cx).view.form.backend_type.clone(),
+            auth_mode: self.cloud_sync.read(cx).view.form.auth_mode.clone(),
+            default_conflict_strategy: self
+                .cloud_sync
+                .read(cx)
+                .view
+                .form
+                .default_conflict_strategy
+                .clone(),
             ..CloudSyncSettings::default()
         };
         cloud_sync_selected_option_spec_index(&settings, select)
     }
 
-    pub(super) fn cloud_sync_focusable_selects(&self) -> Vec<CloudSyncSelect> {
+    pub(super) fn cloud_sync_focusable_selects(&self, cx: &App) -> Vec<CloudSyncSelect> {
         let settings = CloudSyncSettings {
-            backend_type: self.cloud_sync.view.form.backend_type.clone(),
-            auth_mode: self.cloud_sync.view.form.auth_mode.clone(),
-            default_conflict_strategy: self.cloud_sync.view.form.default_conflict_strategy.clone(),
+            backend_type: self.cloud_sync.read(cx).view.form.backend_type.clone(),
+            auth_mode: self.cloud_sync.read(cx).view.form.auth_mode.clone(),
+            default_conflict_strategy: self
+                .cloud_sync
+                .read(cx)
+                .view
+                .form
+                .default_conflict_strategy
+                .clone(),
             ..CloudSyncSettings::default()
         };
         cloud_sync_focusable_selects(&settings)
@@ -404,45 +445,52 @@ impl WorkspaceApp {
     pub(super) fn toggle_cloud_sync_select_from_pointer(
         &mut self,
         select: CloudSyncSelect,
-        _cx: &mut Context<Self>,
+        cx: &mut Context<Self>,
     ) {
-        if self.cloud_sync.view.open_select == Some(select) {
-            self.close_cloud_sync_select();
+        if self.cloud_sync.read(cx).view.open_select == Some(select) {
+            self.close_cloud_sync_select(cx);
             return;
         }
-        let selected_index = self.cloud_sync_selected_option_index(select);
-        browser_behavior::toggle_browser_highlighted_select_from_pointer(
-            &mut self.cloud_sync.view.open_select,
-            &mut self.cloud_sync.view.focused_select,
-            &mut self.cloud_sync.view.select_focus_origin,
-            &mut self.cloud_sync.view.select_highlighted,
-            select,
-            selected_index,
-        );
+        let selected_index = self.cloud_sync_selected_option_index(select, cx);
+        self.cloud_sync.update(cx, |cloud_sync, _cx| {
+            browser_behavior::toggle_browser_highlighted_select_from_pointer(
+                &mut cloud_sync.view.open_select,
+                &mut cloud_sync.view.focused_select,
+                &mut cloud_sync.view.select_focus_origin,
+                &mut cloud_sync.view.select_highlighted,
+                select,
+                selected_index,
+            );
+        });
     }
 
-    pub(super) fn clear_cloud_sync_select_focus(&mut self) {
-        browser_behavior::clear_browser_highlighted_select_focus(
-            &mut self.cloud_sync.view.open_select,
-            &mut self.cloud_sync.view.focused_select,
-            &mut self.cloud_sync.view.select_focus_origin,
-            &mut self.cloud_sync.view.select_highlighted,
-        );
+    pub(super) fn clear_cloud_sync_select_focus(&mut self, cx: &mut Context<Self>) {
+        self.cloud_sync.update(cx, |cloud_sync, _cx| {
+            browser_behavior::clear_browser_highlighted_select_focus(
+                &mut cloud_sync.view.open_select,
+                &mut cloud_sync.view.focused_select,
+                &mut cloud_sync.view.select_focus_origin,
+                &mut cloud_sync.view.select_highlighted,
+            );
+        });
     }
 
-    pub(super) fn close_cloud_sync_select_for_scroll(&mut self) -> bool {
-        let changed = close_cloud_sync_select_on_container_scroll(
-            &mut self.cloud_sync.view.open_select,
-            &mut self.cloud_sync.view.focused_select,
-            &mut self.cloud_sync.view.select_highlighted,
-        );
-        changed
+    pub(super) fn close_cloud_sync_select_for_scroll(&mut self, cx: &mut Context<Self>) -> bool {
+        self.cloud_sync.update(cx, |cloud_sync, _cx| {
+            close_cloud_sync_select_on_container_scroll(
+                &mut cloud_sync.view.open_select,
+                &mut cloud_sync.view.focused_select,
+                &mut cloud_sync.view.select_highlighted,
+            )
+        })
     }
 
-    pub(super) fn close_cloud_sync_select(&mut self) {
+    pub(super) fn close_cloud_sync_select(&mut self, cx: &mut Context<Self>) {
         // Dropdown dismissal is synchronous and independent of motion settings.
-        self.cloud_sync.view.open_select = None;
-        self.cloud_sync.view.select_highlighted = None;
+        self.cloud_sync.update(cx, |cloud_sync, _cx| {
+            cloud_sync.view.open_select = None;
+            cloud_sync.view.select_highlighted = None;
+        });
     }
 
     pub(super) fn apply_cloud_sync_select_action(
@@ -453,31 +501,33 @@ impl WorkspaceApp {
         // Tauri's Radix Select uses the same onValueChange path for mouse and
         // keyboard selection. Keep native mutations centralized so Enter and
         // pointer clicks cannot drift apart.
-        let trigger_select = match action {
+        let trigger_select = self.cloud_sync.update(cx, |cloud_sync, _cx| match action {
             CloudSyncSelectAction::Backend(backend) => {
-                self.cloud_sync.view.form.backend_type = backend.clone();
+                cloud_sync.view.form.backend_type = backend.clone();
                 if matches!(backend, BackendType::Dropbox) {
-                    self.cloud_sync.view.form.auth_mode = AuthMode::Bearer;
+                    cloud_sync.view.form.auth_mode = AuthMode::Bearer;
                 } else if matches!(
                     backend,
                     BackendType::GithubGist | BackendType::Git | BackendType::S3
                 ) {
-                    self.cloud_sync.view.form.auth_mode = AuthMode::None;
+                    cloud_sync.view.form.auth_mode = AuthMode::None;
                 }
                 CloudSyncSelect::Backend
             }
             CloudSyncSelectAction::AuthMode(auth_mode) => {
-                self.cloud_sync.view.form.auth_mode = auth_mode;
+                cloud_sync.view.form.auth_mode = auth_mode;
                 CloudSyncSelect::AuthMode
             }
             CloudSyncSelectAction::ConflictStrategy(strategy) => {
-                self.cloud_sync.view.form.default_conflict_strategy = strategy;
+                cloud_sync.view.form.default_conflict_strategy = strategy;
                 CloudSyncSelect::ConflictStrategy
             }
-        };
-        self.close_cloud_sync_select();
-        self.cloud_sync.view.focused_select = Some(trigger_select);
-        self.cloud_sync.view.select_highlighted = None;
+        });
+        self.close_cloud_sync_select(cx);
+        self.cloud_sync.update(cx, |cloud_sync, _cx| {
+            cloud_sync.view.focused_select = Some(trigger_select);
+            cloud_sync.view.select_highlighted = None;
+        });
         cx.notify();
     }
 
@@ -493,13 +543,13 @@ impl WorkspaceApp {
             event.keystroke.key.as_str(),
             event.keystroke.modifiers.shift,
             CloudSyncSelectKeyState {
-                open_select: self.cloud_sync.view.open_select,
-                focused_select: self.cloud_sync.view.focused_select,
-                highlighted_option: self.cloud_sync.view.select_highlighted,
+                open_select: self.cloud_sync.read(cx).view.open_select,
+                focused_select: self.cloud_sync.read(cx).view.focused_select,
+                highlighted_option: self.cloud_sync.read(cx).view.select_highlighted,
             },
-            &self.cloud_sync_focusable_selects(),
-            |select| self.cloud_sync_selected_option_index(select),
-            |select| self.cloud_sync_select_options(select).len(),
+            &self.cloud_sync_focusable_selects(cx),
+            |select| self.cloud_sync_selected_option_index(select, cx),
+            |select| self.cloud_sync_select_options(select, cx).len(),
         );
         let CloudSyncSelectKeyEffect::Handled {
             state,
@@ -509,26 +559,29 @@ impl WorkspaceApp {
         else {
             return false;
         };
-        let previous_open_select = self.cloud_sync.view.open_select;
-        self.cloud_sync.view.open_select = state.open_select;
-        self.cloud_sync.view.focused_select = state.focused_select;
-        self.cloud_sync.view.select_highlighted = state.highlighted_option;
-        if keyboard_focus_origin {
-            self.cloud_sync.view.select_focus_origin =
-                Some(browser_behavior::BrowserFocusOrigin::Keyboard);
-        }
+        let previous_open_select = self.cloud_sync.read(cx).view.open_select;
+        self.cloud_sync.update(cx, |cloud_sync, _cx| {
+            cloud_sync.view.open_select = state.open_select;
+            cloud_sync.view.focused_select = state.focused_select;
+            cloud_sync.view.select_highlighted = state.highlighted_option;
+            if keyboard_focus_origin {
+                cloud_sync.view.select_focus_origin =
+                    Some(browser_behavior::BrowserFocusOrigin::Keyboard);
+            }
+        });
         if previous_open_select.is_some()
             && state.open_select.is_none()
             && event.keystroke.key.as_str() == "escape"
         {
             // Escape closes the dropdown synchronously like pointer dismissal.
-            self.close_cloud_sync_select();
+            self.close_cloud_sync_select(cx);
         }
-        if let (Some(select), Some(index)) =
-            (self.cloud_sync.view.focused_select, selected_action_index)
-        {
+        if let (Some(select), Some(index)) = (
+            self.cloud_sync.read(cx).view.focused_select,
+            selected_action_index,
+        ) {
             if let Some(action) = self
-                .cloud_sync_select_options(select)
+                .cloud_sync_select_options(select, cx)
                 .get(index)
                 .map(|option| option.action.clone())
             {
@@ -547,11 +600,11 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
-        let open = self.cloud_sync.view.open_select == Some(select);
-        let focused = self.cloud_sync.view.focused_select == Some(select);
+        let open = self.cloud_sync.read(cx).view.open_select == Some(select);
+        let focused = self.cloud_sync.read(cx).view.focused_select == Some(select);
         let focus_visible = browser_behavior::browser_focus_visible(
             focused,
-            self.cloud_sync.view.select_focus_origin,
+            self.cloud_sync.read(cx).view.select_focus_origin,
         );
         let anchor_id = Self::cloud_sync_select_anchor_id(select);
         let workspace = cx.entity();
@@ -622,7 +675,7 @@ impl WorkspaceApp {
     ) -> Option<AnyElement> {
         // Cloud Sync uses one open state so dropdown rendering cannot outlive
         // logical dismissal or depend on the animation profile.
-        let select = self.cloud_sync.view.open_select?;
+        let select = self.cloud_sync.read(cx).view.open_select?;
         let anchor_id = Self::cloud_sync_select_anchor_id(select);
         let anchor = self.select_anchors.get(&anchor_id).copied()?;
         let width =
@@ -634,12 +687,13 @@ impl WorkspaceApp {
         );
         let highlighted = self
             .cloud_sync
+            .read(cx)
             .view
             .select_highlighted
             .filter(|(highlighted_select, _)| *highlighted_select == select)
             .map(|(_, index)| index)
-            .unwrap_or_else(|| self.cloud_sync_selected_option_index(select));
-        let options = self.cloud_sync_select_options(select);
+            .unwrap_or_else(|| self.cloud_sync_selected_option_index(select, cx));
+        let options = self.cloud_sync_select_options(select, cx);
         for (index, option) in options.into_iter().enumerate() {
             let label = option.label;
             let selected = option.selected;
@@ -651,8 +705,10 @@ impl WorkspaceApp {
                 highlighted == index,
             )
             .on_mouse_move(cx.listener(move |this, _event, _window, cx| {
-                if this.cloud_sync.view.select_highlighted != Some((select, index)) {
-                    this.cloud_sync.view.select_highlighted = Some((select, index));
+                if this.cloud_sync.read(cx).view.select_highlighted != Some((select, index)) {
+                    this.cloud_sync.update(cx, |cloud_sync, _cx| {
+                        cloud_sync.view.select_highlighted = Some((select, index));
+                    });
                     cx.notify();
                 }
             }));
@@ -661,9 +717,11 @@ impl WorkspaceApp {
                 false,
                 false,
                 cx.listener(move |this, _event, _window, cx| {
-                    this.close_cloud_sync_select();
-                    this.cloud_sync.view.select_focus_origin =
-                        Some(browser_behavior::BrowserFocusOrigin::Pointer);
+                    this.close_cloud_sync_select(cx);
+                    this.cloud_sync.update(cx, |cloud_sync, _cx| {
+                        cloud_sync.view.select_focus_origin =
+                            Some(browser_behavior::BrowserFocusOrigin::Pointer);
+                    });
                     this.apply_cloud_sync_select_action(action.clone(), cx);
                     cx.stop_propagation();
                     cx.notify();
@@ -780,21 +838,30 @@ impl WorkspaceApp {
         show_success_toast: bool,
         cx: &mut Context<Self>,
     ) -> bool {
-        self.apply_focused_cloud_sync_input_draft();
-        self.invalidate_cloud_sync_snapshot_caches();
-        let (settings, interval) = cloud_sync_settings_from_form(&self.cloud_sync.view.form);
+        self.apply_focused_cloud_sync_input_draft(cx);
+        self.invalidate_cloud_sync_snapshot_caches(cx);
+        let (settings, interval) = {
+            let cloud_sync = self.cloud_sync.read(cx);
+            cloud_sync_settings_from_form(&cloud_sync.view.form)
+        };
         let mut provider = CloudSyncKeychainSecretProvider::new(
             self.cloud_sync
+                .read(cx)
                 .controller
                 .store
                 .state()
                 .secret_hints
                 .clone(),
         );
-        let secret_result =
-            store_cloud_sync_touched_secrets(&self.cloud_sync.view.form, &mut provider);
+        let secret_handoff = self.cloud_sync.update(cx, |cloud_sync, _cx| {
+            cloud_sync.view.form.take_secret_handoff()
+        });
+        let secret_result = store_cloud_sync_touched_secrets(&secret_handoff, &mut provider);
         if let Err(error) = secret_result {
-            self.cloud_sync.controller.store.state_mut().last_error = Some(error.to_string());
+            self.cloud_sync.update(cx, |cloud_sync, _cx| {
+                cloud_sync.view.form.restore_secret_handoff(secret_handoff);
+                cloud_sync.controller.store.state_mut().last_error = Some(error.to_string());
+            });
             self.push_cloud_sync_toast(
                 self.i18n
                     .t("plugin.cloud_sync.toast.settings_saved_failed_title"),
@@ -803,10 +870,15 @@ impl WorkspaceApp {
             );
             return false;
         }
-        self.cloud_sync.controller.store.state_mut().settings = settings;
-        self.cloud_sync.controller.store.state_mut().secret_hints = provider.hints().clone();
-        if let Err(error) = self.cloud_sync.controller.store.save() {
-            self.cloud_sync.controller.store.state_mut().last_error = Some(error.to_string());
+        let save_result = self.cloud_sync.update(cx, |cloud_sync, _cx| {
+            cloud_sync.controller.store.state_mut().settings = settings;
+            cloud_sync.controller.store.state_mut().secret_hints = provider.hints().clone();
+            cloud_sync.controller.store.save()
+        });
+        if let Err(error) = save_result {
+            self.cloud_sync.update(cx, |cloud_sync, _cx| {
+                cloud_sync.controller.store.state_mut().last_error = Some(error.to_string());
+            });
             self.push_cloud_sync_toast(
                 self.i18n
                     .t("plugin.cloud_sync.toast.settings_saved_failed_title"),
@@ -815,9 +887,14 @@ impl WorkspaceApp {
             );
             return false;
         } else {
-            normalize_cloud_sync_interval_draft(&mut self.cloud_sync.view.form, interval);
-            reset_cloud_sync_secret_drafts(&mut self.cloud_sync.view.form);
-            self.cloud_sync.controller.store.state_mut().last_error = None;
+            // Successful synchronous persistence drops and zeroizes the
+            // transferred buffers before the UI draft is normalized.
+            drop(secret_handoff);
+            self.cloud_sync.update(cx, |cloud_sync, _cx| {
+                normalize_cloud_sync_interval_draft(&mut cloud_sync.view.form, interval);
+                reset_cloud_sync_secret_drafts(&mut cloud_sync.view.form);
+                cloud_sync.controller.store.state_mut().last_error = None;
+            });
             if show_success_toast {
                 self.push_cloud_sync_toast(
                     self.i18n.t("plugin.cloud_sync.toast.settings_saved_title"),

@@ -937,9 +937,15 @@ impl WorkspaceApp {
         // Cloud Sync provider/config selects are Radix-like transient popovers;
         // a modal boundary must release both the open menu and the trigger
         // focus owner so keyboard rings do not leak behind the dialog.
-        self.cloud_sync.view.open_select = None;
+        self.cloud_sync.update(cx, |cloud_sync, cx| {
+            let open_changed = cloud_sync.view.open_select.take().is_some();
+            let focus_changed = cloud_sync.view.focused_select.take().is_some();
+            let changed = open_changed || focus_changed;
+            if changed {
+                cx.notify();
+            }
+        });
         self.focused_settings_input = None;
-        self.cloud_sync.view.focused_select = None;
         self.settings_slider_drag = None;
         self.ime_marked_text = None;
         self.workspace_tooltip = None;
@@ -965,13 +971,20 @@ impl WorkspaceApp {
             self.close_new_connection_select(cx);
             changed = true;
         }
-        if self.cloud_sync.view.open_select.take().is_some() {
-            self.cloud_sync.view.select_highlighted = None;
-            changed = true;
-        }
-        if self.cloud_sync.view.focused_select.take().is_some() {
+        if self.cloud_sync.update(cx, |cloud_sync, cx| {
+            let open_changed = cloud_sync.view.open_select.take().is_some();
+            if open_changed {
+                cloud_sync.view.select_highlighted = None;
+            }
             // Outside pointer focus in the browser leaves the Radix trigger;
             // mirror that owner release so the native focus ring cannot linger.
+            let focus_changed = cloud_sync.view.focused_select.take().is_some();
+            let changed = open_changed || focus_changed;
+            if changed {
+                cx.notify();
+            }
+            changed
+        }) {
             changed = true;
         }
         if self

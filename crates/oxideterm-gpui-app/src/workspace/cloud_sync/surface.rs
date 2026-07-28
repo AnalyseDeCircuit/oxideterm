@@ -74,13 +74,12 @@ impl WorkspaceApp {
         &mut self,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        self.poll_cloud_sync_delivery(cx);
-        self.invalidate_cloud_sync_select_if_needed();
+        self.invalidate_cloud_sync_select_if_needed(cx);
 
         let theme = self.tokens.ui;
         let has_background = self.cloud_sync_has_background();
-        self.sync_cloud_sync_section_list_state();
-        let state = self.cloud_sync.view.section_list_state.clone();
+        self.sync_cloud_sync_section_list_state(cx);
+        let state = self.cloud_sync.read(cx).view.section_list_state.clone();
         let spec = self.cloud_sync_section_list_spec();
         let workspace = cx.entity();
 
@@ -92,7 +91,7 @@ impl WorkspaceApp {
                     .id("cloud-sync-scroll")
                     .size_full()
                     .on_scroll_wheel(cx.listener(|this, _event, _window, cx| {
-                        if this.close_cloud_sync_select_for_scroll() {
+                        if this.close_cloud_sync_select_for_scroll(cx) {
                             cx.notify();
                         }
                     }))
@@ -116,8 +115,8 @@ impl WorkspaceApp {
             .into_any_element()
     }
 
-    fn invalidate_cloud_sync_select_if_needed(&mut self) {
-        let Some(open_select) = self.cloud_sync.view.open_select else {
+    fn invalidate_cloud_sync_select_if_needed(&mut self, cx: &mut Context<Self>) {
+        let Some(open_select) = self.cloud_sync.read(cx).view.open_select else {
             return;
         };
         let anchor_valid = self
@@ -125,20 +124,24 @@ impl WorkspaceApp {
             .contains_key(&Self::cloud_sync_select_anchor_id(open_select));
         if !anchor_valid {
             // Invalid live geometry closes the dropdown immediately.
-            self.cloud_sync.view.open_select = None;
+            self.cloud_sync.update(cx, |cloud_sync, _cx| {
+                cloud_sync.view.open_select = None;
+            });
         }
     }
 
-    pub(super) fn sync_cloud_sync_section_list_state(&mut self) {
+    pub(super) fn sync_cloud_sync_section_list_state(&mut self, cx: &mut Context<Self>) {
         let spec = self.cloud_sync_section_list_spec();
-        let signatures = self.cloud_sync_section_signatures();
-        sync_tauri_variable_list_state_by_signatures(
-            &self.cloud_sync.view.section_list_state,
-            &mut self.cloud_sync.view.section_list_cache.borrow_mut(),
-            "cloud-sync",
-            &signatures,
-            spec,
-        );
+        let signatures = self.cloud_sync_section_signatures(cx);
+        self.cloud_sync.update(cx, |cloud_sync, _cx| {
+            sync_tauri_variable_list_state_by_signatures(
+                &cloud_sync.view.section_list_state,
+                &mut cloud_sync.view.section_list_cache.borrow_mut(),
+                "cloud-sync",
+                &signatures,
+                spec,
+            );
+        });
     }
 
     pub(super) fn cloud_sync_section_list_spec(&self) -> TauriVirtualListSpec {
@@ -152,39 +155,39 @@ impl WorkspaceApp {
         self.background_surface_active("cloud_sync")
     }
 
-    pub(super) fn cloud_sync_sections(&self) -> Vec<CloudSyncSection> {
+    pub(super) fn cloud_sync_sections(&self, cx: &App) -> Vec<CloudSyncSection> {
         cloud_sync_sections(
-            self.cloud_sync.controller.store.state(),
-            self.cloud_sync_has_pending_preview(),
-            self.cloud_sync.view.active_tab,
+            self.cloud_sync.read(cx).controller.store.state(),
+            self.cloud_sync_has_pending_preview(cx),
+            self.cloud_sync.read(cx).view.active_tab,
         )
     }
 
-    pub(super) fn cloud_sync_section_signatures(&self) -> Vec<u64> {
-        self.cloud_sync_sections()
+    pub(super) fn cloud_sync_section_signatures(&self, cx: &App) -> Vec<u64> {
+        self.cloud_sync_sections(cx)
             .into_iter()
-            .map(|section| self.cloud_sync_section_signature(section))
+            .map(|section| self.cloud_sync_section_signature(section, cx))
             .collect()
     }
 
-    pub(super) fn cloud_sync_section_signature(&self, section: CloudSyncSection) -> u64 {
+    pub(super) fn cloud_sync_section_signature(&self, section: CloudSyncSection, cx: &App) -> u64 {
         cloud_sync_section_signature(
             section,
-            self.cloud_sync.controller.store.state(),
-            &self.cloud_sync.view.form.backend_type,
-            &self.cloud_sync.view.form.auth_mode,
-            &self.cloud_sync.view.form.default_conflict_strategy,
-            self.cloud_sync.controller.delivery_rx.is_some(),
-            self.cloud_sync_has_pending_preview(),
-            self.cloud_sync.view.preview_selection.is_some(),
-            self.cloud_sync.controller.progress.is_some(),
-            self.cloud_sync.view.active_tab,
+            self.cloud_sync.read(cx).controller.store.state(),
+            &self.cloud_sync.read(cx).view.form.backend_type,
+            &self.cloud_sync.read(cx).view.form.auth_mode,
+            &self.cloud_sync.read(cx).view.form.default_conflict_strategy,
+            self.cloud_sync.read(cx).controller.delivery_rx.is_some(),
+            self.cloud_sync_has_pending_preview(cx),
+            self.cloud_sync.read(cx).view.preview_selection.is_some(),
+            self.cloud_sync.read(cx).controller.progress.is_some(),
+            self.cloud_sync.read(cx).view.active_tab,
         )
     }
 
-    pub(super) fn cloud_sync_has_pending_preview(&self) -> bool {
-        self.cloud_sync.view.pending_preview.is_some()
-            || self.cloud_sync.view.upload_preview.is_some()
+    pub(super) fn cloud_sync_has_pending_preview(&self, cx: &App) -> bool {
+        self.cloud_sync.read(cx).view.pending_preview.is_some()
+            || self.cloud_sync.read(cx).view.upload_preview.is_some()
     }
 
     pub(super) fn render_cloud_sync_section_item(
@@ -192,7 +195,7 @@ impl WorkspaceApp {
         index: usize,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let sections = self.cloud_sync_sections();
+        let sections = self.cloud_sync_sections(cx);
         let Some(section) = sections.get(index).copied() else {
             return div().into_any_element();
         };
@@ -221,106 +224,106 @@ impl WorkspaceApp {
         section: CloudSyncSection,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let busy = self.cloud_sync.controller.delivery_rx.is_some();
+        let (busy, active_tab, backend_type, state, upload_preview, pending_preview) = {
+            let cloud_sync = self.cloud_sync.read(cx);
+            (
+                cloud_sync.controller.delivery_rx.is_some(),
+                cloud_sync.view.active_tab,
+                cloud_sync.view.form.backend_type.clone(),
+                cloud_sync.controller.store.state().clone(),
+                cloud_sync.view.upload_preview.clone(),
+                cloud_sync.view.pending_preview.clone(),
+            )
+        };
         let has_background = self.cloud_sync_has_background();
         match section {
             CloudSyncSection::Header => self.render_cloud_sync_header(cx),
             CloudSyncSection::Guide => {
-                if self.cloud_sync.view.active_tab == CloudSyncTab::Configure {
-                    self.render_cloud_sync_guide(&self.cloud_sync.view.form.backend_type, cx)
+                if active_tab == CloudSyncTab::Configure {
+                    self.render_cloud_sync_guide(&backend_type, cx)
                 } else {
                     div().into_any_element()
                 }
             }
             CloudSyncSection::Status => {
-                if self.cloud_sync.view.active_tab == CloudSyncTab::Overview {
-                    self.render_cloud_sync_overview_card(
-                        self.cloud_sync.controller.store.state(),
-                        busy,
-                        has_background,
-                        cx,
-                    )
+                if active_tab == CloudSyncTab::Overview {
+                    self.render_cloud_sync_overview_card(&state, busy, has_background, cx)
                 } else {
                     div().into_any_element()
                 }
             }
             CloudSyncSection::Actions => div().into_any_element(),
             CloudSyncSection::Preview => {
-                let state = self.cloud_sync.controller.store.state();
-                if let Some(preview) = self.cloud_sync.view.upload_preview.as_ref() {
-                    self.render_cloud_sync_upload_preview(preview, state, busy, cx)
+                if let Some(preview) = upload_preview.as_ref() {
+                    self.render_cloud_sync_upload_preview(preview, &state, busy, cx)
                 } else {
-                    self.cloud_sync
-                        .view
-                        .pending_preview
+                    pending_preview
                         .as_ref()
-                        .map(|preview| self.render_cloud_sync_preview(preview, state, busy, cx))
+                        .map(|preview| self.render_cloud_sync_preview(preview, &state, busy, cx))
                         .unwrap_or_else(|| div().into_any_element())
                 }
             }
             CloudSyncSection::RecentHistory => {
-                if self.cloud_sync.view.active_tab == CloudSyncTab::Overview {
+                if active_tab == CloudSyncTab::Overview {
                     self.render_cloud_sync_recent_history(cx)
                 } else {
                     div().into_any_element()
                 }
             }
-            CloudSyncSection::Rollback => match self.cloud_sync.view.active_tab {
+            CloudSyncSection::Rollback => match active_tab {
                 CloudSyncTab::Overview => self.render_cloud_sync_recent_rollback_backups(busy, cx),
                 CloudSyncTab::History => {
                     // History list setup mutates list state, so keep its snapshot local
                     // instead of cloning persisted data for every Cloud Sync row.
-                    let state = self.cloud_sync.controller.store.state().clone();
                     self.render_cloud_sync_rollback_backups(&state, busy, cx)
                 }
                 CloudSyncTab::Configure => div().into_any_element(),
             },
             CloudSyncSection::History => {
-                if self.cloud_sync.view.active_tab == CloudSyncTab::History {
+                if active_tab == CloudSyncTab::History {
                     // The mutable nested list renderer requires an owned snapshot.
-                    let state = self.cloud_sync.controller.store.state().clone();
                     self.render_cloud_sync_history(&state, cx)
                 } else {
                     div().into_any_element()
                 }
             }
             CloudSyncSection::ConfigConnection => {
-                if self.cloud_sync.view.active_tab == CloudSyncTab::Configure {
+                if active_tab == CloudSyncTab::Configure {
                     self.render_cloud_sync_config_connection_card(cx)
                 } else {
                     div().into_any_element()
                 }
             }
             CloudSyncSection::ConfigScope => {
-                if self.cloud_sync.view.active_tab == CloudSyncTab::Configure {
+                if active_tab == CloudSyncTab::Configure {
                     self.render_cloud_sync_scope_card(cx)
                 } else {
                     div().into_any_element()
                 }
             }
             CloudSyncSection::ConfigCoverage => {
-                if self.cloud_sync.view.active_tab == CloudSyncTab::Configure {
+                if active_tab == CloudSyncTab::Configure {
                     self.render_cloud_sync_coverage_card(cx)
                 } else {
                     div().into_any_element()
                 }
             }
             CloudSyncSection::ConfigPreflight => {
-                if self.cloud_sync.view.active_tab == CloudSyncTab::Configure {
+                if active_tab == CloudSyncTab::Configure {
                     self.render_cloud_sync_config_preflight_card(cx)
                 } else {
                     div().into_any_element()
                 }
             }
             CloudSyncSection::ConfigHealth => {
-                if self.cloud_sync.view.active_tab == CloudSyncTab::Configure {
+                if active_tab == CloudSyncTab::Configure {
                     self.render_cloud_sync_health_card(cx)
                 } else {
                     div().into_any_element()
                 }
             }
             CloudSyncSection::ConfigNotes => {
-                if self.cloud_sync.view.active_tab == CloudSyncTab::Configure {
+                if active_tab == CloudSyncTab::Configure {
                     self.render_cloud_sync_notes(cx)
                 } else {
                     div().into_any_element()
@@ -332,9 +335,22 @@ impl WorkspaceApp {
     pub(super) fn cloud_sync_local_snapshot(
         &self,
         state: &CloudSyncPersistedState,
+        cx: &App,
     ) -> std::result::Result<CloudSyncLocalSnapshot, String> {
-        let generation = self.cloud_sync.view.snapshot_cache_generation.get();
-        if let Some(cache) = self.cloud_sync.view.local_snapshot_cache.borrow().as_ref() {
+        let generation = self
+            .cloud_sync
+            .read(cx)
+            .view
+            .snapshot_cache_generation
+            .get();
+        if let Some(cache) = self
+            .cloud_sync
+            .read(cx)
+            .view
+            .local_snapshot_cache
+            .borrow()
+            .as_ref()
+        {
             if cache.generation == generation {
                 return cache.result.clone();
             }
@@ -347,11 +363,15 @@ impl WorkspaceApp {
             Some(&state.sync_scope),
         )
         .map_err(|error| error.to_string());
-        *self.cloud_sync.view.local_snapshot_cache.borrow_mut() =
-            Some(CloudSyncLocalSnapshotCache {
-                generation,
-                result: result.clone(),
-            });
+        *self
+            .cloud_sync
+            .read(cx)
+            .view
+            .local_snapshot_cache
+            .borrow_mut() = Some(CloudSyncLocalSnapshotCache {
+            generation,
+            result: result.clone(),
+        });
         result
     }
 
@@ -359,42 +379,66 @@ impl WorkspaceApp {
         &self,
         snapshot: &CloudSyncLocalSnapshot,
         state: &CloudSyncPersistedState,
+        cx: &App,
     ) -> Vec<CloudSyncSectionDiffItem> {
-        let generation = self.cloud_sync.view.snapshot_cache_generation.get();
-        if let Some(cache) = self.cloud_sync.view.upload_diff_cache.borrow().as_ref() {
+        let generation = self
+            .cloud_sync
+            .read(cx)
+            .view
+            .snapshot_cache_generation
+            .get();
+        if let Some(cache) = self
+            .cloud_sync
+            .read(cx)
+            .view
+            .upload_diff_cache
+            .borrow()
+            .as_ref()
+        {
             if cache.generation == generation {
                 return cache.items.clone();
             }
         }
         let items = cloud_sync_upload_diff_items(snapshot, state);
-        *self.cloud_sync.view.upload_diff_cache.borrow_mut() = Some(CloudSyncUploadDiffCache {
-            generation,
-            items: items.clone(),
-        });
+        *self.cloud_sync.read(cx).view.upload_diff_cache.borrow_mut() =
+            Some(CloudSyncUploadDiffCache {
+                generation,
+                items: items.clone(),
+            });
         items
     }
 
-    pub(super) fn invalidate_cloud_sync_snapshot_caches(&self) {
+    pub(super) fn invalidate_cloud_sync_snapshot_caches(&self, cx: &App) {
         // Source mutations advance one explicit generation so render-time cache
         // hits never need to rescan stores or query filesystem metadata.
-        self.cloud_sync.view.snapshot_cache_generation.set(
+        self.cloud_sync.read(cx).view.snapshot_cache_generation.set(
             self.cloud_sync
+                .read(cx)
                 .view
                 .snapshot_cache_generation
                 .get()
                 .wrapping_add(1),
         );
         self.cloud_sync
+            .read(cx)
             .view
             .local_snapshot_cache
             .borrow_mut()
             .take();
-        self.cloud_sync.view.upload_diff_cache.borrow_mut().take();
+        self.cloud_sync
+            .read(cx)
+            .view
+            .upload_diff_cache
+            .borrow_mut()
+            .take();
     }
 
-    pub(super) fn cloud_sync_local_field_diff_snapshot(&self) -> CloudSyncLocalFieldDiffSnapshot {
+    pub(super) fn cloud_sync_local_field_diff_snapshot(
+        &self,
+        cx: &App,
+    ) -> CloudSyncLocalFieldDiffSnapshot {
         let scope = normalize_sync_scope(
-            Some(&self.cloud_sync.controller.store.state().sync_scope),
+            Some(&self.cloud_sync.read(cx).controller.store.state().sync_scope),
             &[],
         );
         let app_settings_sections = if scope.sync_app_settings {
@@ -541,7 +585,7 @@ impl WorkspaceApp {
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |this, _event, _window, cx| {
-                    if this.cloud_sync.view.active_tab == CloudSyncTab::Configure
+                    if this.cloud_sync.read(cx).view.active_tab == CloudSyncTab::Configure
                         && tab != CloudSyncTab::Configure
                         && !this.persist_cloud_sync_configuration(false, cx)
                     {
@@ -549,15 +593,17 @@ impl WorkspaceApp {
                         cx.notify();
                         return;
                     }
-                    if this.cloud_sync.view.active_tab != tab {
-                        this.cloud_sync.view.set_active_tab(tab);
+                    if this.cloud_sync.read(cx).view.active_tab != tab {
+                        this.cloud_sync.update(cx, |cloud_sync, _cx| {
+                            cloud_sync.view.set_active_tab(tab);
+                        });
                         this.begin_user_segmented_control_transition(
                             selection_motion::CLOUD_SYNC_SWITCHER_ID,
                             cloud_sync_tab_index(tab),
                             cx,
                         );
                     }
-                    this.clear_cloud_sync_select_focus();
+                    this.clear_cloud_sync_select_focus(cx);
                     cx.stop_propagation();
                     cx.notify();
                 }),
@@ -570,7 +616,7 @@ impl WorkspaceApp {
                 CloudSyncTab::Overview,
                 LucideIcon::Cloud,
                 "plugin.cloud_sync.tabs.overview",
-                self.cloud_sync.view.active_tab == CloudSyncTab::Overview,
+                self.cloud_sync.read(cx).view.active_tab == CloudSyncTab::Overview,
                 self,
                 cx,
             ),
@@ -578,7 +624,7 @@ impl WorkspaceApp {
                 CloudSyncTab::Configure,
                 LucideIcon::Settings,
                 "plugin.cloud_sync.tabs.configure",
-                self.cloud_sync.view.active_tab == CloudSyncTab::Configure,
+                self.cloud_sync.read(cx).view.active_tab == CloudSyncTab::Configure,
                 self,
                 cx,
             ),
@@ -586,18 +632,18 @@ impl WorkspaceApp {
                 CloudSyncTab::History,
                 LucideIcon::Clock,
                 "plugin.cloud_sync.tabs.history",
-                self.cloud_sync.view.active_tab == CloudSyncTab::History,
+                self.cloud_sync.read(cx).view.active_tab == CloudSyncTab::History,
                 self,
                 cx,
             ),
         ];
-        let active_index = cloud_sync_tab_index(self.cloud_sync.view.active_tab);
+        let active_index = cloud_sync_tab_index(self.cloud_sync.read(cx).view.active_tab);
         oxideterm_gpui_ui::segmented_control(
             &self.tokens,
             selection_motion::CLOUD_SYNC_SWITCHER_ID,
             oxideterm_gpui_ui::SegmentedControlOptions::new(
                 active_index,
-                cloud_sync_tab_index(self.cloud_sync.view.previous_tab),
+                cloud_sync_tab_index(self.cloud_sync.read(cx).view.previous_tab),
                 3,
             )
             .user_transition_active(self.segmented_control_user_transition_active(
@@ -621,7 +667,7 @@ impl WorkspaceApp {
     ) -> AnyElement {
         let theme = self.tokens.ui;
         let settings = state.settings.clone();
-        let local_snapshot = self.cloud_sync_local_snapshot(state);
+        let local_snapshot = self.cloud_sync_local_snapshot(state, cx);
         let backend_label = self
             .i18n
             .t(cloud_sync_backend_label_key(&settings.backend_type));
@@ -730,7 +776,7 @@ impl WorkspaceApp {
                                          _window,
                                          cx: &mut Context<WorkspaceApp>| {
                                             this.start_cloud_sync_github_oauth(cx);
-                                            this.clear_cloud_sync_select_focus();
+                                            this.clear_cloud_sync_select_focus(cx);
                                             cx.stop_propagation();
                                         },
                                     ),
@@ -748,7 +794,7 @@ impl WorkspaceApp {
                                          _window,
                                          cx: &mut Context<WorkspaceApp>| {
                                             this.start_cloud_sync_microsoft_oauth(cx);
-                                            this.clear_cloud_sync_select_focus();
+                                            this.clear_cloud_sync_select_focus(cx);
                                             cx.stop_propagation();
                                         },
                                     ),
@@ -766,7 +812,7 @@ impl WorkspaceApp {
                                          _window,
                                          cx: &mut Context<WorkspaceApp>| {
                                             this.start_cloud_sync_google_oauth(cx);
-                                            this.clear_cloud_sync_select_focus();
+                                            this.clear_cloud_sync_select_focus(cx);
                                             cx.stop_propagation();
                                         },
                                     ),
@@ -783,7 +829,7 @@ impl WorkspaceApp {
                                      _window,
                                      cx: &mut Context<WorkspaceApp>| {
                                         this.start_cloud_sync_upload_preview(cx);
-                                        this.clear_cloud_sync_select_focus();
+                                        this.clear_cloud_sync_select_focus(cx);
                                         cx.stop_propagation();
                                     },
                                 ),
@@ -799,7 +845,7 @@ impl WorkspaceApp {
                                      _window,
                                      cx: &mut Context<WorkspaceApp>| {
                                         this.start_cloud_sync_check(cx);
-                                        this.clear_cloud_sync_select_focus();
+                                        this.clear_cloud_sync_select_focus(cx);
                                         cx.stop_propagation();
                                     },
                                 ),
@@ -815,7 +861,7 @@ impl WorkspaceApp {
                                      _window,
                                      cx: &mut Context<WorkspaceApp>| {
                                         this.start_cloud_sync_pull_preview(cx);
-                                        this.clear_cloud_sync_select_focus();
+                                        this.clear_cloud_sync_select_focus(cx);
                                         cx.stop_propagation();
                                     },
                                 ),
@@ -830,8 +876,8 @@ impl WorkspaceApp {
                                      _event,
                                      _window,
                                      cx: &mut Context<WorkspaceApp>| {
-                                        this.open_cloud_sync_restore_confirm(None);
-                                        this.clear_cloud_sync_select_focus();
+                                        this.open_cloud_sync_restore_confirm(None, cx);
+                                        this.clear_cloud_sync_select_focus(cx);
                                         cx.stop_propagation();
                                         cx.notify();
                                     },
@@ -848,7 +894,7 @@ impl WorkspaceApp {
                                      _window,
                                      cx: &mut Context<WorkspaceApp>| {
                                         this.save_cloud_sync_configuration(cx);
-                                        this.clear_cloud_sync_select_focus();
+                                        this.clear_cloud_sync_select_focus(cx);
                                         cx.stop_propagation();
                                         cx.notify();
                                     },
@@ -857,7 +903,8 @@ impl WorkspaceApp {
                     ),
             );
 
-        if let Some(progress) = self.cloud_sync.controller.progress.as_ref() {
+        let progress = self.cloud_sync.read(cx).controller.progress.clone();
+        if let Some(progress) = progress.as_ref() {
             card = card.child(self.render_cloud_sync_progress(progress, cx));
         }
         if let Some(error) = state.last_error.as_ref() {

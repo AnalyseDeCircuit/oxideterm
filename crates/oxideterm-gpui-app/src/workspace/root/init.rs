@@ -351,6 +351,18 @@ impl WorkspaceApp {
         let cloud_sync_store = oxideterm_cloud_sync::state::CloudSyncStateStore::load(
             oxideterm_cloud_sync::state::default_cloud_sync_state_path(settings_store.path()),
         )?;
+        let cloud_sync =
+            cx.new(|cx| cloud_sync::CloudSyncWorkspaceEntity::new(cloud_sync_store, cx));
+        let cloud_sync_observation = cx.observe(&cloud_sync, |_workspace, _cloud_sync, cx| {
+            // Entity-owned delivery and timers repaint every mounted Cloud Sync surface.
+            cx.notify();
+        });
+        let cloud_sync_subscription = cx.subscribe(
+            &cloud_sync,
+            |workspace, _cloud_sync, event: &cloud_sync::CloudSyncWorkspaceEvent, cx| {
+                workspace.handle_cloud_sync_workspace_event(*event, cx);
+            },
+        );
         let initial_vibrancy_mode = effective_vibrancy_mode(&settings, &render_policy);
         let initial_vibrancy_support = apply_window_vibrancy(window, initial_vibrancy_mode);
         let initial_window_opacity = normalized_window_opacity(settings.appearance.window_opacity);
@@ -675,7 +687,9 @@ impl WorkspaceApp {
             _graphics_observation: graphics_observation,
             host_tools,
             _host_tools_subscription: host_tools_subscription,
-            cloud_sync: cloud_sync::CloudSyncWorkspaceState::new(cloud_sync_store),
+            cloud_sync,
+            _cloud_sync_observation: cloud_sync_observation,
+            _cloud_sync_subscription: cloud_sync_subscription,
             i18n,
             tokens,
             detected_graphics,

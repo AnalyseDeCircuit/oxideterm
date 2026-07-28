@@ -4,10 +4,11 @@
 use super::*;
 
 impl WorkspaceApp {
-    pub(super) fn clear_cloud_sync_secret(&mut self, secret_key: &str) {
-        self.invalidate_cloud_sync_snapshot_caches();
+    pub(super) fn clear_cloud_sync_secret(&mut self, secret_key: &str, cx: &mut Context<Self>) {
+        self.invalidate_cloud_sync_snapshot_caches(cx);
         let mut provider = CloudSyncKeychainSecretProvider::new(
             self.cloud_sync
+                .read(cx)
                 .controller
                 .store
                 .state()
@@ -15,7 +16,9 @@ impl WorkspaceApp {
                 .clone(),
         );
         if let Err(error) = provider.store_secret(secret_key, None) {
-            self.cloud_sync.controller.store.state_mut().last_error = Some(error.to_string());
+            self.cloud_sync.update(cx, |cloud_sync, _cx| {
+                cloud_sync.controller.store.state_mut().last_error = Some(error.to_string());
+            });
             self.push_cloud_sync_toast(
                 self.i18n
                     .t("plugin.cloud_sync.toast.secret_cleared_failed_title"),
@@ -24,10 +27,15 @@ impl WorkspaceApp {
             );
             return;
         }
-        self.cloud_sync.controller.store.state_mut().secret_hints = provider.hints().clone();
-        self.cloud_sync.controller.store.state_mut().last_error = None;
-        if let Err(error) = self.cloud_sync.controller.store.save() {
-            self.cloud_sync.controller.store.state_mut().last_error = Some(error.to_string());
+        let save_result = self.cloud_sync.update(cx, |cloud_sync, _cx| {
+            cloud_sync.controller.store.state_mut().secret_hints = provider.hints().clone();
+            cloud_sync.controller.store.state_mut().last_error = None;
+            cloud_sync.controller.store.save()
+        });
+        if let Err(error) = save_result {
+            self.cloud_sync.update(cx, |cloud_sync, _cx| {
+                cloud_sync.controller.store.state_mut().last_error = Some(error.to_string());
+            });
             self.push_cloud_sync_toast(
                 self.i18n
                     .t("plugin.cloud_sync.toast.secret_cleared_failed_title"),
@@ -90,18 +98,25 @@ impl WorkspaceApp {
         )
     }
 
-    pub(super) fn open_cloud_sync_import_confirm(&mut self) {
-        if self.cloud_sync.view.pending_preview.is_none() {
+    pub(super) fn open_cloud_sync_import_confirm(&mut self, cx: &mut Context<Self>) {
+        if self.cloud_sync.read(cx).view.pending_preview.is_none() {
             return;
         }
-        self.cloud_sync.view.confirm = Some(CloudSyncConfirm::ImportPreview);
-        self.cloud_sync.view.confirm_presence.reopen();
-        self.cloud_sync.view.confirm_focused_action = None;
+        self.cloud_sync.update(cx, |cloud_sync, _cx| {
+            cloud_sync.view.confirm = Some(CloudSyncConfirm::ImportPreview);
+            cloud_sync.view.confirm_presence.reopen();
+            cloud_sync.view.confirm_focused_action = None;
+        });
     }
 
-    pub(super) fn open_cloud_sync_restore_confirm(&mut self, backup: Option<(String, String)>) {
+    pub(super) fn open_cloud_sync_restore_confirm(
+        &mut self,
+        backup: Option<(String, String)>,
+        cx: &mut Context<Self>,
+    ) {
         let selected = backup.or_else(|| {
             self.cloud_sync
+                .read(cx)
                 .controller
                 .store
                 .state()
@@ -110,21 +125,31 @@ impl WorkspaceApp {
                 .map(|backup| (backup.id.clone(), backup.created_at.clone()))
         });
         if let Some((id, created_at)) = selected {
-            self.cloud_sync.view.confirm = Some(CloudSyncConfirm::RestoreBackup { id, created_at });
-            self.cloud_sync.view.confirm_presence.reopen();
-            self.cloud_sync.view.confirm_focused_action = None;
+            self.cloud_sync.update(cx, |cloud_sync, _cx| {
+                cloud_sync.view.confirm = Some(CloudSyncConfirm::RestoreBackup { id, created_at });
+                cloud_sync.view.confirm_presence.reopen();
+                cloud_sync.view.confirm_focused_action = None;
+            });
         }
     }
 
-    pub(super) fn open_cloud_sync_delete_backup_confirm(&mut self, id: String, created_at: String) {
-        self.cloud_sync.view.confirm = Some(CloudSyncConfirm::DeleteBackup { id, created_at });
-        self.cloud_sync.view.confirm_presence.reopen();
-        self.cloud_sync.view.confirm_focused_action = None;
+    pub(super) fn open_cloud_sync_delete_backup_confirm(
+        &mut self,
+        id: String,
+        created_at: String,
+        cx: &mut Context<Self>,
+    ) {
+        self.cloud_sync.update(cx, |cloud_sync, _cx| {
+            cloud_sync.view.confirm = Some(CloudSyncConfirm::DeleteBackup { id, created_at });
+            cloud_sync.view.confirm_presence.reopen();
+            cloud_sync.view.confirm_focused_action = None;
+        });
     }
 
-    pub(super) fn open_cloud_sync_clear_backups_confirm(&mut self) {
+    pub(super) fn open_cloud_sync_clear_backups_confirm(&mut self, cx: &mut Context<Self>) {
         if self
             .cloud_sync
+            .read(cx)
             .controller
             .store
             .state()
@@ -133,14 +158,17 @@ impl WorkspaceApp {
         {
             return;
         }
-        self.cloud_sync.view.confirm = Some(CloudSyncConfirm::ClearBackups);
-        self.cloud_sync.view.confirm_presence.reopen();
-        self.cloud_sync.view.confirm_focused_action = None;
+        self.cloud_sync.update(cx, |cloud_sync, _cx| {
+            cloud_sync.view.confirm = Some(CloudSyncConfirm::ClearBackups);
+            cloud_sync.view.confirm_presence.reopen();
+            cloud_sync.view.confirm_focused_action = None;
+        });
     }
 
-    pub(super) fn open_cloud_sync_clear_history_confirm(&mut self) {
+    pub(super) fn open_cloud_sync_clear_history_confirm(&mut self, cx: &mut Context<Self>) {
         if self
             .cloud_sync
+            .read(cx)
             .controller
             .store
             .state()
@@ -149,9 +177,11 @@ impl WorkspaceApp {
         {
             return;
         }
-        self.cloud_sync.view.confirm = Some(CloudSyncConfirm::ClearHistory);
-        self.cloud_sync.view.confirm_presence.reopen();
-        self.cloud_sync.view.confirm_focused_action = None;
+        self.cloud_sync.update(cx, |cloud_sync, _cx| {
+            cloud_sync.view.confirm = Some(CloudSyncConfirm::ClearHistory);
+            cloud_sync.view.confirm_presence.reopen();
+            cloud_sync.view.confirm_focused_action = None;
+        });
     }
 
     pub(super) fn cancel_cloud_sync_confirm(&mut self, cx: &mut Context<Self>) {
@@ -159,13 +189,15 @@ impl WorkspaceApp {
     }
 
     pub(super) fn confirm_cloud_sync_confirm(&mut self, cx: &mut Context<Self>) {
-        let confirm = self.cloud_sync.view.confirm.clone();
+        let confirm = self.cloud_sync.read(cx).view.confirm.clone();
         if !self.begin_cloud_sync_confirm_exit(cx) {
             return;
         }
         match confirm {
             Some(CloudSyncConfirm::ImportPreview) => self.start_cloud_sync_apply_preview(cx),
-            Some(CloudSyncConfirm::ClearSecret { key, .. }) => self.clear_cloud_sync_secret(&key),
+            Some(CloudSyncConfirm::ClearSecret { key, .. }) => {
+                self.clear_cloud_sync_secret(&key, cx)
+            }
             Some(CloudSyncConfirm::RestoreBackup { id, .. }) => {
                 self.start_cloud_sync_restore_backup(id, cx)
             }
@@ -175,12 +207,14 @@ impl WorkspaceApp {
             Some(CloudSyncConfirm::ClearBackups) => self.clear_cloud_sync_rollback_backups(cx),
             Some(CloudSyncConfirm::ClearHistory) => self.clear_cloud_sync_history(cx),
             Some(CloudSyncConfirm::EnableSensitiveSync) => {
-                self.cloud_sync
-                    .controller
-                    .store
-                    .state_mut()
-                    .sync_scope
-                    .sync_sensitive_credentials = Some(true);
+                self.cloud_sync.update(cx, |cloud_sync, _cx| {
+                    cloud_sync
+                        .controller
+                        .store
+                        .state_mut()
+                        .sync_scope
+                        .sync_sensitive_credentials = Some(true);
+                });
                 self.finish_cloud_sync_scope_edit(cx);
             }
             None => {}
@@ -188,58 +222,48 @@ impl WorkspaceApp {
     }
 
     fn begin_cloud_sync_confirm_exit(&mut self, cx: &mut Context<Self>) -> bool {
-        let Some(generation) = self.cloud_sync.view.confirm_presence.begin_exit() else {
+        let Some(generation) = self.cloud_sync.update(cx, |cloud_sync, _cx| {
+            cloud_sync.view.confirm_presence.begin_exit()
+        }) else {
             return false;
         };
-        self.cloud_sync.view.confirm_focused_action = None;
+        self.cloud_sync.update(cx, |cloud_sync, _cx| {
+            cloud_sync.view.confirm_focused_action = None;
+        });
         let delay = oxideterm_gpui_ui::motion::duration(
             &self.tokens,
             oxideterm_gpui_ui::motion::MotionDuration::Control,
         );
         if delay.is_zero() {
-            if self
-                .cloud_sync
-                .view
-                .confirm_presence
-                .finish_exit(generation)
-            {
-                self.cloud_sync.view.confirm = None;
-            }
+            self.cloud_sync.update(cx, |cloud_sync, _cx| {
+                if cloud_sync.view.confirm_presence.finish_exit(generation) {
+                    cloud_sync.view.confirm = None;
+                }
+            });
             return true;
         }
         // Keep the immutable confirmation payload mounted for the exit frame.
-        cx.spawn(async move |weak, cx| {
-            Timer::after(delay).await;
-            let _ = weak.update(cx, |this, cx| {
-                if this
-                    .cloud_sync
-                    .view
-                    .confirm_presence
-                    .finish_exit(generation)
-                {
-                    this.cloud_sync.view.confirm = None;
-                    cx.notify();
-                }
-            });
-        })
-        .detach();
+        self.cloud_sync.update(cx, |cloud_sync, cx| {
+            cloud_sync.schedule_confirm_exit(generation, delay, cx);
+        });
         true
     }
 
     pub(super) fn delete_cloud_sync_rollback_backup(&mut self, id: &str, cx: &mut Context<Self>) {
-        if self.cloud_sync.controller.delivery_rx.is_some() {
-            self.mark_cloud_sync_operation_in_progress();
+        if self.cloud_sync.read(cx).controller.delivery_rx.is_some() {
+            self.mark_cloud_sync_operation_in_progress(cx);
             return;
         }
-        let removed = self
-            .cloud_sync
-            .controller
-            .store
-            .state_mut()
-            .remove_rollback_backup(id);
+        let removed = self.cloud_sync.update(cx, |cloud_sync, _cx| {
+            cloud_sync
+                .controller
+                .store
+                .state_mut()
+                .remove_rollback_backup(id)
+        });
         if removed {
-            self.clear_cloud_sync_preview_for_deleted_backup(id);
-            self.save_cloud_sync_state();
+            self.clear_cloud_sync_preview_for_deleted_backup(id, cx);
+            self.save_cloud_sync_state(cx);
             self.push_cloud_sync_toast(
                 self.i18n
                     .t("plugin.cloud_sync.toast.rollback_backup_deleted_title"),
@@ -251,25 +275,27 @@ impl WorkspaceApp {
     }
 
     pub(super) fn clear_cloud_sync_rollback_backups(&mut self, cx: &mut Context<Self>) {
-        if self.cloud_sync.controller.delivery_rx.is_some() {
-            self.mark_cloud_sync_operation_in_progress();
+        if self.cloud_sync.read(cx).controller.delivery_rx.is_some() {
+            self.mark_cloud_sync_operation_in_progress(cx);
             return;
         }
-        let removed = self
-            .cloud_sync
-            .controller
-            .store
-            .state_mut()
-            .clear_rollback_backups();
+        let removed = self.cloud_sync.update(cx, |cloud_sync, _cx| {
+            cloud_sync
+                .controller
+                .store
+                .state_mut()
+                .clear_rollback_backups()
+        });
         if removed > 0 {
-            self.cloud_sync.view.pending_preview = self
-                .cloud_sync
-                .view
-                .pending_preview
-                .take()
-                .filter(|preview| !preview.is_backup());
-            self.cloud_sync.view.preview_selection = None;
-            self.save_cloud_sync_state();
+            self.cloud_sync.update(cx, |cloud_sync, _cx| {
+                cloud_sync.view.pending_preview = cloud_sync
+                    .view
+                    .pending_preview
+                    .take()
+                    .filter(|preview| !preview.is_backup());
+                cloud_sync.view.preview_selection = None;
+            });
+            self.save_cloud_sync_state(cx);
             self.push_cloud_sync_toast(
                 self.i18n
                     .t("plugin.cloud_sync.toast.rollback_backups_cleared_title"),
@@ -281,13 +307,15 @@ impl WorkspaceApp {
     }
 
     pub(super) fn clear_cloud_sync_history(&mut self, cx: &mut Context<Self>) {
-        if self.cloud_sync.controller.delivery_rx.is_some() {
-            self.mark_cloud_sync_operation_in_progress();
+        if self.cloud_sync.read(cx).controller.delivery_rx.is_some() {
+            self.mark_cloud_sync_operation_in_progress(cx);
             return;
         }
-        let removed = self.cloud_sync.controller.store.state_mut().clear_history();
+        let removed = self.cloud_sync.update(cx, |cloud_sync, _cx| {
+            cloud_sync.controller.store.state_mut().clear_history()
+        });
         if removed > 0 {
-            self.save_cloud_sync_state();
+            self.save_cloud_sync_state(cx);
             self.push_cloud_sync_toast(
                 self.i18n.t("plugin.cloud_sync.toast.history_cleared_title"),
                 None,
@@ -297,10 +325,15 @@ impl WorkspaceApp {
         cx.notify();
     }
 
-    pub(super) fn clear_cloud_sync_preview_for_deleted_backup(&mut self, backup_id: &str) {
+    pub(super) fn clear_cloud_sync_preview_for_deleted_backup(
+        &mut self,
+        backup_id: &str,
+        cx: &mut Context<Self>,
+    ) {
         // A deleted backup cannot remain selected as the pending import preview.
         let pending_matches_deleted_backup = self
             .cloud_sync
+            .read(cx)
             .view
             .pending_preview
             .as_ref()
@@ -312,8 +345,10 @@ impl WorkspaceApp {
                 _ => false,
             });
         if pending_matches_deleted_backup {
-            self.cloud_sync.view.pending_preview = None;
-            self.cloud_sync.view.preview_selection = None;
+            self.cloud_sync.update(cx, |cloud_sync, _cx| {
+                cloud_sync.view.pending_preview = None;
+                cloud_sync.view.preview_selection = None;
+            });
         }
     }
 }
