@@ -924,38 +924,20 @@ impl WorkspaceApp {
     }
 
     pub(in crate::workspace) fn open_help_legal_notice(&mut self, cx: &mut Context<Self>) {
-        self.help_legal_notice_presence.reopen();
-        self.settings_page.legal_notice_open = true;
         self.settings_legal_notice_scroll = MarkdownVirtualListScrollHandle::new();
-        cx.notify();
+        self.overlay.update(cx, |overlay, cx| {
+            overlay.open_confirm(WorkspaceOverlayConfirmKind::LegalNotice, cx);
+        });
     }
 
     pub(in crate::workspace) fn close_help_legal_notice(&mut self, cx: &mut Context<Self>) {
-        let Some(generation) = self.help_legal_notice_presence.begin_exit() else {
-            return;
-        };
         let delay = oxideterm_gpui_ui::motion::duration(
             &self.tokens,
             oxideterm_gpui_ui::motion::MotionDuration::Overlay,
         );
-        if delay.is_zero() {
-            self.settings_page.legal_notice_open = false;
-            self.help_legal_notice_presence.reopen();
-            cx.notify();
-            return;
-        }
-        cx.spawn(async move |weak, cx| {
-            gpui::Timer::after(delay).await;
-            let _ = weak.update(cx, |this, cx| {
-                if this.help_legal_notice_presence.finish_exit(generation) {
-                    this.settings_page.legal_notice_open = false;
-                    this.help_legal_notice_presence.reopen();
-                    cx.notify();
-                }
-            });
-        })
-        .detach();
-        cx.notify();
+        self.overlay.update(cx, |overlay, cx| {
+            overlay.begin_confirm_exit(false, delay, cx);
+        });
     }
 
     pub(in crate::workspace) fn handle_help_legal_notice_key(
@@ -963,20 +945,46 @@ impl WorkspaceApp {
         event: &KeyDownEvent,
         cx: &mut Context<Self>,
     ) -> bool {
-        if !self.settings_page.legal_notice_open
-            || event.keystroke.key.as_str() != "escape"
-            || event.keystroke.modifiers.platform
-        {
+        let Some(snapshot) = self.overlay.read(cx).confirm_snapshot() else {
+            return false;
+        };
+        if !matches!(snapshot.kind, WorkspaceOverlayConfirmKind::LegalNotice) {
             return false;
         }
-        self.close_help_legal_notice(cx);
-        true
+        if snapshot.phase == oxideterm_gpui_ui::motion::ExitPhase::Exiting {
+            return true;
+        }
+        let key_action = self.overlay.update(cx, |overlay, cx| {
+            overlay.handle_confirm_key(
+                event.keystroke.key.as_str(),
+                event.keystroke.modifiers.shift,
+                event.keystroke.modifiers.platform || event.keystroke.modifiers.control,
+                cx,
+            )
+        });
+        match key_action {
+            Some(
+                WorkspaceOverlayConfirmKeyAction::Cancel
+                | WorkspaceOverlayConfirmKeyAction::Confirm,
+            ) => {
+                self.close_help_legal_notice(cx);
+                true
+            }
+            Some(WorkspaceOverlayConfirmKeyAction::Handled) => true,
+            None => false,
+        }
     }
 
     pub(in crate::workspace) fn render_help_legal_notice_dialog(
         &self,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        let Some(snapshot) = self.overlay.read(cx).confirm_snapshot() else {
+            return div().into_any_element();
+        };
+        if !matches!(snapshot.kind, WorkspaceOverlayConfirmKind::LegalNotice) {
+            return div().into_any_element();
+        }
         let mut options = self.localized_markdown_options();
         options.base_font_size = self.tokens.metrics.ui_text_sm;
         options.block_gap = 8.0;
@@ -1043,7 +1051,7 @@ impl WorkspaceApp {
             "help-legal-notice-form",
             backdrop,
             form,
-            self.help_legal_notice_presence,
+            snapshot.phase,
         )
     }
 

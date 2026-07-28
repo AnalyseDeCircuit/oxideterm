@@ -119,9 +119,9 @@ pub(in crate::workspace) fn settings_dialog_transition(
     animation_id: &'static str,
     backdrop: Div,
     form: Div,
-    presence: oxideterm_gpui_ui::motion::ExitPresence,
+    phase: oxideterm_gpui_ui::motion::ExitPhase,
 ) -> AnyElement {
-    let is_visible = presence.phase() == oxideterm_gpui_ui::motion::ExitPhase::Visible;
+    let is_visible = phase == oxideterm_gpui_ui::motion::ExitPhase::Visible;
     backdrop
         .child(oxideterm_gpui_ui::motion::form_transition(
             tokens,

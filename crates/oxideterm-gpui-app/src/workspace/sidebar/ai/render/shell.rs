@@ -878,10 +878,16 @@ window.focus(&this.focus_handle, cx);
         &self,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        let Some(snapshot) = self.ai_entity.read(cx).chat_confirm_snapshot() else {
+            return div().into_any_element();
+        };
+        if !matches!(snapshot.kind, ai_state::AiChatConfirmKind::ClearAll) {
+            return div().into_any_element();
+        }
         oxideterm_gpui_ui::confirm::confirm_dialog_with_focus_motion(
             &self.tokens,
             "ai-clear-all-confirm-motion",
-            self.ai_clear_all_confirm_presence.phase(),
+            snapshot.phase,
             ConfirmDialogView {
                 variant: ConfirmDialogVariant::Danger,
                 title: div()
@@ -916,16 +922,14 @@ window.focus(&this.focus_handle, cx);
                     ))
                     .into_any_element(),
             },
-            self.standard_confirm_focus(),
+            snapshot.focused_action,
             cx.listener(|this, _event, _window, cx| {
-                this.begin_ai_clear_all_confirm_exit(cx);
+                this.begin_ai_clear_all_confirm_exit(false, cx);
                 cx.stop_propagation();
                 cx.notify();
             }),
             cx.listener(|this, _event, _window, cx| {
-                if this.begin_ai_clear_all_confirm_exit(cx) {
-                    this.clear_ai_conversations(cx);
-                }
+                this.begin_ai_clear_all_confirm_exit(true, cx);
                 cx.stop_propagation();
                 cx.notify();
             }),
@@ -936,10 +940,19 @@ window.focus(&this.focus_handle, cx);
         &self,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        let Some(snapshot) = self.ai_entity.read(cx).chat_confirm_snapshot() else {
+            return div().into_any_element();
+        };
+        if !matches!(
+            snapshot.kind,
+            ai_state::AiChatConfirmKind::DeleteMessage { .. }
+        ) {
+            return div().into_any_element();
+        }
         oxideterm_gpui_ui::confirm::confirm_dialog_with_focus_motion(
             &self.tokens,
             "ai-delete-message-confirm-motion",
-            self.ai_delete_message_confirm_presence.phase(),
+            snapshot.phase,
             ConfirmDialogView {
                 variant: ConfirmDialogVariant::Danger,
                 title: div()
@@ -974,19 +987,14 @@ window.focus(&this.focus_handle, cx);
                     ))
                     .into_any_element(),
             },
-            self.standard_confirm_focus(),
+            snapshot.focused_action,
             cx.listener(|this, _event, _window, cx| {
-                this.begin_ai_delete_message_confirm_exit(cx);
+                this.begin_ai_delete_message_confirm_exit(false, cx);
                 cx.stop_propagation();
                 cx.notify();
             }),
             cx.listener(|this, _event, _window, cx| {
-                let message_id = this.ai.chat.delete_message_confirm.clone();
-                if this.begin_ai_delete_message_confirm_exit(cx)
-                    && let Some(message_id) = message_id
-                {
-                    this.delete_ai_message(&message_id, cx);
-                }
+                this.begin_ai_delete_message_confirm_exit(true, cx);
                 cx.stop_propagation();
             }),
         )

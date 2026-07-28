@@ -603,17 +603,21 @@ impl WorkspaceApp {
         &self,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let Some(confirm) = self.node_disconnect_confirm.as_ref() else {
+        let Some(snapshot) = self.overlay.read(cx).confirm_snapshot() else {
+            return div().into_any_element();
+        };
+        let WorkspaceOverlayConfirmKind::NodeDisconnect { display_name, .. } = &snapshot.kind
+        else {
             return div().into_any_element();
         };
         let title = self
             .i18n
             .t("common.confirm.disconnect_node")
-            .replace("{{name}}", &confirm.display_name);
+            .replace("{{name}}", display_name);
         oxideterm_gpui_ui::confirm::confirm_dialog_with_focus_motion(
             &self.tokens,
             "node-disconnect-confirm-motion",
-            self.node_disconnect_confirm_presence.phase(),
+            snapshot.phase,
             ConfirmDialogView {
                 variant: ConfirmDialogVariant::Danger,
                 title: div().child(title).into_any_element(),
@@ -625,7 +629,7 @@ impl WorkspaceApp {
                     .child(self.i18n.t("common.actions.confirm"))
                     .into_any_element(),
             },
-            self.standard_confirm_focus(),
+            snapshot.focused_action,
             cx.listener(|this, _event, _window, cx| {
                 this.cancel_node_disconnect_confirm(cx);
                 cx.stop_propagation();
@@ -641,26 +645,24 @@ impl WorkspaceApp {
         &self,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let Some((title_key, description_key, other_tab_count)) = ({
-            let tab_host = self.tab_host.read(cx);
-            tab_host.close_confirm().map(|confirm| match confirm {
-                TabCloseConfirm::Single { .. } => (
-                    "tabbar.confirm_close_terminal_title",
-                    Some("tabbar.confirm_close_terminal_desc"),
-                    None,
-                ),
-                TabCloseConfirm::LocalChildProcess { .. }
-                | TabCloseConfirm::LocalChildProcessBatch { .. } => {
-                    ("tabbar.child_process_warning", None, None)
-                }
-                TabCloseConfirm::Other { tab_ids } => (
-                    "tabbar.confirm_close_other_title",
-                    Some("tabbar.confirm_close_other_desc"),
-                    Some(tab_ids.len()),
-                ),
-            })
-        }) else {
+        let Some(snapshot) = self.tab_host.read(cx).close_confirm_snapshot() else {
             return div().into_any_element();
+        };
+        let (title_key, description_key, other_tab_count) = match &snapshot.confirm {
+            TabCloseConfirm::Single { .. } => (
+                "tabbar.confirm_close_terminal_title",
+                Some("tabbar.confirm_close_terminal_desc"),
+                None,
+            ),
+            TabCloseConfirm::LocalChildProcess { .. }
+            | TabCloseConfirm::LocalChildProcessBatch { .. } => {
+                ("tabbar.child_process_warning", None, None)
+            }
+            TabCloseConfirm::Other { tab_ids } => (
+                "tabbar.confirm_close_other_title",
+                Some("tabbar.confirm_close_other_desc"),
+                Some(tab_ids.len()),
+            ),
         };
         let description = match (description_key, other_tab_count) {
             (Some(key), Some(count)) => self.i18n.t(key).replace("{{count}}", &count.to_string()),
@@ -670,7 +672,7 @@ impl WorkspaceApp {
         oxideterm_gpui_ui::confirm::confirm_dialog_with_focus_motion(
             &self.tokens,
             "tab-close-confirm-motion",
-            self.tab_close_confirm_presence.phase(),
+            snapshot.phase,
             ConfirmDialogView {
                 variant: ConfirmDialogVariant::Danger,
                 title: div().child(self.i18n.t(title_key)).into_any_element(),
@@ -683,7 +685,7 @@ impl WorkspaceApp {
                     .child(self.i18n.t("common.actions.confirm"))
                     .into_any_element(),
             },
-            self.standard_confirm_focus(),
+            snapshot.focused_action,
             cx.listener(|this, _event, _window, cx| {
                 this.cancel_tab_close_confirm(cx);
                 cx.stop_propagation();

@@ -130,7 +130,7 @@ impl WorkspaceApp {
             "portable-password-dialog-form",
             backdrop,
             form,
-            dialog.presence,
+            dialog.presence.phase(),
         ))
     }
 

@@ -52,6 +52,37 @@ pub(in crate::workspace) enum WorkspaceOverlayIntent {
     },
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(in crate::workspace) enum WorkspaceOverlayConfirmKind {
+    SettingsReset,
+    LegalNotice,
+    NativeUpdateReleaseNotes,
+    NodeDisconnect {
+        node_id: NodeId,
+        display_name: Arc<str>,
+    },
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(in crate::workspace) struct WorkspaceOverlayConfirmSnapshot {
+    pub(in crate::workspace) kind: WorkspaceOverlayConfirmKind,
+    pub(in crate::workspace) phase: oxideterm_gpui_ui::motion::ExitPhase,
+    pub(in crate::workspace) focused_action: Option<ConfirmDialogAction>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(in crate::workspace) enum WorkspaceOverlayConfirmEffect {
+    ResetSettings,
+    DisconnectNode { node_id: NodeId },
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(in crate::workspace) enum WorkspaceOverlayConfirmKeyAction {
+    Cancel,
+    Confirm,
+    Handled,
+}
+
 #[derive(Clone, Debug)]
 struct OverlayToast {
     id: u64,
@@ -120,6 +151,10 @@ pub(in crate::workspace) struct WorkspaceOverlayEntity {
     zen_hint_expires_at: Option<Instant>,
     terminal_font_size_hud: Option<TerminalFontSizeHud>,
     terminal_font_size_hud_generation: u64,
+    confirm: Option<WorkspaceOverlayConfirmKind>,
+    confirm_presence: oxideterm_gpui_ui::motion::ExitPresence,
+    confirm_focused_action: Option<ConfirmDialogAction>,
+    confirm_exit_task: Option<Task<()>>,
 }
 
 impl WorkspaceOverlayEntity {
@@ -173,6 +208,10 @@ impl WorkspaceOverlayEntity {
             zen_hint_expires_at: None,
             terminal_font_size_hud: None,
             terminal_font_size_hud_generation: 0,
+            confirm: None,
+            confirm_presence: oxideterm_gpui_ui::motion::ExitPresence::visible(),
+            confirm_focused_action: None,
+            confirm_exit_task: None,
         }
     }
 
@@ -238,6 +277,137 @@ impl WorkspaceOverlayEntity {
         if self.control_exit_duration != duration {
             self.control_exit_duration = duration;
             self.schedule_next_deadline(cx);
+        }
+    }
+
+    pub(in crate::workspace) fn open_confirm(
+        &mut self,
+        confirm: WorkspaceOverlayConfirmKind,
+        cx: &mut Context<Self>,
+    ) {
+        // Window-global confirms are mutually exclusive; replacement cancels
+        // the stale retained exit before installing the new payload.
+        self.confirm_exit_task = None;
+        self.confirm = Some(confirm);
+        self.confirm_presence.reopen();
+        self.confirm_focused_action = None;
+        cx.notify();
+    }
+
+    pub(in crate::workspace) fn confirm_snapshot(&self) -> Option<WorkspaceOverlayConfirmSnapshot> {
+        self.confirm
+            .as_ref()
+            .cloned()
+            .map(|kind| WorkspaceOverlayConfirmSnapshot {
+                kind,
+                phase: self.confirm_presence.phase(),
+                focused_action: self.confirm_focused_action,
+            })
+    }
+
+    pub(in crate::workspace) fn handle_confirm_key(
+        &mut self,
+        key: &str,
+        shift: bool,
+        blocked_by_primary_modifier: bool,
+        cx: &mut Context<Self>,
+    ) -> Option<WorkspaceOverlayConfirmKeyAction> {
+        let confirm = self.confirm.as_ref()?;
+        if blocked_by_primary_modifier
+            || self.confirm_presence.phase() != oxideterm_gpui_ui::motion::ExitPhase::Visible
+        {
+            return None;
+        }
+        const FULL_ACTIONS: [ConfirmDialogAction; 2] =
+            [ConfirmDialogAction::Cancel, ConfirmDialogAction::Confirm];
+        const CLOSE_ACTION: [ConfirmDialogAction; 1] = [ConfirmDialogAction::Cancel];
+        let actions = if matches!(
+            confirm,
+            WorkspaceOverlayConfirmKind::SettingsReset
+                | WorkspaceOverlayConfirmKind::NodeDisconnect { .. }
+        ) {
+            &FULL_ACTIONS[..]
+        } else {
+            &CLOSE_ACTION[..]
+        };
+        match browser_behavior::modal_footer_key_action(
+            key,
+            shift,
+            actions,
+            self.confirm_focused_action,
+            ConfirmDialogAction::Cancel,
+        ) {
+            Some(browser_behavior::ModalFooterKeyAction::Cancel) => {
+                self.confirm_focused_action = None;
+                Some(WorkspaceOverlayConfirmKeyAction::Cancel)
+            }
+            Some(browser_behavior::ModalFooterKeyAction::Focus(action)) => {
+                self.confirm_focused_action = Some(action);
+                cx.notify();
+                Some(WorkspaceOverlayConfirmKeyAction::Handled)
+            }
+            Some(browser_behavior::ModalFooterKeyAction::Activate(action)) => {
+                self.confirm_focused_action = None;
+                Some(match action {
+                    ConfirmDialogAction::Cancel => WorkspaceOverlayConfirmKeyAction::Cancel,
+                    ConfirmDialogAction::Confirm => WorkspaceOverlayConfirmKeyAction::Confirm,
+                })
+            }
+            None => None,
+        }
+    }
+
+    pub(in crate::workspace) fn begin_confirm_exit(
+        &mut self,
+        confirmed: bool,
+        delay: Duration,
+        cx: &mut Context<Self>,
+    ) -> (bool, Option<WorkspaceOverlayConfirmEffect>) {
+        let Some(confirm) = self.confirm.as_ref() else {
+            return (false, None);
+        };
+        let Some(generation) = self.confirm_presence.begin_exit() else {
+            return (false, None);
+        };
+        self.confirm_focused_action = None;
+        let effect = if confirmed {
+            match confirm {
+                WorkspaceOverlayConfirmKind::SettingsReset => {
+                    Some(WorkspaceOverlayConfirmEffect::ResetSettings)
+                }
+                WorkspaceOverlayConfirmKind::NodeDisconnect { node_id, .. } => {
+                    Some(WorkspaceOverlayConfirmEffect::DisconnectNode {
+                        node_id: node_id.clone(),
+                    })
+                }
+                WorkspaceOverlayConfirmKind::LegalNotice
+                | WorkspaceOverlayConfirmKind::NativeUpdateReleaseNotes => None,
+            }
+        } else {
+            None
+        };
+        self.confirm_exit_task = None;
+        if delay.is_zero() {
+            self.finish_confirm_exit(generation, cx);
+            return (true, effect);
+        }
+        self.confirm_exit_task = Some(cx.spawn(async move |overlay, cx| {
+            Timer::after(delay).await;
+            let _ = overlay.update(cx, |overlay, cx| {
+                overlay.finish_confirm_exit(generation, cx);
+            });
+        }));
+        cx.notify();
+        (true, effect)
+    }
+
+    fn finish_confirm_exit(&mut self, generation: u64, cx: &mut Context<Self>) {
+        self.confirm_exit_task = None;
+        if self.confirm.is_some() && self.confirm_presence.finish_exit(generation) {
+            self.confirm = None;
+            self.confirm_presence.reopen();
+            self.confirm_focused_action = None;
+            cx.notify();
         }
     }
 
@@ -1172,5 +1342,89 @@ mod tests {
         cx.update(|_cx| {});
 
         assert!(wake.is_stopped());
+    }
+
+    #[gpui::test]
+    fn confirm_reopen_cancels_stale_exit_and_replaces_the_payload(cx: &mut TestAppContext) {
+        let overlay = cx.new(|cx| WorkspaceOverlayEntity::new(Duration::ZERO, cx));
+        overlay.update(cx, |overlay, cx| {
+            overlay.open_confirm(WorkspaceOverlayConfirmKind::LegalNotice, cx);
+            assert_eq!(
+                overlay.begin_confirm_exit(false, Duration::from_secs(60), cx),
+                (true, None)
+            );
+            assert!(overlay.confirm_exit_task.is_some());
+
+            overlay.open_confirm(WorkspaceOverlayConfirmKind::NativeUpdateReleaseNotes, cx);
+            assert!(overlay.confirm_exit_task.is_none());
+            assert_eq!(
+                overlay.confirm_snapshot(),
+                Some(WorkspaceOverlayConfirmSnapshot {
+                    kind: WorkspaceOverlayConfirmKind::NativeUpdateReleaseNotes,
+                    phase: oxideterm_gpui_ui::motion::ExitPhase::Visible,
+                    focused_action: None,
+                })
+            );
+        });
+    }
+
+    #[gpui::test]
+    fn confirm_keys_publish_each_typed_effect_at_most_once(cx: &mut TestAppContext) {
+        let overlay = cx.new(|cx| WorkspaceOverlayEntity::new(Duration::ZERO, cx));
+        overlay.update(cx, |overlay, cx| {
+            overlay.open_confirm(
+                WorkspaceOverlayConfirmKind::NodeDisconnect {
+                    node_id: NodeId("node-a".to_string()),
+                    display_name: Arc::from("Node A"),
+                },
+                cx,
+            );
+            assert_eq!(
+                overlay.handle_confirm_key("escape", false, false, cx),
+                Some(WorkspaceOverlayConfirmKeyAction::Cancel)
+            );
+            assert_eq!(
+                overlay.begin_confirm_exit(false, Duration::ZERO, cx),
+                (true, None)
+            );
+
+            overlay.open_confirm(WorkspaceOverlayConfirmKind::SettingsReset, cx);
+            assert_eq!(
+                overlay.handle_confirm_key("end", false, false, cx),
+                Some(WorkspaceOverlayConfirmKeyAction::Handled)
+            );
+            assert_eq!(
+                overlay.handle_confirm_key("enter", false, false, cx),
+                Some(WorkspaceOverlayConfirmKeyAction::Confirm)
+            );
+            assert_eq!(
+                overlay.begin_confirm_exit(true, Duration::ZERO, cx),
+                (true, Some(WorkspaceOverlayConfirmEffect::ResetSettings))
+            );
+            assert_eq!(
+                overlay.begin_confirm_exit(true, Duration::ZERO, cx),
+                (false, None)
+            );
+        });
+    }
+
+    #[gpui::test]
+    fn entity_release_cancels_retained_confirm_exit(cx: &mut TestAppContext) {
+        let overlay = cx.new(|cx| WorkspaceOverlayEntity::new(Duration::ZERO, cx));
+        let (release_sender, release_receiver) = tokio::sync::oneshot::channel();
+        overlay.update(cx, |overlay, cx| {
+            // The task is retained by the confirmation owner, so releasing the
+            // Entity must drop the pending receiver.
+            overlay.confirm_exit_task = Some(cx.spawn(async move |_, _| {
+                let _ = release_receiver.await;
+            }));
+        });
+        cx.run_until_parked();
+
+        drop(overlay);
+        cx.update(|_| {});
+        cx.run_until_parked();
+
+        assert!(release_sender.send(()).is_err());
     }
 }

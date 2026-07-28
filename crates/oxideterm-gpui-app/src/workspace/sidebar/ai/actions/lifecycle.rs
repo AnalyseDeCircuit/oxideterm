@@ -114,7 +114,6 @@ impl WorkspaceApp {
         self.ai.chat.thinking_expansion_state.clear();
         self.ai.chat.tool_call_expansion_state.clear();
         self.close_ai_sidebar_popovers(cx);
-        self.ai.chat.clear_all_confirm_open = false;
     }
 
     pub(in crate::workspace) fn cancel_ai_chat_stream_without_notify(&mut self, cx: &mut App) {

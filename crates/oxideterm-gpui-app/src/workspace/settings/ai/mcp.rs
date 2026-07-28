@@ -638,7 +638,7 @@ impl WorkspaceApp {
             "ai-mcp-dialog-form",
             backdrop,
             form,
-            dialog_presence,
+            dialog_presence.phase(),
         ))
     }
 

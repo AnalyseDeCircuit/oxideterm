@@ -991,7 +991,7 @@ impl WorkspaceApp {
             "ssh-config-import-dialog-form",
             backdrop,
             form,
-            dialog.presence,
+            dialog.presence.phase(),
         ))
     }
 
@@ -2339,7 +2339,7 @@ impl WorkspaceApp {
             |this, _event, _window, cx| {
                 this.import_managed_key_from_file(cx);
             },
-            presence,
+            presence.phase(),
             cx,
         )
     }
@@ -2380,7 +2380,7 @@ impl WorkspaceApp {
             |this, _event, _window, cx| {
                 this.import_managed_key_from_paste(cx);
             },
-            presence,
+            presence.phase(),
             cx,
         )
     }
@@ -2408,7 +2408,7 @@ impl WorkspaceApp {
             |this, _event, _window, cx| {
                 this.rename_managed_key(cx);
             },
-            presence,
+            presence.phase(),
             cx,
         )
     }
@@ -2455,7 +2455,7 @@ impl WorkspaceApp {
             |this, _event, _window, cx| {
                 this.delete_managed_key(cx);
             },
-            presence,
+            presence.phase(),
             cx,
         )
     }
@@ -2468,7 +2468,7 @@ impl WorkspaceApp {
         confirm_label: String,
         can_confirm: bool,
         confirm: impl Fn(&mut Self, &MouseDownEvent, &mut Window, &mut Context<Self>) + 'static,
-        presence: oxideterm_gpui_ui::motion::ExitPresence,
+        phase: oxideterm_gpui_ui::motion::ExitPhase,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let backdrop = dismissible_dialog_backdrop().on_mouse_down(
@@ -2530,7 +2530,7 @@ impl WorkspaceApp {
             "managed-key-dialog-form",
             backdrop,
             form,
-            presence,
+            phase,
         )
     }
 

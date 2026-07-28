@@ -32,6 +32,32 @@ pub(in crate::workspace) enum AiWorkspaceEvent {
     TerminalInlineDeliveryReady,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(in crate::workspace) enum AiChatConfirmKind {
+    ClearAll,
+    DeleteMessage { message_id: Arc<str> },
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(in crate::workspace) struct AiChatConfirmSnapshot {
+    pub(in crate::workspace) kind: AiChatConfirmKind,
+    pub(in crate::workspace) phase: oxideterm_gpui_ui::motion::ExitPhase,
+    pub(in crate::workspace) focused_action: Option<ConfirmDialogAction>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(in crate::workspace) enum AiChatConfirmEffect {
+    ClearAll,
+    DeleteMessage { message_id: Arc<str> },
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(in crate::workspace) enum AiChatConfirmKeyAction {
+    Cancel,
+    Confirm,
+    Handled,
+}
+
 /// Describes which workspace-owned AI surfaces can currently consume UI probes.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub(in crate::workspace) struct AiWorkspaceVisibility {
@@ -233,6 +259,10 @@ pub(in crate::workspace) struct AiWorkspaceEntity {
     settings_confirm_presence: oxideterm_gpui_ui::motion::ExitPresence,
     settings_confirm_exit_task: Option<Task<()>>,
     settings_confirm_intents: VecDeque<AiSettingsConfirmIntent>,
+    chat_confirm: Option<AiChatConfirmKind>,
+    chat_confirm_presence: oxideterm_gpui_ui::motion::ExitPresence,
+    chat_confirm_focused_action: Option<ConfirmDialogAction>,
+    chat_confirm_exit_task: Option<Task<()>>,
     model_refresh_generations: HashMap<String, u64>,
     refreshing_models: HashSet<String>,
     model_refresh_tx:
@@ -369,6 +399,10 @@ impl AiWorkspaceEntity {
             settings_confirm_presence: oxideterm_gpui_ui::motion::ExitPresence::visible(),
             settings_confirm_exit_task: None,
             settings_confirm_intents: VecDeque::new(),
+            chat_confirm: None,
+            chat_confirm_presence: oxideterm_gpui_ui::motion::ExitPresence::visible(),
+            chat_confirm_focused_action: None,
+            chat_confirm_exit_task: None,
             model_refresh_generations: HashMap::new(),
             refreshing_models: HashSet::new(),
             model_refresh_tx,
@@ -1382,6 +1416,123 @@ impl AiWorkspaceEntity {
         &mut self,
     ) -> VecDeque<AiSettingsConfirmIntent> {
         std::mem::take(&mut self.settings_confirm_intents)
+    }
+
+    pub(in crate::workspace) fn open_chat_confirm(
+        &mut self,
+        confirm: AiChatConfirmKind,
+        cx: &mut Context<Self>,
+    ) {
+        // Reopen is a new generation and dropping the retained task prevents a
+        // stale exit from clearing the replacement payload.
+        self.chat_confirm_exit_task = None;
+        self.chat_confirm = Some(confirm);
+        self.chat_confirm_presence.reopen();
+        self.chat_confirm_focused_action = None;
+        cx.notify();
+    }
+
+    pub(in crate::workspace) fn chat_confirm_snapshot(&self) -> Option<AiChatConfirmSnapshot> {
+        self.chat_confirm
+            .as_ref()
+            .cloned()
+            .map(|kind| AiChatConfirmSnapshot {
+                kind,
+                phase: self.chat_confirm_presence.phase(),
+                focused_action: self.chat_confirm_focused_action,
+            })
+    }
+
+    pub(in crate::workspace) fn handle_chat_confirm_key(
+        &mut self,
+        key: &str,
+        shift: bool,
+        blocked_by_primary_modifier: bool,
+        cx: &mut Context<Self>,
+    ) -> Option<AiChatConfirmKeyAction> {
+        if blocked_by_primary_modifier
+            || self.chat_confirm_presence.phase() != oxideterm_gpui_ui::motion::ExitPhase::Visible
+            || self.chat_confirm.is_none()
+        {
+            return None;
+        }
+        const ACTIONS: [ConfirmDialogAction; 2] =
+            [ConfirmDialogAction::Cancel, ConfirmDialogAction::Confirm];
+        match browser_behavior::modal_footer_key_action(
+            key,
+            shift,
+            &ACTIONS,
+            self.chat_confirm_focused_action,
+            ConfirmDialogAction::Cancel,
+        ) {
+            Some(browser_behavior::ModalFooterKeyAction::Cancel) => {
+                self.chat_confirm_focused_action = None;
+                Some(AiChatConfirmKeyAction::Cancel)
+            }
+            Some(browser_behavior::ModalFooterKeyAction::Focus(action)) => {
+                self.chat_confirm_focused_action = Some(action);
+                cx.notify();
+                Some(AiChatConfirmKeyAction::Handled)
+            }
+            Some(browser_behavior::ModalFooterKeyAction::Activate(action)) => {
+                self.chat_confirm_focused_action = None;
+                Some(match action {
+                    ConfirmDialogAction::Cancel => AiChatConfirmKeyAction::Cancel,
+                    ConfirmDialogAction::Confirm => AiChatConfirmKeyAction::Confirm,
+                })
+            }
+            None => None,
+        }
+    }
+
+    pub(in crate::workspace) fn begin_chat_confirm_exit(
+        &mut self,
+        confirmed: bool,
+        delay: Duration,
+        cx: &mut Context<Self>,
+    ) -> (bool, Option<AiChatConfirmEffect>) {
+        let Some(confirm) = self.chat_confirm.as_ref() else {
+            return (false, None);
+        };
+        let Some(generation) = self.chat_confirm_presence.begin_exit() else {
+            return (false, None);
+        };
+        self.chat_confirm_focused_action = None;
+        let effect = if confirmed {
+            Some(match confirm {
+                AiChatConfirmKind::ClearAll => AiChatConfirmEffect::ClearAll,
+                AiChatConfirmKind::DeleteMessage { message_id } => {
+                    AiChatConfirmEffect::DeleteMessage {
+                        message_id: message_id.clone(),
+                    }
+                }
+            })
+        } else {
+            None
+        };
+        self.chat_confirm_exit_task = None;
+        if delay.is_zero() {
+            self.finish_chat_confirm_exit(generation, cx);
+            return (true, effect);
+        }
+        self.chat_confirm_exit_task = Some(cx.spawn(async move |entity, cx| {
+            Timer::after(delay).await;
+            let _ = entity.update(cx, |entity, cx| {
+                entity.finish_chat_confirm_exit(generation, cx);
+            });
+        }));
+        cx.notify();
+        (true, effect)
+    }
+
+    fn finish_chat_confirm_exit(&mut self, generation: u64, cx: &mut Context<Self>) {
+        self.chat_confirm_exit_task = None;
+        if self.chat_confirm.is_some() && self.chat_confirm_presence.finish_exit(generation) {
+            self.chat_confirm = None;
+            self.chat_confirm_presence.reopen();
+            self.chat_confirm_focused_action = None;
+            cx.notify();
+        }
     }
 
     pub(in crate::workspace) fn store_acp_auth_token(
@@ -3232,8 +3383,6 @@ pub(super) struct AiChatWorkspaceState {
     pub(super) safety_confirm_presence: oxideterm_gpui_ui::motion::ExitPresence,
     pub(super) summarize_confirm_open: bool,
     pub(super) summarize_confirm_presence: oxideterm_gpui_ui::motion::ExitPresence,
-    pub(super) clear_all_confirm_open: bool,
-    pub(super) delete_message_confirm: Option<String>,
     pub(super) draft: String,
     pub(super) input_focused: bool,
     pub(super) footer_focus: Option<AiChatFooterAction>,
@@ -3315,8 +3464,6 @@ impl AiChatWorkspaceState {
             safety_confirm_presence: oxideterm_gpui_ui::motion::ExitPresence::visible(),
             summarize_confirm_open: false,
             summarize_confirm_presence: oxideterm_gpui_ui::motion::ExitPresence::visible(),
-            clear_all_confirm_open: false,
-            delete_message_confirm: None,
             draft: String::new(),
             input_focused: false,
             footer_focus: None,
@@ -3414,6 +3561,107 @@ mod entity_tests {
             capability_policy: Default::default(),
             status: Default::default(),
         }
+    }
+
+    #[gpui::test]
+    fn chat_confirmation_reopen_cancels_stale_exit(cx: &mut TestAppContext) {
+        let entity = cx.new(|cx| {
+            AiWorkspaceEntity::new(test_runtime(), oxideterm_ai::AiProviderKeyStore::new(), cx)
+        });
+        entity.update(cx, |entity, cx| {
+            entity.open_chat_confirm(AiChatConfirmKind::ClearAll, cx);
+            assert_eq!(
+                entity.begin_chat_confirm_exit(false, Duration::from_secs(60), cx),
+                (true, None)
+            );
+            assert!(entity.chat_confirm_exit_task.is_some());
+
+            entity.open_chat_confirm(
+                AiChatConfirmKind::DeleteMessage {
+                    message_id: Arc::from("message-new"),
+                },
+                cx,
+            );
+            assert!(entity.chat_confirm_exit_task.is_none());
+            assert_eq!(
+                entity.chat_confirm_snapshot(),
+                Some(AiChatConfirmSnapshot {
+                    kind: AiChatConfirmKind::DeleteMessage {
+                        message_id: Arc::from("message-new"),
+                    },
+                    phase: oxideterm_gpui_ui::motion::ExitPhase::Visible,
+                    focused_action: None,
+                })
+            );
+        });
+    }
+
+    #[gpui::test]
+    fn chat_confirmation_keys_publish_each_effect_at_most_once(cx: &mut TestAppContext) {
+        let entity = cx.new(|cx| {
+            AiWorkspaceEntity::new(test_runtime(), oxideterm_ai::AiProviderKeyStore::new(), cx)
+        });
+        entity.update(cx, |entity, cx| {
+            entity.open_chat_confirm(AiChatConfirmKind::ClearAll, cx);
+            assert_eq!(
+                entity.handle_chat_confirm_key("escape", false, false, cx),
+                Some(AiChatConfirmKeyAction::Cancel)
+            );
+            assert_eq!(
+                entity.begin_chat_confirm_exit(false, Duration::ZERO, cx),
+                (true, None)
+            );
+
+            entity.open_chat_confirm(
+                AiChatConfirmKind::DeleteMessage {
+                    message_id: Arc::from("message-a"),
+                },
+                cx,
+            );
+            assert_eq!(
+                entity.handle_chat_confirm_key("end", false, false, cx),
+                Some(AiChatConfirmKeyAction::Handled)
+            );
+            assert_eq!(
+                entity.handle_chat_confirm_key("enter", false, false, cx),
+                Some(AiChatConfirmKeyAction::Confirm)
+            );
+            assert_eq!(
+                entity.begin_chat_confirm_exit(true, Duration::ZERO, cx),
+                (
+                    true,
+                    Some(AiChatConfirmEffect::DeleteMessage {
+                        message_id: Arc::from("message-a"),
+                    })
+                )
+            );
+            assert_eq!(
+                entity.begin_chat_confirm_exit(true, Duration::ZERO, cx),
+                (false, None)
+            );
+        });
+    }
+
+    #[gpui::test]
+    fn entity_release_cancels_retained_chat_confirmation_exit(cx: &mut TestAppContext) {
+        let entity = cx.new(|cx| {
+            AiWorkspaceEntity::new(test_runtime(), oxideterm_ai::AiProviderKeyStore::new(), cx)
+        });
+        let (release_sender, release_receiver) = tokio::sync::oneshot::channel();
+        entity.update(cx, |entity, cx| {
+            // The AI owner retains its modal exit task so Entity release
+            // cancels a pending animation completion.
+            entity.chat_confirm_exit_task = Some(cx.spawn(async move |_, _| {
+                let _ = release_receiver.await;
+            }));
+        });
+        cx.run_until_parked();
+
+        drop(entity);
+        cx.update(|_| {});
+        cx.run_until_parked();
+
+        assert!(release_sender.send(()).is_err());
     }
 
     #[gpui::test]

@@ -62,8 +62,23 @@ impl WorkspaceApp {
         if !self.native_update_notification_open
             || self.version_migration.open
             || self.onboarding.open
-            || self.settings_page.legal_notice_open
-            || self.native_update_release_notes_open
+            || self
+                .overlay
+                .read(cx)
+                .confirm_snapshot()
+                .is_some_and(|snapshot| {
+                    matches!(snapshot.kind, WorkspaceOverlayConfirmKind::LegalNotice)
+                })
+            || self
+                .overlay
+                .read(cx)
+                .confirm_snapshot()
+                .is_some_and(|snapshot| {
+                    matches!(
+                        snapshot.kind,
+                        WorkspaceOverlayConfirmKind::NativeUpdateReleaseNotes
+                    )
+                })
         {
             return None;
         }
@@ -276,44 +291,22 @@ impl WorkspaceApp {
         }
 
         self.native_update_release_notes_scroll = MarkdownVirtualListScrollHandle::new();
-        self.native_update_release_notes_presence.reopen();
-        self.native_update_release_notes_open = true;
-        cx.notify();
+        self.overlay.update(cx, |overlay, cx| {
+            overlay.open_confirm(WorkspaceOverlayConfirmKind::NativeUpdateReleaseNotes, cx);
+        });
     }
 
     pub(in crate::workspace) fn close_native_update_release_notes(
         &mut self,
         cx: &mut Context<Self>,
     ) {
-        let Some(generation) = self.native_update_release_notes_presence.begin_exit() else {
-            return;
-        };
         let delay = oxideterm_gpui_ui::motion::duration(
             &self.tokens,
             oxideterm_gpui_ui::motion::MotionDuration::Overlay,
         );
-        if delay.is_zero() {
-            self.native_update_release_notes_open = false;
-            self.native_update_release_notes_presence.reopen();
-            cx.notify();
-            return;
-        }
-
-        cx.spawn(async move |weak, cx| {
-            Timer::after(delay).await;
-            let _ = weak.update(cx, |this, cx| {
-                if this
-                    .native_update_release_notes_presence
-                    .finish_exit(generation)
-                {
-                    this.native_update_release_notes_open = false;
-                    this.native_update_release_notes_presence.reopen();
-                    cx.notify();
-                }
-            });
-        })
-        .detach();
-        cx.notify();
+        self.overlay.update(cx, |overlay, cx| {
+            overlay.begin_confirm_exit(false, delay, cx);
+        });
     }
 
     pub(in crate::workspace) fn handle_native_update_release_notes_key(
@@ -321,20 +314,52 @@ impl WorkspaceApp {
         event: &KeyDownEvent,
         cx: &mut Context<Self>,
     ) -> bool {
-        if !self.native_update_release_notes_open
-            || event.keystroke.key.as_str() != "escape"
-            || event.keystroke.modifiers.platform
-        {
+        let Some(snapshot) = self.overlay.read(cx).confirm_snapshot() else {
+            return false;
+        };
+        if !matches!(
+            snapshot.kind,
+            WorkspaceOverlayConfirmKind::NativeUpdateReleaseNotes
+        ) {
             return false;
         }
-        self.close_native_update_release_notes(cx);
-        true
+        if snapshot.phase == oxideterm_gpui_ui::motion::ExitPhase::Exiting {
+            return true;
+        }
+        let key_action = self.overlay.update(cx, |overlay, cx| {
+            overlay.handle_confirm_key(
+                event.keystroke.key.as_str(),
+                event.keystroke.modifiers.shift,
+                event.keystroke.modifiers.platform || event.keystroke.modifiers.control,
+                cx,
+            )
+        });
+        match key_action {
+            Some(
+                WorkspaceOverlayConfirmKeyAction::Cancel
+                | WorkspaceOverlayConfirmKeyAction::Confirm,
+            ) => {
+                self.close_native_update_release_notes(cx);
+                true
+            }
+            Some(WorkspaceOverlayConfirmKeyAction::Handled) => true,
+            None => false,
+        }
     }
 
     pub(in crate::workspace) fn render_native_update_release_notes_dialog(
         &self,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        let Some(snapshot) = self.overlay.read(cx).confirm_snapshot() else {
+            return div().into_any_element();
+        };
+        if !matches!(
+            snapshot.kind,
+            WorkspaceOverlayConfirmKind::NativeUpdateReleaseNotes
+        ) {
+            return div().into_any_element();
+        }
         let release_notes = self
             .settings_workspace
             .read(cx)
@@ -406,7 +431,7 @@ impl WorkspaceApp {
             "native-update-release-notes-form",
             backdrop,
             form,
-            self.native_update_release_notes_presence,
+            snapshot.phase,
         )
     }
 }

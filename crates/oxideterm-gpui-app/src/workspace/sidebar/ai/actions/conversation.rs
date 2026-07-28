@@ -646,10 +646,14 @@ impl WorkspaceApp {
             cx.notify();
             return;
         }
-        self.ai.chat.delete_message_confirm = Some(message_id);
-        self.ai_delete_message_confirm_presence.reopen();
-        self.reset_standard_confirm_focus();
-        cx.notify();
+        self.ai_entity.update(cx, |ai, cx| {
+            ai.open_chat_confirm(
+                ai_state::AiChatConfirmKind::DeleteMessage {
+                    message_id: Arc::from(message_id),
+                },
+                cx,
+            );
+        });
     }
 
     pub(in crate::workspace) fn delete_ai_message(

@@ -125,6 +125,11 @@ impl Render for WorkspaceApp {
             ));
             return self.render_app_lock_screen(window, cx);
         }
+        // Confirmation snapshots are immutable frame inputs. Sampling each
+        // owner once avoids repeatedly cloning typed payloads during render.
+        let ai_chat_confirm_snapshot = self.ai_entity.read(cx).chat_confirm_snapshot();
+        let overlay_confirm_snapshot = self.overlay.read(cx).confirm_snapshot();
+        let tab_close_confirm_open = self.tab_host.read(cx).close_confirm().is_some();
         let title = self
             .active_tab()
             .map(|tab| self.tab_display_title(tab))
@@ -1021,15 +1026,27 @@ impl Render for WorkspaceApp {
             .when(self.ai.chat.summarize_confirm_open, |root| {
                 root.child(self.render_ai_summarize_confirm_dialog(cx))
             })
-            .when(self.ai.chat.clear_all_confirm_open, |root| {
-                root.child(self.render_ai_clear_all_confirm_dialog(cx))
-            })
-            .when(self.ai.chat.delete_message_confirm.is_some(), |root| {
-                root.child(self.render_ai_delete_message_confirm_dialog(cx))
-            })
-            .when(self.settings_page.settings_reset_confirm_open, |root| {
-                root.child(self.render_settings_reset_confirm_dialog(cx))
-            })
+            .when(
+                ai_chat_confirm_snapshot.as_ref().is_some_and(|snapshot| {
+                    matches!(&snapshot.kind, ai_state::AiChatConfirmKind::ClearAll)
+                }),
+                |root| root.child(self.render_ai_clear_all_confirm_dialog(cx)),
+            )
+            .when(
+                ai_chat_confirm_snapshot.as_ref().is_some_and(|snapshot| {
+                    matches!(
+                        &snapshot.kind,
+                        ai_state::AiChatConfirmKind::DeleteMessage { .. }
+                    )
+                }),
+                |root| root.child(self.render_ai_delete_message_confirm_dialog(cx)),
+            )
+            .when(
+                overlay_confirm_snapshot.as_ref().is_some_and(|snapshot| {
+                    matches!(&snapshot.kind, WorkspaceOverlayConfirmKind::SettingsReset)
+                }),
+                |root| root.child(self.render_settings_reset_confirm_dialog(cx)),
+            )
             .when_some(
                 self.render_settings_data_directory_confirm_dialog(cx),
                 |root, dialog| root.child(dialog),
@@ -1041,10 +1058,16 @@ impl Render for WorkspaceApp {
             .when(cloud_sync_confirm_open, |root| {
                 root.child(self.render_cloud_sync_confirm_dialog(cx))
             })
-            .when(self.node_disconnect_confirm.is_some(), |root| {
-                root.child(self.render_node_disconnect_confirm_dialog(cx))
-            })
-            .when(self.tab_host.read(cx).close_confirm().is_some(), |root| {
+            .when(
+                matches!(
+                    overlay_confirm_snapshot
+                        .as_ref()
+                        .map(|snapshot| &snapshot.kind),
+                    Some(WorkspaceOverlayConfirmKind::NodeDisconnect { .. })
+                ),
+                |root| root.child(self.render_node_disconnect_confirm_dialog(cx)),
+            )
+            .when(tab_close_confirm_open, |root| {
                 root.child(self.render_tab_close_confirm_dialog(cx))
             })
             .when_some(
@@ -1164,12 +1187,21 @@ impl Render for WorkspaceApp {
                 self.onboarding.open && !self.version_migration.open,
                 |root| root.child(self.render_onboarding_modal(window, cx)),
             )
-            .when(self.settings_page.legal_notice_open, |root| {
-                root.child(self.render_help_legal_notice_dialog(cx))
-            })
-            .when(self.native_update_release_notes_open, |root| {
-                root.child(self.render_native_update_release_notes_dialog(cx))
-            })
+            .when(
+                overlay_confirm_snapshot.as_ref().is_some_and(|snapshot| {
+                    matches!(&snapshot.kind, WorkspaceOverlayConfirmKind::LegalNotice)
+                }),
+                |root| root.child(self.render_help_legal_notice_dialog(cx)),
+            )
+            .when(
+                overlay_confirm_snapshot.as_ref().is_some_and(|snapshot| {
+                    matches!(
+                        &snapshot.kind,
+                        WorkspaceOverlayConfirmKind::NativeUpdateReleaseNotes
+                    )
+                }),
+                |root| root.child(self.render_native_update_release_notes_dialog(cx)),
+            )
             .when(self.shortcuts_modal.open, |root| {
                 root.child(self.render_shortcuts_modal(cx))
             })

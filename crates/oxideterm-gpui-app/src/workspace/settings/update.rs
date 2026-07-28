@@ -562,8 +562,16 @@ impl WorkspaceApp {
             SettingsWorkspaceEvent::ResetNativeUpdateOverlay => {
                 self.native_update_notification_open = false;
                 self.native_update_notification_presence.reopen();
-                self.native_update_release_notes_open = false;
-                self.native_update_release_notes_presence.reopen();
+                self.overlay.update(cx, |overlay, cx| {
+                    if overlay.confirm_snapshot().is_some_and(|snapshot| {
+                        matches!(
+                            snapshot.kind,
+                            WorkspaceOverlayConfirmKind::NativeUpdateReleaseNotes
+                        )
+                    }) {
+                        overlay.begin_confirm_exit(false, Duration::ZERO, cx);
+                    }
+                });
                 // A new package must not inherit an old changelog scroll position.
                 self.native_update_release_notes_scroll = MarkdownVirtualListScrollHandle::new();
                 cx.notify();

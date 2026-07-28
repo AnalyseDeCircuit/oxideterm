@@ -206,7 +206,7 @@ use oxideterm_settings::{
     default_settings_path, ensure_bundled_background_image, list_background_images,
 };
 use oxideterm_settings_model::{
-    AiMcpServerDraft, AiProviderKeyStatusDelivery, SettingsNavigationLayout, SettingsPageModel,
+    AiMcpServerDraft, AiProviderKeyStatusDelivery, SettingsNavigationLayout,
 };
 use oxideterm_sftp::{
     BackgroundTransferDirection, BackgroundTransferKind, BackgroundTransferSnapshot,
@@ -261,7 +261,10 @@ use self::new_connection::{
     SshConnectionIntent,
 };
 use self::onboarding::OnboardingState;
-use self::overlay::{WorkspaceOverlayEntity, WorkspaceOverlayIntent};
+use self::overlay::{
+    WorkspaceOverlayConfirmEffect, WorkspaceOverlayConfirmKeyAction, WorkspaceOverlayConfirmKind,
+    WorkspaceOverlayEntity, WorkspaceOverlayIntent,
+};
 use self::pane_tree::SplitDrag;
 use self::root::state::{ReconnectWorkerResult, WorkspaceSshNode, WorkspaceSshNodeEndpoint};
 use self::root::{background::*, helpers::*};
@@ -564,7 +567,7 @@ struct ExitingTabVisual {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-enum TabCloseConfirm {
+pub(in crate::workspace) enum TabCloseConfirm {
     Single { tab_id: TabId },
     LocalChildProcess { tab_id: TabId },
     LocalChildProcessBatch { tab_ids: Vec<TabId> },
@@ -649,20 +652,6 @@ impl WorkspaceWindowTabState {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
-struct NodeDisconnectConfirm {
-    node_id: NodeId,
-    display_name: String,
-}
-
-#[derive(Clone, Copy)]
-enum SimpleConfirmExitTarget {
-    AiClearAll,
-    AiDeleteMessage,
-    NodeDisconnect,
-    TabClose,
-}
-
 #[derive(Clone)]
 pub(super) struct SelectableTextFragmentState {
     pub group_id: u64,
@@ -681,8 +670,6 @@ pub(crate) struct WorkspaceApp {
     detached_tab_return_handoff: Option<DetachedTabReturnHandoff>,
     next_tab_window_handoff_generation: u64,
     main_window_tabbar_drop_bounds: Option<Bounds<Pixels>>,
-    node_disconnect_confirm: Option<NodeDisconnectConfirm>,
-    node_disconnect_confirm_presence: oxideterm_gpui_ui::motion::ExitPresence,
     pending_auto_close_terminal_sessions: HashSet<TerminalSessionId>,
     auto_close_terminal_sessions_scheduled: bool,
     tab_host: Entity<tabs::WorkspaceTabHostEntity>,
@@ -702,12 +689,10 @@ pub(crate) struct WorkspaceApp {
     version_migration: VersionMigrationState,
     onboarding: OnboardingState,
     shortcuts_modal: ShortcutsModalState,
-    settings_page: SettingsPageModel,
     settings_workspace: Entity<settings::SettingsWorkspaceEntity>,
     _settings_workspace_observation: Subscription,
     _settings_workspace_subscription: Subscription,
     segmented_control_user_motion: selection_motion::UserSegmentedControlMotionState,
-    help_legal_notice_presence: oxideterm_gpui_ui::motion::ExitPresence,
     // Prompt and memory documents are edited outside the virtual settings list.
     ai_text_editor_dialog: Option<settings::AiTextEditorDialog>,
     ai_text_editor: Option<Entity<oxideterm_gpui_editor::TextEditorView>>,
@@ -740,10 +725,6 @@ pub(crate) struct WorkspaceApp {
     settings_section_list_state: ListState,
     settings_section_list_cache: RefCell<VirtualListSignatureCache>,
     standard_confirm_focused_action: Option<ConfirmDialogAction>,
-    settings_reset_confirm_presence: oxideterm_gpui_ui::motion::ExitPresence,
-    ai_clear_all_confirm_presence: oxideterm_gpui_ui::motion::ExitPresence,
-    ai_delete_message_confirm_presence: oxideterm_gpui_ui::motion::ExitPresence,
-    tab_close_confirm_presence: oxideterm_gpui_ui::motion::ExitPresence,
     select_anchors: HashMap<SelectAnchorId, OverlayAnchor>,
     text_input_anchors: TextInputAnchorStore,
     selectable_text_values: HashMap<u64, String>,
@@ -773,8 +754,6 @@ pub(crate) struct WorkspaceApp {
     input_caret: ime::WorkspaceCaretVisibility,
     native_update_notification_open: bool,
     native_update_notification_presence: oxideterm_gpui_ui::motion::ExitPresence,
-    native_update_release_notes_open: bool,
-    native_update_release_notes_presence: oxideterm_gpui_ui::motion::ExitPresence,
     native_update_release_notes_scroll: MarkdownVirtualListScrollHandle,
     settings_legal_notice_scroll: MarkdownVirtualListScrollHandle,
     _window_intents: Entity<WorkspaceWindowIntentEntity>,

@@ -1,4 +1,5 @@
 use super::ime::WorkspaceImeTarget;
+use super::tabs::TabCloseConfirmKeyAction;
 use super::*;
 use oxideterm_gpui_ui::text_input::{
     text_caret, text_input_anchor_probe, text_input_value_segments_with_color,
@@ -56,28 +57,6 @@ enum TerminalCommandSuggestionDirection {
     Down,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum TabCloseConfirmDirectKeyAction {
-    Cancel,
-    Confirm,
-}
-
-/// Gives the close modal priority over the terminal while preserving modified shortcuts.
-fn tab_close_confirm_direct_key_action(
-    key: &str,
-    platform_modifier: bool,
-    control_modifier: bool,
-) -> Option<TabCloseConfirmDirectKeyAction> {
-    if platform_modifier || control_modifier {
-        return None;
-    }
-    match key {
-        "escape" => Some(TabCloseConfirmDirectKeyAction::Cancel),
-        "enter" => Some(TabCloseConfirmDirectKeyAction::Confirm),
-        _ => None,
-    }
-}
-
 fn terminal_tab_capture_keystroke(keystroke: &gpui::Keystroke) -> bool {
     let modifiers = keystroke.modifiers;
     // Plain Tab and Shift+Tab are terminal protocol keys, but some platforms
@@ -99,115 +78,67 @@ fn terminal_tab_capture_blocked_by_workspace_ui(
 }
 
 impl WorkspaceApp {
-    fn schedule_simple_confirm_exit(
-        &mut self,
-        target: SimpleConfirmExitTarget,
-        generation: u64,
-        cx: &mut Context<Self>,
-    ) {
-        let delay = oxideterm_gpui_ui::motion::duration(
-            &self.tokens,
-            oxideterm_gpui_ui::motion::MotionDuration::Control,
-        );
-        if delay.is_zero() {
-            self.finish_simple_confirm_exit(target, generation, cx);
-            return;
-        }
-        // Each target retains only the read-only payload needed for its exit frame.
-        cx.spawn(async move |weak, cx| {
-            Timer::after(delay).await;
-            let _ = weak.update(cx, |this, cx| {
-                if this.finish_simple_confirm_exit(target, generation, cx) {
-                    cx.notify();
-                }
-            });
-        })
-        .detach();
-    }
-
-    fn finish_simple_confirm_exit(
-        &mut self,
-        target: SimpleConfirmExitTarget,
-        generation: u64,
-        cx: &mut App,
-    ) -> bool {
-        match target {
-            SimpleConfirmExitTarget::AiClearAll
-                if self.ai_clear_all_confirm_presence.finish_exit(generation) =>
-            {
-                self.ai.chat.clear_all_confirm_open = false;
-            }
-            SimpleConfirmExitTarget::AiDeleteMessage
-                if self
-                    .ai_delete_message_confirm_presence
-                    .finish_exit(generation) =>
-            {
-                self.ai.chat.delete_message_confirm = None;
-            }
-            SimpleConfirmExitTarget::NodeDisconnect
-                if self
-                    .node_disconnect_confirm_presence
-                    .finish_exit(generation) =>
-            {
-                self.node_disconnect_confirm = None;
-            }
-            SimpleConfirmExitTarget::TabClose
-                if self.tab_close_confirm_presence.finish_exit(generation) =>
-            {
-                self.tab_host
-                    .update(cx, |tab_host, _| tab_host.clear_close_confirm());
-            }
-            _ => return false,
-        }
-        true
-    }
-
     pub(in crate::workspace) fn begin_ai_clear_all_confirm_exit(
         &mut self,
+        confirmed: bool,
         cx: &mut Context<Self>,
     ) -> bool {
-        let Some(generation) = self.ai_clear_all_confirm_presence.begin_exit() else {
-            return false;
-        };
-        self.clear_standard_confirm_focus();
-        self.schedule_simple_confirm_exit(SimpleConfirmExitTarget::AiClearAll, generation, cx);
-        true
+        self.begin_ai_chat_confirm_exit(confirmed, cx)
     }
 
     pub(in crate::workspace) fn begin_ai_delete_message_confirm_exit(
         &mut self,
+        confirmed: bool,
         cx: &mut Context<Self>,
     ) -> bool {
-        let Some(generation) = self.ai_delete_message_confirm_presence.begin_exit() else {
-            return false;
-        };
-        self.clear_standard_confirm_focus();
-        self.schedule_simple_confirm_exit(SimpleConfirmExitTarget::AiDeleteMessage, generation, cx);
-        true
+        self.begin_ai_chat_confirm_exit(confirmed, cx)
+    }
+
+    fn begin_ai_chat_confirm_exit(&mut self, confirmed: bool, cx: &mut Context<Self>) -> bool {
+        let delay = oxideterm_gpui_ui::motion::duration(
+            &self.tokens,
+            oxideterm_gpui_ui::motion::MotionDuration::Control,
+        );
+        let (started, effect) = self.ai_entity.update(cx, |ai, cx| {
+            ai.begin_chat_confirm_exit(confirmed, delay, cx)
+        });
+        if let Some(effect) = effect {
+            match effect {
+                ai_state::AiChatConfirmEffect::ClearAll => self.clear_ai_conversations(cx),
+                ai_state::AiChatConfirmEffect::DeleteMessage { message_id } => {
+                    self.delete_ai_message(&message_id, cx);
+                }
+            }
+        }
+        started
     }
 
     pub(in crate::workspace) fn begin_node_disconnect_confirm_exit(
         &mut self,
+        confirmed: bool,
         cx: &mut Context<Self>,
-    ) -> bool {
-        let Some(generation) = self.node_disconnect_confirm_presence.begin_exit() else {
-            return false;
-        };
-        self.clear_standard_confirm_focus();
-        self.schedule_simple_confirm_exit(SimpleConfirmExitTarget::NodeDisconnect, generation, cx);
-        true
+    ) -> (bool, Option<WorkspaceOverlayConfirmEffect>) {
+        let delay = oxideterm_gpui_ui::motion::duration(
+            &self.tokens,
+            oxideterm_gpui_ui::motion::MotionDuration::Control,
+        );
+        self.overlay.update(cx, |overlay, cx| {
+            overlay.begin_confirm_exit(confirmed, delay, cx)
+        })
     }
 
     pub(in crate::workspace) fn begin_tab_close_confirm_exit(
         &mut self,
+        confirmed: bool,
         cx: &mut Context<Self>,
-    ) -> bool {
-        let Some(generation) = self.tab_close_confirm_presence.begin_exit() else {
-            return false;
-        };
-        self.clear_standard_confirm_focus();
-        self.schedule_simple_confirm_exit(SimpleConfirmExitTarget::TabClose, generation, cx);
-        true
+    ) -> (bool, Option<TabCloseConfirm>) {
+        let delay = oxideterm_gpui_ui::motion::duration(
+            &self.tokens,
+            oxideterm_gpui_ui::motion::MotionDuration::Control,
+        );
+        self.tab_host.update(cx, |tab_host, cx| {
+            tab_host.begin_close_confirm_exit(confirmed, delay, cx)
+        })
     }
 
     pub(in crate::workspace) fn begin_keybinding_reset_all_confirm_exit(
@@ -1007,23 +938,32 @@ impl WorkspaceApp {
             }
             // The import dialog owns keyboard input while it is mounted.
             true
-        } else if self.settings_page.settings_reset_confirm_open
-            && self.settings_reset_confirm_presence.phase()
-                == oxideterm_gpui_ui::motion::ExitPhase::Visible
+        } else if self
+            .overlay
+            .read(cx)
+            .confirm_snapshot()
+            .is_some_and(|snapshot| {
+                matches!(snapshot.kind, WorkspaceOverlayConfirmKind::SettingsReset)
+            })
         {
-            match self.handle_standard_confirm_key(event, cx) {
-                Some(ConfirmKeyboardAction::Cancel) => {
-                    self.begin_settings_reset_confirm_exit(cx);
-                    cx.notify();
+            let key_action = self.overlay.update(cx, |overlay, cx| {
+                overlay.handle_confirm_key(
+                    event.keystroke.key.as_str(),
+                    event.keystroke.modifiers.shift,
+                    event.keystroke.modifiers.platform || event.keystroke.modifiers.control,
+                    cx,
+                )
+            });
+            match key_action {
+                Some(WorkspaceOverlayConfirmKeyAction::Cancel) => {
+                    self.begin_settings_reset_confirm_exit(false, cx);
                     true
                 }
-                Some(ConfirmKeyboardAction::Confirm) => {
-                    if self.begin_settings_reset_confirm_exit(cx) {
-                        self.edit_settings(|settings| *settings = PersistedSettings::default(), cx);
-                    }
+                Some(WorkspaceOverlayConfirmKeyAction::Confirm) => {
+                    self.begin_settings_reset_confirm_exit(true, cx);
                     true
                 }
-                Some(ConfirmKeyboardAction::Handled) => true,
+                Some(WorkspaceOverlayConfirmKeyAction::Handled) => true,
                 None => false,
             }
         } else if self
@@ -1162,39 +1102,30 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
-        if self.tab_host.read(cx).close_confirm().is_none() {
+        let Some(snapshot) = self.tab_host.read(cx).close_confirm_snapshot() else {
             return false;
-        }
-        if self.tab_close_confirm_presence.phase() == oxideterm_gpui_ui::motion::ExitPhase::Exiting
-        {
+        };
+        if snapshot.phase == oxideterm_gpui_ui::motion::ExitPhase::Exiting {
             return true;
         }
-        if let Some(action) = tab_close_confirm_direct_key_action(
-            event.keystroke.key.as_str(),
-            event.keystroke.modifiers.platform,
-            event.keystroke.modifiers.control,
-        ) {
-            match action {
-                TabCloseConfirmDirectKeyAction::Cancel => {
-                    self.cancel_tab_close_confirm(cx);
-                    return true;
-                }
-                TabCloseConfirmDirectKeyAction::Confirm => {
-                    self.confirm_tab_close_confirm(window, cx);
-                    return true;
-                }
-            }
-        }
-        match self.handle_standard_confirm_key(event, cx) {
-            Some(ConfirmKeyboardAction::Cancel) => {
+        let key_action = self.tab_host.update(cx, |tab_host, cx| {
+            tab_host.handle_close_confirm_key(
+                event.keystroke.key.as_str(),
+                event.keystroke.modifiers.shift,
+                event.keystroke.modifiers.platform || event.keystroke.modifiers.control,
+                cx,
+            )
+        });
+        match key_action {
+            Some(TabCloseConfirmKeyAction::Cancel) => {
                 self.cancel_tab_close_confirm(cx);
                 true
             }
-            Some(ConfirmKeyboardAction::Confirm) => {
+            Some(TabCloseConfirmKeyAction::Confirm) => {
                 self.confirm_tab_close_confirm(window, cx);
                 true
             }
-            Some(ConfirmKeyboardAction::Handled) => true,
+            Some(TabCloseConfirmKeyAction::Handled) => true,
             None => false,
         }
     }
@@ -1205,24 +1136,36 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
-        if self.node_disconnect_confirm.is_none() {
+        let Some(snapshot) = self.overlay.read(cx).confirm_snapshot() else {
+            return false;
+        };
+        if !matches!(
+            snapshot.kind,
+            WorkspaceOverlayConfirmKind::NodeDisconnect { .. }
+        ) {
             return false;
         }
-        if self.node_disconnect_confirm_presence.phase()
-            == oxideterm_gpui_ui::motion::ExitPhase::Exiting
-        {
+        if snapshot.phase == oxideterm_gpui_ui::motion::ExitPhase::Exiting {
             return true;
         }
-        match self.handle_standard_confirm_key(event, cx) {
-            Some(ConfirmKeyboardAction::Cancel) => {
+        let key_action = self.overlay.update(cx, |overlay, cx| {
+            overlay.handle_confirm_key(
+                event.keystroke.key.as_str(),
+                event.keystroke.modifiers.shift,
+                event.keystroke.modifiers.platform || event.keystroke.modifiers.control,
+                cx,
+            )
+        });
+        match key_action {
+            Some(WorkspaceOverlayConfirmKeyAction::Cancel) => {
                 self.cancel_node_disconnect_confirm(cx);
                 true
             }
-            Some(ConfirmKeyboardAction::Confirm) => {
+            Some(WorkspaceOverlayConfirmKeyAction::Confirm) => {
                 self.confirm_node_disconnect_confirm(window, cx);
                 true
             }
-            Some(ConfirmKeyboardAction::Handled) => true,
+            Some(WorkspaceOverlayConfirmKeyAction::Handled) => true,
             None => false,
         }
     }
@@ -1274,50 +1217,28 @@ impl WorkspaceApp {
                 Some(ConfirmKeyboardAction::Handled) => true,
                 None => false,
             }
-        } else if self.ai.chat.clear_all_confirm_open {
-            if self.ai_clear_all_confirm_presence.phase()
-                == oxideterm_gpui_ui::motion::ExitPhase::Exiting
-            {
+        } else if let Some(snapshot) = self.ai_entity.read(cx).chat_confirm_snapshot() {
+            if snapshot.phase == oxideterm_gpui_ui::motion::ExitPhase::Exiting {
                 return true;
             }
-            match self.handle_standard_confirm_key(event, cx) {
-                Some(ConfirmKeyboardAction::Cancel) => {
-                    self.begin_ai_clear_all_confirm_exit(cx);
-                    cx.notify();
+            let key_action = self.ai_entity.update(cx, |ai, cx| {
+                ai.handle_chat_confirm_key(
+                    event.keystroke.key.as_str(),
+                    event.keystroke.modifiers.shift,
+                    event.keystroke.modifiers.platform || event.keystroke.modifiers.control,
+                    cx,
+                )
+            });
+            match key_action {
+                Some(ai_state::AiChatConfirmKeyAction::Cancel) => {
+                    self.begin_ai_chat_confirm_exit(false, cx);
                     true
                 }
-                Some(ConfirmKeyboardAction::Confirm) => {
-                    if self.begin_ai_clear_all_confirm_exit(cx) {
-                        self.clear_ai_conversations(cx);
-                    }
-                    cx.notify();
+                Some(ai_state::AiChatConfirmKeyAction::Confirm) => {
+                    self.begin_ai_chat_confirm_exit(true, cx);
                     true
                 }
-                Some(ConfirmKeyboardAction::Handled) => true,
-                None => false,
-            }
-        } else if self.ai.chat.delete_message_confirm.is_some() {
-            if self.ai_delete_message_confirm_presence.phase()
-                == oxideterm_gpui_ui::motion::ExitPhase::Exiting
-            {
-                return true;
-            }
-            match self.handle_standard_confirm_key(event, cx) {
-                Some(ConfirmKeyboardAction::Cancel) => {
-                    self.begin_ai_delete_message_confirm_exit(cx);
-                    cx.notify();
-                    true
-                }
-                Some(ConfirmKeyboardAction::Confirm) => {
-                    let message_id = self.ai.chat.delete_message_confirm.clone();
-                    if self.begin_ai_delete_message_confirm_exit(cx)
-                        && let Some(message_id) = message_id
-                    {
-                        self.delete_ai_message(&message_id, cx);
-                    }
-                    true
-                }
-                Some(ConfirmKeyboardAction::Handled) => true,
+                Some(ai_state::AiChatConfirmKeyAction::Handled) => true,
                 None => false,
             }
         } else {
@@ -2515,22 +2436,6 @@ fn is_shell_assignment_name(name: &str) -> bool {
 #[cfg(test)]
 mod terminal_command_bar_behavior_tests {
     use super::*;
-
-    #[test]
-    fn tab_close_confirm_uses_escape_to_cancel_and_enter_to_confirm() {
-        assert_eq!(
-            tab_close_confirm_direct_key_action("escape", false, false),
-            Some(TabCloseConfirmDirectKeyAction::Cancel)
-        );
-        assert_eq!(
-            tab_close_confirm_direct_key_action("enter", false, false),
-            Some(TabCloseConfirmDirectKeyAction::Confirm)
-        );
-        assert_eq!(
-            tab_close_confirm_direct_key_action("enter", true, false),
-            None
-        );
-    }
 
     fn tab_keystroke_with(modifiers: gpui::Modifiers) -> gpui::Keystroke {
         gpui::Keystroke {

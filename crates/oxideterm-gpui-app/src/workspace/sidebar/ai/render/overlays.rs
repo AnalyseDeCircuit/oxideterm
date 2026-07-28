@@ -546,9 +546,9 @@ impl WorkspaceApp {
             move |this, _event, window, cx| match action {
                 AiHeaderAction::Settings => this.open_ai_settings(window, cx),
                 AiHeaderAction::NewChat => {
-                    this.ai.chat.clear_all_confirm_open = true;
-                    this.ai_clear_all_confirm_presence.reopen();
-                    this.reset_standard_confirm_focus();
+                    this.ai_entity.update(cx, |ai, cx| {
+                        ai.open_chat_confirm(ai_state::AiChatConfirmKind::ClearAll, cx);
+                    });
                 }
             },
             cx,

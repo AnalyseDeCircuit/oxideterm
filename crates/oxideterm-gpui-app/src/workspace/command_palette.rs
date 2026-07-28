@@ -609,47 +609,43 @@ impl WorkspaceApp {
     }
 
     pub(super) fn open_reset_settings_confirm_from_palette(&mut self, cx: &mut Context<Self>) {
-        self.settings_page.set_settings_reset_confirm_open(true);
-        self.settings_reset_confirm_presence.reopen();
-        self.reset_standard_confirm_focus();
-        cx.notify();
+        self.overlay.update(cx, |overlay, cx| {
+            overlay.open_confirm(WorkspaceOverlayConfirmKind::SettingsReset, cx);
+        });
     }
 
-    pub(super) fn begin_settings_reset_confirm_exit(&mut self, cx: &mut Context<Self>) -> bool {
-        let Some(generation) = self.settings_reset_confirm_presence.begin_exit() else {
-            return false;
-        };
-        self.clear_standard_confirm_focus();
+    pub(super) fn begin_settings_reset_confirm_exit(
+        &mut self,
+        confirmed: bool,
+        cx: &mut Context<Self>,
+    ) -> bool {
         let delay = oxideterm_gpui_ui::motion::duration(
             &self.tokens,
             oxideterm_gpui_ui::motion::MotionDuration::Control,
         );
-        if delay.is_zero() {
-            self.settings_page.set_settings_reset_confirm_open(false);
-            return true;
+        let (started, effect) = self.overlay.update(cx, |overlay, cx| {
+            overlay.begin_confirm_exit(confirmed, delay, cx)
+        });
+        if matches!(effect, Some(WorkspaceOverlayConfirmEffect::ResetSettings)) {
+            self.edit_settings(|settings| *settings = PersistedSettings::default(), cx);
         }
-        // Keep the inert dialog payload mounted only until its visual exit completes.
-        cx.spawn(async move |weak, cx| {
-            Timer::after(delay).await;
-            let _ = weak.update(cx, |this, cx| {
-                if this.settings_reset_confirm_presence.finish_exit(generation) {
-                    this.settings_page.set_settings_reset_confirm_open(false);
-                    cx.notify();
-                }
-            });
-        })
-        .detach();
-        true
+        started
     }
 
     pub(super) fn render_settings_reset_confirm_dialog(
         &self,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        let Some(snapshot) = self.overlay.read(cx).confirm_snapshot() else {
+            return div().into_any_element();
+        };
+        if !matches!(snapshot.kind, WorkspaceOverlayConfirmKind::SettingsReset) {
+            return div().into_any_element();
+        }
         oxideterm_gpui_ui::confirm::confirm_dialog_with_focus_motion(
             &self.tokens,
             "settings-reset-confirm-motion",
-            self.settings_reset_confirm_presence.phase(),
+            snapshot.phase,
             ConfirmDialogView {
                 variant: ConfirmDialogVariant::Danger,
                 title: div()
@@ -667,16 +663,14 @@ impl WorkspaceApp {
                     .child(self.i18n.t("command_palette.cmd_reset_settings"))
                     .into_any_element(),
             },
-            self.standard_confirm_focus(),
+            snapshot.focused_action,
             cx.listener(|this, _event, _window, cx| {
-                this.begin_settings_reset_confirm_exit(cx);
+                this.begin_settings_reset_confirm_exit(false, cx);
                 cx.stop_propagation();
                 cx.notify();
             }),
             cx.listener(|this, _event, _window, cx| {
-                if this.begin_settings_reset_confirm_exit(cx) {
-                    this.edit_settings(|settings| *settings = PersistedSettings::default(), cx);
-                }
+                this.begin_settings_reset_confirm_exit(true, cx);
                 cx.stop_propagation();
             }),
         )

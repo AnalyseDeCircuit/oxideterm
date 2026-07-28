@@ -12,8 +12,8 @@ mod render;
 mod state;
 
 pub(in crate::workspace) use entity::{
-    TabCloseProcessProbe, TabMountCleanupPlan, TabMountCloseReason, TabMountId, TerminalLocation,
-    WorkspaceTabHostEntity, WorkspaceTabHostEvent,
+    TabCloseConfirmKeyAction, TabCloseProcessProbe, TabMountCleanupPlan, TabMountCloseReason,
+    TabMountId, TerminalLocation, WorkspaceTabHostEntity, WorkspaceTabHostEvent,
 };
 
 // The main tab strip keeps a thin visual thumb while exposing a larger drag target.

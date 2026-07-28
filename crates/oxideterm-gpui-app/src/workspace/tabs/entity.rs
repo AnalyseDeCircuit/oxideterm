@@ -26,6 +26,9 @@ pub(in crate::workspace) struct WorkspaceTabHostEntity {
     process_close_check_task: Option<gpui::Task<()>>,
     process_close_completion: Option<TabCloseProcessCompletion>,
     close_confirm: Option<TabCloseConfirm>,
+    close_confirm_presence: oxideterm_gpui_ui::motion::ExitPresence,
+    close_confirm_focused_action: Option<ConfirmDialogAction>,
+    close_confirm_exit_task: Option<gpui::Task<()>>,
     recording_elapsed_pane_id: Option<PaneId>,
     recording_elapsed_generation: u64,
     recording_elapsed_task: Option<gpui::Task<()>>,
@@ -99,6 +102,20 @@ pub(in crate::workspace) struct TabCloseProcessCompletion {
     pub(in crate::workspace) has_foreground_child: bool,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(in crate::workspace) struct TabCloseConfirmSnapshot {
+    pub(in crate::workspace) confirm: TabCloseConfirm,
+    pub(in crate::workspace) phase: oxideterm_gpui_ui::motion::ExitPhase,
+    pub(in crate::workspace) focused_action: Option<ConfirmDialogAction>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(in crate::workspace) enum TabCloseConfirmKeyAction {
+    Cancel,
+    Confirm,
+    Handled,
+}
+
 impl WorkspaceTabHostEntity {
     pub(in crate::workspace) fn new() -> Self {
         Self {
@@ -120,6 +137,9 @@ impl WorkspaceTabHostEntity {
             process_close_check_task: None,
             process_close_completion: None,
             close_confirm: None,
+            close_confirm_presence: oxideterm_gpui_ui::motion::ExitPresence::visible(),
+            close_confirm_focused_action: None,
+            close_confirm_exit_task: None,
             recording_elapsed_pane_id: None,
             recording_elapsed_generation: 0,
             recording_elapsed_task: None,
@@ -580,21 +600,122 @@ impl WorkspaceTabHostEntity {
         self.process_close_completion.take()
     }
 
-    pub(in crate::workspace) fn open_close_confirm(&mut self, confirm: TabCloseConfirm) {
+    pub(in crate::workspace) fn open_close_confirm(
+        &mut self,
+        confirm: TabCloseConfirm,
+        cx: &mut Context<Self>,
+    ) {
+        // A replacement confirmation owns a fresh generation and cancels the
+        // retained exit task for the previous payload.
+        self.close_confirm_exit_task = None;
         self.close_confirm = Some(confirm);
+        self.close_confirm_presence.reopen();
+        self.close_confirm_focused_action = None;
+        cx.notify();
     }
 
     pub(in crate::workspace) fn close_confirm(&self) -> Option<&TabCloseConfirm> {
         self.close_confirm.as_ref()
     }
 
-    pub(in crate::workspace) fn close_confirm_cloned(&self) -> Option<TabCloseConfirm> {
-        // The exit animation retains the original while the window executes the accepted action.
-        self.close_confirm.clone()
+    pub(in crate::workspace) fn close_confirm_snapshot(&self) -> Option<TabCloseConfirmSnapshot> {
+        self.close_confirm
+            .as_ref()
+            .cloned()
+            .map(|confirm| TabCloseConfirmSnapshot {
+                confirm,
+                phase: self.close_confirm_presence.phase(),
+                focused_action: self.close_confirm_focused_action,
+            })
     }
 
-    pub(in crate::workspace) fn clear_close_confirm(&mut self) {
-        self.close_confirm = None;
+    pub(in crate::workspace) fn handle_close_confirm_key(
+        &mut self,
+        key: &str,
+        shift: bool,
+        blocked_by_primary_modifier: bool,
+        cx: &mut Context<Self>,
+    ) -> Option<TabCloseConfirmKeyAction> {
+        if blocked_by_primary_modifier
+            || self.close_confirm.is_none()
+            || self.close_confirm_presence.phase() != oxideterm_gpui_ui::motion::ExitPhase::Visible
+        {
+            return None;
+        }
+        if key == "escape" {
+            self.close_confirm_focused_action = None;
+            return Some(TabCloseConfirmKeyAction::Cancel);
+        }
+        if key == "enter" {
+            self.close_confirm_focused_action = None;
+            return Some(TabCloseConfirmKeyAction::Confirm);
+        }
+        const ACTIONS: [ConfirmDialogAction; 2] =
+            [ConfirmDialogAction::Cancel, ConfirmDialogAction::Confirm];
+        match browser_behavior::modal_footer_key_action(
+            key,
+            shift,
+            &ACTIONS,
+            self.close_confirm_focused_action,
+            ConfirmDialogAction::Cancel,
+        ) {
+            Some(browser_behavior::ModalFooterKeyAction::Cancel) => {
+                self.close_confirm_focused_action = None;
+                Some(TabCloseConfirmKeyAction::Cancel)
+            }
+            Some(browser_behavior::ModalFooterKeyAction::Focus(action)) => {
+                self.close_confirm_focused_action = Some(action);
+                cx.notify();
+                Some(TabCloseConfirmKeyAction::Handled)
+            }
+            Some(browser_behavior::ModalFooterKeyAction::Activate(action)) => {
+                self.close_confirm_focused_action = None;
+                Some(match action {
+                    ConfirmDialogAction::Cancel => TabCloseConfirmKeyAction::Cancel,
+                    ConfirmDialogAction::Confirm => TabCloseConfirmKeyAction::Confirm,
+                })
+            }
+            None => None,
+        }
+    }
+
+    pub(in crate::workspace) fn begin_close_confirm_exit(
+        &mut self,
+        confirmed: bool,
+        delay: Duration,
+        cx: &mut Context<Self>,
+    ) -> (bool, Option<TabCloseConfirm>) {
+        let Some(confirm) = self.close_confirm.as_ref() else {
+            return (false, None);
+        };
+        let Some(generation) = self.close_confirm_presence.begin_exit() else {
+            return (false, None);
+        };
+        self.close_confirm_focused_action = None;
+        let effect = confirmed.then(|| confirm.clone());
+        self.close_confirm_exit_task = None;
+        if delay.is_zero() {
+            self.finish_close_confirm_exit(generation, cx);
+            return (true, effect);
+        }
+        self.close_confirm_exit_task = Some(cx.spawn(async move |tab_host, cx| {
+            Timer::after(delay).await;
+            let _ = tab_host.update(cx, |tab_host, cx| {
+                tab_host.finish_close_confirm_exit(generation, cx);
+            });
+        }));
+        cx.notify();
+        (true, effect)
+    }
+
+    fn finish_close_confirm_exit(&mut self, generation: u64, cx: &mut Context<Self>) {
+        self.close_confirm_exit_task = None;
+        if self.close_confirm.is_some() && self.close_confirm_presence.finish_exit(generation) {
+            self.close_confirm = None;
+            self.close_confirm_presence.reopen();
+            self.close_confirm_focused_action = None;
+            cx.notify();
+        }
     }
 }
 
@@ -1166,17 +1287,87 @@ mod tests {
         );
     }
 
-    #[test]
-    fn close_confirmation_state_is_opened_and_cleared_by_tab_host() {
-        let mut tab_host = WorkspaceTabHostEntity::new();
-        let confirm = TabCloseConfirm::Other {
+    #[gpui::test]
+    fn close_confirmation_reopen_cancels_stale_exit(cx: &mut TestAppContext) {
+        let tab_host = cx.new(|_| WorkspaceTabHostEntity::new());
+        let stale_confirm = TabCloseConfirm::Other {
             tab_ids: vec![TabId(2), TabId(3)],
         };
+        let replacement_confirm = TabCloseConfirm::Single { tab_id: TabId(7) };
 
-        tab_host.open_close_confirm(confirm.clone());
-        assert_eq!(tab_host.close_confirm(), Some(&confirm));
-        tab_host.clear_close_confirm();
-        assert!(tab_host.close_confirm().is_none());
+        tab_host.update(cx, |tab_host, cx| {
+            tab_host.open_close_confirm(stale_confirm, cx);
+            assert_eq!(
+                tab_host.begin_close_confirm_exit(false, Duration::from_secs(60), cx),
+                (true, None)
+            );
+            assert!(tab_host.close_confirm_exit_task.is_some());
+
+            tab_host.open_close_confirm(replacement_confirm.clone(), cx);
+            assert!(tab_host.close_confirm_exit_task.is_none());
+            assert_eq!(
+                tab_host.close_confirm_snapshot(),
+                Some(TabCloseConfirmSnapshot {
+                    confirm: replacement_confirm,
+                    phase: oxideterm_gpui_ui::motion::ExitPhase::Visible,
+                    focused_action: None,
+                })
+            );
+        });
+    }
+
+    #[gpui::test]
+    fn close_confirmation_keys_publish_the_payload_at_most_once(cx: &mut TestAppContext) {
+        let tab_host = cx.new(|_| WorkspaceTabHostEntity::new());
+        let confirm = TabCloseConfirm::LocalChildProcessBatch {
+            tab_ids: vec![TabId(4), TabId(5)],
+        };
+
+        tab_host.update(cx, |tab_host, cx| {
+            tab_host.open_close_confirm(confirm.clone(), cx);
+            assert_eq!(
+                tab_host.handle_close_confirm_key("escape", false, false, cx),
+                Some(TabCloseConfirmKeyAction::Cancel)
+            );
+            assert_eq!(
+                tab_host.begin_close_confirm_exit(false, Duration::ZERO, cx),
+                (true, None)
+            );
+
+            tab_host.open_close_confirm(confirm.clone(), cx);
+            assert_eq!(
+                tab_host.handle_close_confirm_key("enter", false, false, cx),
+                Some(TabCloseConfirmKeyAction::Confirm)
+            );
+            assert_eq!(
+                tab_host.begin_close_confirm_exit(true, Duration::ZERO, cx),
+                (true, Some(confirm))
+            );
+            assert_eq!(
+                tab_host.begin_close_confirm_exit(true, Duration::ZERO, cx),
+                (false, None)
+            );
+        });
+    }
+
+    #[gpui::test]
+    fn entity_release_cancels_retained_close_confirmation_exit(cx: &mut TestAppContext) {
+        let tab_host = cx.new(|_| WorkspaceTabHostEntity::new());
+        let (release_sender, release_receiver) = tokio::sync::oneshot::channel();
+        tab_host.update(cx, |tab_host, cx| {
+            // The confirmation owner retains the exit task and therefore
+            // cancels it when its Entity is released.
+            tab_host.close_confirm_exit_task = Some(cx.spawn(async move |_, _| {
+                let _ = release_receiver.await;
+            }));
+        });
+        cx.run_until_parked();
+
+        drop(tab_host);
+        cx.update(|_| {});
+        cx.run_until_parked();
+
+        assert!(release_sender.send(()).is_err());
     }
 
     #[test]

@@ -122,7 +122,7 @@ impl WorkspaceApp {
             "knowledge-create-dialog-form",
             backdrop,
             form,
-            self.ai_entity.read(cx).knowledge_create_presence(),
+            self.ai_entity.read(cx).knowledge_create_presence().phase(),
         ))
     }
 
@@ -251,7 +251,10 @@ impl WorkspaceApp {
             "knowledge-document-dialog-form",
             backdrop,
             form,
-            self.ai_entity.read(cx).knowledge_document_presence(),
+            self.ai_entity
+                .read(cx)
+                .knowledge_document_presence()
+                .phase(),
         ))
     }
 
