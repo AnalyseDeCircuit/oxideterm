@@ -778,6 +778,51 @@ mod tests {
     }
 
     #[test]
+    fn active_registry_state_without_physical_transport_is_not_ready() {
+        let registry = SshConnectionRegistry::default();
+        let router = NodeRouter::new(registry.clone());
+        let node = NodeId::new("node-a");
+        let config = SshConfig::password("host", 22, "me", "pw");
+        router.upsert_node(node.clone(), config.clone());
+        let handle = registry.acquire(config, ConnectionConsumer::NodeRouter("node-a".into()));
+        registry.mark_state(handle.connection_id(), ConnectionState::Active);
+
+        router
+            .bind_connection(&node, handle.connection_id().to_string())
+            .unwrap();
+
+        assert_ne!(
+            router.node_state(&node).unwrap().state.readiness,
+            NodeReadiness::Ready
+        );
+    }
+
+    #[test]
+    fn closing_terminal_consumer_does_not_change_node_readiness() {
+        let registry = SshConnectionRegistry::default();
+        let router = NodeRouter::new(registry.clone());
+        let node = NodeId::new("node-a");
+        let config = SshConfig::password("host", 22, "me", "pw");
+        router.upsert_node(node.clone(), config.clone());
+        let handle = bind_active_node(&registry, &router, &node, config.clone());
+        let terminal_consumer = ConnectionConsumer::Terminal("term-a".into());
+        let terminal_handle = registry.acquire(config, terminal_consumer.clone());
+        assert_eq!(terminal_handle.connection_id(), handle.connection_id());
+        router
+            .bind_terminal_session(&node, "term-a".to_string())
+            .unwrap();
+
+        registry.release(handle.connection_id(), &terminal_consumer);
+        router.unbind_terminal_session(&node, "term-a").unwrap();
+
+        assert_eq!(
+            router.node_state(&node).unwrap().state.readiness,
+            NodeReadiness::Ready
+        );
+        assert!(handle.has_physical());
+    }
+
+    #[test]
     fn acquire_wait_follows_runtime_rebind_during_reconnect() {
         let registry = SshConnectionRegistry::default();
         let router = NodeRouter::new(registry.clone());

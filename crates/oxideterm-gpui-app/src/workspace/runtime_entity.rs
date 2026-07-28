@@ -654,23 +654,39 @@ impl WorkspaceRuntimeEntity {
         root_connection_id: &str,
         recovered_connections: Vec<(NodeId, String)>,
     ) -> Vec<NodeId> {
-        let affected_node_ids = self.runtime_subtree_postorder(root_node_id);
-        for node_id in &affected_node_ids {
-            let _ = self.node_router.sync_node_readiness_event(
-                node_id,
-                NodeReadiness::Ready,
-                "grace recovered",
-            );
-        }
-        let _ = self
-            .ssh_registry
-            .mark_state_without_event(root_connection_id, ConnectionState::Active);
-        for (_, connection_id) in recovered_connections {
-            let _ = self
+        let mut recovered_node_ids = Vec::new();
+        for (node_id, connection_id) in
+            std::iter::once((root_node_id.clone(), root_connection_id.to_string()))
+                .chain(recovered_connections)
+        {
+            let connection_matches_node =
+                self.node_router.connection_id_for_node(&node_id).as_deref()
+                    == Some(connection_id.as_str());
+            let has_physical_transport = self
                 .ssh_registry
-                .mark_state_without_event(&connection_id, ConnectionState::Active);
+                .get(&connection_id)
+                .is_some_and(|handle| handle.has_physical());
+            if !connection_matches_node || !has_physical_transport {
+                continue;
+            }
+            let Some(connection) = self
+                .ssh_registry
+                .mark_state_without_event(&connection_id, ConnectionState::Active)
+            else {
+                continue;
+            };
+            let _ =
+                self.node_router
+                    .sync_connection_state(&node_id, &connection, "grace recovered");
+            if self
+                .node_router
+                .node_state(&node_id)
+                .is_ok_and(|snapshot| snapshot.state.readiness == NodeReadiness::Ready)
+            {
+                recovered_node_ids.push(node_id);
+            }
         }
-        affected_node_ids
+        recovered_node_ids
     }
 
     pub(in crate::workspace) fn apply_grace_expiration(&self, connection_id: &str) {
@@ -2537,7 +2553,9 @@ mod tests {
     }
 
     #[gpui::test]
-    fn grace_connection_state_transitions_are_entity_owned(cx: &mut TestAppContext) {
+    fn grace_recovery_marks_only_connections_with_physical_transport_ready(
+        cx: &mut TestAppContext,
+    ) {
         let ssh_registry = SshConnectionRegistry::new(ConnectionPoolConfig::default());
         let node_runtime_store = NodeRuntimeStore::default();
         let root_id = NodeId::new("root");
@@ -2560,6 +2578,7 @@ mod tests {
             ConnectionConsumer::NodeRouter(root_id.0.clone()),
         );
         let root_connection_id = root_connection.connection_id().to_string();
+        root_connection.set_physical(Arc::new(()));
         node_router
             .bind_connection(&root_id, root_connection_id.clone())
             .expect("root connection binding");
@@ -2589,25 +2608,27 @@ mod tests {
         });
 
         entity.update(cx, |entity, _cx| {
-            let affected_node_ids = entity.apply_grace_recovery(
+            let recovered_node_ids = entity.apply_grace_recovery(
                 &root_id,
                 &root_connection_id,
                 vec![(child_id.clone(), child_connection_id.clone())],
             );
-            assert_eq!(affected_node_ids, vec![child_id.clone(), root_id.clone()]);
+            assert_eq!(recovered_node_ids, vec![root_id.clone()]);
             assert_eq!(
                 entity
                     .node_router
-                    .node_metadata(&root_id)
-                    .expect("root runtime metadata")
+                    .node_state(&root_id)
+                    .expect("root runtime state")
+                    .state
                     .readiness,
                 NodeReadiness::Ready
             );
-            assert_eq!(
+            assert_ne!(
                 entity
                     .node_router
-                    .node_metadata(&child_id)
-                    .expect("child runtime metadata")
+                    .node_state(&child_id)
+                    .expect("child runtime state")
+                    .state
                     .readiness,
                 NodeReadiness::Ready
             );
@@ -2626,7 +2647,7 @@ mod tests {
                 .get(&child_connection_id)
                 .expect("child connection")
                 .state(),
-            ConnectionState::Active
+            ConnectionState::LinkDown
         );
     }
 

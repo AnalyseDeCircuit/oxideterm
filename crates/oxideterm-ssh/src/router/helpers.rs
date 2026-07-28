@@ -2,6 +2,20 @@ fn readiness_for_connection(connection: &ConnectionInfo) -> NodeReadiness {
     readiness_for_connection_state(&connection.state)
 }
 
+fn connection_info_for_runtime(handle: &SshConnectionHandle) -> ConnectionInfo {
+    let mut connection = handle.info();
+    if matches!(
+        connection.state,
+        ConnectionState::Active | ConnectionState::Idle
+    ) && !handle.has_physical()
+    {
+        // Registry state alone cannot make a node usable without a physical transport.
+        connection.state =
+            ConnectionState::Error("registry connection has no physical SSH transport".to_string());
+    }
+    connection
+}
+
 fn readiness_for_connection_state(state: &ConnectionState) -> NodeReadiness {
     match state {
         ConnectionState::Active | ConnectionState::Idle => NodeReadiness::Ready,
@@ -28,4 +42,3 @@ fn now_ms() -> u64 {
         .as_millis()
         .min(u128::from(u64::MAX)) as u64
 }
-

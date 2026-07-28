@@ -802,19 +802,9 @@ impl WorkspaceApp {
     }
 
     pub(in crate::workspace) fn connection_trace_node_is_ready(&self, node_id: &NodeId) -> bool {
-        self.ssh_nodes.get(node_id).is_some_and(|node| {
-            matches!(node.readiness, NodeReadiness::Ready)
-                && self
-                    .node_router
-                    .connection_id_for_node(node_id)
-                    .and_then(|connection_id| self.ssh_registry.get(&connection_id))
-                    .is_some_and(|handle| {
-                        matches!(
-                            handle.state(),
-                            ConnectionState::Active | ConnectionState::Idle
-                        )
-                    })
-        })
+        self.node_router
+            .node_state(node_id)
+            .is_ok_and(|snapshot| snapshot.state.readiness == NodeReadiness::Ready)
     }
 
     pub(in crate::workspace) fn begin_connection_trace_for_node(

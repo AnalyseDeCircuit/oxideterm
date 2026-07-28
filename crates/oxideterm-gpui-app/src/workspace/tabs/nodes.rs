@@ -369,11 +369,16 @@ impl WorkspaceApp {
                             .advance(&node_id.0, ReconnectPhase::RestoreForwards);
                         self.log_reconnect_phase(&node_id, ReconnectPhase::RestoreForwards, None);
                     }
-                    if let Some(node) = self.ssh_nodes.get_mut(&node_id) {
-                        node.readiness = NodeReadiness::Ready;
-                    }
                     if let Ok(event) = self.node_router.bind_connection(&node_id, connection_id) {
                         self.emit_node_event(event);
+                    }
+                    let projected_readiness = self
+                        .node_router
+                        .node_state(&node_id)
+                        .map(|snapshot| snapshot.state.readiness)
+                        .unwrap_or(NodeReadiness::Disconnected);
+                    if let Some(node) = self.ssh_nodes.get_mut(&node_id) {
+                        node.readiness = projected_readiness;
                     }
                     self.persist_session_tree_snapshot();
                     let connection_chain_node = self
@@ -629,21 +634,21 @@ impl WorkspaceApp {
                         TerminalNoticeVariant::Success,
                     );
                     self.resolve_connection_notifications_for_node(&node_id);
-                    // Tauri's phaseGracePeriod calls clearLinkDown(root) and
-                    // then clearLinkDown(each descendant). The descendant
-                    // probes only decide whether their backend connection can
-                    // also be marked Active; UI link-down is cleared for the
-                    // whole affected subtree once the root connection survives.
-                    let affected_node_ids = self.workspace_runtime.update(cx, |runtime, _cx| {
+                    let recovered_node_ids = self.workspace_runtime.update(cx, |runtime, _cx| {
                         runtime.apply_grace_recovery(
                             &node_id,
                             &connection_id,
                             recovered_connections,
                         )
                     });
-                    for affected_node_id in affected_node_ids {
-                        if let Some(node) = self.ssh_nodes.get_mut(&affected_node_id) {
-                            node.readiness = NodeReadiness::Ready;
+                    for recovered_node_id in recovered_node_ids {
+                        let projected_readiness = self
+                            .node_router
+                            .node_state(&recovered_node_id)
+                            .map(|snapshot| snapshot.state.readiness)
+                            .unwrap_or(NodeReadiness::Disconnected);
+                        if let Some(node) = self.ssh_nodes.get_mut(&recovered_node_id) {
+                            node.readiness = projected_readiness;
                         }
                     }
                     self.restore_forwarding_session_for_node(&node_id, cx);
@@ -758,9 +763,14 @@ impl WorkspaceApp {
                 let Some(node_id) = self.node_router.node_id_for_connection(&connection_id) else {
                     return false;
                 };
-                let Some(state) = readiness_for_connection_status(&status) else {
+                let Some(event_state) = readiness_for_connection_status(&status) else {
                     return false;
                 };
+                let state = self
+                    .node_router
+                    .node_state(&node_id)
+                    .map(|snapshot| snapshot.state.readiness)
+                    .unwrap_or(event_state);
                 let reason = reason_for_connection_status(&status);
                 self.ensure_workspace_ssh_node_from_runtime(&node_id);
                 let previous = self
@@ -878,11 +888,16 @@ impl WorkspaceApp {
             NodeStateEvent::ConnectionStateChanged {
                 node_id,
                 generation: _,
-                state,
+                state: event_state,
                 reason,
             } => {
                 let node_id = NodeId::new(node_id);
                 self.ensure_workspace_ssh_node_from_runtime(&node_id);
+                let state = self
+                    .node_router
+                    .node_state(&node_id)
+                    .map(|snapshot| snapshot.state.readiness)
+                    .unwrap_or(event_state);
                 let _ = self.node_router.sync_node_readiness_event(
                     &node_id,
                     state.clone(),
@@ -1711,24 +1726,9 @@ impl WorkspaceApp {
     }
 
     fn node_still_needs_reconnect(&self, node_id: &NodeId) -> bool {
-        let Some(node) = self.ssh_nodes.get(node_id) else {
-            return false;
-        };
-        if !matches!(node.readiness, NodeReadiness::Ready) {
-            return true;
-        }
         self.node_router
-            .connection_id_for_node(node_id)
-            .and_then(|connection_id| self.ssh_registry.get(&connection_id))
-            .is_some_and(|handle| {
-                matches!(
-                    handle.state(),
-                    ConnectionState::LinkDown
-                        | ConnectionState::Disconnected
-                        | ConnectionState::Disconnecting
-                        | ConnectionState::Error(_)
-                )
-            })
+            .node_state(node_id)
+            .is_ok_and(|snapshot| snapshot.state.readiness != NodeReadiness::Ready)
     }
 
     fn has_active_reconnect_job_for_ancestor(&self, node_id: &NodeId, cx: &App) -> bool {
@@ -1918,36 +1918,19 @@ impl WorkspaceApp {
         trace_plan: Option<&ConnectionTracePlan>,
         cx: &mut Context<Self>,
     ) -> bool {
-        let Some((readiness, has_terminal_consumer)) = self
-            .ssh_nodes
-            .get(node_id)
-            .map(|node| (node.readiness.clone(), !node.terminal_ids.is_empty()))
-        else {
+        if !self.ssh_nodes.contains_key(node_id) {
             return false;
-        };
-        if matches!(readiness, NodeReadiness::Ready | NodeReadiness::Connecting)
-            && let Some(connection_id) = self.node_router.connection_id_for_node(node_id)
-            && let Some(handle) = self.ssh_registry.get(&connection_id)
-        {
-            let state = handle.state();
-            // Terminal panes are only shell-channel consumers. When no terminal
-            // remains, reopening SFTP/forwards must prove or rebuild the node
-            // transport through connect_tree_node instead of treating the old
-            // shell-created connection as authoritative.
-            if matches!(
-                state,
-                ConnectionState::Connecting | ConnectionState::Reconnecting
-            ) || (has_terminal_consumer
-                && matches!(state, ConnectionState::Active | ConnectionState::Idle))
-            {
-                return true;
-            }
-            // Tauri's node workflows can be reopened after all terminal panes
-            // are closed because connect_tree_node owns the physical transport.
-            // If native has no terminal consumer left, re-enter the node-only
-            // connect path instead of trusting a possibly stale shell-created
-            // handle. The transport layer will cheaply reuse an open pooled
-            // connection, or replace it when it has been closed.
+        }
+        let projected_readiness = self
+            .node_router
+            .node_state(node_id)
+            .map(|snapshot| snapshot.state.readiness)
+            .unwrap_or(NodeReadiness::Disconnected);
+        if matches!(
+            projected_readiness,
+            NodeReadiness::Ready | NodeReadiness::Connecting
+        ) {
+            return true;
         }
 
         let Some(parent_id) = self

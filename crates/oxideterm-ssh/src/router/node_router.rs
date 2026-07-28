@@ -142,7 +142,15 @@ impl NodeRouter {
             .registry
             .list()
             .into_iter()
-            .map(|info| (info.connection_id, info.state))
+            .map(|info| {
+                let connection_id = info.connection_id.clone();
+                let state = self
+                    .registry
+                    .get(&connection_id)
+                    .map(|handle| connection_info_for_runtime(&handle).state)
+                    .unwrap_or(info.state);
+                (connection_id, state)
+            })
             .collect::<HashMap<_, _>>();
         self.runtime.reconcile_with_connections(&connections);
     }
@@ -240,7 +248,7 @@ impl NodeRouter {
             .registry
             .get(&connection_id)
             .ok_or_else(|| RouteError::NotConnected(node_id.0.clone()))?;
-        let connection = handle.info();
+        let connection = connection_info_for_runtime(&handle);
         let event = self
             .runtime
             .bind_connection(node_id, connection_id.clone(), &connection)?;
@@ -457,7 +465,7 @@ impl NodeRouter {
             .ok_or_else(|| RouteError::NodeNotFound(node_id.0.clone()))?;
         if let Some(connection_id) = runtime.connection_id.clone() {
             if let Some(handle) = self.registry.get(&connection_id) {
-                let info = handle.info();
+                let info = connection_info_for_runtime(&handle);
                 runtime.state.readiness = readiness_for_connection(&info);
                 runtime.state.error = match &info.state {
                     ConnectionState::Error(error) => Some(error.clone()),
@@ -474,6 +482,10 @@ impl NodeRouter {
                 runtime.state.sftp_ready = false;
                 runtime.state.sftp_cwd = None;
             }
+        } else if matches!(runtime.state.readiness, NodeReadiness::Ready) {
+            // A stale runtime projection cannot remain Ready after losing its registry binding.
+            runtime.state.readiness = NodeReadiness::Disconnected;
+            runtime.state.error = None;
         }
         Ok(NodeStateSnapshot {
             state: runtime.state,
@@ -492,9 +504,14 @@ impl NodeRouter {
         reason: impl Into<String>,
     ) -> Result<NodeStateEvent, RouteError> {
         let reason = reason.into();
+        let connection = self
+            .registry
+            .get(&connection.connection_id)
+            .map(|handle| connection_info_for_runtime(&handle))
+            .unwrap_or_else(|| connection.clone());
         let event = self
             .runtime
-            .update_connection_state(node_id, connection, reason.clone())?;
+            .update_connection_state(node_id, &connection, reason.clone())?;
         Ok(self
             .emitter
             .emit_state_from_connection(&connection.connection_id, &connection.state, reason)
