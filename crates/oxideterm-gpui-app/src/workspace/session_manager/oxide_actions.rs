@@ -590,10 +590,21 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) {
         let mut dialog = OxideExportDialogState::default();
+        dialog.connection_rows = self
+            .connection_store
+            .connections()
+            .iter()
+            .map(OxideExportConnectionRow::from)
+            .collect::<Vec<_>>()
+            .into();
         dialog.include_portable_secrets = portable_migration;
         dialog.embed_keys = portable_migration;
         dialog.include_managed_key_passphrases = portable_migration;
         dialog.available_forwards = self.exportable_saved_forwards();
+        dialog.forward_group_rows = oxide_export_forward_group_rows(
+            self.connection_store.connections(),
+            &dialog.available_forwards,
+        );
         dialog.last_export_timestamp = load_oxide_last_export_timestamp(self.settings_store.path());
         dialog.selected_forward_ids = dialog
             .available_forwards
@@ -1129,6 +1140,9 @@ impl WorkspaceApp {
                 for effect in effects.take() {
                     self.handle_oxide_workspace_effect(effect, cx);
                 }
+            }
+            SessionManagerWorkspaceEvent::RefreshOxideExportPreflight => {
+                self.refresh_oxide_export_preflight(cx);
             }
         }
     }

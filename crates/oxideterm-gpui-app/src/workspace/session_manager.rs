@@ -25,7 +25,7 @@ use oxideterm_connections::{
         export_connections_to_oxide_with_progress, preflight_export,
         preview_oxide_import_with_progress,
     },
-    save_request_from_draft,
+    save_request_from_draft, validate_group_name,
 };
 use oxideterm_editor_core::utf16::replace_utf16;
 use oxideterm_forwarding::{ForwardType, OwnedForwardImportRecord, PersistedForward};
@@ -249,6 +249,7 @@ pub(super) enum SessionTransferAction {
 
 pub(super) enum SessionManagerWorkspaceEvent {
     OxideEffectsReady(oxide_actions::OxideWorkspaceEffects),
+    RefreshOxideExportPreflight,
 }
 
 #[derive(Clone, Debug)]
@@ -777,6 +778,8 @@ impl std::fmt::Debug for OxideImportDialogState {
 pub(super) struct OxideExportDialogState {
     pub(super) presence: oxideterm_gpui_ui::motion::ExitPresence,
     pub(super) selected_ids: HashSet<String>,
+    connection_rows: Arc<[oxide_export_selection_dialogs::OxideExportConnectionRow]>,
+    forward_group_rows: Arc<[oxide_export_selection_dialogs::OxideExportForwardGroupRow]>,
     pub(super) available_forwards: Vec<PersistedForward>,
     pub(super) selected_forward_ids: HashSet<String>,
     pub(super) include_app_settings: bool,
@@ -813,6 +816,8 @@ impl Default for OxideExportDialogState {
         Self {
             presence: oxideterm_gpui_ui::motion::ExitPresence::visible(),
             selected_ids: HashSet::new(),
+            connection_rows: Arc::from([]),
+            forward_group_rows: Arc::from([]),
             available_forwards: Vec::new(),
             selected_forward_ids: HashSet::new(),
             include_app_settings: true,
@@ -927,8 +932,10 @@ use self::{
 };
 
 // Preserve the workspace-facing session manager API at its original visibility.
+#[cfg(test)]
+pub(in crate::workspace) use self::helpers::save_request_from_form;
 pub(in crate::workspace) use self::helpers::{
-    duplicate_connection_template_name, form_from_saved_connection, save_request_from_form,
+    duplicate_connection_template_name, form_from_saved_connection,
     save_request_from_form_with_existing_auth, save_request_from_form_with_proxy_hop_prefix,
     upstream_proxy_config_from_form,
 };
