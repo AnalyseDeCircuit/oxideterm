@@ -421,6 +421,7 @@ impl SettingsWorkspaceEntity {
     }
 
     fn clear_managed_key_dialog_drafts(&mut self) {
+        self.managed_key_file_picker_task = None;
         self.managed_key_file_path.clear();
         self.managed_key_file_name.clear();
         zeroize::Zeroize::zeroize(&mut *self.managed_key_file_passphrase);
@@ -454,6 +455,23 @@ impl SettingsWorkspaceEntity {
         }
         self.managed_key_status = None;
         cx.notify();
+    }
+
+    pub(in crate::workspace) fn start_managed_key_file_picker(
+        &mut self,
+        selected_file: impl std::future::Future<Output = Option<(String, String)>> + 'static,
+        cx: &mut Context<Self>,
+    ) {
+        // The picker completion must not retain or write through WorkspaceApp.
+        self.managed_key_file_picker_task = Some(cx.spawn(async move |settings, cx| {
+            let selected_file = selected_file.await;
+            let _ = settings.update(cx, |settings, cx| {
+                settings.managed_key_file_picker_task = None;
+                if let Some((path, default_name)) = selected_file {
+                    settings.set_managed_key_import_file(path, default_name, cx);
+                }
+            });
+        }));
     }
 
     fn take_managed_key_file_import_request(&mut self) -> Option<ManagedKeyFileImportRequest> {
@@ -2762,25 +2780,23 @@ impl WorkspaceApp {
                 self.i18n.t("modals.managed_key.import_file.browse_title"),
             )),
         });
-        cx.spawn(async move |weak, cx| {
+        let selected_file = async move {
             let Ok(Ok(Some(paths))) = receiver.await else {
-                return;
+                return None;
             };
             let Some(path) = paths.into_iter().next() else {
-                return;
+                return None;
             };
             let file_name = path
                 .file_name()
                 .and_then(|name| name.to_str())
                 .unwrap_or("Managed SSH Key")
                 .to_string();
-            let _ = weak.update(cx, |this, cx| {
-                this.settings_workspace.update(cx, |settings, cx| {
-                    settings.set_managed_key_import_file(path.display().to_string(), file_name, cx);
-                });
-            });
-        })
-        .detach();
+            Some((path.display().to_string(), file_name))
+        };
+        self.settings_workspace.update(cx, |settings, cx| {
+            settings.start_managed_key_file_picker(selected_file, cx);
+        });
     }
 
     pub(in crate::workspace) fn import_managed_key_from_file(&mut self, cx: &mut Context<Self>) {
@@ -3380,6 +3396,34 @@ mod settings_connection_entity_tests {
             assert!(settings.managed_key_file_passphrase.is_empty());
             assert_eq!(settings.settings_entity_focused_input(), None);
             assert!(settings.managed_key_dialog_exit_task.is_none());
+        });
+    }
+
+    #[gpui::test]
+    fn managed_key_file_picker_completion_and_cancellation_are_entity_owned(
+        cx: &mut TestAppContext,
+    ) {
+        let settings = cx.new(SettingsWorkspaceEntity::new);
+        settings.update(cx, |settings, cx| {
+            settings.open_managed_key_import_file_dialog(cx);
+            settings.start_managed_key_file_picker(
+                std::future::ready(Some(("/tmp/id_ed25519".into(), "id_ed25519".into()))),
+                cx,
+            );
+            assert!(settings.managed_key_file_picker_task.is_some());
+        });
+
+        cx.run_until_parked();
+
+        settings.update(cx, |settings, cx| {
+            assert_eq!(settings.managed_key_file_path, "/tmp/id_ed25519");
+            assert_eq!(settings.managed_key_file_name, "id_ed25519");
+            assert!(settings.managed_key_file_picker_task.is_none());
+
+            settings.start_managed_key_file_picker(std::future::pending(), cx);
+            assert!(settings.managed_key_file_picker_task.is_some());
+            settings.close_managed_key_dialog(std::time::Duration::ZERO, cx);
+            assert!(settings.managed_key_file_picker_task.is_none());
         });
     }
 
