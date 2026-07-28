@@ -1331,90 +1331,26 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if event.keystroke.key.as_str() == "escape"
-            && !event.keystroke.modifiers.platform
-            && !event.keystroke.modifiers.control
-            && !event.keystroke.modifiers.alt
-            && !event.keystroke.modifiers.shift
-        {
-            self.cancel_keybinding_recording(cx);
-            return;
+        let overrides = &self.settings_store.settings().keybindings.overrides;
+        let action = self.settings_workspace.update(cx, |settings, cx| {
+            settings.handle_keybinding_recording_key(event, overrides, cx)
+        });
+        if action == Some(settings::KeybindingRecordingKeyAction::Confirm) {
+            self.confirm_keybinding_recording(window, cx);
         }
-
-        if self.keybinding_recording_combo.is_some()
-            && !event.keystroke.modifiers.platform
-            && !event.keystroke.modifiers.control
-            && !event.keystroke.modifiers.alt
-        {
-            match browser_behavior::modal_footer_key_action(
-                event.keystroke.key.as_str(),
-                event.keystroke.modifiers.shift,
-                &KEYBINDING_RECORDING_FOOTER_ACTIONS,
-                self.keybinding_recording_footer_focus,
-                KeybindingRecordingFooterAction::Confirm,
-            ) {
-                Some(browser_behavior::ModalFooterKeyAction::Cancel) => {
-                    self.cancel_keybinding_recording(cx);
-                    return;
-                }
-                Some(browser_behavior::ModalFooterKeyAction::Focus(action)) => {
-                    // Tauri renders real footer buttons once a combo exists.
-                    // Native captures keydown globally, so route recorder
-                    // footer navigation through the shared browser footer
-                    // contract instead of recording Tab/Home/End again.
-                    self.keybinding_recording_footer_focus = Some(action);
-                    cx.notify();
-                    return;
-                }
-                Some(browser_behavior::ModalFooterKeyAction::Activate(action)) => {
-                    self.activate_keybinding_recording_footer_action(action, window, cx);
-                    return;
-                }
-                None => {}
-            }
-        }
-
-        let Some(action_id) = self.settings_page.keybinding_recording_action_id.clone() else {
-            return;
-        };
-        let Some(combo) = crate::keybindings::combo_from_keystroke(&event.keystroke) else {
-            return;
-        };
-
-        let side = crate::keybindings::KeybindingSide::current();
-        let conflicts = crate::keybindings::conflicts_for_combo(
-            &action_id,
-            &combo,
-            &self.settings_store.settings().keybindings.overrides,
-            side,
-        )
-        .into_iter()
-        .map(|definition| definition.id.to_string())
-        .collect::<Vec<_>>();
-
-        self.keybinding_recording_combo = Some(combo);
-        self.keybinding_recording_footer_focus = None;
-        self.settings_page.set_keybinding_conflicts(conflicts);
-        cx.notify();
     }
 
     pub(super) fn activate_keybinding_recording_footer_action(
         &mut self,
-        action: KeybindingRecordingFooterAction,
+        action: settings::KeybindingRecordingFooterAction,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        // Tauri RecordingCell buttons stop propagation and then run exactly one
-        // footer action. Native shares this entry for keyboard and pointer
-        // activation so focus cleanup and confirm/cancel branching cannot drift.
-        self.keybinding_recording_footer_focus = None;
-        match action {
-            KeybindingRecordingFooterAction::Confirm => {
-                self.confirm_keybinding_recording(window, cx);
-            }
-            KeybindingRecordingFooterAction::Cancel => {
-                self.cancel_keybinding_recording(cx);
-            }
+        let should_confirm = self.settings_workspace.update(cx, |settings, cx| {
+            settings.activate_keybinding_recording_footer(action, cx)
+        });
+        if should_confirm {
+            self.confirm_keybinding_recording(window, cx);
         }
     }
 
@@ -1423,14 +1359,12 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(action_id) = self.settings_page.keybinding_recording_action_id.clone() else {
+        let Some(commit) = self.settings_workspace.update(cx, |settings, cx| {
+            settings.take_keybinding_recording_commit(cx)
+        }) else {
             return;
         };
-        let Some(combo) = self.keybinding_recording_combo.clone() else {
-            return;
-        };
-        let Some(definition) = crate::keybindings::action_definition(&action_id) else {
-            self.cancel_keybinding_recording(cx);
+        let Some(definition) = crate::keybindings::action_definition(&commit.action_id) else {
             return;
         };
 
@@ -1441,31 +1375,29 @@ impl WorkspaceApp {
             side,
         );
         let runtime_bindings = crate::keybindings::runtime_rebind_key_bindings(
-            &action_id,
+            &commit.action_id,
             previous.as_ref(),
-            Some(&combo),
+            Some(&commit.combo),
         );
 
         self.edit_settings(
-            |settings| {
+            move |settings| {
                 crate::keybindings::set_override(
                     &mut settings.keybindings.overrides,
-                    &action_id,
+                    &commit.action_id,
                     side,
-                    combo,
+                    commit.combo,
                 );
             },
             cx,
         );
-        self.cancel_keybinding_recording(cx);
         self.apply_runtime_key_bindings(runtime_bindings, window, cx);
     }
 
     pub(super) fn cancel_keybinding_recording(&mut self, cx: &mut Context<Self>) {
-        self.settings_page.stop_keybinding_recording();
-        self.keybinding_recording_combo = None;
-        self.keybinding_recording_footer_focus = None;
-        cx.notify();
+        self.settings_workspace.update(cx, |settings, cx| {
+            settings.stop_keybinding_recording(cx);
+        });
     }
 
     pub(super) fn reset_keybinding(
@@ -1483,11 +1415,11 @@ impl WorkspaceApp {
             &self.settings_store.settings().keybindings.overrides,
             side,
         );
-        let next = definition.default_combo(side).clone();
+        let next = definition.default_combo(side);
         let runtime_bindings = crate::keybindings::runtime_rebind_key_bindings(
             action_id,
             previous.as_ref(),
-            Some(&next),
+            Some(next),
         );
         self.edit_settings(
             |settings| {
@@ -1499,9 +1431,7 @@ impl WorkspaceApp {
             },
             cx,
         );
-        self.settings_page.stop_keybinding_recording();
-        self.keybinding_recording_combo = None;
-        self.keybinding_recording_footer_focus = None;
+        self.cancel_keybinding_recording(cx);
         self.apply_runtime_key_bindings(runtime_bindings, window, cx);
     }
 
@@ -1532,31 +1462,28 @@ impl WorkspaceApp {
             },
             cx,
         );
-        self.settings_page.stop_keybinding_recording();
-        self.keybinding_recording_combo = None;
-        self.keybinding_recording_footer_focus = None;
+        self.cancel_keybinding_recording(cx);
         self.apply_runtime_key_bindings(runtime_bindings, window, cx);
     }
 
     pub(super) fn reset_all_keybindings(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let side = crate::keybindings::KeybindingSide::current();
-        let overrides = self.settings_store.settings().keybindings.overrides.clone();
-        let runtime_bindings = crate::keybindings::ACTION_DEFINITIONS
-            .iter()
-            .flat_map(|definition| {
-                let previous = crate::keybindings::effective_combo(definition, &overrides, side);
-                let next = definition.default_combo(side).clone();
-                crate::keybindings::runtime_rebind_key_bindings(
-                    definition.id,
-                    previous.as_ref(),
-                    Some(&next),
-                )
-            })
-            .collect::<Vec<_>>();
+        let runtime_bindings = {
+            let overrides = &self.settings_store.settings().keybindings.overrides;
+            crate::keybindings::ACTION_DEFINITIONS
+                .iter()
+                .flat_map(|definition| {
+                    let previous = crate::keybindings::effective_combo(definition, overrides, side);
+                    crate::keybindings::runtime_rebind_key_bindings(
+                        definition.id,
+                        previous.as_ref(),
+                        Some(definition.default_combo(side)),
+                    )
+                })
+                .collect::<Vec<_>>()
+        };
         self.edit_settings(|settings| settings.keybindings.overrides.clear(), cx);
-        self.settings_page.stop_keybinding_recording();
-        self.keybinding_recording_combo = None;
-        self.keybinding_recording_footer_focus = None;
+        self.cancel_keybinding_recording(cx);
         self.apply_runtime_key_bindings(runtime_bindings, window, cx);
     }
 
@@ -1569,31 +1496,17 @@ impl WorkspaceApp {
                 self.i18n.t("settings_view.keybindings.export"),
             )),
         });
+        let selection = async move {
+            match receiver.await {
+                Ok(Ok(Some(paths))) => paths.into_iter().next(),
+                _ => None,
+            }
+        };
         let overrides = self.settings_store.settings().keybindings.overrides.clone();
-        let success = self.i18n.t("settings_view.keybindings.export_success");
-        let error = self.i18n.t("settings_view.keybindings.export_error");
-        cx.spawn(async move |weak, cx| {
-            let Ok(Ok(Some(paths))) = receiver.await else {
-                return;
-            };
-            let Some(directory) = paths.into_iter().next() else {
-                return;
-            };
-            let path = directory.join("oxideterm-keybindings.json");
-            let result = serde_json::to_string_pretty(&overrides)
-                .map_err(|err| err.to_string())
-                .and_then(|json| fs::write(path, json).map_err(|err| err.to_string()));
-            let _ = weak.update(cx, |this, cx| {
-                match result {
-                    Ok(()) => {
-                        this.push_ai_settings_toast(success, TerminalNoticeVariant::Success, cx)
-                    }
-                    Err(_) => this.push_ai_settings_toast(error, TerminalNoticeVariant::Error, cx),
-                }
-                cx.notify();
-            });
-        })
-        .detach();
+        let runtime = self.forwarding_runtime.handle().clone();
+        self.settings_workspace.update(cx, |settings, cx| {
+            settings.start_keybinding_export(selection, overrides, runtime, cx);
+        });
     }
 
     pub(super) fn import_keybindings(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -1605,66 +1518,17 @@ impl WorkspaceApp {
                 self.i18n.t("settings_view.keybindings.import"),
             )),
         });
-        let window_handle = window.window_handle();
-        let side = crate::keybindings::KeybindingSide::current();
-        let previous_overrides = self.settings_store.settings().keybindings.overrides.clone();
-        let success = self.i18n.t("settings_view.keybindings.import_success");
-        let invalid = self.i18n.t("settings_view.keybindings.import_invalid");
-        cx.spawn(async move |weak, cx| {
-            let Ok(Ok(Some(paths))) = receiver.await else {
-                return;
-            };
-            let Some(path) = paths.into_iter().next() else {
-                return;
-            };
-            let result = fs::read_to_string(path)
-                .map_err(|err| err.to_string())
-                .and_then(|content| {
-                    serde_json::from_str::<serde_json::Value>(&content)
-                        .map_err(|err| err.to_string())
-                })
-                .and_then(crate::keybindings::sanitize_imported_overrides);
-            let _ = cx.update_window(window_handle, |_root, window, cx| {
-                let _ = weak.update(cx, |this, cx| match result {
-                    Ok(next_overrides) => {
-                        let runtime_bindings = crate::keybindings::ACTION_DEFINITIONS
-                            .iter()
-                            .flat_map(|definition| {
-                                let previous = crate::keybindings::effective_combo(
-                                    definition,
-                                    &previous_overrides,
-                                    side,
-                                );
-                                let next = crate::keybindings::effective_combo(
-                                    definition,
-                                    &next_overrides,
-                                    side,
-                                );
-                                crate::keybindings::runtime_rebind_key_bindings(
-                                    definition.id,
-                                    previous.as_ref(),
-                                    next.as_ref(),
-                                )
-                            })
-                            .collect::<Vec<_>>();
-                        this.edit_settings(
-                            |settings| settings.keybindings.overrides = next_overrides,
-                            cx,
-                        );
-                        this.settings_page.stop_keybinding_recording();
-                        this.keybinding_recording_combo = None;
-                        this.keybinding_recording_footer_focus = None;
-                        this.apply_runtime_key_bindings(runtime_bindings, window, cx);
-                        this.push_ai_settings_toast(success, TerminalNoticeVariant::Success, cx);
-                    }
-                    Err(_) => {
-                        this.push_ai_settings_toast(invalid, TerminalNoticeVariant::Error, cx);
-                        cx.notify();
-                    }
-                });
-            });
-        })
-        .detach();
+        let selection = async move {
+            match receiver.await {
+                Ok(Ok(Some(paths))) => paths.into_iter().next(),
+                _ => None,
+            }
+        };
+        let runtime = self.forwarding_runtime.handle().clone();
+        let target_window = window.window_handle();
+        self.settings_workspace.update(cx, |settings, cx| {
+            settings.start_keybinding_import(selection, runtime, target_window, cx);
+        });
     }
 
     fn apply_runtime_key_bindings(
@@ -1673,10 +1537,19 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        self.apply_runtime_key_bindings_to_window_handle(bindings, window.window_handle(), cx);
+    }
+
+    pub(in crate::workspace) fn apply_runtime_key_bindings_to_window_handle(
+        &self,
+        bindings: Vec<gpui::KeyBinding>,
+        window_handle: AnyWindowHandle,
+        cx: &mut Context<Self>,
+    ) {
         if bindings.is_empty() {
             return;
         }
-        let _ = cx.update_window(window.window_handle(), move |_root, _window, app| {
+        let _ = cx.update_window(window_handle, move |_root, _window, app| {
             app.bind_keys(bindings);
         });
     }

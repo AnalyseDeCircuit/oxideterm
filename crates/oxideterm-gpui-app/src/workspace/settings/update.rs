@@ -696,6 +696,83 @@ impl WorkspaceApp {
                 }
                 cx.notify();
             }
+            SettingsWorkspaceEvent::KeybindingFileOperationReady => {
+                let results = settings.update(cx, |settings, _cx| {
+                    settings.take_keybinding_file_operation_results()
+                });
+                for result in results {
+                    match result {
+                        KeybindingFileOperationResult::Exported => {
+                            self.push_ai_settings_toast(
+                                self.i18n.t("settings_view.keybindings.export_success"),
+                                TerminalNoticeVariant::Success,
+                                cx,
+                            );
+                        }
+                        KeybindingFileOperationResult::ExportFailed => {
+                            self.push_ai_settings_toast(
+                                self.i18n.t("settings_view.keybindings.export_error"),
+                                TerminalNoticeVariant::Error,
+                                cx,
+                            );
+                        }
+                        KeybindingFileOperationResult::Imported {
+                            overrides: next_overrides,
+                            target_window,
+                        } => {
+                            let side = crate::keybindings::KeybindingSide::current();
+                            let runtime_bindings = {
+                                let previous_overrides =
+                                    &self.settings_store.settings().keybindings.overrides;
+                                crate::keybindings::ACTION_DEFINITIONS
+                                    .iter()
+                                    .flat_map(|definition| {
+                                        let previous = crate::keybindings::effective_combo(
+                                            definition,
+                                            previous_overrides,
+                                            side,
+                                        );
+                                        let next = crate::keybindings::effective_combo(
+                                            definition,
+                                            &next_overrides,
+                                            side,
+                                        );
+                                        crate::keybindings::runtime_rebind_key_bindings(
+                                            definition.id,
+                                            previous.as_ref(),
+                                            next.as_ref(),
+                                        )
+                                    })
+                                    .collect::<Vec<_>>()
+                            };
+                            self.edit_settings(
+                                move |settings| {
+                                    settings.keybindings.overrides = next_overrides;
+                                },
+                                cx,
+                            );
+                            self.apply_runtime_key_bindings_to_window_handle(
+                                runtime_bindings,
+                                target_window,
+                                cx,
+                            );
+                            self.push_ai_settings_toast(
+                                self.i18n.t("settings_view.keybindings.import_success"),
+                                TerminalNoticeVariant::Success,
+                                cx,
+                            );
+                        }
+                        KeybindingFileOperationResult::ImportFailed => {
+                            self.push_ai_settings_toast(
+                                self.i18n.t("settings_view.keybindings.import_invalid"),
+                                TerminalNoticeVariant::Error,
+                                cx,
+                            );
+                        }
+                    }
+                }
+                cx.notify();
+            }
             SettingsWorkspaceEvent::PortablePasswordChangeFinished { success } => {
                 if *success {
                     self.push_ai_settings_toast(

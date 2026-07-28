@@ -173,6 +173,7 @@ mod entity;
 pub(in crate::workspace) use entity::{
     BackgroundGalleryOperationResult, CliCompanionOperation, CliCompanionSnapshot,
     ConnectionImportSnapshot, DataDirectoryConfirm, DataDirectoryOperationResult,
+    KeybindingFileOperationResult, KeybindingRecordingFooterAction, KeybindingRecordingKeyAction,
     KeybindingResetConfirmKeyAction, ManagedKeyDialogSnapshot, NetworkProxyPasswordSnapshot,
     NetworkProxyTestSnapshot, PortablePasswordDialogSnapshot, PortableStatusRefresh,
     PrivilegeCredentialDraft, PrivilegeCredentialSnapshot, SettingsWorkspaceEntity,

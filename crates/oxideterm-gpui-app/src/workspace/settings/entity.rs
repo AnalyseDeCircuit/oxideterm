@@ -5,12 +5,12 @@ use std::{
     time::{Duration, SystemTime},
 };
 
-use gpui::{Context, EventEmitter, Task, Timer};
+use gpui::{Context, EventEmitter, KeyDownEvent, Task, Timer};
 use oxideterm_connections::{
     ConnectionImportDuplicateStrategy, ConnectionImportPreview, ConnectionImportSource,
     PrivilegeCredentialKind,
 };
-use oxideterm_gpui_settings_view::SettingsInput;
+use oxideterm_gpui_settings_view::{SettingsInput, SettingsKeybindingScopeFilter};
 use oxideterm_gpui_ui::confirm::ConfirmDialogAction;
 use zeroize::Zeroizing;
 
@@ -227,6 +227,39 @@ pub(in crate::workspace) enum ThemeImportResult {
     Failed(String),
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(in crate::workspace) enum KeybindingRecordingFooterAction {
+    Confirm,
+    Cancel,
+}
+
+const KEYBINDING_RECORDING_FOOTER_ACTIONS: [KeybindingRecordingFooterAction; 2] = [
+    KeybindingRecordingFooterAction::Confirm,
+    KeybindingRecordingFooterAction::Cancel,
+];
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(in crate::workspace) enum KeybindingRecordingKeyAction {
+    Confirm,
+    Handled,
+}
+
+/// Transfers the completed recording into the persistence/window adapter without cloning it.
+pub(in crate::workspace) struct KeybindingRecordingCommit {
+    pub(in crate::workspace) action_id: String,
+    pub(in crate::workspace) combo: crate::keybindings::KeyCombo,
+}
+
+pub(in crate::workspace) enum KeybindingFileOperationResult {
+    Exported,
+    ExportFailed,
+    Imported {
+        overrides: serde_json::Map<String, serde_json::Value>,
+        target_window: gpui::AnyWindowHandle,
+    },
+    ImportFailed,
+}
+
 /// Converts managed gallery paths once at the filesystem boundary.
 fn background_gallery_strings(settings_path: &Path) -> anyhow::Result<Vec<String>> {
     Ok(oxideterm_settings::list_background_images(settings_path)?
@@ -307,6 +340,16 @@ pub(in crate::workspace) struct SettingsWorkspaceEntity {
     background_gallery_results: VecDeque<BackgroundGalleryOperationResult>,
     theme_import_task: Option<Task<()>>,
     theme_import_results: VecDeque<ThemeImportResult>,
+    keybinding_scope_filter: SettingsKeybindingScopeFilter,
+    previous_keybinding_scope_filter: SettingsKeybindingScopeFilter,
+    keybinding_search_query: String,
+    keybinding_recording_action_id: Option<String>,
+    keybinding_conflict_action_ids: Vec<String>,
+    keybinding_recording_combo: Option<crate::keybindings::KeyCombo>,
+    keybinding_recording_footer_focus: Option<KeybindingRecordingFooterAction>,
+    keybinding_file_operation_generation: u64,
+    keybinding_file_operation_task: Option<Task<()>>,
+    keybinding_file_operation_results: VecDeque<KeybindingFileOperationResult>,
     keybinding_reset_confirm_open: bool,
     keybinding_reset_confirm_presence: oxideterm_gpui_ui::motion::ExitPresence,
     keybinding_reset_confirm_focused_action: Option<ConfirmDialogAction>,
@@ -347,6 +390,7 @@ pub(in crate::workspace) enum SettingsWorkspaceEvent {
     BackgroundBlurCommitReady(i64),
     BackgroundGalleryOperationReady,
     ThemeImportReady,
+    KeybindingFileOperationReady,
     PortablePasswordChangeFinished {
         success: bool,
     },
@@ -431,12 +475,198 @@ impl SettingsWorkspaceEntity {
             background_gallery_results: VecDeque::new(),
             theme_import_task: None,
             theme_import_results: VecDeque::new(),
+            keybinding_scope_filter: SettingsKeybindingScopeFilter::All,
+            previous_keybinding_scope_filter: SettingsKeybindingScopeFilter::All,
+            keybinding_search_query: String::new(),
+            keybinding_recording_action_id: None,
+            keybinding_conflict_action_ids: Vec::new(),
+            keybinding_recording_combo: None,
+            keybinding_recording_footer_focus: None,
+            keybinding_file_operation_generation: 0,
+            keybinding_file_operation_task: None,
+            keybinding_file_operation_results: VecDeque::new(),
             keybinding_reset_confirm_open: false,
             keybinding_reset_confirm_presence: oxideterm_gpui_ui::motion::ExitPresence::visible(),
             keybinding_reset_confirm_focused_action: None,
             keybinding_reset_confirm_exit_task: None,
             native_update: NativeUpdateRuntime::new(cx),
         }
+    }
+
+    pub(in crate::workspace) fn keybinding_scope_filter(&self) -> SettingsKeybindingScopeFilter {
+        self.keybinding_scope_filter
+    }
+
+    pub(in crate::workspace) fn previous_keybinding_scope_filter(
+        &self,
+    ) -> SettingsKeybindingScopeFilter {
+        self.previous_keybinding_scope_filter
+    }
+
+    pub(in crate::workspace) fn set_keybinding_scope_filter(
+        &mut self,
+        filter: SettingsKeybindingScopeFilter,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if self.keybinding_scope_filter == filter {
+            return false;
+        }
+        self.previous_keybinding_scope_filter = self.keybinding_scope_filter;
+        self.keybinding_scope_filter = filter;
+        cx.notify();
+        true
+    }
+
+    pub(in crate::workspace) fn keybinding_search_query(&self) -> &str {
+        &self.keybinding_search_query
+    }
+
+    pub(in crate::workspace) fn keybinding_recording_action_id(&self) -> Option<&str> {
+        self.keybinding_recording_action_id.as_deref()
+    }
+
+    pub(in crate::workspace) fn keybinding_recording_combo(
+        &self,
+    ) -> Option<&crate::keybindings::KeyCombo> {
+        self.keybinding_recording_combo.as_ref()
+    }
+
+    pub(in crate::workspace) fn keybinding_conflicts(&self) -> &[String] {
+        &self.keybinding_conflict_action_ids
+    }
+
+    pub(in crate::workspace) fn keybinding_recording_footer_focus(
+        &self,
+    ) -> Option<KeybindingRecordingFooterAction> {
+        self.keybinding_recording_footer_focus
+    }
+
+    pub(in crate::workspace) fn start_keybinding_recording(
+        &mut self,
+        action_id: impl Into<String>,
+        cx: &mut Context<Self>,
+    ) {
+        self.keybinding_recording_action_id = Some(action_id.into());
+        self.keybinding_conflict_action_ids.clear();
+        self.keybinding_recording_combo = None;
+        self.keybinding_recording_footer_focus = None;
+        cx.notify();
+    }
+
+    pub(in crate::workspace) fn stop_keybinding_recording(&mut self, cx: &mut Context<Self>) {
+        let changed = self.keybinding_recording_action_id.take().is_some()
+            || !self.keybinding_conflict_action_ids.is_empty()
+            || self.keybinding_recording_combo.take().is_some()
+            || self.keybinding_recording_footer_focus.take().is_some();
+        self.keybinding_conflict_action_ids.clear();
+        if changed {
+            cx.notify();
+        }
+    }
+
+    pub(in crate::workspace) fn handle_keybinding_recording_key(
+        &mut self,
+        event: &KeyDownEvent,
+        overrides: &serde_json::Map<String, serde_json::Value>,
+        cx: &mut Context<Self>,
+    ) -> Option<KeybindingRecordingKeyAction> {
+        if self.keybinding_recording_action_id.is_none() {
+            return None;
+        }
+        if event.keystroke.key.as_str() == "escape"
+            && !event.keystroke.modifiers.platform
+            && !event.keystroke.modifiers.control
+            && !event.keystroke.modifiers.alt
+            && !event.keystroke.modifiers.shift
+        {
+            self.stop_keybinding_recording(cx);
+            return Some(KeybindingRecordingKeyAction::Handled);
+        }
+
+        if self.keybinding_recording_combo.is_some()
+            && !event.keystroke.modifiers.platform
+            && !event.keystroke.modifiers.control
+            && !event.keystroke.modifiers.alt
+        {
+            match browser_behavior::modal_footer_key_action(
+                event.keystroke.key.as_str(),
+                event.keystroke.modifiers.shift,
+                &KEYBINDING_RECORDING_FOOTER_ACTIONS,
+                self.keybinding_recording_footer_focus,
+                KeybindingRecordingFooterAction::Confirm,
+            ) {
+                Some(browser_behavior::ModalFooterKeyAction::Cancel) => {
+                    self.stop_keybinding_recording(cx);
+                    return Some(KeybindingRecordingKeyAction::Handled);
+                }
+                Some(browser_behavior::ModalFooterKeyAction::Focus(action)) => {
+                    // Native captures keydown globally, so the Entity mirrors
+                    // the browser footer focus contract after a combo exists.
+                    self.keybinding_recording_footer_focus = Some(action);
+                    cx.notify();
+                    return Some(KeybindingRecordingKeyAction::Handled);
+                }
+                Some(browser_behavior::ModalFooterKeyAction::Activate(
+                    KeybindingRecordingFooterAction::Confirm,
+                )) => {
+                    self.keybinding_recording_footer_focus = None;
+                    return Some(KeybindingRecordingKeyAction::Confirm);
+                }
+                Some(browser_behavior::ModalFooterKeyAction::Activate(
+                    KeybindingRecordingFooterAction::Cancel,
+                )) => {
+                    self.stop_keybinding_recording(cx);
+                    return Some(KeybindingRecordingKeyAction::Handled);
+                }
+                None => {}
+            }
+        }
+
+        let action_id = self
+            .keybinding_recording_action_id
+            .as_deref()
+            .expect("recording presence checked above");
+        let combo = crate::keybindings::combo_from_keystroke(&event.keystroke)?;
+        let side = crate::keybindings::KeybindingSide::current();
+        self.keybinding_conflict_action_ids =
+            crate::keybindings::conflicts_for_combo(action_id, &combo, overrides, side)
+                .into_iter()
+                .map(|definition| definition.id.to_string())
+                .collect();
+        self.keybinding_recording_combo = Some(combo);
+        self.keybinding_recording_footer_focus = None;
+        cx.notify();
+        Some(KeybindingRecordingKeyAction::Handled)
+    }
+
+    pub(in crate::workspace) fn activate_keybinding_recording_footer(
+        &mut self,
+        action: KeybindingRecordingFooterAction,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        self.keybinding_recording_footer_focus = None;
+        match action {
+            KeybindingRecordingFooterAction::Confirm => true,
+            KeybindingRecordingFooterAction::Cancel => {
+                self.stop_keybinding_recording(cx);
+                false
+            }
+        }
+    }
+
+    pub(in crate::workspace) fn take_keybinding_recording_commit(
+        &mut self,
+        cx: &mut Context<Self>,
+    ) -> Option<KeybindingRecordingCommit> {
+        let action_id = self.keybinding_recording_action_id.take()?;
+        let Some(combo) = self.keybinding_recording_combo.take() else {
+            self.keybinding_recording_action_id = Some(action_id);
+            return None;
+        };
+        self.keybinding_conflict_action_ids.clear();
+        self.keybinding_recording_footer_focus = None;
+        cx.notify();
+        Some(KeybindingRecordingCommit { action_id, combo })
     }
 
     pub(in crate::workspace) fn open_keybinding_reset_confirm(&mut self, cx: &mut Context<Self>) {
@@ -1042,6 +1272,126 @@ impl SettingsWorkspaceEntity {
         std::mem::take(&mut self.theme_import_results)
     }
 
+    pub(in crate::workspace) fn start_keybinding_export(
+        &mut self,
+        selection: impl std::future::Future<Output = Option<PathBuf>> + 'static,
+        overrides: serde_json::Map<String, serde_json::Value>,
+        runtime: tokio::runtime::Handle,
+        cx: &mut Context<Self>,
+    ) -> u64 {
+        let generation = self.replace_keybinding_file_operation();
+        self.keybinding_file_operation_task = Some(cx.spawn(async move |settings, cx| {
+            let Some(directory) = selection.await else {
+                let _ = settings.update(cx, |settings, cx| {
+                    settings.finish_keybinding_file_operation(generation, None, cx);
+                });
+                return;
+            };
+            let result = runtime
+                .spawn_blocking(move || {
+                    let path = directory.join("oxideterm-keybindings.json");
+                    serde_json::to_string_pretty(&overrides)
+                        .map_err(|_| ())
+                        .and_then(|json| std::fs::write(path, json).map_err(|_| ()))
+                })
+                .await
+                .map_err(|_| ())
+                .and_then(|result| result)
+                .map(|()| KeybindingFileOperationResult::Exported)
+                .unwrap_or(KeybindingFileOperationResult::ExportFailed);
+            let _ = settings.update(cx, |settings, cx| {
+                settings.finish_keybinding_file_operation(generation, Some(result), cx);
+            });
+        }));
+        cx.notify();
+        generation
+    }
+
+    pub(in crate::workspace) fn start_keybinding_import(
+        &mut self,
+        selection: impl std::future::Future<Output = Option<PathBuf>> + 'static,
+        runtime: tokio::runtime::Handle,
+        target_window: gpui::AnyWindowHandle,
+        cx: &mut Context<Self>,
+    ) -> u64 {
+        let generation = self.replace_keybinding_file_operation();
+        self.keybinding_file_operation_task = Some(cx.spawn(async move |settings, cx| {
+            let Some(path) = selection.await else {
+                let _ = settings.update(cx, |settings, cx| {
+                    settings.finish_keybinding_file_operation(generation, None, cx);
+                });
+                return;
+            };
+            let result = runtime
+                .spawn_blocking(move || {
+                    std::fs::read_to_string(path)
+                        .map_err(|_| ())
+                        .and_then(|content| {
+                            serde_json::from_str::<serde_json::Value>(&content).map_err(|_| ())
+                        })
+                        .and_then(|value| {
+                            crate::keybindings::sanitize_imported_overrides(value).map_err(|_| ())
+                        })
+                })
+                .await
+                .map_err(|_| ())
+                .and_then(|result| result)
+                .map(|overrides| KeybindingFileOperationResult::Imported {
+                    overrides,
+                    target_window,
+                })
+                .unwrap_or(KeybindingFileOperationResult::ImportFailed);
+            let _ = settings.update(cx, |settings, cx| {
+                settings.finish_keybinding_file_operation(generation, Some(result), cx);
+            });
+        }));
+        cx.notify();
+        generation
+    }
+
+    fn replace_keybinding_file_operation(&mut self) -> u64 {
+        // Dropping the retained task cancels the superseded dialog or worker.
+        self.keybinding_file_operation_task = None;
+        self.keybinding_file_operation_generation =
+            self.keybinding_file_operation_generation.wrapping_add(1);
+        self.keybinding_file_operation_generation
+    }
+
+    fn finish_keybinding_file_operation(
+        &mut self,
+        generation: u64,
+        result: Option<KeybindingFileOperationResult>,
+        cx: &mut Context<Self>,
+    ) {
+        if generation != self.keybinding_file_operation_generation {
+            return;
+        }
+        self.keybinding_file_operation_task = None;
+        // Retire the generation before publishing so duplicate or late
+        // completions cannot enqueue the same user-visible result twice.
+        self.keybinding_file_operation_generation =
+            self.keybinding_file_operation_generation.wrapping_add(1);
+        let Some(result) = result else {
+            cx.notify();
+            return;
+        };
+        if matches!(&result, KeybindingFileOperationResult::Imported { .. }) {
+            self.keybinding_recording_action_id = None;
+            self.keybinding_conflict_action_ids.clear();
+            self.keybinding_recording_combo = None;
+            self.keybinding_recording_footer_focus = None;
+        }
+        self.keybinding_file_operation_results.push_back(result);
+        cx.emit(SettingsWorkspaceEvent::KeybindingFileOperationReady);
+        cx.notify();
+    }
+
+    pub(in crate::workspace) fn take_keybinding_file_operation_results(
+        &mut self,
+    ) -> VecDeque<KeybindingFileOperationResult> {
+        std::mem::take(&mut self.keybinding_file_operation_results)
+    }
+
     pub(in crate::workspace) fn portable_status_snapshot(&self) -> PortableStatusSnapshot {
         PortableStatusSnapshot {
             status: self.portable_status.clone(),
@@ -1133,6 +1483,7 @@ impl SettingsWorkspaceEntity {
         input: SettingsInput,
     ) -> Option<&str> {
         match input {
+            SettingsInput::KeybindingSearch => Some(&self.keybinding_search_query),
             SettingsInput::PortableCurrentPassword => Some(&self.portable_current_password),
             SettingsInput::PortableNewPassword => Some(&self.portable_new_password),
             SettingsInput::PortableConfirmPassword => Some(&self.portable_confirm_password),
@@ -1166,6 +1517,7 @@ impl SettingsWorkspaceEntity {
     ) -> bool {
         let portable_open = self.portable_dialog == Some(PortableSettingsDialog::ChangePassword);
         let can_focus = match input {
+            SettingsInput::KeybindingSearch => true,
             SettingsInput::PortableCurrentPassword
             | SettingsInput::PortableNewPassword
             | SettingsInput::PortableConfirmPassword => portable_open,
@@ -1278,6 +1630,7 @@ impl SettingsWorkspaceEntity {
 
     fn settings_entity_input_mut(&mut self, input: SettingsInput) -> Option<&mut String> {
         match input {
+            SettingsInput::KeybindingSearch => Some(&mut self.keybinding_search_query),
             SettingsInput::PortableCurrentPassword => Some(&mut self.portable_current_password),
             SettingsInput::PortableNewPassword => Some(&mut self.portable_new_password),
             SettingsInput::PortableConfirmPassword => Some(&mut self.portable_confirm_password),
@@ -1323,17 +1676,30 @@ impl Drop for SettingsWorkspaceEntity {
 mod tests {
     use std::{
         path::PathBuf,
-        sync::Arc,
+        sync::{
+            Arc,
+            atomic::{AtomicBool, Ordering},
+        },
         time::{Duration, SystemTime},
     };
 
     use gpui::{AppContext, TestAppContext};
+    use oxideterm_gpui_settings_view::{SettingsInput, SettingsKeybindingScopeFilter};
     use oxideterm_gpui_ui::confirm::ConfirmDialogAction;
 
     use super::{
         BackgroundGalleryOperationResult, DataDirectoryConfirm, ExternalStoreWatch,
+        KeybindingFileOperationResult, KeybindingRecordingFooterAction,
         KeybindingResetConfirmKeyAction, SettingsWorkspaceEntity,
     };
+
+    struct DropSignal(Arc<AtomicBool>);
+
+    impl Drop for DropSignal {
+        fn drop(&mut self) {
+            self.0.store(true, Ordering::Release);
+        }
+    }
 
     #[test]
     fn external_store_watch_advances_before_publishing_each_change() {
@@ -1513,6 +1879,159 @@ mod tests {
             assert!(entity.begin_keybinding_reset_confirm_exit(Duration::ZERO, cx));
             assert!(entity.keybinding_reset_confirm_snapshot().is_none());
         });
+    }
+
+    #[gpui::test]
+    fn keybinding_page_state_and_recording_commit_are_entity_owned(cx: &mut TestAppContext) {
+        let entity = cx.new(SettingsWorkspaceEntity::new);
+        entity.update(cx, |entity, cx| {
+            assert!(
+                entity.set_keybinding_scope_filter(SettingsKeybindingScopeFilter::Terminal, cx,)
+            );
+            assert_eq!(
+                entity.previous_keybinding_scope_filter(),
+                SettingsKeybindingScopeFilter::All
+            );
+            assert!(entity.focus_settings_entity_input(SettingsInput::KeybindingSearch, cx));
+            assert!(entity.replace_settings_entity_input(
+                SettingsInput::KeybindingSearch,
+                None,
+                "paste",
+                cx,
+            ));
+            assert_eq!(entity.keybinding_search_query(), "paste");
+
+            entity.start_keybinding_recording("terminal.paste", cx);
+            entity.keybinding_recording_combo = Some(crate::keybindings::KeyCombo {
+                key: "v".to_string(),
+                ctrl: false,
+                shift: false,
+                alt: false,
+                meta: true,
+            });
+            entity
+                .keybinding_conflict_action_ids
+                .push("terminal.copy".to_string());
+            entity.keybinding_recording_footer_focus =
+                Some(KeybindingRecordingFooterAction::Confirm);
+
+            let commit = entity
+                .take_keybinding_recording_commit(cx)
+                .expect("recording should produce one commit");
+            assert_eq!(commit.action_id, "terminal.paste");
+            assert_eq!(commit.combo.key, "v");
+            assert!(entity.keybinding_recording_action_id().is_none());
+            assert!(entity.keybinding_conflicts().is_empty());
+            assert!(entity.keybinding_recording_combo().is_none());
+            assert!(entity.keybinding_recording_footer_focus().is_none());
+            assert!(entity.take_keybinding_recording_commit(cx).is_none());
+        });
+    }
+
+    #[gpui::test]
+    fn keybinding_file_task_replacement_and_completion_are_generation_safe(
+        cx: &mut TestAppContext,
+    ) {
+        let runtime = tokio::runtime::Runtime::new().expect("create keybinding file runtime");
+        let first_dropped = Arc::new(AtomicBool::new(false));
+        let entity = cx.new(SettingsWorkspaceEntity::new);
+        let first_generation = entity.update(cx, |entity, cx| {
+            let first_dropped_for_future = Arc::clone(&first_dropped);
+            entity.start_keybinding_export(
+                async move {
+                    let _signal = DropSignal(first_dropped_for_future);
+                    std::future::pending::<Option<PathBuf>>().await
+                },
+                serde_json::Map::new(),
+                runtime.handle().clone(),
+                cx,
+            )
+        });
+        cx.run_until_parked();
+        let second_generation = entity.update(cx, |entity, cx| {
+            let generation = entity.start_keybinding_export(
+                std::future::pending::<Option<PathBuf>>(),
+                serde_json::Map::new(),
+                runtime.handle().clone(),
+                cx,
+            );
+            assert!(entity.keybinding_file_operation_task.is_some());
+            generation
+        });
+        cx.run_until_parked();
+        assert_ne!(first_generation, second_generation);
+        assert!(first_dropped.load(Ordering::Acquire));
+
+        entity.update(cx, |entity, cx| {
+            entity.finish_keybinding_file_operation(
+                first_generation,
+                Some(KeybindingFileOperationResult::Exported),
+                cx,
+            );
+            assert!(entity.keybinding_file_operation_results.is_empty());
+
+            entity.finish_keybinding_file_operation(
+                second_generation,
+                Some(KeybindingFileOperationResult::ImportFailed),
+                cx,
+            );
+            entity.finish_keybinding_file_operation(
+                second_generation,
+                Some(KeybindingFileOperationResult::Exported),
+                cx,
+            );
+            let results = entity.take_keybinding_file_operation_results();
+            assert_eq!(results.len(), 1);
+            assert!(matches!(
+                results.front(),
+                Some(KeybindingFileOperationResult::ImportFailed)
+            ));
+        });
+    }
+
+    #[gpui::test]
+    fn settings_entity_release_cancels_keybinding_file_task(cx: &mut TestAppContext) {
+        let runtime = tokio::runtime::Runtime::new().expect("create keybinding file runtime");
+        let dropped = Arc::new(AtomicBool::new(false));
+        let entity = cx.new(SettingsWorkspaceEntity::new);
+        entity.update(cx, |entity, cx| {
+            let dropped_for_future = Arc::clone(&dropped);
+            entity.start_keybinding_export(
+                async move {
+                    let _signal = DropSignal(dropped_for_future);
+                    std::future::pending::<Option<PathBuf>>().await
+                },
+                serde_json::Map::new(),
+                runtime.handle().clone(),
+                cx,
+            );
+        });
+        cx.run_until_parked();
+
+        drop(entity);
+        cx.update(|_cx| {});
+        cx.run_until_parked();
+
+        assert!(dropped.load(Ordering::Acquire));
+    }
+
+    #[test]
+    fn keybinding_import_preserves_the_invoking_window_as_action_context() {
+        let action_source = include_str!("../actions.rs");
+        let update_source = include_str!("update.rs");
+        let init_source = include_str!("../root/init.rs");
+        let compact_update_source = update_source.split_whitespace().collect::<Vec<_>>().concat();
+
+        assert!(action_source.contains("let target_window = window.window_handle();"));
+        assert!(
+            action_source.contains(
+                "settings.start_keybinding_import(selection, runtime, target_window, cx);"
+            )
+        );
+        assert!(compact_update_source.contains(
+            "self.apply_runtime_key_bindings_to_window_handle(runtime_bindings,target_window,cx,);"
+        ));
+        assert!(!init_source.contains("settings_workspace_window_handle"));
     }
 
     #[gpui::test]

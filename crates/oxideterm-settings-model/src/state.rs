@@ -9,10 +9,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use crate::{
-    AiSettingsPage, SettingsInput, SettingsKeybindingScopeFilter, SettingsTab,
-    TerminalSettingsPage, ThemeEditorState,
-};
+use crate::{AiSettingsPage, SettingsInput, SettingsTab, TerminalSettingsPage, ThemeEditorState};
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct CliCompanionStatus {
@@ -34,8 +31,6 @@ pub struct SettingsPageModel {
     pub previous_terminal_page: TerminalSettingsPage,
     pub ai_page: AiSettingsPage,
     pub previous_ai_page: AiSettingsPage,
-    pub keybinding_scope_filter: SettingsKeybindingScopeFilter,
-    pub previous_keybinding_scope_filter: SettingsKeybindingScopeFilter,
     pub settings_reset_confirm_open: bool,
     pub ai_new_provider_type: String,
     pub ai_provider_settings_expanded: bool,
@@ -44,9 +39,6 @@ pub struct SettingsPageModel {
     pub expanded_ai_providers: HashMap<String, bool>,
     pub expanded_ai_provider_models: HashSet<String>,
     pub expanded_ai_context_providers: HashSet<String>,
-    pub keybinding_recording_action_id: Option<String>,
-    pub keybinding_conflict_action_ids: Vec<String>,
-    pub keybinding_search_query: String,
     pub legal_notice_open: bool,
     pub theme_editor: Option<ThemeEditorState>,
     pub background_cache_poll_scheduled: bool,
@@ -60,8 +52,6 @@ impl Default for SettingsPageModel {
             previous_terminal_page: TerminalSettingsPage::Display,
             ai_page: AiSettingsPage::General,
             previous_ai_page: AiSettingsPage::General,
-            keybinding_scope_filter: SettingsKeybindingScopeFilter::All,
-            previous_keybinding_scope_filter: SettingsKeybindingScopeFilter::All,
             settings_reset_confirm_open: false,
             ai_new_provider_type: "openai_compatible".to_string(),
             ai_provider_settings_expanded: true,
@@ -70,9 +60,6 @@ impl Default for SettingsPageModel {
             expanded_ai_providers: HashMap::new(),
             expanded_ai_provider_models: HashSet::new(),
             expanded_ai_context_providers: HashSet::new(),
-            keybinding_recording_action_id: None,
-            keybinding_conflict_action_ids: Vec::new(),
-            keybinding_search_query: String::new(),
             legal_notice_open: false,
             theme_editor: None,
             background_cache_poll_scheduled: false,
@@ -100,14 +87,6 @@ impl SettingsPageModel {
             self.previous_ai_page = self.ai_page;
         }
         self.ai_page = page;
-    }
-
-    /// Selects the keybinding scope filter used by the keybindings page.
-    pub fn set_keybinding_scope_filter(&mut self, filter: SettingsKeybindingScopeFilter) {
-        if self.keybinding_scope_filter != filter {
-            self.previous_keybinding_scope_filter = self.keybinding_scope_filter;
-        }
-        self.keybinding_scope_filter = filter;
     }
 
     /// Opens or closes the settings reset confirmation without exposing the flag layout.
@@ -154,28 +133,6 @@ impl SettingsPageModel {
         self.expanded_ai_context_providers.remove(provider_id);
     }
 
-    /// Starts recording a keybinding and clears stale conflict hints.
-    pub fn start_keybinding_recording(&mut self, action_id: impl Into<String>) {
-        self.keybinding_recording_action_id = Some(action_id.into());
-        self.keybinding_conflict_action_ids.clear();
-    }
-
-    /// Stops recording a keybinding and clears conflict hints.
-    pub fn stop_keybinding_recording(&mut self) {
-        self.keybinding_recording_action_id = None;
-        self.keybinding_conflict_action_ids.clear();
-    }
-
-    /// Replaces the current keybinding conflict list.
-    pub fn set_keybinding_conflicts(&mut self, conflicts: Vec<String>) {
-        self.keybinding_conflict_action_ids = conflicts;
-    }
-
-    /// Updates the keybinding search draft.
-    pub fn set_keybinding_search_query(&mut self, query: impl Into<String>) {
-        self.keybinding_search_query = query.into();
-    }
-
     /// Installs a new theme editor model.
     pub fn open_theme_editor(&mut self, editor: ThemeEditorState) {
         self.theme_editor = Some(editor);
@@ -196,7 +153,6 @@ impl SettingsPageModel {
     /// Returns the draft text for inputs whose state is owned by the settings page model.
     pub fn page_input_value(&self, input: SettingsInput) -> Option<String> {
         let value = match input {
-            SettingsInput::KeybindingSearch => self.keybinding_search_query.clone(),
             SettingsInput::CustomThemeName => self
                 .theme_editor
                 .as_ref()
@@ -220,10 +176,6 @@ impl SettingsPageModel {
     /// Applies a draft to inputs whose state is page-local rather than persisted settings.
     pub fn apply_page_input_draft(&mut self, input: SettingsInput, draft: &str) -> bool {
         match input {
-            SettingsInput::KeybindingSearch => {
-                self.set_keybinding_search_query(draft.to_string());
-                true
-            }
             SettingsInput::CustomThemeName => {
                 self.update_theme_editor(|editor| editor.name = draft.to_string());
                 true
@@ -309,66 +261,13 @@ mod tests {
     }
 
     #[test]
-    fn keybinding_recording_resets_conflicts() {
-        let mut model = SettingsPageModel::default();
-        model
-            .keybinding_conflict_action_ids
-            .push("copy".to_string());
-
-        model.start_keybinding_recording("paste");
-
-        assert_eq!(
-            model.keybinding_recording_action_id.as_deref(),
-            Some("paste")
-        );
-        assert!(model.keybinding_conflict_action_ids.is_empty());
-    }
-
-    #[test]
     fn page_routing_state_lives_in_settings_model() {
         let mut model = SettingsPageModel::default();
 
         model.set_active_tab(SettingsTab::Keybindings);
         model.set_terminal_page(TerminalSettingsPage::Awareness);
-        model.set_keybinding_scope_filter(SettingsKeybindingScopeFilter::Terminal);
-
         assert_eq!(model.active_tab, SettingsTab::Keybindings);
         assert_eq!(model.terminal_page, TerminalSettingsPage::Awareness);
         assert_eq!(model.previous_terminal_page, TerminalSettingsPage::Display);
-        assert_eq!(
-            model.keybinding_scope_filter,
-            SettingsKeybindingScopeFilter::Terminal
-        );
-        assert_eq!(
-            model.previous_keybinding_scope_filter,
-            SettingsKeybindingScopeFilter::All
-        );
-
-        model.set_keybinding_scope_filter(SettingsKeybindingScopeFilter::Terminal);
-        assert_eq!(
-            model.previous_keybinding_scope_filter,
-            SettingsKeybindingScopeFilter::All
-        );
-
-        model.set_keybinding_scope_filter(SettingsKeybindingScopeFilter::Split);
-        assert_eq!(
-            model.previous_keybinding_scope_filter,
-            SettingsKeybindingScopeFilter::Terminal
-        );
-    }
-
-    #[test]
-    fn page_owned_input_drafts_apply_inside_settings_model() {
-        let mut model = SettingsPageModel::default();
-
-        assert!(model.apply_page_input_draft(SettingsInput::KeybindingSearch, "terminal"));
-
-        assert_eq!(model.keybinding_search_query, "terminal");
-        assert_eq!(
-            model
-                .page_input_value(SettingsInput::KeybindingSearch)
-                .as_deref(),
-            Some("terminal")
-        );
     }
 }

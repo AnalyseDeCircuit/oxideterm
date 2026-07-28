@@ -659,8 +659,6 @@ impl WorkspaceApp {
             workspace_input,
             _workspace_input_observation: workspace_input_observation,
             input_caret,
-            keybinding_recording_combo: None,
-            keybinding_recording_footer_focus: None,
             native_update_notification_open: false,
             native_update_notification_presence: oxideterm_gpui_ui::motion::ExitPresence::visible(),
             native_update_release_notes_open: false,

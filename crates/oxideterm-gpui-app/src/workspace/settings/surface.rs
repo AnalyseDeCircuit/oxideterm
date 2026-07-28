@@ -573,9 +573,10 @@ impl WorkspaceApp {
                 // The toolbar owns the moving scope indicator. Keep row zero
                 // mounted while filtered table rows are replaced underneath it.
                 if index > 0 {
-                    format!("{:?}", self.settings_page.keybinding_scope_filter).hash(&mut hasher);
-                    self.settings_page
-                        .keybinding_search_query
+                    let keybinding_state = self.settings_workspace.read(cx);
+                    format!("{:?}", keybinding_state.keybinding_scope_filter()).hash(&mut hasher);
+                    keybinding_state
+                        .keybinding_search_query()
                         .trim()
                         .hash(&mut hasher);
                 }
@@ -607,18 +608,19 @@ impl WorkspaceApp {
         SettingsDynamicSectionCounts {
             terminal_page: self.settings_page.terminal_page,
             ai_page: self.settings_page.ai_page,
-            visible_keybinding_scope_count: self.visible_keybinding_scope_count(),
+            visible_keybinding_scope_count: self.visible_keybinding_scope_count(cx),
             knowledge_has_error: self.ai_entity.read(cx).knowledge_error().is_some(),
             knowledge_has_selected_collection,
         }
     }
 
-    pub(in crate::workspace) fn visible_keybinding_scope_count(&self) -> usize {
-        let query = self
-            .settings_page
-            .keybinding_search_query
+    pub(in crate::workspace) fn visible_keybinding_scope_count(&self, cx: &App) -> usize {
+        let keybinding_state = self.settings_workspace.read(cx);
+        let query = keybinding_state
+            .keybinding_search_query()
             .trim()
             .to_lowercase();
+        let scope_filter = keybinding_state.keybinding_scope_filter();
         [
             crate::keybindings::ActionScope::Global,
             crate::keybindings::ActionScope::Terminal,
@@ -631,10 +633,7 @@ impl WorkspaceApp {
                 .iter()
                 .filter(|definition| definition.scope == *scope)
                 .filter(|definition| {
-                    settings_keybinding_scope_matches(
-                        self.settings_page.keybinding_scope_filter,
-                        definition.scope,
-                    )
+                    settings_keybinding_scope_matches(scope_filter, definition.scope)
                 })
                 .any(|definition| {
                     if query.is_empty() {

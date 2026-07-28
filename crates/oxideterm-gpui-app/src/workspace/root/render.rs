@@ -432,7 +432,11 @@ impl Render for WorkspaceApp {
                     window.prevent_default();
                     cx.stop_propagation();
                 } else if !this.command_palette.read(cx).is_open()
-                    && this.settings_page.keybinding_recording_action_id.is_none()
+                    && this
+                        .settings_workspace
+                        .read(cx)
+                        .keybinding_recording_action_id()
+                        .is_none()
                     && crate::keybindings::keystroke_matches_action(
                         &event.keystroke,
                         "app.commandPalette",
@@ -454,7 +458,11 @@ impl Render for WorkspaceApp {
                     this.handle_shortcuts_modal_key(event, cx);
                     window.prevent_default();
                     cx.stop_propagation();
-                } else if this.settings_page.keybinding_recording_action_id.is_some()
+                } else if this
+                    .settings_workspace
+                    .read(cx)
+                    .keybinding_recording_action_id()
+                    .is_some()
                     && this.active_surface == ActiveSurface::Settings
                     && this.settings_page.active_tab == SettingsTab::Keybindings
                 {

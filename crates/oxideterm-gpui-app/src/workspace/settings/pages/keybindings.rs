@@ -103,10 +103,12 @@ impl WorkspaceApp {
 
         let side = crate::keybindings::KeybindingSide::current();
         let query = self
-            .settings_page
-            .keybinding_search_query
+            .settings_workspace
+            .read(cx)
+            .keybinding_search_query()
             .trim()
             .to_lowercase();
+        let scope_filter = self.settings_workspace.read(cx).keybinding_scope_filter();
         let mut visible_index = 0;
         for scope in [
             crate::keybindings::ActionScope::Global,
@@ -118,10 +120,7 @@ impl WorkspaceApp {
                 .iter()
                 .filter(|definition| definition.scope == scope)
                 .filter(|definition| {
-                    settings_keybinding_scope_matches(
-                        self.settings_page.keybinding_scope_filter,
-                        definition.scope,
-                    )
+                    settings_keybinding_scope_matches(scope_filter, definition.scope)
                 })
                 .filter(|definition| {
                     if query.is_empty() {
@@ -194,12 +193,10 @@ impl WorkspaceApp {
         &self,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let focused = self.focused_settings_input == Some(SettingsInput::KeybindingSearch);
-        let value = if focused {
-            self.settings_input_draft.as_str()
-        } else {
-            self.settings_page.keybinding_search_query.as_str()
-        };
+        let settings_workspace = self.settings_workspace.read(cx);
+        let focused = settings_workspace.settings_entity_focused_input()
+            == Some(SettingsInput::KeybindingSearch);
+        let value = settings_workspace.keybinding_search_query();
         let target = WorkspaceImeTarget::Settings(SettingsInput::KeybindingSearch);
         let workspace = cx.entity();
         text_input_anchor_probe(
@@ -235,11 +232,7 @@ impl WorkspaceApp {
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |this, event: &gpui::MouseDownEvent, window, cx| {
-                    this.focus_settings_input(
-                        SettingsInput::KeybindingSearch,
-                        this.settings_page.keybinding_search_query.clone(),
-                        cx,
-                    );
+                    this.focus_settings_input(SettingsInput::KeybindingSearch, String::new(), cx);
                     this.ime_marked_text = None;
                     window.focus(&this.focus_handle, cx);
                     this.begin_ime_selection_from_mouse_down(target, event, window, cx);
@@ -265,17 +258,22 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let filters = SettingsKeybindingScopeFilter::all();
+        let scope_filter = self.settings_workspace.read(cx).keybinding_scope_filter();
+        let previous_scope_filter = self
+            .settings_workspace
+            .read(cx)
+            .previous_keybinding_scope_filter();
         let active_index = filters
             .iter()
-            .position(|filter| *filter == self.settings_page.keybinding_scope_filter)
+            .position(|filter| *filter == scope_filter)
             .unwrap_or(0);
         let previous_index = filters
             .iter()
-            .position(|filter| *filter == self.settings_page.previous_keybinding_scope_filter)
+            .position(|filter| *filter == previous_scope_filter)
             .unwrap_or(active_index);
         let mut items = Vec::with_capacity(filters.len());
         for (filter_index, filter) in filters.iter().copied().enumerate() {
-            let active = self.settings_page.keybinding_scope_filter == filter;
+            let active = scope_filter == filter;
             let item = oxideterm_gpui_ui::segmented_control_item(
                 &self.tokens,
                 self.i18n.t(filter.label_key()),
@@ -284,8 +282,9 @@ impl WorkspaceApp {
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |this, _event, _window, cx| {
-                    if this.settings_page.keybinding_scope_filter != filter {
-                        this.settings_page.set_keybinding_scope_filter(filter);
+                    if this.settings_workspace.update(cx, |settings, cx| {
+                        settings.set_keybinding_scope_filter(filter, cx)
+                    }) {
                         this.begin_user_segmented_control_transition(
                             selection_motion::KEYBINDING_SCOPE_SWITCHER_ID,
                             filter_index,
@@ -480,18 +479,21 @@ impl WorkspaceApp {
         let default = definition.default_combo(side);
         let modified = current.as_ref() != Some(default);
         let recording = self
-            .settings_page
-            .keybinding_recording_action_id
-            .as_deref()
+            .settings_workspace
+            .read(cx)
+            .keybinding_recording_action_id()
             .is_some_and(|id| id == definition.id);
         let action_id = definition.id.to_string();
         let record_action_id = action_id.clone();
         let unbind_action_id = action_id.clone();
         let reset_action_id = action_id;
         let conflicts = if recording {
-            self.settings_page.keybinding_conflict_action_ids.as_slice()
+            self.settings_workspace
+                .read(cx)
+                .keybinding_conflicts()
+                .to_vec()
         } else {
-            &[]
+            Vec::new()
         };
 
         div()
@@ -546,7 +548,7 @@ impl WorkspaceApp {
                     .items_center()
                     .gap(px(8.0))
                     .when(recording, |controls| {
-                        controls.child(self.keybinding_recording_cell(conflicts, side, cx))
+                        controls.child(self.keybinding_recording_cell(&conflicts, side, cx))
                     })
                     .when(!recording, |controls| {
                         controls
@@ -575,13 +577,13 @@ impl WorkspaceApp {
                                     .on_mouse_down(
                                         MouseButton::Left,
                                         cx.listener(move |this, _event, _window, cx| {
-                                            this.settings_page.start_keybinding_recording(
-                                                record_action_id.clone(),
-                                            );
-                                            this.keybinding_recording_combo = None;
-                                            this.keybinding_recording_footer_focus = None;
+                                            this.settings_workspace.update(cx, |settings, cx| {
+                                                settings.start_keybinding_recording(
+                                                    record_action_id.clone(),
+                                                    cx,
+                                                );
+                                            });
                                             cx.stop_propagation();
-                                            cx.notify();
                                         }),
                                     ),
                             )
@@ -633,7 +635,11 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
-        let combo = self.keybinding_recording_combo.as_ref();
+        let combo_display = self
+            .settings_workspace
+            .read(cx)
+            .keybinding_recording_combo()
+            .map(crate::keybindings::format_combo);
         div()
             .flex()
             .items_center()
@@ -644,12 +650,8 @@ impl WorkspaceApp {
                     .flex_col()
                     .items_end()
                     .gap(px(4.0))
-                    .child(match combo {
-                        Some(combo) => self.keybinding_kbd_badge(
-                            &crate::keybindings::format_combo(combo),
-                            true,
-                            cx,
-                        ),
+                    .child(match combo_display.as_deref() {
+                        Some(combo) => self.keybinding_kbd_badge(combo, true, cx),
                         None => div()
                             .text_size(px(self.tokens.metrics.ui_text_xs))
                             .italic()
@@ -664,7 +666,7 @@ impl WorkspaceApp {
                             ))
                             .into_any_element(),
                     })
-                    .when(combo.is_some() && !conflicts.is_empty(), |cell| {
+                    .when(combo_display.is_some() && !conflicts.is_empty(), |cell| {
                         cell.child(
                             div()
                                 .max_w(px(240.0))
@@ -682,7 +684,7 @@ impl WorkspaceApp {
                         )
                     }),
             )
-            .when(combo.is_some(), |cell| {
+            .when(combo_display.is_some(), |cell| {
                 let label_key = if conflicts.is_empty() {
                     "✓"
                 } else {
@@ -805,7 +807,10 @@ impl WorkspaceApp {
                 // Browser focus rings on Tauri's RecordingCell buttons are
                 // keyboard-origin only; mouse activation below clears this
                 // footer focus instead of synthesizing a focus-visible state.
-                focus_visible: self.keybinding_recording_footer_focus
+                focus_visible: self
+                    .settings_workspace
+                    .read(cx)
+                    .keybinding_recording_footer_focus()
                     == Some(KeybindingRecordingFooterAction::Confirm),
                 ..ToolbarButtonOptions::default()
             },
@@ -831,7 +836,10 @@ impl WorkspaceApp {
             rgb(self.tokens.ui.text_muted),
             IconButtonOptions {
                 hover_background: Some(rgb(self.tokens.ui.bg_hover)),
-                focus_visible: self.keybinding_recording_footer_focus
+                focus_visible: self
+                    .settings_workspace
+                    .read(cx)
+                    .keybinding_recording_footer_focus()
                     == Some(KeybindingRecordingFooterAction::Cancel),
                 ..IconButtonOptions::opaque_toolbar(28.0, ButtonRadius::Sm)
             },

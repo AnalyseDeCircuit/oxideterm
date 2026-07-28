@@ -420,18 +420,8 @@ enum AiChatFooterAction {
 // keyboard focus order stays centralized even though it is not a modal trap.
 const AI_CHAT_FOOTER_ACTIONS: [AiChatFooterAction; 1] = [AiChatFooterAction::Submit];
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum KeybindingRecordingFooterAction {
-    Confirm,
-    Cancel,
-}
-
 const CONFIRM_DIALOG_FOOTER_ACTIONS: [ConfirmDialogAction; 2] =
     [ConfirmDialogAction::Cancel, ConfirmDialogAction::Confirm];
-const KEYBINDING_RECORDING_FOOTER_ACTIONS: [KeybindingRecordingFooterAction; 2] = [
-    KeybindingRecordingFooterAction::Confirm,
-    KeybindingRecordingFooterAction::Cancel,
-];
 
 #[derive(Default)]
 struct AiMarkdownDocumentCache {
@@ -789,8 +779,6 @@ pub(crate) struct WorkspaceApp {
     workspace_input: Entity<ime::WorkspaceInputEntity>,
     _workspace_input_observation: Subscription,
     input_caret: ime::WorkspaceCaretVisibility,
-    keybinding_recording_combo: Option<crate::keybindings::KeyCombo>,
-    keybinding_recording_footer_focus: Option<KeybindingRecordingFooterAction>,
     native_update_notification_open: bool,
     native_update_notification_presence: oxideterm_gpui_ui::motion::ExitPresence,
     native_update_release_notes_open: bool,
