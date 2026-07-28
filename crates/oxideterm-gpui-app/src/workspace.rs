@@ -727,7 +727,6 @@ pub(crate) struct WorkspaceApp {
     // Prompt and memory documents are edited outside the virtual settings list.
     ai_text_editor_dialog: Option<settings::AiTextEditorDialog>,
     ai_text_editor: Option<Entity<oxideterm_gpui_editor::TextEditorView>>,
-    remote_shell_integration: settings::RemoteShellIntegrationUiState,
     detached_local_terminal_list_state: ListState,
     detached_local_terminal_list_cache: RefCell<VirtualListSignatureCache>,
     plugin_entity: Entity<plugin_entity::PluginWorkspaceEntity>,

@@ -469,10 +469,17 @@ impl WorkspaceApp {
                     changed = true;
                 }
                 runtime_entity::ReconnectRuntimeEffect::RemoteShellIntegrationGateFinished {
-                    node_id,
-                    result,
+                    notice,
                 } => {
-                    self.finish_remote_shell_integration_terminal_gate(node_id, result, window, cx);
+                    if let Some(notice) = notice {
+                        self.push_remote_shell_integration_notice(notice, cx);
+                    }
+                    changed = true;
+                }
+                runtime_entity::ReconnectRuntimeEffect::RemoteShellIntegrationMaintenanceFinished {
+                    notice,
+                } => {
+                    self.push_remote_shell_integration_notice(notice, cx);
                     changed = true;
                 }
             }

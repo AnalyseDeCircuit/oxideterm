@@ -1136,6 +1136,10 @@ impl WorkspaceApp {
                 reconnect_max_attempts_from_settings(&settings),
                 cx,
             );
+            runtime.configure_remote_shell_integration(
+                settings.terminal.remote_shell_integration_mode,
+                settings.terminal.command_bar.current_directory_awareness,
+            );
         });
         self.ai_entity.update(cx, |ai, _cx| {
             ai.set_agent_fs_mode(crate::workspace::ide::node_agent_mode_from_settings(

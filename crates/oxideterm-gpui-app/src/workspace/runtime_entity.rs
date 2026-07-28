@@ -99,8 +99,10 @@ pub(in crate::workspace) enum ReconnectRuntimeEffect {
         entered_grace_period: bool,
     },
     RemoteShellIntegrationGateFinished {
-        node_id: NodeId,
-        result: Result<(RemoteShellIntegrationStatus, bool), String>,
+        notice: Option<settings::RemoteShellIntegrationNotice>,
+    },
+    RemoteShellIntegrationMaintenanceFinished {
+        notice: settings::RemoteShellIntegrationNotice,
     },
 }
 
@@ -199,12 +201,6 @@ pub(in crate::workspace) struct ReconnectGraceProbeRequest {
     pub(in crate::workspace) job_id: String,
 }
 
-pub(in crate::workspace) struct RemoteShellIntegrationGateRequest {
-    pub(in crate::workspace) node_id: NodeId,
-    pub(in crate::workspace) mode: RemoteShellIntegrationMode,
-    pub(in crate::workspace) force_install: bool,
-}
-
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(in crate::workspace) struct ReconnectTransferResumeCompletion {
     pub(in crate::workspace) node_id: NodeId,
@@ -276,6 +272,9 @@ pub(in crate::workspace) struct WorkspaceRuntimeEntity {
     reconnect_timing: ReconnectTiming,
     ssh_active_probe_in_flight: bool,
     active_probe_timer_generation: u64,
+    remote_shell_integration: settings::RemoteShellIntegrationRuntimeState,
+    remote_shell_gate_tasks: HashMap<NodeId, (u64, tokio::task::AbortHandle)>,
+    remote_shell_maintenance_task: Option<(NodeId, u64, tokio::task::AbortHandle)>,
 }
 
 impl WorkspaceRuntimeEntity {
@@ -367,6 +366,9 @@ impl WorkspaceRuntimeEntity {
             reconnect_timing,
             ssh_active_probe_in_flight: false,
             active_probe_timer_generation: 0,
+            remote_shell_integration: settings::RemoteShellIntegrationRuntimeState::default(),
+            remote_shell_gate_tasks: HashMap::new(),
+            remote_shell_maintenance_task: None,
         };
         entity.schedule_worker_delivery(cx);
         entity.schedule_active_probe_after(ACTIVE_PROBE_START_DELAY, cx);
@@ -944,6 +946,13 @@ impl WorkspaceRuntimeEntity {
         // Stop producers and invalidate deferred transitions before touching
         // any node or registry owner they could otherwise reacquire.
         self.shutdown_node_transport_attempts();
+        for (_, (_, abort_handle)) in self.remote_shell_gate_tasks.drain() {
+            abort_handle.abort();
+        }
+        if let Some((_, _, abort_handle)) = self.remote_shell_maintenance_task.take() {
+            abort_handle.abort();
+        }
+        self.remote_shell_integration.cancel_terminal_gates();
         self.reconnect_debounce_generation = self.reconnect_debounce_generation.wrapping_add(1);
         self.reconnect_cascade_generation = self.reconnect_cascade_generation.wrapping_add(1);
         self.active_probe_timer_generation = self.active_probe_timer_generation.wrapping_add(1);
@@ -1002,23 +1011,77 @@ impl WorkspaceRuntimeEntity {
         self.lifecycle = WorkspaceRuntimeLifecycle::Stopped;
     }
 
-    pub(in crate::workspace) fn start_remote_shell_integration_gate(
-        &self,
-        request: RemoteShellIntegrationGateRequest,
+    pub(in crate::workspace) fn configure_remote_shell_integration(
+        &mut self,
+        mode: RemoteShellIntegrationMode,
+        awareness_enabled: bool,
     ) {
-        let RemoteShellIntegrationGateRequest {
-            node_id,
-            mode,
-            force_install,
-        } = request;
+        self.remote_shell_integration
+            .configure(mode, awareness_enabled);
+        if mode == RemoteShellIntegrationMode::Disabled || !awareness_enabled {
+            for (_, (_, abort_handle)) in self.remote_shell_gate_tasks.drain() {
+                abort_handle.abort();
+            }
+            self.remote_shell_integration.cancel_terminal_gates();
+        }
+    }
+
+    pub(in crate::workspace) fn remote_shell_integration_pending(&self) -> bool {
+        self.remote_shell_integration.pending()
+    }
+
+    pub(in crate::workspace) fn remote_shell_integration_confirm_snapshot(
+        &self,
+    ) -> Option<settings::RemoteShellIntegrationConfirmSnapshot> {
+        self.remote_shell_integration.confirm_snapshot()
+    }
+
+    pub(in crate::workspace) fn remote_shell_integration_card_snapshot(
+        &self,
+        node_id: Option<&NodeId>,
+    ) -> settings::RemoteShellIntegrationCardSnapshot {
+        self.remote_shell_integration.card_snapshot(node_id)
+    }
+
+    pub(in crate::workspace) fn open_remote_shell_integration_toolbar_confirm(
+        &mut self,
+        node_id: Option<NodeId>,
+    ) {
+        self.remote_shell_integration.open_toolbar_confirm(node_id);
+    }
+
+    pub(in crate::workspace) fn toggle_remote_shell_integration_prompt_suppression(&mut self) {
+        self.remote_shell_integration.toggle_prompt_suppression();
+    }
+
+    pub(in crate::workspace) fn cancel_remote_shell_integration_confirm(&mut self) -> bool {
+        self.remote_shell_integration.cancel_confirm()
+    }
+
+    pub(in crate::workspace) fn accept_remote_shell_integration_confirm(
+        &mut self,
+    ) -> Option<(NodeId, settings::RemoteShellIntegrationConfirmSource)> {
+        self.remote_shell_integration.accept_confirm()
+    }
+
+    pub(in crate::workspace) fn start_remote_shell_integration_gate(
+        &mut self,
+        node_id: NodeId,
+        force_install: bool,
+    ) -> bool {
+        let Some(generation) = self.remote_shell_integration.begin_terminal_gate(&node_id) else {
+            return false;
+        };
+        let mode = self.remote_shell_integration.deployment_mode();
         let router = self.node_router.clone();
         let result_tx = self.reconnect_worker_tx.clone();
-        self.task_runtime.spawn(async move {
+        let task_node_id = node_id.clone();
+        let task = self.task_runtime.spawn(async move {
             // The node owns this capability check independently from the
             // terminal pane, matching the IDE Agent deployment lifecycle.
             let result = async {
                 let resolved = router
-                    .resolve_connection(&node_id)
+                    .resolve_connection(&task_node_id)
                     .await
                     .map_err(|error| error.to_string())?;
                 // Detection starts only after the first visible Shell request,
@@ -1036,7 +1099,7 @@ impl WorkspaceRuntimeEntity {
                         .to_string()
                 })?;
                 let sftp = router
-                    .acquire_sftp(&node_id)
+                    .acquire_sftp(&task_node_id)
                     .await
                     .map_err(|error| error.to_string())?;
                 let sftp = sftp.lock().await;
@@ -1051,12 +1114,97 @@ impl WorkspaceRuntimeEntity {
                     Ok((status, false))
                 }
             }
-            .await;
+            .await
+            // Delivery exposes only a typed failure category; backend details
+            // never cross into UI state, notifications, or diagnostics.
+            .map_err(|_| ());
             let _ = result_tx.send(ReconnectWorkerResult::RemoteShellIntegrationGateFinished {
-                node_id,
+                node_id: task_node_id,
+                generation,
                 result,
             });
         });
+        self.remote_shell_gate_tasks
+            .insert(node_id, (generation, task.abort_handle()));
+        true
+    }
+
+    pub(in crate::workspace) fn start_remote_shell_integration_maintenance(
+        &mut self,
+        action: settings::RemoteShellIntegrationAction,
+        node_id: NodeId,
+    ) -> bool {
+        let Some(generation) = self
+            .remote_shell_integration
+            .begin_maintenance(action, node_id.clone())
+        else {
+            return false;
+        };
+        if let Some((_, _, abort_handle)) = self.remote_shell_maintenance_task.take() {
+            abort_handle.abort();
+        }
+        let router = self.node_router.clone();
+        let result_tx = self.reconnect_worker_tx.clone();
+        let task_node_id = node_id.clone();
+        let task = self.task_runtime.spawn(async move {
+            let result = async {
+                let resolved = router
+                    .resolve_connection(&task_node_id)
+                    .await
+                    .map_err(|error| error.to_string())?;
+                let remote_env = resolved.handle.remote_env();
+                let sftp = router
+                    .acquire_sftp(&task_node_id)
+                    .await
+                    .map_err(|error| error.to_string())?;
+                let sftp = sftp.lock().await;
+                match action {
+                    settings::RemoteShellIntegrationAction::Inspect => {
+                        oxideterm_terminal::inspect_remote_shell_integration(
+                            &sftp,
+                            remote_env.as_ref(),
+                        )
+                        .await
+                    }
+                    settings::RemoteShellIntegrationAction::Install => {
+                        oxideterm_terminal::install_remote_shell_integration(
+                            &sftp,
+                            remote_env.as_ref(),
+                        )
+                        .await
+                    }
+                    settings::RemoteShellIntegrationAction::RemoveReference => {
+                        oxideterm_terminal::remove_remote_shell_integration(
+                            &sftp,
+                            remote_env.as_ref(),
+                            false,
+                        )
+                        .await
+                    }
+                    settings::RemoteShellIntegrationAction::RemoveAll => {
+                        oxideterm_terminal::remove_remote_shell_integration(
+                            &sftp,
+                            remote_env.as_ref(),
+                            true,
+                        )
+                        .await
+                    }
+                }
+            }
+            .await
+            // Maintenance failures follow the same content-free UI boundary.
+            .map_err(|_| ());
+            let _ = result_tx.send(
+                ReconnectWorkerResult::RemoteShellIntegrationMaintenanceFinished {
+                    action,
+                    node_id: task_node_id,
+                    generation,
+                    result,
+                },
+            );
+        });
+        self.remote_shell_maintenance_task = Some((node_id, generation, task.abort_handle()));
+        true
     }
 
     pub(in crate::workspace) fn start_reconnect_grace_probe(
@@ -1293,6 +1441,18 @@ impl WorkspaceRuntimeEntity {
     fn cancel_node_runtime_work(&mut self, node_ids: &[NodeId], cx: &mut Context<Self>) {
         self.cancel_queued_reconnects(node_ids);
         for node_id in node_ids {
+            if let Some((_, abort_handle)) = self.remote_shell_gate_tasks.remove(node_id) {
+                abort_handle.abort();
+            }
+            if self
+                .remote_shell_maintenance_task
+                .as_ref()
+                .is_some_and(|(current, _, _)| current == node_id)
+                && let Some((_, _, abort_handle)) = self.remote_shell_maintenance_task.take()
+            {
+                abort_handle.abort();
+            }
+            self.remote_shell_integration.cancel_node(node_id);
             self.cancel_connection_trace(node_id, cx);
             self.abort_connection_chain_for_node(node_id);
             self.unlock_connecting_node(node_id);
@@ -2319,11 +2479,59 @@ impl WorkspaceRuntimeEntity {
                     entered_grace_period,
                 }
             }),
-            ReconnectWorkerResult::RemoteShellIntegrationGateFinished { node_id, result } => {
-                Some(ReconnectRuntimeEffect::RemoteShellIntegrationGateFinished {
-                    node_id,
-                    result: result.map_err(|error| oxideterm_ai::sanitize_for_ai(&error)),
-                })
+            ReconnectWorkerResult::RemoteShellIntegrationGateFinished {
+                node_id,
+                generation,
+                result,
+            } => {
+                if self
+                    .remote_shell_gate_tasks
+                    .get(&node_id)
+                    .is_some_and(|(current, _)| *current == generation)
+                {
+                    self.remote_shell_gate_tasks.remove(&node_id);
+                }
+                let outcome = self
+                    .remote_shell_integration
+                    .finish_terminal_gate(node_id, generation, result);
+                match outcome {
+                    settings::RemoteShellIntegrationGateOutcome::Applied => {
+                        Some(ReconnectRuntimeEffect::RemoteShellIntegrationGateFinished {
+                            notice: None,
+                        })
+                    }
+                    settings::RemoteShellIntegrationGateOutcome::RetryInstall(node_id) => {
+                        self.start_remote_shell_integration_gate(node_id, true);
+                        Some(ReconnectRuntimeEffect::RemoteShellIntegrationGateFinished {
+                            notice: None,
+                        })
+                    }
+                    settings::RemoteShellIntegrationGateOutcome::Failed => {
+                        Some(ReconnectRuntimeEffect::RemoteShellIntegrationGateFinished {
+                            notice: Some(settings::RemoteShellIntegrationNotice::Failed),
+                        })
+                    }
+                    settings::RemoteShellIntegrationGateOutcome::Stale => None,
+                }
+            }
+            ReconnectWorkerResult::RemoteShellIntegrationMaintenanceFinished {
+                action,
+                node_id,
+                generation,
+                result,
+            } => {
+                if self
+                    .remote_shell_maintenance_task
+                    .as_ref()
+                    .is_some_and(|(_, current, _)| *current == generation)
+                {
+                    self.remote_shell_maintenance_task = None;
+                }
+                self.remote_shell_integration
+                    .finish_maintenance(action, node_id, generation, result)
+                    .map(|notice| {
+                        ReconnectRuntimeEffect::RemoteShellIntegrationMaintenanceFinished { notice }
+                    })
             }
         }
     }

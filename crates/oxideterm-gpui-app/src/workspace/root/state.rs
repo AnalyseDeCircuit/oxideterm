@@ -85,7 +85,14 @@ pub(in crate::workspace) enum ReconnectWorkerResult {
     },
     RemoteShellIntegrationGateFinished {
         node_id: NodeId,
-        result: std::result::Result<(RemoteShellIntegrationStatus, bool), String>,
+        generation: u64,
+        result: std::result::Result<(RemoteShellIntegrationStatus, bool), ()>,
+    },
+    RemoteShellIntegrationMaintenanceFinished {
+        action: settings::RemoteShellIntegrationAction,
+        node_id: NodeId,
+        generation: u64,
+        result: std::result::Result<RemoteShellIntegrationStatus, ()>,
     },
 }
 

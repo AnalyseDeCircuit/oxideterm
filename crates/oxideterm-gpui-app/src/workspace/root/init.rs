@@ -204,6 +204,12 @@ impl WorkspaceApp {
                 cx,
             )
         });
+        workspace_runtime.update(cx, |runtime, _cx| {
+            runtime.configure_remote_shell_integration(
+                settings.terminal.remote_shell_integration_mode,
+                settings.terminal.command_bar.current_directory_awareness,
+            );
+        });
         let runtime_window_handle = window.window_handle();
         let workspace_runtime_subscription = cx.subscribe_in(
             &workspace_runtime,
@@ -545,7 +551,6 @@ impl WorkspaceApp {
             help_legal_notice_presence: oxideterm_gpui_ui::motion::ExitPresence::visible(),
             ai_text_editor_dialog: None,
             ai_text_editor: None,
-            remote_shell_integration: settings::RemoteShellIntegrationUiState::default(),
             // Detached local terminals are a bounded popover list, but the
             // number of retained background shells is user-driven, so keep it
             // on the same ListState path as other browser-style popovers.
