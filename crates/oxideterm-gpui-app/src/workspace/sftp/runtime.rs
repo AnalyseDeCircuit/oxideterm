@@ -98,6 +98,7 @@ impl SftpWorkspaceEntity {
         }
         let started = self.remote_load_state().start()?;
         self.set_remote_load_state(started);
+        self.init_error = None;
         Some((self.remote_path.clone(), self.view_generation))
     }
 
@@ -271,11 +272,275 @@ impl SftpWorkspaceEntity {
                     // Hidden views retain the pending request; mounting the tab
                     // later calls the same start gate without restarting SSH.
                     sftp.request_remote_load();
-                    cx.emit(SftpWorkspaceEvent::RemoteLoadReady);
+                    cx.emit(SftpWorkspaceEvent::RemoteLoadReady {
+                        tab_id,
+                        node_id,
+                        delivery: sftp.worker_tx.clone(),
+                    });
                     cx.notify();
                 }
             });
         }));
+    }
+
+    pub(in crate::workspace::sftp) fn reduce_worker_result(
+        &mut self,
+        result: SftpWorkerResult,
+        effects: &mut VecDeque<SftpWorkspaceEffect>,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        match result {
+            SftpWorkerResult::StartRemoteLoad { tab_id, node_id } => {
+                let Some((path, view_generation)) = self.start_remote_load(tab_id, &node_id) else {
+                    return false;
+                };
+                effects.push_back(SftpWorkspaceEffect::StartRemoteLoad {
+                    tab_id,
+                    node_id,
+                    path,
+                    view_generation,
+                });
+                true
+            }
+            SftpWorkerResult::RemoteList {
+                tab_id,
+                node_id,
+                view_generation,
+                session_id,
+                path,
+                result,
+            } => {
+                let outcome = self.apply_remote_list(
+                    tab_id,
+                    node_id,
+                    view_generation,
+                    session_id,
+                    path,
+                    result,
+                    cx,
+                );
+                if let Some((node_id, session_id, cwd)) = outcome.bind_session {
+                    effects.push_back(SftpWorkspaceEffect::BindSession {
+                        node_id,
+                        session_id,
+                        cwd,
+                    });
+                }
+                if let Some(node_id) = outcome.load_transfer_state_for {
+                    effects.push_back(SftpWorkspaceEffect::LoadBackgroundTransfers {
+                        node_id: node_id.clone(),
+                    });
+                    if self.begin_incomplete_transfer_load(node_id.clone()) {
+                        effects.push_back(SftpWorkspaceEffect::LoadIncompleteTransfers { node_id });
+                    }
+                }
+                self.push_remote_load_pending_effect(effects);
+                outcome.changed
+            }
+            SftpWorkerResult::RemotePathCompletion {
+                generation,
+                node_id,
+                parent_path,
+                result,
+            } => self.apply_remote_path_completion(generation, &node_id, &parent_path, result),
+            SftpWorkerResult::TransferProgress {
+                id,
+                transferred,
+                total,
+                speed,
+            } => self.apply_transfer_progress(id, transferred, total, speed),
+            SftpWorkerResult::TransferProtocolResolved { id, protocol } => {
+                self.apply_transfer_protocol(id, protocol)
+            }
+            SftpWorkerResult::TransferComplete {
+                node_id,
+                transfer_id,
+                id,
+                result,
+                refresh_remote,
+                refresh_local,
+            } => {
+                let success = result.is_ok();
+                effects.push_back(SftpWorkspaceEffect::TransferFinishedForReconnect {
+                    node_id: node_id.clone(),
+                    transfer_id,
+                    success,
+                });
+                let mut batch_update = None;
+                let should_refresh =
+                    if let Some(item) = self.transfers.iter_mut().find(|item| item.id == id) {
+                        let should_refresh = apply_tauri_transfer_completion(item, &result);
+                        batch_update = item.batch_id.map(|batch_id| (batch_id, item.state));
+                        should_refresh
+                    } else {
+                        success
+                    };
+                if let Some((batch_id, state)) = batch_update
+                    && let Some(batch) = self.complete_transfer_batch_item(batch_id, state)
+                {
+                    effects.push_back(SftpWorkspaceEffect::TransferBatchCompleted(batch));
+                }
+                if self.current_node_id.as_ref() == Some(&node_id) {
+                    if should_refresh && refresh_remote {
+                        self.request_remote_load();
+                        self.push_remote_load_pending_effect(effects);
+                    }
+                    if should_refresh && refresh_local {
+                        effects.push_back(SftpWorkspaceEffect::ReloadLocalDirectory {
+                            view_generation: self.view_generation,
+                            path: self.local_path.clone(),
+                        });
+                    }
+                    if self.begin_incomplete_transfer_load(node_id.clone()) {
+                        effects.push_back(SftpWorkspaceEffect::LoadIncompleteTransfers { node_id });
+                    }
+                }
+                true
+            }
+            SftpWorkerResult::ResumeIncompleteTransferLoaded {
+                node_id,
+                transfer_id,
+                result,
+            } => {
+                let launch = match result {
+                    Ok(progress) if progress.is_incomplete() => {
+                        let show_in_current_view = self.current_node_id.as_ref() == Some(&node_id);
+                        self.prepare_reconnect_resume(
+                            node_id.clone(),
+                            progress,
+                            show_in_current_view,
+                        )
+                    }
+                    Ok(_) | Err(_) => None,
+                };
+                if let Some(launch) = launch {
+                    effects.push_back(SftpWorkspaceEffect::StartTransfer(launch));
+                } else {
+                    effects.push_back(SftpWorkspaceEffect::TransferFinishedForReconnect {
+                        node_id,
+                        transfer_id,
+                        success: false,
+                    });
+                }
+                true
+            }
+            SftpWorkerResult::RemoteMutationComplete {
+                result,
+                refresh_remote,
+                refresh_local,
+                toast,
+            } => {
+                match result {
+                    Ok(()) => {
+                        if let Some(toast) = toast {
+                            effects.push_back(SftpWorkspaceEffect::Toast {
+                                title: toast.success_title,
+                                description: toast.success_description,
+                                variant: TerminalNoticeVariant::Success,
+                            });
+                        }
+                    }
+                    Err(error) => {
+                        if let Some(toast) = toast {
+                            effects.push_back(SftpWorkspaceEffect::Toast {
+                                title: toast.error_title,
+                                description: Some(error),
+                                variant: TerminalNoticeVariant::Error,
+                            });
+                        } else {
+                            self.init_error = Some(error);
+                        }
+                    }
+                }
+                if refresh_remote {
+                    self.request_remote_load();
+                    self.push_remote_load_pending_effect(effects);
+                }
+                if refresh_local {
+                    effects.push_back(SftpWorkspaceEffect::ReloadLocalDirectory {
+                        view_generation: self.view_generation,
+                        path: self.local_path.clone(),
+                    });
+                }
+                true
+            }
+            SftpWorkerResult::IncompleteTransfersLoaded { node_id, result } => {
+                let (changed, next_load) = self.apply_incomplete_transfers(&node_id, result);
+                if let Some(node_id) = next_load {
+                    effects.push_back(SftpWorkspaceEffect::LoadIncompleteTransfers { node_id });
+                }
+                changed
+            }
+            SftpWorkerResult::BackgroundTransfersLoaded { node_id, result } => {
+                if self.current_node_id.as_ref() != Some(&node_id) {
+                    return false;
+                }
+                match result {
+                    Ok(snapshots) => {
+                        for snapshot in snapshots {
+                            self.upsert_background_transfer_snapshot(snapshot);
+                        }
+                    }
+                    Err(error) => {
+                        self.init_error = Some(error);
+                    }
+                }
+                true
+            }
+            SftpWorkerResult::PreviewLoaded {
+                generation,
+                path,
+                result,
+            } => self.apply_preview_loaded(generation, path, result, cx),
+            SftpWorkerResult::PreviewHexLoaded {
+                generation,
+                path,
+                error_prefix,
+                result,
+            } => self.apply_preview_hex_loaded(generation, &path, result, &error_prefix),
+            SftpWorkerResult::PreviewSaved {
+                generation,
+                path,
+                content,
+                network_error_message,
+                result,
+            } => {
+                let (changed, refresh_remote) = self.apply_preview_saved(
+                    generation,
+                    path,
+                    content,
+                    result,
+                    &network_error_message,
+                    cx,
+                );
+                if refresh_remote {
+                    self.request_remote_load();
+                    self.push_remote_load_pending_effect(effects);
+                }
+                changed
+            }
+            SftpWorkerResult::LocalFilesLoaded {
+                view_generation,
+                path,
+                files,
+            } => {
+                if self.view_generation != view_generation || self.local_path != path {
+                    return false;
+                }
+                self.local_files = files;
+                true
+            }
+        }
+    }
+
+    fn push_remote_load_pending_effect(&self, effects: &mut VecDeque<SftpWorkspaceEffect>) {
+        if self.remote_load_pending
+            && !self.remote_load_inflight
+            && let (Some(tab_id), Some(node_id)) =
+                (self.current_tab_id, self.current_node_id.clone())
+        {
+            effects.push_back(SftpWorkspaceEffect::RemoteLoadPending { tab_id, node_id });
+        }
     }
 }
 
@@ -393,24 +658,20 @@ impl WorkspaceApp {
         else {
             return false;
         };
-        self.start_sftp_remote_load(tab_id, node_id, path, view_generation, cx);
+        let delivery = self.sftp_view.read(cx).worker_sender();
+        self.spawn_sftp_remote_load(tab_id, node_id, path, view_generation, delivery);
         true
     }
 
-    fn start_sftp_remote_load(
-        &mut self,
+    fn spawn_sftp_remote_load(
+        &self,
         tab_id: TabId,
         node_id: NodeId,
         path: String,
         view_generation: u64,
-        cx: &mut Context<Self>,
+        tx: delivery::ActiveDeliverySender<SftpWorkerResult>,
     ) {
         let session_id = format!("node:{}:sftp", node_id.0);
-        self.sftp_view.update(cx, |sftp, _cx| {
-            sftp.init_error = None;
-        });
-
-        let tx = self.sftp_view.read(cx).worker_sender();
         let runtime = self.forwarding_runtime.clone();
         let router = self.node_router.clone();
         runtime.spawn(async move {
@@ -428,293 +689,116 @@ impl WorkspaceApp {
                 result,
             });
         });
-        cx.notify();
     }
 
-    pub(in crate::workspace) fn apply_sftp_worker_results(&mut self, cx: &mut Context<Self>) {
-        let results = self
-            .sftp_view
-            .update(cx, |sftp, _cx| sftp.take_worker_results());
-        for result in results {
-            self.handle_sftp_worker_result(result, cx);
-        }
-    }
-
-    fn handle_sftp_worker_result(&mut self, result: SftpWorkerResult, cx: &mut Context<Self>) {
-        let changed = {
-            let mut changed = false;
-            match result {
-                SftpWorkerResult::RemoteList {
-                    tab_id,
+    pub(in crate::workspace) fn handle_sftp_worker_effects(
+        &mut self,
+        effect_batch: &SftpWorkspaceEffects,
+        cx: &mut Context<Self>,
+    ) {
+        let delivery = effect_batch.delivery();
+        for effect in effect_batch.take() {
+            match effect {
+                SftpWorkspaceEffect::BindSession {
                     node_id,
-                    view_generation,
                     session_id,
-                    path,
-                    result,
+                    cwd,
                 } => {
-                    let outcome = self.sftp_view.update(cx, |sftp, cx| {
-                        sftp.apply_remote_list(
-                            tab_id,
-                            node_id,
-                            view_generation,
-                            session_id,
-                            path,
-                            result,
-                            cx,
-                        )
-                    });
-                    changed |= outcome.changed;
-                    if let Some((node_id, session_id, cwd)) = outcome.bind_session
-                        && let Ok(event) =
-                            self.node_router
-                                .bind_sftp_session(&node_id, session_id, Some(cwd))
+                    if let Ok(event) =
+                        self.node_router
+                            .bind_sftp_session(&node_id, session_id, Some(cwd))
                     {
                         // Binding only reports node-owned readiness. It never
                         // grants SFTP authority to start or stop the SSH link.
                         self.emit_node_event(event);
                     }
-                    if let Some(node_id) = outcome.load_transfer_state_for {
-                        self.spawn_sftp_background_transfer_load(node_id.clone(), cx);
-                        self.spawn_sftp_incomplete_load(node_id, cx);
+                }
+                SftpWorkspaceEffect::LoadBackgroundTransfers { node_id } => {
+                    self.spawn_sftp_background_transfer_load_with_sender(node_id, delivery.clone());
+                }
+                SftpWorkspaceEffect::LoadIncompleteTransfers { node_id } => {
+                    self.spawn_sftp_incomplete_load_with_sender(node_id, delivery.clone());
+                }
+                SftpWorkspaceEffect::RemoteLoadPending { tab_id, node_id } => {
+                    if self.sftp_tab_is_visible(tab_id, &node_id) {
+                        let _ =
+                            delivery.send(SftpWorkerResult::StartRemoteLoad { tab_id, node_id });
                     }
-                    self.maybe_start_sftp_remote_load(cx);
                 }
-                SftpWorkerResult::RemotePathCompletion {
-                    generation,
+                SftpWorkspaceEffect::StartRemoteLoad {
+                    tab_id,
                     node_id,
-                    parent_path,
-                    result,
+                    path,
+                    view_generation,
                 } => {
-                    changed |= self.sftp_view.update(cx, |sftp, _cx| {
-                        sftp.apply_remote_path_completion(
-                            generation,
-                            &node_id,
-                            &parent_path,
-                            result,
-                        )
-                    });
+                    self.spawn_sftp_remote_load(
+                        tab_id,
+                        node_id,
+                        path,
+                        view_generation,
+                        delivery.clone(),
+                    );
                 }
-                SftpWorkerResult::TransferProgress {
-                    id,
-                    transferred,
-                    total,
-                    speed,
-                    state: _state,
-                    error: _error,
-                } => {
-                    changed |= self.sftp_view.update(cx, |sftp, _cx| {
-                        sftp.apply_transfer_progress(id, transferred, total, speed)
-                    });
-                }
-                SftpWorkerResult::TransferProtocolResolved { id, protocol } => {
-                    changed |= self
-                        .sftp_view
-                        .update(cx, |sftp, _cx| sftp.apply_transfer_protocol(id, protocol));
-                }
-                SftpWorkerResult::TransferComplete {
+                SftpWorkspaceEffect::TransferFinishedForReconnect {
                     node_id,
                     transfer_id,
-                    id,
-                    result,
-                    refresh_remote,
-                    refresh_local,
+                    success,
                 } => {
                     self.on_sftp_transfer_finished_for_reconnect(
                         &node_id,
                         &transfer_id,
-                        result.is_ok(),
+                        success,
                         cx,
                     );
-                    let (should_refresh, batch_update, active_sftp_node, local_path) =
-                        self.sftp_view.update(cx, |sftp, _cx| {
-                            let mut batch_update = None;
-                            let should_refresh = if let Some(item) =
-                                sftp.transfers.iter_mut().find(|item| item.id == id)
-                            {
-                                let should_refresh = apply_tauri_transfer_completion(item, &result);
-                                batch_update = item.batch_id.map(|batch_id| (batch_id, item.state));
-                                should_refresh
-                            } else {
-                                result.is_ok()
-                            };
-                            (
-                                should_refresh,
-                                batch_update,
-                                sftp.current_node_id.clone(),
-                                sftp.local_path.clone(),
-                            )
-                        });
-                    if let Some((batch_id, state)) = batch_update {
-                        self.update_sftp_transfer_batch_toast(batch_id, state, cx);
-                    }
-                    if active_sftp_node.as_ref() == Some(&node_id)
-                        && should_refresh
-                        && refresh_remote
-                    {
-                        self.request_sftp_remote_load(cx);
-                    }
-                    if active_sftp_node.as_ref() == Some(&node_id)
-                        && should_refresh
-                        && refresh_local
-                        && let Ok(files) = list_local_files(&local_path)
-                    {
-                        self.sftp_view.update(cx, |sftp, cx| {
-                            sftp.local_files = files;
-                            cx.notify();
-                        });
-                    }
-                    if let Some(node_id) = active_sftp_node {
-                        self.spawn_sftp_incomplete_load(node_id, cx);
-                    }
-                    changed = true;
                 }
-                SftpWorkerResult::ResumeIncompleteTransferLoaded {
-                    node_id,
-                    transfer_id,
-                    result,
+                SftpWorkspaceEffect::TransferBatchCompleted(batch) => {
+                    self.show_sftp_transfer_batch_toast(batch);
+                }
+                SftpWorkspaceEffect::StartTransfer(launch) => {
+                    self.spawn_sftp_transfer_launch_with_sender(launch, delivery.clone());
+                }
+                SftpWorkspaceEffect::Toast {
+                    title,
+                    description,
+                    variant,
                 } => {
-                    match result {
-                        Ok(progress) if progress.is_incomplete() => {
-                            if !self.queue_sftp_resume_transfer_for_node(
-                                node_id.clone(),
-                                progress,
-                                cx,
-                            ) {
-                                self.on_sftp_transfer_finished_for_reconnect(
-                                    &node_id,
-                                    &transfer_id,
-                                    false,
-                                    cx,
-                                );
-                            }
-                        }
-                        Ok(_) | Err(_) => {
-                            self.on_sftp_transfer_finished_for_reconnect(
-                                &node_id,
-                                &transfer_id,
-                                false,
-                                cx,
-                            );
-                        }
-                    }
-                    changed = true;
+                    self.push_sftp_toast(title, description, variant);
                 }
-                SftpWorkerResult::RemoteMutationComplete {
-                    result,
-                    refresh_remote,
-                    refresh_local,
-                    toast,
-                } => {
-                    match result {
-                        Ok(()) => {
-                            if let Some(toast) = toast {
-                                self.push_sftp_toast(
-                                    toast.success_title,
-                                    toast.success_description,
-                                    TerminalNoticeVariant::Success,
-                                );
-                            }
-                        }
-                        Err(error) => {
-                            if let Some(toast) = toast {
-                                self.push_sftp_toast(
-                                    toast.error_title,
-                                    Some(error),
-                                    TerminalNoticeVariant::Error,
-                                );
-                            } else {
-                                self.sftp_view.update(cx, |sftp, cx| {
-                                    sftp.init_error = Some(error);
-                                    cx.notify();
-                                });
-                            }
-                        }
-                    }
-                    if refresh_remote {
-                        self.request_sftp_remote_load(cx);
-                    }
-                    let local_path = self.sftp_view.read(cx).local_path.clone();
-                    if refresh_local && let Ok(files) = list_local_files(&local_path) {
-                        self.sftp_view.update(cx, |sftp, cx| {
-                            sftp.local_files = files;
-                            cx.notify();
-                        });
-                    }
-                    changed = true;
-                }
-                SftpWorkerResult::IncompleteTransfersLoaded { node_id, result } => {
-                    changed |= self.sftp_view.update(cx, |sftp, _cx| {
-                        sftp.apply_incomplete_transfers(&node_id, result)
-                    });
-                }
-                SftpWorkerResult::BackgroundTransfersLoaded { node_id, result } => {
-                    if self.sftp_view.read(cx).current_node_id.as_ref() != Some(&node_id) {
-                        return;
-                    }
-                    match result {
-                        Ok(snapshots) => {
-                            for snapshot in snapshots {
-                                self.upsert_sftp_background_transfer_snapshot(snapshot, cx);
-                            }
-                        }
-                        Err(error) => {
-                            self.sftp_view.update(cx, |sftp, cx| {
-                                sftp.init_error = Some(error);
-                                cx.notify();
-                            });
-                        }
-                    }
-                    changed = true;
-                }
-                SftpWorkerResult::PreviewLoaded {
-                    generation,
+                SftpWorkspaceEffect::ReloadLocalDirectory {
+                    view_generation,
                     path,
-                    result,
                 } => {
-                    changed |= self.sftp_view.update(cx, |sftp, cx| {
-                        sftp.apply_preview_loaded(generation, path, result, cx)
-                    });
-                }
-                SftpWorkerResult::PreviewHexLoaded {
-                    generation,
-                    path,
-                    offset: _offset,
-                    result,
-                } => {
-                    let error_prefix = self.i18n.t("sftp.toast.load_more_failed");
-                    changed |= self.sftp_view.update(cx, |sftp, _cx| {
-                        sftp.apply_preview_hex_loaded(generation, &path, result, &error_prefix)
-                    });
-                }
-                SftpWorkerResult::PreviewSaved {
-                    generation,
-                    path,
-                    content,
-                    encoding: _encoding,
-                    result,
-                } => {
-                    let network_error_message = self.i18n.t("sftp.preview.network_error");
-                    let (result_changed, refresh_remote) = self.sftp_view.update(cx, |sftp, cx| {
-                        sftp.apply_preview_saved(
-                            generation,
+                    if let Ok(files) = list_local_files(&path) {
+                        let _ = delivery.send(SftpWorkerResult::LocalFilesLoaded {
+                            view_generation,
                             path,
-                            content,
-                            result,
-                            &network_error_message,
-                            cx,
-                        )
-                    });
-                    changed |= result_changed;
-                    if refresh_remote {
-                        self.request_sftp_remote_load(cx);
+                            files,
+                        });
                     }
                 }
             }
-            changed
-        };
-        if changed {
-            cx.notify();
         }
+        cx.notify();
+    }
+
+    pub(in crate::workspace) fn request_visible_sftp_remote_load(
+        &self,
+        tab_id: TabId,
+        node_id: NodeId,
+        delivery: delivery::ActiveDeliverySender<SftpWorkerResult>,
+    ) {
+        if self.sftp_tab_is_visible(tab_id, &node_id) {
+            let _ = delivery.send(SftpWorkerResult::StartRemoteLoad { tab_id, node_id });
+        }
+    }
+
+    fn sftp_tab_is_visible(&self, tab_id: TabId, node_id: &NodeId) -> bool {
+        self.main_window_tabs.active_tab_id == Some(tab_id)
+            && self
+                .tabs
+                .iter()
+                .any(|tab| tab.id == tab_id && tab.kind == TabKind::Sftp)
+            && self.sftp_tab_nodes.get(&tab_id) == Some(node_id)
     }
 
     pub(in crate::workspace) fn apply_sftp_ready_event(
@@ -782,30 +866,41 @@ impl SftpWorkspaceEntity {
         &mut self,
         node_id: &NodeId,
         result: Result<Vec<StoredTransferProgress>, String>,
-    ) -> bool {
-        if self.current_node_id.as_ref() != Some(node_id) {
-            return false;
+    ) -> (bool, Option<NodeId>) {
+        if self.incomplete_load_node.as_ref() != Some(node_id) {
+            return (false, None);
         }
         self.incomplete_load_inflight = false;
-        match result {
-            Ok(transfers) => {
-                self.incomplete_transfers = transfers
-                    .into_iter()
-                    .filter(StoredTransferProgress::is_incomplete)
-                    .collect();
-                if self.incomplete_transfers.is_empty() {
+        self.incomplete_load_node = None;
+        if self.current_node_id.as_ref() == Some(node_id) {
+            match result {
+                Ok(transfers) => {
+                    self.incomplete_transfers = transfers
+                        .into_iter()
+                        .filter(StoredTransferProgress::is_incomplete)
+                        .collect();
+                    if self.incomplete_transfers.is_empty() {
+                        self.show_incomplete = false;
+                    }
+                }
+                Err(error) => {
+                    if !is_sftp_incomplete_store_compat_error(&error) {
+                        self.init_error = Some(error);
+                    }
+                    self.incomplete_transfers.clear();
                     self.show_incomplete = false;
                 }
             }
-            Err(error) => {
-                if !is_sftp_incomplete_store_compat_error(&error) {
-                    self.init_error = Some(error);
-                }
-                self.incomplete_transfers.clear();
-                self.show_incomplete = false;
-            }
         }
-        true
+        let next_load = self
+            .incomplete_load_pending_node
+            .take()
+            .filter(|pending| self.current_node_id.as_ref() == Some(pending));
+        if let Some(node_id) = next_load.as_ref() {
+            self.incomplete_load_inflight = true;
+            self.incomplete_load_node = Some(node_id.clone());
+        }
+        (true, next_load)
     }
 
     fn apply_preview_loaded(

@@ -34,8 +34,8 @@ use oxideterm_sftp::{
     ListFilter as RemoteListFilter, PreviewContent, SftpError, SftpSession, SftpTransferGuard,
     SortOrder as RemoteSortOrder, StoredTransferProgress, TarCapabilities,
     TransferDirection as SftpTransferDirection, TransferProgress,
-    TransferProtocol as RemoteTransferProtocol, TransferState as RemoteTransferState,
-    TransferStrategy as RemoteTransferStrategy, TransferType as RemoteTransferType,
+    TransferProtocol as RemoteTransferProtocol, TransferStrategy as RemoteTransferStrategy,
+    TransferType as RemoteTransferType,
     encode_to_encoding, scp_download_directory, scp_download_file, scp_upload_directory,
     scp_upload_file, tar_download_directory, tar_upload_directory,
 };
@@ -243,6 +243,10 @@ pub(super) struct SftpMutationToast {
 
 #[derive(Debug)]
 pub(super) enum SftpWorkerResult {
+    StartRemoteLoad {
+        tab_id: TabId,
+        node_id: NodeId,
+    },
     RemoteList {
         tab_id: TabId,
         node_id: NodeId,
@@ -262,8 +266,6 @@ pub(super) enum SftpWorkerResult {
         transferred: u64,
         total: u64,
         speed: u64,
-        state: SftpTransferState,
-        error: Option<String>,
     },
     TransferProtocolResolved {
         id: u64,
@@ -304,27 +306,96 @@ pub(super) enum SftpWorkerResult {
     PreviewHexLoaded {
         generation: u64,
         path: String,
-        offset: u64,
+        error_prefix: String,
         result: Result<PreviewContent, String>,
     },
     PreviewSaved {
         generation: u64,
         path: String,
         content: Arc<str>,
-        encoding: Arc<str>,
+        network_error_message: String,
         result: Result<SftpPreviewSaveResult, String>,
+    },
+    LocalFilesLoaded {
+        view_generation: u64,
+        path: String,
+        files: Vec<SftpFileEntry>,
     },
 }
 
+// Effects contain only stable identifiers, non-secret display errors, and
+// owned runtime intents. Authentication material never crosses this boundary.
+pub(in crate::workspace::sftp) enum SftpWorkspaceEffect {
+    BindSession {
+        node_id: NodeId,
+        session_id: String,
+        cwd: String,
+    },
+    LoadBackgroundTransfers {
+        node_id: NodeId,
+    },
+    LoadIncompleteTransfers {
+        node_id: NodeId,
+    },
+    RemoteLoadPending {
+        tab_id: TabId,
+        node_id: NodeId,
+    },
+    StartRemoteLoad {
+        tab_id: TabId,
+        node_id: NodeId,
+        path: String,
+        view_generation: u64,
+    },
+    TransferFinishedForReconnect {
+        node_id: NodeId,
+        transfer_id: String,
+        success: bool,
+    },
+    TransferBatchCompleted(SftpTransferBatch),
+    StartTransfer(SftpTransferLaunch),
+    Toast {
+        title: String,
+        description: Option<String>,
+        variant: TerminalNoticeVariant,
+    },
+    ReloadLocalDirectory {
+        view_generation: u64,
+        path: String,
+    },
+}
+
+pub(super) struct SftpWorkspaceEffects {
+    delivery: delivery::ActiveDeliverySender<SftpWorkerResult>,
+    effects: RefCell<VecDeque<SftpWorkspaceEffect>>,
+}
+
+impl SftpWorkspaceEffects {
+    pub(in crate::workspace::sftp) fn delivery(
+        &self,
+    ) -> &delivery::ActiveDeliverySender<SftpWorkerResult> {
+        &self.delivery
+    }
+
+    pub(in crate::workspace::sftp) fn take(&self) -> VecDeque<SftpWorkspaceEffect> {
+        std::mem::take(&mut *self.effects.borrow_mut())
+    }
+}
+
 pub(super) enum SftpWorkspaceEvent {
-    WorkerResultsReady,
-    RemoteLoadReady,
+    WorkerEffectsReady(SftpWorkspaceEffects),
+    RemoteLoadReady {
+        tab_id: TabId,
+        node_id: NodeId,
+        delivery: delivery::ActiveDeliverySender<SftpWorkerResult>,
+    },
     PreviewSaveRequested {
         path: String,
         content: Arc<str>,
         encoding: Arc<str>,
         line_ending: TextLineEnding,
         generation: u64,
+        delivery: delivery::ActiveDeliverySender<SftpWorkerResult>,
     },
 }
 
@@ -535,7 +606,7 @@ mod directory_progress_tests {
             remote_path: format!("/remote/{file_name}"),
             local_path: format!("/local/{file_name}"),
             direction: SftpTransferDirection::Download,
-            state: RemoteTransferState::InProgress,
+            state: oxideterm_sftp::TransferState::InProgress,
             total_bytes,
             transferred_bytes,
             speed: u64::MAX,
@@ -748,6 +819,8 @@ pub(super) struct SftpWorkspaceEntity {
     incomplete_transfer_list_state: ListState,
     incomplete_transfer_list_cache: RefCell<VirtualListSignatureCache>,
     incomplete_load_inflight: bool,
+    incomplete_load_node: Option<NodeId>,
+    incomplete_load_pending_node: Option<NodeId>,
     show_incomplete: bool,
     context_menu: Option<SftpContextMenu>,
     context_menu_presence: oxideterm_gpui_ui::motion::ExitPresence,
@@ -761,7 +834,6 @@ pub(super) struct SftpWorkspaceEntity {
     next_transfer_batch_id: u64,
     worker_tx: delivery::ActiveDeliverySender<SftpWorkerResult>,
     worker_rx: std::sync::mpsc::Receiver<SftpWorkerResult>,
-    worker_results: VecDeque<SftpWorkerResult>,
 }
 
 impl Default for SftpWorkspaceEntity {
@@ -885,6 +957,8 @@ impl Default for SftpWorkspaceEntity {
             .measure_all(),
             incomplete_transfer_list_cache: RefCell::new(VirtualListSignatureCache::default()),
             incomplete_load_inflight: false,
+            incomplete_load_node: None,
+            incomplete_load_pending_node: None,
             show_incomplete: false,
             context_menu: None,
             context_menu_presence: oxideterm_gpui_ui::motion::ExitPresence::visible(),
@@ -898,7 +972,6 @@ impl Default for SftpWorkspaceEntity {
             next_transfer_batch_id: 1,
             worker_tx,
             worker_rx,
-            worker_results: VecDeque::new(),
         }
     }
 }
@@ -915,10 +988,6 @@ impl SftpWorkspaceEntity {
     ) -> delivery::ActiveDeliverySender<SftpWorkerResult> {
         // Background operations receive only the shallow delivery endpoint.
         self.worker_tx.clone()
-    }
-
-    pub(in crate::workspace) fn take_worker_results(&mut self) -> VecDeque<SftpWorkerResult> {
-        std::mem::take(&mut self.worker_results)
     }
 
     fn schedule_worker_delivery(&self, cx: &mut Context<Self>) {
@@ -955,9 +1024,22 @@ impl SftpWorkspaceEntity {
     fn drain_worker_results(&mut self, cx: &mut Context<Self>) -> bool {
         let delivery_batch =
             delivery::drain_channel(&self.worker_rx, delivery::LIFECYCLE_DELIVERY_BUDGET);
-        if !delivery_batch.items.is_empty() {
-            self.worker_results.extend(delivery_batch.items);
-            cx.emit(SftpWorkspaceEvent::WorkerResultsReady);
+        let mut effects = VecDeque::new();
+        let mut changed = false;
+        for result in delivery_batch.items {
+            changed |= self.reduce_worker_result(result, &mut effects, cx);
+        }
+        if changed {
+            cx.notify();
+        }
+        if !effects.is_empty() {
+            // State is fully reduced before observers can consume cross-system work.
+            cx.emit(SftpWorkspaceEvent::WorkerEffectsReady(
+                SftpWorkspaceEffects {
+                    delivery: self.worker_tx.clone(),
+                    effects: RefCell::new(effects),
+                },
+            ));
         }
         delivery_batch.outcome.backlog_remaining
     }
@@ -1196,27 +1278,126 @@ mod entity_delivery_tests {
     use gpui::TestAppContext;
     use std::sync::{
         Arc,
-        atomic::{AtomicUsize, Ordering},
+        atomic::{AtomicBool, AtomicUsize, Ordering},
     };
 
     fn completion(index: usize) -> SftpWorkerResult {
-        SftpWorkerResult::RemotePathCompletion {
-            generation: index as u64,
-            node_id: NodeId("delivery-test".to_string()),
-            parent_path: "/".to_string(),
-            result: Ok(Vec::new()),
+        SftpWorkerResult::RemoteMutationComplete {
+            result: Ok(()),
+            refresh_remote: false,
+            refresh_local: false,
+            toast: Some(SftpMutationToast {
+                success_title: format!("completed-{index}"),
+                success_description: None,
+                error_title: "unused".to_string(),
+            }),
         }
+    }
+
+    fn transfer_item() -> SftpTransferItem {
+        SftpTransferItem {
+            id: 1,
+            transfer_id: "transfer-1".to_string(),
+            batch_id: None,
+            node_id: NodeId::new("delivery-test"),
+            name: "file.txt".to_string(),
+            local_path: "/tmp/file.txt".to_string(),
+            remote_path: "/file.txt".to_string(),
+            direction: SftpTransferDirection::Upload,
+            protocol: RemoteTransferProtocol::Sftp,
+            size: 10,
+            transferred: 0,
+            speed: 0,
+            state: SftpTransferState::Pending,
+            error: None,
+        }
+    }
+
+    #[gpui::test]
+    fn worker_state_is_applied_before_effect_event(cx: &mut TestAppContext) {
+        let entity = cx.new(SftpWorkspaceEntity::new);
+        entity.update(cx, |sftp, _cx| sftp.transfers.push(transfer_item()));
+        let observed_completed_state = Arc::new(AtomicBool::new(false));
+        let observed_state = observed_completed_state.clone();
+        let _subscription = entity.update(cx, |_, cx| {
+            cx.subscribe(&entity, move |sftp, _, event: &SftpWorkspaceEvent, _cx| {
+                if let SftpWorkspaceEvent::WorkerEffectsReady(effects) = event {
+                    observed_state.store(
+                        sftp.transfers[0].state == SftpTransferState::Completed,
+                        Ordering::Release,
+                    );
+                    let _ = effects.take();
+                }
+            })
+        });
+        let sender = cx.read(|cx| entity.read(cx).worker_sender());
+
+        sender
+            .send(SftpWorkerResult::TransferComplete {
+                node_id: NodeId::new("delivery-test"),
+                transfer_id: "transfer-1".to_string(),
+                id: 1,
+                result: Ok(()),
+                refresh_remote: false,
+                refresh_local: false,
+            })
+            .expect("SFTP completion delivery");
+        cx.run_until_parked();
+
+        assert!(observed_completed_state.load(Ordering::Acquire));
+    }
+
+    #[gpui::test]
+    fn stale_remote_list_result_does_not_emit_effect(cx: &mut TestAppContext) {
+        let entity = cx.new(SftpWorkspaceEntity::new);
+        entity.update(cx, |sftp, _cx| {
+            sftp.current_tab_id = Some(TabId(1));
+            sftp.current_node_id = Some(NodeId::new("current-node"));
+            sftp.view_generation = 2;
+            sftp.remote_load_inflight = true;
+        });
+        let effect_events = Arc::new(AtomicUsize::new(0));
+        let observed_events = effect_events.clone();
+        let _subscription = entity.update(cx, |_, cx| {
+            cx.subscribe(&entity, move |_, _, event: &SftpWorkspaceEvent, _cx| {
+                if matches!(event, SftpWorkspaceEvent::WorkerEffectsReady(_)) {
+                    observed_events.fetch_add(1, Ordering::AcqRel);
+                }
+            })
+        });
+        let sender = cx.read(|cx| entity.read(cx).worker_sender());
+
+        sender
+            .send(SftpWorkerResult::RemoteList {
+                tab_id: TabId(1),
+                node_id: NodeId::new("current-node"),
+                view_generation: 1,
+                session_id: "stale-session".to_string(),
+                path: "/stale".to_string(),
+                result: Ok(RemoteSftpListing {
+                    cwd: "/stale".to_string(),
+                    files: Vec::new(),
+                }),
+            })
+            .expect("stale SFTP delivery");
+        cx.run_until_parked();
+
+        assert_eq!(effect_events.load(Ordering::Acquire), 0);
+        cx.read(|cx| assert!(!entity.read(cx).remote_load_inflight));
     }
 
     #[gpui::test]
     fn hidden_entity_drains_backlog_by_budget_and_stops_on_release(cx: &mut TestAppContext) {
         let entity = cx.new(SftpWorkspaceEntity::new);
         let ready_events = Arc::new(AtomicUsize::new(0));
+        let delivered_effects = Arc::new(AtomicUsize::new(0));
         let observed_events = ready_events.clone();
+        let observed_effects = delivered_effects.clone();
         let _subscription = entity.update(cx, |_, cx| {
             cx.subscribe(&entity, move |_, _, event: &SftpWorkspaceEvent, _cx| {
-                if matches!(event, SftpWorkspaceEvent::WorkerResultsReady) {
+                if let SftpWorkspaceEvent::WorkerEffectsReady(effects) = event {
                     observed_events.fetch_add(1, Ordering::AcqRel);
+                    observed_effects.fetch_add(effects.take().len(), Ordering::AcqRel);
                 }
             })
         });
@@ -1231,9 +1412,7 @@ mod entity_delivery_tests {
         }
         cx.run_until_parked();
 
-        entity.update(cx, |entity, _cx| {
-            assert_eq!(entity.take_worker_results().len(), 130);
-        });
+        assert_eq!(delivered_effects.load(Ordering::Acquire), 130);
         assert!(ready_events.load(Ordering::Acquire) >= 3);
 
         drop(entity);
@@ -1255,7 +1434,7 @@ mod surface;
 mod transfers;
 
 // Re-export only the cross-module helpers needed by the SFTP facade and its children.
-pub(in crate::workspace::sftp) use actions::sftp_extract_archive_kind;
+pub(in crate::workspace::sftp) use actions::{SftpTransferLaunch, sftp_extract_archive_kind};
 use helpers::{
     diff_cell, format_conflict_modified, format_file_size, format_modified, format_sftp_media_time,
     format_transfer_speed, home_path, is_sftp_incomplete_store_compat_error, join_local_path,
@@ -1268,6 +1447,5 @@ use helpers::{
     sftp_editor_language_id, sftp_file_name, sftp_hover_bg, sftp_panel_bg, sftp_path_segments,
     sftp_preview_editor_is_network_error, sftp_preview_is_markdown, sftp_preview_visual_lines,
     sftp_source_not_newer_than_target, sftp_transfer_conflicts,
-    sftp_transfer_state_from_background, sftp_transfer_state_from_remote, sorted_sftp_files,
-    unique_sftp_conflict_name,
+    sftp_transfer_state_from_background, sorted_sftp_files, unique_sftp_conflict_name,
 };

@@ -240,19 +240,6 @@ impl WorkspaceApp {
         self.close_sftp_dialog(cx);
     }
 
-    pub(in crate::workspace) fn report_sftp_preview_save_unavailable(
-        &mut self,
-        cx: &mut Context<Self>,
-    ) {
-        let error = self.i18n.t("sftp.errors.connection_lost");
-        self.sftp_view.update(cx, |sftp, cx| {
-            sftp.preview_editor_saving = false;
-            sftp.preview_editor_network_error = true;
-            sftp.preview_editor_save_error = Some(error);
-            cx.notify();
-        });
-    }
-
     pub(in crate::workspace::sftp) fn download_sftp_preview(
         &mut self,
         name: &str,
@@ -458,13 +445,14 @@ impl WorkspaceApp {
         };
         let router = self.node_router.clone();
         let tx = self.sftp_view.read(cx).worker_sender();
+        let error_prefix = self.i18n.t("sftp.toast.load_more_failed");
         let runtime = self.forwarding_runtime.clone();
         runtime.spawn(async move {
             let result = load_remote_sftp_preview_hex(router, &node_id, &path, offset).await;
             let _ = tx.send(SftpWorkerResult::PreviewHexLoaded {
                 generation,
                 path,
-                offset,
+                error_prefix,
                 result,
             });
         });
@@ -477,7 +465,7 @@ impl WorkspaceApp {
         encoding: Arc<str>,
         line_ending: TextLineEnding,
         generation: u64,
-        cx: &App,
+        tx: delivery::ActiveDeliverySender<SftpWorkerResult>,
     ) -> bool {
         let Some(tab_id) = self.main_window_tabs.active_tab_id else {
             return false;
@@ -486,7 +474,7 @@ impl WorkspaceApp {
             return false;
         };
         let router = self.node_router.clone();
-        let tx = self.sftp_view.read(cx).worker_sender();
+        let network_error_message = self.i18n.t("sftp.preview.network_error");
         let runtime = self.forwarding_runtime.clone();
         runtime.spawn(async move {
             let result = save_remote_sftp_preview(
@@ -502,7 +490,7 @@ impl WorkspaceApp {
                 generation,
                 path,
                 content,
-                encoding,
+                network_error_message,
                 result,
             });
         });
@@ -554,6 +542,7 @@ impl SftpWorkspaceEntity {
             encoding: Arc::<str>::from(self.preview_editor_encoding.as_str()),
             line_ending: self.preview_editor_line_ending,
             generation: self.preview_generation,
+            delivery: self.worker_tx.clone(),
         });
         cx.notify();
     }

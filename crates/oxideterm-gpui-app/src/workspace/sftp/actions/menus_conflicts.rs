@@ -314,11 +314,10 @@ impl SftpWorkspaceEntity {
         }
     }
 
-    fn complete_transfer_batch_item(
+    pub(in crate::workspace::sftp) fn complete_transfer_batch_item(
         &mut self,
         batch_id: u64,
         state: SftpTransferState,
-        cx: &mut Context<Self>,
     ) -> Option<SftpTransferBatch> {
         let batch = self.transfer_batches.get_mut(&batch_id)?;
         match state {
@@ -327,12 +326,9 @@ impl SftpWorkspaceEntity {
             _ => return None,
         }
         if batch.success + batch.failed < batch.total {
-            cx.notify();
             return None;
         }
-        let completed = self.transfer_batches.remove(&batch_id);
-        cx.notify();
-        completed
+        self.transfer_batches.remove(&batch_id)
     }
 }
 
@@ -635,17 +631,10 @@ impl WorkspaceApp {
         self.close_sftp_dialog(cx);
     }
 
-    pub(in crate::workspace::sftp) fn update_sftp_transfer_batch_toast(
-        &mut self,
-        batch_id: u64,
-        state: SftpTransferState,
-        cx: &mut Context<Self>,
+    pub(in crate::workspace::sftp) fn show_sftp_transfer_batch_toast(
+        &self,
+        batch: SftpTransferBatch,
     ) {
-        let Some(batch) = self.sftp_view.update(cx, |sftp, cx| {
-            sftp.complete_transfer_batch_item(batch_id, state, cx)
-        }) else {
-            return;
-        };
         let is_upload = batch.direction == SftpTransferDirection::Upload;
         let only_queued_directory_transfers =
             batch.queued > 0 && batch.queued == batch.success && batch.failed == 0;

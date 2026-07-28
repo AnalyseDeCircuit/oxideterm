@@ -196,8 +196,8 @@ impl WorkspaceApp {
             &sftp_view,
             |workspace, _sftp, event: &sftp::SftpWorkspaceEvent, cx| {
                 match event {
-                    sftp::SftpWorkspaceEvent::WorkerResultsReady => {
-                        workspace.apply_sftp_worker_results(cx);
+                    sftp::SftpWorkspaceEvent::WorkerEffectsReady(effects) => {
+                        workspace.handle_sftp_worker_effects(effects, cx);
                     }
                     sftp::SftpWorkspaceEvent::PreviewSaveRequested {
                         path,
@@ -205,6 +205,7 @@ impl WorkspaceApp {
                         encoding,
                         line_ending,
                         generation,
+                        delivery,
                     } => {
                         if !workspace.spawn_remote_sftp_preview_save(
                             path.clone(),
@@ -212,13 +213,29 @@ impl WorkspaceApp {
                             encoding.clone(),
                             *line_ending,
                             *generation,
-                            cx,
+                            delivery.clone(),
                         ) {
-                            workspace.report_sftp_preview_save_unavailable(cx);
+                            let _ = delivery.send(sftp::SftpWorkerResult::PreviewSaved {
+                                generation: *generation,
+                                path: path.clone(),
+                                content: content.clone(),
+                                network_error_message: workspace
+                                    .i18n
+                                    .t("sftp.errors.connection_lost"),
+                                result: Err("SFTP connection unavailable".to_string()),
+                            });
                         }
                     }
-                    sftp::SftpWorkspaceEvent::RemoteLoadReady => {
-                        workspace.maybe_start_sftp_remote_load(cx);
+                    sftp::SftpWorkspaceEvent::RemoteLoadReady {
+                        tab_id,
+                        node_id,
+                        delivery,
+                    } => {
+                        workspace.request_visible_sftp_remote_load(
+                            *tab_id,
+                            node_id.clone(),
+                            delivery.clone(),
+                        );
                     }
                 }
                 cx.notify();

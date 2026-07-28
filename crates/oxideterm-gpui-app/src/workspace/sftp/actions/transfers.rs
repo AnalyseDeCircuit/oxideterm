@@ -1,6 +1,6 @@
 use super::*;
 
-struct SftpTransferLaunch {
+pub(in crate::workspace::sftp) struct SftpTransferLaunch {
     id: u64,
     transfer_id: String,
     node_id: NodeId,
@@ -83,12 +83,18 @@ impl SftpWorkspaceEntity {
         Some((pending_transfers, resolved_actions))
     }
 
-    fn begin_incomplete_transfer_load(&mut self, cx: &mut Context<Self>) -> bool {
+    pub(in crate::workspace::sftp) fn begin_incomplete_transfer_load(
+        &mut self,
+        node_id: NodeId,
+    ) -> bool {
         if self.incomplete_load_inflight {
+            if self.incomplete_load_node.as_ref() != Some(&node_id) {
+                self.incomplete_load_pending_node = Some(node_id);
+            }
             return false;
         }
         self.incomplete_load_inflight = true;
-        cx.notify();
+        self.incomplete_load_node = Some(node_id);
         true
     }
 
@@ -114,20 +120,16 @@ impl SftpWorkspaceEntity {
         Some(launch)
     }
 
-    fn prepare_reconnect_resume(
+    pub(in crate::workspace::sftp) fn prepare_reconnect_resume(
         &mut self,
         node_id: NodeId,
         progress: StoredTransferProgress,
         show_in_current_view: bool,
-        cx: &mut Context<Self>,
     ) -> Option<SftpTransferLaunch> {
         if !progress.is_incomplete() || !progress.protocol.supports_restart_resume() {
             return None;
         }
         let launch = self.prepare_resumed_transfer(node_id, progress, show_in_current_view);
-        if show_in_current_view {
-            cx.notify();
-        }
         Some(launch)
     }
 
@@ -248,7 +250,6 @@ impl SftpWorkspaceEntity {
     pub(in crate::workspace::sftp) fn upsert_background_transfer_snapshot(
         &mut self,
         snapshot: BackgroundTransferSnapshot,
-        cx: &mut Context<Self>,
     ) {
         let node_id = NodeId::new(snapshot.node_id);
         let direction = match snapshot.direction {
@@ -276,7 +277,6 @@ impl SftpWorkspaceEntity {
             item.speed = snapshot.backend_speed.unwrap_or(item.speed);
             item.state = state;
             item.error = snapshot.error;
-            cx.notify();
             return;
         }
 
@@ -298,7 +298,6 @@ impl SftpWorkspaceEntity {
             state,
             error: snapshot.error,
         });
-        cx.notify();
     }
 
     fn interrupt_transfers_by_node(
@@ -353,20 +352,13 @@ impl WorkspaceApp {
         self.execute_sftp_pending_transfers(node_id, pending_transfers, resolved_actions, cx);
     }
 
-    pub(in crate::workspace::sftp) fn spawn_sftp_incomplete_load(
-        &mut self,
+    pub(in crate::workspace::sftp) fn spawn_sftp_incomplete_load_with_sender(
+        &self,
         node_id: NodeId,
-        cx: &mut Context<Self>,
+        tx: delivery::ActiveDeliverySender<SftpWorkerResult>,
     ) {
-        if !self
-            .sftp_view
-            .update(cx, |sftp, cx| sftp.begin_incomplete_transfer_load(cx))
-        {
-            return;
-        }
         let router = self.node_router.clone();
         let progress_store = self.sftp_progress_store.clone();
-        let tx = self.sftp_view.read(cx).worker_sender();
         let runtime = self.forwarding_runtime.clone();
         runtime.spawn(async move {
             let result = async {
@@ -384,13 +376,12 @@ impl WorkspaceApp {
         });
     }
 
-    pub(in crate::workspace::sftp) fn spawn_sftp_background_transfer_load(
-        &mut self,
+    pub(in crate::workspace::sftp) fn spawn_sftp_background_transfer_load_with_sender(
+        &self,
         node_id: NodeId,
-        cx: &App,
+        tx: delivery::ActiveDeliverySender<SftpWorkerResult>,
     ) {
         let manager = self.sftp_transfer_manager.clone();
-        let tx = self.sftp_view.read(cx).worker_sender();
         let runtime = self.forwarding_runtime.clone();
         runtime.spawn(async move {
             let snapshots = manager.list_background_transfers(Some(&node_id.0));
@@ -451,33 +442,21 @@ impl WorkspaceApp {
         });
     }
 
-    pub(in crate::workspace::sftp) fn queue_sftp_resume_transfer_for_node(
-        &mut self,
-        node_id: NodeId,
-        progress: StoredTransferProgress,
-        cx: &mut Context<Self>,
-    ) -> bool {
-        let show_in_current_view = self
-            .main_window_tabs
-            .active_tab_id
-            .and_then(|tab_id| self.sftp_tab_nodes.get(&tab_id))
-            == Some(&node_id);
-        let Some(launch) = self.sftp_view.update(cx, |sftp, cx| {
-            sftp.prepare_reconnect_resume(node_id, progress, show_in_current_view, cx)
-        }) else {
-            return false;
-        };
-
-        // This is the native equivalent of Tauri's node_sftp_resume_transfer:
-        // the transfer owner is the node/router-backed manager, not the SFTP
-        // tab. The UI row is optional; reconnect must still resume in the
-        // background when no SFTP tab is focused.
-        self.spawn_sftp_transfer_launch(launch, cx);
-        true
+    pub(in crate::workspace::sftp) fn spawn_sftp_transfer_launch(
+        &self,
+        launch: SftpTransferLaunch,
+        cx: &App,
+    ) {
+        let tx = self.sftp_view.read(cx).worker_sender();
+        self.spawn_sftp_transfer_launch_with_sender(launch, tx);
     }
 
-    fn spawn_sftp_transfer_launch(&self, launch: SftpTransferLaunch, cx: &App) {
-        self.spawn_sftp_transfer_task(
+    pub(in crate::workspace::sftp) fn spawn_sftp_transfer_launch_with_sender(
+        &self,
+        launch: SftpTransferLaunch,
+        tx: delivery::ActiveDeliverySender<SftpWorkerResult>,
+    ) {
+        self.spawn_sftp_transfer_task_with_sender(
             launch.id,
             launch.transfer_id,
             launch.node_id,
@@ -487,7 +466,7 @@ impl WorkspaceApp {
             launch.remote_path,
             launch.resume_progress,
             launch.protocol_override,
-            cx,
+            tx,
         );
     }
 
@@ -504,6 +483,34 @@ impl WorkspaceApp {
         protocol_override: Option<RemoteTransferProtocol>,
         cx: &App,
     ) {
+        let tx = self.sftp_view.read(cx).worker_sender();
+        self.spawn_sftp_transfer_task_with_sender(
+            id,
+            transfer_id,
+            node_id,
+            direction,
+            is_directory,
+            local_path,
+            remote_path,
+            resume_progress,
+            protocol_override,
+            tx,
+        );
+    }
+
+    fn spawn_sftp_transfer_task_with_sender(
+        &self,
+        id: u64,
+        transfer_id: String,
+        node_id: NodeId,
+        direction: SftpTransferDirection,
+        is_directory: bool,
+        local_path: String,
+        remote_path: String,
+        resume_progress: Option<StoredTransferProgress>,
+        protocol_override: Option<RemoteTransferProtocol>,
+        tx: delivery::ActiveDeliverySender<SftpWorkerResult>,
+    ) {
         let protocol_preference = self.settings_store.settings().sftp.transfer_protocol;
         let scp_unavailable_error = self.i18n.t("sftp.errors.scp_unavailable");
         let transfer_protocol_unavailable_error =
@@ -511,7 +518,6 @@ impl WorkspaceApp {
         let router = self.node_router.clone();
         let manager = self.sftp_transfer_manager.clone();
         let progress_store = self.sftp_progress_store.clone();
-        let tx = self.sftp_view.read(cx).worker_sender();
         let runtime = self.forwarding_runtime.clone();
         // The runtime owns cancellation from enqueue through completion, even
         // while no SFTP tab is visible or a jump-chain reconnect is in flight.
@@ -713,8 +719,6 @@ impl WorkspaceApp {
                 transferred: 0,
                 total: 0,
                 speed: 0,
-                state: SftpTransferState::Active,
-                error: None,
             });
             let (progress_tx, mut progress_rx) =
                 tokio::sync::mpsc::channel::<TransferProgress>(100);
@@ -758,8 +762,6 @@ impl WorkspaceApp {
                         transferred: progress.transferred_bytes,
                         total: progress.total_bytes,
                         speed: progress.speed,
-                        state: sftp_transfer_state_from_remote(progress.state),
-                        error: progress.error,
                     });
                 }
             });
@@ -1194,16 +1196,6 @@ impl WorkspaceApp {
         {
             self.sftp_transfer_manager.cancel(&transfer_id);
         }
-    }
-
-    pub(in crate::workspace::sftp) fn upsert_sftp_background_transfer_snapshot(
-        &mut self,
-        snapshot: BackgroundTransferSnapshot,
-        cx: &mut Context<Self>,
-    ) {
-        self.sftp_view.update(cx, |sftp, cx| {
-            sftp.upsert_background_transfer_snapshot(snapshot, cx);
-        });
     }
 
     pub(in crate::workspace) fn interrupt_sftp_transfers_by_node(

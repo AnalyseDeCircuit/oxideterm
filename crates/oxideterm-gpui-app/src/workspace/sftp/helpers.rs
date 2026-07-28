@@ -308,19 +308,6 @@ pub(in crate::workspace::sftp) fn sftp_source_not_newer_than_target(
     )
 }
 
-pub(in crate::workspace::sftp) fn sftp_transfer_state_from_remote(
-    state: RemoteTransferState,
-) -> SftpTransferState {
-    match state {
-        RemoteTransferState::Pending => SftpTransferState::Pending,
-        RemoteTransferState::InProgress => SftpTransferState::Active,
-        RemoteTransferState::Paused => SftpTransferState::Paused,
-        RemoteTransferState::Completed => SftpTransferState::Completed,
-        RemoteTransferState::Failed => SftpTransferState::Error,
-        RemoteTransferState::Cancelled => SftpTransferState::Cancelled,
-    }
-}
-
 pub(in crate::workspace::sftp) fn sftp_transfer_state_from_background(
     state: BackgroundTransferState,
 ) -> SftpTransferState {
