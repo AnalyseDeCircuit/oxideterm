@@ -1,4 +1,5 @@
 use super::*;
+use gpui::Task;
 
 const AUTOMATIC_NATIVE_UPDATE_DELAY: Duration = Duration::from_secs(8);
 
@@ -8,7 +9,7 @@ enum NativeUpdateCheckKind {
     Automatic,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub(in crate::workspace) enum NativeUpdateUiState {
     Idle,
     Checking,
@@ -22,105 +23,256 @@ pub(in crate::workspace) enum NativeUpdateUiState {
     Error(String),
 }
 
-#[derive(Clone, Debug)]
+#[derive(Debug)]
+pub(in crate::workspace) enum NativeUpdateRenderState {
+    Idle,
+    Checking,
+    UpToDate,
+    Available {
+        version: String,
+        has_release_notes: bool,
+    },
+    Downloading(Option<oxideterm_update::ResumableUpdateStatus>),
+    Verifying(Option<oxideterm_update::ResumableUpdateStatus>),
+    Downloaded,
+    Installing(Option<String>),
+    InstallFinished {
+        status: oxideterm_update::NativeInstallStatus,
+        message: String,
+    },
+    Error(String),
+}
+
+pub(in crate::workspace) struct NativeUpdateReleaseNotes {
+    pub(in crate::workspace) body: String,
+    pub(in crate::workspace) description: Option<String>,
+}
+
+#[derive(Debug)]
 pub(in crate::workspace) enum NativeUpdateDelivery {
     Progress(oxideterm_update::DownloadProgress),
     Finished(Result<oxideterm_update::NativeUpdateDownload, String>),
     InstallFinished(Result<oxideterm_update::NativeInstallOutcome, String>),
 }
 
-impl WorkspaceApp {
-    pub(in crate::workspace) fn check_native_update(&mut self, cx: &mut Context<Self>) {
-        self.check_native_update_with_kind(NativeUpdateCheckKind::Manual, cx);
+pub(super) struct NativeUpdateRuntime {
+    state: NativeUpdateUiState,
+    receiver: Option<std::sync::mpsc::Receiver<NativeUpdateDelivery>>,
+    wake: delivery::ActiveDeliveryWake,
+    cancel: Option<Arc<AtomicBool>>,
+    cancel_requested: bool,
+    package: Option<oxideterm_update::NativeUpdatePackage>,
+    check_task: Option<Task<()>>,
+    operation_task: Option<Task<()>>,
+    automatic_check_task: Option<Task<()>>,
+    _delivery_task: Task<()>,
+    error_fallback: String,
+}
+
+struct NativeUpdateCheckRequest {
+    kind: NativeUpdateCheckKind,
+    channel: UpdateChannel,
+    current_version: String,
+    install_flavor: Result<oxideterm_update::InstallFlavor, String>,
+    update_proxy: oxideterm_settings::UpdateProxySettings,
+    preview_upgrade_error: Option<String>,
+    runtime: Arc<tokio::runtime::Runtime>,
+}
+
+impl NativeUpdateRuntime {
+    pub(super) fn new(cx: &mut Context<SettingsWorkspaceEntity>) -> Self {
+        let wake = delivery::ActiveDeliveryWake::default();
+        let delivery_wake = wake.clone();
+        let release_wake = wake.clone();
+        cx.on_release(move |_, _| {
+            // External updater work may finish after its window Entity is released.
+            release_wake.stop();
+        })
+        .detach();
+        let delivery_task = cx.spawn(async move |settings, cx| {
+            loop {
+                delivery_wake.wait().await;
+                let should_drain = delivery_wake.take();
+                let stopped = delivery_wake.is_stopped();
+                if should_drain {
+                    let backlog_remaining = settings
+                        .update(cx, |settings, cx| settings.drain_native_update_delivery(cx))
+                        .unwrap_or(false);
+                    if backlog_remaining {
+                        // Continue bounded delivery without introducing a timer poll.
+                        delivery_wake.mark();
+                    }
+                }
+                if stopped {
+                    break;
+                }
+            }
+        });
+
+        Self {
+            state: NativeUpdateUiState::Idle,
+            receiver: None,
+            wake,
+            cancel: None,
+            cancel_requested: false,
+            package: None,
+            check_task: None,
+            operation_task: None,
+            automatic_check_task: None,
+            _delivery_task: delivery_task,
+            error_fallback: String::new(),
+        }
+    }
+}
+
+impl SettingsWorkspaceEntity {
+    pub(in crate::workspace) fn native_update_render_state(&self) -> NativeUpdateRenderState {
+        match &self.native_update.state {
+            NativeUpdateUiState::Idle => NativeUpdateRenderState::Idle,
+            NativeUpdateUiState::Checking => NativeUpdateRenderState::Checking,
+            NativeUpdateUiState::UpToDate => NativeUpdateRenderState::UpToDate,
+            NativeUpdateUiState::Available(package) => NativeUpdateRenderState::Available {
+                version: package.version.clone(),
+                has_release_notes: package
+                    .body
+                    .as_deref()
+                    .is_some_and(|body| !body.trim().is_empty()),
+            },
+            NativeUpdateUiState::Downloading(status) => {
+                NativeUpdateRenderState::Downloading(status.clone())
+            }
+            NativeUpdateUiState::Verifying(status) => {
+                NativeUpdateRenderState::Verifying(status.clone())
+            }
+            NativeUpdateUiState::Downloaded(_) => NativeUpdateRenderState::Downloaded,
+            NativeUpdateUiState::Installing(plan) => {
+                NativeUpdateRenderState::Installing(plan.as_ref().map(|plan| plan.summary.clone()))
+            }
+            NativeUpdateUiState::InstallFinished(outcome) => {
+                NativeUpdateRenderState::InstallFinished {
+                    status: outcome.status.clone(),
+                    message: outcome.message.clone(),
+                }
+            }
+            NativeUpdateUiState::Error(error) => NativeUpdateRenderState::Error(error.clone()),
+        }
+    }
+
+    pub(in crate::workspace) fn native_update_package_description(&self) -> Option<String> {
+        self.native_update
+            .package
+            .as_ref()
+            .map(|package| format!("v{} → v{}", package.current_version, package.version))
+    }
+
+    pub(in crate::workspace) fn native_update_has_release_notes(&self) -> bool {
+        self.native_update
+            .package
+            .as_ref()
+            .and_then(|package| package.body.as_deref())
+            .is_some_and(|body| !body.trim().is_empty())
+    }
+
+    pub(in crate::workspace) fn native_update_release_notes(
+        &self,
+    ) -> Option<NativeUpdateReleaseNotes> {
+        let package = self.native_update.package.as_ref()?;
+        let body = package
+            .body
+            .as_deref()
+            .filter(|body| !body.trim().is_empty())?
+            .to_string();
+        let description = package
+            .date
+            .as_ref()
+            .map(|date| format!("v{} · {date}", package.version))
+            .or_else(|| Some(format!("v{}", package.version)));
+        Some(NativeUpdateReleaseNotes { body, description })
+    }
+
+    pub(in crate::workspace) fn native_update_message(&self) -> Option<&str> {
+        match &self.native_update.state {
+            NativeUpdateUiState::InstallFinished(outcome) => Some(&outcome.message),
+            NativeUpdateUiState::Error(error) => Some(error),
+            _ => None,
+        }
     }
 
     pub(in crate::workspace) fn schedule_automatic_native_update_check(
         &mut self,
+        is_portable: bool,
         cx: &mut Context<Self>,
     ) {
-        if self.native_update_is_portable(cx) {
+        if is_portable || self.native_update.automatic_check_task.is_some() {
             return;
         }
 
-        // Match the legacy startup delay so session restoration and the first
-        // interactive frame are not competing with update manifest traffic.
-        cx.spawn(async move |weak, cx| {
+        // Delay manifest traffic until session restoration and the first frame settle.
+        self.native_update.automatic_check_task = Some(cx.spawn(async move |settings, cx| {
             Timer::after(AUTOMATIC_NATIVE_UPDATE_DELAY).await;
-            let _ = weak.update(cx, |this, cx| {
-                if matches!(this.native_update_state, NativeUpdateUiState::Idle) {
-                    this.check_native_update_with_kind(NativeUpdateCheckKind::Automatic, cx);
+            let _ = settings.update(cx, |settings, cx| {
+                settings.native_update.automatic_check_task = None;
+                if matches!(settings.native_update.state, NativeUpdateUiState::Idle) {
+                    cx.emit(SettingsWorkspaceEvent::RequestAutomaticNativeUpdateCheck);
                 }
             });
-        })
-        .detach();
+        }));
     }
 
-    fn check_native_update_with_kind(
+    fn start_native_update_check(
         &mut self,
-        check_kind: NativeUpdateCheckKind,
+        request: NativeUpdateCheckRequest,
         cx: &mut Context<Self>,
-    ) {
-        if matches!(
-            self.native_update_state,
-            NativeUpdateUiState::Checking
-                | NativeUpdateUiState::Downloading(_)
-                | NativeUpdateUiState::Verifying(_)
-                | NativeUpdateUiState::Installing(_)
-        ) {
-            return;
+    ) -> bool {
+        if self.native_update.receiver.is_some()
+            || matches!(
+                self.native_update.state,
+                NativeUpdateUiState::Checking
+                    | NativeUpdateUiState::Downloading(_)
+                    | NativeUpdateUiState::Verifying(_)
+                    | NativeUpdateUiState::Installing(_)
+            )
+        {
+            return false;
         }
 
-        self.native_update_state = NativeUpdateUiState::Checking;
-        self.native_update_package = None;
-        self.native_update_notification_open = false;
-        self.native_update_notification_presence.reopen();
-        self.native_update_release_notes_open = false;
-        self.native_update_release_notes_presence.reopen();
-        // Release notes belong to the next update result; reset virtual scroll
-        // so a previous changelog position cannot leak into the new package.
-        self.native_update_release_notes_scroll = MarkdownVirtualListScrollHandle::new();
-        let channel = self.settings_store.settings().general.update_channel;
-        if channel == UpdateChannel::Stable && is_gpui_preview_version(env!("CARGO_PKG_VERSION")) {
-            // Keep the persisted choice untouched because Tauri 1.x shares this
-            // settings file. The update crate repeats this guard for non-UI callers.
-            self.native_update_state = if check_kind == NativeUpdateCheckKind::Automatic {
+        self.native_update.state = NativeUpdateUiState::Checking;
+        self.native_update.package = None;
+        cx.emit(SettingsWorkspaceEvent::ResetNativeUpdateOverlay);
+
+        if let Some(error) = request.preview_upgrade_error {
+            self.native_update.state = if request.kind == NativeUpdateCheckKind::Automatic {
                 NativeUpdateUiState::Idle
             } else {
-                NativeUpdateUiState::Error(
-                    self.i18n
-                        .t("settings_view.help.preview_stable_upgrade_hint"),
-                )
+                NativeUpdateUiState::Error(error)
             };
             cx.notify();
-            return;
+            return true;
         }
-        let update_proxy = self.settings_store.settings().general.update_proxy.clone();
-        let current_version = env!("CARGO_PKG_VERSION").to_string();
-        let install_flavor = match oxideterm_update::NativeInstallContext::current(
-            self.native_update_is_portable(cx),
-        ) {
-            Ok(context) => context.install_flavor,
+        let install_flavor = match request.install_flavor {
+            Ok(install_flavor) => install_flavor,
             Err(error) => {
-                self.native_update_state = if check_kind == NativeUpdateCheckKind::Automatic {
+                self.native_update.state = if request.kind == NativeUpdateCheckKind::Automatic {
                     NativeUpdateUiState::Idle
                 } else {
-                    NativeUpdateUiState::Error(error.to_string())
+                    NativeUpdateUiState::Error(error)
                 };
                 cx.notify();
-                return;
+                return true;
             }
         };
-        let runtime = self.forwarding_runtime.clone();
 
-        cx.spawn(async move |weak, cx| {
-            let result = runtime
+        self.native_update.check_task = Some(cx.spawn(async move |settings, cx| {
+            let result = request
+                .runtime
                 .spawn(async move {
-                    let client =
-                        oxideterm_update::NativeUpdateClient::with_update_proxy(&update_proxy)?;
+                    let client = oxideterm_update::NativeUpdateClient::with_update_proxy(
+                        &request.update_proxy,
+                    )?;
                     client
                         .check(oxideterm_update::NativeUpdateRequest::current(
-                            channel,
-                            current_version,
+                            request.channel,
+                            request.current_version,
                             install_flavor,
                         ))
                         .await
@@ -129,10 +281,11 @@ impl WorkspaceApp {
                 .map_err(|error| error.to_string())
                 .and_then(|result| result.map_err(|error| error.to_string()));
 
-            let _ = weak.update(cx, |this, cx| {
-                this.native_update_state = match result {
+            let _ = settings.update(cx, |settings, cx| {
+                settings.native_update.check_task = None;
+                settings.native_update.state = match result {
                     Ok(oxideterm_update::NativeUpdateStatus::UpToDate)
-                        if check_kind == NativeUpdateCheckKind::Automatic =>
+                        if request.kind == NativeUpdateCheckKind::Automatic =>
                     {
                         NativeUpdateUiState::Idle
                     }
@@ -140,185 +293,165 @@ impl WorkspaceApp {
                         NativeUpdateUiState::UpToDate
                     }
                     Ok(oxideterm_update::NativeUpdateStatus::Available(package)) => {
-                        this.native_update_package = Some(package.clone());
-                        this.show_native_update_notification();
+                        settings.native_update.package = Some(package.clone());
+                        cx.emit(SettingsWorkspaceEvent::ShowNativeUpdateNotification);
                         NativeUpdateUiState::Available(package)
                     }
-                    Err(_error) if check_kind == NativeUpdateCheckKind::Automatic => {
+                    Err(_error) if request.kind == NativeUpdateCheckKind::Automatic => {
                         NativeUpdateUiState::Idle
                     }
                     Err(error) => NativeUpdateUiState::Error(error),
                 };
                 cx.notify();
             });
-        })
-        .detach();
+        }));
         cx.notify();
+        true
     }
 
-    pub(in crate::workspace) fn download_native_update(&mut self, cx: &mut Context<Self>) {
-        if self.native_update_rx.is_some() {
-            return;
-        }
-        let package = match &self.native_update_state {
-            NativeUpdateUiState::Available(package) => package.clone(),
-            _ => return,
-        };
-
-        let (tx, rx) =
-            delivery::ActiveDeliverySender::channel_with_wake(self.native_update_wake.clone());
-        let cancel = Arc::new(AtomicBool::new(false));
-        self.native_update_rx = Some(rx);
-        self.native_update_cancel = Some(cancel.clone());
-        self.native_update_state = NativeUpdateUiState::Downloading(None);
-        self.show_native_update_notification();
-
-        let directory = self.native_update_download_directory();
-        let runtime = self.forwarding_runtime.clone();
-        let update_proxy = self.settings_store.settings().general.update_proxy.clone();
-
-        cx.spawn(async move |_weak, _cx| {
-            runtime.spawn(async move {
-                let result = async {
-                    let client =
-                        oxideterm_update::NativeUpdateClient::with_update_proxy(&update_proxy)?;
-                    // Match Tauri's resumable updater cache contract:
-                    // package.part + state.json, Range resume, retry status,
-                    // and minisign verification before the package is opened.
-                    client
-                        .download_resumable_package(package, &directory, cancel, |progress| {
-                            let _ = tx.send(NativeUpdateDelivery::Progress(progress));
-                        })
-                        .await
-                }
-                .await
-                .map_err(|error: oxideterm_update::NativeUpdateError| error.to_string());
-                let _ = tx.send(NativeUpdateDelivery::Finished(result));
-            });
-        })
-        .detach();
-        cx.notify();
-    }
-
-    pub(in crate::workspace) fn install_native_update(&mut self, cx: &mut Context<Self>) {
-        let download = match &self.native_update_state {
-            NativeUpdateUiState::Downloaded(download) => download.clone(),
-            _ => return,
-        };
-
-        let context = match oxideterm_update::NativeInstallContext::current(
-            self.native_update_is_portable(cx),
-        ) {
-            Ok(context) => context,
-            Err(error) => {
-                self.native_update_state = NativeUpdateUiState::Error(error.to_string());
-                self.show_native_update_notification();
-                cx.notify();
-                return;
-            }
-        };
-        let plan = oxideterm_update::plan_native_install(&download.path, &context);
-
-        let (tx, rx) =
-            delivery::ActiveDeliverySender::channel_with_wake(self.native_update_wake.clone());
-        self.native_update_rx = Some(rx);
-        self.native_update_cancel = None;
-        self.native_update_state = NativeUpdateUiState::Installing(Some(plan.clone()));
-        self.show_native_update_notification();
-
-        let runtime = self.forwarding_runtime.clone();
-        let cleanup_directory = self.native_update_download_directory();
-        let cleanup_version = download.package.version;
-        cx.spawn(async move |_weak, _cx| {
-            runtime.spawn(async move {
-                let result = tokio::task::spawn_blocking(move || {
-                    // Installation is intentionally delegated to the updater
-                    // crate so GPUI keeps only UI-state orchestration here.
-                    oxideterm_update::execute_install_plan(&plan)
-                })
-                .await
-                .map_err(|error| error.to_string())
-                .and_then(|result| result.map_err(|error| error.to_string()));
-                if result.is_ok() {
-                    let _ = oxideterm_update::prune_resumable_update_cache(
-                        &cleanup_directory,
-                        Some(&cleanup_version),
-                    )
-                    .await;
-                }
-                let _ = tx.send(NativeUpdateDelivery::InstallFinished(result));
-            });
-        })
-        .detach();
-        cx.notify();
-    }
-
-    pub(in crate::workspace) fn cancel_native_update(&mut self, cx: &mut Context<Self>) {
-        if let Some(cancel) = self.native_update_cancel.as_ref() {
-            cancel.store(true, Ordering::Relaxed);
-        }
-        self.native_update_state = self.native_update_available_state();
-        self.native_update_cancel = None;
-        cx.notify();
-    }
-
-    pub(in crate::workspace) fn schedule_native_update_delivery(&self, cx: &mut Context<Self>) {
-        let update_wake = self.native_update_wake.clone();
-        let release_wake = update_wake.clone();
-        cx.on_release(move |_, _| {
-            // Cancel state remains operation-owned; release only stops the UI waiter.
-            release_wake.stop();
-        })
-        .detach();
-        cx.spawn(async move |weak, cx| {
-            loop {
-                update_wake.wait().await;
-                let should_drain = update_wake.take();
-                let stopped = update_wake.is_stopped();
-                if !should_drain {
-                    if stopped {
-                        break;
-                    }
-                    continue;
-                }
-                let Ok(backlog_remaining) =
-                    weak.update(cx, |this, cx| this.poll_native_update_delivery(cx))
-                else {
-                    break;
-                };
-                if backlog_remaining {
-                    // Continue a bounded progress batch without a polling timer.
-                    update_wake.mark();
-                } else if stopped {
-                    break;
-                }
-            }
-        })
-        .detach();
-    }
-
-    pub(in crate::workspace) fn poll_native_update_delivery(
+    fn start_native_update_download(
         &mut self,
+        directory: std::path::PathBuf,
+        update_proxy: oxideterm_settings::UpdateProxySettings,
+        runtime: Arc<tokio::runtime::Runtime>,
+        error_fallback: String,
         cx: &mut Context<Self>,
     ) -> bool {
-        let Some(rx) = self.native_update_rx.as_ref() else {
+        if self.native_update.receiver.is_some() {
             return false;
+        }
+        let package = match &self.native_update.state {
+            NativeUpdateUiState::Available(package) => package.clone(),
+            _ => return false,
         };
 
-        let delivery_batch = delivery::drain_channel(rx, delivery::NOTIFICATION_DELIVERY_BUDGET);
+        let (sender, receiver) =
+            delivery::ActiveDeliverySender::channel_with_wake(self.native_update.wake.clone());
+        let cancel = Arc::new(AtomicBool::new(false));
+        self.native_update.receiver = Some(receiver);
+        // The worker and owner share only the atomic cancellation capability.
+        self.native_update.cancel = Some(cancel.clone());
+        self.native_update.cancel_requested = false;
+        self.native_update.error_fallback = error_fallback;
+        self.native_update.state = NativeUpdateUiState::Downloading(None);
+        cx.emit(SettingsWorkspaceEvent::ShowNativeUpdateNotification);
+
+        self.native_update.operation_task = Some(cx.spawn(async move |_settings, _cx| {
+            let _ = runtime
+                .spawn(async move {
+                    let result = async {
+                        let client =
+                            oxideterm_update::NativeUpdateClient::with_update_proxy(&update_proxy)?;
+                        // Preserve the resumable cache and verification contract from Tauri.
+                        client
+                            .download_resumable_package(package, &directory, cancel, |progress| {
+                                let _ = sender.send(NativeUpdateDelivery::Progress(progress));
+                            })
+                            .await
+                    }
+                    .await
+                    .map_err(|error: oxideterm_update::NativeUpdateError| error.to_string());
+                    let _ = sender.send(NativeUpdateDelivery::Finished(result));
+                })
+                .await;
+        }));
+        cx.notify();
+        true
+    }
+
+    fn start_native_update_install(
+        &mut self,
+        context: Result<oxideterm_update::NativeInstallContext, String>,
+        cleanup_directory: std::path::PathBuf,
+        runtime: Arc<tokio::runtime::Runtime>,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if self.native_update.receiver.is_some() {
+            return false;
+        }
+        let context = match context {
+            Ok(context) => context,
+            Err(error) => {
+                self.native_update.state = NativeUpdateUiState::Error(error);
+                cx.emit(SettingsWorkspaceEvent::ShowNativeUpdateNotification);
+                cx.notify();
+                return true;
+            }
+        };
+        let download =
+            match std::mem::replace(&mut self.native_update.state, NativeUpdateUiState::Idle) {
+                NativeUpdateUiState::Downloaded(download) => download,
+                state => {
+                    self.native_update.state = state;
+                    return false;
+                }
+            };
+        let plan = oxideterm_update::plan_native_install(&download.path, &context);
+        let cleanup_version = download.package.version;
+        let (sender, receiver) =
+            delivery::ActiveDeliverySender::channel_with_wake(self.native_update.wake.clone());
+        self.native_update.receiver = Some(receiver);
+        self.native_update.cancel = None;
+        self.native_update.cancel_requested = false;
+        self.native_update.state = NativeUpdateUiState::Installing(Some(plan.clone()));
+        cx.emit(SettingsWorkspaceEvent::ShowNativeUpdateNotification);
+
+        self.native_update.operation_task = Some(cx.spawn(async move |_settings, _cx| {
+            let _ = runtime
+                .spawn(async move {
+                    let result = tokio::task::spawn_blocking(move || {
+                        // Installation stays in the updater crate; the Entity owns its result.
+                        oxideterm_update::execute_install_plan(&plan)
+                    })
+                    .await;
+                    let result = result
+                        .map_err(|error| error.to_string())
+                        .and_then(|result| result.map_err(|error| error.to_string()));
+                    if result.is_ok() {
+                        let _ = oxideterm_update::prune_resumable_update_cache(
+                            &cleanup_directory,
+                            Some(&cleanup_version),
+                        )
+                        .await;
+                    }
+                    let _ = sender.send(NativeUpdateDelivery::InstallFinished(result));
+                })
+                .await;
+        }));
+        cx.notify();
+        true
+    }
+
+    fn cancel_native_update(&mut self, cx: &mut Context<Self>) {
+        if let Some(cancel) = self.native_update.cancel.as_ref() {
+            cancel.store(true, Ordering::Relaxed);
+            self.native_update.cancel_requested = true;
+        }
+        self.native_update.state = self.native_update_available_state();
+        cx.notify();
+    }
+
+    fn drain_native_update_delivery(&mut self, cx: &mut Context<Self>) -> bool {
+        let Some(receiver) = self.native_update.receiver.as_ref() else {
+            return false;
+        };
+        let delivery_batch =
+            delivery::drain_channel(receiver, delivery::NOTIFICATION_DELIVERY_BUDGET);
 
         for update in delivery_batch.items {
             self.handle_native_update_delivery(update, cx);
         }
         if delivery_batch.disconnected {
-            self.native_update_rx = None;
-            self.native_update_cancel = None;
+            self.native_update.receiver = None;
+            self.native_update.cancel = None;
+            self.native_update.cancel_requested = false;
+            self.native_update.operation_task = None;
         }
         cx.notify();
         delivery_batch.outcome.backlog_remaining
     }
 
-    pub(in crate::workspace) fn handle_native_update_delivery(
+    fn handle_native_update_delivery(
         &mut self,
         delivery: NativeUpdateDelivery,
         cx: &mut Context<Self>,
@@ -326,70 +459,211 @@ impl WorkspaceApp {
         match delivery {
             NativeUpdateDelivery::Progress(progress) => {
                 let stage = progress.status.stage;
-                self.native_update_state = match stage {
+                if self.native_update.cancel_requested
+                    && stage != oxideterm_update::NativeUpdateStage::Cancelled
+                {
+                    return;
+                }
+                self.native_update.state = match stage {
                     oxideterm_update::NativeUpdateStage::Downloading => {
                         NativeUpdateUiState::Downloading(Some(progress.status))
                     }
-                    oxideterm_update::NativeUpdateStage::Verifying => {
-                        NativeUpdateUiState::Verifying(Some(progress.status))
-                    }
-                    oxideterm_update::NativeUpdateStage::Ready => {
+                    oxideterm_update::NativeUpdateStage::Verifying
+                    | oxideterm_update::NativeUpdateStage::Ready => {
                         NativeUpdateUiState::Verifying(Some(progress.status))
                     }
                     oxideterm_update::NativeUpdateStage::Error => NativeUpdateUiState::Error(
                         progress
                             .status
                             .error_message
-                            .unwrap_or_else(|| self.i18n.t("settings_view.help.update_error")),
+                            .unwrap_or_else(|| self.native_update.error_fallback.clone()),
                     ),
                     oxideterm_update::NativeUpdateStage::Cancelled => {
                         self.native_update_available_state()
                     }
                 };
                 if stage == oxideterm_update::NativeUpdateStage::Error {
-                    self.show_native_update_notification();
+                    cx.emit(SettingsWorkspaceEvent::ShowNativeUpdateNotification);
                 }
             }
             NativeUpdateDelivery::Finished(Ok(download)) => {
-                self.native_update_package = Some(download.package.clone());
-                self.native_update_state = NativeUpdateUiState::Downloaded(download);
-                self.native_update_cancel = None;
-                self.show_native_update_notification();
+                self.native_update.package = Some(download.package.clone());
+                self.native_update.state = NativeUpdateUiState::Downloaded(download);
+                self.native_update.cancel = None;
+                self.native_update.cancel_requested = false;
+                cx.emit(SettingsWorkspaceEvent::ShowNativeUpdateNotification);
             }
             NativeUpdateDelivery::Finished(Err(error)) => {
                 if error.contains("update cancelled") {
-                    self.native_update_state = self.native_update_available_state();
+                    self.native_update.state = self.native_update_available_state();
                 } else {
-                    self.native_update_state = NativeUpdateUiState::Error(error.clone());
-                    self.show_native_update_notification();
-                    self.push_ai_settings_toast(error, TerminalNoticeVariant::Error);
+                    self.native_update.state = NativeUpdateUiState::Error(error);
+                    cx.emit(SettingsWorkspaceEvent::ShowNativeUpdateNotification);
+                    cx.emit(SettingsWorkspaceEvent::ShowNativeUpdateToast(
+                        SettingsWorkspaceToast::Error,
+                    ));
                 }
-                self.native_update_cancel = None;
+                self.native_update.cancel = None;
+                self.native_update.cancel_requested = false;
             }
             NativeUpdateDelivery::InstallFinished(Ok(outcome)) => {
                 let is_success =
                     outcome.status != oxideterm_update::NativeInstallStatus::ManualActionRequired;
                 let should_quit_app = outcome.should_quit_app;
-                self.native_update_state = NativeUpdateUiState::InstallFinished(outcome.clone());
-                self.native_update_rx = None;
-                self.show_native_update_notification();
-                let variant = if is_success {
-                    TerminalNoticeVariant::Success
-                } else {
-                    TerminalNoticeVariant::Warning
-                };
-                self.push_ai_settings_toast(outcome.message, variant);
+                self.native_update.state = NativeUpdateUiState::InstallFinished(outcome);
+                self.native_update.receiver = None;
+                self.native_update.operation_task = None;
+                cx.emit(SettingsWorkspaceEvent::ShowNativeUpdateNotification);
+                cx.emit(SettingsWorkspaceEvent::ShowNativeUpdateToast(
+                    if is_success {
+                        SettingsWorkspaceToast::Success
+                    } else {
+                        SettingsWorkspaceToast::Warning
+                    },
+                ));
                 if should_quit_app {
-                    self.schedule_native_update_quit(cx);
+                    cx.emit(SettingsWorkspaceEvent::RequestQuitAfterNativeUpdate);
                 }
             }
             NativeUpdateDelivery::InstallFinished(Err(error)) => {
-                self.native_update_state = NativeUpdateUiState::Error(error.clone());
-                self.native_update_rx = None;
-                self.show_native_update_notification();
-                self.push_ai_settings_toast(error, TerminalNoticeVariant::Error);
+                self.native_update.state = NativeUpdateUiState::Error(error);
+                self.native_update.receiver = None;
+                self.native_update.operation_task = None;
+                cx.emit(SettingsWorkspaceEvent::ShowNativeUpdateNotification);
+                cx.emit(SettingsWorkspaceEvent::ShowNativeUpdateToast(
+                    SettingsWorkspaceToast::Error,
+                ));
             }
         }
+    }
+
+    fn native_update_available_state(&self) -> NativeUpdateUiState {
+        self.native_update
+            .package
+            .clone()
+            .map(NativeUpdateUiState::Available)
+            .unwrap_or(NativeUpdateUiState::Idle)
+    }
+}
+
+impl WorkspaceApp {
+    pub(in crate::workspace) fn handle_settings_workspace_event(
+        &mut self,
+        settings: Entity<SettingsWorkspaceEntity>,
+        event: &SettingsWorkspaceEvent,
+        cx: &mut Context<Self>,
+    ) {
+        match event {
+            SettingsWorkspaceEvent::ResetNativeUpdateOverlay => {
+                self.native_update_notification_open = false;
+                self.native_update_notification_presence.reopen();
+                self.native_update_release_notes_open = false;
+                self.native_update_release_notes_presence.reopen();
+                // A new package must not inherit an old changelog scroll position.
+                self.native_update_release_notes_scroll = MarkdownVirtualListScrollHandle::new();
+                cx.notify();
+            }
+            SettingsWorkspaceEvent::ShowNativeUpdateNotification => {
+                self.show_native_update_notification();
+                cx.notify();
+            }
+            SettingsWorkspaceEvent::ShowNativeUpdateToast(toast) => {
+                let Some(message) = settings.read(cx).native_update_message().map(str::to_owned)
+                else {
+                    return;
+                };
+                let variant = match toast {
+                    SettingsWorkspaceToast::Success => TerminalNoticeVariant::Success,
+                    SettingsWorkspaceToast::Warning => TerminalNoticeVariant::Warning,
+                    SettingsWorkspaceToast::Error => TerminalNoticeVariant::Error,
+                };
+                self.push_ai_settings_toast(message, variant);
+            }
+            SettingsWorkspaceEvent::RequestAutomaticNativeUpdateCheck => {
+                self.check_native_update_with_kind(NativeUpdateCheckKind::Automatic, cx);
+            }
+            SettingsWorkspaceEvent::RequestQuitAfterNativeUpdate => {
+                self.schedule_native_update_quit(cx);
+            }
+        }
+    }
+
+    pub(in crate::workspace) fn check_native_update(&mut self, cx: &mut Context<Self>) {
+        self.check_native_update_with_kind(NativeUpdateCheckKind::Manual, cx);
+    }
+
+    pub(in crate::workspace) fn schedule_automatic_native_update_check(
+        &mut self,
+        cx: &mut Context<Self>,
+    ) {
+        let is_portable = self.native_update_is_portable(cx);
+        self.settings_workspace.update(cx, |settings, cx| {
+            settings.schedule_automatic_native_update_check(is_portable, cx);
+        });
+    }
+
+    fn check_native_update_with_kind(
+        &mut self,
+        check_kind: NativeUpdateCheckKind,
+        cx: &mut Context<Self>,
+    ) {
+        let channel = self.settings_store.settings().general.update_channel;
+        let preview_upgrade_error = (channel == UpdateChannel::Stable
+            && is_gpui_preview_version(env!("CARGO_PKG_VERSION")))
+        .then(|| {
+            // Keep the shared Tauri settings choice untouched for preview builds.
+            self.i18n
+                .t("settings_view.help.preview_stable_upgrade_hint")
+        });
+        let install_flavor =
+            oxideterm_update::NativeInstallContext::current(self.native_update_is_portable(cx))
+                .map(|context| context.install_flavor)
+                .map_err(|error| error.to_string());
+        let request = NativeUpdateCheckRequest {
+            kind: check_kind,
+            channel,
+            current_version: env!("CARGO_PKG_VERSION").to_string(),
+            install_flavor,
+            update_proxy: self.settings_store.settings().general.update_proxy.clone(),
+            preview_upgrade_error,
+            runtime: self.forwarding_runtime.clone(),
+        };
+        self.settings_workspace.update(cx, |settings, cx| {
+            settings.start_native_update_check(request, cx);
+        });
+    }
+
+    pub(in crate::workspace) fn download_native_update(&mut self, cx: &mut Context<Self>) {
+        let directory = self.native_update_download_directory();
+        let update_proxy = self.settings_store.settings().general.update_proxy.clone();
+        let runtime = self.forwarding_runtime.clone();
+        let error_fallback = self.i18n.t("settings_view.help.update_error");
+        self.settings_workspace.update(cx, |settings, cx| {
+            settings.start_native_update_download(
+                directory,
+                update_proxy,
+                runtime,
+                error_fallback,
+                cx,
+            );
+        });
+    }
+
+    pub(in crate::workspace) fn install_native_update(&mut self, cx: &mut Context<Self>) {
+        let context =
+            oxideterm_update::NativeInstallContext::current(self.native_update_is_portable(cx))
+                .map_err(|error| error.to_string());
+        let cleanup_directory = self.native_update_download_directory();
+        let runtime = self.forwarding_runtime.clone();
+        self.settings_workspace.update(cx, |settings, cx| {
+            settings.start_native_update_install(context, cleanup_directory, runtime, cx);
+        });
+    }
+
+    pub(in crate::workspace) fn cancel_native_update(&mut self, cx: &mut Context<Self>) {
+        self.settings_workspace.update(cx, |settings, cx| {
+            settings.cancel_native_update(cx);
+        });
     }
 
     pub(in crate::workspace) fn schedule_native_update_quit(&mut self, cx: &mut Context<Self>) {
@@ -418,13 +692,6 @@ impl WorkspaceApp {
             .read(cx)
             .portable_mode()
             .unwrap_or_else(|| oxideterm_portable_runtime::is_portable_mode().unwrap_or(false))
-    }
-
-    fn native_update_available_state(&self) -> NativeUpdateUiState {
-        self.native_update_package
-            .clone()
-            .map(NativeUpdateUiState::Available)
-            .unwrap_or(NativeUpdateUiState::Idle)
     }
 }
 
@@ -469,7 +736,21 @@ fn native_update_format_bytes(bytes: u64) -> String {
 
 #[cfg(test)]
 mod tests {
+    use gpui::{AppContext, TestAppContext};
+
     use super::*;
+
+    fn update_package() -> oxideterm_update::NativeUpdatePackage {
+        oxideterm_update::NativeUpdatePackage {
+            version: "2.0.0".to_string(),
+            current_version: "1.0.0".to_string(),
+            body: Some("Release notes".to_string()),
+            date: Some("2026-07-28".to_string()),
+            platform_key: "test-platform".to_string(),
+            url: "https://example.invalid/update".to_string(),
+            signature: None,
+        }
+    }
 
     fn update_status(
         downloaded_bytes: u64,
@@ -524,5 +805,56 @@ mod tests {
             native_update_progress_hint(&update_status(512, None)),
             "512 B"
         );
+    }
+
+    #[gpui::test]
+    fn native_update_delivery_changes_entity_state_without_workspace_polling(
+        cx: &mut TestAppContext,
+    ) {
+        let settings = cx.new(SettingsWorkspaceEntity::new);
+        let sender = settings.update(cx, |settings, _cx| {
+            let (sender, receiver) = delivery::ActiveDeliverySender::channel();
+            settings.native_update.receiver = Some(receiver);
+            settings.native_update.state = NativeUpdateUiState::Downloading(None);
+            sender
+        });
+        sender
+            .send(NativeUpdateDelivery::Finished(Err(
+                "download failed".to_string()
+            )))
+            .expect("delivery");
+
+        settings.update(cx, |settings, cx| {
+            assert!(!settings.drain_native_update_delivery(cx));
+            assert!(matches!(
+                settings.native_update.state,
+                NativeUpdateUiState::Error(ref error) if error == "download failed"
+            ));
+        });
+    }
+
+    #[gpui::test]
+    fn cancellation_ignores_late_progress_and_preserves_available_state(cx: &mut TestAppContext) {
+        let settings = cx.new(SettingsWorkspaceEntity::new);
+        settings.update(cx, |settings, cx| {
+            let package = update_package();
+            settings.native_update.package = Some(package.clone());
+            settings.native_update.state = NativeUpdateUiState::Downloading(None);
+            settings.native_update.cancel = Some(Arc::new(AtomicBool::new(false)));
+
+            settings.cancel_native_update(cx);
+            settings.handle_native_update_delivery(
+                NativeUpdateDelivery::Progress(oxideterm_update::DownloadProgress {
+                    event: oxideterm_update::TauriUpdaterEvent::Progress,
+                    status: update_status(512, Some(1024)),
+                }),
+                cx,
+            );
+
+            assert!(matches!(
+                settings.native_update.state,
+                NativeUpdateUiState::Available(ref available) if available == &package
+            ));
+        });
     }
 }

@@ -1,7 +1,7 @@
 use super::*;
 
-// Update state stays owned by the live workspace; this module only maps that
-// state into the persistent prompt and the on-demand release-notes overlay.
+// The settings Entity owns updater state; the workspace only maps its narrow
+// render projection into window-scoped notification and release-note overlays.
 const NATIVE_UPDATE_RELEASE_NOTES_WIDTH: f32 = 760.0;
 const NATIVE_UPDATE_RELEASE_NOTES_HEIGHT: f32 = 720.0;
 
@@ -68,14 +68,18 @@ impl WorkspaceApp {
             return None;
         }
 
-        let (title, status_text, progress, variant) = match &self.native_update_state {
-            NativeUpdateUiState::Available(_) => (
+        let update_state = self
+            .settings_workspace
+            .read(cx)
+            .native_update_render_state();
+        let (title, status_text, progress, variant) = match &update_state {
+            NativeUpdateRenderState::Available { .. } => (
                 self.i18n.t("settings_view.help.update_available"),
                 None,
                 None,
                 ToastVariant::Default,
             ),
-            NativeUpdateUiState::Downloading(status) => (
+            NativeUpdateRenderState::Downloading(status) => (
                 self.i18n.t("settings_view.help.downloading"),
                 status.as_ref().map(native_update_progress_hint),
                 status
@@ -85,26 +89,26 @@ impl WorkspaceApp {
                     .or(Some(0.0)),
                 ToastVariant::Default,
             ),
-            NativeUpdateUiState::Verifying(status) => (
+            NativeUpdateRenderState::Verifying(status) => (
                 self.i18n.t("settings_view.help.verifying"),
                 status.as_ref().map(native_update_progress_hint),
                 Some(100.0),
                 ToastVariant::Default,
             ),
-            NativeUpdateUiState::Downloaded(_) => (
+            NativeUpdateRenderState::Downloaded => (
                 self.i18n.t("settings_view.help.update_downloaded"),
                 None,
                 None,
                 ToastVariant::Success,
             ),
-            NativeUpdateUiState::Installing(plan) => (
+            NativeUpdateRenderState::Installing(summary) => (
                 self.i18n.t("settings_view.help.installing"),
-                plan.as_ref().map(|plan| plan.summary.clone()),
+                summary.clone(),
                 None,
                 ToastVariant::Default,
             ),
-            NativeUpdateUiState::InstallFinished(outcome) => {
-                let (title_key, variant) = match outcome.status {
+            NativeUpdateRenderState::InstallFinished { status, message } => {
+                let (title_key, variant) = match status {
                     oxideterm_update::NativeInstallStatus::ManualActionRequired => (
                         "settings_view.help.update_downloaded",
                         ToastVariant::Warning,
@@ -118,28 +122,23 @@ impl WorkspaceApp {
                         ToastVariant::Success,
                     ),
                 };
-                (
-                    self.i18n.t(title_key),
-                    Some(outcome.message.clone()),
-                    None,
-                    variant,
-                )
+                (self.i18n.t(title_key), Some(message.clone()), None, variant)
             }
-            NativeUpdateUiState::Error(error) => (
+            NativeUpdateRenderState::Error(error) => (
                 self.i18n.t("settings_view.help.update_error"),
                 (!error.is_empty()).then(|| error.clone()),
                 None,
                 ToastVariant::Error,
             ),
-            NativeUpdateUiState::Idle
-            | NativeUpdateUiState::Checking
-            | NativeUpdateUiState::UpToDate => return None,
+            NativeUpdateRenderState::Idle
+            | NativeUpdateRenderState::Checking
+            | NativeUpdateRenderState::UpToDate => return None,
         };
 
         let description = self
-            .native_update_package
-            .as_ref()
-            .map(|package| format!("v{} → v{}", package.current_version, package.version));
+            .settings_workspace
+            .read(cx)
+            .native_update_package_description();
         let actions = self.render_native_update_notification_actions(cx);
         let workspace = cx.entity();
 
@@ -171,10 +170,9 @@ impl WorkspaceApp {
     ) -> Option<AnyElement> {
         let mut actions = Vec::new();
         let has_release_notes = self
-            .native_update_package
-            .as_ref()
-            .and_then(|package| package.body.as_deref())
-            .is_some_and(|body| !body.trim().is_empty());
+            .settings_workspace
+            .read(cx)
+            .native_update_has_release_notes();
 
         if has_release_notes {
             actions.push(self.native_update_notification_action(
@@ -185,20 +183,26 @@ impl WorkspaceApp {
             ));
         }
 
-        let primary_action = match &self.native_update_state {
-            NativeUpdateUiState::Available(_) => Some((
+        let update_state = self
+            .settings_workspace
+            .read(cx)
+            .native_update_render_state();
+        let primary_action = match update_state {
+            NativeUpdateRenderState::Available { .. } => Some((
                 NativeUpdateNotificationAction::Download,
                 "settings_view.help.download_update",
             )),
-            NativeUpdateUiState::Downloading(_) | NativeUpdateUiState::Verifying(_) => Some((
-                NativeUpdateNotificationAction::Cancel,
-                "settings_view.help.cancel",
-            )),
-            NativeUpdateUiState::Downloaded(_) => Some((
+            NativeUpdateRenderState::Downloading(_) | NativeUpdateRenderState::Verifying(_) => {
+                Some((
+                    NativeUpdateNotificationAction::Cancel,
+                    "settings_view.help.cancel",
+                ))
+            }
+            NativeUpdateRenderState::Downloaded => Some((
                 NativeUpdateNotificationAction::Install,
                 "settings_view.help.install_update",
             )),
-            NativeUpdateUiState::Error(_) => Some((
+            NativeUpdateRenderState::Error(_) => Some((
                 NativeUpdateNotificationAction::Retry,
                 "settings_view.help.retry",
             )),
@@ -264,10 +268,9 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) {
         let has_release_notes = self
-            .native_update_package
-            .as_ref()
-            .and_then(|package| package.body.as_deref())
-            .is_some_and(|body| !body.trim().is_empty());
+            .settings_workspace
+            .read(cx)
+            .native_update_has_release_notes();
         if !has_release_notes {
             return;
         }
@@ -332,19 +335,13 @@ impl WorkspaceApp {
         &self,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let package = self.native_update_package.as_ref();
-        let release_body = package
-            .and_then(|package| package.body.as_deref())
-            .filter(|body| !body.trim().is_empty())
-            .map(str::to_owned)
-            .unwrap_or_else(|| self.i18n.t("settings_view.help.no_changelog"));
-        let description = package.map(|package| {
-            package
-                .date
-                .as_ref()
-                .map(|date| format!("v{} · {date}", package.version))
-                .unwrap_or_else(|| format!("v{}", package.version))
-        });
+        let release_notes = self
+            .settings_workspace
+            .read(cx)
+            .native_update_release_notes();
+        let (release_body, description) = release_notes
+            .map(|release_notes| (release_notes.body, release_notes.description))
+            .unwrap_or_else(|| (self.i18n.t("settings_view.help.no_changelog"), None));
 
         let mut options = self.localized_markdown_options();
         options.base_font_size = self.tokens.metrics.ui_text_sm;

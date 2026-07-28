@@ -427,17 +427,21 @@ impl WorkspaceApp {
         &self,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let button_icon = if matches!(self.native_update_state, NativeUpdateUiState::Checking) {
+        let update_state = self
+            .settings_workspace
+            .read(cx)
+            .native_update_render_state();
+        let button_icon = if matches!(update_state, NativeUpdateRenderState::Checking) {
             LucideIcon::LoaderCircle
         } else {
             LucideIcon::RefreshCw
         };
         let disabled = matches!(
-            self.native_update_state,
-            NativeUpdateUiState::Checking
-                | NativeUpdateUiState::Downloading(_)
-                | NativeUpdateUiState::Verifying(_)
-                | NativeUpdateUiState::Installing(_)
+            update_state,
+            NativeUpdateRenderState::Checking
+                | NativeUpdateRenderState::Downloading(_)
+                | NativeUpdateRenderState::Verifying(_)
+                | NativeUpdateRenderState::Installing(_)
         );
 
         let mut area = div().flex().flex_col().gap(px(12.0)).child(
@@ -454,47 +458,50 @@ impl WorkspaceApp {
                     },
                     cx,
                 ))
-                .children(self.help_update_status_inline()),
+                .children(self.help_update_status_inline(&update_state)),
         );
 
-        if let Some(detail) = self.help_update_detail(cx) {
+        if let Some(detail) = self.help_update_detail(&update_state, cx) {
             area = area.child(detail);
         }
 
         area.into_any_element()
     }
 
-    pub(in crate::workspace) fn help_update_status_inline(&self) -> Option<AnyElement> {
-        let (label, icon, color) = match &self.native_update_state {
-            NativeUpdateUiState::Checking => (
+    pub(in crate::workspace) fn help_update_status_inline(
+        &self,
+        update_state: &NativeUpdateRenderState,
+    ) -> Option<AnyElement> {
+        let (label, icon, color) = match update_state {
+            NativeUpdateRenderState::Checking => (
                 self.i18n.t("settings_view.help.checking"),
                 None,
                 self.tokens.ui.text_muted,
             ),
-            NativeUpdateUiState::UpToDate => (
+            NativeUpdateRenderState::UpToDate => (
                 self.i18n.t("settings_view.help.up_to_date"),
                 Some(LucideIcon::CheckCircle),
                 self.tokens.ui.success,
             ),
-            NativeUpdateUiState::Verifying(_) => (
+            NativeUpdateRenderState::Verifying(_) => (
                 self.i18n.t("settings_view.help.verifying"),
                 None,
                 self.tokens.ui.text_muted,
             ),
-            NativeUpdateUiState::Installing(plan) => (
-                plan.as_ref()
-                    .map(|plan| plan.summary.clone())
+            NativeUpdateRenderState::Installing(summary) => (
+                summary
+                    .clone()
                     .unwrap_or_else(|| self.i18n.t("settings_view.help.installing")),
                 None,
                 self.tokens.ui.text_muted,
             ),
-            NativeUpdateUiState::Downloaded(_) => (
+            NativeUpdateRenderState::Downloaded => (
                 self.i18n.t("settings_view.help.update_downloaded"),
                 Some(LucideIcon::CheckCircle),
                 self.tokens.ui.success,
             ),
-            NativeUpdateUiState::InstallFinished(outcome) => {
-                let label_key = match outcome.status {
+            NativeUpdateRenderState::InstallFinished { status, .. } => {
+                let label_key = match status {
                     oxideterm_update::NativeInstallStatus::ManualActionRequired => {
                         "settings_view.help.update_downloaded"
                     }
@@ -511,7 +518,7 @@ impl WorkspaceApp {
                     self.tokens.ui.success,
                 )
             }
-            NativeUpdateUiState::Error(error) => (
+            NativeUpdateRenderState::Error(error) => (
                 if error.is_empty() {
                     self.i18n.t("settings_view.help.update_error")
                 } else {
@@ -520,9 +527,9 @@ impl WorkspaceApp {
                 Some(LucideIcon::AlertCircle),
                 self.tokens.ui.error,
             ),
-            NativeUpdateUiState::Idle
-            | NativeUpdateUiState::Available(_)
-            | NativeUpdateUiState::Downloading(_) => return None,
+            NativeUpdateRenderState::Idle
+            | NativeUpdateRenderState::Available { .. }
+            | NativeUpdateRenderState::Downloading(_) => return None,
         };
 
         let mut row = div()
@@ -539,20 +546,20 @@ impl WorkspaceApp {
 
     pub(in crate::workspace) fn help_update_detail(
         &self,
+        update_state: &NativeUpdateRenderState,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
-        match &self.native_update_state {
-            NativeUpdateUiState::Available(package) => {
-                let has_release_notes = package
-                    .body
-                    .as_deref()
-                    .is_some_and(|body| !body.trim().is_empty());
+        match update_state {
+            NativeUpdateRenderState::Available {
+                version,
+                has_release_notes,
+            } => {
                 let mut actions = div()
                     .flex()
                     .flex_wrap()
                     .justify_end()
                     .gap(px(self.tokens.spacing.two));
-                if has_release_notes {
+                if *has_release_notes {
                     actions = actions.child(self.help_outline_button(
                         self.i18n.t("settings_view.help.release_notes"),
                         LucideIcon::BookOpen,
@@ -588,20 +595,20 @@ impl WorkspaceApp {
                                     div()
                                         .text_color(rgb(self.tokens.ui.accent))
                                         .font_weight(gpui::FontWeight::MEDIUM)
-                                        .child(format!("v{}", package.version)),
+                                        .child(format!("v{version}")),
                                 ),
                         )
                         .child(actions)
                         .into_any_element(),
                 )
             }
-            NativeUpdateUiState::Downloading(status) => {
+            NativeUpdateRenderState::Downloading(status) => {
                 Some(self.help_transfer_progress(status.as_ref(), false, cx))
             }
-            NativeUpdateUiState::Verifying(status) => {
+            NativeUpdateRenderState::Verifying(status) => {
                 Some(self.help_transfer_progress(status.as_ref(), true, cx))
             }
-            NativeUpdateUiState::Downloaded(_) => Some(
+            NativeUpdateRenderState::Downloaded => Some(
                 div()
                     .flex()
                     .justify_end()

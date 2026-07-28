@@ -88,12 +88,18 @@ impl WorkspaceApp {
             forwarding_runtime.clone(),
         );
         let connection_flow = cx.new(ConnectionFlowEntity::new);
-        let settings_workspace = cx.new(|_| settings::SettingsWorkspaceEntity::new());
+        let settings_workspace = cx.new(settings::SettingsWorkspaceEntity::new);
         let settings_workspace_observation =
             cx.observe(&settings_workspace, |_workspace, _settings, cx| {
                 // Entity-owned settings workers repaint mounted settings surfaces.
                 cx.notify();
             });
+        let settings_workspace_subscription = cx.subscribe(
+            &settings_workspace,
+            |workspace, settings, event: &settings::SettingsWorkspaceEvent, cx| {
+                workspace.handle_settings_workspace_event(settings, event, cx);
+            },
+        );
         let ssh_worker_tx = connection_flow.read(cx).ssh_worker_sender();
         let workspace_runtime = cx.new(|cx| {
             runtime_entity::WorkspaceRuntimeEntity::new_with_ssh_worker_sender(
@@ -334,6 +340,7 @@ impl WorkspaceApp {
             settings_page: SettingsPageModel::default(),
             settings_workspace,
             _settings_workspace_observation: settings_workspace_observation,
+            _settings_workspace_subscription: settings_workspace_subscription,
             settings_navigation_draft: None,
             segmented_control_user_motion:
                 selection_motion::UserSegmentedControlMotionState::default(),
@@ -488,11 +495,6 @@ impl WorkspaceApp {
             portable_settings_dialog: None,
             portable_settings_action_pending: None,
             portable_settings_action_error: None,
-            native_update_state: settings::NativeUpdateUiState::Idle,
-            native_update_rx: None,
-            native_update_wake: delivery::ActiveDeliveryWake::default(),
-            native_update_cancel: None,
-            native_update_package: None,
             native_update_notification_open: false,
             native_update_notification_presence: oxideterm_gpui_ui::motion::ExitPresence::visible(),
             native_update_release_notes_open: false,
@@ -733,7 +735,6 @@ impl WorkspaceApp {
         workspace.sync_ssh_config_sync_service();
         workspace.restore_session_tree_snapshot();
         workspace.schedule_launcher_worker_delivery(cx);
-        workspace.schedule_native_update_delivery(cx);
         let window_handle = window.window_handle();
         workspace.schedule_graphics_worker_delivery(window_handle, cx);
         cx.spawn(async move |weak, cx| {

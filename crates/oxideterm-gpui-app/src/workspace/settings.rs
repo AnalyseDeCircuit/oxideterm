@@ -173,7 +173,9 @@ mod cli_companion;
 mod connections_page;
 mod controls;
 mod entity;
-pub(in crate::workspace) use entity::{PortableStatusRefresh, SettingsWorkspaceEntity};
+pub(in crate::workspace) use entity::{
+    PortableStatusRefresh, SettingsWorkspaceEntity, SettingsWorkspaceEvent, SettingsWorkspaceToast,
+};
 mod general_terminal_pages;
 pub(in crate::workspace) use general_terminal_pages::SETTINGS_TERMINAL_CUSTOM_FONT_INPUT_WIDTH;
 mod highlight;
@@ -208,8 +210,7 @@ use network_page::{
 use pages::settings_keybinding_scope_matches;
 pub(in crate::workspace) use remote_shell_integration::RemoteShellIntegrationUiState;
 pub(in crate::workspace) use update::{
-    NativeUpdateDelivery, NativeUpdateUiState, native_update_progress_hint,
-    native_update_progress_ratio,
+    NativeUpdateRenderState, native_update_progress_hint, native_update_progress_ratio,
 };
 
 fn settings_tab_lucide(icon: SettingsTabIcon) -> LucideIcon {

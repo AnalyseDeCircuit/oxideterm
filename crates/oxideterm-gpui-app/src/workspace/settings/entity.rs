@@ -1,6 +1,8 @@
 use std::sync::Arc;
 
-use gpui::{Context, Task};
+use gpui::{Context, EventEmitter, Task};
+
+use super::update::NativeUpdateRuntime;
 
 /// Non-secret result produced by the portable runtime status worker.
 pub(in crate::workspace) struct PortableStatusRefresh {
@@ -25,16 +27,36 @@ pub(in crate::workspace) struct SettingsWorkspaceEntity {
     portable_exportable_secret_count: Option<usize>,
     portable_refresh_pending: bool,
     portable_refresh_task: Option<Task<()>>,
+    pub(super) native_update: NativeUpdateRuntime,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(in crate::workspace) enum SettingsWorkspaceToast {
+    Success,
+    Warning,
+    Error,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(in crate::workspace) enum SettingsWorkspaceEvent {
+    ResetNativeUpdateOverlay,
+    ShowNativeUpdateNotification,
+    ShowNativeUpdateToast(SettingsWorkspaceToast),
+    RequestAutomaticNativeUpdateCheck,
+    RequestQuitAfterNativeUpdate,
+}
+
+impl EventEmitter<SettingsWorkspaceEvent> for SettingsWorkspaceEntity {}
+
 impl SettingsWorkspaceEntity {
-    pub(in crate::workspace) fn new() -> Self {
+    pub(in crate::workspace) fn new(cx: &mut Context<Self>) -> Self {
         Self {
             portable_status: None,
             portable_status_error: None,
             portable_exportable_secret_count: None,
             portable_refresh_pending: false,
             portable_refresh_task: None,
+            native_update: NativeUpdateRuntime::new(cx),
         }
     }
 
@@ -131,7 +153,7 @@ mod tests {
 
     #[gpui::test]
     fn portable_status_refresh_is_single_flight_and_entity_owned(cx: &mut TestAppContext) {
-        let entity = cx.new(|_| SettingsWorkspaceEntity::new());
+        let entity = cx.new(SettingsWorkspaceEntity::new);
         let runtime = Arc::new(
             tokio::runtime::Builder::new_multi_thread()
                 .worker_threads(1)
