@@ -113,6 +113,38 @@ pub(super) struct CloudSyncListRenderProjection {
     pub(super) i18n: I18n,
     pub(super) selectable_text: crate::workspace::selectable_text::SelectableTextRenderState,
     pub(super) has_background: bool,
+    pub(super) input: CloudSyncInputRenderProjection,
+    pub(super) local_snapshot: std::result::Result<Arc<CloudSyncLocalSnapshot>, Arc<str>>,
+    pub(super) local_field_diff: Arc<CloudSyncLocalFieldDiffSnapshot>,
+    pub(super) upload_diff_items: Arc<Vec<CloudSyncSectionDiffItem>>,
+    pub(super) mono_font_family: SharedString,
+    pub(super) tab_transition_active: bool,
+    pub(super) upload_sensitive_summary: Option<String>,
+}
+
+/// Contains only frame-scoped text geometry; secret text is length-preserving masked.
+#[derive(Clone, Default)]
+pub(super) struct CloudSyncInputRenderProjection {
+    pub(super) focused_input: Option<SettingsInput>,
+    pub(super) active_value: Option<String>,
+    pub(super) selected_range: Option<std::ops::Range<usize>>,
+    pub(super) marked_text: Option<String>,
+    pub(super) caret_visible: bool,
+}
+
+/// Renders Cloud Sync virtual rows without retaining the workspace root.
+#[derive(Clone)]
+pub(super) struct CloudSyncPageRenderer {
+    pub(super) cloud_sync: Entity<CloudSyncWorkspaceEntity>,
+    pub(super) render: Arc<CloudSyncListRenderProjection>,
+}
+
+impl std::ops::Deref for CloudSyncPageRenderer {
+    type Target = CloudSyncListRenderProjection;
+
+    fn deref(&self) -> &Self::Target {
+        &self.render
+    }
 }
 
 /// Owns the persisted service and asynchronous operation lifecycle for Cloud Sync.
@@ -150,6 +182,7 @@ impl CloudSyncControllerState {
 /// Owns Cloud Sync form drafts, navigation, dialogs, previews, and virtual-list caches.
 pub(super) struct CloudSyncViewState {
     pub(super) form: CloudSyncFormDraft,
+    section_rows: Vec<CloudSyncSection>,
     pub(super) section_list_state: ListState,
     pub(super) section_list_cache: RefCell<VirtualListSignatureCache>,
     pub(super) snapshot_cache_generation: Cell<u64>,
@@ -216,6 +249,7 @@ impl CloudSyncViewState {
 
         Self {
             form: CloudSyncFormDraft::from_settings(settings),
+            section_rows: Vec::new(),
             section_list_state,
             section_list_cache: RefCell::new(VirtualListSignatureCache::default()),
             snapshot_cache_generation: Cell::new(0),
@@ -251,7 +285,7 @@ fn cloud_sync_tab_index(tab: CloudSyncTab) -> usize {
 }
 
 /// Requests root-only adapters without giving long-lived tasks a root handle.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug)]
 pub(super) enum CloudSyncWorkspaceEvent {
     DeliveriesReady,
     AutoUploadDue { generation: u64 },
@@ -261,11 +295,46 @@ pub(super) enum CloudSyncWorkspaceEvent {
 }
 
 /// Typed, non-secret actions crossing from Entity-owned virtual rows to root adapters.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug)]
 pub(super) enum CloudSyncUiIntent {
+    SelectTab {
+        tab: CloudSyncTab,
+    },
+    StartGithubOauth,
+    StartMicrosoftOauth,
+    StartGoogleOauth,
+    StartUploadPreview,
+    CheckRemote,
+    PullPreview,
+    RestoreLatestBackup,
+    SaveConfiguration,
+    ApplyPreview,
+    StartUpload,
+    FinishScopeEdit,
+    BeginInputSelection {
+        input: SettingsInput,
+        event: MouseDownEvent,
+        source_window: AnyWindowHandle,
+    },
+    UpdateInputSelection {
+        event: MouseMoveEvent,
+        source_window: AnyWindowHandle,
+    },
+    UpdateInputAnchor {
+        anchor: oxideterm_gpui_ui::text_input::TextInputAnchor,
+        source_window: AnyWindowHandle,
+    },
+    UpdateSelectAnchor {
+        anchor: OverlayAnchor,
+        source_window: AnyWindowHandle,
+    },
     ClearRollbackBackups,
-    RestoreRollbackBackup { signature: u64 },
-    DeleteRollbackBackup { signature: u64 },
+    RestoreRollbackBackup {
+        signature: u64,
+    },
+    DeleteRollbackBackup {
+        signature: u64,
+    },
     ClearHistory,
 }
 
@@ -347,6 +416,75 @@ impl CloudSyncWorkspaceEntity {
         self.delivery_closed = false;
         cx.notify();
         sender
+    }
+
+    fn section_list_spec() -> TauriVirtualListSpec {
+        TauriVirtualListSpec::new(
+            px(CLOUD_SYNC_SECTION_LIST_ESTIMATED_HEIGHT),
+            CLOUD_SYNC_SECTION_LIST_OVERSCAN,
+        )
+    }
+
+    fn has_pending_preview(&self) -> bool {
+        self.view.pending_preview.is_some() || self.view.upload_preview.is_some()
+    }
+
+    fn sections(&self) -> Vec<CloudSyncSection> {
+        cloud_sync_sections(
+            self.controller.store.state(),
+            self.has_pending_preview(),
+            self.view.active_tab,
+        )
+    }
+
+    fn section_signature(&self, section: CloudSyncSection) -> u64 {
+        cloud_sync_section_signature(
+            section,
+            self.controller.store.state(),
+            &self.view.form.backend_type,
+            &self.view.form.auth_mode,
+            &self.view.form.default_conflict_strategy,
+            self.controller.delivery_rx.is_some(),
+            self.has_pending_preview(),
+            self.view.preview_selection.is_some(),
+            self.controller.progress.is_some(),
+            self.view.active_tab,
+        )
+    }
+
+    fn sync_section_rows(&mut self) {
+        let section_rows = self.sections();
+        let signatures = section_rows
+            .iter()
+            .copied()
+            .map(|section| self.section_signature(section))
+            .collect::<Vec<_>>();
+        sync_tauri_variable_list_state_by_signatures(
+            &self.view.section_list_state,
+            &mut self.view.section_list_cache.borrow_mut(),
+            "cloud-sync",
+            &signatures,
+            Self::section_list_spec(),
+        );
+        self.view.section_rows = section_rows;
+    }
+
+    fn section_at(&self, index: usize) -> Option<(CloudSyncSection, usize)> {
+        self.view
+            .section_rows
+            .get(index)
+            .copied()
+            .map(|section| (section, self.view.section_rows.len()))
+    }
+
+    fn close_select_for_scroll(&mut self, cx: &mut Context<Self>) {
+        if close_cloud_sync_select_on_container_scroll(
+            &mut self.view.open_select,
+            &mut self.view.focused_select,
+            &mut self.view.select_highlighted,
+        ) {
+            cx.notify();
+        }
     }
 
     pub(super) fn take_deliveries(&mut self) -> (VecDeque<CloudSyncDelivery>, bool) {
@@ -675,5 +813,41 @@ mod tests {
         assert!(entity.update(cx, |cloud_sync, _cx| {
             cloud_sync.accept_dirty_refresh_generation(current_generation)
         }));
+    }
+
+    #[gpui::test]
+    fn section_list_projection_and_scroll_dismissal_are_entity_owned(cx: &mut TestAppContext) {
+        let entity = test_cloud_sync_entity(cx);
+        entity.update(cx, |cloud_sync, _cx| {
+            cloud_sync.view.set_active_tab(CloudSyncTab::Configure);
+            cloud_sync.view.open_select = Some(CloudSyncSelect::Backend);
+            cloud_sync.view.focused_select = Some(CloudSyncSelect::Backend);
+            cloud_sync.view.select_highlighted = Some((CloudSyncSelect::Backend, 2));
+            cloud_sync.sync_section_rows();
+        });
+
+        let (first_section, section_count, list_count) = entity.read_with(cx, |cloud_sync, _cx| {
+            let (first_section, section_count) =
+                cloud_sync.section_at(0).expect("configure section");
+            (
+                first_section,
+                section_count,
+                cloud_sync.view.section_list_state.item_count(),
+            )
+        });
+        assert_eq!(first_section, CloudSyncSection::Header);
+        assert_eq!(section_count, list_count);
+
+        entity.update(cx, |cloud_sync, cx| {
+            cloud_sync.close_select_for_scroll(cx);
+        });
+        entity.read_with(cx, |cloud_sync, _cx| {
+            assert_eq!(cloud_sync.view.open_select, None);
+            assert_eq!(
+                cloud_sync.view.focused_select,
+                Some(CloudSyncSelect::Backend)
+            );
+            assert_eq!(cloud_sync.view.select_highlighted, None);
+        });
     }
 }

@@ -4,38 +4,86 @@
 use super::*;
 
 impl WorkspaceApp {
-    fn cloud_sync_list_render_projection(
-        &self,
-        cx: &mut Context<Self>,
-    ) -> Arc<CloudSyncListRenderProjection> {
+    pub(super) fn cloud_sync_page_renderer(&self, cx: &mut Context<Self>) -> CloudSyncPageRenderer {
+        let focused_input = self.focused_settings_input.filter(|input| {
+            cloud_sync_form_input_value_ref(&self.cloud_sync.read(cx).view.form, *input).is_some()
+        });
+        let input = focused_input
+            .map(|input| {
+                let target = WorkspaceImeTarget::Settings(input);
+                let mask = |value: &str| "•".repeat(value.encode_utf16().count());
+                CloudSyncInputRenderProjection {
+                    focused_input: Some(input),
+                    active_value: Some(if input.is_secret() {
+                        // The page receives only UTF-16-length geometry for an active secret.
+                        mask(&self.settings_input_draft)
+                    } else {
+                        self.settings_input_draft.clone()
+                    }),
+                    selected_range: self.ime_selected_range_for_target(target, cx),
+                    marked_text: self.marked_text_for_target(target, cx).map(|text| {
+                        if input.is_secret() {
+                            mask(text)
+                        } else {
+                            text.to_owned()
+                        }
+                    }),
+                    caret_visible: self.input_caret.visible(),
+                }
+            })
+            .unwrap_or_default();
+        let local_snapshot = {
+            let cloud_sync = self.cloud_sync.read(cx);
+            self.cloud_sync_local_snapshot(cloud_sync.controller.store.state(), cx)
+                .map(Arc::new)
+                .map_err(|error| Arc::<str>::from(error))
+        };
+        let local_field_diff = Arc::new(self.cloud_sync_local_field_diff_snapshot(cx));
+        let upload_diff_items = match &local_snapshot {
+            Ok(local_snapshot) => {
+                let cloud_sync = self.cloud_sync.read(cx);
+                Arc::new(self.cloud_sync_upload_diff_items_cached(
+                    local_snapshot,
+                    cloud_sync.controller.store.state(),
+                    cx,
+                ))
+            }
+            Err(_) => Arc::new(Vec::new()),
+        };
+        let active_tab = self.cloud_sync.read(cx).view.active_tab;
+        let tab_transition_active = self.segmented_control_user_transition_active(
+            selection_motion::CLOUD_SYNC_SWITCHER_ID,
+            cloud_sync_tab_index(active_tab),
+        );
+        let upload_sensitive_summary = self
+            .cloud_sync
+            .read(cx)
+            .view
+            .upload_selection
+            .as_ref()
+            .and_then(|selection| self.cloud_sync_upload_sensitive_summary(selection));
         // I18n clones share the catalog Arc; no locale table or secret draft is copied.
-        Arc::new(CloudSyncListRenderProjection {
-            tokens: self.tokens,
-            i18n: self.i18n.clone(),
-            selectable_text: self.selectable_text_render_state(cx),
-            has_background: self.cloud_sync_has_background(),
-        })
+        CloudSyncPageRenderer {
+            cloud_sync: self.cloud_sync.clone(),
+            render: Arc::new(CloudSyncListRenderProjection {
+                tokens: self.tokens,
+                i18n: self.i18n.clone(),
+                selectable_text: self.selectable_text_render_state(cx),
+                has_background: self.cloud_sync_has_background(),
+                input,
+                local_snapshot,
+                local_field_diff,
+                upload_diff_items,
+                mono_font_family: settings_mono_font_family(self.settings_store.settings()),
+                tab_transition_active,
+                upload_sensitive_summary,
+            }),
+        }
     }
+}
 
-    pub(super) fn render_cloud_sync_rollback_backups(
-        &mut self,
-        busy: bool,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let render = self.cloud_sync_list_render_projection(cx);
-        self.cloud_sync.update(cx, |cloud_sync, cx| {
-            cloud_sync.render_rollback_backup_list(render, busy, cx)
-        })
-    }
-
-    pub(super) fn render_cloud_sync_history(&mut self, cx: &mut Context<Self>) -> AnyElement {
-        let render = self.cloud_sync_list_render_projection(cx);
-        self.cloud_sync.update(cx, |cloud_sync, cx| {
-            cloud_sync.render_history_list(render, cx)
-        })
-    }
-
-    pub(super) fn render_cloud_sync_recent_history(&self, cx: &mut Context<Self>) -> AnyElement {
+impl CloudSyncPageRenderer {
+    pub(super) fn render_cloud_sync_recent_history(&self, cx: &mut App) -> AnyElement {
         let recent = self
             .cloud_sync
             .read(cx)
@@ -51,25 +99,11 @@ impl WorkspaceApp {
         let theme = self.tokens.ui;
         let title =
             self.render_cloud_sync_section_title("plugin.cloud_sync.overview.recent_history", cx);
-        let view_all = self.render_cloud_sync_inline_button(
+        let view_all = self.render.inline_button(
             "plugin.cloud_sync.overview.view_all_history",
-            cx.listener(|this, _event, _window, cx| {
-                if this.cloud_sync.read(cx).view.active_tab != CloudSyncTab::History {
-                    this.cloud_sync.update(cx, |cloud_sync, cx| {
-                        cloud_sync.view.set_active_tab(CloudSyncTab::History);
-                        cx.notify();
-                    });
-                    this.begin_user_segmented_control_transition(
-                        selection_motion::CLOUD_SYNC_SWITCHER_ID,
-                        cloud_sync_tab_index(CloudSyncTab::History),
-                        cx,
-                    );
-                }
-                this.clear_cloud_sync_select_focus(cx);
-                cx.stop_propagation();
-                cx.notify();
+            self.intent_listener(CloudSyncUiIntent::SelectTab {
+                tab: CloudSyncTab::History,
             }),
-            cx,
         );
         let body = if recent.is_empty() {
             cloud_sync_history_empty(
@@ -104,21 +138,10 @@ impl WorkspaceApp {
             .into_any_element()
     }
 
-    pub(super) fn render_cloud_sync_recent_rollback_backups(
-        &self,
-        busy: bool,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let render = self.cloud_sync_list_render_projection(cx);
-        self.cloud_sync.update(cx, |cloud_sync, cx| {
-            cloud_sync.render_recent_rollback_backups(render, busy, cx)
-        })
-    }
-
     pub(super) fn render_cloud_sync_history_entry(
         &self,
         entry: &CloudSyncHistoryEntry,
-        cx: &mut Context<Self>,
+        cx: &mut App,
     ) -> AnyElement {
         let theme = self.tokens.ui;
         let summary = self.i18n_replace(
@@ -182,11 +205,13 @@ impl WorkspaceApp {
             .unwrap_or_else(|| action.to_string())
     }
 
-    pub(super) fn render_cloud_sync_notes(&self, cx: &mut Context<Self>) -> AnyElement {
-        let state = self.cloud_sync.read(cx).controller.store.state().clone();
-        let local_snapshot = self.cloud_sync_local_snapshot(&state, cx).ok();
+    pub(super) fn render_cloud_sync_notes(&self, cx: &mut App) -> AnyElement {
         let theme = self.tokens.ui;
-        let sections = local_snapshot
+        let sections = self
+            .local_snapshot
+            .as_ref()
+            .ok()
+            .map(Arc::as_ref)
             .map(|snapshot| {
                 snapshot
                     .scope
@@ -195,7 +220,7 @@ impl WorkspaceApp {
                     .map(|section| {
                         cloud_sync_app_settings_section_label_key(section)
                             .map(|key| self.i18n.t(key))
-                            .unwrap_or_else(|| section.clone())
+                            .unwrap_or_else(|| section.to_string())
                     })
                     .collect::<Vec<_>>()
                     .join(" · ")
@@ -224,80 +249,8 @@ impl WorkspaceApp {
             .into_any_element()
     }
 
-    pub(super) fn render_cloud_sync_config_connection_card(
-        &self,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let (config_rows, auto_upload_enabled) = {
-            let cloud_sync = self.cloud_sync.read(cx);
-            (
-                cloud_sync_config_rows(
-                    &cloud_sync.view.form.backend_type,
-                    &cloud_sync.view.form.auth_mode,
-                ),
-                cloud_sync.view.form.auto_upload_enabled,
-            )
-        };
-        let mut connection_rows = Vec::new();
-        for row in config_rows {
-            connection_rows.push(match row {
-                CloudSyncConfigRow::BackendSelect => self.render_cloud_sync_backend_select(cx),
-                CloudSyncConfigRow::AuthModeSelect => self.render_cloud_sync_auth_mode_select(cx),
-                CloudSyncConfigRow::Text(field) => self.render_cloud_sync_text_field(
-                    field.label_key,
-                    field.input,
-                    field.placeholder_key,
-                    false,
-                    cx,
-                ),
-                CloudSyncConfigRow::Secret(field) => self.render_cloud_sync_secret_field(
-                    field.label_key,
-                    field.input,
-                    field.placeholder_key,
-                    field.secret_key,
-                    cx,
-                ),
-                CloudSyncConfigRow::AutoUploadToggle => self.render_cloud_sync_form_toggle(
-                    "plugin.cloud_sync.settings.auto_upload_enabled",
-                    auto_upload_enabled,
-                    cx.listener(
-                        |this: &mut WorkspaceApp,
-                         _event,
-                         _window,
-                         cx: &mut Context<WorkspaceApp>| {
-                            this.cloud_sync.update(cx, |cloud_sync, cx| {
-                                cloud_sync.view.form.auto_upload_enabled =
-                                    !cloud_sync.view.form.auto_upload_enabled;
-                                cx.notify();
-                            });
-                            this.clear_cloud_sync_select_focus(cx);
-                            cx.stop_propagation();
-                        },
-                    ),
-                    cx,
-                ),
-                CloudSyncConfigRow::ConflictSelect => self.render_cloud_sync_conflict_select(cx),
-            });
-        }
-        self.cloud_sync_plugin_card(self.cloud_sync_has_background())
-            .child(self.render_cloud_sync_section_title(
-                "plugin.cloud_sync.sections.connection_settings",
-                cx,
-            ))
-            .child(cloud_sync_form_grid(connection_rows))
-            .into_any_element()
-    }
-
-    pub(super) fn render_cloud_sync_config_preflight_card(
-        &self,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let state = self.cloud_sync.read(cx).controller.store.state().clone();
-        let Some(local_snapshot) = self.cloud_sync_local_snapshot(&state, cx).ok() else {
-            return div().into_any_element();
-        };
-        let upload_diff = self.cloud_sync_upload_diff_items_cached(&local_snapshot, &state, cx);
-        if upload_diff.is_empty() {
+    pub(super) fn render_cloud_sync_config_preflight_card(&self, cx: &mut App) -> AnyElement {
+        if self.upload_diff_items.is_empty() {
             return div().into_any_element();
         }
         self.cloud_sync_plugin_card(self.cloud_sync_has_background())
@@ -310,13 +263,13 @@ impl WorkspaceApp {
             .child(self.render_cloud_sync_section_diff_flat(
                 "cloud-sync-upload-diff",
                 "plugin.cloud_sync.preflight.upload_diff_title",
-                &upload_diff,
+                &self.upload_diff_items,
                 cx,
             ))
             .into_any_element()
     }
 
-    pub(super) fn render_cloud_sync_health_card(&self, cx: &mut Context<Self>) -> AnyElement {
+    pub(super) fn render_cloud_sync_health_card(&self, cx: &mut App) -> AnyElement {
         let health_items = {
             let cloud_sync = self.cloud_sync.read(cx);
             cloud_sync_health_items(&cloud_sync.view.form, cloud_sync.controller.store.state())
@@ -364,7 +317,7 @@ impl WorkspaceApp {
         label_key: &'static str,
         detail_key: &'static str,
         status: CloudSyncHealthStatus,
-        cx: &mut Context<Self>,
+        cx: &mut App,
     ) -> AnyElement {
         let status_key = self.cloud_sync_health_status_key(status);
         let theme = self.tokens.ui;
@@ -430,7 +383,7 @@ impl WorkspaceApp {
         }
     }
 
-    pub(super) fn render_cloud_sync_coverage_card(&self, cx: &mut Context<Self>) -> AnyElement {
+    pub(super) fn render_cloud_sync_coverage_card(&self, cx: &mut App) -> AnyElement {
         let coverage_items = {
             let cloud_sync = self.cloud_sync.read(cx);
             cloud_sync_coverage_model(&cloud_sync.controller.store.state().sync_scope)
@@ -489,7 +442,7 @@ impl WorkspaceApp {
         label_key: &'static str,
         detail: Option<String>,
         status: CloudSyncCoverageStatus,
-        cx: &mut Context<Self>,
+        cx: &mut App,
     ) -> AnyElement {
         let label = self.i18n.t(label_key);
         let status_key = self.cloud_sync_coverage_status_key(status);
@@ -576,7 +529,7 @@ impl WorkspaceApp {
 }
 
 impl CloudSyncListRenderProjection {
-    fn replace(&self, key: &str, replacements: &[(&str, String)]) -> String {
+    pub(super) fn replace(&self, key: &str, replacements: &[(&str, String)]) -> String {
         let mut text = self.i18n.t(key);
         for (name, value) in replacements {
             text = text.replace(&format!("{{{{{name}}}}}"), value);
@@ -584,7 +537,7 @@ impl CloudSyncListRenderProjection {
         text
     }
 
-    fn format_error(&self, error: &str) -> String {
+    pub(super) fn format_error(&self, error: &str) -> String {
         match cloud_sync_error_message_spec(error) {
             CloudSyncErrorMessageSpec::Raw(message) => message,
             CloudSyncErrorMessageSpec::Key(key) => self.i18n.t(key),
@@ -595,7 +548,7 @@ impl CloudSyncListRenderProjection {
         }
     }
 
-    fn selectable_text(
+    pub(super) fn selectable_text(
         &self,
         role: SelectableTextRole,
         scope: &str,
@@ -616,7 +569,7 @@ impl CloudSyncListRenderProjection {
         )
     }
 
-    fn section_title(&self, key: &str, cx: &mut App) -> AnyElement {
+    pub(super) fn section_title(&self, key: &str, cx: &mut App) -> AnyElement {
         cloud_sync_section_title(
             &self.tokens,
             self.selectable_text(
@@ -630,7 +583,7 @@ impl CloudSyncListRenderProjection {
         )
     }
 
-    fn plugin_card(&self) -> Div {
+    pub(super) fn plugin_card(&self) -> Div {
         semantic_surface(
             &self.tokens,
             SurfaceOptions::new(SurfaceKind::Inspector)
@@ -644,7 +597,7 @@ impl CloudSyncListRenderProjection {
         .gap(px(16.0))
     }
 
-    fn inline_button(
+    pub(super) fn inline_button(
         &self,
         label_key: &str,
         listener: impl Fn(&MouseDownEvent, &mut Window, &mut App) + 'static,
@@ -880,7 +833,7 @@ impl CloudSyncWorkspaceEntity {
             .into_any_element()
     }
 
-    fn render_rollback_backup_list(
+    pub(super) fn render_rollback_backup_list(
         &mut self,
         render: Arc<CloudSyncListRenderProjection>,
         busy: bool,
@@ -939,7 +892,7 @@ impl CloudSyncWorkspaceEntity {
             .into_any_element()
     }
 
-    fn render_recent_rollback_backups(
+    pub(super) fn render_recent_rollback_backups(
         &mut self,
         render: Arc<CloudSyncListRenderProjection>,
         busy: bool,
@@ -959,7 +912,7 @@ impl CloudSyncWorkspaceEntity {
         card.into_any_element()
     }
 
-    fn render_history_list(
+    pub(super) fn render_history_list(
         &mut self,
         render: Arc<CloudSyncListRenderProjection>,
         cx: &mut Context<Self>,

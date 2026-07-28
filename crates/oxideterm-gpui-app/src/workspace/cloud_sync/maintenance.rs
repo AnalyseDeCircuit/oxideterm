@@ -73,36 +73,12 @@ impl WorkspaceApp {
         );
     }
 
-    pub(super) fn render_cloud_sync_fact(
-        &self,
-        label_key: &str,
-        value: String,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let theme = self.tokens.ui;
-        let label = self.i18n.t(label_key).to_uppercase();
-        cloud_sync_fact_card(
-            &self.tokens,
-            self.render_display_text_with_role(
-                SelectableTextRole::PlainDocument,
-                "cloud-sync-fact-label",
-                label_key,
-                label.clone(),
-                theme.text_muted,
-                cx,
-            ),
-            self.render_selectable_text(
-                crate::workspace::selectable_text::selectable_text_id(
-                    "cloud-sync-fact",
-                    (&label, &value),
-                ),
-                value.clone(),
-                self.tokens.ui.text,
-                cx,
-            ),
-            cloud_sync_value_prefers_mono(&value),
-            Some(settings_mono_font_family(self.settings_store.settings())),
-        )
+    pub(super) fn finish_cloud_sync_scope_edit(&mut self, cx: &mut Context<Self>) {
+        // Scope edits are Entity-owned; the root only refreshes external source
+        // projections and persists the resulting Cloud Sync state.
+        self.refresh_cloud_sync_local_dirty_state(cx);
+        self.save_cloud_sync_state(cx);
+        cx.notify();
     }
 
     pub(super) fn open_cloud_sync_import_confirm(&mut self, cx: &mut Context<Self>) {

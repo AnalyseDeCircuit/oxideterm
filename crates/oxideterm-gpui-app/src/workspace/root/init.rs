@@ -431,10 +431,11 @@ impl WorkspaceApp {
             // Entity-owned delivery and timers repaint every mounted Cloud Sync surface.
             cx.notify();
         });
-        let cloud_sync_subscription = cx.subscribe(
+        let cloud_sync_subscription = cx.subscribe_in(
             &cloud_sync,
-            |workspace, _cloud_sync, event: &cloud_sync::CloudSyncWorkspaceEvent, cx| {
-                workspace.handle_cloud_sync_workspace_event(*event, cx);
+            window,
+            |workspace, _cloud_sync, event: &cloud_sync::CloudSyncWorkspaceEvent, window, cx| {
+                workspace.handle_cloud_sync_workspace_event(event, window, cx);
             },
         );
         let initial_vibrancy_mode = effective_vibrancy_mode(&settings, &render_policy);

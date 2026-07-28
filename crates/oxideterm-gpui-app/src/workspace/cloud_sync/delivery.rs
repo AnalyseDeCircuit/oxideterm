@@ -4,6 +4,17 @@
 use super::*;
 
 impl WorkspaceApp {
+    pub(super) fn format_cloud_sync_error(&self, error: &str) -> String {
+        match cloud_sync_error_message_spec(error) {
+            CloudSyncErrorMessageSpec::Raw(message) => message,
+            CloudSyncErrorMessageSpec::Key(key) => self.i18n.t(key),
+            CloudSyncErrorMessageSpec::SnapshotTooLarge { limit } => self.i18n_replace(
+                "plugin.cloud_sync.errors.snapshot_too_large",
+                &[("limit", limit.unwrap_or_else(|| "—".to_string()))],
+            ),
+        }
+    }
+
     pub(in crate::workspace) fn bootstrap_cloud_sync_controller(&mut self, cx: &mut Context<Self>) {
         self.cloud_sync.update(cx, |cloud_sync, _cx| {
             cloud_sync
@@ -715,7 +726,8 @@ impl WorkspaceApp {
 
     pub(in crate::workspace) fn handle_cloud_sync_workspace_event(
         &mut self,
-        event: CloudSyncWorkspaceEvent,
+        event: &CloudSyncWorkspaceEvent,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         match event {
@@ -723,7 +735,7 @@ impl WorkspaceApp {
                 self.apply_ready_cloud_sync_deliveries(cx);
             }
             CloudSyncWorkspaceEvent::AutoUploadDue { generation } => {
-                if self.cloud_sync.read(cx).controller.auto_upload_generation != generation {
+                if self.cloud_sync.read(cx).controller.auto_upload_generation != *generation {
                     return;
                 }
                 self.refresh_cloud_sync_local_dirty_state(cx);
@@ -741,7 +753,7 @@ impl WorkspaceApp {
                 }
             }
             CloudSyncWorkspaceEvent::DirtyRefreshDue { generation } => {
-                if self.cloud_sync.read(cx).controller.dirty_refresh_generation != generation {
+                if self.cloud_sync.read(cx).controller.dirty_refresh_generation != *generation {
                     return;
                 }
                 self.refresh_cloud_sync_local_dirty_state(cx);
@@ -754,7 +766,7 @@ impl WorkspaceApp {
                     if cloud_sync
                         .view
                         .confirm_presence
-                        .finish_exit(presence_generation)
+                        .finish_exit(*presence_generation)
                     {
                         cloud_sync.view.confirm = None;
                         cx.notify();
@@ -762,13 +774,101 @@ impl WorkspaceApp {
                 });
             }
             CloudSyncWorkspaceEvent::UiIntent(intent) => {
-                self.handle_cloud_sync_ui_intent(intent, cx);
+                self.handle_cloud_sync_ui_intent(intent, window, cx);
             }
         }
     }
 
-    fn handle_cloud_sync_ui_intent(&mut self, intent: CloudSyncUiIntent, cx: &mut Context<Self>) {
+    fn handle_cloud_sync_ui_intent(
+        &mut self,
+        intent: &CloudSyncUiIntent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         match intent {
+            CloudSyncUiIntent::SelectTab { tab } => {
+                let tab = *tab;
+                if self.cloud_sync.read(cx).view.active_tab == CloudSyncTab::Configure
+                    && tab != CloudSyncTab::Configure
+                    && !self.persist_cloud_sync_configuration(false, cx)
+                {
+                    return;
+                }
+                let changed = self.cloud_sync.update(cx, |cloud_sync, cx| {
+                    if cloud_sync.view.active_tab == tab {
+                        return false;
+                    }
+                    cloud_sync.view.set_active_tab(tab);
+                    cx.notify();
+                    true
+                });
+                if changed {
+                    self.begin_user_segmented_control_transition(
+                        selection_motion::CLOUD_SYNC_SWITCHER_ID,
+                        cloud_sync_tab_index(tab),
+                        cx,
+                    );
+                }
+                self.clear_cloud_sync_select_focus(cx);
+            }
+            CloudSyncUiIntent::StartGithubOauth => self.start_cloud_sync_github_oauth(cx),
+            CloudSyncUiIntent::StartMicrosoftOauth => self.start_cloud_sync_microsoft_oauth(cx),
+            CloudSyncUiIntent::StartGoogleOauth => self.start_cloud_sync_google_oauth(cx),
+            CloudSyncUiIntent::StartUploadPreview => self.start_cloud_sync_upload_preview(cx),
+            CloudSyncUiIntent::CheckRemote => self.start_cloud_sync_check(cx),
+            CloudSyncUiIntent::PullPreview => self.start_cloud_sync_pull_preview(cx),
+            CloudSyncUiIntent::RestoreLatestBackup => {
+                self.open_cloud_sync_restore_confirm(None, cx);
+            }
+            CloudSyncUiIntent::SaveConfiguration => self.save_cloud_sync_configuration(cx),
+            CloudSyncUiIntent::ApplyPreview => self.open_cloud_sync_import_confirm(cx),
+            CloudSyncUiIntent::StartUpload => {
+                self.cloud_sync.update(cx, |cloud_sync, cx| {
+                    cloud_sync.view.upload_preview = None;
+                    cloud_sync.clear_select_focus();
+                    cx.notify();
+                });
+                self.start_cloud_sync_upload_with_options(false, false, false, cx);
+            }
+            CloudSyncUiIntent::FinishScopeEdit => self.finish_cloud_sync_scope_edit(cx),
+            CloudSyncUiIntent::BeginInputSelection {
+                input,
+                event,
+                source_window,
+            } => {
+                if *source_window == window.window_handle() {
+                    self.begin_ime_selection_from_mouse_down(
+                        WorkspaceImeTarget::Settings(*input),
+                        event,
+                        window,
+                        cx,
+                    );
+                }
+            }
+            CloudSyncUiIntent::UpdateInputSelection {
+                event,
+                source_window,
+            } => {
+                if *source_window == window.window_handle() {
+                    self.update_ime_selection_drag_from_mouse_move(event, window, cx);
+                }
+            }
+            CloudSyncUiIntent::UpdateInputAnchor {
+                anchor,
+                source_window,
+            } => {
+                if *source_window == window.window_handle() {
+                    self.update_text_input_anchor(*anchor, cx);
+                }
+            }
+            CloudSyncUiIntent::UpdateSelectAnchor {
+                anchor,
+                source_window,
+            } => {
+                if *source_window == window.window_handle() {
+                    self.update_select_anchor(*anchor, cx);
+                }
+            }
             CloudSyncUiIntent::ClearRollbackBackups => {
                 self.open_cloud_sync_clear_backups_confirm(cx);
             }
@@ -781,7 +881,7 @@ impl WorkspaceApp {
                     .state()
                     .rollback_backups
                     .iter()
-                    .find(|backup| cloud_sync_rollback_backup_signature(backup) == signature)
+                    .find(|backup| cloud_sync_rollback_backup_signature(backup) == *signature)
                     .map(|backup| (backup.id.clone(), backup.created_at.clone()));
                 if let Some(backup) = backup {
                     self.open_cloud_sync_restore_confirm(Some(backup), cx);
@@ -796,7 +896,7 @@ impl WorkspaceApp {
                     .state()
                     .rollback_backups
                     .iter()
-                    .find(|backup| cloud_sync_rollback_backup_signature(backup) == signature)
+                    .find(|backup| cloud_sync_rollback_backup_signature(backup) == *signature)
                     .map(|backup| (backup.id.clone(), backup.created_at.clone()));
                 if let Some((id, created_at)) = backup {
                     self.open_cloud_sync_delete_backup_confirm(id, created_at, cx);
