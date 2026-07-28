@@ -255,7 +255,7 @@ use self::ime::{
     WorkspaceImeElement, WorkspaceImeSelection, WorkspaceImeTarget,
     active_ime_should_defer_input_key, workspace_ime_target_for_plain_host_tools_input,
 };
-use self::launcher::LauncherState;
+use self::launcher::{LauncherWorkspaceEntity, LauncherWorkspaceEvent};
 use self::new_connection::{
     ConnectionFlowEntity, ConnectionFlowEvent, NativeSshPromptHandler, NewConnectionField,
     NewConnectionForm, NewConnectionSelect, SavedConnectionPromptAction, SshAuthTab,
@@ -857,7 +857,9 @@ pub(crate) struct WorkspaceApp {
     ide_tab_nodes: HashMap<TabId, NodeId>,
     ide_last_closed_at_by_node: HashMap<NodeId, SystemTime>,
     sftp_view: sftp::SftpViewState,
-    launcher: LauncherState,
+    launcher: Entity<LauncherWorkspaceEntity>,
+    _launcher_observation: Subscription,
+    _launcher_subscription: Subscription,
     launcher_wsl_list_state: ListState,
     launcher_wsl_list_cache: RefCell<VirtualListSignatureCache>,
     launcher_app_grid_list_state: ListState,

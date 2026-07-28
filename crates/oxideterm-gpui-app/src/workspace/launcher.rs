@@ -5,7 +5,8 @@ use std::{
     thread,
 };
 
-use gpui::StatefulInteractiveElement;
+use gpui::{EventEmitter, StatefulInteractiveElement};
+use oxideterm_editor_core::utf16::replace_utf16;
 use oxideterm_gpui_ui::{
     ButtonTone, SurfaceKind, SurfaceOptions, SurfacePadding, TextInputView, button,
     button::{
@@ -90,20 +91,28 @@ pub(super) enum LauncherWorkerResult {
     },
 }
 
-pub(super) struct LauncherState {
-    pub(super) core: LauncherRuntimeState,
-    pub(super) focused_input: Option<LauncherInput>,
-    pub(super) hovered_app_path: Option<String>,
-    pub(super) hovered_wsl_distro: Option<String>,
-    pub(super) pressed_app_path: Option<String>,
+/// Owns launcher input, scan state, worker delivery, and scan lifetime.
+pub(super) struct LauncherWorkspaceEntity {
+    core: LauncherRuntimeState,
+    focused_input: Option<LauncherInput>,
+    hovered_app_path: Option<String>,
+    hovered_wsl_distro: Option<String>,
+    pressed_app_path: Option<String>,
     worker_tx: delivery::ActiveDeliverySender<LauncherWorkerResult>,
     worker_rx: std::sync::mpsc::Receiver<LauncherWorkerResult>,
 }
 
-impl LauncherState {
-    pub(super) fn new(enabled: bool) -> Self {
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum LauncherWorkspaceEvent {
+    EnabledChanged(bool),
+}
+
+impl EventEmitter<LauncherWorkspaceEvent> for LauncherWorkspaceEntity {}
+
+impl LauncherWorkspaceEntity {
+    pub(super) fn new(enabled: bool, cx: &mut Context<Self>) -> Self {
         let (worker_tx, worker_rx) = delivery::ActiveDeliverySender::channel();
-        Self {
+        let entity = Self {
             core: LauncherRuntimeState::new(enabled),
             focused_input: None,
             hovered_app_path: None,
@@ -111,7 +120,145 @@ impl LauncherState {
             pressed_app_path: None,
             worker_tx,
             worker_rx,
+        };
+        entity.schedule_worker_delivery(cx);
+        entity
+    }
+
+    pub(super) fn focused_input(&self) -> Option<LauncherInput> {
+        self.focused_input
+    }
+
+    pub(super) fn focus_search(&mut self, cx: &mut Context<Self>) {
+        if self.focused_input != Some(LauncherInput::Search) {
+            self.focused_input = Some(LauncherInput::Search);
+            cx.notify();
         }
+    }
+
+    pub(super) fn clear_input_focus(&mut self, cx: &mut Context<Self>) -> bool {
+        let changed = self.focused_input.take().is_some();
+        if changed {
+            cx.notify();
+        }
+        changed
+    }
+
+    pub(super) fn clear_pressed_app(&mut self, cx: &mut Context<Self>) -> bool {
+        let changed = self.pressed_app_path.take().is_some();
+        if changed {
+            cx.notify();
+        }
+        changed
+    }
+
+    pub(super) fn input_value(&self, input: LauncherInput) -> &str {
+        match input {
+            LauncherInput::Search => &self.core.search_query,
+        }
+    }
+
+    pub(super) fn replace_input(
+        &mut self,
+        input: LauncherInput,
+        replacement_range: Option<std::ops::Range<usize>>,
+        text: &str,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if self.focused_input != Some(input) {
+            return false;
+        }
+        match input {
+            LauncherInput::Search => {
+                replace_utf16(&mut self.core.search_query, replacement_range, text);
+            }
+        }
+        cx.notify();
+        true
+    }
+
+    fn enable(&mut self, cx: &mut Context<Self>) {
+        self.core.enable();
+        self.start_load_if_needed(true);
+        cx.emit(LauncherWorkspaceEvent::EnabledChanged(true));
+        cx.notify();
+    }
+
+    fn disable(&mut self, cx: &mut Context<Self>) {
+        self.core.disable();
+        self.focused_input = None;
+        let _ = launcher_core::clear_icon_cache();
+        cx.emit(LauncherWorkspaceEvent::EnabledChanged(false));
+        cx.notify();
+    }
+
+    fn refresh(&mut self, cx: &mut Context<Self>) {
+        self.core.clear_for_refresh();
+        self.start_load_if_needed(true);
+        cx.notify();
+    }
+
+    fn start_load_if_needed(&mut self, force: bool) {
+        let Some(generation) = self.core.begin_load(force, launcher_requires_opt_in()) else {
+            return;
+        };
+        let tx = self.worker_tx.clone();
+        thread::Builder::new()
+            .name("oxideterm-launcher-scan".to_string())
+            .spawn(move || {
+                let result = launcher_core::load_entries();
+                let _ = tx.send(LauncherWorkerResult::LoadEntries { generation, result });
+            })
+            .ok();
+    }
+
+    fn schedule_worker_delivery(&self, cx: &mut Context<Self>) {
+        let worker_wake = self.worker_tx.wake();
+        let release_wake = worker_wake.clone();
+        cx.on_release(move |_, _| {
+            // A platform scan may finish after the launcher entity is released.
+            release_wake.stop();
+        })
+        .detach();
+        cx.spawn(async move |entity, cx| {
+            loop {
+                worker_wake.wait().await;
+                let should_drain = worker_wake.take();
+                let stopped = worker_wake.is_stopped();
+                if should_drain {
+                    let backlog_remaining = entity
+                        .update(cx, |launcher, cx| launcher.drain_worker_results(cx))
+                        .unwrap_or(false);
+                    if backlog_remaining {
+                        // Continue bounded delivery without relying on the workspace heartbeat.
+                        worker_wake.mark();
+                    }
+                }
+                if stopped {
+                    break;
+                }
+            }
+        })
+        .detach();
+    }
+
+    fn drain_worker_results(&mut self, cx: &mut Context<Self>) -> bool {
+        let result_batch =
+            delivery::drain_channel(&self.worker_rx, delivery::USER_ACTION_DELIVERY_BUDGET);
+        let mut changed = false;
+        for result in result_batch.items {
+            match result {
+                LauncherWorkerResult::LoadEntries { generation, result } => {
+                    changed |=
+                        self.core
+                            .apply_load_result(generation, result, launcher_requires_opt_in());
+                }
+            }
+        }
+        if changed {
+            cx.notify();
+        }
+        result_batch.outcome.backlog_remaining
     }
 }
 
@@ -137,10 +284,13 @@ impl WorkspaceApp {
         self.set_main_window_active_tab(Some(tab_id), cx);
         self.active_surface = ActiveSurface::Terminal;
         self.needs_active_pane_focus = false;
-        self.launcher.focused_input = Some(LauncherInput::Search);
-        if !launcher_requires_opt_in() || self.launcher.core.enabled {
-            self.start_launcher_load_if_needed(false);
-        }
+        self.launcher.update(cx, |launcher, cx| {
+            launcher.focus_search(cx);
+            if !launcher_requires_opt_in() || launcher.core.enabled {
+                launcher.start_load_if_needed(false);
+                cx.notify();
+            }
+        });
         window.focus(&self.focus_handle, cx);
         self.reveal_active_tab(window);
         cx.notify();
@@ -167,12 +317,13 @@ impl WorkspaceApp {
         }
 
         let has_background = self.launcher_background_active();
-        let enabled = self.launcher.core.enabled;
+        let enabled = self.launcher.read(cx).core.enabled;
         let filtered_apps = if enabled {
-            self.filtered_launcher_apps()
+            self.filtered_launcher_apps(cx)
         } else {
             Vec::new()
         };
+        let show_disable_confirm = self.launcher.read(cx).core.show_disable_confirm;
         let page_padding = self.tokens.metrics.settings_content_padding;
         let page_gap = self.tokens.metrics.settings_page_gap;
         div()
@@ -189,7 +340,7 @@ impl WorkspaceApp {
             })
             .child(self.render_launcher_header(enabled, filtered_apps.len(), cx))
             .child(div().w_full().h(px(1.0)).bg(rgb(theme.border)))
-            .when(self.launcher.core.show_disable_confirm, |surface| {
+            .when(show_disable_confirm, |surface| {
                 surface.child(self.render_launcher_disable_confirm(cx))
             })
             .child(if enabled {
@@ -203,7 +354,7 @@ impl WorkspaceApp {
     fn render_launcher_wsl_surface(&mut self, cx: &mut Context<Self>) -> AnyElement {
         let theme = self.tokens.ui;
         let has_background = self.background_surface_active("launcher");
-        let filtered_distros = self.launcher.core.filtered_wsl_distros();
+        let filtered_distros = self.launcher.read(cx).core.filtered_wsl_distros();
         div()
             .size_full()
             .flex()
@@ -262,7 +413,7 @@ impl WorkspaceApp {
                     .flex()
                     .items_center()
                     .justify_center()
-                    .opacity(if self.launcher.core.loading {
+                    .opacity(if self.launcher.read(cx).core.loading {
                         0.35
                     } else {
                         1.0
@@ -276,8 +427,9 @@ impl WorkspaceApp {
                     .on_mouse_down(
                         MouseButton::Left,
                         cx.listener(|this, _event, _window, cx| {
-                            if !this.launcher.core.loading {
-                                this.refresh_launcher(cx);
+                            if !this.launcher.read(cx).core.loading {
+                                this.launcher
+                                    .update(cx, |launcher, cx| launcher.refresh(cx));
                             }
                         }),
                     ),
@@ -287,7 +439,8 @@ impl WorkspaceApp {
 
     fn render_launcher_wsl_search(&self, cx: &mut Context<Self>) -> AnyElement {
         let theme = self.tokens.ui;
-        let focused = self.launcher.focused_input == Some(LauncherInput::Search);
+        let launcher = self.launcher.read(cx);
+        let focused = launcher.focused_input == Some(LauncherInput::Search);
         let target = WorkspaceImeTarget::Launcher(LauncherInput::Search);
         let marked = self.marked_text_for_target(target, cx);
         let workspace = cx.entity();
@@ -305,7 +458,7 @@ impl WorkspaceApp {
                         oxideterm_gpui_ui::text_input(
                             &self.tokens,
                             TextInputView {
-                                value: &self.launcher.core.search_query,
+                                value: &launcher.core.search_query,
                                 placeholder: self.i18n.t("launcher.searchWsl"),
                                 focused,
                                 caret_visible: self.new_connection_caret_visible,
@@ -322,7 +475,9 @@ impl WorkspaceApp {
                         .on_mouse_down(
                             MouseButton::Left,
                             cx.listener(move |this, event: &gpui::MouseDownEvent, window, cx| {
-                                this.launcher.focused_input = Some(LauncherInput::Search);
+                                this.launcher.update(cx, |launcher, cx| {
+                                    launcher.focus_search(cx);
+                                });
                                 this.new_connection_caret_visible = true;
                                 window.focus(&this.focus_handle, cx);
                                 this.begin_ime_selection_from_mouse_down(target, event, window, cx);
@@ -351,7 +506,8 @@ impl WorkspaceApp {
         filtered_distros: Vec<WslDistro>,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        if self.launcher.core.loading {
+        let launcher = self.launcher.read(cx);
+        if launcher.core.loading {
             return self.render_launcher_center_state(
                 LucideIcon::LoaderCircle,
                 self.i18n.t("launcher.loadingWsl"),
@@ -360,7 +516,7 @@ impl WorkspaceApp {
                 cx,
             );
         }
-        if let Some(error) = self.launcher.core.error.as_ref() {
+        if let Some(error) = launcher.core.error.as_ref() {
             return self.render_launcher_center_state(
                 LucideIcon::AlertCircle,
                 error.clone(),
@@ -370,7 +526,7 @@ impl WorkspaceApp {
             );
         }
         if filtered_distros.is_empty() {
-            let label = if self.launcher.core.search_query.trim().is_empty() {
+            let label = if launcher.core.search_query.trim().is_empty() {
                 self.i18n.t("launcher.noWsl")
             } else {
                 self.i18n.t("launcher.noWslResults")
@@ -428,7 +584,7 @@ impl WorkspaceApp {
         index: usize,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let distros = self.launcher.core.filtered_wsl_distros();
+        let distros = self.launcher.read(cx).core.filtered_wsl_distros();
         let total = distros.len();
         let Some(distro) = distros.into_iter().nth(index) else {
             return div().into_any_element();
@@ -448,7 +604,8 @@ impl WorkspaceApp {
     fn render_launcher_wsl_row(&self, distro: WslDistro, cx: &mut Context<Self>) -> AnyElement {
         let theme = self.tokens.ui;
         let distro_name = distro.name.clone();
-        let hovered = self.launcher.hovered_wsl_distro.as_deref() == Some(distro.name.as_str());
+        let hovered =
+            self.launcher.read(cx).hovered_wsl_distro.as_deref() == Some(distro.name.as_str());
         div()
             .id((
                 "launcher-wsl-distro",
@@ -525,21 +682,25 @@ impl WorkspaceApp {
                 move |this, _event: &MouseMoveEvent, _window, cx| {
                     // Pointer movement within the same row should not repaint
                     // the launcher unless the hover target actually changes.
-                    if this.launcher.hovered_wsl_distro.as_deref() != Some(distro_name.as_str()) {
-                        this.launcher.hovered_wsl_distro = Some(distro_name.clone());
-                        cx.notify();
-                    }
+                    this.launcher.update(cx, |launcher, cx| {
+                        if launcher.hovered_wsl_distro.as_deref() != Some(distro_name.as_str()) {
+                            launcher.hovered_wsl_distro = Some(distro_name.clone());
+                            cx.notify();
+                        }
+                    });
                 }
             }))
             .on_hover(cx.listener({
                 let distro_name = distro_name.clone();
                 move |this, hovered: &bool, _window, cx| {
-                    if !*hovered
-                        && this.launcher.hovered_wsl_distro.as_deref() == Some(distro_name.as_str())
-                    {
-                        this.launcher.hovered_wsl_distro = None;
-                        cx.notify();
-                    }
+                    this.launcher.update(cx, |launcher, cx| {
+                        if !*hovered
+                            && launcher.hovered_wsl_distro.as_deref() == Some(distro_name.as_str())
+                        {
+                            launcher.hovered_wsl_distro = None;
+                            cx.notify();
+                        }
+                    });
                 }
             }))
             .on_mouse_down(
@@ -554,87 +715,36 @@ impl WorkspaceApp {
             .into_any_element()
     }
 
-    pub(super) fn poll_launcher_worker_results(&mut self, cx: &mut Context<Self>) -> bool {
-        let result_batch = delivery::drain_channel(
-            &self.launcher.worker_rx,
-            delivery::USER_ACTION_DELIVERY_BUDGET,
-        );
-        let mut changed = false;
-        for result in result_batch.items {
-            match result {
-                LauncherWorkerResult::LoadEntries { generation, result } => {
-                    if self.launcher.core.apply_load_result(
-                        generation,
-                        result,
-                        launcher_requires_opt_in(),
-                    ) {
-                        changed = true;
-                    }
-                }
-            }
-        }
-        if changed {
-            cx.notify();
-        }
-        result_batch.outcome.backlog_remaining
-    }
-
-    pub(super) fn schedule_launcher_worker_delivery(&self, cx: &mut Context<Self>) {
-        let worker_wake = self.launcher.worker_tx.wake();
-        let release_wake = worker_wake.clone();
-        cx.on_release(move |_, _| {
-            // The scan thread may finish after the workspace UI has been released.
-            release_wake.stop();
-        })
-        .detach();
-        cx.spawn(async move |weak, cx| {
-            loop {
-                worker_wake.wait().await;
-                let should_drain = worker_wake.take();
-                let stopped = worker_wake.is_stopped();
-                if !should_drain {
-                    if stopped {
-                        break;
-                    }
-                    continue;
-                }
-                let Ok(backlog_remaining) = weak.update(cx, |workspace, cx| {
-                    workspace.poll_launcher_worker_results(cx)
-                }) else {
-                    break;
-                };
-                if backlog_remaining {
-                    // Continue a bounded scan-result batch without the workspace heartbeat.
-                    worker_wake.mark();
-                } else if stopped {
-                    break;
-                }
-            }
-        })
-        .detach();
-    }
-
     pub(super) fn handle_launcher_key(
         &mut self,
         event: &KeyDownEvent,
         cx: &mut Context<Self>,
     ) -> bool {
-        if self.launcher.focused_input != Some(LauncherInput::Search)
+        if self.launcher.read(cx).focused_input != Some(LauncherInput::Search)
             || event.keystroke.modifiers.platform
         {
             return false;
         }
         match event.keystroke.key.as_str() {
             "escape" => {
-                self.launcher.core.search_query.clear();
-                self.launcher.focused_input = None;
+                self.launcher.update(cx, |launcher, cx| {
+                    launcher.core.search_query.clear();
+                    launcher.focused_input = None;
+                    cx.notify();
+                });
                 self.ime_marked_text = None;
                 cx.notify();
                 true
             }
             "backspace" => {
-                let changed = self.launcher.core.search_query.pop().is_some()
-                    || self.ime_marked_text.take().is_some();
+                let query_changed = self.launcher.update(cx, |launcher, cx| {
+                    let changed = launcher.core.search_query.pop().is_some();
+                    if changed {
+                        cx.notify();
+                    }
+                    changed
+                });
+                let changed = query_changed || self.ime_marked_text.take().is_some();
                 if changed {
                     // Empty Backspace is only visible if it also clears an IME
                     // composition marker.
@@ -643,18 +753,6 @@ impl WorkspaceApp {
                 true
             }
             _ => true,
-        }
-    }
-
-    pub(super) fn launcher_input_value(&self, input: LauncherInput) -> &str {
-        match input {
-            LauncherInput::Search => &self.launcher.core.search_query,
-        }
-    }
-
-    pub(super) fn launcher_input_value_mut(&mut self, input: LauncherInput) -> &mut String {
-        match input {
-            LauncherInput::Search => &mut self.launcher.core.search_query,
         }
     }
 
@@ -856,7 +954,8 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
-        let focused = self.launcher.focused_input == Some(LauncherInput::Search);
+        let launcher = self.launcher.read(cx);
+        let focused = launcher.focused_input == Some(LauncherInput::Search);
         let target = WorkspaceImeTarget::Launcher(LauncherInput::Search);
         let marked = self.marked_text_for_target(target, cx);
         let workspace = cx.entity();
@@ -876,7 +975,7 @@ impl WorkspaceApp {
                         oxideterm_gpui_ui::text_input(
                             &self.tokens,
                             TextInputView {
-                                value: &self.launcher.core.search_query,
+                                value: &launcher.core.search_query,
                                 placeholder: self.i18n.t("launcher.search"),
                                 focused,
                                 caret_visible: self.new_connection_caret_visible,
@@ -892,7 +991,9 @@ impl WorkspaceApp {
                         .on_mouse_down(
                             MouseButton::Left,
                             cx.listener(move |this, event: &gpui::MouseDownEvent, window, cx| {
-                                this.launcher.focused_input = Some(LauncherInput::Search);
+                                this.launcher.update(cx, |launcher, cx| {
+                                    launcher.focus_search(cx);
+                                });
                                 this.new_connection_caret_visible = true;
                                 window.focus(&this.focus_handle, cx);
                                 this.begin_ime_selection_from_mouse_down(target, event, window, cx);
@@ -924,13 +1025,13 @@ impl WorkspaceApp {
                     .text_color(rgba((theme.text_muted << 8) | 0x80))
                     .child(launcher_core::count_label(
                         filtered_count,
-                        self.launcher.core.apps.len(),
+                        launcher.core.apps.len(),
                     )),
             )
             .child(self.render_launcher_icon_button(
                 LucideIcon::RefreshCw,
                 self.i18n.t("launcher.refresh"),
-                self.launcher.core.loading,
+                launcher.core.loading,
                 LauncherHeaderAction::Refresh,
                 cx,
             ))
@@ -967,10 +1068,15 @@ impl WorkspaceApp {
             "launcher-icon-button",
             false,
             cx.listener(move |this, _event, _window, cx| match action {
-                LauncherHeaderAction::Refresh => this.refresh_launcher(cx),
+                LauncherHeaderAction::Refresh => {
+                    this.launcher
+                        .update(cx, |launcher, cx| launcher.refresh(cx));
+                }
                 LauncherHeaderAction::Disable => {
-                    this.launcher.core.show_disable_confirm = true;
-                    cx.notify();
+                    this.launcher.update(cx, |launcher, cx| {
+                        launcher.core.show_disable_confirm = true;
+                        cx.notify();
+                    });
                 }
             }),
             cx.entity(),
@@ -1010,8 +1116,10 @@ impl WorkspaceApp {
                 .on_mouse_down(
                     MouseButton::Left,
                     cx.listener(|this, _event, _window, cx| {
-                        this.launcher.core.show_disable_confirm = false;
-                        cx.notify();
+                        this.launcher.update(cx, |launcher, cx| {
+                            launcher.core.show_disable_confirm = false;
+                            cx.notify();
+                        });
                     }),
                 ),
             )
@@ -1030,7 +1138,8 @@ impl WorkspaceApp {
                 .on_mouse_down(
                     MouseButton::Left,
                     cx.listener(|this, _event, _window, cx| {
-                        this.disable_launcher(cx);
+                        this.launcher
+                            .update(cx, |launcher, cx| launcher.disable(cx));
                     }),
                 ),
             )
@@ -1043,7 +1152,8 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        if self.launcher.core.loading && self.launcher.core.apps.is_empty() {
+        let launcher = self.launcher.read(cx);
+        if launcher.core.loading && launcher.core.apps.is_empty() {
             return self.render_launcher_center_state(
                 LucideIcon::LoaderCircle,
                 self.i18n.t("launcher.scanning"),
@@ -1052,7 +1162,7 @@ impl WorkspaceApp {
                 cx,
             );
         }
-        if let Some(error) = self.launcher.core.error.as_ref() {
+        if let Some(error) = launcher.core.error.as_ref() {
             return self.render_launcher_center_state(
                 LucideIcon::AlertCircle,
                 error.clone(),
@@ -1062,7 +1172,7 @@ impl WorkspaceApp {
             );
         }
         if filtered_apps.is_empty() {
-            let label = if self.launcher.core.search_query.trim().is_empty() {
+            let label = if launcher.core.search_query.trim().is_empty() {
                 self.i18n.t("launcher.empty")
             } else {
                 self.i18n.t("launcher.noResults")
@@ -1147,7 +1257,7 @@ impl WorkspaceApp {
         columns: usize,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let apps = self.filtered_launcher_apps();
+        let apps = self.filtered_launcher_apps(cx);
         let columns = columns.max(1);
         let start = row_index.saturating_mul(columns);
         let Some(row_apps) = apps.get(start..apps.len().min(start + columns)) else {
@@ -1219,7 +1329,10 @@ impl WorkspaceApp {
                     )
                     .on_mouse_down(
                         MouseButton::Left,
-                        cx.listener(|this, _event, _window, cx| this.refresh_launcher(cx)),
+                        cx.listener(|this, _event, _window, cx| {
+                            this.launcher
+                                .update(cx, |launcher, cx| launcher.refresh(cx));
+                        }),
                     ),
                 )
             })
@@ -1234,8 +1347,9 @@ impl WorkspaceApp {
         let theme = self.tokens.ui;
         let app_path = app.path.clone();
         let tooltip_name = app.name.clone();
-        let hovered = self.launcher.hovered_app_path.as_deref() == Some(app.path.as_str());
-        let pressed = self.launcher.pressed_app_path.as_deref() == Some(app.path.as_str());
+        let launcher = self.launcher.read(cx);
+        let hovered = launcher.hovered_app_path.as_deref() == Some(app.path.as_str());
+        let pressed = launcher.pressed_app_path.as_deref() == Some(app.path.as_str());
         let icon_size = if pressed {
             LAUNCHER_ICON_PRESSED
         } else {
@@ -1292,11 +1406,14 @@ impl WorkspaceApp {
                 let tooltip_name = tooltip_name;
                 move |this, event: &MouseMoveEvent, _window, cx| {
                     let tooltip_id = format!("launcher-app-{app_path}");
-                    let hover_changed =
-                        this.launcher.hovered_app_path.as_deref() != Some(app_path.as_str());
-                    if hover_changed {
-                        this.launcher.hovered_app_path = Some(app_path.clone());
-                    }
+                    this.launcher.update(cx, |launcher, cx| {
+                        let changed =
+                            launcher.hovered_app_path.as_deref() != Some(app_path.as_str());
+                        if changed {
+                            launcher.hovered_app_path = Some(app_path.clone());
+                            cx.notify();
+                        }
+                    });
                     this.queue_workspace_tooltip(
                         tooltip_id,
                         tooltip_name.clone(),
@@ -1307,9 +1424,6 @@ impl WorkspaceApp {
                     // Pending tooltip movement is not visible until the delay
                     // timer fires; visible tooltip movement is repainted by
                     // queue_workspace_tooltip itself.
-                    if hover_changed {
-                        cx.notify();
-                    }
                 }
             }))
             .on_hover(cx.listener({
@@ -1317,14 +1431,19 @@ impl WorkspaceApp {
                 move |this, hovered: &bool, _window, cx| {
                     if !*hovered {
                         let mut changed = false;
-                        if this.launcher.hovered_app_path.as_deref() == Some(app_path.as_str()) {
-                            this.launcher.hovered_app_path = None;
-                            changed = true;
-                        }
-                        if this.launcher.pressed_app_path.as_deref() == Some(app_path.as_str()) {
-                            this.launcher.pressed_app_path = None;
-                            changed = true;
-                        }
+                        this.launcher.update(cx, |launcher, cx| {
+                            if launcher.hovered_app_path.as_deref() == Some(app_path.as_str()) {
+                                launcher.hovered_app_path = None;
+                                changed = true;
+                            }
+                            if launcher.pressed_app_path.as_deref() == Some(app_path.as_str()) {
+                                launcher.pressed_app_path = None;
+                                changed = true;
+                            }
+                            if changed {
+                                cx.notify();
+                            }
+                        });
                         let tooltip_changed =
                             this.clear_workspace_tooltip_state(&format!("launcher-app-{app_path}"));
                         // Combine tooltip and tile chrome changes so one leave
@@ -1340,7 +1459,10 @@ impl WorkspaceApp {
                 cx.listener({
                     let app_path = app_path;
                     move |this, _event, _window, cx| {
-                        this.launcher.pressed_app_path = Some(app_path.clone());
+                        this.launcher.update(cx, |launcher, cx| {
+                            launcher.pressed_app_path = Some(app_path.clone());
+                            cx.notify();
+                        });
                         this.launch_app(&app_path, cx);
                     }
                 }),
@@ -1364,63 +1486,30 @@ impl WorkspaceApp {
         }
     }
 
-    fn filtered_launcher_apps(&self) -> Vec<LauncherAppEntry> {
-        self.launcher.core.filtered_apps()
+    fn filtered_launcher_apps(&self, cx: &App) -> Vec<LauncherAppEntry> {
+        self.launcher.read(cx).core.filtered_apps()
     }
 
     fn enable_launcher(&mut self, cx: &mut Context<Self>) {
-        self.launcher.core.enable();
-        self.settings_store.settings_mut().launcher.enabled = true;
-        let _ = self.settings_store.save();
-        self.start_launcher_load_if_needed(true);
-        cx.notify();
-    }
-
-    fn disable_launcher(&mut self, cx: &mut Context<Self>) {
-        self.launcher.core.disable();
-        self.launcher.focused_input = None;
-        self.settings_store.settings_mut().launcher.enabled = false;
-        let _ = self.settings_store.save();
-        let _ = launcher_core::clear_icon_cache();
-        cx.notify();
-    }
-
-    fn refresh_launcher(&mut self, cx: &mut Context<Self>) {
-        self.launcher.core.clear_for_refresh();
-        self.start_launcher_load_if_needed(true);
-        cx.notify();
-    }
-
-    fn start_launcher_load_if_needed(&mut self, force: bool) {
-        let Some(generation) = self
-            .launcher
-            .core
-            .begin_load(force, launcher_requires_opt_in())
-        else {
-            return;
-        };
-        let tx = self.launcher.worker_tx.clone();
-        thread::Builder::new()
-            .name("oxideterm-launcher-scan".to_string())
-            .spawn(move || {
-                let result = launcher_core::load_entries();
-                let _ = tx.send(LauncherWorkerResult::LoadEntries { generation, result });
-            })
-            .ok();
+        self.launcher.update(cx, |launcher, cx| launcher.enable(cx));
     }
 
     fn launch_app(&mut self, path: &str, cx: &mut Context<Self>) {
         if let Err(error) = launcher_core::launch_app(path) {
-            self.launcher.core.mark_launch_error(error);
+            self.launcher.update(cx, |launcher, cx| {
+                launcher.core.mark_launch_error(error);
+                cx.notify();
+            });
         }
-        cx.notify();
     }
 
     fn launch_wsl(&mut self, distro: &str, cx: &mut Context<Self>) {
         if let Err(error) = launcher_core::launch_wsl(distro) {
-            self.launcher.core.mark_launch_error(error);
+            self.launcher.update(cx, |launcher, cx| {
+                launcher.core.mark_launch_error(error);
+                cx.notify();
+            });
         }
-        cx.notify();
     }
 }
 
@@ -1483,4 +1572,63 @@ fn launcher_app_icon_fallback(
                 .text_color(rgb(text_muted)),
         )
         .into_any_element()
+}
+
+#[cfg(test)]
+mod tests {
+    use gpui::TestAppContext;
+
+    use super::*;
+
+    #[gpui::test]
+    fn scan_state_and_delivery_are_launcher_entity_owned(cx: &mut TestAppContext) {
+        let launcher = cx.new(|cx| LauncherWorkspaceEntity::new(true, cx));
+        let (generation, sender) = launcher.update(cx, |launcher, _cx| {
+            let generation = launcher
+                .core
+                .begin_load(true, true)
+                .expect("scan generation");
+            (generation, launcher.worker_tx.clone())
+        });
+        sender
+            .send(LauncherWorkerResult::LoadEntries {
+                generation,
+                result: Ok(LauncherLoadResponse {
+                    apps: vec![LauncherAppEntry {
+                        name: "Terminal".to_string(),
+                        path: "/Applications/Terminal.app".to_string(),
+                        bundle_id: None,
+                        icon_path: None,
+                    }],
+                    icon_dir: None,
+                    wsl_distros: Vec::new(),
+                }),
+            })
+            .expect("launcher delivery");
+
+        // Delivery completes while no launcher page or WorkspaceApp is mounted.
+        cx.run_until_parked();
+
+        launcher.read_with(cx, |launcher, _cx| {
+            assert!(!launcher.core.loading);
+            assert_eq!(launcher.core.apps.len(), 1);
+            assert_eq!(launcher.core.apps[0].name, "Terminal");
+        });
+    }
+
+    #[gpui::test]
+    fn input_focus_transition_is_launcher_entity_owned(cx: &mut TestAppContext) {
+        let launcher = cx.new(|cx| LauncherWorkspaceEntity::new(false, cx));
+
+        launcher.update(cx, |launcher, cx| {
+            launcher.focus_search(cx);
+            assert_eq!(launcher.focused_input(), Some(LauncherInput::Search));
+            assert!(launcher.clear_input_focus(cx));
+        });
+
+        launcher.read_with(cx, |launcher, _cx| {
+            assert_eq!(launcher.focused_input(), None);
+            assert!(!launcher.core.enabled);
+        });
+    }
 }

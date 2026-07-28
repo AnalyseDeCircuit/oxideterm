@@ -728,7 +728,7 @@ impl WorkspaceApp {
         if self
             .active_tab()
             .is_some_and(|tab| tab.kind == oxideterm_workspace::TabKind::Launcher)
-            && let Some(input) = self.launcher.focused_input
+            && let Some(input) = self.launcher.read(cx).focused_input()
         {
             return Some(WorkspaceImeTarget::Launcher(input));
         }
@@ -1609,8 +1609,9 @@ impl WorkspaceApp {
                 }
             }
             WorkspaceImeTarget::Launcher(input) => {
-                if self.launcher.focused_input == Some(input) {
-                    Some(self.launcher_input_value(input).to_string())
+                let launcher = self.launcher.read(cx);
+                if launcher.focused_input() == Some(input) {
+                    Some(launcher.input_value(input).to_string())
                 } else {
                     None
                 }
@@ -2505,12 +2506,9 @@ impl WorkspaceApp {
                 }
             }
             WorkspaceImeTarget::Launcher(input) => {
-                if self.launcher.focused_input == Some(input) {
-                    replace_utf16(
-                        self.launcher_input_value_mut(input),
-                        replacement_range,
-                        text,
-                    );
+                if self.launcher.update(cx, |launcher, cx| {
+                    launcher.replace_input(input, replacement_range, text, cx)
+                }) {
                     self.new_connection_caret_visible = true;
                     cx.notify();
                 }

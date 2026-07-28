@@ -100,6 +100,26 @@ impl WorkspaceApp {
                 workspace.handle_settings_workspace_event(settings, event, cx);
             },
         );
+        let launcher = cx.new(|cx| LauncherWorkspaceEntity::new(settings.launcher.enabled, cx));
+        let launcher_observation = cx.observe(&launcher, |_workspace, _launcher, cx| {
+            // Entity-owned scans and input transitions repaint every mounted launcher surface.
+            cx.notify();
+        });
+        let launcher_subscription = cx.subscribe(
+            &launcher,
+            |workspace, _launcher, event: &LauncherWorkspaceEvent, cx| {
+                match event {
+                    LauncherWorkspaceEvent::EnabledChanged(enabled) => {
+                        workspace.settings_store.settings_mut().launcher.enabled = *enabled;
+                        let _ = workspace.settings_store.save();
+                        if !enabled {
+                            workspace.ime_marked_text = None;
+                        }
+                    }
+                }
+                cx.notify();
+            },
+        );
         let ssh_worker_tx = connection_flow.read(cx).ssh_worker_sender();
         let workspace_runtime = cx.new(|cx| {
             runtime_entity::WorkspaceRuntimeEntity::new_with_ssh_worker_sender(
@@ -518,7 +538,9 @@ impl WorkspaceApp {
             ide_tab_nodes: HashMap::new(),
             ide_last_closed_at_by_node: HashMap::new(),
             sftp_view: sftp::SftpViewState::default(),
-            launcher: LauncherState::new(settings.launcher.enabled),
+            launcher,
+            _launcher_observation: launcher_observation,
+            _launcher_subscription: launcher_subscription,
             // WSL launcher rows are browser-list content: keep their row
             // estimate/overscan centralized instead of rebuilding every distro
             // row through a plain flex tree.
@@ -699,7 +721,6 @@ impl WorkspaceApp {
         workspace.bootstrap_cloud_sync_controller(cx);
         workspace.sync_ssh_config_sync_service();
         workspace.restore_session_tree_snapshot();
-        workspace.schedule_launcher_worker_delivery(cx);
         let window_handle = window.window_handle();
         workspace.schedule_graphics_worker_delivery(window_handle, cx);
         cx.spawn(async move |weak, cx| {

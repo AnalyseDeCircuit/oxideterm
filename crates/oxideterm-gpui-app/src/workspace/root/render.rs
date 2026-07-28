@@ -515,7 +515,7 @@ impl Render for WorkspaceApp {
                 } else if this
                     .active_tab()
                     .is_some_and(|tab| tab.kind == TabKind::Launcher)
-                    && this.launcher.focused_input.is_some()
+                    && this.launcher.read(cx).focused_input().is_some()
                 {
                     let _ = this.handle_launcher_key(event, cx);
                     window.prevent_default();
@@ -1246,7 +1246,9 @@ impl WorkspaceApp {
         self.stop_selectable_text_autoscroll();
         self.finish_tab_drag(event, window, cx);
         let cancelled_sftp_drag = self.cancel_sftp_drag_capture();
-        let cleared_launcher_press = self.launcher.pressed_app_path.take().is_some();
+        let cleared_launcher_press = self
+            .launcher
+            .update(cx, |launcher, cx| launcher.clear_pressed_app(cx));
         if cleared_launcher_press || cancelled_sftp_drag {
             // A single mouse-up can clear both transient states; repaint once
             // after composing those no-longer-visible captures instead of

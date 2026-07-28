@@ -934,7 +934,10 @@ impl WorkspaceApp {
             self.ime_marked_text = None;
             changed = true;
         }
-        if self.launcher.focused_input.take().is_some() {
+        if self
+            .launcher
+            .update(cx, |launcher, cx| launcher.clear_input_focus(cx))
+        {
             self.ime_marked_text = None;
             changed = true;
         }
