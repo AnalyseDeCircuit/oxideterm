@@ -356,12 +356,6 @@ const FORWARDS_TABLE_ROW_LIST_OVERSCAN: usize = 8;
 const CONNECTION_MONITOR_SECTION_LIST_ITEM_COUNT: usize = 2;
 const CONNECTION_MONITOR_SECTION_LIST_ESTIMATED_HEIGHT: f32 = 280.0;
 const CONNECTION_MONITOR_SECTION_LIST_OVERSCAN: usize = 1;
-const LAUNCHER_WSL_LIST_INITIAL_ITEM_COUNT: usize = 0;
-const LAUNCHER_WSL_LIST_ESTIMATED_HEIGHT: f32 = 56.0;
-const LAUNCHER_WSL_LIST_OVERSCAN: usize = 6;
-const LAUNCHER_APP_GRID_INITIAL_ROW_COUNT: usize = 0;
-const LAUNCHER_APP_GRID_ESTIMATED_ROW_HEIGHT: f32 = 104.0;
-const LAUNCHER_APP_GRID_OVERSCAN: usize = 4;
 const QUICK_COMMAND_LIST_INITIAL_ITEM_COUNT: usize = 0;
 const QUICK_COMMAND_LIST_ESTIMATED_HEIGHT: f32 = 56.0;
 const QUICK_COMMAND_LIST_OVERSCAN: usize = 6;
@@ -859,10 +853,6 @@ pub(crate) struct WorkspaceApp {
     launcher: Entity<LauncherWorkspaceEntity>,
     _launcher_observation: Subscription,
     _launcher_subscription: Subscription,
-    launcher_wsl_list_state: ListState,
-    launcher_wsl_list_cache: RefCell<VirtualListSignatureCache>,
-    launcher_app_grid_list_state: ListState,
-    launcher_app_grid_list_cache: RefCell<VirtualListSignatureCache>,
     graphics: Entity<GraphicsWorkspaceEntity>,
     _graphics_observation: Subscription,
     host_tools: Entity<HostToolsEntity>,

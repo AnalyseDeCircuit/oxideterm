@@ -16,5 +16,7 @@ mod state;
 pub use cache::{clear_icon_cache, icon_cache_dir};
 pub use model::{LauncherAppEntry, LauncherListResponse, LauncherLoadResponse, WslDistro};
 pub use platform::{launch_app, launch_wsl, list_apps, load_entries};
-pub use query::{count_label, filter_apps, filter_wsl_distros};
+pub use query::{
+    count_label, filter_app_indices, filter_apps, filter_wsl_distro_indices, filter_wsl_distros,
+};
 pub use state::LauncherRuntimeState;

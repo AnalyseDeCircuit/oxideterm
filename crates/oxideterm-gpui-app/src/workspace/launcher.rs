@@ -64,6 +64,13 @@ const LAUNCHER_WSL_BORDER_ALPHA_50: u32 = 0x80; // Tauri border/50.
 const LAUNCHER_WSL_BG_HOVER_ALPHA_30: u32 = 0x4d; // Tauri bg-hover/30.
 const LAUNCHER_WSL_BG_HOVER_ALPHA_60: u32 = 0x99; // Tauri bg-hover/60.
 const LAUNCHER_WSL_ACCENT_ALPHA_20: u32 = 0x33; // Tauri accent/20.
+const LAUNCHER_WSL_LIST_INITIAL_ITEM_COUNT: usize = 0;
+const LAUNCHER_WSL_LIST_ESTIMATED_HEIGHT: f32 = 56.0;
+const LAUNCHER_WSL_LIST_OVERSCAN: usize = 6;
+const LAUNCHER_APP_GRID_INITIAL_ROW_COUNT: usize = 0;
+const LAUNCHER_APP_GRID_ESTIMATED_ROW_HEIGHT: f32 = 104.0;
+const LAUNCHER_APP_GRID_OVERSCAN: usize = 4;
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub(super) enum LauncherInput {
     Search,
@@ -98,13 +105,30 @@ pub(super) struct LauncherWorkspaceEntity {
     hovered_app_path: Option<String>,
     hovered_wsl_distro: Option<String>,
     pressed_app_path: Option<String>,
+    // Stable catalog indices avoid cloning the full result set for each virtual-list frame.
+    filtered_app_indices: Vec<usize>,
+    filtered_wsl_distro_indices: Vec<usize>,
+    wsl_list_state: ListState,
+    wsl_list_cache: RefCell<VirtualListSignatureCache>,
+    app_grid_list_state: ListState,
+    app_grid_list_cache: RefCell<VirtualListSignatureCache>,
     worker_tx: delivery::ActiveDeliverySender<LauncherWorkerResult>,
     worker_rx: std::sync::mpsc::Receiver<LauncherWorkerResult>,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub(super) enum LauncherWorkspaceEvent {
     EnabledChanged(bool),
+    // Tooltips are the only row effect that belongs to the global workspace overlay.
+    TooltipRequested {
+        id: String,
+        label: String,
+        x: f32,
+        y: f32,
+    },
+    TooltipCleared {
+        id: String,
+    },
 }
 
 impl EventEmitter<LauncherWorkspaceEvent> for LauncherWorkspaceEntity {}
@@ -118,6 +142,23 @@ impl LauncherWorkspaceEntity {
             hovered_app_path: None,
             hovered_wsl_distro: None,
             pressed_app_path: None,
+            filtered_app_indices: Vec::new(),
+            filtered_wsl_distro_indices: Vec::new(),
+            // Measured list geometry belongs to the surface that filters and renders it.
+            wsl_list_state: ListState::new(
+                LAUNCHER_WSL_LIST_INITIAL_ITEM_COUNT,
+                ListAlignment::Top,
+                Self::wsl_list_spec().overdraw(),
+            )
+            .measure_all(),
+            wsl_list_cache: RefCell::new(VirtualListSignatureCache::default()),
+            app_grid_list_state: ListState::new(
+                LAUNCHER_APP_GRID_INITIAL_ROW_COUNT,
+                ListAlignment::Top,
+                Self::app_grid_list_spec().overdraw(),
+            )
+            .measure_all(),
+            app_grid_list_cache: RefCell::new(VirtualListSignatureCache::default()),
             worker_tx,
             worker_rx,
         };
@@ -173,6 +214,7 @@ impl LauncherWorkspaceEntity {
                 replace_utf16(&mut self.core.search_query, replacement_range, text);
             }
         }
+        self.rebuild_filtered_indices();
         cx.notify();
         true
     }
@@ -187,6 +229,7 @@ impl LauncherWorkspaceEntity {
     fn disable(&mut self, cx: &mut Context<Self>) {
         self.core.disable();
         self.focused_input = None;
+        self.rebuild_filtered_indices();
         let _ = launcher_core::clear_icon_cache();
         cx.emit(LauncherWorkspaceEvent::EnabledChanged(false));
         cx.notify();
@@ -194,6 +237,7 @@ impl LauncherWorkspaceEntity {
 
     fn refresh(&mut self, cx: &mut Context<Self>) {
         self.core.clear_for_refresh();
+        self.rebuild_filtered_indices();
         self.start_load_if_needed(true);
         cx.notify();
     }
@@ -249,9 +293,13 @@ impl LauncherWorkspaceEntity {
         for result in result_batch.items {
             match result {
                 LauncherWorkerResult::LoadEntries { generation, result } => {
-                    changed |=
+                    let result_applied =
                         self.core
                             .apply_load_result(generation, result, launcher_requires_opt_in());
+                    if result_applied {
+                        self.rebuild_filtered_indices();
+                    }
+                    changed |= result_applied;
                 }
             }
         }
@@ -259,6 +307,376 @@ impl LauncherWorkspaceEntity {
             cx.notify();
         }
         result_batch.outcome.backlog_remaining
+    }
+
+    fn rebuild_filtered_indices(&mut self) {
+        self.filtered_app_indices =
+            launcher_core::filter_app_indices(&self.core.apps, &self.core.search_query);
+        self.filtered_wsl_distro_indices = launcher_core::filter_wsl_distro_indices(
+            &self.core.wsl_distros,
+            &self.core.search_query,
+        );
+    }
+
+    fn filtered_app_count(&self) -> usize {
+        self.filtered_app_indices.len()
+    }
+
+    fn filtered_wsl_distro_count(&self) -> usize {
+        self.filtered_wsl_distro_indices.len()
+    }
+
+    fn filtered_app_at(&self, filtered_index: usize) -> Option<LauncherAppEntry> {
+        self.filtered_app_indices
+            .get(filtered_index)
+            .and_then(|catalog_index| self.core.apps.get(*catalog_index))
+            .cloned()
+    }
+
+    fn filtered_wsl_distro_at(&self, filtered_index: usize) -> Option<WslDistro> {
+        self.filtered_wsl_distro_indices
+            .get(filtered_index)
+            .and_then(|catalog_index| self.core.wsl_distros.get(*catalog_index))
+            .cloned()
+    }
+
+    fn sync_wsl_list_state(&self) {
+        let signatures = self
+            .filtered_wsl_distro_indices
+            .iter()
+            .filter_map(|catalog_index| self.core.wsl_distros.get(*catalog_index))
+            .map(launcher_wsl_distro_signature)
+            .collect::<Vec<_>>();
+        sync_tauri_variable_list_state_by_signatures(
+            &self.wsl_list_state,
+            &mut self.wsl_list_cache.borrow_mut(),
+            "launcher-wsl-distros",
+            &signatures,
+            Self::wsl_list_spec(),
+        );
+    }
+
+    fn sync_app_grid_list_state(&self, columns: usize) {
+        let columns = columns.max(1);
+        let signatures = self
+            .filtered_app_indices
+            .chunks(columns)
+            .enumerate()
+            .map(|(row_index, catalog_indices)| {
+                launcher_app_grid_catalog_row_signature(
+                    row_index,
+                    columns,
+                    catalog_indices,
+                    &self.core.apps,
+                )
+            })
+            .collect::<Vec<_>>();
+        sync_tauri_variable_list_state_by_signatures(
+            &self.app_grid_list_state,
+            &mut self.app_grid_list_cache.borrow_mut(),
+            "launcher-app-grid",
+            &signatures,
+            Self::app_grid_list_spec(),
+        );
+    }
+
+    fn wsl_list_spec() -> TauriVirtualListSpec {
+        TauriVirtualListSpec::new(
+            px(LAUNCHER_WSL_LIST_ESTIMATED_HEIGHT),
+            LAUNCHER_WSL_LIST_OVERSCAN,
+        )
+    }
+
+    fn app_grid_list_spec() -> TauriVirtualListSpec {
+        TauriVirtualListSpec::new(
+            px(LAUNCHER_APP_GRID_ESTIMATED_ROW_HEIGHT),
+            LAUNCHER_APP_GRID_OVERSCAN,
+        )
+    }
+
+    fn render_wsl_list_item(
+        &mut self,
+        index: usize,
+        tokens: ThemeTokens,
+        mono_font_family: &SharedString,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let total = self.filtered_wsl_distro_count();
+        let Some(distro) = self.filtered_wsl_distro_at(index) else {
+            return div().into_any_element();
+        };
+        div()
+            .px(px(LAUNCHER_WSL_CONTENT_PADDING))
+            .when(index == 0, |item| item.pt(px(LAUNCHER_WSL_CONTENT_PADDING)))
+            .pb(px(if index + 1 == total {
+                LAUNCHER_WSL_CONTENT_PADDING
+            } else {
+                8.0
+            }))
+            .child(self.render_wsl_row(distro, tokens, mono_font_family, cx))
+            .into_any_element()
+    }
+
+    fn render_wsl_row(
+        &mut self,
+        distro: WslDistro,
+        tokens: ThemeTokens,
+        mono_font_family: &SharedString,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let theme = tokens.ui;
+        let distro_name = distro.name.clone();
+        let hovered = self.hovered_wsl_distro.as_deref() == Some(distro.name.as_str());
+        div()
+            .id((
+                "launcher-wsl-distro",
+                launcher_element_id_for_path(&distro.name),
+            ))
+            .flex()
+            .items_center()
+            .gap(px(LAUNCHER_WSL_ROW_GAP))
+            .px(px(LAUNCHER_WSL_ROW_PADDING_X))
+            .py(px(LAUNCHER_WSL_ROW_PADDING_Y))
+            .rounded(px(tokens.radii.lg))
+            .border_1()
+            .border_color(rgba((theme.border << 8) | LAUNCHER_WSL_BORDER_ALPHA_30))
+            .bg(if hovered {
+                rgba((theme.bg_hover << 8) | LAUNCHER_WSL_BG_HOVER_ALPHA_60)
+            } else {
+                rgba(0x00000000)
+            })
+            .cursor_pointer()
+            .child(WorkspaceApp::render_lucide_icon(
+                LucideIcon::Terminal,
+                20.0,
+                rgb(theme.accent),
+            ))
+            .child(
+                div().flex_1().min_w(px(0.0)).child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .text_size(px(14.0))
+                        .font_weight(gpui::FontWeight::MEDIUM)
+                        .text_color(rgb(theme.text))
+                        .overflow_hidden()
+                        .child(div().truncate().child(distro.name.clone()))
+                        .when(distro.is_default, |row| {
+                            row.child(
+                                div()
+                                    .ml(px(8.0))
+                                    .px(px(6.0))
+                                    .py(px(2.0))
+                                    .rounded(px(tokens.radii.sm))
+                                    .bg(rgba((theme.accent << 8) | LAUNCHER_WSL_ACCENT_ALPHA_20))
+                                    .font_family(mono_font_family.clone())
+                                    .text_size(px(LAUNCHER_WSL_BADGE_TEXT_SIZE))
+                                    .text_color(rgb(theme.accent))
+                                    .child("DEFAULT"),
+                            )
+                        }),
+                ),
+            )
+            .child(
+                div()
+                    .size(px(LAUNCHER_WSL_DOT))
+                    .rounded(px(LAUNCHER_WSL_DOT / 2.0))
+                    .bg(rgb(if distro.is_running {
+                        LAUNCHER_WSL_GREEN_500
+                    } else {
+                        theme.text_muted
+                    })),
+            )
+            .child(div().opacity(if hovered { 1.0 } else { 0.0 }).child(
+                WorkspaceApp::render_lucide_icon(
+                    LucideIcon::ExternalLink,
+                    14.0,
+                    rgb(theme.text_muted),
+                ),
+            ))
+            .on_mouse_move(cx.listener({
+                let distro_name = distro_name.clone();
+                move |launcher, _event: &MouseMoveEvent, _window, cx| {
+                    if launcher.hovered_wsl_distro.as_deref() != Some(distro_name.as_str()) {
+                        launcher.hovered_wsl_distro = Some(distro_name.clone());
+                        cx.notify();
+                    }
+                }
+            }))
+            .on_hover(cx.listener({
+                let distro_name = distro_name.clone();
+                move |launcher, hovered: &bool, _window, cx| {
+                    if !*hovered
+                        && launcher.hovered_wsl_distro.as_deref() == Some(distro_name.as_str())
+                    {
+                        launcher.hovered_wsl_distro = None;
+                        cx.notify();
+                    }
+                }
+            }))
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(move |launcher, _event, _window, cx| {
+                    launcher.launch_wsl(&distro_name, cx);
+                }),
+            )
+            .into_any_element()
+    }
+
+    fn render_app_grid_row(
+        &mut self,
+        row_index: usize,
+        columns: usize,
+        tokens: ThemeTokens,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let columns = columns.max(1);
+        let start = row_index.saturating_mul(columns);
+        let end = self.filtered_app_count().min(start.saturating_add(columns));
+        let row_apps = (start..end)
+            .filter_map(|filtered_index| self.filtered_app_at(filtered_index))
+            .collect::<Vec<_>>();
+        div()
+            .when(row_index == 0, |row| row.pt(px(4.0)))
+            .pb(px(LAUNCHER_GRID_GAP_Y))
+            .flex()
+            .items_start()
+            .gap_x(px(LAUNCHER_GRID_GAP_X))
+            .children(
+                row_apps
+                    .into_iter()
+                    .map(|app| self.render_app_icon(app, tokens, cx)),
+            )
+            .into_any_element()
+    }
+
+    fn render_app_icon(
+        &mut self,
+        app: LauncherAppEntry,
+        tokens: ThemeTokens,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let theme = tokens.ui;
+        let app_path = app.path.clone();
+        let tooltip_name = app.name.clone();
+        let hovered = self.hovered_app_path.as_deref() == Some(app.path.as_str());
+        let pressed = self.pressed_app_path.as_deref() == Some(app.path.as_str());
+        let icon_size = if pressed {
+            LAUNCHER_ICON_PRESSED
+        } else {
+            LAUNCHER_ICON_BOX
+        };
+        div()
+            .id(("launcher-app", launcher_element_id_for_path(&app.path)))
+            .w(px(LAUNCHER_TILE_W))
+            .min_h(px(LAUNCHER_TILE_MIN_H))
+            .p(px(LAUNCHER_TILE_PADDING))
+            .flex()
+            .flex_col()
+            .items_center()
+            .gap(px(8.0))
+            .rounded(px(tokens.radii.lg))
+            .bg(if hovered {
+                rgba((0xffffff << 8) | LAUNCHER_WHITE_ALPHA_06)
+            } else {
+                rgba(0x00000000)
+            })
+            .cursor_pointer()
+            .child(
+                div()
+                    .size(px(LAUNCHER_ICON_BOX))
+                    .rounded(px(tokens.radii.lg))
+                    .overflow_hidden()
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .shadow(vec![gpui::BoxShadow {
+                        inset: false,
+                        color: rgba((0x000000 << 8) | 0x33).into(),
+                        offset: gpui::point(px(0.0), px(2.0)),
+                        blur_radius: px(4.0),
+                        spread_radius: px(0.0),
+                    }])
+                    .child(launcher_app_icon_image(&app, icon_size, tokens)),
+            )
+            .child(
+                div()
+                    .max_w(px(LAUNCHER_APP_NAME_W))
+                    .h(px(LAUNCHER_APP_NAME_LINE_H * LAUNCHER_APP_NAME_LINES))
+                    .overflow_hidden()
+                    .text_align(gpui::TextAlign::Center)
+                    .text_size(px(LAUNCHER_APP_NAME_SIZE))
+                    .line_height(px(LAUNCHER_APP_NAME_LINE_H))
+                    .text_color(rgba(
+                        (theme.text_secondary << 8) | LAUNCHER_TEXT_SECONDARY_90_ALPHA,
+                    ))
+                    .child(app.name),
+            )
+            .on_mouse_move(cx.listener({
+                let app_path = app_path.clone();
+                move |launcher, event: &MouseMoveEvent, _window, cx| {
+                    if launcher.hovered_app_path.as_deref() != Some(app_path.as_str()) {
+                        launcher.hovered_app_path = Some(app_path.clone());
+                        cx.notify();
+                    }
+                    cx.emit(LauncherWorkspaceEvent::TooltipRequested {
+                        id: format!("launcher-app-{app_path}"),
+                        label: tooltip_name.clone(),
+                        x: f32::from(event.position.x) + 12.0,
+                        y: f32::from(event.position.y) + 16.0,
+                    });
+                }
+            }))
+            .on_hover(cx.listener({
+                let app_path = app_path.clone();
+                move |launcher, hovered: &bool, _window, cx| {
+                    if !*hovered {
+                        let mut changed = false;
+                        if launcher.hovered_app_path.as_deref() == Some(app_path.as_str()) {
+                            launcher.hovered_app_path = None;
+                            changed = true;
+                        }
+                        if launcher.pressed_app_path.as_deref() == Some(app_path.as_str()) {
+                            launcher.pressed_app_path = None;
+                            changed = true;
+                        }
+                        if changed {
+                            cx.notify();
+                        }
+                        cx.emit(LauncherWorkspaceEvent::TooltipCleared {
+                            id: format!("launcher-app-{app_path}"),
+                        });
+                    }
+                }
+            }))
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(move |launcher, _event, _window, cx| {
+                    launcher.select_app_with(&app_path, launcher_core::launch_app, cx);
+                }),
+            )
+            .into_any_element()
+    }
+
+    fn select_app_with(
+        &mut self,
+        path: &str,
+        launch: impl FnOnce(&str) -> Result<(), String>,
+        cx: &mut Context<Self>,
+    ) {
+        // Keep selection and launch failure in the same owner before repainting the row.
+        self.pressed_app_path = Some(path.to_string());
+        if let Err(error) = launch(path) {
+            self.core.mark_launch_error(error);
+        }
+        cx.notify();
+    }
+
+    fn launch_wsl(&mut self, distro: &str, cx: &mut Context<Self>) {
+        if let Err(error) = launcher_core::launch_wsl(distro) {
+            self.core.mark_launch_error(error);
+            cx.notify();
+        }
     }
 }
 
@@ -318,10 +736,10 @@ impl WorkspaceApp {
 
         let has_background = self.launcher_background_active();
         let enabled = self.launcher.read(cx).core.enabled;
-        let filtered_apps = if enabled {
-            self.filtered_launcher_apps(cx)
+        let filtered_app_count = if enabled {
+            self.launcher.read(cx).filtered_app_count()
         } else {
-            Vec::new()
+            0
         };
         let show_disable_confirm = self.launcher.read(cx).core.show_disable_confirm;
         let page_padding = self.tokens.metrics.settings_content_padding;
@@ -338,13 +756,13 @@ impl WorkspaceApp {
             } else {
                 rgb(theme.bg)
             })
-            .child(self.render_launcher_header(enabled, filtered_apps.len(), cx))
+            .child(self.render_launcher_header(enabled, filtered_app_count, cx))
             .child(div().w_full().h(px(1.0)).bg(rgb(theme.border)))
             .when(show_disable_confirm, |surface| {
                 surface.child(self.render_launcher_disable_confirm(cx))
             })
             .child(if enabled {
-                self.render_launcher_content(filtered_apps, window, cx)
+                self.render_launcher_content(window, cx)
             } else {
                 self.render_launcher_consent(has_background, cx)
             })
@@ -354,7 +772,7 @@ impl WorkspaceApp {
     fn render_launcher_wsl_surface(&mut self, cx: &mut Context<Self>) -> AnyElement {
         let theme = self.tokens.ui;
         let has_background = self.background_surface_active("launcher");
-        let filtered_distros = self.launcher.read(cx).core.filtered_wsl_distros();
+        let filtered_distro_count = self.launcher.read(cx).filtered_wsl_distro_count();
         div()
             .size_full()
             .flex()
@@ -364,9 +782,9 @@ impl WorkspaceApp {
             } else {
                 rgb(theme.bg)
             })
-            .child(self.render_launcher_wsl_header(filtered_distros.len(), cx))
+            .child(self.render_launcher_wsl_header(filtered_distro_count, cx))
             .child(self.render_launcher_wsl_search(cx))
-            .child(self.render_launcher_wsl_content(filtered_distros, cx))
+            .child(self.render_launcher_wsl_content(cx))
             .into_any_element()
     }
 
@@ -501,13 +919,17 @@ impl WorkspaceApp {
             .into_any_element()
     }
 
-    fn render_launcher_wsl_content(
-        &mut self,
-        filtered_distros: Vec<WslDistro>,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let launcher = self.launcher.read(cx);
-        if launcher.core.loading {
+    fn render_launcher_wsl_content(&mut self, cx: &mut Context<Self>) -> AnyElement {
+        let (loading, error, query_empty, filtered_count) = {
+            let launcher = self.launcher.read(cx);
+            (
+                launcher.core.loading,
+                launcher.core.error.clone(),
+                launcher.core.search_query.trim().is_empty(),
+                launcher.filtered_wsl_distro_count(),
+            )
+        };
+        if loading {
             return self.render_launcher_center_state(
                 LucideIcon::LoaderCircle,
                 self.i18n.t("launcher.loadingWsl"),
@@ -516,17 +938,17 @@ impl WorkspaceApp {
                 cx,
             );
         }
-        if let Some(error) = launcher.core.error.as_ref() {
+        if let Some(error) = error {
             return self.render_launcher_center_state(
                 LucideIcon::AlertCircle,
-                error.clone(),
+                error,
                 LAUNCHER_RED_400,
                 Some(self.i18n.t("launcher.retry")),
                 cx,
             );
         }
-        if filtered_distros.is_empty() {
-            let label = if launcher.core.search_query.trim().is_empty() {
+        if filtered_count == 0 {
+            let label = if query_empty {
                 self.i18n.t("launcher.noWsl")
             } else {
                 self.i18n.t("launcher.noWslResults")
@@ -540,178 +962,25 @@ impl WorkspaceApp {
             );
         }
 
-        self.sync_launcher_wsl_list_state(&filtered_distros);
-        let state = self.launcher_wsl_list_state.clone();
-        let spec = self.launcher_wsl_list_spec();
-        let workspace = cx.entity();
+        self.launcher
+            .update(cx, |launcher, _cx| launcher.sync_wsl_list_state());
+        let state = self.launcher.read(cx).wsl_list_state.clone();
+        let launcher_entity = self.launcher.clone();
+        let tokens = self.tokens;
+        let mono_font_family = settings_mono_font_family(self.settings_store.settings());
         div()
             .id("launcher-wsl-scroll")
             .flex_1()
             .min_h(px(0.0))
             .child(tauri_virtual_list(
                 state,
-                spec,
+                LauncherWorkspaceEntity::wsl_list_spec(),
                 move |index, _window, cx| {
-                    workspace.update(cx, |this, cx| this.render_launcher_wsl_list_item(index, cx))
+                    launcher_entity.update(cx, |launcher, cx| {
+                        launcher.render_wsl_list_item(index, tokens, &mono_font_family, cx)
+                    })
                 },
             ))
-            .into_any_element()
-    }
-
-    fn sync_launcher_wsl_list_state(&mut self, distros: &[WslDistro]) {
-        let signatures = distros
-            .iter()
-            .map(launcher_wsl_distro_signature)
-            .collect::<Vec<_>>();
-        sync_tauri_variable_list_state_by_signatures(
-            &self.launcher_wsl_list_state,
-            &mut self.launcher_wsl_list_cache.borrow_mut(),
-            "launcher-wsl-distros",
-            &signatures,
-            self.launcher_wsl_list_spec(),
-        );
-    }
-
-    fn launcher_wsl_list_spec(&self) -> TauriVirtualListSpec {
-        TauriVirtualListSpec::new(
-            px(LAUNCHER_WSL_LIST_ESTIMATED_HEIGHT),
-            LAUNCHER_WSL_LIST_OVERSCAN,
-        )
-    }
-
-    fn render_launcher_wsl_list_item(
-        &mut self,
-        index: usize,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let distros = self.launcher.read(cx).core.filtered_wsl_distros();
-        let total = distros.len();
-        let Some(distro) = distros.into_iter().nth(index) else {
-            return div().into_any_element();
-        };
-        div()
-            .px(px(LAUNCHER_WSL_CONTENT_PADDING))
-            .when(index == 0, |item| item.pt(px(LAUNCHER_WSL_CONTENT_PADDING)))
-            .pb(px(if index + 1 == total {
-                LAUNCHER_WSL_CONTENT_PADDING
-            } else {
-                8.0
-            }))
-            .child(self.render_launcher_wsl_row(distro, cx))
-            .into_any_element()
-    }
-
-    fn render_launcher_wsl_row(&self, distro: WslDistro, cx: &mut Context<Self>) -> AnyElement {
-        let theme = self.tokens.ui;
-        let distro_name = distro.name.clone();
-        let hovered =
-            self.launcher.read(cx).hovered_wsl_distro.as_deref() == Some(distro.name.as_str());
-        div()
-            .id((
-                "launcher-wsl-distro",
-                launcher_element_id_for_path(&distro.name),
-            ))
-            .flex()
-            .items_center()
-            .gap(px(LAUNCHER_WSL_ROW_GAP))
-            .px(px(LAUNCHER_WSL_ROW_PADDING_X))
-            .py(px(LAUNCHER_WSL_ROW_PADDING_Y))
-            .rounded(px(self.tokens.radii.lg))
-            .border_1()
-            .border_color(rgba((theme.border << 8) | LAUNCHER_WSL_BORDER_ALPHA_30))
-            .bg(if hovered {
-                rgba((theme.bg_hover << 8) | LAUNCHER_WSL_BG_HOVER_ALPHA_60)
-            } else {
-                rgba(0x00000000)
-            })
-            .cursor_pointer()
-            .child(Self::render_lucide_icon(
-                LucideIcon::Terminal,
-                20.0,
-                rgb(theme.accent),
-            ))
-            .child(
-                div().flex_1().min_w(px(0.0)).child(
-                    div()
-                        .flex()
-                        .items_center()
-                        .text_size(px(14.0))
-                        .font_weight(gpui::FontWeight::MEDIUM)
-                        .text_color(rgb(theme.text))
-                        .overflow_hidden()
-                        .child(div().truncate().child(distro.name.clone()))
-                        .when(distro.is_default, |row| {
-                            row.child(
-                                div()
-                                    .ml(px(8.0))
-                                    .px(px(6.0))
-                                    .py(px(2.0))
-                                    .rounded(px(self.tokens.radii.sm))
-                                    .bg(rgba((theme.accent << 8) | LAUNCHER_WSL_ACCENT_ALPHA_20))
-                                    .font_family(settings_mono_font_family(
-                                        self.settings_store.settings(),
-                                    ))
-                                    .text_size(px(LAUNCHER_WSL_BADGE_TEXT_SIZE))
-                                    .text_color(rgb(theme.accent))
-                                    .child("DEFAULT"),
-                            )
-                        }),
-                ),
-            )
-            .child(
-                div()
-                    .size(px(LAUNCHER_WSL_DOT))
-                    .rounded(px(LAUNCHER_WSL_DOT / 2.0))
-                    .bg(rgb(if distro.is_running {
-                        LAUNCHER_WSL_GREEN_500
-                    } else {
-                        theme.text_muted
-                    })),
-            )
-            .child(
-                div()
-                    .opacity(if hovered { 1.0 } else { 0.0 })
-                    .child(Self::render_lucide_icon(
-                        LucideIcon::ExternalLink,
-                        14.0,
-                        rgb(theme.text_muted),
-                    )),
-            )
-            .on_mouse_move(cx.listener({
-                let distro_name = distro_name.clone();
-                move |this, _event: &MouseMoveEvent, _window, cx| {
-                    // Pointer movement within the same row should not repaint
-                    // the launcher unless the hover target actually changes.
-                    this.launcher.update(cx, |launcher, cx| {
-                        if launcher.hovered_wsl_distro.as_deref() != Some(distro_name.as_str()) {
-                            launcher.hovered_wsl_distro = Some(distro_name.clone());
-                            cx.notify();
-                        }
-                    });
-                }
-            }))
-            .on_hover(cx.listener({
-                let distro_name = distro_name.clone();
-                move |this, hovered: &bool, _window, cx| {
-                    this.launcher.update(cx, |launcher, cx| {
-                        if !*hovered
-                            && launcher.hovered_wsl_distro.as_deref() == Some(distro_name.as_str())
-                        {
-                            launcher.hovered_wsl_distro = None;
-                            cx.notify();
-                        }
-                    });
-                }
-            }))
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener({
-                    let distro_name = distro_name;
-                    move |this, _event, _window, cx| {
-                        this.launch_wsl(&distro_name, cx);
-                    }
-                }),
-            )
             .into_any_element()
     }
 
@@ -730,6 +999,7 @@ impl WorkspaceApp {
                 self.launcher.update(cx, |launcher, cx| {
                     launcher.core.search_query.clear();
                     launcher.focused_input = None;
+                    launcher.rebuild_filtered_indices();
                     cx.notify();
                 });
                 self.ime_marked_text = None;
@@ -740,6 +1010,7 @@ impl WorkspaceApp {
                 let query_changed = self.launcher.update(cx, |launcher, cx| {
                     let changed = launcher.core.search_query.pop().is_some();
                     if changed {
+                        launcher.rebuild_filtered_indices();
                         cx.notify();
                     }
                     changed
@@ -1148,12 +1419,19 @@ impl WorkspaceApp {
 
     fn render_launcher_content(
         &mut self,
-        filtered_apps: Vec<LauncherAppEntry>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let launcher = self.launcher.read(cx);
-        if launcher.core.loading && launcher.core.apps.is_empty() {
+        let (initial_scan, error, query_empty, filtered_count) = {
+            let launcher = self.launcher.read(cx);
+            (
+                launcher.core.loading && launcher.core.apps.is_empty(),
+                launcher.core.error.clone(),
+                launcher.core.search_query.trim().is_empty(),
+                launcher.filtered_app_count(),
+            )
+        };
+        if initial_scan {
             return self.render_launcher_center_state(
                 LucideIcon::LoaderCircle,
                 self.i18n.t("launcher.scanning"),
@@ -1162,17 +1440,17 @@ impl WorkspaceApp {
                 cx,
             );
         }
-        if let Some(error) = launcher.core.error.as_ref() {
+        if let Some(error) = error {
             return self.render_launcher_center_state(
                 LucideIcon::AlertCircle,
-                error.clone(),
+                error,
                 LAUNCHER_RED_400,
                 Some(self.i18n.t("launcher.retry")),
                 cx,
             );
         }
-        if filtered_apps.is_empty() {
-            let label = if launcher.core.search_query.trim().is_empty() {
+        if filtered_count == 0 {
+            let label = if query_empty {
                 self.i18n.t("launcher.empty")
             } else {
                 self.i18n.t("launcher.noResults")
@@ -1187,20 +1465,22 @@ impl WorkspaceApp {
         }
 
         let columns = self.launcher_app_grid_columns(window);
-        self.sync_launcher_app_grid_list_state(&filtered_apps, columns);
-        let state = self.launcher_app_grid_list_state.clone();
-        let spec = self.launcher_app_grid_list_spec();
-        let workspace = cx.entity();
+        self.launcher.update(cx, |launcher, _cx| {
+            launcher.sync_app_grid_list_state(columns)
+        });
+        let state = self.launcher.read(cx).app_grid_list_state.clone();
+        let launcher_entity = self.launcher.clone();
+        let tokens = self.tokens;
         div()
             .id("launcher-apps-scroll")
             .flex_1()
             .min_h(px(0.0))
             .child(tauri_virtual_list(
                 state,
-                spec,
+                LauncherWorkspaceEntity::app_grid_list_spec(),
                 move |index, _window, cx| {
-                    workspace.update(cx, |this, cx| {
-                        this.render_launcher_app_grid_row(index, columns, cx)
+                    launcher_entity.update(cx, |launcher, cx| {
+                        launcher.render_app_grid_row(index, columns, tokens, cx)
                     })
                 },
             ))
@@ -1227,55 +1507,6 @@ impl WorkspaceApp {
         ((grid_width + LAUNCHER_GRID_GAP_X) / (LAUNCHER_TILE_W + LAUNCHER_GRID_GAP_X))
             .floor()
             .max(1.0) as usize
-    }
-
-    fn sync_launcher_app_grid_list_state(&mut self, apps: &[LauncherAppEntry], columns: usize) {
-        let signatures = apps
-            .chunks(columns.max(1))
-            .enumerate()
-            .map(|(row_index, row)| launcher_app_grid_row_signature(row_index, columns, row))
-            .collect::<Vec<_>>();
-        sync_tauri_variable_list_state_by_signatures(
-            &self.launcher_app_grid_list_state,
-            &mut self.launcher_app_grid_list_cache.borrow_mut(),
-            "launcher-app-grid",
-            &signatures,
-            self.launcher_app_grid_list_spec(),
-        );
-    }
-
-    fn launcher_app_grid_list_spec(&self) -> TauriVirtualListSpec {
-        TauriVirtualListSpec::new(
-            px(LAUNCHER_APP_GRID_ESTIMATED_ROW_HEIGHT),
-            LAUNCHER_APP_GRID_OVERSCAN,
-        )
-    }
-
-    fn render_launcher_app_grid_row(
-        &self,
-        row_index: usize,
-        columns: usize,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let apps = self.filtered_launcher_apps(cx);
-        let columns = columns.max(1);
-        let start = row_index.saturating_mul(columns);
-        let Some(row_apps) = apps.get(start..apps.len().min(start + columns)) else {
-            return div().into_any_element();
-        };
-        div()
-            .when(row_index == 0, |row| row.pt(px(4.0)))
-            .pb(px(LAUNCHER_GRID_GAP_Y))
-            .flex()
-            .items_start()
-            .gap_x(px(LAUNCHER_GRID_GAP_X))
-            .children(
-                row_apps
-                    .iter()
-                    .cloned()
-                    .map(|app| self.render_launcher_app_icon(app, cx)),
-            )
-            .into_any_element()
     }
 
     fn render_launcher_center_state(
@@ -1339,177 +1570,8 @@ impl WorkspaceApp {
             .into_any_element()
     }
 
-    fn render_launcher_app_icon(
-        &self,
-        app: LauncherAppEntry,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let theme = self.tokens.ui;
-        let app_path = app.path.clone();
-        let tooltip_name = app.name.clone();
-        let launcher = self.launcher.read(cx);
-        let hovered = launcher.hovered_app_path.as_deref() == Some(app.path.as_str());
-        let pressed = launcher.pressed_app_path.as_deref() == Some(app.path.as_str());
-        let icon_size = if pressed {
-            LAUNCHER_ICON_PRESSED
-        } else {
-            LAUNCHER_ICON_BOX
-        };
-        div()
-            .id(("launcher-app", launcher_element_id_for_path(&app.path)))
-            .w(px(LAUNCHER_TILE_W))
-            .min_h(px(LAUNCHER_TILE_MIN_H))
-            .p(px(LAUNCHER_TILE_PADDING))
-            .flex()
-            .flex_col()
-            .items_center()
-            .gap(px(8.0))
-            .rounded(px(self.tokens.radii.lg))
-            .bg(if hovered {
-                rgba((0xffffff << 8) | LAUNCHER_WHITE_ALPHA_06)
-            } else {
-                rgba(0x00000000)
-            })
-            .cursor_pointer()
-            .child(
-                div()
-                    .size(px(LAUNCHER_ICON_BOX))
-                    .rounded(px(self.tokens.radii.lg))
-                    .overflow_hidden()
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .shadow(vec![gpui::BoxShadow {
-                        inset: false,
-                        color: rgba((0x000000 << 8) | 0x33).into(),
-                        offset: gpui::point(px(0.0), px(2.0)),
-                        blur_radius: px(4.0),
-                        spread_radius: px(0.0),
-                    }])
-                    .child(self.render_launcher_app_icon_image(&app, icon_size)),
-            )
-            .child(
-                div()
-                    .max_w(px(LAUNCHER_APP_NAME_W))
-                    .h(px(LAUNCHER_APP_NAME_LINE_H * LAUNCHER_APP_NAME_LINES))
-                    .overflow_hidden()
-                    .text_align(gpui::TextAlign::Center)
-                    .text_size(px(LAUNCHER_APP_NAME_SIZE))
-                    .line_height(px(LAUNCHER_APP_NAME_LINE_H))
-                    .text_color(rgba(
-                        (theme.text_secondary << 8) | LAUNCHER_TEXT_SECONDARY_90_ALPHA,
-                    ))
-                    .child(app.name),
-            )
-            .on_mouse_move(cx.listener({
-                let app_path = app_path.clone();
-                let tooltip_name = tooltip_name;
-                move |this, event: &MouseMoveEvent, _window, cx| {
-                    let tooltip_id = format!("launcher-app-{app_path}");
-                    this.launcher.update(cx, |launcher, cx| {
-                        let changed =
-                            launcher.hovered_app_path.as_deref() != Some(app_path.as_str());
-                        if changed {
-                            launcher.hovered_app_path = Some(app_path.clone());
-                            cx.notify();
-                        }
-                    });
-                    this.queue_workspace_tooltip(
-                        tooltip_id,
-                        tooltip_name.clone(),
-                        f32::from(event.position.x) + 12.0,
-                        f32::from(event.position.y) + 16.0,
-                        cx,
-                    );
-                    // Pending tooltip movement is not visible until the delay
-                    // timer fires; visible tooltip movement is repainted by
-                    // queue_workspace_tooltip itself.
-                }
-            }))
-            .on_hover(cx.listener({
-                let app_path = app_path.clone();
-                move |this, hovered: &bool, _window, cx| {
-                    if !*hovered {
-                        let mut changed = false;
-                        this.launcher.update(cx, |launcher, cx| {
-                            if launcher.hovered_app_path.as_deref() == Some(app_path.as_str()) {
-                                launcher.hovered_app_path = None;
-                                changed = true;
-                            }
-                            if launcher.pressed_app_path.as_deref() == Some(app_path.as_str()) {
-                                launcher.pressed_app_path = None;
-                                changed = true;
-                            }
-                            if changed {
-                                cx.notify();
-                            }
-                        });
-                        let tooltip_changed =
-                            this.clear_workspace_tooltip_state(&format!("launcher-app-{app_path}"));
-                        // Combine tooltip and tile chrome changes so one leave
-                        // event produces at most one repaint.
-                        if changed || tooltip_changed {
-                            cx.notify();
-                        }
-                    }
-                }
-            }))
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener({
-                    let app_path = app_path;
-                    move |this, _event, _window, cx| {
-                        this.launcher.update(cx, |launcher, cx| {
-                            launcher.pressed_app_path = Some(app_path.clone());
-                            cx.notify();
-                        });
-                        this.launch_app(&app_path, cx);
-                    }
-                }),
-            )
-            .into_any_element()
-    }
-
-    fn render_launcher_app_icon_image(&self, app: &LauncherAppEntry, icon_size: f32) -> AnyElement {
-        let theme = self.tokens.ui;
-        let radius = self.tokens.radii.lg;
-        if let Some(icon_path) = app.icon_path.as_ref() {
-            gpui::img(PathBuf::from(icon_path))
-                .size(px(icon_size))
-                .object_fit(ObjectFit::Contain)
-                .with_fallback(move || {
-                    launcher_app_icon_fallback(theme.bg_panel, theme.text_muted, radius, icon_size)
-                })
-                .into_any_element()
-        } else {
-            launcher_app_icon_fallback(theme.bg_panel, theme.text_muted, radius, icon_size)
-        }
-    }
-
-    fn filtered_launcher_apps(&self, cx: &App) -> Vec<LauncherAppEntry> {
-        self.launcher.read(cx).core.filtered_apps()
-    }
-
     fn enable_launcher(&mut self, cx: &mut Context<Self>) {
         self.launcher.update(cx, |launcher, cx| launcher.enable(cx));
-    }
-
-    fn launch_app(&mut self, path: &str, cx: &mut Context<Self>) {
-        if let Err(error) = launcher_core::launch_app(path) {
-            self.launcher.update(cx, |launcher, cx| {
-                launcher.core.mark_launch_error(error);
-                cx.notify();
-            });
-        }
-    }
-
-    fn launch_wsl(&mut self, distro: &str, cx: &mut Context<Self>) {
-        if let Err(error) = launcher_core::launch_wsl(distro) {
-            self.launcher.update(cx, |launcher, cx| {
-                launcher.core.mark_launch_error(error);
-                cx.notify();
-            });
-        }
     }
 }
 
@@ -1533,9 +1595,10 @@ fn launcher_wsl_distro_signature(distro: &WslDistro) -> u64 {
     hasher.finish()
 }
 
-fn launcher_app_grid_row_signature(
+fn launcher_app_grid_catalog_row_signature(
     row_index: usize,
     columns: usize,
+    catalog_indices: &[usize],
     apps: &[LauncherAppEntry],
 ) -> u64 {
     let mut hasher = DefaultHasher::new();
@@ -1544,12 +1607,34 @@ fn launcher_app_grid_row_signature(
     // entire launcher grid.
     row_index.hash(&mut hasher);
     columns.hash(&mut hasher);
-    for app in apps {
-        app.path.hash(&mut hasher);
-        app.name.hash(&mut hasher);
-        app.icon_path.hash(&mut hasher);
+    for catalog_index in catalog_indices {
+        if let Some(app) = apps.get(*catalog_index) {
+            app.path.hash(&mut hasher);
+            app.name.hash(&mut hasher);
+            app.icon_path.hash(&mut hasher);
+        }
     }
     hasher.finish()
+}
+
+fn launcher_app_icon_image(
+    app: &LauncherAppEntry,
+    icon_size: f32,
+    tokens: ThemeTokens,
+) -> AnyElement {
+    let theme = tokens.ui;
+    let radius = tokens.radii.lg;
+    if let Some(icon_path) = app.icon_path.as_ref() {
+        gpui::img(PathBuf::from(icon_path))
+            .size(px(icon_size))
+            .object_fit(ObjectFit::Contain)
+            .with_fallback(move || {
+                launcher_app_icon_fallback(theme.bg_panel, theme.text_muted, radius, icon_size)
+            })
+            .into_any_element()
+    } else {
+        launcher_app_icon_fallback(theme.bg_panel, theme.text_muted, radius, icon_size)
+    }
 }
 
 fn launcher_app_icon_fallback(
@@ -1576,6 +1661,8 @@ fn launcher_app_icon_fallback(
 
 #[cfg(test)]
 mod tests {
+    use std::sync::{Arc, Mutex};
+
     use gpui::TestAppContext;
 
     use super::*;
@@ -1613,6 +1700,7 @@ mod tests {
             assert!(!launcher.core.loading);
             assert_eq!(launcher.core.apps.len(), 1);
             assert_eq!(launcher.core.apps[0].name, "Terminal");
+            assert_eq!(launcher.filtered_app_count(), 1);
         });
     }
 
@@ -1630,5 +1718,83 @@ mod tests {
             assert_eq!(launcher.focused_input(), None);
             assert!(!launcher.core.enabled);
         });
+    }
+
+    #[gpui::test]
+    fn list_geometry_and_visible_selection_are_launcher_entity_owned(cx: &mut TestAppContext) {
+        let launcher = cx.new(|cx| LauncherWorkspaceEntity::new(true, cx));
+        launcher.update(cx, |launcher, _cx| {
+            launcher.core.apps = vec![
+                LauncherAppEntry {
+                    name: "Terminal".to_string(),
+                    path: "/Applications/Terminal.app".to_string(),
+                    bundle_id: None,
+                    icon_path: None,
+                },
+                LauncherAppEntry {
+                    name: "Calendar".to_string(),
+                    path: "/Applications/Calendar.app".to_string(),
+                    bundle_id: Some("com.apple.iCal".to_string()),
+                    icon_path: None,
+                },
+            ];
+            launcher.core.wsl_distros = vec![WslDistro {
+                name: "Ubuntu".to_string(),
+                is_default: true,
+                is_running: false,
+            }];
+            launcher.rebuild_filtered_indices();
+            launcher.sync_app_grid_list_state(4);
+            launcher.sync_wsl_list_state();
+        });
+
+        launcher.read_with(cx, |launcher, _cx| {
+            assert_eq!(launcher.app_grid_list_state.item_count(), 1);
+            assert_eq!(launcher.wsl_list_state.item_count(), 1);
+            assert_eq!(
+                launcher.filtered_app_at(1).map(|app| app.name),
+                Some("Calendar".to_string())
+            );
+        });
+        launcher.update(cx, |launcher, _cx| {
+            launcher.core.search_query = "ical".to_string();
+            launcher.rebuild_filtered_indices();
+            launcher.sync_app_grid_list_state(4);
+        });
+        launcher.read_with(cx, |launcher, _cx| {
+            assert_eq!(
+                launcher.filtered_app_at(0).map(|app| app.name),
+                Some("Calendar".to_string())
+            );
+        });
+    }
+
+    #[gpui::test]
+    fn app_selection_action_is_applied_by_launcher_entity(cx: &mut TestAppContext) {
+        let launcher = cx.new(|cx| LauncherWorkspaceEntity::new(true, cx));
+        let launched_path = Arc::new(Mutex::new(None));
+        let observed_path = launched_path.clone();
+
+        launcher.update(cx, |launcher, cx| {
+            launcher.select_app_with(
+                "/Applications/Terminal.app",
+                move |path| {
+                    *observed_path.lock().expect("selection capture") = Some(path.to_string());
+                    Ok(())
+                },
+                cx,
+            );
+        });
+
+        launcher.read_with(cx, |launcher, _cx| {
+            assert_eq!(
+                launcher.pressed_app_path.as_deref(),
+                Some("/Applications/Terminal.app")
+            );
+        });
+        assert_eq!(
+            launched_path.lock().expect("selection result").as_deref(),
+            Some("/Applications/Terminal.app")
+        );
     }
 }

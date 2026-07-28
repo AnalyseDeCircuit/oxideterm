@@ -115,9 +115,17 @@ impl WorkspaceApp {
                         if !enabled {
                             workspace.ime_marked_text = None;
                         }
+                        cx.notify();
+                    }
+                    LauncherWorkspaceEvent::TooltipRequested { id, label, x, y } => {
+                        workspace.queue_workspace_tooltip(id, label, *x, *y, cx);
+                    }
+                    LauncherWorkspaceEvent::TooltipCleared { id } => {
+                        if workspace.clear_workspace_tooltip_state(id) {
+                            cx.notify();
+                        }
                     }
                 }
-                cx.notify();
             },
         );
         let file_manager = cx.new(|cx| FileManagerState::load(settings_store.path(), cx));
@@ -655,34 +663,6 @@ impl WorkspaceApp {
             launcher,
             _launcher_observation: launcher_observation,
             _launcher_subscription: launcher_subscription,
-            // WSL launcher rows are browser-list content: keep their row
-            // estimate/overscan centralized instead of rebuilding every distro
-            // row through a plain flex tree.
-            launcher_wsl_list_state: ListState::new(
-                LAUNCHER_WSL_LIST_INITIAL_ITEM_COUNT,
-                ListAlignment::Top,
-                TauriVirtualListSpec::new(
-                    px(LAUNCHER_WSL_LIST_ESTIMATED_HEIGHT),
-                    LAUNCHER_WSL_LIST_OVERSCAN,
-                )
-                .overdraw(),
-            )
-            .measure_all(),
-            launcher_wsl_list_cache: RefCell::new(VirtualListSignatureCache::default()),
-            // macOS launcher keeps the Tauri grid visual, but the scroll owner
-            // is a GPUI ListState of grid rows so large application catalogs do
-            // not build every icon tile on every render.
-            launcher_app_grid_list_state: ListState::new(
-                LAUNCHER_APP_GRID_INITIAL_ROW_COUNT,
-                ListAlignment::Top,
-                TauriVirtualListSpec::new(
-                    px(LAUNCHER_APP_GRID_ESTIMATED_ROW_HEIGHT),
-                    LAUNCHER_APP_GRID_OVERSCAN,
-                )
-                .overdraw(),
-            )
-            .measure_all(),
-            launcher_app_grid_list_cache: RefCell::new(VirtualListSignatureCache::default()),
             graphics,
             _graphics_observation: graphics_observation,
             host_tools,
