@@ -55,8 +55,6 @@ use oxideterm_remote_desktop::{
     RemoteDesktopVncCompression, RemoteDesktopVncImageQuality, RemoteDesktopVncSecurityPolicy,
     RemoteDesktopVncSessionMode,
 };
-use zeroize::Zeroizing;
-
 // Keep the modal, proxy-chain, and field-control implementations in explicit
 // submodules so their dependencies and visibility remain locally auditable.
 mod field_controls;

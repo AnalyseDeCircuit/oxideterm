@@ -6,11 +6,9 @@ struct JumpServerRenderSnapshot {
     port: String,
     username: String,
     auth_tab: SshAuthTab,
-    password: Zeroizing<String>,
     key_path: String,
     managed_key_id: String,
     cert_path: String,
-    passphrase: Zeroizing<String>,
     agent_forwarding: bool,
     legacy_ssh_compatibility: bool,
     complete: bool,
@@ -24,12 +22,9 @@ impl JumpServerRenderSnapshot {
             port: hop.port.clone(),
             username: hop.username.clone(),
             auth_tab: hop.auth_tab,
-            // GPUI requires frame-owned input values; scrub secret copies after rendering.
-            password: Zeroizing::new(hop.password.clone()),
             key_path: hop.key_path.clone(),
             managed_key_id: hop.managed_key_id.clone(),
             cert_path: hop.cert_path.clone(),
-            passphrase: Zeroizing::new(hop.passphrase.clone()),
             agent_forwarding: hop.agent_forwarding,
             legacy_ssh_compatibility: hop.legacy_ssh_compatibility,
             complete: hop.complete(),
@@ -617,12 +612,10 @@ impl WorkspaceApp {
                                         NewConnectionField::JumpKeyPath,
                                         cx,
                                     ))
-                                    .child(self.render_connection_field(
+                                    .child(self.render_connection_secret_field(
                                         self.i18n.t("ssh.form.passphrase"),
-                                        &jump_form.passphrase,
                                         String::new(),
                                         NewConnectionField::JumpPassphrase,
-                                        true,
                                         cx,
                                     ))
                             })
@@ -634,12 +627,10 @@ impl WorkspaceApp {
                                         true,
                                         cx,
                                     ))
-                                    .child(self.render_connection_field(
+                                    .child(self.render_connection_secret_field(
                                         self.i18n.t("ssh.form.passphrase"),
-                                        &jump_form.passphrase,
                                         self.i18n.t("ssh.form.passphrase_placeholder"),
                                         NewConnectionField::JumpPassphrase,
-                                        true,
                                         cx,
                                     ))
                                     .child(self.render_connection_hint(
@@ -662,22 +653,18 @@ impl WorkspaceApp {
                                         NewConnectionField::JumpCertPath,
                                         cx,
                                     ))
-                                    .child(self.render_connection_field(
+                                    .child(self.render_connection_secret_field(
                                         self.i18n.t("ssh.form.passphrase"),
-                                        &jump_form.passphrase,
                                         String::new(),
                                         NewConnectionField::JumpPassphrase,
-                                        true,
                                         cx,
                                     ))
                             })
                             .when(jump_form.auth_tab == SshAuthTab::Password, |content| {
-                                content.child(self.render_connection_field(
+                                content.child(self.render_connection_secret_field(
                                     self.i18n.t("ssh.form.password"),
-                                    &jump_form.password,
                                     String::new(),
                                     NewConnectionField::JumpPassword,
-                                    true,
                                     cx,
                                 ))
                             })

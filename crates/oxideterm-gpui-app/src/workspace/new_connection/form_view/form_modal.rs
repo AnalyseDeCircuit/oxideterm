@@ -9,18 +9,15 @@ struct ConnectionFormModalSnapshot {
     port: String,
     username: String,
     auth_tab: SshAuthTab,
-    password: Zeroizing<String>,
     password_present: bool,
     remote_desktop_profile_id: Option<String>,
     saved_password_keychain_id: Option<String>,
-    password_loaded: bool,
     password_visible: bool,
     password_loading: bool,
     password_error: Option<String>,
     key_path: String,
     managed_key_id: String,
     cert_path: String,
-    passphrase: Zeroizing<String>,
     save_password: bool,
     group: String,
     post_connect_command: String,
@@ -39,7 +36,6 @@ struct ConnectionFormModalSnapshot {
 
 impl ConnectionFormModalSnapshot {
     fn from_form(form: &NewConnectionForm) -> Self {
-        let ssh_form = form.transport == NewConnectionTransport::Ssh;
         Self {
             transport: form.transport,
             name: form.name.clone(),
@@ -47,28 +43,15 @@ impl ConnectionFormModalSnapshot {
             port: form.port.clone(),
             username: form.username.clone(),
             auth_tab: form.auth_tab,
-            // Only the SSH branch consumes these values. Other transports create
-            // their own narrow frame snapshot and must not duplicate the secret.
-            password: Zeroizing::new(if ssh_form {
-                form.password.clone()
-            } else {
-                String::new()
-            }),
             password_present: !form.password.is_empty(),
             remote_desktop_profile_id: form.remote_desktop_profile_id.clone(),
             saved_password_keychain_id: form.saved_password_keychain_id.clone(),
-            password_loaded: form.password_loaded,
             password_visible: form.password_visible,
             password_loading: form.password_loading,
             password_error: form.password_error.clone(),
             key_path: form.key_path.clone(),
             managed_key_id: form.managed_key_id.clone(),
             cert_path: form.cert_path.clone(),
-            passphrase: Zeroizing::new(if ssh_form {
-                form.passphrase.clone()
-            } else {
-                String::new()
-            }),
             save_password: form.save_password,
             group: form.group.clone(),
             post_connect_command: form.post_connect_command.clone(),
@@ -459,8 +442,6 @@ impl WorkspaceApp {
                                     {
                                         content
                                             .child(self.render_edit_saved_password_field(
-                                                &form.password,
-                                                form.password_loaded,
                                                 form.password_visible,
                                                 form.password_loading,
                                                 cx,
@@ -485,40 +466,32 @@ impl WorkspaceApp {
                                                 },
                                             )
                                     } else if edit_properties_mode {
-                                        content.child(self.render_connection_field(
+                                        content.child(self.render_connection_secret_field(
                                             self.i18n.t("ssh.form.password"),
-                                            &form.password,
                                             String::new(),
                                             NewConnectionField::Password,
-                                            true,
                                             cx,
                                         ))
                                     } else if prompt_mode {
-                                        content.child(self.render_connection_field(
+                                        content.child(self.render_connection_secret_field(
                                             self.i18n.t("ssh.form.password"),
-                                            &form.password,
                                             String::new(),
                                             NewConnectionField::Password,
-                                            true,
                                             cx,
                                         ))
                                     } else if drill_down_mode {
-                                        content.child(self.render_connection_field(
+                                        content.child(self.render_connection_secret_field(
                                             self.i18n.t("ssh.drill_down.password"),
-                                            &form.password,
                                             String::new(),
                                             NewConnectionField::Password,
-                                            true,
                                             cx,
                                         ))
                                     } else {
                                         content
-                                            .child(self.render_connection_field(
+                                            .child(self.render_connection_secret_field(
                                                 self.i18n.t("ssh.form.password"),
-                                                &form.password,
                                                 String::new(),
                                                 NewConnectionField::Password,
-                                                true,
                                                 cx,
                                             ))
                                             .child(self.render_connection_checkbox(
@@ -538,12 +511,10 @@ impl WorkspaceApp {
                                             .child(self.render_connection_hint(
                                                 self.i18n.t("ssh.form.default_key_desc"),
                                             ))
-                                            .child(self.render_connection_field(
+                                            .child(self.render_connection_secret_field(
                                                 self.i18n.t("ssh.form.passphrase"),
-                                                &form.passphrase,
                                                 self.i18n.t("ssh.form.passphrase_placeholder"),
                                                 NewConnectionField::Passphrase,
-                                                true,
                                                 cx,
                                             ))
                                     },
@@ -585,16 +556,14 @@ impl WorkspaceApp {
                                         };
                                         content
                                             .child(key_field)
-                                            .child(self.render_connection_field(
+                                            .child(self.render_connection_secret_field(
                                                 if drill_down_mode {
                                                     self.i18n.t("ssh.drill_down.passphrase")
                                                 } else {
                                                     self.i18n.t("ssh.form.passphrase")
                                                 },
-                                                &form.passphrase,
                                                 self.i18n.t("ssh.form.passphrase_placeholder"),
                                                 NewConnectionField::Passphrase,
-                                                true,
                                                 cx,
                                             ))
                                             .when(edit_properties_mode, |content| {
@@ -614,12 +583,10 @@ impl WorkspaceApp {
                                             false,
                                             cx,
                                         ))
-                                        .child(self.render_connection_field(
+                                        .child(self.render_connection_secret_field(
                                             self.i18n.t("ssh.form.passphrase"),
-                                            &form.passphrase,
                                             self.i18n.t("ssh.form.passphrase_placeholder"),
                                             NewConnectionField::Passphrase,
-                                            true,
                                             cx,
                                         ))
                                         .child(self.render_connection_hint(
@@ -671,12 +638,10 @@ impl WorkspaceApp {
                                                 cx,
                                             )
                                         })
-                                        .child(self.render_connection_field(
+                                        .child(self.render_connection_secret_field(
                                             self.i18n.t("ssh.form.passphrase"),
-                                            &form.passphrase,
                                             self.i18n.t("ssh.form.passphrase_placeholder"),
                                             NewConnectionField::Passphrase,
-                                            true,
                                             cx,
                                         ))
                                         .when(edit_properties_mode, |content| {

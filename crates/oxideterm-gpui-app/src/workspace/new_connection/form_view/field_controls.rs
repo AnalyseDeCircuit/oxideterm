@@ -124,6 +124,28 @@ pub(super) enum AuthSelectorContext {
     Jump,
 }
 
+fn connection_secret_field_value(
+    form: &NewConnectionForm,
+    field: NewConnectionField,
+) -> Option<&str> {
+    // Return a view into the Entity-owned draft so rendering cannot create a
+    // second credential owner before the text input builds its presentation.
+    match field {
+        NewConnectionField::Password => Some(&form.password),
+        NewConnectionField::Passphrase => Some(&form.passphrase),
+        NewConnectionField::UpstreamProxyPassword => Some(&form.upstream_proxy_password),
+        NewConnectionField::JumpPassword => form
+            .jump_server_form
+            .as_ref()
+            .map(|jump_form| jump_form.password.as_str()),
+        NewConnectionField::JumpPassphrase => form
+            .jump_server_form
+            .as_ref()
+            .map(|jump_form| jump_form.passphrase.as_str()),
+        _ => None,
+    }
+}
+
 impl WorkspaceApp {
     pub(super) fn new_connection_select_anchor_id(
         select_id: NewConnectionSelect,
@@ -308,7 +330,74 @@ impl WorkspaceApp {
             secret && !secret_visible.unwrap_or(false),
             cx,
         );
-        let control = if secret && let Some(visible) = secret_visible {
+        let control = if secret {
+            self.render_connection_secret_visibility(input, field, secret_visible, cx)
+        } else {
+            input
+        };
+
+        form_field(&self.tokens, label, control)
+    }
+
+    pub(super) fn render_connection_secret_field(
+        &self,
+        label: String,
+        placeholder: String,
+        field: NewConnectionField,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let Some((input, secret_visible)) =
+            self.render_connection_secret_input(placeholder, field, cx)
+        else {
+            return div().into_any_element();
+        };
+        let control = self.render_connection_secret_visibility(input, field, secret_visible, cx);
+        form_field(&self.tokens, label, control)
+    }
+
+    fn render_connection_secret_input(
+        &self,
+        placeholder: String,
+        field: NewConnectionField,
+        cx: &mut Context<Self>,
+    ) -> Option<(AnyElement, Option<bool>)> {
+        let target = WorkspaceImeTarget::NewConnection(field);
+        let selected_range = self.ime_selected_range_for_target(target, cx);
+        let marked_text = self.marked_text_for_target(target, cx);
+        let caret_visible = self.input_caret.visible();
+        let (input, secret_visible) = {
+            let form = self.connection_form_state(cx).form.as_ref()?;
+            let value = connection_secret_field_value(form, field)?;
+            let secret_visible = connection_secret_field_visible(form, field);
+            let focused = form.field_focused && form.focused_field == field;
+            let selected_all = connection_field_is_selected(form, field);
+            let input = text_input(
+                &self.tokens,
+                TextInputView {
+                    value,
+                    placeholder,
+                    focused,
+                    caret_visible,
+                    secret: !secret_visible.unwrap_or(false),
+                    selected_all,
+                    selected_range,
+                    marked_text,
+                },
+            );
+            (input, secret_visible)
+        };
+        let input = self.finish_connection_input(input, field, cx);
+        Some((input, secret_visible))
+    }
+
+    fn render_connection_secret_visibility(
+        &self,
+        input: AnyElement,
+        field: NewConnectionField,
+        secret_visible: Option<bool>,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        if let Some(visible) = secret_visible {
             let icon = if visible {
                 LucideIcon::EyeOff
             } else {
@@ -349,88 +438,75 @@ impl WorkspaceApp {
                 .into_any_element()
         } else {
             input
-        };
-
-        form_field(&self.tokens, label, control)
+        }
     }
 
     pub(super) fn render_edit_saved_password_field(
         &self,
-        password: &str,
-        password_loaded: bool,
         password_visible: bool,
         password_loading: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let value = if password_loaded { password } else { "" };
+        let Some((input, _)) = self.render_connection_secret_input(
+            self.i18n
+                .t("sessionManager.edit_properties.password_placeholder"),
+            NewConnectionField::Password,
+            cx,
+        ) else {
+            return div().into_any_element();
+        };
         let icon = if password_visible {
             LucideIcon::EyeOff
         } else {
             LucideIcon::Eye
         };
-        let secret = password_loaded && !password_visible;
         form_field(
             &self.tokens,
             self.i18n.t("sessionManager.edit_properties.saved_password"),
-            div()
-                .relative()
-                .child(
-                    self.render_connection_input(
-                        value,
-                        self.i18n
-                            .t("sessionManager.edit_properties.password_placeholder"),
-                        NewConnectionField::Password,
-                        secret,
-                        cx,
-                    ),
-                )
-                .child(
-                    if password_loading {
-                        oxideterm_gpui_ui::button::icon_button(
-                            &self.tokens,
-                            self.render_loading_icon(
-                                "saved-password-loading",
-                                SECRET_VISIBILITY_ICON_SIZE,
-                                rgb(self.tokens.ui.text_muted),
-                            ),
-                            IconButtonOptions {
-                                loading: true,
-                                hover_background: Some(rgba((self.tokens.ui.bg_hover << 8) | 0x99)),
-                                ..IconButtonOptions::opaque_toolbar(
-                                    SECRET_VISIBILITY_BUTTON_SIZE,
-                                    ButtonRadius::Sm,
-                                )
-                            },
-                        )
-                        .on_mouse_down(
-                            MouseButton::Left,
-                            |_event, _window, cx| {
-                                cx.stop_propagation();
-                            },
-                        )
-                    } else {
-                        self.workspace_icon_action_button(
-                            icon,
+            div().relative().child(input).child(
+                if password_loading {
+                    oxideterm_gpui_ui::button::icon_button(
+                        &self.tokens,
+                        self.render_loading_icon(
+                            "saved-password-loading",
                             SECRET_VISIBILITY_ICON_SIZE,
                             rgb(self.tokens.ui.text_muted),
-                            IconButtonOptions {
-                                hover_background: Some(rgba((self.tokens.ui.bg_hover << 8) | 0x99)),
-                                ..IconButtonOptions::opaque_toolbar(
-                                    SECRET_VISIBILITY_BUTTON_SIZE,
-                                    ButtonRadius::Sm,
-                                )
-                            },
-                            |this, _event, _window, cx| {
-                                this.toggle_edit_saved_password_visibility(cx);
-                                cx.stop_propagation();
-                            },
-                            cx,
-                        )
-                    }
-                    .absolute()
-                    .right(px(SECRET_VISIBILITY_BUTTON_OFFSET))
-                    .top(px(SECRET_VISIBILITY_BUTTON_OFFSET)),
-                ),
+                        ),
+                        IconButtonOptions {
+                            loading: true,
+                            hover_background: Some(rgba((self.tokens.ui.bg_hover << 8) | 0x99)),
+                            ..IconButtonOptions::opaque_toolbar(
+                                SECRET_VISIBILITY_BUTTON_SIZE,
+                                ButtonRadius::Sm,
+                            )
+                        },
+                    )
+                    .on_mouse_down(MouseButton::Left, |_event, _window, cx| {
+                        cx.stop_propagation();
+                    })
+                } else {
+                    self.workspace_icon_action_button(
+                        icon,
+                        SECRET_VISIBILITY_ICON_SIZE,
+                        rgb(self.tokens.ui.text_muted),
+                        IconButtonOptions {
+                            hover_background: Some(rgba((self.tokens.ui.bg_hover << 8) | 0x99)),
+                            ..IconButtonOptions::opaque_toolbar(
+                                SECRET_VISIBILITY_BUTTON_SIZE,
+                                ButtonRadius::Sm,
+                            )
+                        },
+                        |this, _event, _window, cx| {
+                            this.toggle_edit_saved_password_visibility(cx);
+                            cx.stop_propagation();
+                        },
+                        cx,
+                    )
+                }
+                .absolute()
+                .right(px(SECRET_VISIBILITY_BUTTON_OFFSET))
+                .top(px(SECRET_VISIBILITY_BUTTON_OFFSET)),
+            ),
         )
     }
 
@@ -881,46 +957,57 @@ impl WorkspaceApp {
             .as_ref()
             .is_some_and(|form| connection_field_is_selected(form, field));
         let target = WorkspaceImeTarget::NewConnection(field);
+        let input = text_input(
+            &self.tokens,
+            TextInputView {
+                value,
+                placeholder,
+                focused,
+                caret_visible: self.input_caret.visible(),
+                secret,
+                selected_all,
+                selected_range: self.ime_selected_range_for_target(target, cx),
+                marked_text: self.marked_text_for_target(target, cx),
+            },
+        );
+        self.finish_connection_input(input, field, cx)
+    }
+
+    fn finish_connection_input(
+        &self,
+        input: Div,
+        field: NewConnectionField,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let target = WorkspaceImeTarget::NewConnection(field);
         let workspace = cx.entity();
         text_input_anchor_probe(
             target.anchor_id(),
-            text_input(
-                &self.tokens,
-                TextInputView {
-                    value,
-                    placeholder,
-                    focused,
-                    caret_visible: self.input_caret.visible(),
-                    secret,
-                    selected_all,
-                    selected_range: self.ime_selected_range_for_target(target, cx),
-                    marked_text: self.marked_text_for_target(target, cx),
-                },
-            )
-            .id(("connection-field", field as u32))
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(move |this, event: &gpui::MouseDownEvent, window, cx| {
-                    this.update_connection_form_state(cx, |state| {
-                        if let Some(form) = state.form.as_mut() {
-                            form.field_focused = true;
-                            form.focused_field = field;
-                            clear_connection_selection(form);
-                        }
-                    });
-                    this.close_new_connection_select(cx);
-                    this.ime_marked_text = None;
-                    this.show_active_input_caret(cx);
-                    window.focus(&this.focus_handle, cx);
-                    this.begin_ime_selection_from_mouse_down(target, event, window, cx);
-                    cx.stop_propagation();
-                }),
-            )
-            .on_mouse_move(cx.listener(
-                |this, event: &gpui::MouseMoveEvent, window, cx| {
-                    this.update_ime_selection_drag_from_mouse_move(event, window, cx);
-                },
-            )),
+            input
+                .id(("connection-field", field as u32))
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(move |this, event: &gpui::MouseDownEvent, window, cx| {
+                        this.update_connection_form_state(cx, |state| {
+                            if let Some(form) = state.form.as_mut() {
+                                form.field_focused = true;
+                                form.focused_field = field;
+                                clear_connection_selection(form);
+                            }
+                        });
+                        this.close_new_connection_select(cx);
+                        this.ime_marked_text = None;
+                        this.show_active_input_caret(cx);
+                        window.focus(&this.focus_handle, cx);
+                        this.begin_ime_selection_from_mouse_down(target, event, window, cx);
+                        cx.stop_propagation();
+                    }),
+                )
+                .on_mouse_move(
+                    cx.listener(|this, event: &gpui::MouseMoveEvent, window, cx| {
+                        this.update_ime_selection_drag_from_mouse_move(event, window, cx);
+                    }),
+                ),
             move |anchor, _window, cx| {
                 let _ = workspace.update(cx, |this, cx| {
                     this.update_text_input_anchor(anchor, cx);
@@ -1795,30 +1882,19 @@ impl WorkspaceApp {
         protocol: oxideterm_remote_desktop::RemoteDesktopProtocol,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        // GPUI field construction needs owned values after the Entity borrow ends.
-        // Keep the unavoidable password presentation copy zeroizing and frame-local.
-        let Some((
-            name,
-            host,
-            port,
-            username,
-            password,
-            keeps_saved_password,
-            save_password,
-            group,
-        )) = self.connection_form_state(cx).form.as_ref().map(|form| {
-            (
-                form.name.clone(),
-                form.host.clone(),
-                form.port.clone(),
-                form.username.clone(),
-                Zeroizing::new(form.password.clone()),
-                form.remote_desktop_profile_id.is_some()
-                    && form.saved_password_keychain_id.is_some(),
-                form.save_password,
-                form.group.clone(),
-            )
-        })
+        let Some((name, host, port, username, keeps_saved_password, save_password, group)) =
+            self.connection_form_state(cx).form.as_ref().map(|form| {
+                (
+                    form.name.clone(),
+                    form.host.clone(),
+                    form.port.clone(),
+                    form.username.clone(),
+                    form.remote_desktop_profile_id.is_some()
+                        && form.saved_password_keychain_id.is_some(),
+                    form.save_password,
+                    form.group.clone(),
+                )
+            })
         else {
             return div().into_any_element();
         };
@@ -1889,9 +1965,8 @@ impl WorkspaceApp {
                     ))
                 },
             )
-            .child(self.render_connection_field(
+            .child(self.render_connection_secret_field(
                 self.i18n.t("ssh.form.password"),
-                &password,
                 if keeps_saved_password {
                     self.i18n
                         .t("modals.new_connection.remote_desktop_password_keep_placeholder")
@@ -1902,7 +1977,6 @@ impl WorkspaceApp {
                     self.i18n.t("ssh.form.password")
                 },
                 NewConnectionField::Password,
-                true,
                 cx,
             ))
             .child(self.render_connection_checkbox(
@@ -2650,8 +2724,7 @@ impl WorkspaceApp {
         &self,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        // Release the Entity borrow before building controls; keep the only secret copy zeroizing.
-        let Some((policy, protocol, host, port, no_proxy, remote_dns, auth, username, password)) =
+        let Some((policy, protocol, host, port, no_proxy, remote_dns, auth, username)) =
             self.connection_form_state(cx).form.as_ref().map(|form| {
                 (
                     form.upstream_proxy_policy,
@@ -2662,7 +2735,6 @@ impl WorkspaceApp {
                     form.upstream_proxy_remote_dns,
                     form.upstream_proxy_auth,
                     form.upstream_proxy_username.clone(),
-                    Zeroizing::new(form.upstream_proxy_password.clone()),
                 )
             })
         else {
@@ -2761,12 +2833,10 @@ impl WorkspaceApp {
                                     false,
                                     cx,
                                 ))
-                                .child(self.render_connection_field(
+                                .child(self.render_connection_secret_field(
                                     self.i18n.t("settings_view.network.password"),
-                                    &password,
                                     String::new(),
                                     NewConnectionField::UpstreamProxyPassword,
-                                    true,
                                     cx,
                                 ))
                                 .child(self.render_connection_hint(
@@ -3059,5 +3129,89 @@ mod tests {
             new_connection_transport_index(NewConnectionTransport::WslGraphics),
             5,
         );
+    }
+
+    #[test]
+    fn secret_field_render_values_borrow_entity_owned_allocations() {
+        let mut form = NewConnectionForm::default();
+        form.password = "primary-password".to_string();
+        form.passphrase = "primary-passphrase".to_string();
+        form.upstream_proxy_password = "proxy-password".to_string();
+        let mut jump_form = NewConnectionProxyHop::new();
+        jump_form.password = "jump-password".to_string();
+        jump_form.passphrase = "jump-passphrase".to_string();
+        form.jump_server_form = Some(jump_form);
+
+        let password_pointer = form.password.as_ptr();
+        let passphrase_pointer = form.passphrase.as_ptr();
+        let proxy_password_pointer = form.upstream_proxy_password.as_ptr();
+        let jump_password_pointer = form
+            .jump_server_form
+            .as_ref()
+            .expect("jump form should exist")
+            .password
+            .as_ptr();
+        let jump_passphrase_pointer = form
+            .jump_server_form
+            .as_ref()
+            .expect("jump form should exist")
+            .passphrase
+            .as_ptr();
+
+        assert_eq!(
+            connection_secret_field_value(&form, NewConnectionField::Password)
+                .expect("password should be rendered")
+                .as_ptr(),
+            password_pointer,
+        );
+        assert_eq!(
+            connection_secret_field_value(&form, NewConnectionField::Passphrase)
+                .expect("passphrase should be rendered")
+                .as_ptr(),
+            passphrase_pointer,
+        );
+        assert_eq!(
+            connection_secret_field_value(&form, NewConnectionField::UpstreamProxyPassword)
+                .expect("proxy password should be rendered")
+                .as_ptr(),
+            proxy_password_pointer,
+        );
+        assert_eq!(
+            connection_secret_field_value(&form, NewConnectionField::JumpPassword)
+                .expect("jump password should be rendered")
+                .as_ptr(),
+            jump_password_pointer,
+        );
+        assert_eq!(
+            connection_secret_field_value(&form, NewConnectionField::JumpPassphrase)
+                .expect("jump passphrase should be rendered")
+                .as_ptr(),
+            jump_passphrase_pointer,
+        );
+    }
+
+    #[test]
+    fn form_view_sources_do_not_clone_secret_drafts_for_rendering() {
+        let sources = [
+            include_str!("form_modal.rs"),
+            include_str!("field_controls.rs"),
+            include_str!("proxy_chain_view.rs"),
+        ];
+        let forbidden_patterns = [
+            ["form.password", ".clone()"].concat(),
+            ["form.passphrase", ".clone()"].concat(),
+            ["form.upstream_proxy_password", ".clone()"].concat(),
+            ["hop.password", ".clone()"].concat(),
+            ["hop.passphrase", ".clone()"].concat(),
+        ];
+
+        for source in sources {
+            for forbidden_pattern in &forbidden_patterns {
+                assert!(
+                    !source.contains(forbidden_pattern),
+                    "form rendering must borrow secret drafts instead of matching {forbidden_pattern}",
+                );
+            }
+        }
     }
 }
