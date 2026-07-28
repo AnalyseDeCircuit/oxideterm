@@ -13,6 +13,8 @@ pub(in crate::workspace) struct WorkspaceTabHostEntity {
     next_session_id: u64,
     panes: HashMap<PaneId, Entity<TerminalPane>>,
     pane_subscriptions: HashMap<PaneId, Subscription>,
+    pane_window_affinities: HashMap<PaneId, TerminalPaneWindowAffinity>,
+    tab_window_overrides: HashMap<TabId, AnyWindowHandle>,
     terminal_locations: HashMap<TerminalSessionId, TerminalLocation>,
     navigation_history: Vec<TabId>,
     navigation_index: Option<usize>,
@@ -32,6 +34,12 @@ pub(in crate::workspace) struct WorkspaceTabHostEntity {
 pub(in crate::workspace) struct TerminalLocation {
     pub(in crate::workspace) tab_id: TabId,
     pub(in crate::workspace) pane_id: PaneId,
+}
+
+#[derive(Clone, Copy)]
+struct TerminalPaneWindowAffinity {
+    home: AnyWindowHandle,
+    current: AnyWindowHandle,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -68,6 +76,8 @@ impl WorkspaceTabHostEntity {
             next_session_id: 1,
             panes: HashMap::new(),
             pane_subscriptions: HashMap::new(),
+            pane_window_affinities: HashMap::new(),
+            tab_window_overrides: HashMap::new(),
             terminal_locations: HashMap::new(),
             navigation_history: Vec::new(),
             navigation_index: None,
@@ -153,6 +163,13 @@ impl WorkspaceTabHostEntity {
             previous.is_none_or(|previous| previous == location),
             "terminal session was rebound without removing its previous location"
         );
+        if let Some(window_handle) = self.tab_window_overrides.get(&location.tab_id).copied()
+            && let Some(affinity) = self.pane_window_affinities.get_mut(&location.pane_id)
+        {
+            // Reconnect remounts can register a replacement pane after the tab
+            // moved, so location binding reapplies the current window owner.
+            affinity.current = window_handle;
+        }
     }
 
     pub(in crate::workspace) fn register_terminal_pane(
@@ -164,8 +181,23 @@ impl WorkspaceTabHostEntity {
         cx: &mut Context<Self>,
     ) {
         // TabHost owns pane delivery and its cancellation together with the
-        // registered Entity; the window adapter consumes only typed intents.
-        let subscription = cx.subscribe(&pane, move |_tab_host, _pane, event, cx| {
+        // registered Entity. Delivery resolves the current mount dynamically
+        // so detach and return cannot retain the creation window.
+        self.pane_window_affinities.insert(
+            pane_id,
+            TerminalPaneWindowAffinity {
+                home: window_handle,
+                current: window_handle,
+            },
+        );
+        let subscription = cx.subscribe(&pane, move |tab_host, _pane, event, cx| {
+            let Some(window_handle) = tab_host
+                .pane_window_affinities
+                .get(&pane_id)
+                .map(|affinity| affinity.current)
+            else {
+                return;
+            };
             cx.emit(WorkspaceTabHostEvent::TerminalPaneDelivery {
                 pane_id,
                 session_id,
@@ -182,6 +214,7 @@ impl WorkspaceTabHostEntity {
         pane_id: PaneId,
     ) -> Option<Entity<TerminalPane>> {
         self.pane_subscriptions.remove(&pane_id);
+        self.pane_window_affinities.remove(&pane_id);
         self.unbind_terminal_location_for_pane(pane_id);
         self.panes.remove(&pane_id)
     }
@@ -209,6 +242,36 @@ impl WorkspaceTabHostEntity {
         session_id: TerminalSessionId,
     ) -> Option<TerminalLocation> {
         self.terminal_locations.get(&session_id).copied()
+    }
+
+    pub(in crate::workspace) fn bind_tab_panes_to_window(
+        &mut self,
+        tab_id: TabId,
+        window_handle: AnyWindowHandle,
+    ) {
+        self.tab_window_overrides.insert(tab_id, window_handle);
+        for location in self
+            .terminal_locations
+            .values()
+            .filter(|location| location.tab_id == tab_id)
+        {
+            if let Some(affinity) = self.pane_window_affinities.get_mut(&location.pane_id) {
+                affinity.current = window_handle;
+            }
+        }
+    }
+
+    pub(in crate::workspace) fn restore_tab_panes_to_home_window(&mut self, tab_id: TabId) {
+        self.tab_window_overrides.remove(&tab_id);
+        for location in self
+            .terminal_locations
+            .values()
+            .filter(|location| location.tab_id == tab_id)
+        {
+            if let Some(affinity) = self.pane_window_affinities.get_mut(&location.pane_id) {
+                affinity.current = affinity.home;
+            }
+        }
     }
 
     pub(in crate::workspace) fn observe_active_tab(&mut self, active_tab_id: Option<TabId>) {
@@ -482,6 +545,7 @@ mod tests {
             );
             assert_eq!(tab_host.panes().len(), 1);
             assert_eq!(tab_host.pane_subscriptions.len(), 1);
+            assert_eq!(tab_host.pane_window_affinities.len(), 1);
         });
         pane.update(cx, |_pane, cx| {
             cx.emit(TerminalPaneEvent::Exited { exit_code: Some(0) });
@@ -501,6 +565,7 @@ mod tests {
             assert!(tab_host.remove_terminal_pane(pane_id).is_some());
             assert!(tab_host.panes().is_empty());
             assert!(tab_host.pane_subscriptions.is_empty());
+            assert!(tab_host.pane_window_affinities.is_empty());
             assert!(tab_host.terminal_location(session_id).is_none());
         });
         pane.update(cx, |_pane, cx| {
@@ -510,6 +575,194 @@ mod tests {
         assert_eq!(
             event_recorder.read_with(cx, |event_recorder, _cx| event_recorder.events.len()),
             1
+        );
+    }
+
+    #[gpui::test]
+    fn pane_delivery_tracks_detach_reconnect_and_return_window(cx: &mut TestAppContext) {
+        let (_, cx) = cx.add_window_view(|_window, _cx| TabHostTestRoot);
+        let first_pane = cx.update(|window, cx| {
+            cx.new(|cx| {
+                TerminalPane::new_recording_playback(
+                    80,
+                    24,
+                    oxideterm_gpui_terminal::TerminalUiPreferences::default(),
+                    window,
+                    cx,
+                )
+                .expect("first recording pane")
+            })
+        });
+        let replacement_pane = cx.update(|window, cx| {
+            cx.new(|cx| {
+                TerminalPane::new_recording_playback(
+                    80,
+                    24,
+                    oxideterm_gpui_terminal::TerminalUiPreferences::default(),
+                    window,
+                    cx,
+                )
+                .expect("replacement recording pane")
+            })
+        });
+        let main_window_handle = cx.window_handle();
+        let tab_host = cx.new(|_| WorkspaceTabHostEntity::new());
+        let event_recorder = cx.new(|_| TabHostEventRecorder {
+            events: Vec::new(),
+            _subscription: None,
+        });
+        event_recorder.update(cx, |event_recorder, cx| {
+            event_recorder._subscription = Some(cx.subscribe(
+                &tab_host,
+                |event_recorder, _tab_host, event, _cx| {
+                    event_recorder.events.push(*event);
+                },
+            ));
+        });
+        let tab_id = TabId(3);
+        let first_pane_id = PaneId(4);
+        let first_session_id = TerminalSessionId(5);
+        let first_location = TerminalLocation {
+            tab_id,
+            pane_id: first_pane_id,
+        };
+
+        tab_host.update(cx, |tab_host, cx| {
+            tab_host.register_terminal_pane(
+                first_pane_id,
+                first_session_id,
+                first_pane.clone(),
+                main_window_handle,
+                cx,
+            );
+            tab_host.bind_terminal_location(first_session_id, first_location);
+        });
+
+        let (_, cx) = cx.add_window_view(|_window, _cx| TabHostTestRoot);
+        let detached_window_handle = cx.window_handle();
+        assert_ne!(main_window_handle, detached_window_handle);
+
+        tab_host.update(cx, |tab_host, _cx| {
+            tab_host.bind_tab_panes_to_window(tab_id, detached_window_handle);
+            assert_eq!(
+                tab_host
+                    .panes()
+                    .get(&first_pane_id)
+                    .expect("first pane remains registered")
+                    .entity_id(),
+                first_pane.entity_id()
+            );
+            assert_eq!(
+                tab_host.terminal_location(first_session_id),
+                Some(first_location)
+            );
+            assert_eq!(
+                tab_host
+                    .pane_window_affinities
+                    .get(&first_pane_id)
+                    .expect("first pane affinity")
+                    .current,
+                detached_window_handle
+            );
+        });
+        first_pane.update(cx, |_pane, cx| {
+            cx.emit(TerminalPaneEvent::ContextActionRequested);
+        });
+        cx.run_until_parked();
+
+        tab_host.update(cx, |tab_host, _cx| {
+            tab_host.restore_tab_panes_to_home_window(tab_id);
+            assert_eq!(
+                tab_host
+                    .panes()
+                    .get(&first_pane_id)
+                    .expect("first pane remains registered")
+                    .entity_id(),
+                first_pane.entity_id()
+            );
+            assert_eq!(
+                tab_host.terminal_location(first_session_id),
+                Some(first_location)
+            );
+        });
+        first_pane.update(cx, |_pane, cx| {
+            cx.emit(TerminalPaneEvent::PrivilegePromptStateChanged);
+        });
+        cx.run_until_parked();
+
+        let replacement_pane_id = PaneId(6);
+        let replacement_session_id = TerminalSessionId(7);
+        tab_host.update(cx, |tab_host, cx| {
+            tab_host.bind_tab_panes_to_window(tab_id, detached_window_handle);
+            tab_host.register_terminal_pane(
+                replacement_pane_id,
+                replacement_session_id,
+                replacement_pane.clone(),
+                main_window_handle,
+                cx,
+            );
+            assert!(tab_host.remove_terminal_pane(first_pane_id).is_some());
+            tab_host.bind_terminal_location(
+                replacement_session_id,
+                TerminalLocation {
+                    tab_id,
+                    pane_id: replacement_pane_id,
+                },
+            );
+            assert_eq!(
+                tab_host
+                    .pane_window_affinities
+                    .get(&replacement_pane_id)
+                    .expect("replacement pane affinity")
+                    .current,
+                detached_window_handle
+            );
+        });
+        first_pane.update(cx, |_pane, cx| {
+            cx.emit(TerminalPaneEvent::Exited { exit_code: Some(0) });
+        });
+        replacement_pane.update(cx, |_pane, cx| {
+            cx.emit(TerminalPaneEvent::CurrentDirectoryChanged);
+        });
+        cx.run_until_parked();
+
+        tab_host.update(cx, |tab_host, _cx| {
+            tab_host.restore_tab_panes_to_home_window(tab_id);
+            assert!(!tab_host.tab_window_overrides.contains_key(&tab_id));
+        });
+        replacement_pane.update(cx, |_pane, cx| {
+            cx.emit(TerminalPaneEvent::RecordingStatusChanged);
+        });
+        cx.run_until_parked();
+
+        assert_eq!(
+            event_recorder.read_with(cx, |event_recorder, _cx| event_recorder.events.clone()),
+            vec![
+                WorkspaceTabHostEvent::TerminalPaneDelivery {
+                    pane_id: first_pane_id,
+                    session_id: first_session_id,
+                    window_handle: detached_window_handle,
+                    event: TerminalPaneEvent::ContextActionRequested,
+                },
+                WorkspaceTabHostEvent::TerminalPaneDelivery {
+                    pane_id: first_pane_id,
+                    session_id: first_session_id,
+                    window_handle: main_window_handle,
+                    event: TerminalPaneEvent::PrivilegePromptStateChanged,
+                },
+                WorkspaceTabHostEvent::TerminalPaneDelivery {
+                    pane_id: replacement_pane_id,
+                    session_id: replacement_session_id,
+                    window_handle: detached_window_handle,
+                    event: TerminalPaneEvent::CurrentDirectoryChanged,
+                },
+                WorkspaceTabHostEvent::TerminalPaneDelivery {
+                    pane_id: replacement_pane_id,
+                    session_id: replacement_session_id,
+                    window_handle: main_window_handle,
+                    event: TerminalPaneEvent::RecordingStatusChanged,
+                },
+            ]
         );
     }
 

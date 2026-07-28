@@ -188,6 +188,9 @@ impl WorkspaceApp {
                 let detached_window_handle = handle.into();
                 self.detached_tab_windows
                     .insert(tab_id, detached_window_handle);
+                self.tab_host.update(cx, |tab_host, _cx| {
+                    tab_host.bind_tab_panes_to_window(tab_id, detached_window_handle);
+                });
                 self.sync_host_tools_lifecycle(false, cx);
                 self.bind_remote_desktop_window(tab_id, detached_window_handle, cx);
                 self.resume_remote_desktop_frame_delivery(tab_id, cx);
@@ -239,6 +242,11 @@ impl WorkspaceApp {
         tab_id: TabId,
         cx: &mut Context<Self>,
     ) {
+        self.tab_host.update(cx, |tab_host, _cx| {
+            // Release callbacks can arrive after tab cleanup removed the root
+            // detached marker, so always clear the Entity-owned window override.
+            tab_host.restore_tab_panes_to_home_window(tab_id);
+        });
         if self.detached_tabs.remove(&tab_id) {
             self.detached_tab_windows.remove(&tab_id);
             self.set_main_window_active_tab(Some(tab_id), cx);
