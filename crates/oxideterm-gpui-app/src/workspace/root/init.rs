@@ -521,8 +521,6 @@ impl WorkspaceApp {
             focus_handle,
             tabs: Vec::new(),
             main_window_tabs: WorkspaceWindowTabState::new(),
-            detached_tabs: HashSet::new(),
-            detached_tab_windows: HashMap::new(),
             detached_tab_return_drag: None,
             detached_tab_return_handoff: None,
             next_tab_window_handoff_generation: 0,

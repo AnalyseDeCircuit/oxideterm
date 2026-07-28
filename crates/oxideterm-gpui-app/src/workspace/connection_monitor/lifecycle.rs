@@ -173,15 +173,17 @@ impl HostToolsEntity {
 }
 
 impl WorkspaceApp {
-    pub(in crate::workspace) fn host_tools_visibility(&self) -> HostToolsVisibility {
+    pub(in crate::workspace) fn host_tools_visibility(&self, cx: &App) -> HostToolsVisibility {
+        let tab_host = self.tab_host.read(cx);
         let main_tab_visible = self.tabs.iter().any(|tab| {
             is_host_tools_tab_kind(&tab.kind)
                 && self.main_window_tabs.active_tab_id == Some(tab.id)
-                && !self.detached_tabs.contains(&tab.id)
+                && !tab_host.is_outside_main_window(tab.id)
         });
-        let detached_tab_visible = self.tabs.iter().any(|tab| {
-            is_host_tools_tab_kind(&tab.kind) && self.detached_tab_windows.contains_key(&tab.id)
-        });
+        let detached_tab_visible = self
+            .tabs
+            .iter()
+            .any(|tab| is_host_tools_tab_kind(&tab.kind) && tab_host.is_detached(tab.id));
         let sidebar_visible = self.context_sidebar_visible()
             && self.active_context_sidebar_panel == ContextSidebarPanel::HostTools;
 
@@ -252,7 +254,7 @@ impl WorkspaceApp {
         force_pool_refresh: bool,
         cx: &mut App,
     ) {
-        let visibility = self.host_tools_visibility();
+        let visibility = self.host_tools_visibility(cx);
         let monitoring = self.settings_store.settings().host_tools.clone();
         let sampling_config = self.resource_sampling_config();
         let runtime = self.forwarding_runtime.handle().clone();
@@ -272,7 +274,7 @@ impl WorkspaceApp {
         &mut self,
         cx: &mut Context<Self>,
     ) {
-        let visibility = self.host_tools_visibility();
+        let visibility = self.host_tools_visibility(cx);
         let monitoring = self.settings_store.settings().host_tools.clone();
         let sampling_config = self.resource_sampling_config();
         let runtime = self.forwarding_runtime.handle().clone();

@@ -120,7 +120,7 @@ impl WorkspaceApp {
         self.active_surface = ActiveSurface::Terminal;
         self.needs_active_pane_focus = false;
         self.focus_remote_desktop_keyboard(window, cx);
-        self.reveal_active_tab(window);
+        self.reveal_active_tab(window, cx);
         if let Some(session) = self.remote_desktop_session_entity(tab_id, cx) {
             let initial_scale_factor = remote_desktop_scale_factor_percent(window.scale_factor());
             session.update(cx, |session, cx| {

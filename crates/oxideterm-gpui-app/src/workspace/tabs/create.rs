@@ -98,7 +98,7 @@ impl WorkspaceApp {
         self.active_surface = ActiveSurface::Terminal;
         self.needs_active_pane_focus = true;
         pane.update(cx, |pane, cx| pane.focus(window, cx));
-        self.reveal_active_tab(window);
+        self.reveal_active_tab(window, cx);
         cx.notify();
         Ok(())
     }
@@ -138,7 +138,7 @@ impl WorkspaceApp {
         self.active_surface = ActiveSurface::Terminal;
         self.needs_active_pane_focus = true;
         pane.update(cx, |pane, cx| pane.focus(window, cx));
-        self.reveal_active_tab(window);
+        self.reveal_active_tab(window, cx);
         cx.notify();
         Ok(session_id)
     }
@@ -179,7 +179,7 @@ impl WorkspaceApp {
         self.active_surface = ActiveSurface::Terminal;
         self.needs_active_pane_focus = true;
         pane.update(cx, |pane, cx| pane.focus(window, cx));
-        self.reveal_active_tab(window);
+        self.reveal_active_tab(window, cx);
         cx.notify();
         Ok(session_id)
     }
@@ -772,7 +772,7 @@ impl WorkspaceApp {
         }
         self.needs_active_pane_focus = true;
         self.focus_active_pane(window, cx);
-        self.reveal_active_tab(window);
+        self.reveal_active_tab(window, cx);
         self.persist_session_tree_snapshot();
         // The existing node remains the physical transport owner. This tab
         // owns only the terminal consumer registered by the pane helper.
@@ -1024,7 +1024,7 @@ impl WorkspaceApp {
             self.set_sidebar_collapsed_with_motion(false, cx);
         }
         self.persist_sidebar_settings(cx);
-        self.reveal_active_tab(window);
+        self.reveal_active_tab(window, cx);
         if self.settings_page.active_tab == SettingsTab::General {
             self.refresh_cli_companion_status(cx);
             #[cfg(not(target_os = "macos"))]

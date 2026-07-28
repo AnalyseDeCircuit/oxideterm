@@ -531,7 +531,7 @@ impl WorkspaceApp {
                                     && let Some(tab) = this.tab_mut_by_id(tab_id)
                                 {
                                     tab.active_pane_id = Some(pane_id);
-                                    if !this.detached_tabs.contains(&tab_id) {
+                                    if !this.tab_host.read(cx).is_outside_main_window(tab_id) {
                                         this.set_main_window_active_tab(Some(tab_id), cx);
                                     }
                                 } else if let Some(tab) = this.active_tab_mut() {

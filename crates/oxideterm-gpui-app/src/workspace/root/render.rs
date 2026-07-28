@@ -1103,7 +1103,7 @@ impl Render for WorkspaceApp {
                 ))
             })
             .when_some(
-                self.render_detached_tab_return_handoff(window),
+                self.render_detached_tab_return_handoff(window, cx),
                 |root, handoff| root.child(handoff),
             )
             .when_some(

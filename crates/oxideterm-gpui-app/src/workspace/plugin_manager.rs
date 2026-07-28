@@ -207,7 +207,7 @@ impl WorkspaceApp {
         self.active_surface = ActiveSurface::Terminal;
         self.needs_active_pane_focus = false;
         window.focus(&self.focus_handle, cx);
-        self.reveal_active_tab(window);
+        self.reveal_active_tab(window, cx);
         self.persist_sidebar_settings(cx);
         cx.notify();
     }

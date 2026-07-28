@@ -938,7 +938,7 @@ impl WorkspaceApp {
             return Some(WorkspaceImeTarget::ShortcutsModalSearch);
         }
 
-        if self.host_tools_visibility().main_window_is_visible()
+        if self.host_tools_visibility(cx).main_window_is_visible()
             && let Some(input) = self.host_tools.read(cx).ui.focused_input
         {
             return Some(match input {

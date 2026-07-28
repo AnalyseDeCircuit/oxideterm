@@ -677,8 +677,6 @@ pub(crate) struct WorkspaceApp {
     focus_handle: FocusHandle,
     tabs: Vec<Tab>,
     main_window_tabs: WorkspaceWindowTabState,
-    detached_tabs: HashSet<TabId>,
-    detached_tab_windows: HashMap<TabId, AnyWindowHandle>,
     detached_tab_return_drag: Option<DetachedTabReturnDrag>,
     detached_tab_return_handoff: Option<DetachedTabReturnHandoff>,
     next_tab_window_handoff_generation: u64,

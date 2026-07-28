@@ -131,6 +131,10 @@ impl WorkspaceApp {
         let old_active_tab_id = self.main_window_tabs.active_tab_id;
         let removed_was_active = self.tabs.get(index).map(|tab| tab.id) == old_active_tab_id;
         let tab = self.tabs.remove(index);
+        let mount_cleanup = self
+            .tab_host
+            .update(cx, |tab_host, _cx| tab_host.close_tab_mount(tab.id));
+        self.apply_tab_mount_cleanup(mount_cleanup, Some(window), cx);
         let mut pane_ids = Vec::new();
         if let Some(root_pane) = &tab.root_pane {
             root_pane.collect_pane_ids(&mut pane_ids);
@@ -153,7 +157,7 @@ impl WorkspaceApp {
             .active_tab()
             .is_some_and(|tab| matches!(tab.kind, TabKind::LocalTerminal | TabKind::SshTerminal));
         self.focus_active_pane(window, cx);
-        self.reveal_active_tab(window);
+        self.reveal_active_tab(window, cx);
     }
 
     pub(super) fn attach_detached_local_terminal_session(
@@ -194,7 +198,7 @@ impl WorkspaceApp {
             self.detached_local_terminals_popover_open = false;
         }
         pane.update(cx, |pane, cx| pane.focus(window, cx));
-        self.reveal_active_tab(window);
+        self.reveal_active_tab(window, cx);
         self.push_command_palette_toast(
             self.i18n.t("local_shell.toast.attached"),
             Some(title),

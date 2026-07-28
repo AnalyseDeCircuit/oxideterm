@@ -547,7 +547,7 @@ impl WorkspaceApp {
             cx.notify();
         });
         window.focus(&self.focus_handle, cx);
-        self.reveal_active_tab(window);
+        self.reveal_active_tab(window, cx);
         cx.notify();
     }
 

@@ -2116,7 +2116,7 @@ impl WorkspaceApp {
         let pane_id = location.pane_id;
         let pane = self.tab_host.read(cx).panes().get(&pane_id)?.clone();
 
-        if self.detached_tabs.contains(&tab_id) {
+        if self.tab_host.read(cx).is_outside_main_window(tab_id) {
             // The detached window already owns this pane entity. Focus that
             // owner without mounting the same terminal into the main window.
             self.focus_detached_tab_window(tab_id, cx);
@@ -2134,7 +2134,7 @@ impl WorkspaceApp {
         self.active_surface = ActiveSurface::Terminal;
         self.needs_active_pane_focus = true;
         self.focus_active_pane(window, cx);
-        self.reveal_active_tab(window);
+        self.reveal_active_tab(window, cx);
         cx.notify();
 
         Some((pane_id, pane))

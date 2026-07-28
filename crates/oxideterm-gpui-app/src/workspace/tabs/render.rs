@@ -75,14 +75,15 @@ impl WorkspaceApp {
                 this.handle_tabbar_scroll(event, window, cx);
             }));
 
-        let returning_placeholder = self.detached_tab_return_placeholder();
+        let returning_placeholder = self.detached_tab_return_placeholder(cx);
         let returning_tab =
             returning_placeholder.and_then(|placeholder| self.tab_by_id(placeholder.tab_id));
+        let outside_main_tabs = self.tab_host.read(cx).outside_main_tab_ids();
         let mut live_tabs = self
             .tabs
             .iter()
             .enumerate()
-            .filter(|(_, tab)| !self.detached_tabs.contains(&tab.id));
+            .filter(|(_, tab)| !outside_main_tabs.contains(&tab.id));
         let live_tab_count = live_tabs.clone().count();
         let visual_tab_count = live_tab_count
             + self.main_window_tabs.exiting_tabs.len()
@@ -389,7 +390,7 @@ impl WorkspaceApp {
     }
 
     fn render_tabbar_scrollbar(&self, window: &Window, cx: &mut Context<Self>) -> AnyElement {
-        let Some(geometry) = self.tabbar_scrollbar_geometry(window) else {
+        let Some(geometry) = self.tabbar_scrollbar_geometry(window, cx) else {
             return div().into_any_element();
         };
         let scrollbar_dragging = self.main_window_tabs.scrollbar_drag.is_some();
@@ -439,7 +440,11 @@ impl WorkspaceApp {
             .into_any_element()
     }
 
-    fn tabbar_scrollbar_geometry(&self, window: &Window) -> Option<TabbarScrollbarGeometry> {
+    fn tabbar_scrollbar_geometry(
+        &self,
+        window: &Window,
+        cx: &App,
+    ) -> Option<TabbarScrollbarGeometry> {
         let viewport_bounds = self.main_window_tabs.scroll_handle.bounds();
         let measured_width = f32::from(viewport_bounds.size.width);
         let viewport_width = if measured_width > 1.0 {
@@ -455,8 +460,8 @@ impl WorkspaceApp {
         calculate_tabbar_scrollbar_geometry(
             viewport_left,
             viewport_width,
-            self.tabbar_max_scroll(window),
-            self.tabbar_effective_scroll_x(window),
+            self.tabbar_max_scroll(window, cx),
+            self.tabbar_effective_scroll_x(window, cx),
         )
     }
 
@@ -466,7 +471,7 @@ impl WorkspaceApp {
         window: &Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(geometry) = self.tabbar_scrollbar_geometry(window) else {
+        let Some(geometry) = self.tabbar_scrollbar_geometry(window, cx) else {
             return;
         };
         let pointer_x = f32::from(event.position.x) - geometry.viewport_left;
@@ -481,7 +486,11 @@ impl WorkspaceApp {
         self.main_window_tabs.scrollbar_drag = Some(TabbarScrollbarDragState { grab_offset_x });
         let thumb_left =
             (pointer_x - grab_offset_x).clamp(track_left, track_right - geometry.thumb_width);
-        self.set_tabbar_scroll_x(tabbar_scroll_x_for_thumb_left(thumb_left, geometry), window);
+        self.set_tabbar_scroll_x(
+            tabbar_scroll_x_for_thumb_left(thumb_left, geometry),
+            window,
+            cx,
+        );
         cx.notify();
         cx.stop_propagation();
     }
@@ -499,7 +508,7 @@ impl WorkspaceApp {
             self.finish_tabbar_scrollbar_drag(cx);
             return;
         }
-        let Some(geometry) = self.tabbar_scrollbar_geometry(window) else {
+        let Some(geometry) = self.tabbar_scrollbar_geometry(window, cx) else {
             self.finish_tabbar_scrollbar_drag(cx);
             return;
         };
@@ -507,7 +516,11 @@ impl WorkspaceApp {
         let track_left = TABBAR_SCROLLBAR_HORIZONTAL_INSET;
         let max_thumb_left = track_left + geometry.track_width - geometry.thumb_width;
         let thumb_left = (pointer_x - drag.grab_offset_x).clamp(track_left, max_thumb_left);
-        self.set_tabbar_scroll_x(tabbar_scroll_x_for_thumb_left(thumb_left, geometry), window);
+        self.set_tabbar_scroll_x(
+            tabbar_scroll_x_for_thumb_left(thumb_left, geometry),
+            window,
+            cx,
+        );
         cx.notify();
         cx.stop_propagation();
     }

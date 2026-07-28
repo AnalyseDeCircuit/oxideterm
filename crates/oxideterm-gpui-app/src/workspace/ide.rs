@@ -476,10 +476,17 @@ impl IdeOpenIntent {
 
 impl WorkspaceApp {
     pub(in crate::workspace) fn sync_ide_surface_mount(&mut self, tab_id: TabId, cx: &mut App) {
+        let (outside_main_window, detached_window_open) = {
+            let tab_host = self.tab_host.read(cx);
+            (
+                tab_host.is_outside_main_window(tab_id),
+                tab_host.is_detached(tab_id),
+            )
+        };
         let mount = ide_surface_mount_for_location(
             self.main_window_tabs.active_tab_id == Some(tab_id),
-            self.detached_tabs.contains(&tab_id),
-            self.detached_tab_windows.contains_key(&tab_id),
+            outside_main_window,
+            detached_window_open,
         );
         // WorkspaceApp reports only window placement; the IDE owner performs
         // the sampling, watcher, and node-session mount transition.
@@ -578,7 +585,7 @@ impl WorkspaceApp {
         if self.focus_detached_tab_window(tab_id, cx) {
             return;
         }
-        if !self.detached_tabs.contains(&tab_id) {
+        if !self.tab_host.read(cx).is_outside_main_window(tab_id) {
             self.set_main_window_active_tab(Some(tab_id), cx);
             self.active_surface = oxideterm_gpui_settings_view::ActiveSurface::Terminal;
         }
@@ -691,7 +698,7 @@ impl WorkspaceApp {
             }
         };
 
-        if !self.detached_tabs.contains(&tab_id) {
+        if !self.tab_host.read(cx).is_outside_main_window(tab_id) {
             self.set_main_window_active_tab(Some(tab_id), cx);
             self.active_surface = oxideterm_gpui_settings_view::ActiveSurface::Terminal;
         }
@@ -998,26 +1005,29 @@ impl WorkspaceApp {
         };
         let removed_was_active = self.main_window_tabs.active_tab_id == Some(tab_id);
         let tab = self.tabs.remove(index);
-        self.detached_tabs.remove(&tab.id);
-        self.detached_tab_windows.remove(&tab.id);
+        let mount_cleanup = self
+            .tab_host
+            .update(cx, |tab_host, _cx| tab_host.close_tab_mount(tab.id));
+        self.apply_tab_mount_cleanup(mount_cleanup, None, cx);
 
         if removed_was_active {
             // Picker cancellation is not a user project-close action. Pick the
             // nearest visible tab without recording an IDE last-closed marker,
             // so reconnect restore remains governed only by real project tabs.
+            let tab_host = self.tab_host.read(cx);
             let next_active_tab_id = self
                 .tabs
                 .iter()
                 .enumerate()
                 .skip(index.min(self.tabs.len().saturating_sub(1)))
-                .find(|(_, tab)| !self.detached_tabs.contains(&tab.id))
+                .find(|(_, tab)| !tab_host.is_outside_main_window(tab.id))
                 .or_else(|| {
                     self.tabs
                         .iter()
                         .enumerate()
                         .take(index)
                         .rev()
-                        .find(|(_, tab)| !self.detached_tabs.contains(&tab.id))
+                        .find(|(_, tab)| !tab_host.is_outside_main_window(tab.id))
                 })
                 .map(|(_, tab)| tab.id);
             self.set_main_window_active_tab(next_active_tab_id, cx);

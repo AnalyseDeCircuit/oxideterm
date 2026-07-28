@@ -104,10 +104,11 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        let outside_main_tabs = self.tab_host.read(cx).outside_main_tab_ids();
         let existing_tab_ids = self
             .tabs
             .iter()
-            .filter(|tab| !self.detached_tabs.contains(&tab.id))
+            .filter(|tab| !outside_main_tabs.contains(&tab.id))
             .map(|tab| tab.id)
             .collect::<HashSet<_>>();
         let Some(tab_id) = self.tab_host.update(cx, |tab_host, _| {
@@ -122,7 +123,7 @@ impl WorkspaceApp {
             .active_tab()
             .is_some_and(|tab| matches!(tab.kind, TabKind::LocalTerminal | TabKind::SshTerminal));
         self.focus_active_tab_keyboard_owner(window, cx);
-        self.reveal_active_tab(window);
+        self.reveal_active_tab(window, cx);
         cx.notify();
     }
 
@@ -138,7 +139,7 @@ impl WorkspaceApp {
         if self
             .tabs
             .iter()
-            .any(|tab| tab.id == tab_id && !self.detached_tabs.contains(&tab.id))
+            .any(|tab| tab.id == tab_id && !self.tab_host.read(cx).is_outside_main_window(tab.id))
         {
             if self.main_window_tabs.active_tab_id != Some(tab_id)
                 && let Some(previous_tab_id) = self.main_window_tabs.active_tab_id
@@ -155,7 +156,7 @@ impl WorkspaceApp {
                 matches!(tab.kind, TabKind::LocalTerminal | TabKind::SshTerminal)
             });
             self.focus_active_tab_keyboard_owner(window, cx);
-            self.reveal_active_tab(window);
+            self.reveal_active_tab(window, cx);
             cx.notify();
         }
     }
@@ -375,7 +376,11 @@ impl WorkspaceApp {
         let Some(location) = self.tab_host.read(cx).terminal_location(session_id) else {
             return false;
         };
-        if self.detached_tabs.contains(&location.tab_id) {
+        if self
+            .tab_host
+            .read(cx)
+            .is_outside_main_window(location.tab_id)
+        {
             // A detached terminal already has a native window owner. Do not
             // mount the same terminal entity into the main window as well;
             // focus its existing owner so session-tree activation still works.
@@ -399,7 +404,7 @@ impl WorkspaceApp {
         self.sync_active_tab_surface(cx);
         self.needs_active_pane_focus = true;
         self.focus_active_pane(window, cx);
-        self.reveal_active_tab(window);
+        self.reveal_active_tab(window, cx);
         cx.notify();
         true
     }
@@ -828,10 +833,12 @@ impl WorkspaceApp {
     fn close_tab_at_index(&mut self, index: usize, window: &mut Window, cx: &mut Context<Self>) {
         let old_active_tab_id = self.main_window_tabs.active_tab_id;
         let removed_was_active = self.tabs.get(index).map(|tab| tab.id) == old_active_tab_id;
-        let exiting_visual = self.tab_exit_visual(index);
+        let exiting_visual = self.tab_exit_visual(index, cx);
         let tab = self.tabs.remove(index);
-        self.detached_tabs.remove(&tab.id);
-        self.detached_tab_windows.remove(&tab.id);
+        let mount_cleanup = self
+            .tab_host
+            .update(cx, |tab_host, _cx| tab_host.close_tab_mount(tab.id));
+        self.apply_tab_mount_cleanup(mount_cleanup, Some(window), cx);
         self.sync_host_tools_lifecycle(false, cx);
         if self
             .main_window_tabs
@@ -882,13 +889,14 @@ impl WorkspaceApp {
             }
         }
 
+        let outside_main_tabs = self.tab_host.read(cx).outside_main_tab_ids();
         let next_active_tab_id = if self.tabs.is_empty() {
             None
         } else if !removed_was_active
             && old_active_tab_id.is_some_and(|tab_id| {
                 self.tabs
                     .iter()
-                    .any(|tab| tab.id == tab_id && !self.detached_tabs.contains(&tab.id))
+                    .any(|tab| tab.id == tab_id && !outside_main_tabs.contains(&tab.id))
             })
         {
             old_active_tab_id
@@ -897,14 +905,14 @@ impl WorkspaceApp {
                 .iter()
                 .enumerate()
                 .skip(index.min(self.tabs.len().saturating_sub(1)))
-                .find(|(_, tab)| !self.detached_tabs.contains(&tab.id))
+                .find(|(_, tab)| !outside_main_tabs.contains(&tab.id))
                 .or_else(|| {
                     self.tabs
                         .iter()
                         .enumerate()
                         .take(index)
                         .rev()
-                        .find(|(_, tab)| !self.detached_tabs.contains(&tab.id))
+                        .find(|(_, tab)| !outside_main_tabs.contains(&tab.id))
                 })
                 .map(|(_, tab)| tab.id)
         };
@@ -914,21 +922,22 @@ impl WorkspaceApp {
             .active_tab()
             .is_some_and(|tab| matches!(tab.kind, TabKind::LocalTerminal | TabKind::SshTerminal));
         self.focus_active_pane(window, cx);
-        self.reveal_active_tab(window);
+        self.reveal_active_tab(window, cx);
         if let Some(exiting_visual) = exiting_visual {
             self.begin_tab_visual_exit(exiting_visual, cx);
         }
         cx.notify();
     }
 
-    pub(super) fn tab_exit_visual(&self, index: usize) -> Option<ExitingTabVisual> {
+    pub(super) fn tab_exit_visual(&self, index: usize, cx: &App) -> Option<ExitingTabVisual> {
         let tab = self.tabs.get(index)?;
-        if self.detached_tabs.contains(&tab.id) {
+        let outside_main_tabs = self.tab_host.read(cx).outside_main_tab_ids();
+        if outside_main_tabs.contains(&tab.id) {
             return None;
         }
         let live_visual_index = self.tabs[..index]
             .iter()
-            .filter(|candidate| !self.detached_tabs.contains(&candidate.id))
+            .filter(|candidate| !outside_main_tabs.contains(&candidate.id))
             .count();
         let mut occupied_indices = self
             .main_window_tabs
@@ -1030,10 +1039,11 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        let outside_main_tabs = self.tab_host.read(cx).outside_main_tab_ids();
         let visible_tabs = self
             .tabs
             .iter()
-            .filter(|tab| !self.detached_tabs.contains(&tab.id))
+            .filter(|tab| !outside_main_tabs.contains(&tab.id))
             .map(|tab| tab.id)
             .collect::<Vec<_>>();
         if visible_tabs.is_empty() {
@@ -1057,7 +1067,7 @@ impl WorkspaceApp {
             .active_tab()
             .is_some_and(|tab| matches!(tab.kind, TabKind::LocalTerminal | TabKind::SshTerminal));
         self.focus_active_pane(window, cx);
-        self.reveal_active_tab(window);
+        self.reveal_active_tab(window, cx);
         cx.notify();
     }
 
@@ -1067,10 +1077,11 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        let outside_main_tabs = self.tab_host.read(cx).outside_main_tab_ids();
         if let Some(tab_id) = self
             .tabs
             .iter()
-            .filter(|tab| !self.detached_tabs.contains(&tab.id))
+            .filter(|tab| !outside_main_tabs.contains(&tab.id))
             .nth(index)
             .map(|tab| tab.id)
         {
@@ -1080,7 +1091,7 @@ impl WorkspaceApp {
                 matches!(tab.kind, TabKind::LocalTerminal | TabKind::SshTerminal)
             });
             self.focus_active_pane(window, cx);
-            self.reveal_active_tab(window);
+            self.reveal_active_tab(window, cx);
             cx.notify();
         }
     }
@@ -1116,44 +1127,50 @@ impl WorkspaceApp {
         }
     }
 
-    fn tabbar_content_width(&self) -> f32 {
+    fn tabbar_content_width(&self, cx: &App) -> f32 {
+        let outside_main_tabs = self.tab_host.read(cx).outside_main_tab_ids();
         self.tokens.metrics.tabbar_leading_offset
             + self
                 .tabs
                 .iter()
-                .filter(|tab| !self.detached_tabs.contains(&tab.id))
+                .filter(|tab| !outside_main_tabs.contains(&tab.id))
                 .map(|tab| self.tab_visual_width(tab))
                 .sum::<f32>()
     }
 
-    pub(in crate::workspace) fn tabbar_max_scroll(&self, window: &Window) -> f32 {
+    pub(in crate::workspace) fn tabbar_max_scroll(&self, window: &Window, cx: &App) -> f32 {
         let measured_width = f32::from(self.main_window_tabs.scroll_handle.bounds().size.width);
         if measured_width > 1.0 {
             return f32::from(self.main_window_tabs.scroll_handle.max_offset().x);
         }
-        (self.tabbar_content_width() - self.tabbar_scroll_viewport_width(window)).max(0.0)
+        (self.tabbar_content_width(cx) - self.tabbar_scroll_viewport_width(window)).max(0.0)
     }
 
-    fn clamp_tab_scroll(&mut self, window: &Window) {
-        let scroll_x = self.tabbar_effective_scroll_x(window);
-        self.set_tabbar_scroll_x(scroll_x, window);
+    fn clamp_tab_scroll(&mut self, window: &Window, cx: &App) {
+        let scroll_x = self.tabbar_effective_scroll_x(window, cx);
+        self.set_tabbar_scroll_x(scroll_x, window, cx);
     }
 
-    fn tabbar_has_overflow(&self, window: &Window) -> bool {
-        self.tabbar_max_scroll(window) > 1.0
+    fn tabbar_has_overflow(&self, window: &Window, cx: &App) -> bool {
+        self.tabbar_max_scroll(window, cx) > 1.0
     }
 
-    pub(in crate::workspace) fn tabbar_effective_scroll_x(&self, window: &Window) -> f32 {
-        if self.tabbar_has_overflow(window) {
+    pub(in crate::workspace) fn tabbar_effective_scroll_x(&self, window: &Window, cx: &App) -> f32 {
+        if self.tabbar_has_overflow(window, cx) {
             f32::from(-self.main_window_tabs.scroll_handle.offset().x)
-                .clamp(0.0, self.tabbar_max_scroll(window))
+                .clamp(0.0, self.tabbar_max_scroll(window, cx))
         } else {
             0.0
         }
     }
 
-    pub(in crate::workspace) fn set_tabbar_scroll_x(&mut self, scroll_x: f32, window: &Window) {
-        let next = scroll_x.clamp(0.0, self.tabbar_max_scroll(window));
+    pub(in crate::workspace) fn set_tabbar_scroll_x(
+        &mut self,
+        scroll_x: f32,
+        window: &Window,
+        cx: &App,
+    ) {
+        let next = scroll_x.clamp(0.0, self.tabbar_max_scroll(window, cx));
         self.main_window_tabs
             .scroll_handle
             .set_offset(Point::new(px(-next), px(0.0)));
@@ -1165,10 +1182,10 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let max_scroll = self.tabbar_max_scroll(window);
+        let max_scroll = self.tabbar_max_scroll(window, cx);
         if max_scroll <= 1.0 {
             let had_offset = self.main_window_tabs.scroll_handle.offset().x != px(0.0);
-            self.set_tabbar_scroll_x(0.0, window);
+            self.set_tabbar_scroll_x(0.0, window, cx);
             if had_offset {
                 cx.notify();
             }
@@ -1187,7 +1204,7 @@ impl WorkspaceApp {
             return;
         }
 
-        let current_scroll_x = self.tabbar_effective_scroll_x(window);
+        let current_scroll_x = self.tabbar_effective_scroll_x(window, cx);
         let next_scroll_x = tabbar_scroll_x_after_wheel(current_scroll_x, scroll_delta, max_scroll);
         if (next_scroll_x - current_scroll_x).abs() < 0.01 {
             cx.stop_propagation();
@@ -1205,30 +1222,31 @@ impl WorkspaceApp {
         cx.stop_propagation();
     }
 
-    pub(in crate::workspace) fn reveal_active_tab(&mut self, window: &Window) {
+    pub(in crate::workspace) fn reveal_active_tab(&mut self, window: &Window, cx: &App) {
         let Some(index) = self.active_tab_index() else {
-            self.clamp_tab_scroll(window);
+            self.clamp_tab_scroll(window, cx);
             return;
         };
+        let outside_main_tabs = self.tab_host.read(cx).outside_main_tab_ids();
         let tab_left = self.tokens.metrics.tabbar_leading_offset
             + self
                 .tabs
                 .iter()
                 .take(index)
-                .filter(|tab| !self.detached_tabs.contains(&tab.id))
+                .filter(|tab| !outside_main_tabs.contains(&tab.id))
                 .map(|tab| self.tab_visual_width(tab))
                 .sum::<f32>();
         let tab_right = tab_left + self.tab_visual_width(&self.tabs[index]);
         let viewport_width = self.tabbar_scroll_viewport_width(window);
 
-        let current_scroll_x = self.tabbar_effective_scroll_x(window);
+        let current_scroll_x = self.tabbar_effective_scroll_x(window, cx);
         let mut next_scroll_x = current_scroll_x;
         if tab_left < current_scroll_x {
             next_scroll_x = tab_left;
         } else if tab_right > current_scroll_x + viewport_width {
             next_scroll_x = tab_right - viewport_width;
         }
-        self.set_tabbar_scroll_x(next_scroll_x, window);
+        self.set_tabbar_scroll_x(next_scroll_x, window, cx);
     }
 
     pub(in crate::workspace) fn tab_display_title(&self, tab: &Tab) -> String {
@@ -1271,11 +1289,12 @@ impl WorkspaceApp {
         client_x: f32,
         window: &Window,
         tab_widths: &[f32],
+        cx: &App,
     ) -> usize {
         if tab_widths.is_empty() {
             return 0;
         }
-        let tabbar_x = client_x - self.tabbar_left_x() + self.tabbar_effective_scroll_x(window)
+        let tabbar_x = client_x - self.tabbar_left_x() + self.tabbar_effective_scroll_x(window, cx)
             - self.tokens.metrics.tabbar_leading_offset;
         let mut left = 0.0;
         for (index, width) in tab_widths.iter().copied().enumerate() {
@@ -1301,21 +1320,22 @@ impl WorkspaceApp {
         }
         let start_x = f32::from(event.position.x);
         let start_y = f32::from(event.position.y);
+        let outside_main_tabs = self.tab_host.read(cx).outside_main_tab_ids();
         let tab_widths = self
             .tabs
             .iter()
-            .filter(|tab| !self.detached_tabs.contains(&tab.id))
+            .filter(|tab| !outside_main_tabs.contains(&tab.id))
             .map(|tab| self.tab_visual_width(tab))
             .collect::<Vec<_>>();
         let Some(visible_index) = self
             .tabs
             .iter()
-            .filter(|tab| !self.detached_tabs.contains(&tab.id))
+            .filter(|tab| !outside_main_tabs.contains(&tab.id))
             .position(|tab| tab.id == tab_id)
         else {
             return;
         };
-        let drop_target_index = self.tab_drop_target_index_for_x(start_x, window, &tab_widths);
+        let drop_target_index = self.tab_drop_target_index_for_x(start_x, window, &tab_widths, cx);
         self.main_window_tabs.drag = Some(TabDragState {
             tab_id,
             from_index: visible_index,
@@ -1360,7 +1380,7 @@ impl WorkspaceApp {
             drag.active = true;
             drag.mode = TabDragMode::Reorder;
             drag.drop_target_index =
-                self.tab_drop_target_index_for_x(drag.current_x, window, &drag.tab_widths);
+                self.tab_drop_target_index_for_x(drag.current_x, window, &drag.tab_widths, cx);
         } else {
             drag.active = false;
             drag.mode = TabDragMode::Pending;
@@ -1397,9 +1417,9 @@ impl WorkspaceApp {
             TabDragMode::Reorder if drag.active => {
                 let target_visible_index =
                     tab_reorder_target_visible_index(drag.from_index, drag.drop_target_index);
-                if self.move_tab_to_visible_index(drag.tab_id, target_visible_index) {
-                    self.clamp_tab_scroll(window);
-                    self.reveal_active_tab(window);
+                if self.move_tab_to_visible_index(drag.tab_id, target_visible_index, cx) {
+                    self.clamp_tab_scroll(window, cx);
+                    self.reveal_active_tab(window, cx);
                     cx.notify();
                 }
             }
@@ -1416,14 +1436,16 @@ impl WorkspaceApp {
         &mut self,
         tab_id: TabId,
         visible_index: usize,
+        cx: &App,
     ) -> bool {
         let Some(source_index) = self.tab_index_by_id(tab_id) else {
             return false;
         };
+        let outside_main_tabs = self.tab_host.read(cx).outside_main_tab_ids();
         let current_visible_index = self
             .tabs
             .iter()
-            .filter(|tab| !self.detached_tabs.contains(&tab.id))
+            .filter(|tab| !outside_main_tabs.contains(&tab.id))
             .position(|tab| tab.id == tab_id);
         if current_visible_index == Some(visible_index) {
             return false;
@@ -1431,7 +1453,7 @@ impl WorkspaceApp {
         let visible_tab_ids = self
             .tabs
             .iter()
-            .filter(|tab| tab.id != tab_id && !self.detached_tabs.contains(&tab.id))
+            .filter(|tab| tab.id != tab_id && !outside_main_tabs.contains(&tab.id))
             .map(|tab| tab.id)
             .collect::<Vec<_>>();
         let anchor_tab_id = visible_tab_ids.get(visible_index).copied();

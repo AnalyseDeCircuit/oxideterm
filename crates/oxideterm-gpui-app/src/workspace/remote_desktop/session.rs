@@ -676,7 +676,7 @@ impl WorkspaceApp {
             return;
         }
 
-        let visible = self.remote_desktop_tab_visible(tab_id);
+        let visible = self.remote_desktop_tab_visible(tab_id, cx);
         // The root supplies cross-tab visibility, then the Entity owns the
         // window-affine delivery and lifecycle transition.
         session_entity.update(cx, |session, cx| {
@@ -707,10 +707,11 @@ impl WorkspaceApp {
         }
     }
 
-    pub(in crate::workspace) fn remote_desktop_tab_visible(&self, tab_id: TabId) -> bool {
+    pub(in crate::workspace) fn remote_desktop_tab_visible(&self, tab_id: TabId, cx: &App) -> bool {
+        let tab_host = self.tab_host.read(cx);
         let main_tab_visible = self.main_window_tabs.active_tab_id == Some(tab_id)
-            && !self.detached_tabs.contains(&tab_id);
-        let detached_tab_visible = self.detached_tab_windows.contains_key(&tab_id);
+            && !tab_host.is_outside_main_window(tab_id);
+        let detached_tab_visible = tab_host.is_detached(tab_id);
         remote_desktop_tab_visible(main_tab_visible, detached_tab_visible)
     }
 

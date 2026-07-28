@@ -14,7 +14,9 @@ pub(in crate::workspace) struct WorkspaceTabHostEntity {
     panes: HashMap<PaneId, Entity<TerminalPane>>,
     pane_subscriptions: HashMap<PaneId, Subscription>,
     pane_window_affinities: HashMap<PaneId, TerminalPaneWindowAffinity>,
-    tab_window_overrides: HashMap<TabId, AnyWindowHandle>,
+    tab_mounts: HashMap<TabId, TabMount>,
+    pending_detach_mounts: HashMap<TabId, TabMountId>,
+    next_tab_mount_id: u64,
     terminal_locations: HashMap<TerminalSessionId, TerminalLocation>,
     navigation_history: Vec<TabId>,
     navigation_index: Option<usize>,
@@ -34,6 +36,35 @@ pub(in crate::workspace) struct WorkspaceTabHostEntity {
 pub(in crate::workspace) struct TerminalLocation {
     pub(in crate::workspace) tab_id: TabId,
     pub(in crate::workspace) pane_id: PaneId,
+}
+
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub(in crate::workspace) struct TabMountId(u64);
+
+/// Identifies the native window currently mounting a workspace tab.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(in crate::workspace) enum TabMount {
+    Main,
+    Detached {
+        mount_id: TabMountId,
+        window_id: gpui::WindowId,
+        handle: AnyWindowHandle,
+    },
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(in crate::workspace) enum TabMountCloseReason {
+    ReturnToMain,
+    DetachedWindowReleased,
+    TabClosed,
+}
+
+/// Describes the native-window cleanup that follows an Entity-owned mount transition.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(in crate::workspace) struct TabMountCleanupPlan {
+    pub(in crate::workspace) tab_id: TabId,
+    pub(in crate::workspace) reason: TabMountCloseReason,
+    pub(in crate::workspace) detached_window: Option<AnyWindowHandle>,
 }
 
 #[derive(Clone, Copy)]
@@ -77,7 +108,9 @@ impl WorkspaceTabHostEntity {
             panes: HashMap::new(),
             pane_subscriptions: HashMap::new(),
             pane_window_affinities: HashMap::new(),
-            tab_window_overrides: HashMap::new(),
+            tab_mounts: HashMap::new(),
+            pending_detach_mounts: HashMap::new(),
+            next_tab_mount_id: 1,
             terminal_locations: HashMap::new(),
             navigation_history: Vec::new(),
             navigation_index: None,
@@ -163,7 +196,7 @@ impl WorkspaceTabHostEntity {
             previous.is_none_or(|previous| previous == location),
             "terminal session was rebound without removing its previous location"
         );
-        if let Some(window_handle) = self.tab_window_overrides.get(&location.tab_id).copied()
+        if let Some(window_handle) = self.detached_window_handle(location.tab_id)
             && let Some(affinity) = self.pane_window_affinities.get_mut(&location.pane_id)
         {
             // Reconnect remounts can register a replacement pane after the tab
@@ -244,12 +277,44 @@ impl WorkspaceTabHostEntity {
         self.terminal_locations.get(&session_id).copied()
     }
 
-    pub(in crate::workspace) fn bind_tab_panes_to_window(
+    pub(in crate::workspace) fn begin_detach(&mut self, tab_id: TabId) -> Option<TabMountId> {
+        if self.pending_detach_mounts.contains_key(&tab_id)
+            || matches!(
+                self.tab_mounts.get(&tab_id),
+                Some(TabMount::Detached { .. })
+            )
+        {
+            return None;
+        }
+        let mount_id = TabMountId(self.next_tab_mount_id);
+        self.next_tab_mount_id = self.next_tab_mount_id.wrapping_add(1);
+        self.pending_detach_mounts.insert(tab_id, mount_id);
+        Some(mount_id)
+    }
+
+    pub(in crate::workspace) fn commit_detach(
         &mut self,
         tab_id: TabId,
+        mount_id: TabMountId,
         window_handle: AnyWindowHandle,
-    ) {
-        self.tab_window_overrides.insert(tab_id, window_handle);
+    ) -> bool {
+        if self.pending_detach_mounts.get(&tab_id).copied() != Some(mount_id)
+            || matches!(
+                self.tab_mounts.get(&tab_id),
+                Some(TabMount::Detached { .. })
+            )
+        {
+            return false;
+        }
+        self.pending_detach_mounts.remove(&tab_id);
+        self.tab_mounts.insert(
+            tab_id,
+            TabMount::Detached {
+                mount_id,
+                window_id: window_handle.window_id(),
+                handle: window_handle,
+            },
+        );
         for location in self
             .terminal_locations
             .values()
@@ -259,10 +324,72 @@ impl WorkspaceTabHostEntity {
                 affinity.current = window_handle;
             }
         }
+        true
     }
 
-    pub(in crate::workspace) fn restore_tab_panes_to_home_window(&mut self, tab_id: TabId) {
-        self.tab_window_overrides.remove(&tab_id);
+    pub(in crate::workspace) fn rollback_detach(
+        &mut self,
+        tab_id: TabId,
+        mount_id: TabMountId,
+    ) -> bool {
+        if self.pending_detach_mounts.get(&tab_id).copied() != Some(mount_id) {
+            return false;
+        }
+        self.pending_detach_mounts.remove(&tab_id);
+        true
+    }
+
+    pub(in crate::workspace) fn return_to_main(
+        &mut self,
+        tab_id: TabId,
+        reason: TabMountCloseReason,
+    ) -> Option<TabMountCleanupPlan> {
+        let TabMount::Detached { handle, .. } = self.tab_mounts.get(&tab_id).copied()? else {
+            return None;
+        };
+        self.tab_mounts.remove(&tab_id);
+        self.restore_tab_panes_to_home_window(tab_id);
+        Some(TabMountCleanupPlan {
+            tab_id,
+            reason,
+            detached_window: Some(handle),
+        })
+    }
+
+    pub(in crate::workspace) fn release_detached_window(
+        &mut self,
+        tab_id: TabId,
+        mount_id: TabMountId,
+        window_id: gpui::WindowId,
+    ) -> Option<TabMountCleanupPlan> {
+        match self.tab_mounts.get(&tab_id).copied() {
+            Some(TabMount::Detached {
+                mount_id: current_mount_id,
+                window_id: current_window_id,
+                ..
+            }) if current_mount_id == mount_id && current_window_id == window_id => {
+                self.return_to_main(tab_id, TabMountCloseReason::DetachedWindowReleased)
+            }
+            _ => None,
+        }
+    }
+
+    pub(in crate::workspace) fn close_tab_mount(&mut self, tab_id: TabId) -> TabMountCleanupPlan {
+        self.pending_detach_mounts.remove(&tab_id);
+        let detached_window = match self.tab_mounts.remove(&tab_id) {
+            Some(TabMount::Detached { handle, .. }) => Some(handle),
+            _ => None,
+        };
+        // Pane removal follows in the caller's tab-close transaction. Do not
+        // release terminal or node consumers merely because the mount changed.
+        TabMountCleanupPlan {
+            tab_id,
+            reason: TabMountCloseReason::TabClosed,
+            detached_window,
+        }
+    }
+
+    fn restore_tab_panes_to_home_window(&mut self, tab_id: TabId) {
         for location in self
             .terminal_locations
             .values()
@@ -271,6 +398,51 @@ impl WorkspaceTabHostEntity {
             if let Some(affinity) = self.pane_window_affinities.get_mut(&location.pane_id) {
                 affinity.current = affinity.home;
             }
+        }
+    }
+
+    #[cfg(test)]
+    fn mount(&self, tab_id: TabId) -> TabMount {
+        self.tab_mounts
+            .get(&tab_id)
+            .copied()
+            .unwrap_or(TabMount::Main)
+    }
+
+    pub(in crate::workspace) fn is_outside_main_window(&self, tab_id: TabId) -> bool {
+        self.pending_detach_mounts.contains_key(&tab_id)
+            || matches!(
+                self.tab_mounts.get(&tab_id),
+                Some(TabMount::Detached { .. })
+            )
+    }
+
+    pub(in crate::workspace) fn is_detached(&self, tab_id: TabId) -> bool {
+        matches!(
+            self.tab_mounts.get(&tab_id),
+            Some(TabMount::Detached { .. })
+        )
+    }
+
+    pub(in crate::workspace) fn outside_main_tab_ids(&self) -> HashSet<TabId> {
+        // Renderers need to release the Entity borrow before mutating GPUI.
+        // Copy only stable IDs, never tab contents, panes, or session state.
+        self.tab_mounts
+            .iter()
+            .filter_map(|(tab_id, mount)| {
+                matches!(mount, TabMount::Detached { .. }).then_some(*tab_id)
+            })
+            .chain(self.pending_detach_mounts.keys().copied())
+            .collect()
+    }
+
+    pub(in crate::workspace) fn detached_window_handle(
+        &self,
+        tab_id: TabId,
+    ) -> Option<AnyWindowHandle> {
+        match self.tab_mounts.get(&tab_id).copied() {
+            Some(TabMount::Detached { handle, .. }) => Some(handle),
+            _ => None,
         }
     }
 
@@ -619,7 +791,7 @@ mod tests {
                 },
             ));
         });
-        let tab_id = TabId(3);
+        let tab_id = tab_host.update(cx, |tab_host, _cx| tab_host.alloc_tab_id());
         let first_pane_id = PaneId(4);
         let first_session_id = TerminalSessionId(5);
         let first_location = TerminalLocation {
@@ -643,7 +815,8 @@ mod tests {
         assert_ne!(main_window_handle, detached_window_handle);
 
         tab_host.update(cx, |tab_host, _cx| {
-            tab_host.bind_tab_panes_to_window(tab_id, detached_window_handle);
+            let mount_id = tab_host.begin_detach(tab_id).expect("detach reservation");
+            assert!(tab_host.commit_detach(tab_id, mount_id, detached_window_handle));
             assert_eq!(
                 tab_host
                     .panes()
@@ -671,7 +844,10 @@ mod tests {
         cx.run_until_parked();
 
         tab_host.update(cx, |tab_host, _cx| {
-            tab_host.restore_tab_panes_to_home_window(tab_id);
+            let cleanup = tab_host
+                .return_to_main(tab_id, TabMountCloseReason::ReturnToMain)
+                .expect("return cleanup");
+            assert_eq!(cleanup.reason, TabMountCloseReason::ReturnToMain);
             assert_eq!(
                 tab_host
                     .panes()
@@ -693,7 +869,8 @@ mod tests {
         let replacement_pane_id = PaneId(6);
         let replacement_session_id = TerminalSessionId(7);
         tab_host.update(cx, |tab_host, cx| {
-            tab_host.bind_tab_panes_to_window(tab_id, detached_window_handle);
+            let mount_id = tab_host.begin_detach(tab_id).expect("replacement detach");
+            assert!(tab_host.commit_detach(tab_id, mount_id, detached_window_handle));
             tab_host.register_terminal_pane(
                 replacement_pane_id,
                 replacement_session_id,
@@ -727,8 +904,12 @@ mod tests {
         cx.run_until_parked();
 
         tab_host.update(cx, |tab_host, _cx| {
-            tab_host.restore_tab_panes_to_home_window(tab_id);
-            assert!(!tab_host.tab_window_overrides.contains_key(&tab_id));
+            assert!(
+                tab_host
+                    .return_to_main(tab_id, TabMountCloseReason::ReturnToMain)
+                    .is_some()
+            );
+            assert_eq!(tab_host.mount(tab_id), TabMount::Main);
         });
         replacement_pane.update(cx, |_pane, cx| {
             cx.emit(TerminalPaneEvent::RecordingStatusChanged);
@@ -996,5 +1177,141 @@ mod tests {
         assert_eq!(tab_host.close_confirm(), Some(&confirm));
         tab_host.clear_close_confirm();
         assert!(tab_host.close_confirm().is_none());
+    }
+
+    #[test]
+    fn failed_detach_rolls_back_only_the_current_reservation() {
+        let mut tab_host = WorkspaceTabHostEntity::new();
+        let tab_id = tab_host.alloc_tab_id();
+        let mount_id = tab_host.begin_detach(tab_id).expect("detach reservation");
+
+        assert!(tab_host.is_outside_main_window(tab_id));
+        assert!(tab_host.rollback_detach(tab_id, mount_id));
+        assert_eq!(tab_host.mount(tab_id), TabMount::Main);
+        assert!(!tab_host.is_outside_main_window(tab_id));
+        let replacement_mount_id = tab_host
+            .begin_detach(tab_id)
+            .expect("replacement reservation");
+        assert!(!tab_host.rollback_detach(tab_id, mount_id));
+        assert!(tab_host.is_outside_main_window(tab_id));
+        assert!(tab_host.rollback_detach(tab_id, replacement_mount_id));
+    }
+
+    #[gpui::test]
+    fn stale_detached_release_cannot_return_a_newer_mount(cx: &mut TestAppContext) {
+        let (_, cx) = cx.add_window_view(|_window, _cx| TabHostTestRoot);
+        let first_window = cx.window_handle();
+        let tab_host = cx.new(|_| WorkspaceTabHostEntity::new());
+        let tab_id = tab_host.update(cx, |tab_host, _cx| tab_host.alloc_tab_id());
+        let first_mount_id = tab_host.update(cx, |tab_host, _cx| {
+            let mount_id = tab_host.begin_detach(tab_id).expect("first reservation");
+            assert!(tab_host.commit_detach(tab_id, mount_id, first_window));
+            mount_id
+        });
+
+        let (_, cx) = cx.add_window_view(|_window, _cx| TabHostTestRoot);
+        let second_window = cx.window_handle();
+        let second_mount_id = tab_host.update(cx, |tab_host, _cx| {
+            assert!(
+                tab_host
+                    .return_to_main(tab_id, TabMountCloseReason::ReturnToMain)
+                    .is_some()
+            );
+            let mount_id = tab_host
+                .begin_detach(tab_id)
+                .expect("replacement reservation");
+            assert!(tab_host.commit_detach(tab_id, mount_id, second_window));
+            mount_id
+        });
+
+        tab_host.update(cx, |tab_host, _cx| {
+            assert!(
+                tab_host
+                    .release_detached_window(tab_id, first_mount_id, first_window.window_id(),)
+                    .is_none()
+            );
+            assert!(
+                tab_host
+                    .release_detached_window(tab_id, second_mount_id, first_window.window_id(),)
+                    .is_none()
+            );
+            assert_eq!(
+                tab_host.mount(tab_id),
+                TabMount::Detached {
+                    mount_id: second_mount_id,
+                    window_id: second_window.window_id(),
+                    handle: second_window,
+                }
+            );
+
+            let cleanup = tab_host
+                .release_detached_window(tab_id, second_mount_id, second_window.window_id())
+                .expect("current release cleanup");
+            assert_eq!(cleanup.reason, TabMountCloseReason::DetachedWindowReleased);
+            assert_eq!(tab_host.mount(tab_id), TabMount::Main);
+        });
+    }
+
+    #[gpui::test]
+    fn mount_return_and_tab_close_preserve_consumers_until_pane_cleanup(cx: &mut TestAppContext) {
+        let (_, cx) = cx.add_window_view(|_window, _cx| TabHostTestRoot);
+        let main_window = cx.window_handle();
+        let pane = cx.update(|window, cx| {
+            cx.new(|cx| {
+                TerminalPane::new_recording_playback(
+                    80,
+                    24,
+                    oxideterm_gpui_terminal::TerminalUiPreferences::default(),
+                    window,
+                    cx,
+                )
+                .expect("recording pane")
+            })
+        });
+        let tab_host = cx.new(|_| WorkspaceTabHostEntity::new());
+        let tab_id = tab_host.update(cx, |tab_host, _cx| tab_host.alloc_tab_id());
+        let pane_id = PaneId(8);
+        let session_id = TerminalSessionId(9);
+        tab_host.update(cx, |tab_host, cx| {
+            tab_host.register_terminal_pane(pane_id, session_id, pane.clone(), main_window, cx);
+            tab_host.bind_terminal_location(session_id, TerminalLocation { tab_id, pane_id });
+        });
+
+        let (_, cx) = cx.add_window_view(|_window, _cx| TabHostTestRoot);
+        let detached_window = cx.window_handle();
+        tab_host.update(cx, |tab_host, _cx| {
+            let mount_id = tab_host.begin_detach(tab_id).expect("detach reservation");
+            assert!(tab_host.commit_detach(tab_id, mount_id, detached_window));
+
+            let returned = tab_host
+                .return_to_main(tab_id, TabMountCloseReason::ReturnToMain)
+                .expect("return cleanup");
+            assert_eq!(returned.reason, TabMountCloseReason::ReturnToMain);
+            assert_eq!(returned.detached_window, Some(detached_window));
+            assert!(tab_host.panes().contains_key(&pane_id));
+            assert_eq!(
+                tab_host.terminal_location(session_id),
+                Some(TerminalLocation { tab_id, pane_id })
+            );
+
+            let replacement_mount_id = tab_host.begin_detach(tab_id).expect("replacement detach");
+            assert!(tab_host.commit_detach(tab_id, replacement_mount_id, detached_window));
+            let closed = tab_host.close_tab_mount(tab_id);
+            assert_eq!(closed.reason, TabMountCloseReason::TabClosed);
+            assert_eq!(closed.detached_window, Some(detached_window));
+            assert!(tab_host.panes().contains_key(&pane_id));
+            assert_eq!(
+                tab_host.terminal_location(session_id),
+                Some(TerminalLocation { tab_id, pane_id })
+            );
+            assert_eq!(
+                tab_host
+                    .pane_window_affinities
+                    .get(&pane_id)
+                    .expect("pane affinity survives mount cleanup")
+                    .current,
+                detached_window
+            );
+        });
     }
 }

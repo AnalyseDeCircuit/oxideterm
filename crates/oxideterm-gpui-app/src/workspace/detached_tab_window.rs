@@ -3,6 +3,7 @@ use super::*;
 pub(super) struct DetachedTabWindow {
     workspace: WeakEntity<WorkspaceApp>,
     tab_id: TabId,
+    mount_id: tabs::TabMountId,
     entry_handoff_origin: Option<TabWindowHandoffOrigin>,
     entry_handoff_duration: Duration,
     focus_handle: FocusHandle,
@@ -15,6 +16,7 @@ impl DetachedTabWindow {
     pub(super) fn new(
         workspace: WeakEntity<WorkspaceApp>,
         tab_id: TabId,
+        mount_id: tabs::TabMountId,
         entry_handoff_origin: Option<TabWindowHandoffOrigin>,
         entry_handoff_duration: Duration,
         window: &mut Window,
@@ -42,15 +44,22 @@ impl DetachedTabWindow {
         });
         // Closing a detached window should behave like docking the tab back
         // into the main tab strip, not like closing the underlying session.
-        let release_subscription = cx.on_release_in(window, move |detached, _window, cx| {
+        let release_subscription = cx.on_release_in(window, move |detached, window, cx| {
+            let window_id = window.window_handle().window_id();
             let _ = workspace_on_release.update(cx, |workspace, cx| {
-                workspace.return_detached_tab_to_main(detached.tab_id, cx);
+                workspace.release_detached_tab_window(
+                    detached.tab_id,
+                    detached.mount_id,
+                    window_id,
+                    cx,
+                );
             });
         });
 
         Self {
             workspace,
             tab_id,
+            mount_id,
             entry_handoff_origin,
             entry_handoff_duration,
             focus_handle,

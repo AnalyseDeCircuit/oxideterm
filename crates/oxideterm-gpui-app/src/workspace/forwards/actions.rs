@@ -289,7 +289,7 @@ impl WorkspaceApp {
             .read(cx)
             .tab_node_mappings()
             .keys()
-            .any(|tab_id| self.forwards_tab_is_visible(*tab_id))
+            .any(|tab_id| self.forwards_tab_is_visible(*tab_id, cx))
         {
             return;
         }
@@ -298,7 +298,7 @@ impl WorkspaceApp {
             .read(cx)
             .tab_node_mappings()
             .iter()
-            .filter(|(tab_id, _)| self.forwards_tab_is_visible(**tab_id))
+            .filter(|(tab_id, _)| self.forwards_tab_is_visible(**tab_id, cx))
             .map(|(_, node_id)| node_id.clone())
             .collect::<Vec<_>>();
         let changed = self.forwarding.update(cx, |forwarding, _cx| {
@@ -406,7 +406,7 @@ impl WorkspaceApp {
                                 // becomes hidden before the worker completes.
                                 self.queue_cloud_sync_dirty_refresh(cx);
                             }
-                            if self.forwards_tab_is_visible(tab_id) {
+                            if self.forwards_tab_is_visible(tab_id, cx) {
                                 let _ = message_key;
                                 let (show_new_form, editing_forward) = {
                                     let view = self.forwarding.read(cx).view();
@@ -425,7 +425,7 @@ impl WorkspaceApp {
                             }
                         }
                         Err(error) => {
-                            if self.forwards_tab_is_visible(tab_id) {
+                            if self.forwards_tab_is_visible(tab_id, cx) {
                                 self.forwarding.update(cx, |forwarding, _cx| {
                                     forwarding.set_error(error);
                                 });
@@ -592,7 +592,7 @@ impl WorkspaceApp {
             .tab_node_mappings()
             .iter()
             .any(|(tab_id, node_id)| {
-                self.forwards_tab_is_visible(*tab_id)
+                self.forwards_tab_is_visible(*tab_id, cx)
                     && self.forwarding_session_id_for_node(node_id) == session_id
             })
     }
@@ -603,7 +603,7 @@ impl WorkspaceApp {
             .tab_node_mappings()
             .iter()
             .any(|(tab_id, visible_node_id)| {
-                visible_node_id == node_id && self.forwards_tab_is_visible(*tab_id)
+                visible_node_id == node_id && self.forwards_tab_is_visible(*tab_id, cx)
             })
     }
 
@@ -613,15 +613,15 @@ impl WorkspaceApp {
             .tab_node_mappings()
             .iter()
             .any(|(tab_id, visible_node_id)| {
-                visible_node_id == node_id && self.forwards_tab_is_visible(*tab_id)
+                visible_node_id == node_id && self.forwards_tab_is_visible(*tab_id, cx)
             })
     }
 
-    fn forwards_tab_is_visible(&self, tab_id: TabId) -> bool {
+    fn forwards_tab_is_visible(&self, tab_id: TabId, cx: &App) -> bool {
         super::forwarding_tab_mount_is_visible(
             tab_id,
             self.main_window_tabs.active_tab_id,
-            self.detached_tab_windows.contains_key(&tab_id),
+            self.tab_host.read(cx).is_detached(tab_id),
         )
     }
 

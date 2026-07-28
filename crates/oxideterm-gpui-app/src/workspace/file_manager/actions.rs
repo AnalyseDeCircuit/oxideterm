@@ -50,7 +50,7 @@ impl WorkspaceApp {
             self.refresh_file_manager(cx);
         }
         self.persist_sidebar_settings(cx);
-        self.reveal_active_tab(window);
+        self.reveal_active_tab(window, cx);
         cx.notify();
     }
 
@@ -1726,7 +1726,7 @@ impl WorkspaceApp {
         self.active_surface = ActiveSurface::Terminal;
         self.needs_active_pane_focus = true;
         pane.update(cx, |pane, cx| pane.focus(window, cx));
-        self.reveal_active_tab(window);
+        self.reveal_active_tab(window, cx);
         self.push_file_manager_toast(
             self.i18n.t("fileManager.terminalOpened"),
             None,
