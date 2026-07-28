@@ -390,13 +390,16 @@ impl WorkspaceApp {
                             this.open_terminal_cast_player(player, window, cx);
                         }
                         Err(error) => {
-                            let _ = this.terminal_notice_tx.send(TerminalNotice {
-                                title: this.i18n.t("terminal.recording.open_failed"),
-                                description: Some(error),
-                                status_text: None,
-                                progress: None,
-                                variant: TerminalNoticeVariant::Error,
-                            });
+                            this.push_workspace_notice(
+                                TerminalNotice {
+                                    title: this.i18n.t("terminal.recording.open_failed"),
+                                    description: Some(error),
+                                    status_text: None,
+                                    progress: None,
+                                    variant: TerminalNoticeVariant::Error,
+                                },
+                                cx,
+                            );
                         }
                     }
                     cx.notify();

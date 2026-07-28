@@ -577,7 +577,7 @@ impl WorkspaceApp {
                     SettingsWorkspaceToast::Warning => TerminalNoticeVariant::Warning,
                     SettingsWorkspaceToast::Error => TerminalNoticeVariant::Error,
                 };
-                self.push_ai_settings_toast(message, variant);
+                self.push_ai_settings_toast(message, variant, cx);
             }
             SettingsWorkspaceEvent::RequestAutomaticNativeUpdateCheck => {
                 self.check_native_update_with_kind(NativeUpdateCheckKind::Automatic, cx);
@@ -598,16 +598,18 @@ impl WorkspaceApp {
                             self.push_ai_settings_toast(
                                 self.i18n.t("settings_view.general.data_directory_changed"),
                                 TerminalNoticeVariant::Success,
+                                cx,
                             );
                         }
                         DataDirectoryOperationResult::Reset => {
                             self.push_ai_settings_toast(
                                 self.i18n.t("settings_view.general.data_directory_reset"),
                                 TerminalNoticeVariant::Success,
+                                cx,
                             );
                         }
                         DataDirectoryOperationResult::Failed(error) => {
-                            self.push_ai_settings_toast(error, TerminalNoticeVariant::Error);
+                            self.push_ai_settings_toast(error, TerminalNoticeVariant::Error, cx);
                         }
                     }
                 }
@@ -641,6 +643,7 @@ impl WorkspaceApp {
                             self.send_settings_notice(
                                 self.i18n.t("settings_view.terminal.bg_operation_failed"),
                                 TerminalNoticeVariant::Error,
+                                cx,
                             );
                         }
                     }
@@ -672,6 +675,7 @@ impl WorkspaceApp {
                                     .t("settings_view.appearance.theme_import_success")
                                     .replace("{{name}}", &name),
                                 TerminalNoticeVariant::Success,
+                                cx,
                             );
                         }
                         ThemeImportResult::Failed(error) => {
@@ -680,6 +684,7 @@ impl WorkspaceApp {
                                     .t("settings_view.appearance.theme_import_error")
                                     .replace("{{error}}", &error),
                                 TerminalNoticeVariant::Error,
+                                cx,
                             );
                         }
                     }
@@ -692,12 +697,13 @@ impl WorkspaceApp {
                         self.i18n
                             .t("settings_view.general.portable_password_changed"),
                         TerminalNoticeVariant::Success,
+                        cx,
                     );
                     self.refresh_portable_settings_snapshot(true, cx);
                 } else if let Some(error) =
                     settings.read(cx).portable_action_error().map(str::to_owned)
                 {
-                    self.push_ai_settings_toast(error, TerminalNoticeVariant::Error);
+                    self.push_ai_settings_toast(error, TerminalNoticeVariant::Error, cx);
                 }
             }
             SettingsWorkspaceEvent::CliCompanionFinished { operation, success } => {
@@ -717,11 +723,12 @@ impl WorkspaceApp {
                     self.push_ai_settings_toast(
                         self.i18n.t(message_key),
                         TerminalNoticeVariant::Success,
+                        cx,
                     );
                 } else if let Some(error) =
                     settings.read(cx).cli_companion_error().map(str::to_owned)
                 {
-                    self.push_ai_settings_toast(error, TerminalNoticeVariant::Error);
+                    self.push_ai_settings_toast(error, TerminalNoticeVariant::Error, cx);
                 }
             }
         }

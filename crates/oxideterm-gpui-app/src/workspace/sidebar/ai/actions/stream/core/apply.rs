@@ -291,7 +291,7 @@ impl WorkspaceApp {
                     )],
                     cx,
                 );
-                self.push_ai_settings_toast(safe_error, TerminalNoticeVariant::Error);
+                self.push_ai_settings_toast(safe_error, TerminalNoticeVariant::Error, cx);
             }
             AiStreamApplyOutcome::Stale => return,
         }

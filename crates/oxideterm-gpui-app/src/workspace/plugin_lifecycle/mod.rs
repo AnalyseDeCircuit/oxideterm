@@ -18,7 +18,8 @@ use serde_json::{Value, json};
 
 use super::{
     TabKind, TelnetSessionConfig, TerminalInputInterceptor, TerminalOutputProcessor,
-    TerminalSessionId, WorkspaceApp, WorkspaceToast, plugin_entity, plugin_host, plugin_runtime,
+    TerminalSessionId, WorkspaceApp, WorkspaceOverlayIntent, plugin_entity, plugin_host,
+    plugin_runtime,
 };
 
 pub(in crate::workspace) mod constants;
@@ -1683,8 +1684,8 @@ impl WorkspaceApp {
             return;
         }
         match (namespace, method) {
-            ("ui", "showToast") => self.push_native_plugin_toast(plugin_id, args),
-            ("ui", "showNotification") => self.push_native_plugin_notification(plugin_id, args),
+            ("ui", "showToast") => self.push_native_plugin_toast(plugin_id, args, cx),
+            ("ui", "showNotification") => self.push_native_plugin_notification(plugin_id, args, cx),
             ("ui", "registerTabView") => self.register_native_plugin_ui_contribution(
                 plugin_id,
                 plugin_runtime::PluginRegistrationKind::Tab,
@@ -1792,7 +1793,12 @@ impl WorkspaceApp {
         }
     }
 
-    fn push_native_plugin_toast(&mut self, plugin_id: &str, args: serde_json::Value) {
+    fn push_native_plugin_toast(
+        &mut self,
+        plugin_id: &str,
+        args: serde_json::Value,
+        cx: &mut Context<Self>,
+    ) {
         let title = args
             .get("title")
             .and_then(|value| value.as_str())
@@ -1808,22 +1814,27 @@ impl WorkspaceApp {
             .map(native_plugin_toast_variant)
             .unwrap_or(TerminalNoticeVariant::Default);
 
-        let id = self.next_workspace_toast_id();
-        self.workspace_toasts.push(WorkspaceToast {
-            id,
-            notice: TerminalNotice {
-                title: native_plugin_notice_title(plugin_id, title),
-                description,
-                status_text: None,
-                progress: None,
-                variant,
+        self.apply_workspace_overlay_intent(
+            WorkspaceOverlayIntent::Notice {
+                notice: TerminalNotice {
+                    title: native_plugin_notice_title(plugin_id, title),
+                    description,
+                    status_text: None,
+                    progress: None,
+                    variant,
+                },
+                ttl: NATIVE_PLUGIN_TOAST_TTL,
             },
-            expires_at: std::time::Instant::now() + NATIVE_PLUGIN_TOAST_TTL,
-            presence: oxideterm_gpui_ui::motion::ExitPresence::visible(),
-        });
+            cx,
+        );
     }
 
-    fn push_native_plugin_notification(&mut self, plugin_id: &str, args: serde_json::Value) {
+    fn push_native_plugin_notification(
+        &mut self,
+        plugin_id: &str,
+        args: serde_json::Value,
+        cx: &mut Context<Self>,
+    ) {
         let title = args
             .get("title")
             .and_then(|value| value.as_str())
@@ -1839,19 +1850,19 @@ impl WorkspaceApp {
             .map(native_plugin_notification_variant)
             .unwrap_or(TerminalNoticeVariant::Default);
 
-        let id = self.next_workspace_toast_id();
-        self.workspace_toasts.push(WorkspaceToast {
-            id,
-            notice: TerminalNotice {
-                title: native_plugin_notice_title(plugin_id, title),
-                description,
-                status_text: None,
-                progress: None,
-                variant,
+        self.apply_workspace_overlay_intent(
+            WorkspaceOverlayIntent::Notice {
+                notice: TerminalNotice {
+                    title: native_plugin_notice_title(plugin_id, title),
+                    description,
+                    status_text: None,
+                    progress: None,
+                    variant,
+                },
+                ttl: NATIVE_PLUGIN_TOAST_TTL,
             },
-            expires_at: std::time::Instant::now() + NATIVE_PLUGIN_TOAST_TTL,
-            presence: oxideterm_gpui_ui::motion::ExitPresence::visible(),
-        });
+            cx,
+        );
     }
 
     fn refresh_native_after_external_sync(&mut self, plugin_id: &str, cx: &mut Context<Self>) {
@@ -2038,7 +2049,10 @@ impl WorkspaceApp {
     ) {
         let progress_key = native_plugin_progress_key(plugin_id, registration_id);
         if native_plugin_progress_is_done(&value) {
-            self.dismiss_plugin_progress_toast(&progress_key, cx);
+            self.apply_workspace_overlay_intent(
+                WorkspaceOverlayIntent::DismissPluginProgress { key: progress_key },
+                cx,
+            );
             return;
         }
 
@@ -2046,25 +2060,14 @@ impl WorkspaceApp {
         // Tauri plugin progress is host-owned and keyed by reporter id. Native
         // updates the same toast entry instead of appending one toast per event
         // burst, which keeps noisy process runtimes from flooding the overlay.
-        let expires_at = std::time::Instant::now() + NATIVE_PLUGIN_TOAST_TTL;
-        if let Some(toast) = self.plugin_progress_toasts.get_mut(&progress_key) {
-            toast.notice = notice;
-            toast.expires_at = expires_at;
-            if toast.presence.phase() == oxideterm_gpui_ui::motion::ExitPhase::Exiting {
-                toast.presence.reopen();
-            }
-        } else {
-            let id = self.next_workspace_toast_id();
-            self.plugin_progress_toasts.insert(
-                progress_key,
-                WorkspaceToast {
-                    id,
-                    notice,
-                    expires_at,
-                    presence: oxideterm_gpui_ui::motion::ExitPresence::visible(),
-                },
-            );
-        }
+        self.apply_workspace_overlay_intent(
+            WorkspaceOverlayIntent::PluginProgress {
+                key: progress_key,
+                notice,
+                ttl: NATIVE_PLUGIN_TOAST_TTL,
+            },
+            cx,
+        );
     }
 }
 

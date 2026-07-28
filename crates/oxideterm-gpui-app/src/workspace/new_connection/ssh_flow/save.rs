@@ -973,7 +973,7 @@ impl WorkspaceApp {
             // stale reference without exposing its identifier or connection data.
             tracing::warn!("Saved connection lookup failed before opening");
             let title = self.i18n.t("sessionManager.toast.connection_not_found");
-            self.push_command_palette_toast(title.clone(), None, TerminalNoticeVariant::Error);
+            self.push_command_palette_toast(title.clone(), None, TerminalNoticeVariant::Error, cx);
             self.push_notification_entry(
                 WorkspaceNotificationKind::Connection,
                 WorkspaceNotificationSeverity::Error,

@@ -570,6 +570,7 @@ impl WorkspaceApp {
                             title.clone(),
                             description.clone(),
                             TerminalNoticeVariant::Error,
+                            cx,
                         );
                         self.push_notification_entry(
                             WorkspaceNotificationKind::Connection,
@@ -632,6 +633,7 @@ impl WorkspaceApp {
                         self.i18n.t("connections.reconnect.recovered"),
                         None,
                         TerminalNoticeVariant::Success,
+                        cx,
                     );
                     self.resolve_connection_notifications_for_node(&node_id);
                     let recovered_node_ids = self.workspace_runtime.update(cx, |runtime, _cx| {
@@ -1459,6 +1461,7 @@ impl WorkspaceApp {
             ),
             None,
             TerminalNoticeVariant::Default,
+            cx,
         );
         self.log_reconnect_phase(
             node_id,
@@ -1610,7 +1613,7 @@ impl WorkspaceApp {
                 } else {
                     self.resolve_connection_notifications_for_node(node_id);
                 }
-                self.push_reconnect_notice(title, detail, variant);
+                self.push_reconnect_notice(title, detail, variant, cx);
             }
             self.workspace_runtime.update(cx, |runtime, _cx| {
                 runtime.release_reconnect_pipeline(node_id);

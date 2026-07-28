@@ -1053,7 +1053,7 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) {
         if let Err(error) = open_external_url(url) {
-            self.push_ai_settings_toast(error.to_string(), TerminalNoticeVariant::Error);
+            self.push_ai_settings_toast(error.to_string(), TerminalNoticeVariant::Error, cx);
             cx.notify();
         }
     }
@@ -1064,7 +1064,7 @@ impl WorkspaceApp {
             .and_then(|()| open_path_external(&log_dir))
             .map_err(|error| error.to_string());
         if let Err(error) = opened {
-            self.push_ai_settings_toast(error, TerminalNoticeVariant::Error);
+            self.push_ai_settings_toast(error, TerminalNoticeVariant::Error, cx);
             cx.notify();
         }
     }

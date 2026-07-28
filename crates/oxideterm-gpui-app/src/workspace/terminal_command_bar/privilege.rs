@@ -324,6 +324,7 @@ impl WorkspaceApp {
                     self.i18n.t("terminal.privilege_helper.load_failed"),
                     Some(error.to_string()),
                     TerminalNoticeVariant::Error,
+                    cx,
                 );
                 cx.notify();
                 return;
@@ -345,6 +346,7 @@ impl WorkspaceApp {
                 self.i18n.t("terminal.privilege_helper.send_failed"),
                 None,
                 TerminalNoticeVariant::Error,
+                cx,
             );
         }
         self.focus_active_pane(window, cx);

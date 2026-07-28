@@ -343,6 +343,7 @@ impl WorkspaceApp {
                 self.i18n.t("sftp.toast.extract_failed"),
                 None,
                 TerminalNoticeVariant::Error,
+                cx,
             );
             return;
         };
@@ -351,6 +352,7 @@ impl WorkspaceApp {
                 self.i18n.t("sftp.toast.extract_failed"),
                 None,
                 TerminalNoticeVariant::Error,
+                cx,
             );
             return;
         };
@@ -371,6 +373,7 @@ impl WorkspaceApp {
                     self.i18n.t("sftp.toast.unsupported_archive"),
                     Some(file.name),
                     TerminalNoticeVariant::Error,
+                    cx,
                 );
                 return;
             }
@@ -634,6 +637,7 @@ impl WorkspaceApp {
     pub(in crate::workspace::sftp) fn show_sftp_transfer_batch_toast(
         &self,
         batch: SftpTransferBatch,
+        cx: &App,
     ) {
         let is_upload = batch.direction == SftpTransferDirection::Upload;
         let only_queued_directory_transfers =
@@ -660,6 +664,7 @@ impl WorkspaceApp {
                 },
                 Some(description),
                 TerminalNoticeVariant::Success,
+                cx,
             );
         } else if batch.failed > 0 && batch.success == 0 {
             self.push_sftp_toast(
@@ -673,6 +678,7 @@ impl WorkspaceApp {
                     batch.failed,
                 )),
                 TerminalNoticeVariant::Error,
+                cx,
             );
         } else if batch.success > 0 || batch.failed > 0 {
             self.push_sftp_toast(
@@ -688,6 +694,7 @@ impl WorkspaceApp {
                     batch.skipped,
                 )),
                 TerminalNoticeVariant::Error,
+                cx,
             );
         }
     }

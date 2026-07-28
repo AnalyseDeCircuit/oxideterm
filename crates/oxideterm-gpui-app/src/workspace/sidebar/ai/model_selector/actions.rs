@@ -384,6 +384,7 @@ impl WorkspaceApp {
             self.push_ai_settings_toast(
                 self.i18n.t("ai.model_selector.no_key_warning"),
                 TerminalNoticeVariant::Warning,
+                cx,
             );
             cx.notify();
             return;
@@ -392,6 +393,7 @@ impl WorkspaceApp {
             self.push_ai_settings_toast(
                 self.i18n.t("ai.model_selector.offline"),
                 TerminalNoticeVariant::Warning,
+                cx,
             );
             cx.notify();
             return;

@@ -201,6 +201,7 @@ impl WorkspaceApp {
                     self.i18n.t("remote_desktop.certificate_save_failed"),
                     None,
                     TerminalNoticeVariant::Error,
+                    cx,
                 );
             }
         }

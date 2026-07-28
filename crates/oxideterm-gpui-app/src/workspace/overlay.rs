@@ -1,0 +1,1176 @@
+// Copyright (C) 2026 AnalyseDeCircuit
+// SPDX-License-Identifier: GPL-3.0-only
+
+use super::*;
+use gpui::Task;
+
+const WORKSPACE_NOTICE_TTL: Duration = Duration::from_secs(4);
+const TOOLTIP_DELAY: Duration = Duration::from_millis(300);
+const CONNECTION_TRACE_DISPLAY_DELAY: Duration = Duration::from_millis(1200);
+const CONNECTION_TRACE_UPDATE_COALESCE: Duration = Duration::from_millis(300);
+const CONNECTION_TRACE_SUCCESS_TTL: Duration = Duration::from_millis(1800);
+const CONNECTION_TRACE_FAILURE_TTL: Duration = Duration::from_secs(16);
+const TERMINAL_FONT_SIZE_HUD_HORIZONTAL_PADDING: f32 = 20.0;
+const TERMINAL_FONT_SIZE_HUD_VERTICAL_PADDING: f32 = 12.0;
+const TERMINAL_FONT_SIZE_HUD_VALUE_TEXT_SIZE: f32 = 24.0;
+const TERMINAL_FONT_SIZE_HUD_UNIT_TEXT_SIZE: f32 = 16.0;
+const TERMINAL_FONT_SIZE_HUD_UNIT_GAP: f32 = 2.0;
+const TERMINAL_FONT_SIZE_HUD_BACKGROUND_ALPHA: u32 = 0xe6;
+
+/// Typed cross-system updates accepted by the window overlay owner.
+pub(in crate::workspace) enum WorkspaceOverlayIntent {
+    Notice {
+        notice: TerminalNotice,
+        ttl: Duration,
+    },
+    PluginProgress {
+        key: String,
+        notice: TerminalNotice,
+        ttl: Duration,
+    },
+    DismissPluginProgress {
+        key: String,
+    },
+    ConnectionTraceEvents(Vec<ConnectionTraceEvent>),
+    QueueTooltip {
+        id: String,
+        label: String,
+        x: f32,
+        y: f32,
+    },
+    ClearTooltip {
+        id: String,
+    },
+    ClearAllTooltips,
+    ShowZenHint {
+        ttl: Duration,
+    },
+    ClearZenHint,
+    ShowTerminalFontSizeHud {
+        font_size: i64,
+        ttl: Duration,
+    },
+}
+
+#[derive(Clone, Debug)]
+struct OverlayToast {
+    id: u64,
+    notice: TerminalNotice,
+    expires_at: Instant,
+    remove_at: Option<Instant>,
+    presence: oxideterm_gpui_ui::motion::ExitPresence,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct TerminalFontSizeHud {
+    font_size: i64,
+    generation: u64,
+    expires_at: Instant,
+}
+
+#[derive(Clone, Debug)]
+struct ActiveConnectionTrace {
+    visible: bool,
+    latest: ConnectionTraceEvent,
+    displayed: Option<ConnectionTraceEvent>,
+    started_at: Instant,
+    show_deadline: Option<(Instant, u64)>,
+    show_generation: u64,
+    flush_deadline: Option<(Instant, u64)>,
+    flush_generation: u64,
+    expires_at: Option<Instant>,
+    remove_at: Option<Instant>,
+    presence: oxideterm_gpui_ui::motion::ExitPresence,
+}
+
+#[derive(Clone, Debug)]
+struct WorkspaceTooltip {
+    id: String,
+    label: String,
+    x: f32,
+    y: f32,
+}
+
+#[derive(Clone, Debug)]
+struct WorkspaceTooltipPending {
+    id: String,
+    label: String,
+    x: f32,
+    y: f32,
+    generation: u64,
+    show_at: Instant,
+}
+
+/// Owns every window-global transient overlay and its delivery/timer lifetime.
+pub(in crate::workspace) struct WorkspaceOverlayEntity {
+    notice_tx: delivery::ActiveDeliverySender<TerminalNotice>,
+    notice_rx: std::sync::mpsc::Receiver<TerminalNotice>,
+    _notice_wake: delivery::ActiveDeliveryWake,
+    _notice_delivery_task: Task<()>,
+    deadline_task: Option<Task<()>>,
+    deadline_generation: u64,
+    control_exit_duration: Duration,
+    next_toast_id: u64,
+    standard_toasts: Vec<OverlayToast>,
+    plugin_progress_toasts: HashMap<String, OverlayToast>,
+    connection_trace_toasts: HashMap<String, ActiveConnectionTrace>,
+    tooltip: Option<WorkspaceTooltip>,
+    tooltip_pending: Option<WorkspaceTooltipPending>,
+    tooltip_generation: u64,
+    zen_hint_expires_at: Option<Instant>,
+    terminal_font_size_hud: Option<TerminalFontSizeHud>,
+    terminal_font_size_hud_generation: u64,
+}
+
+impl WorkspaceOverlayEntity {
+    pub(in crate::workspace) fn new(
+        control_exit_duration: Duration,
+        cx: &mut Context<Self>,
+    ) -> Self {
+        let notice_wake = delivery::ActiveDeliveryWake::default();
+        let (notice_tx, notice_rx) =
+            delivery::ActiveDeliverySender::channel_with_wake(notice_wake.clone());
+        let release_wake = notice_wake.clone();
+        cx.on_release(move |_, _| {
+            // Background producers may outlive the window overlay Entity.
+            release_wake.stop();
+        })
+        .detach();
+        let delivery_wake = notice_wake.clone();
+        let notice_delivery_task = cx.spawn(async move |overlay, cx| {
+            loop {
+                delivery_wake.wait().await;
+                let should_drain = delivery_wake.take();
+                let stopped = delivery_wake.is_stopped();
+                if should_drain {
+                    let backlog_remaining = overlay
+                        .update(cx, |overlay, cx| overlay.drain_notices(cx))
+                        .unwrap_or(false);
+                    if backlog_remaining {
+                        delivery_wake.mark();
+                    }
+                }
+                if stopped {
+                    break;
+                }
+            }
+        });
+        Self {
+            notice_tx,
+            notice_rx,
+            _notice_wake: notice_wake,
+            _notice_delivery_task: notice_delivery_task,
+            deadline_task: None,
+            deadline_generation: 0,
+            control_exit_duration,
+            next_toast_id: 1,
+            standard_toasts: Vec::new(),
+            plugin_progress_toasts: HashMap::new(),
+            connection_trace_toasts: HashMap::new(),
+            tooltip: None,
+            tooltip_pending: None,
+            tooltip_generation: 0,
+            zen_hint_expires_at: None,
+            terminal_font_size_hud: None,
+            terminal_font_size_hud_generation: 0,
+        }
+    }
+
+    pub(in crate::workspace) fn notice_sender(
+        &self,
+    ) -> delivery::ActiveDeliverySender<TerminalNotice> {
+        self.notice_tx.clone()
+    }
+
+    pub(in crate::workspace) fn apply_intent(
+        &mut self,
+        intent: WorkspaceOverlayIntent,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let changed = match intent {
+            WorkspaceOverlayIntent::Notice { notice, ttl } => {
+                self.push_notice(notice, ttl);
+                true
+            }
+            WorkspaceOverlayIntent::PluginProgress { key, notice, ttl } => {
+                self.upsert_plugin_progress(key, notice, ttl);
+                true
+            }
+            WorkspaceOverlayIntent::DismissPluginProgress { key } => {
+                self.dismiss_plugin_progress(&key, Instant::now())
+            }
+            WorkspaceOverlayIntent::ConnectionTraceEvents(events) => {
+                self.apply_connection_trace_events(events, Instant::now())
+            }
+            WorkspaceOverlayIntent::QueueTooltip { id, label, x, y } => {
+                self.queue_tooltip(id, label, x, y, Instant::now())
+            }
+            WorkspaceOverlayIntent::ClearTooltip { id } => self.clear_tooltip(&id),
+            WorkspaceOverlayIntent::ClearAllTooltips => self.clear_all_tooltips(),
+            WorkspaceOverlayIntent::ShowZenHint { ttl } => {
+                self.zen_hint_expires_at = Some(Instant::now() + ttl);
+                true
+            }
+            WorkspaceOverlayIntent::ClearZenHint => self.zen_hint_expires_at.take().is_some(),
+            WorkspaceOverlayIntent::ShowTerminalFontSizeHud { font_size, ttl } => {
+                self.terminal_font_size_hud_generation =
+                    self.terminal_font_size_hud_generation.wrapping_add(1);
+                self.terminal_font_size_hud = Some(TerminalFontSizeHud {
+                    font_size,
+                    generation: self.terminal_font_size_hud_generation,
+                    expires_at: Instant::now() + ttl,
+                });
+                true
+            }
+        };
+        if changed {
+            self.schedule_next_deadline(cx);
+            cx.notify();
+        }
+        changed
+    }
+
+    pub(in crate::workspace) fn set_control_exit_duration(
+        &mut self,
+        duration: Duration,
+        cx: &mut Context<Self>,
+    ) {
+        if self.control_exit_duration != duration {
+            self.control_exit_duration = duration;
+            self.schedule_next_deadline(cx);
+        }
+    }
+
+    fn drain_notices(&mut self, cx: &mut Context<Self>) -> bool {
+        let batch =
+            delivery::drain_channel(&self.notice_rx, delivery::NOTIFICATION_DELIVERY_BUDGET);
+        if !batch.items.is_empty() {
+            for notice in batch.items {
+                self.push_notice(notice, WORKSPACE_NOTICE_TTL);
+            }
+            self.schedule_next_deadline(cx);
+            cx.notify();
+        }
+        batch.outcome.backlog_remaining
+    }
+
+    fn push_notice(&mut self, notice: TerminalNotice, ttl: Duration) {
+        let id = self.next_toast_id;
+        self.next_toast_id = self.next_toast_id.wrapping_add(1).max(1);
+        self.standard_toasts.push(OverlayToast {
+            id,
+            notice,
+            expires_at: Instant::now() + ttl,
+            remove_at: None,
+            presence: oxideterm_gpui_ui::motion::ExitPresence::visible(),
+        });
+    }
+
+    fn upsert_plugin_progress(&mut self, key: String, notice: TerminalNotice, ttl: Duration) {
+        let expires_at = Instant::now() + ttl;
+        if let Some(toast) = self.plugin_progress_toasts.get_mut(&key) {
+            toast.notice = notice;
+            toast.expires_at = expires_at;
+            toast.remove_at = None;
+            if toast.presence.phase() == oxideterm_gpui_ui::motion::ExitPhase::Exiting {
+                toast.presence.reopen();
+            }
+            return;
+        }
+        let id = self.next_toast_id;
+        self.next_toast_id = self.next_toast_id.wrapping_add(1).max(1);
+        self.plugin_progress_toasts.insert(
+            key,
+            OverlayToast {
+                id,
+                notice,
+                expires_at,
+                remove_at: None,
+                presence: oxideterm_gpui_ui::motion::ExitPresence::visible(),
+            },
+        );
+    }
+
+    fn queue_tooltip(&mut self, id: String, label: String, x: f32, y: f32, now: Instant) -> bool {
+        if let Some(tooltip) = self.tooltip.as_mut()
+            && tooltip.id == id
+        {
+            let changed = tooltip.label != label || tooltip.x != x || tooltip.y != y;
+            tooltip.label = label;
+            tooltip.x = x;
+            tooltip.y = y;
+            return changed;
+        }
+        if let Some(pending) = self.tooltip_pending.as_mut()
+            && pending.id == id
+        {
+            pending.x = x;
+            pending.y = y;
+            return false;
+        }
+        self.tooltip = None;
+        self.tooltip_generation = self.tooltip_generation.wrapping_add(1);
+        self.tooltip_pending = Some(WorkspaceTooltipPending {
+            id,
+            label,
+            x,
+            y,
+            generation: self.tooltip_generation,
+            show_at: now + TOOLTIP_DELAY,
+        });
+        true
+    }
+
+    fn clear_tooltip(&mut self, id: &str) -> bool {
+        let mut changed = false;
+        if self
+            .tooltip_pending
+            .as_ref()
+            .is_some_and(|pending| pending.id == id)
+        {
+            self.tooltip_pending = None;
+            self.tooltip_generation = self.tooltip_generation.wrapping_add(1);
+            changed = true;
+        }
+        if self
+            .tooltip
+            .as_ref()
+            .is_some_and(|tooltip| tooltip.id == id)
+        {
+            self.tooltip = None;
+            changed = true;
+        }
+        changed
+    }
+
+    fn clear_all_tooltips(&mut self) -> bool {
+        let changed = self.tooltip.take().is_some() || self.tooltip_pending.take().is_some();
+        if changed {
+            self.tooltip_generation = self.tooltip_generation.wrapping_add(1);
+        }
+        changed
+    }
+
+    fn apply_connection_trace_events(
+        &mut self,
+        events: Vec<ConnectionTraceEvent>,
+        now: Instant,
+    ) -> bool {
+        let mut changed = false;
+        for event in coalesce_connection_trace_running_events(events) {
+            let attempt_id = event.attempt_id.clone();
+            let trace = self
+                .connection_trace_toasts
+                .entry(attempt_id.clone())
+                .or_insert_with(|| ActiveConnectionTrace {
+                    visible: false,
+                    latest: event.clone(),
+                    displayed: None,
+                    started_at: now,
+                    show_deadline: None,
+                    show_generation: 0,
+                    flush_deadline: None,
+                    flush_generation: 0,
+                    expires_at: None,
+                    remove_at: None,
+                    presence: oxideterm_gpui_ui::motion::ExitPresence::visible(),
+                });
+            if trace.presence.phase() == oxideterm_gpui_ui::motion::ExitPhase::Exiting {
+                trace.presence.reopen();
+            }
+            trace.latest = event.clone();
+            trace.expires_at = None;
+            trace.remove_at = None;
+
+            match event.status {
+                ConnectionTraceStatus::Running => {
+                    if !trace.visible && trace.show_deadline.is_none() {
+                        trace.show_generation = trace.show_generation.wrapping_add(1);
+                        trace.show_deadline =
+                            Some((now + CONNECTION_TRACE_DISPLAY_DELAY, trace.show_generation));
+                    } else {
+                        trace.flush_generation = trace.flush_generation.wrapping_add(1);
+                        trace.flush_deadline = Some((
+                            now + CONNECTION_TRACE_UPDATE_COALESCE,
+                            trace.flush_generation,
+                        ));
+                    }
+                }
+                ConnectionTraceStatus::Ready => {
+                    trace.show_deadline = None;
+                    trace.flush_deadline = None;
+                    if trace.visible {
+                        let mut success = event;
+                        success.elapsed_ms = trace
+                            .started_at
+                            .elapsed()
+                            .as_millis()
+                            .min(u128::from(u64::MAX))
+                            as u64;
+                        trace.latest = success.clone();
+                        trace.displayed = Some(success);
+                        trace.expires_at = Some(now + CONNECTION_TRACE_SUCCESS_TTL);
+                    } else {
+                        self.connection_trace_toasts.remove(&attempt_id);
+                    }
+                    changed = true;
+                }
+                ConnectionTraceStatus::Failed => {
+                    trace.visible = true;
+                    trace.show_deadline = None;
+                    trace.flush_deadline = None;
+                    trace.latest = event.clone();
+                    trace.displayed = Some(event);
+                    trace.expires_at = Some(now + CONNECTION_TRACE_FAILURE_TTL);
+                    changed = true;
+                }
+                ConnectionTraceStatus::Cancelled => {
+                    trace.show_deadline = None;
+                    trace.flush_deadline = None;
+                    if trace.displayed.is_some() {
+                        self.begin_trace_exit(&attempt_id, now);
+                    } else {
+                        self.connection_trace_toasts.remove(&attempt_id);
+                    }
+                    changed = true;
+                }
+            }
+        }
+        changed
+    }
+
+    fn begin_standard_exit(&mut self, toast_id: u64, now: Instant) -> bool {
+        let Some(toast) = self
+            .standard_toasts
+            .iter_mut()
+            .find(|toast| toast.id == toast_id)
+        else {
+            return false;
+        };
+        if toast.presence.begin_exit().is_none() {
+            return false;
+        }
+        if self.control_exit_duration.is_zero() {
+            self.standard_toasts.retain(|toast| toast.id != toast_id);
+        } else {
+            toast.remove_at = Some(now + self.control_exit_duration);
+        }
+        true
+    }
+
+    fn dismiss_plugin_progress(&mut self, key: &str, now: Instant) -> bool {
+        let Some(toast) = self.plugin_progress_toasts.get_mut(key) else {
+            return false;
+        };
+        if toast.presence.begin_exit().is_none() {
+            return false;
+        }
+        if self.control_exit_duration.is_zero() {
+            self.plugin_progress_toasts.remove(key);
+        } else {
+            toast.remove_at = Some(now + self.control_exit_duration);
+        }
+        true
+    }
+
+    fn begin_trace_exit(&mut self, attempt_id: &str, now: Instant) -> bool {
+        let Some(trace) = self.connection_trace_toasts.get_mut(attempt_id) else {
+            return false;
+        };
+        if trace.presence.begin_exit().is_none() {
+            return false;
+        }
+        trace.expires_at = None;
+        if self.control_exit_duration.is_zero() {
+            self.connection_trace_toasts.remove(attempt_id);
+        } else {
+            trace.remove_at = Some(now + self.control_exit_duration);
+        }
+        true
+    }
+
+    fn schedule_next_deadline(&mut self, cx: &mut Context<Self>) {
+        self.deadline_generation = self.deadline_generation.wrapping_add(1);
+        self.deadline_task.take();
+        let Some(deadline) = self.next_deadline() else {
+            return;
+        };
+        let generation = self.deadline_generation;
+        let delay = deadline.saturating_duration_since(Instant::now());
+        self.deadline_task = Some(cx.spawn(async move |overlay, cx| {
+            Timer::after(delay).await;
+            let _ = overlay.update(cx, |overlay, cx| {
+                overlay.handle_deadline_generation(generation, Instant::now(), cx);
+            });
+        }));
+    }
+
+    fn handle_deadline_generation(
+        &mut self,
+        generation: u64,
+        now: Instant,
+        cx: &mut Context<Self>,
+    ) {
+        if self.deadline_generation != generation {
+            return;
+        }
+        if self.process_due_deadlines(now) {
+            cx.notify();
+        }
+        self.schedule_next_deadline(cx);
+    }
+
+    fn process_due_deadlines(&mut self, now: Instant) -> bool {
+        let mut changed = false;
+        if self
+            .tooltip_pending
+            .as_ref()
+            .is_some_and(|pending| pending.show_at <= now)
+            && let Some(pending) = self.tooltip_pending.take()
+            && pending.generation == self.tooltip_generation
+        {
+            self.tooltip = Some(WorkspaceTooltip {
+                id: pending.id,
+                label: pending.label,
+                x: pending.x,
+                y: pending.y,
+            });
+            changed = true;
+        }
+        if self
+            .zen_hint_expires_at
+            .is_some_and(|expires_at| expires_at <= now)
+        {
+            self.zen_hint_expires_at = None;
+            changed = true;
+        }
+        if self
+            .terminal_font_size_hud
+            .is_some_and(|hud| hud.expires_at <= now)
+        {
+            self.terminal_font_size_hud = None;
+            changed = true;
+        }
+
+        let standard_expired = self
+            .standard_toasts
+            .iter()
+            .filter(|toast| {
+                toast.expires_at <= now
+                    && toast.presence.phase() == oxideterm_gpui_ui::motion::ExitPhase::Visible
+            })
+            .map(|toast| toast.id)
+            .collect::<Vec<_>>();
+        for toast_id in standard_expired {
+            changed |= self.begin_standard_exit(toast_id, now);
+        }
+        let standard_count = self.standard_toasts.len();
+        self.standard_toasts
+            .retain(|toast| !toast.remove_at.is_some_and(|remove_at| remove_at <= now));
+        changed |= self.standard_toasts.len() != standard_count;
+
+        let plugin_expired = self
+            .plugin_progress_toasts
+            .iter()
+            .filter(|(_, toast)| {
+                toast.expires_at <= now
+                    && toast.presence.phase() == oxideterm_gpui_ui::motion::ExitPhase::Visible
+            })
+            .map(|(key, _)| key.clone())
+            .collect::<Vec<_>>();
+        for key in plugin_expired {
+            changed |= self.dismiss_plugin_progress(&key, now);
+        }
+        let plugin_remove = self
+            .plugin_progress_toasts
+            .iter()
+            .filter(|(_, toast)| toast.remove_at.is_some_and(|remove_at| remove_at <= now))
+            .map(|(key, _)| key.clone())
+            .collect::<Vec<_>>();
+        for key in plugin_remove {
+            self.plugin_progress_toasts.remove(&key);
+            changed = true;
+        }
+
+        let trace_ids = self
+            .connection_trace_toasts
+            .keys()
+            .cloned()
+            .collect::<Vec<_>>();
+        for attempt_id in trace_ids {
+            let Some(trace) = self.connection_trace_toasts.get_mut(&attempt_id) else {
+                continue;
+            };
+            if let Some((show_at, generation)) = trace.show_deadline
+                && show_at <= now
+            {
+                trace.show_deadline = None;
+                if trace.show_generation == generation
+                    && !trace.visible
+                    && trace.latest.status == ConnectionTraceStatus::Running
+                {
+                    trace.visible = true;
+                    trace.displayed = Some(trace.latest.clone());
+                    changed = true;
+                }
+            }
+            if let Some((flush_at, generation)) = trace.flush_deadline
+                && flush_at <= now
+            {
+                trace.flush_deadline = None;
+                if trace.flush_generation == generation
+                    && trace.visible
+                    && trace.latest.status == ConnectionTraceStatus::Running
+                {
+                    trace.displayed = Some(trace.latest.clone());
+                    changed = true;
+                }
+            }
+            if trace.expires_at.is_some_and(|expires_at| expires_at <= now)
+                && trace.presence.phase() == oxideterm_gpui_ui::motion::ExitPhase::Visible
+            {
+                changed |= self.begin_trace_exit(&attempt_id, now);
+            }
+        }
+        let trace_remove = self
+            .connection_trace_toasts
+            .iter()
+            .filter(|(_, trace)| trace.remove_at.is_some_and(|remove_at| remove_at <= now))
+            .map(|(attempt_id, _)| attempt_id.clone())
+            .collect::<Vec<_>>();
+        for attempt_id in trace_remove {
+            self.connection_trace_toasts.remove(&attempt_id);
+            changed = true;
+        }
+        changed
+    }
+
+    fn next_deadline(&self) -> Option<Instant> {
+        let mut next = self.tooltip_pending.as_ref().map(|pending| pending.show_at);
+        next = min_deadline(next, self.zen_hint_expires_at);
+        next = min_deadline(next, self.terminal_font_size_hud.map(|hud| hud.expires_at));
+        for toast in &self.standard_toasts {
+            next = min_deadline(
+                next,
+                if toast.presence.phase() == oxideterm_gpui_ui::motion::ExitPhase::Visible {
+                    Some(toast.expires_at)
+                } else {
+                    toast.remove_at
+                },
+            );
+        }
+        for toast in self.plugin_progress_toasts.values() {
+            next = min_deadline(
+                next,
+                if toast.presence.phase() == oxideterm_gpui_ui::motion::ExitPhase::Visible {
+                    Some(toast.expires_at)
+                } else {
+                    toast.remove_at
+                },
+            );
+        }
+        for trace in self.connection_trace_toasts.values() {
+            next = min_deadline(next, trace.show_deadline.map(|(deadline, _)| deadline));
+            next = min_deadline(next, trace.flush_deadline.map(|(deadline, _)| deadline));
+            next = min_deadline(next, trace.expires_at);
+            next = min_deadline(next, trace.remove_at);
+        }
+        next
+    }
+
+    pub(in crate::workspace) fn render_layers(
+        &self,
+        tokens: &ThemeTokens,
+        i18n: &I18n,
+        mono_font_family: SharedString,
+        native_update: Option<ToastView>,
+        cx: &mut Context<Self>,
+    ) -> Vec<AnyElement> {
+        let mut layers = Vec::new();
+        if let Some(tooltip) = self.tooltip.clone() {
+            layers.push(render_tooltip(tokens, tooltip));
+        }
+        if self
+            .zen_hint_expires_at
+            .is_some_and(|expires_at| expires_at > Instant::now())
+        {
+            layers.push(render_zen_hint(tokens, i18n));
+        }
+        if let Some(toasts) = self.render_toasts(tokens, i18n, native_update, cx) {
+            layers.push(toasts);
+        }
+        if let Some(hud) = self.terminal_font_size_hud {
+            layers.push(render_terminal_font_size_hud(
+                tokens,
+                mono_font_family,
+                hud.font_size,
+            ));
+        }
+        layers
+    }
+
+    fn render_toasts(
+        &self,
+        tokens: &ThemeTokens,
+        i18n: &I18n,
+        native_update: Option<ToastView>,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        if self.standard_toasts.is_empty()
+            && self.plugin_progress_toasts.is_empty()
+            && !self
+                .connection_trace_toasts
+                .values()
+                .any(|trace| trace.displayed.is_some())
+            && native_update.is_none()
+        {
+            return None;
+        }
+        let overlay = cx.entity();
+        let standard = self.standard_toasts.iter().map(|toast| {
+            let toast_id = toast.id;
+            let overlay = overlay.clone();
+            ToastView {
+                id: format!("workspace-{}", toast.id),
+                phase: toast.presence.phase(),
+                title: toast.notice.title.clone(),
+                description: toast.notice.description.clone(),
+                status_text: toast.notice.status_text.clone(),
+                progress: toast.notice.progress,
+                variant: toast_variant_from_terminal(toast.notice.variant),
+                actions: None,
+                close: Some(
+                    toast_close(tokens)
+                        .on_mouse_down(MouseButton::Left, move |_event, _window, cx| {
+                            let _ = overlay.update(cx, |overlay, cx| {
+                                if overlay.begin_standard_exit(toast_id, Instant::now()) {
+                                    overlay.schedule_next_deadline(cx);
+                                    cx.notify();
+                                }
+                            });
+                            cx.stop_propagation();
+                        })
+                        .into_any_element(),
+                ),
+            }
+        });
+        let plugin = self.plugin_progress_toasts.iter().map(|(key, toast)| {
+            let key = key.clone();
+            let overlay = overlay.clone();
+            ToastView {
+                id: format!("plugin-{key}"),
+                phase: toast.presence.phase(),
+                title: toast.notice.title.clone(),
+                description: toast.notice.description.clone(),
+                status_text: toast.notice.status_text.clone(),
+                progress: toast.notice.progress,
+                variant: toast_variant_from_terminal(toast.notice.variant),
+                actions: None,
+                close: Some(
+                    toast_close(tokens)
+                        .on_mouse_down(MouseButton::Left, move |_event, _window, cx| {
+                            let _ = overlay.update(cx, |overlay, cx| {
+                                if overlay.dismiss_plugin_progress(&key, Instant::now()) {
+                                    overlay.schedule_next_deadline(cx);
+                                    cx.notify();
+                                }
+                            });
+                            cx.stop_propagation();
+                        })
+                        .into_any_element(),
+                ),
+            }
+        });
+        let traces = self
+            .connection_trace_toasts
+            .iter()
+            .filter_map(|(attempt_id, trace)| {
+                trace
+                    .displayed
+                    .as_ref()
+                    .map(|event| (attempt_id.clone(), event, trace.presence.phase()))
+            })
+            .map(|(attempt_id, event, phase)| {
+                let overlay = overlay.clone();
+                ToastView {
+                    id: format!("connection-{attempt_id}"),
+                    phase,
+                    title: connection_trace_title(i18n, event),
+                    description: connection_trace_description(i18n, event),
+                    status_text: Some(connection_trace_status_text(i18n, event)),
+                    progress: Some(event.progress),
+                    variant: match event.status {
+                        ConnectionTraceStatus::Ready => ToastVariant::Success,
+                        ConnectionTraceStatus::Failed => ToastVariant::Error,
+                        _ => ToastVariant::Default,
+                    },
+                    actions: None,
+                    close: Some(
+                        toast_close(tokens)
+                            .on_mouse_down(MouseButton::Left, move |_event, _window, cx| {
+                                let _ = overlay.update(cx, |overlay, cx| {
+                                    if overlay.begin_trace_exit(&attempt_id, Instant::now()) {
+                                        overlay.schedule_next_deadline(cx);
+                                        cx.notify();
+                                    }
+                                });
+                                cx.stop_propagation();
+                            })
+                            .into_any_element(),
+                    ),
+                }
+            });
+        Some(
+            toaster(
+                tokens,
+                standard.chain(plugin).chain(traces).chain(native_update),
+            )
+            .into_any_element(),
+        )
+    }
+
+    #[cfg(test)]
+    fn notice_wake(&self) -> delivery::ActiveDeliveryWake {
+        self._notice_wake.clone()
+    }
+}
+
+fn min_deadline(current: Option<Instant>, candidate: Option<Instant>) -> Option<Instant> {
+    match (current, candidate) {
+        (Some(current), Some(candidate)) => Some(current.min(candidate)),
+        (Some(current), None) => Some(current),
+        (None, candidate) => candidate,
+    }
+}
+
+pub(super) fn coalesce_connection_trace_running_events(
+    events: Vec<ConnectionTraceEvent>,
+) -> Vec<ConnectionTraceEvent> {
+    let mut coalesced = Vec::with_capacity(events.len());
+    let mut pending_running_by_attempt = HashMap::<String, usize>::new();
+    for event in events {
+        if event.status == ConnectionTraceStatus::Running {
+            if let Some(index) = pending_running_by_attempt.get(&event.attempt_id).copied() {
+                coalesced[index] = event;
+            } else {
+                pending_running_by_attempt.insert(event.attempt_id.clone(), coalesced.len());
+                coalesced.push(event);
+            }
+        } else {
+            pending_running_by_attempt.remove(&event.attempt_id);
+            coalesced.push(event);
+        }
+    }
+    coalesced
+}
+
+fn render_tooltip(tokens: &ThemeTokens, tooltip: WorkspaceTooltip) -> AnyElement {
+    deferred(
+        anchored()
+            .anchor(Corner::TopLeft)
+            .position(gpui::point(px(tooltip.x), px(tooltip.y)))
+            .position_mode(AnchoredPositionMode::Window)
+            .child(tooltip_content(tokens, tooltip.label, None)),
+    )
+    .with_priority(oxideterm_gpui_ui::modal::TAURI_TOOLTIP_LAYER_PRIORITY)
+    .into_any_element()
+}
+
+fn render_zen_hint(tokens: &ThemeTokens, i18n: &I18n) -> AnyElement {
+    let key = if cfg!(target_os = "macos") {
+        "zen_mode.hint"
+    } else {
+        "zen_mode.hint_other"
+    };
+    div()
+        .absolute()
+        .left_0()
+        .right_0()
+        .bottom(px(24.0))
+        .flex()
+        .justify_center()
+        .child(
+            div()
+                .rounded(px(tokens.radii.md))
+                .border_1()
+                .border_color(rgb(tokens.ui.border))
+                .bg(rgba((tokens.ui.bg_elevated << 8) | 0xe6))
+                .px(px(16.0))
+                .py(px(8.0))
+                .text_size(px(14.0))
+                .line_height(px(20.0))
+                .text_color(rgb(tokens.ui.text_muted))
+                .shadow_lg()
+                .child(i18n.t(key)),
+        )
+        .into_any_element()
+}
+
+fn render_terminal_font_size_hud(
+    tokens: &ThemeTokens,
+    mono_font_family: SharedString,
+    font_size: i64,
+) -> AnyElement {
+    let card = div()
+        .rounded(px(tokens.radii.sm))
+        .border_1()
+        .border_color(rgb(tokens.ui.border))
+        .bg(rgba(
+            (tokens.ui.bg_elevated << 8) | TERMINAL_FONT_SIZE_HUD_BACKGROUND_ALPHA,
+        ))
+        .px(px(TERMINAL_FONT_SIZE_HUD_HORIZONTAL_PADDING))
+        .py(px(TERMINAL_FONT_SIZE_HUD_VERTICAL_PADDING))
+        .flex()
+        .items_baseline()
+        .font_family(mono_font_family)
+        .shadow_lg()
+        .child(
+            div()
+                .text_size(px(TERMINAL_FONT_SIZE_HUD_VALUE_TEXT_SIZE))
+                .font_weight(gpui::FontWeight::SEMIBOLD)
+                .text_color(rgb(tokens.ui.text))
+                .child(font_size.to_string()),
+        )
+        .child(
+            div()
+                .ml(px(TERMINAL_FONT_SIZE_HUD_UNIT_GAP))
+                .text_size(px(TERMINAL_FONT_SIZE_HUD_UNIT_TEXT_SIZE))
+                .font_weight(gpui::FontWeight::NORMAL)
+                .text_color(rgb(tokens.ui.text_muted))
+                .child("px"),
+        );
+    let layer = div()
+        .absolute()
+        .top_0()
+        .right_0()
+        .bottom_0()
+        .left_0()
+        .flex()
+        .items_center()
+        .justify_center()
+        .child(card);
+    deferred(oxideterm_gpui_ui::motion::fade_in(
+        tokens,
+        "terminal-font-size-hud",
+        layer,
+        oxideterm_gpui_ui::motion::MotionDuration::Control,
+    ))
+    .with_priority(oxideterm_gpui_ui::modal::TAURI_TOOLTIP_LAYER_PRIORITY)
+    .into_any_element()
+}
+
+fn connection_trace_title(i18n: &I18n, event: &ConnectionTraceEvent) -> String {
+    let label = event
+        .label
+        .clone()
+        .filter(|label| !label.is_empty())
+        .unwrap_or_else(|| {
+            if event.node_id.0.is_empty() {
+                i18n.t("connections.trace.target_unknown")
+            } else {
+                event.node_id.0.clone()
+            }
+        });
+    let chain_title = event
+        .step_index
+        .zip(event.total_steps)
+        .filter(|(_, total)| *total > 1);
+    if event.status == ConnectionTraceStatus::Failed {
+        return i18n
+            .t("connections.trace.failed")
+            .replace("{{label}}", &label);
+    }
+    match (event.mode, chain_title) {
+        (ConnectionTraceMode::Reconnect, Some((current, total))) => i18n
+            .t("connections.trace.reconnecting_chain")
+            .replace("{{current}}", &current.to_string())
+            .replace("{{total}}", &total.to_string())
+            .replace("{{label}}", &label),
+        (ConnectionTraceMode::Connect, Some((current, total))) => i18n
+            .t("connections.trace.connecting_chain")
+            .replace("{{current}}", &current.to_string())
+            .replace("{{total}}", &total.to_string())
+            .replace("{{label}}", &label),
+        (ConnectionTraceMode::Reconnect, None) => i18n
+            .t("connections.trace.reconnecting")
+            .replace("{{label}}", &label),
+        (ConnectionTraceMode::Connect, None) => i18n
+            .t("connections.trace.connecting")
+            .replace("{{label}}", &label),
+    }
+}
+
+fn connection_trace_description(i18n: &I18n, event: &ConnectionTraceEvent) -> Option<String> {
+    if event.status != ConnectionTraceStatus::Failed {
+        return None;
+    }
+    event
+        .detail
+        .as_deref()
+        .and_then(|detail| ssh_algorithm_diagnostic_parts(i18n, detail).map(|(summary, _)| summary))
+}
+
+fn connection_trace_status_text(i18n: &I18n, event: &ConnectionTraceEvent) -> String {
+    if event.status == ConnectionTraceStatus::Ready {
+        return i18n.t("connections.trace.connected").replace(
+            "{{elapsed}}",
+            &format_connection_trace_elapsed(event.elapsed_ms),
+        );
+    }
+    if event.status == ConnectionTraceStatus::Failed
+        && let Some(detail) = event.detail.as_deref()
+        && let Some((_, diagnostic_detail)) = ssh_algorithm_diagnostic_parts(i18n, detail)
+    {
+        return diagnostic_detail;
+    }
+    event
+        .detail
+        .clone()
+        .unwrap_or_else(|| i18n.t(connection_trace_stage_key(event.stage)))
+}
+
+fn ssh_algorithm_diagnostic_parts(i18n: &I18n, error: &str) -> Option<(String, String)> {
+    let diagnostic = oxideterm_ssh::parse_algorithm_negotiation_error(error)?;
+    let kind_label = i18n.t(ssh_algorithm_kind_label_key(diagnostic.kind));
+    let summary_key = ssh_algorithm_summary_key(diagnostic.kind, &diagnostic.server_algorithms);
+    let summary = i18n.t(summary_key).replace("{{kind}}", &kind_label);
+    let no_common = i18n
+        .t("connections.trace.diagnostics.no_common")
+        .replace("{{kind}}", &kind_label);
+    let replace = |key: &str, name: &str, value: String| {
+        i18n.t(key).replace(&format!("{{{{{name}}}}}"), &value)
+    };
+    let detail = [
+        replace(
+            "connections.trace.diagnostics.client_offered",
+            "algorithms",
+            format_algorithm_list(&diagnostic.client_algorithms),
+        ),
+        replace(
+            "connections.trace.diagnostics.server_offered",
+            "algorithms",
+            format_algorithm_list(&diagnostic.server_algorithms),
+        ),
+        replace(
+            "connections.trace.diagnostics.missing_match",
+            "reason",
+            no_common,
+        ),
+    ]
+    .join("\n");
+    Some((summary, detail))
+}
+
+pub(in crate::workspace) fn toast_variant_from_terminal(
+    variant: TerminalNoticeVariant,
+) -> ToastVariant {
+    match variant {
+        TerminalNoticeVariant::Default => ToastVariant::Default,
+        TerminalNoticeVariant::Success => ToastVariant::Success,
+        TerminalNoticeVariant::Error => ToastVariant::Error,
+        TerminalNoticeVariant::Warning => ToastVariant::Warning,
+    }
+}
+
+pub(in crate::workspace) fn connection_trace_stage_key(
+    stage: ConnectionTraceStage,
+) -> &'static str {
+    match stage {
+        ConnectionTraceStage::Queued => "connections.trace.stage.queued",
+        ConnectionTraceStage::Preparing => "connections.trace.stage.preparing",
+        ConnectionTraceStage::OpeningTransport => "connections.trace.stage.opening_transport",
+        ConnectionTraceStage::SshHandshake => "connections.trace.stage.ssh_handshake",
+        ConnectionTraceStage::HostKey => "connections.trace.stage.host_key",
+        ConnectionTraceStage::Authentication => "connections.trace.stage.authentication",
+        ConnectionTraceStage::Pty => "connections.trace.stage.pty",
+        ConnectionTraceStage::ShellReady => "connections.trace.stage.shell_ready",
+        ConnectionTraceStage::Ready => "connections.trace.stage.ready",
+    }
+}
+
+pub(in crate::workspace) fn format_connection_trace_elapsed(ms: u64) -> String {
+    if ms < 10_000 {
+        format!("{:.1}s", ms as f64 / 1000.0)
+    } else {
+        format!("{}s", (ms + 500) / 1000)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use gpui::TestAppContext;
+
+    use super::*;
+
+    fn notice(index: usize) -> TerminalNotice {
+        TerminalNotice {
+            title: format!("notice-{index}"),
+            description: None,
+            status_text: None,
+            progress: None,
+            variant: TerminalNoticeVariant::Default,
+        }
+    }
+
+    #[gpui::test]
+    fn hidden_notice_delivery_continues_across_budgets(cx: &mut TestAppContext) {
+        let overlay = cx.new(|cx| WorkspaceOverlayEntity::new(Duration::ZERO, cx));
+        let sender = cx.read(|cx| overlay.read(cx).notice_sender());
+        for index in 0..130 {
+            sender.send(notice(index)).expect("overlay notice");
+        }
+
+        cx.run_until_parked();
+
+        cx.read(|cx| {
+            let overlay = overlay.read(cx);
+            assert_eq!(overlay.standard_toasts.len(), 130);
+            assert_eq!(overlay.standard_toasts[0].notice.title, "notice-0");
+            assert_eq!(overlay.standard_toasts[129].notice.title, "notice-129");
+        });
+    }
+
+    #[gpui::test]
+    fn stale_deadline_generation_does_not_hide_newer_hud(cx: &mut TestAppContext) {
+        let overlay = cx.new(|cx| WorkspaceOverlayEntity::new(Duration::ZERO, cx));
+        let stale_generation = overlay.update(cx, |overlay, cx| {
+            overlay.apply_intent(
+                WorkspaceOverlayIntent::ShowTerminalFontSizeHud {
+                    font_size: 14,
+                    ttl: Duration::from_secs(60),
+                },
+                cx,
+            );
+            overlay.deadline_generation
+        });
+        overlay.update(cx, |overlay, cx| {
+            overlay.apply_intent(
+                WorkspaceOverlayIntent::ShowTerminalFontSizeHud {
+                    font_size: 18,
+                    ttl: Duration::from_secs(60),
+                },
+                cx,
+            );
+            overlay.handle_deadline_generation(
+                stale_generation,
+                Instant::now() + Duration::from_secs(120),
+                cx,
+            );
+            assert_eq!(
+                overlay.terminal_font_size_hud.map(|hud| hud.font_size),
+                Some(18)
+            );
+        });
+    }
+
+    #[gpui::test]
+    fn entity_release_stops_notice_delivery(cx: &mut TestAppContext) {
+        let overlay = cx.new(|cx| WorkspaceOverlayEntity::new(Duration::from_millis(120), cx));
+        let wake = cx.read(|cx| overlay.read(cx).notice_wake());
+
+        drop(overlay);
+        cx.update(|_cx| {});
+
+        assert!(wake.is_stopped());
+    }
+}

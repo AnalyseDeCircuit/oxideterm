@@ -46,14 +46,18 @@ impl WorkspaceApp {
         title: String,
         description: Option<String>,
         variant: TerminalNoticeVariant,
+        cx: &App,
     ) {
-        let _ = self.terminal_notice_tx.send(TerminalNotice {
-            title,
-            description,
-            status_text: None,
-            progress: None,
-            variant,
-        });
+        self.push_workspace_notice(
+            TerminalNotice {
+                title,
+                description,
+                status_text: None,
+                progress: None,
+                variant,
+            },
+            cx,
+        );
     }
 
     pub(in crate::workspace::sftp) fn close_sftp_dialog(&mut self, cx: &mut Context<Self>) {
@@ -122,6 +126,7 @@ impl WorkspaceApp {
                                             &new_name,
                                         )),
                                         TerminalNoticeVariant::Success,
+                                        cx,
                                     );
                                 }
                                 Err(error) => {
@@ -129,6 +134,7 @@ impl WorkspaceApp {
                                         self.i18n.t("sftp.toast.rename_failed"),
                                         Some(error.to_string()),
                                         TerminalNoticeVariant::Error,
+                                        cx,
                                     );
                                 }
                             }
@@ -191,6 +197,7 @@ impl WorkspaceApp {
                                         self.i18n.t("sftp.toast.folder_created"),
                                         Some(name),
                                         TerminalNoticeVariant::Success,
+                                        cx,
                                     );
                                 }
                                 Err(error) => {
@@ -198,6 +205,7 @@ impl WorkspaceApp {
                                         self.i18n.t("sftp.toast.create_folder_failed"),
                                         Some(error.to_string()),
                                         TerminalNoticeVariant::Error,
+                                        cx,
                                     );
                                 }
                             }
@@ -257,6 +265,7 @@ impl WorkspaceApp {
                                         count,
                                     )),
                                     TerminalNoticeVariant::Success,
+                                    cx,
                                 );
                             }
                             Err(error) => {
@@ -264,6 +273,7 @@ impl WorkspaceApp {
                                     self.i18n.t("sftp.toast.delete_failed"),
                                     Some(error.to_string()),
                                     TerminalNoticeVariant::Error,
+                                    cx,
                                 );
                             }
                         }

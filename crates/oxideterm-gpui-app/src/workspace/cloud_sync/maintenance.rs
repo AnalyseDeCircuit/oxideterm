@@ -24,6 +24,7 @@ impl WorkspaceApp {
                     .t("plugin.cloud_sync.toast.secret_cleared_failed_title"),
                 Some(error.to_string()),
                 TerminalNoticeVariant::Error,
+                cx,
             );
             return;
         }
@@ -41,12 +42,14 @@ impl WorkspaceApp {
                     .t("plugin.cloud_sync.toast.secret_cleared_failed_title"),
                 Some(error.to_string()),
                 TerminalNoticeVariant::Error,
+                cx,
             );
         } else {
             self.push_cloud_sync_toast(
                 self.i18n.t("plugin.cloud_sync.toast.secret_cleared_title"),
                 None,
                 TerminalNoticeVariant::Success,
+                cx,
             );
         }
     }
@@ -56,14 +59,18 @@ impl WorkspaceApp {
         title: String,
         description: Option<String>,
         variant: TerminalNoticeVariant,
+        cx: &App,
     ) {
-        let _ = self.terminal_notice_tx.send(TerminalNotice {
-            title,
-            description,
-            status_text: None,
-            progress: None,
-            variant,
-        });
+        self.push_workspace_notice(
+            TerminalNotice {
+                title,
+                description,
+                status_text: None,
+                progress: None,
+                variant,
+            },
+            cx,
+        );
     }
 
     pub(super) fn render_cloud_sync_fact(
@@ -269,6 +276,7 @@ impl WorkspaceApp {
                     .t("plugin.cloud_sync.toast.rollback_backup_deleted_title"),
                 None,
                 TerminalNoticeVariant::Success,
+                cx,
             );
         }
         cx.notify();
@@ -301,6 +309,7 @@ impl WorkspaceApp {
                     .t("plugin.cloud_sync.toast.rollback_backups_cleared_title"),
                 None,
                 TerminalNoticeVariant::Success,
+                cx,
             );
         }
         cx.notify();
@@ -320,6 +329,7 @@ impl WorkspaceApp {
                 self.i18n.t("plugin.cloud_sync.toast.history_cleared_title"),
                 None,
                 TerminalNoticeVariant::Success,
+                cx,
             );
         }
         cx.notify();

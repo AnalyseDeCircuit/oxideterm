@@ -364,6 +364,7 @@ impl WorkspaceApp {
             self.push_ai_settings_toast(
                 self.i18n.t("ai.chat.disabled_message"),
                 TerminalNoticeVariant::Warning,
+                cx,
             );
             cx.notify();
             return;
@@ -409,7 +410,7 @@ impl WorkspaceApp {
         let stream_config = match self.resolve_ai_stream_config(cx) {
             Ok(config) => config,
             Err(error) => {
-                self.push_ai_settings_toast(error, TerminalNoticeVariant::Error);
+                self.push_ai_settings_toast(error, TerminalNoticeVariant::Error, cx);
                 cx.notify();
                 return;
             }
@@ -511,6 +512,7 @@ impl WorkspaceApp {
                         this.push_ai_settings_toast(
                             api_key_not_found,
                             TerminalNoticeVariant::Error,
+                            cx,
                         );
                         cx.notify();
                         return;
@@ -527,7 +529,7 @@ impl WorkspaceApp {
                 }
                 Err(_) if requires_key => {
                     this.ai_entity.update(cx, |ai, _cx| ai.set_chat_loading(false));
-                    this.push_ai_settings_toast(failed_to_get_key, TerminalNoticeVariant::Error);
+                    this.push_ai_settings_toast(failed_to_get_key, TerminalNoticeVariant::Error, cx);
                     cx.notify();
                 }
                 Err(_) => {
@@ -614,7 +616,7 @@ impl WorkspaceApp {
         let stream_config = match self.resolve_ai_stream_config(cx) {
             Ok(config) => config,
             Err(error) => {
-                self.push_ai_settings_toast(error, TerminalNoticeVariant::Error);
+                self.push_ai_settings_toast(error, TerminalNoticeVariant::Error, cx);
                 cx.notify();
                 return;
             }
@@ -750,7 +752,7 @@ impl WorkspaceApp {
         let stream_config = match self.resolve_ai_stream_config(cx) {
             Ok(config) => config,
             Err(error) => {
-                self.push_ai_settings_toast(error, TerminalNoticeVariant::Error);
+                self.push_ai_settings_toast(error, TerminalNoticeVariant::Error, cx);
                 cx.notify();
                 return;
             }

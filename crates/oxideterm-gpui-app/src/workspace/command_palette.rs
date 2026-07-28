@@ -556,14 +556,18 @@ impl WorkspaceApp {
         title: String,
         description: Option<String>,
         variant: TerminalNoticeVariant,
+        cx: &App,
     ) {
-        let _ = self.terminal_notice_tx.send(TerminalNotice {
-            title,
-            description,
-            status_text: None,
-            progress: None,
-            variant,
-        });
+        self.push_workspace_notice(
+            TerminalNotice {
+                title,
+                description,
+                status_text: None,
+                progress: None,
+                variant,
+            },
+            cx,
+        );
     }
 
     pub(super) fn i18n_replace(&self, key: &str, replacements: &[(&str, String)]) -> String {
@@ -622,6 +626,7 @@ impl WorkspaceApp {
             ),
             None,
             TerminalNoticeVariant::Success,
+            cx,
         );
         cx.notify();
     }

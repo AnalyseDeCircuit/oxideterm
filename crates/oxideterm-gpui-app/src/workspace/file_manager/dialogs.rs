@@ -92,12 +92,13 @@ impl WorkspaceApp {
                         has_background,
                         {
                             let file = file.clone();
-                            move |this, _event, _window, _cx| {
+                            move |this, _event, _window, cx| {
                                 if let Err(error) = open_path_external(&file.path) {
                                     this.push_file_manager_toast(
                                         this.i18n.t("fileManager.error"),
                                         Some(error),
                                         TerminalNoticeVariant::Error,
+                                        cx,
                                     );
                                 }
                             }
@@ -127,7 +128,7 @@ impl WorkspaceApp {
                 has_background,
                 {
                     let file = menu.file.clone();
-                    move |this, _event, _window, _cx| {
+                    move |this, _event, _window, cx| {
                         if let Some(file) = file.as_ref()
                             && let Err(error) = reveal_path_external(&file.path)
                         {
@@ -135,6 +136,7 @@ impl WorkspaceApp {
                                 this.i18n.t("fileManager.error"),
                                 Some(error),
                                 TerminalNoticeVariant::Error,
+                                cx,
                             );
                         }
                     }

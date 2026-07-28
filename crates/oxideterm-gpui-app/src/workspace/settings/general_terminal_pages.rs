@@ -1803,6 +1803,7 @@ impl WorkspaceApp {
                             error
                         ),
                         TerminalNoticeVariant::Error,
+                        cx,
                     ),
                 }
             }
@@ -1829,12 +1830,14 @@ impl WorkspaceApp {
                                 self.push_ai_settings_toast(
                                     self.i18n.t("settings_view.terminal.command_specs_saved"),
                                     TerminalNoticeVariant::Success,
+                                    cx,
                                 );
                                 cx.notify();
                             }
                             Err(error) => self.push_ai_settings_toast(
                                 error.to_string(),
                                 TerminalNoticeVariant::Error,
+                                cx,
                             ),
                         }
                     }
@@ -1845,6 +1848,7 @@ impl WorkspaceApp {
                             error
                         ),
                         TerminalNoticeVariant::Error,
+                        cx,
                     ),
                 }
             }

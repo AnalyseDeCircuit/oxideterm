@@ -21,6 +21,7 @@ mod local_terminal_background;
 mod new_connection;
 mod notification_center;
 mod onboarding;
+mod overlay;
 mod pane_tree;
 mod path_completion;
 mod plugin_entity;
@@ -261,6 +262,7 @@ use self::new_connection::{
     SshConnectionIntent,
 };
 use self::onboarding::OnboardingState;
+use self::overlay::{WorkspaceOverlayEntity, WorkspaceOverlayIntent};
 use self::pane_tree::SplitDrag;
 use self::root::state::{
     PendingSshTerminalOpen, ReconnectWorkerResult, WorkspaceSshNode, WorkspaceSshNodeEndpoint,
@@ -885,19 +887,8 @@ pub(crate) struct WorkspaceApp {
     local_shell_launcher_selected_id: Option<String>,
     terminal: Entity<WorkspaceTerminalEntity>,
     _terminal_subscription: Subscription,
-    terminal_notice_tx: delivery::ActiveDeliverySender<TerminalNotice>,
-    // Standard toasts need stable ids so the close button removes the rendered
-    // toast, not whichever item later occupies the same list index.
-    workspace_toast_next_id: u64,
-    workspace_toasts: Vec<WorkspaceToast>,
-    plugin_progress_toasts: HashMap<String, WorkspaceToast>,
-    connection_trace_toasts: HashMap<String, ActiveConnectionTrace>,
-    zen_hint_expires_at: Option<Instant>,
-    terminal_font_size_hud: Option<TerminalFontSizeHud>,
-    terminal_font_size_hud_generation: u64,
-    workspace_tooltip: Option<WorkspaceTooltip>,
-    workspace_tooltip_pending: Option<WorkspaceTooltipPending>,
-    workspace_tooltip_generation: u64,
+    overlay: Entity<WorkspaceOverlayEntity>,
+    _overlay_observation: Subscription,
 }
 
 #[derive(Clone)]
@@ -1054,49 +1045,6 @@ pub(crate) struct AiCliAgentSession {
     pub(crate) started_at: i64,
     pub(crate) updated_at: i64,
     pub(crate) runtime_epoch: String,
-}
-
-#[derive(Clone, Debug)]
-struct WorkspaceToast {
-    id: u64,
-    notice: TerminalNotice,
-    expires_at: Instant,
-    presence: oxideterm_gpui_ui::motion::ExitPresence,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-struct TerminalFontSizeHud {
-    font_size: i64,
-    generation: u64,
-}
-
-#[derive(Clone, Debug)]
-struct ActiveConnectionTrace {
-    visible: bool,
-    latest: ConnectionTraceEvent,
-    displayed: Option<ConnectionTraceEvent>,
-    started_at: Instant,
-    show_generation: u64,
-    flush_generation: u64,
-    expires_at: Option<Instant>,
-    presence: oxideterm_gpui_ui::motion::ExitPresence,
-}
-
-#[derive(Clone, Debug)]
-struct WorkspaceTooltip {
-    id: String,
-    label: String,
-    x: f32,
-    y: f32,
-}
-
-#[derive(Clone, Debug)]
-struct WorkspaceTooltipPending {
-    id: String,
-    label: String,
-    x: f32,
-    y: f32,
-    generation: u64,
 }
 
 struct WorkspaceTerminalEndpointSession {

@@ -97,7 +97,7 @@ impl WorkspaceApp {
             host_tools.confirm_service_action(delay, runtime, cx)
         });
         for notice in notices {
-            self.push_host_tools_notice(notice);
+            self.push_host_tools_notice(notice, cx);
         }
     }
 

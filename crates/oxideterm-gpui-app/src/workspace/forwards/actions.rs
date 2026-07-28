@@ -435,6 +435,7 @@ impl WorkspaceApp {
                                     self.i18n.t("forwards.toast.error_title"),
                                     Some(error),
                                     TerminalNoticeVariant::Error,
+                                    cx,
                                 );
                             }
                         }
@@ -485,6 +486,7 @@ impl WorkspaceApp {
                                 self.i18n.t("forwards.toast.suspended_title"),
                                 Some(description),
                                 TerminalNoticeVariant::Warning,
+                                cx,
                             );
                         }
                         ForwardStatus::Error => {
@@ -492,6 +494,7 @@ impl WorkspaceApp {
                                 self.i18n.t("forwards.toast.error_title"),
                                 error,
                                 TerminalNoticeVariant::Error,
+                                cx,
                             );
                         }
                         _ => {}
@@ -522,6 +525,7 @@ impl WorkspaceApp {
                                 .replace("{{count}}", &forward_ids.len().to_string()),
                         ),
                         TerminalNoticeVariant::Warning,
+                        cx,
                     );
                     changed |= visible;
                 }
@@ -564,18 +568,22 @@ impl WorkspaceApp {
         title: String,
         description: Option<String>,
         variant: TerminalNoticeVariant,
+        cx: &App,
     ) {
         // Tauri's ForwardsView emits toast() for suspended/error status events
         // while keeping create-form failures inline. Mirror that split so bind
         // and remote-open classes remain visible without turning every failed
         // form submission into a workspace toast.
-        let _ = self.terminal_notice_tx.send(TerminalNotice {
-            title,
-            description,
-            status_text: None,
-            progress: None,
-            variant,
-        });
+        self.push_workspace_notice(
+            TerminalNotice {
+                title,
+                description,
+                status_text: None,
+                progress: None,
+                variant,
+            },
+            cx,
+        );
     }
 
     fn active_forwards_tab_matches_session(&self, session_id: &str, cx: &App) -> bool {

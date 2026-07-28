@@ -308,6 +308,7 @@ impl WorkspaceApp {
                                         this.i18n.t("fileManager.error"),
                                         Some(error),
                                         TerminalNoticeVariant::Error,
+                                        cx,
                                     );
                                 }
                             }
@@ -1134,6 +1135,7 @@ impl WorkspaceApp {
                                 this.i18n.t("fileManager.error"),
                                 Some(error),
                                 TerminalNoticeVariant::Error,
+                                cx,
                             );
                         }
                         cx.stop_propagation();

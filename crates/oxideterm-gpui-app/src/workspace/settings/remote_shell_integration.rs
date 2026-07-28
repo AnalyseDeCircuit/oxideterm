@@ -206,11 +206,11 @@ impl WorkspaceApp {
                     self.remote_shell_integration_state_label(status.state)
                 );
                 self.remote_shell_integration.error = Some(error.clone());
-                self.push_ai_settings_toast(error, TerminalNoticeVariant::Error);
+                self.push_ai_settings_toast(error, TerminalNoticeVariant::Error, cx);
             }
             Err(error) => {
                 self.remote_shell_integration.error = Some(error.clone());
-                self.push_ai_settings_toast(error, TerminalNoticeVariant::Error);
+                self.push_ai_settings_toast(error, TerminalNoticeVariant::Error, cx);
             }
         }
         cx.notify();
@@ -720,11 +720,12 @@ impl WorkspaceApp {
                         this.push_ai_settings_toast(
                             success_message,
                             TerminalNoticeVariant::Success,
+                            cx,
                         );
                     }
                     Err(error) => {
                         this.remote_shell_integration.error = Some(error.clone());
-                        this.push_ai_settings_toast(error, TerminalNoticeVariant::Error);
+                        this.push_ai_settings_toast(error, TerminalNoticeVariant::Error, cx);
                     }
                 }
                 cx.notify();

@@ -1194,7 +1194,7 @@ impl WorkspaceApp {
             .map(|(pane_id, pane)| (*pane_id, pane.clone()))
             .collect::<Vec<_>>();
         for (pane_id, pane) in panes {
-            let preferences = self.terminal_preferences_for_pane(pane_id);
+            let preferences = self.terminal_preferences_for_pane(pane_id, cx);
             let _ = pane.update(cx, |pane, cx| {
                 pane.set_preferences(preferences, cx);
             });

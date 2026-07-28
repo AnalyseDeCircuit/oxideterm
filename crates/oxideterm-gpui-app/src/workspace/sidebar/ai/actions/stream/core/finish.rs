@@ -211,6 +211,7 @@ impl WorkspaceApp {
                 self.push_ai_settings_toast(
                     self.i18n.t("settings_view.ai.acp_agent_error_unknown"),
                     TerminalNoticeVariant::Error,
+                    cx,
                 );
             }
             self.resume_ai_chat_after_pre_send_compaction(resume_after, cx);
@@ -311,6 +312,7 @@ impl WorkspaceApp {
             self.push_ai_settings_toast(
                 self.i18n.t("settings_view.ai.acp_agent_error_unknown"),
                 TerminalNoticeVariant::Error,
+                cx,
             );
             cx.notify();
             return;

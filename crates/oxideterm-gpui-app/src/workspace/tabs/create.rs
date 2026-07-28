@@ -926,6 +926,7 @@ impl WorkspaceApp {
                 self.i18n.t("modals.new_connection.save_failed"),
                 Some(error.to_string()),
                 TerminalNoticeVariant::Error,
+                cx,
             );
             cx.notify();
             return;

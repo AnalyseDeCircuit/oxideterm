@@ -1669,6 +1669,7 @@ impl WorkspaceApp {
                 .t("settings_view.appearance.theme_import_success")
                 .replace("{{name}}", &notice_name),
             TerminalNoticeVariant::Success,
+            cx,
         );
         cx.notify();
     }
@@ -1718,14 +1719,18 @@ impl WorkspaceApp {
         &self,
         title: String,
         variant: TerminalNoticeVariant,
+        cx: &App,
     ) {
-        let _ = self.terminal_notice_tx.send(TerminalNotice {
-            title,
-            description: None,
-            status_text: None,
-            progress: None,
-            variant,
-        });
+        self.push_workspace_notice(
+            TerminalNotice {
+                title,
+                description: None,
+                status_text: None,
+                progress: None,
+                variant,
+            },
+            cx,
+        );
     }
 
     pub(in crate::workspace) fn appearance_background_image_slot(

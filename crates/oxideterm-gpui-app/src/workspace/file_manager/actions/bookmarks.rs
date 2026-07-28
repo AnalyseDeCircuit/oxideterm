@@ -43,12 +43,14 @@ impl WorkspaceApp {
                 self.i18n.t("fileManager.bookmarked"),
                 None,
                 TerminalNoticeVariant::Success,
+                cx,
             );
         } else {
             self.push_file_manager_toast(
                 self.i18n.t("fileManager.removeBookmark"),
                 None,
                 TerminalNoticeVariant::Default,
+                cx,
             );
         }
         self.persist_file_manager_bookmarks(cx);
@@ -129,6 +131,7 @@ impl WorkspaceApp {
                 self.i18n.t("fileManager.error"),
                 Some(error),
                 TerminalNoticeVariant::Error,
+                cx,
             ),
         }
     }

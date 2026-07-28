@@ -64,6 +64,7 @@ impl WorkspaceApp {
             self.i18n.t("local_shell.toast.detached"),
             Some(self.i18n_replace("local_shell.toast.detached_desc", &[("shell", title)])),
             TerminalNoticeVariant::Success,
+            cx,
         );
         cx.notify();
     }
@@ -93,6 +94,7 @@ impl WorkspaceApp {
             ),
             None,
             TerminalNoticeVariant::Success,
+            cx,
         );
         cx.notify();
     }
@@ -197,6 +199,7 @@ impl WorkspaceApp {
             self.i18n.t("local_shell.toast.attached"),
             Some(title),
             TerminalNoticeVariant::Success,
+            cx,
         );
         cx.notify();
     }

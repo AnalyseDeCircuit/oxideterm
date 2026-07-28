@@ -911,6 +911,7 @@ impl WorkspaceApp {
                 self.i18n.t("fileManager.error"),
                 Some(error),
                 TerminalNoticeVariant::Error,
+                cx,
             );
         }
         let preview = read_local_preview(&entry.path);
@@ -923,6 +924,7 @@ impl WorkspaceApp {
                         self.i18n.t("fileManager.error"),
                         Some(error),
                         TerminalNoticeVariant::Error,
+                        cx,
                     );
                 }
             }
@@ -1079,6 +1081,7 @@ impl WorkspaceApp {
                 self.i18n.t("fileManager.error"),
                 Some(error),
                 TerminalNoticeVariant::Error,
+                cx,
             );
         }
         cx.notify();
@@ -1098,6 +1101,7 @@ impl WorkspaceApp {
                 self.i18n.t("fileManager.error"),
                 Some(error),
                 TerminalNoticeVariant::Error,
+                cx,
             );
         }
         cx.notify();
@@ -1123,6 +1127,7 @@ impl WorkspaceApp {
             self.i18n.t("fileManager.copyContent"),
             None,
             TerminalNoticeVariant::Success,
+            cx,
         );
         cx.notify();
     }
@@ -1229,12 +1234,14 @@ impl WorkspaceApp {
                     self.i18n.t("fileManager.folderCreated"),
                     None,
                     TerminalNoticeVariant::Success,
+                    cx,
                 );
             }
             Err(error) => self.push_file_manager_toast(
                 self.i18n.t("fileManager.error"),
                 Some(error),
                 TerminalNoticeVariant::Error,
+                cx,
             ),
         }
         cx.notify();
@@ -1265,12 +1272,14 @@ impl WorkspaceApp {
                     self.i18n.t("fileManager.fileCreated"),
                     None,
                     TerminalNoticeVariant::Success,
+                    cx,
                 );
             }
             Err(error) => self.push_file_manager_toast(
                 self.i18n.t("fileManager.error"),
                 Some(error),
                 TerminalNoticeVariant::Error,
+                cx,
             ),
         }
         cx.notify();
@@ -1297,12 +1306,14 @@ impl WorkspaceApp {
                     self.i18n.t("fileManager.renamed"),
                     None,
                     TerminalNoticeVariant::Success,
+                    cx,
                 );
             }
             Err(error) => self.push_file_manager_toast(
                 self.i18n.t("fileManager.error"),
                 Some(error),
                 TerminalNoticeVariant::Error,
+                cx,
             ),
         }
         cx.notify();
@@ -1333,6 +1344,7 @@ impl WorkspaceApp {
                 self.i18n.t("fileManager.error"),
                 Some(error),
                 TerminalNoticeVariant::Error,
+                cx,
             ),
             None => {
                 self.close_file_manager_dialog(cx);
@@ -1343,6 +1355,7 @@ impl WorkspaceApp {
                         .replace("{{count}}", &names.len().to_string()),
                     None,
                     TerminalNoticeVariant::Success,
+                    cx,
                 );
             }
         }
@@ -1378,6 +1391,7 @@ impl WorkspaceApp {
                 .replace("{{count}}", &entries.len().to_string()),
             None,
             TerminalNoticeVariant::Default,
+            cx,
         );
     }
 
@@ -1604,12 +1618,14 @@ impl WorkspaceApp {
                     self.i18n.t("fileManager.operationSuccess"),
                     Some(format!("{}", archive_path.display())),
                     TerminalNoticeVariant::Success,
+                    cx,
                 );
             }
             Err(error) => self.push_file_manager_toast(
                 self.i18n.t("fileManager.error"),
                 Some(error),
                 TerminalNoticeVariant::Error,
+                cx,
             ),
         }
         self.dismiss_file_manager_context_menu(cx);
@@ -1630,12 +1646,14 @@ impl WorkspaceApp {
                     self.i18n.t("fileManager.operationSuccess"),
                     Some(entry.name),
                     TerminalNoticeVariant::Success,
+                    cx,
                 );
             }
             Err(error) => self.push_file_manager_toast(
                 self.i18n.t("fileManager.error"),
                 Some(error),
                 TerminalNoticeVariant::Error,
+                cx,
             ),
         }
         self.dismiss_file_manager_context_menu(cx);
@@ -1713,6 +1731,7 @@ impl WorkspaceApp {
             self.i18n.t("fileManager.terminalOpened"),
             None,
             TerminalNoticeVariant::Success,
+            cx,
         );
         cx.notify();
     }
@@ -1740,14 +1759,18 @@ impl WorkspaceApp {
         title: String,
         description: Option<String>,
         variant: TerminalNoticeVariant,
+        cx: &App,
     ) {
-        let _ = self.terminal_notice_tx.send(TerminalNotice {
-            title,
-            description,
-            status_text: None,
-            progress: None,
-            variant,
-        });
+        self.push_workspace_notice(
+            TerminalNotice {
+                title,
+                description,
+                status_text: None,
+                progress: None,
+                variant,
+            },
+            cx,
+        );
     }
 }
 

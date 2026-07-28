@@ -21,6 +21,7 @@ impl WorkspaceApp {
                     self.i18n.t("remote_desktop.provider_missing"),
                     None,
                     TerminalNoticeVariant::Error,
+                    cx,
                 );
                 return;
             }
@@ -47,6 +48,7 @@ impl WorkspaceApp {
                     self.i18n.t("remote_desktop.provider_missing"),
                     None,
                     TerminalNoticeVariant::Error,
+                    cx,
                 );
                 return;
             }

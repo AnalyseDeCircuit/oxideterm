@@ -13,7 +13,7 @@ use oxideterm_environment::{
 use std::{
     ops::Range,
     path::Path,
-    sync::{Arc, Mutex},
+    sync::Arc,
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
@@ -21,27 +21,8 @@ const TERMINAL_PROJECT_PROBE_TTL_MS: u64 = 5_000;
 const TERMINAL_PROJECT_REMOTE_TIMEOUT: Duration = Duration::from_secs(3);
 const TERMINAL_PROJECT_REMOTE_MAX_OUTPUT: usize = 512 * 1024;
 
-/// Moves a bounded notice batch into the window toast adapter exactly once.
-#[derive(Clone)]
-pub(in crate::workspace) struct TerminalNoticeBatchRequest {
-    notices: Arc<Mutex<Option<Vec<TerminalNotice>>>>,
-}
-
-impl TerminalNoticeBatchRequest {
-    fn new(notices: Vec<TerminalNotice>) -> Self {
-        Self {
-            notices: Arc::new(Mutex::new(Some(notices))),
-        }
-    }
-
-    pub(in crate::workspace) fn take(&self) -> Option<Vec<TerminalNotice>> {
-        self.notices.lock().ok()?.take()
-    }
-}
-
 #[derive(Clone)]
 pub(in crate::workspace) enum WorkspaceTerminalEvent {
-    NoticesReady(TerminalNoticeBatchRequest),
     GitMetadataChanged,
     GitCommitDraftReady(terminal_git::TerminalGitCommitDraftRequest),
     ProjectMetadataChanged,
@@ -65,8 +46,6 @@ struct TerminalBroadcastState {
 
 /// Owns terminal-wide delivery channels and their foreground cancellation lifecycle.
 pub(in crate::workspace) struct WorkspaceTerminalEntity {
-    notice_tx: delivery::ActiveDeliverySender<TerminalNotice>,
-    notice_rx: std::sync::mpsc::Receiver<TerminalNotice>,
     git_tx: delivery::ActiveDeliverySender<TerminalGitProbeDelivery>,
     git_rx: std::sync::mpsc::Receiver<TerminalGitProbeDelivery>,
     git_store: GitStatusStore,
@@ -99,8 +78,6 @@ impl WorkspaceTerminalEntity {
         cx: &mut Context<Self>,
     ) -> Self {
         let delivery_wake = delivery::ActiveDeliveryWake::default();
-        let (notice_tx, notice_rx) =
-            delivery::ActiveDeliverySender::channel_with_wake(delivery_wake.clone());
         let (git_tx, git_rx) =
             delivery::ActiveDeliverySender::channel_with_wake(delivery_wake.clone());
         let (git_action_tx, git_action_rx) =
@@ -141,8 +118,6 @@ impl WorkspaceTerminalEntity {
         .detach();
 
         Self {
-            notice_tx,
-            notice_rx,
             git_tx,
             git_rx,
             git_store: GitStatusStore::default(),
@@ -166,14 +141,6 @@ impl WorkspaceTerminalEntity {
             node_router,
             runtime,
         }
-    }
-
-    pub(in crate::workspace) fn notice_sender(
-        &self,
-    ) -> delivery::ActiveDeliverySender<TerminalNotice> {
-        // The root keeps one producer capability for legacy surface adapters;
-        // receiver state and foreground delivery remain Entity-owned.
-        self.notice_tx.clone()
     }
 
     pub(in crate::workspace) fn broadcast_enabled(&self) -> bool {
@@ -476,22 +443,10 @@ impl WorkspaceTerminalEntity {
     }
 
     fn drain_deliveries(&mut self, cx: &mut Context<Self>) -> bool {
-        self.drain_notices(cx)
-            | self.drain_git_results(cx)
+        self.drain_git_results(cx)
             | self.drain_git_action_results(cx)
             | self.drain_project_results(cx)
             | self.drain_cwd_results(cx)
-    }
-
-    fn drain_notices(&mut self, cx: &mut Context<Self>) -> bool {
-        let delivery_batch =
-            delivery::drain_channel(&self.notice_rx, delivery::NOTIFICATION_DELIVERY_BUDGET);
-        if !delivery_batch.items.is_empty() {
-            cx.emit(WorkspaceTerminalEvent::NoticesReady(
-                TerminalNoticeBatchRequest::new(delivery_batch.items),
-            ));
-        }
-        delivery_batch.outcome.backlog_remaining
     }
 
     fn drain_project_results(&mut self, cx: &mut Context<Self>) -> bool {
@@ -696,7 +651,6 @@ mod tests {
     static NEXT_TERMINAL_TEST_SETTINGS_ID: AtomicU64 = AtomicU64::new(1);
 
     struct TerminalEventRecorder {
-        notices: Vec<TerminalNoticeBatchRequest>,
         git_metadata_changes: usize,
         project_metadata_changes: usize,
         _subscription: Subscription,
@@ -971,74 +925,12 @@ mod tests {
     }
 
     #[gpui::test]
-    fn notice_delivery_is_entity_owned_and_payload_is_consumed_once(cx: &mut TestAppContext) {
-        let terminal = new_terminal_entity(cx);
-        let recorder = cx.new(|cx| {
-            let subscription = cx.subscribe(
-                &terminal,
-                |recorder: &mut TerminalEventRecorder, _terminal, event, _cx| match event {
-                    WorkspaceTerminalEvent::NoticesReady(request) => {
-                        recorder.notices.push(request.clone());
-                    }
-                    WorkspaceTerminalEvent::GitMetadataChanged => {
-                        recorder.git_metadata_changes += 1;
-                    }
-                    WorkspaceTerminalEvent::GitCommitDraftReady(_) => {}
-                    WorkspaceTerminalEvent::ProjectMetadataChanged => {
-                        recorder.project_metadata_changes += 1;
-                    }
-                },
-            );
-            TerminalEventRecorder {
-                notices: Vec::new(),
-                git_metadata_changes: 0,
-                project_metadata_changes: 0,
-                _subscription: subscription,
-            }
-        });
-        let sender = terminal.read_with(cx, |terminal, _cx| terminal.notice_sender());
-
-        sender
-            .send(TerminalNotice {
-                title: "ready".to_string(),
-                description: Some("description".to_string()),
-                status_text: None,
-                progress: None,
-                variant: TerminalNoticeVariant::Success,
-            })
-            .expect("notice send");
-        cx.run_until_parked();
-
-        let request = recorder.read_with(cx, |recorder, _cx| recorder.notices[0].clone());
-        let notices = request.take().expect("notice payload");
-        let notice = &notices[0];
-        assert_eq!(notice.title, "ready");
-        assert_eq!(notice.description.as_deref(), Some("description"));
-        assert!(request.take().is_none());
-    }
-
-    #[gpui::test]
-    fn entity_release_stops_notice_delivery_waiter(cx: &mut TestAppContext) {
-        let terminal = new_terminal_entity(cx);
-        let notice_wake = terminal.read_with(cx, |terminal, _cx| terminal.notice_sender().wake());
-
-        drop(terminal);
-        cx.update(|_cx| {});
-        cx.run_until_parked();
-
-        assert!(notice_wake.is_stopped());
-    }
-
-    #[gpui::test]
     fn project_probe_state_and_delivery_are_entity_owned(cx: &mut TestAppContext) {
         let terminal = new_terminal_entity(cx);
         let recorder = cx.new(|cx| {
             let subscription = cx.subscribe(
                 &terminal,
                 |recorder: &mut TerminalEventRecorder, _terminal, event, _cx| match event {
-                    WorkspaceTerminalEvent::NoticesReady(request) => {
-                        recorder.notices.push(request.clone());
-                    }
                     WorkspaceTerminalEvent::GitMetadataChanged => {
                         recorder.git_metadata_changes += 1;
                     }
@@ -1049,7 +941,6 @@ mod tests {
                 },
             );
             TerminalEventRecorder {
-                notices: Vec::new(),
                 git_metadata_changes: 0,
                 project_metadata_changes: 0,
                 _subscription: subscription,
@@ -1097,9 +988,6 @@ mod tests {
             let subscription = cx.subscribe(
                 &terminal,
                 |recorder: &mut TerminalEventRecorder, _terminal, event, _cx| match event {
-                    WorkspaceTerminalEvent::NoticesReady(request) => {
-                        recorder.notices.push(request.clone());
-                    }
                     WorkspaceTerminalEvent::GitMetadataChanged => {
                         recorder.git_metadata_changes += 1;
                     }
@@ -1110,7 +998,6 @@ mod tests {
                 },
             );
             TerminalEventRecorder {
-                notices: Vec::new(),
                 git_metadata_changes: 0,
                 project_metadata_changes: 0,
                 _subscription: subscription,

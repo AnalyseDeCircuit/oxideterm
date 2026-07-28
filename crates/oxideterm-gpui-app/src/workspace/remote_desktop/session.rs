@@ -671,6 +671,7 @@ impl WorkspaceApp {
                 self.i18n.t("remote_desktop.clipboard_file_failed"),
                 None,
                 TerminalNoticeVariant::Error,
+                cx,
             );
             return;
         }

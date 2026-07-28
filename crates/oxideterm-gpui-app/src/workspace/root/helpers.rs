@@ -660,14 +660,18 @@ impl WorkspaceApp {
         title: impl Into<String>,
         description: Option<String>,
         variant: TerminalNoticeVariant,
+        cx: &App,
     ) {
-        let _ = self.terminal_notice_tx.send(TerminalNotice {
-            title: title.into(),
-            description,
-            status_text: None,
-            progress: None,
-            variant,
-        });
+        self.push_workspace_notice(
+            TerminalNotice {
+                title: title.into(),
+                description,
+                status_text: None,
+                progress: None,
+                variant,
+            },
+            cx,
+        );
     }
 
     pub(in crate::workspace) fn i18n_with(
@@ -910,6 +914,7 @@ impl WorkspaceApp {
                 self.i18n.t("connections.reconnect.cancelled"),
                 None,
                 TerminalNoticeVariant::Default,
+                cx,
             );
             cx.notify();
         }
@@ -938,9 +943,7 @@ impl WorkspaceApp {
         self.focused_settings_input = None;
         self.settings_slider_drag = None;
         self.ime_marked_text = None;
-        self.workspace_tooltip = None;
-        self.workspace_tooltip_pending = None;
-        self.workspace_tooltip_generation = self.workspace_tooltip_generation.wrapping_add(1);
+        self.clear_all_workspace_tooltips(cx);
     }
 
     pub(in crate::workspace) fn dismiss_transient_workspace_overlays(
@@ -1021,10 +1024,7 @@ impl WorkspaceApp {
             self.close_ai_model_selector(cx);
             changed = true;
         }
-        if self.workspace_tooltip.is_some() || self.workspace_tooltip_pending.is_some() {
-            self.workspace_tooltip = None;
-            self.workspace_tooltip_pending = None;
-            self.workspace_tooltip_generation = self.workspace_tooltip_generation.wrapping_add(1);
+        if self.clear_all_workspace_tooltips(cx) {
             changed = true;
         }
         if changed {

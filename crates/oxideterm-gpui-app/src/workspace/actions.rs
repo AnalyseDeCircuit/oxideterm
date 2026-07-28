@@ -355,21 +355,16 @@ impl WorkspaceApp {
             settings.sidebar_ui.ai_sidebar_collapsed = true;
             self.clear_ai_sidebar_keyboard_focus(cx);
             const ZEN_HINT_TTL: Duration = Duration::from_millis(2500);
-            self.zen_hint_expires_at = Some(Instant::now() + ZEN_HINT_TTL);
-            cx.spawn(async move |weak, cx| {
-                Timer::after(ZEN_HINT_TTL).await;
-                let _ = weak.update(cx, |this, cx| {
-                    this.zen_hint_expires_at = None;
-                    cx.notify();
-                });
-            })
-            .detach();
+            self.apply_workspace_overlay_intent(
+                WorkspaceOverlayIntent::ShowZenHint { ttl: ZEN_HINT_TTL },
+                cx,
+            );
         } else {
             self.sidebar_collapsed = false;
             self.sidebar_motion_generation = self.sidebar_motion_generation.wrapping_add(1);
             self.sidebar_rendered = true;
             settings.sidebar_ui.collapsed = false;
-            self.zen_hint_expires_at = None;
+            self.apply_workspace_overlay_intent(WorkspaceOverlayIntent::ClearZenHint, cx);
         }
         cx.notify();
     }
@@ -392,29 +387,13 @@ impl WorkspaceApp {
     }
 
     fn show_terminal_font_size_hud(&mut self, font_size: i64, cx: &mut Context<Self>) {
-        self.terminal_font_size_hud_generation =
-            self.terminal_font_size_hud_generation.wrapping_add(1);
-        let generation = self.terminal_font_size_hud_generation;
-        self.terminal_font_size_hud = Some(TerminalFontSizeHud {
-            font_size,
-            generation,
-        });
-        // Each shortcut refreshes the same HUD. The generation prevents an
-        // earlier timer from hiding a newer value during rapid key repeats.
-        cx.spawn(async move |weak, cx| {
-            Timer::after(TERMINAL_FONT_SIZE_HUD_DURATION).await;
-            let _ = weak.update(cx, |workspace, cx| {
-                if workspace
-                    .terminal_font_size_hud
-                    .is_some_and(|hud| hud.generation == generation)
-                {
-                    workspace.terminal_font_size_hud = None;
-                    cx.notify();
-                }
-            });
-        })
-        .detach();
-        cx.notify();
+        self.apply_workspace_overlay_intent(
+            WorkspaceOverlayIntent::ShowTerminalFontSizeHud {
+                font_size,
+                ttl: TERMINAL_FONT_SIZE_HUD_DURATION,
+            },
+            cx,
+        );
     }
 
     pub(super) fn dispatch_registered_keybinding(
@@ -551,6 +530,7 @@ impl WorkspaceApp {
                 "common.disabled"
             })),
             TerminalNoticeVariant::Default,
+            cx,
         );
     }
 
@@ -1596,8 +1576,10 @@ impl WorkspaceApp {
                 .and_then(|json| fs::write(path, json).map_err(|err| err.to_string()));
             let _ = weak.update(cx, |this, cx| {
                 match result {
-                    Ok(()) => this.push_ai_settings_toast(success, TerminalNoticeVariant::Success),
-                    Err(_) => this.push_ai_settings_toast(error, TerminalNoticeVariant::Error),
+                    Ok(()) => {
+                        this.push_ai_settings_toast(success, TerminalNoticeVariant::Success, cx)
+                    }
+                    Err(_) => this.push_ai_settings_toast(error, TerminalNoticeVariant::Error, cx),
                 }
                 cx.notify();
             });
@@ -1664,10 +1646,10 @@ impl WorkspaceApp {
                         this.keybinding_recording_combo = None;
                         this.keybinding_recording_footer_focus = None;
                         this.apply_runtime_key_bindings(runtime_bindings, window, cx);
-                        this.push_ai_settings_toast(success, TerminalNoticeVariant::Success);
+                        this.push_ai_settings_toast(success, TerminalNoticeVariant::Success, cx);
                     }
                     Err(_) => {
-                        this.push_ai_settings_toast(invalid, TerminalNoticeVariant::Error);
+                        this.push_ai_settings_toast(invalid, TerminalNoticeVariant::Error, cx);
                         cx.notify();
                     }
                 });
@@ -1960,13 +1942,16 @@ impl WorkspaceApp {
                 .command_bar
                 .quick_commands_show_toast
         {
-            let _ = self.terminal_notice_tx.send(TerminalNotice {
-                title: self.i18n.t("terminal.quick_commands.toast_executed"),
-                description: Some(command.to_string()),
-                status_text: None,
-                progress: None,
-                variant: TerminalNoticeVariant::Success,
-            });
+            self.push_workspace_notice(
+                TerminalNotice {
+                    title: self.i18n.t("terminal.quick_commands.toast_executed"),
+                    description: Some(command.to_string()),
+                    status_text: None,
+                    progress: None,
+                    variant: TerminalNoticeVariant::Success,
+                },
+                cx,
+            );
         }
         self.finish_terminal_quick_command_execution(cx);
         self.terminal_command_bar_draft.clear();
@@ -2007,13 +1992,16 @@ impl WorkspaceApp {
         let title = self.active_tab().map(|tab| tab.title.clone());
         if let Some(pane) = self.active_pane(cx) {
             let _ = pane.update(cx, |pane, cx| pane.start_recording(title, cx));
-            let _ = self.terminal_notice_tx.send(TerminalNotice {
-                title: self.i18n.t("terminal.recording.started"),
-                description: None,
-                status_text: None,
-                progress: None,
-                variant: TerminalNoticeVariant::Success,
-            });
+            self.push_workspace_notice(
+                TerminalNotice {
+                    title: self.i18n.t("terminal.recording.started"),
+                    description: None,
+                    status_text: None,
+                    progress: None,
+                    variant: TerminalNoticeVariant::Success,
+                },
+                cx,
+            );
         }
         cx.notify();
     }
@@ -2099,23 +2087,29 @@ impl WorkspaceApp {
             let _ = weak.update(cx, |this, cx| {
                 match result {
                     Ok(Some(path)) => {
-                        let _ = this.terminal_notice_tx.send(TerminalNotice {
-                            title: this.i18n.t("terminal.recording.saved"),
-                            description: Some(path.to_string_lossy().to_string()),
-                            status_text: None,
-                            progress: None,
-                            variant: TerminalNoticeVariant::Success,
-                        });
+                        this.push_workspace_notice(
+                            TerminalNotice {
+                                title: this.i18n.t("terminal.recording.saved"),
+                                description: Some(path.to_string_lossy().to_string()),
+                                status_text: None,
+                                progress: None,
+                                variant: TerminalNoticeVariant::Success,
+                            },
+                            cx,
+                        );
                     }
                     Ok(None) => {}
                     Err(error) => {
-                        let _ = this.terminal_notice_tx.send(TerminalNotice {
-                            title: this.i18n.t("terminal.recording.save_failed"),
-                            description: Some(error),
-                            status_text: None,
-                            progress: None,
-                            variant: TerminalNoticeVariant::Error,
-                        });
+                        this.push_workspace_notice(
+                            TerminalNotice {
+                                title: this.i18n.t("terminal.recording.save_failed"),
+                                description: Some(error),
+                                status_text: None,
+                                progress: None,
+                                variant: TerminalNoticeVariant::Error,
+                            },
+                            cx,
+                        );
                     }
                 }
                 cx.notify();

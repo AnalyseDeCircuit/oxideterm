@@ -838,6 +838,7 @@ impl WorkspaceApp {
                         .t("plugin.cloud_sync.toast.rollback_backup_available"),
                     None,
                     TerminalNoticeVariant::Success,
+                    cx,
                 );
             }
             CloudSyncDelivery::CheckFinished(action) => {
@@ -933,6 +934,7 @@ impl WorkspaceApp {
                         ],
                     )),
                     TerminalNoticeVariant::Default,
+                    cx,
                 );
             }
             CloudSyncDelivery::GithubOauthFinished(action) => {
@@ -958,6 +960,7 @@ impl WorkspaceApp {
                         ],
                     )),
                     TerminalNoticeVariant::Default,
+                    cx,
                 );
             }
             CloudSyncDelivery::MicrosoftOauthFinished(action) => {
@@ -979,6 +982,7 @@ impl WorkspaceApp {
                         &[("seconds", prompt.expires_in.to_string())],
                     )),
                     TerminalNoticeVariant::Default,
+                    cx,
                 );
             }
             CloudSyncDelivery::GoogleOauthFinished(action) => {
@@ -1071,6 +1075,7 @@ impl WorkspaceApp {
                 self.i18n.t("plugin.cloud_sync.toast.upload_success_title"),
                 Some(revision),
                 TerminalNoticeVariant::Success,
+                cx,
             );
         }
     }
@@ -1089,6 +1094,7 @@ impl WorkspaceApp {
                 .t("plugin.cloud_sync.toast.github_oauth_success_title"),
             None,
             TerminalNoticeVariant::Success,
+            cx,
         );
     }
 
@@ -1108,6 +1114,7 @@ impl WorkspaceApp {
                 .t("plugin.cloud_sync.toast.microsoft_oauth_success_title"),
             None,
             TerminalNoticeVariant::Success,
+            cx,
         );
     }
 
@@ -1127,6 +1134,7 @@ impl WorkspaceApp {
                 .t("plugin.cloud_sync.toast.google_oauth_success_title"),
             None,
             TerminalNoticeVariant::Success,
+            cx,
         );
     }
 
@@ -1307,6 +1315,7 @@ impl WorkspaceApp {
             self.i18n.t("plugin.cloud_sync.toast.pull_success_title"),
             Some(description),
             TerminalNoticeVariant::Success,
+            cx,
         );
     }
 
@@ -1392,6 +1401,7 @@ impl WorkspaceApp {
             self.i18n.t(copy.title_key),
             Some(description),
             TerminalNoticeVariant::Success,
+            cx,
         );
     }
 
@@ -1492,6 +1502,7 @@ impl WorkspaceApp {
                 self.i18n.t(title_key),
                 Some(display_error),
                 TerminalNoticeVariant::Error,
+                cx,
             );
         }
     }

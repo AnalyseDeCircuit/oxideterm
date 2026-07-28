@@ -5,7 +5,7 @@ mod tests {
     use oxideterm_workspace::TabKind;
 
     use super::super::super::*;
-    use super::super::render::coalesce_connection_trace_running_events;
+    use super::super::super::overlay::coalesce_connection_trace_running_events;
 
     fn connection_trace_event(
         status: ConnectionTraceStatus,

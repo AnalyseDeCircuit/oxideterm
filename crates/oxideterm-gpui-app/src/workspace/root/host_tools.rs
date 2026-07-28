@@ -24,6 +24,7 @@ impl WorkspaceApp {
                     self.push_host_tools_window_notice(
                         missing_notice,
                         TerminalNoticeVariant::Error,
+                        cx,
                     );
                     cx.notify();
                     return;
@@ -32,6 +33,7 @@ impl WorkspaceApp {
                     self.push_host_tools_window_notice(
                         missing_notice,
                         TerminalNoticeVariant::Error,
+                        cx,
                     );
                     cx.notify();
                     return;
@@ -47,10 +49,12 @@ impl WorkspaceApp {
                     Ok(()) => self.push_host_tools_window_notice(
                         opened_notice,
                         TerminalNoticeVariant::Success,
+                        cx,
                     ),
                     Err(_) => self.push_host_tools_window_notice(
                         missing_notice,
                         TerminalNoticeVariant::Error,
+                        cx,
                     ),
                 }
                 cx.notify();
@@ -84,17 +88,25 @@ impl WorkspaceApp {
         }
     }
 
-    fn push_host_tools_window_notice(&mut self, title: String, variant: TerminalNoticeVariant) {
-        let _ = self.terminal_notice_tx.send(TerminalNotice {
-            title,
-            description: None,
-            status_text: None,
-            progress: None,
-            variant,
-        });
+    fn push_host_tools_window_notice(
+        &self,
+        title: String,
+        variant: TerminalNoticeVariant,
+        cx: &App,
+    ) {
+        self.push_workspace_notice(
+            TerminalNotice {
+                title,
+                description: None,
+                status_text: None,
+                progress: None,
+                variant,
+            },
+            cx,
+        );
     }
 
-    pub(in crate::workspace) fn push_host_tools_notice(&mut self, notice: HostToolsNotice) {
+    pub(in crate::workspace) fn push_host_tools_notice(&self, notice: HostToolsNotice, cx: &App) {
         let (message, variant) = match notice {
             HostToolsNotice::ProcessActionAlreadyRunning => (
                 self.i18n
@@ -552,12 +564,15 @@ impl WorkspaceApp {
                 }
             }
         };
-        let _ = self.terminal_notice_tx.send(TerminalNotice {
-            title: message,
-            description: None,
-            status_text: None,
-            progress: None,
-            variant,
-        });
+        self.push_workspace_notice(
+            TerminalNotice {
+                title: message,
+                description: None,
+                status_text: None,
+                progress: None,
+                variant,
+            },
+            cx,
+        );
     }
 }

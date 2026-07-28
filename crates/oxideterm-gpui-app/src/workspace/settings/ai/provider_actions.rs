@@ -165,6 +165,7 @@ impl WorkspaceApp {
                             self.push_ai_settings_toast(
                                 self.ai_i18n_error(message_key, &safe_error),
                                 TerminalNoticeVariant::Error,
+                                cx,
                             );
                         }
                     }
@@ -182,6 +183,7 @@ impl WorkspaceApp {
                                 self.push_ai_settings_toast(
                                     self.i18n.t("settings_view.knowledge.error_reindex"),
                                     TerminalNoticeVariant::Error,
+                                    cx,
                                 );
                             } else {
                                 self.settings_page.clear_knowledge_error();
@@ -223,6 +225,7 @@ impl WorkspaceApp {
                             self.push_ai_settings_toast(
                                 self.i18n.t("settings_view.ai.api_key_missing"),
                                 TerminalNoticeVariant::Warning,
+                                cx,
                             );
                         }
                         ai_state::AiModelRefreshIntent::Failed => {
@@ -231,6 +234,7 @@ impl WorkspaceApp {
                             self.push_ai_settings_toast(
                                 self.ai_i18n_error("settings_view.ai.refresh_failed", &safe_error),
                                 TerminalNoticeVariant::Error,
+                                cx,
                             );
                         }
                     }
@@ -275,19 +279,17 @@ impl WorkspaceApp {
         &mut self,
         title: String,
         variant: TerminalNoticeVariant,
+        cx: &App,
     ) {
-        let id = self.next_workspace_toast_id();
-        self.workspace_toasts.push(WorkspaceToast {
-            id,
-            notice: TerminalNotice {
+        self.push_workspace_notice(
+            TerminalNotice {
                 title,
                 description: None,
                 status_text: None,
                 progress: None,
                 variant,
             },
-            expires_at: Instant::now() + Duration::from_secs(4),
-            presence: oxideterm_gpui_ui::motion::ExitPresence::visible(),
-        });
+            cx,
+        );
     }
 }

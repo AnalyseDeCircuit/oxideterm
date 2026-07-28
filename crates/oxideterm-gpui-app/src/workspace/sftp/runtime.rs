@@ -752,7 +752,7 @@ impl WorkspaceApp {
                     );
                 }
                 SftpWorkspaceEffect::TransferBatchCompleted(batch) => {
-                    self.show_sftp_transfer_batch_toast(batch);
+                    self.show_sftp_transfer_batch_toast(batch, cx);
                 }
                 SftpWorkspaceEffect::StartTransfer(launch) => {
                     self.spawn_sftp_transfer_launch_with_sender(launch, delivery.clone());
@@ -762,7 +762,7 @@ impl WorkspaceApp {
                     description,
                     variant,
                 } => {
-                    self.push_sftp_toast(title, description, variant);
+                    self.push_sftp_toast(title, description, variant, cx);
                 }
                 SftpWorkspaceEffect::ReloadLocalDirectory {
                     view_generation,

@@ -69,7 +69,7 @@ impl WorkspaceApp {
                 self.ai_entity
                     .update(cx, |ai, _cx| ai.finish_compaction(&conversation_id));
                 if !silent {
-                    self.push_ai_settings_toast(error, TerminalNoticeVariant::Error);
+                    self.push_ai_settings_toast(error, TerminalNoticeVariant::Error, cx);
                 }
                 return Err(resume_after);
             }
@@ -162,7 +162,7 @@ impl WorkspaceApp {
             Err(error) => {
                 self.ai_entity
                     .update(cx, |ai, _cx| ai.finish_compaction(&conversation_id));
-                self.push_ai_settings_toast(error, TerminalNoticeVariant::Error);
+                self.push_ai_settings_toast(error, TerminalNoticeVariant::Error, cx);
                 return;
             }
         };
@@ -238,6 +238,7 @@ impl WorkspaceApp {
                             this.push_ai_settings_toast(
                                 api_key_not_found,
                                 TerminalNoticeVariant::Error,
+                                cx,
                             );
                         }
                         this.resume_ai_chat_after_pre_send_compaction(resume_after, cx);
@@ -272,6 +273,7 @@ impl WorkspaceApp {
                         this.push_ai_settings_toast(
                             failed_to_get_key,
                             TerminalNoticeVariant::Error,
+                            cx,
                         );
                     }
                     this.resume_ai_chat_after_pre_send_compaction(resume_after, cx);

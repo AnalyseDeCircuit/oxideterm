@@ -287,6 +287,7 @@ impl WorkspaceApp {
             self.push_ai_settings_toast(
                 self.i18n.t("ai.sidebar.not_enabled_hint"),
                 TerminalNoticeVariant::Warning,
+                cx,
             );
             cx.notify();
             return false;

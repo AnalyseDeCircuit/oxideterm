@@ -867,6 +867,7 @@ impl WorkspaceApp {
                     .t("plugin.cloud_sync.toast.settings_saved_failed_title"),
                 Some(error.to_string()),
                 TerminalNoticeVariant::Error,
+                cx,
             );
             return false;
         }
@@ -884,6 +885,7 @@ impl WorkspaceApp {
                     .t("plugin.cloud_sync.toast.settings_saved_failed_title"),
                 Some(error.to_string()),
                 TerminalNoticeVariant::Error,
+                cx,
             );
             return false;
         } else {
@@ -900,6 +902,7 @@ impl WorkspaceApp {
                     self.i18n.t("plugin.cloud_sync.toast.settings_saved_title"),
                     None,
                     TerminalNoticeVariant::Success,
+                    cx,
                 );
             }
             self.reschedule_cloud_sync_auto_upload(cx);

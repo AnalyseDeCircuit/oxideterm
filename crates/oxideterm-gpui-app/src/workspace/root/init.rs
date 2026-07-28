@@ -40,6 +40,15 @@ impl WorkspaceApp {
         let plugin_registry = plugin_host::NativePluginRegistry::discover(settings_store.path());
         let local_shells = scan_shells();
         let tokens = tokens_from_settings(&settings);
+        let overlay_exit_duration = oxideterm_gpui_ui::motion::duration(
+            &tokens,
+            oxideterm_gpui_ui::motion::MotionDuration::Control,
+        );
+        let overlay = cx.new(|cx| WorkspaceOverlayEntity::new(overlay_exit_duration, cx));
+        let overlay_observation = cx.observe(&overlay, |_workspace, _overlay, cx| {
+            // Entity-owned timers and delivery repaint the mounted window portal.
+            cx.notify();
+        });
         let detected_graphics = detect_graphics(window);
         let render_profile_override = render_profile_from_env();
         let render_policy = compute_render_policy(
@@ -130,9 +139,7 @@ impl WorkspaceApp {
                     workspace.queue_workspace_tooltip(id, label, *x, *y, cx);
                 }
                 LauncherWorkspaceEvent::TooltipCleared { id } => {
-                    if workspace.clear_workspace_tooltip_state(id) {
-                        cx.notify();
-                    }
+                    workspace.clear_workspace_tooltip(id, cx);
                 }
             },
         );
@@ -150,12 +157,14 @@ impl WorkspaceApp {
                         workspace.i18n.t("fileManager.error"),
                         Some(error.clone()),
                         TerminalNoticeVariant::Error,
+                        cx,
                     ),
                     FileManagerWorkspaceEvent::OperationSucceeded => workspace
                         .push_file_manager_toast(
                             workspace.i18n.t("fileManager.operationSuccess"),
                             None,
                             TerminalNoticeVariant::Success,
+                            cx,
                         ),
                     FileManagerWorkspaceEvent::OpenEntry(entry) => {
                         workspace.open_file_manager_entry(entry.clone(), cx);
@@ -234,9 +243,7 @@ impl WorkspaceApp {
                         workspace.queue_workspace_tooltip(id, label, *x, *y, cx);
                     }
                     sftp::SftpWorkspaceEvent::TooltipCleared { id } => {
-                        if workspace.clear_workspace_tooltip_state(id) {
-                            cx.notify();
-                        }
+                        workspace.clear_workspace_tooltip(id, cx);
                     }
                     sftp::SftpWorkspaceEvent::PreviewSaveRequested {
                         path,
@@ -288,7 +295,6 @@ impl WorkspaceApp {
                 cx,
             )
         });
-        let terminal_notice_tx = terminal.read(cx).notice_sender();
         let terminal_subscription = cx.subscribe(
             &terminal,
             |workspace, _terminal, event: &WorkspaceTerminalEvent, cx| {
@@ -356,19 +362,19 @@ impl WorkspaceApp {
         });
         let host_tools_subscription = cx.subscribe(
             &host_tools,
-            |workspace, _host_tools, event: &HostToolsEvent, _cx| match event {
+            |workspace, _host_tools, event: &HostToolsEvent, cx| match event {
                 HostToolsEvent::ShowNotice(notice) => {
-                    workspace.push_host_tools_notice(notice.clone());
+                    workspace.push_host_tools_notice(notice.clone(), cx);
                 }
                 HostToolsEvent::ToolSelected(tool) => {
                     workspace.begin_user_segmented_control_transition(
                         selection_motion::HOST_TOOLS_SWITCHER_ID,
                         connection_monitor::host_tools_tab_index(*tool),
-                        _cx,
+                        cx,
                     );
                     workspace.clear_ime_selection();
                     workspace.ime_marked_text = None;
-                    _cx.notify();
+                    cx.notify();
                 }
             },
         );
@@ -725,17 +731,8 @@ impl WorkspaceApp {
             local_shell_launcher_selected_id: None,
             terminal,
             _terminal_subscription: terminal_subscription,
-            terminal_notice_tx,
-            workspace_toast_next_id: 1,
-            workspace_toasts: Vec::new(),
-            plugin_progress_toasts: HashMap::new(),
-            connection_trace_toasts: HashMap::new(),
-            zen_hint_expires_at: None,
-            terminal_font_size_hud: None,
-            terminal_font_size_hud_generation: 0,
-            workspace_tooltip: None,
-            workspace_tooltip_pending: None,
-            workspace_tooltip_generation: 0,
+            overlay,
+            _overlay_observation: overlay_observation,
         };
         workspace.ai.chat.overlay_window_bounds_subscription =
             Some(cx.observe_window_bounds(window, |this, window, cx| {
@@ -813,10 +810,14 @@ impl WorkspaceApp {
                 "failed to load bundled CJK terminal fallback; falling back to system fonts: {error}"
             );
         }
-        self.terminal_preferences_for_background_key(tab_background_key(kind))
+        self.terminal_preferences_for_background_key(tab_background_key(kind), cx)
     }
 
-    pub(crate) fn terminal_preferences_for_pane(&self, pane_id: PaneId) -> TerminalUiPreferences {
+    pub(crate) fn terminal_preferences_for_pane(
+        &self,
+        pane_id: PaneId,
+        cx: &App,
+    ) -> TerminalUiPreferences {
         let key = self
             .tabs
             .iter()
@@ -827,12 +828,13 @@ impl WorkspaceApp {
                     .then_some(tab_background_key(&tab.kind))
             })
             .unwrap_or("local_terminal");
-        self.terminal_preferences_for_background_key(key)
+        self.terminal_preferences_for_background_key(key, cx)
     }
 
     pub(in crate::workspace) fn terminal_preferences_for_background_key(
         &self,
         background_key: &str,
+        cx: &App,
     ) -> TerminalUiPreferences {
         let settings = self.settings_store.settings();
         let terminal = &settings.terminal;
@@ -1028,7 +1030,7 @@ impl WorkspaceApp {
                 disabled_description: self.i18n.t("terminal.trzsz.disabled_description"),
             },
             notice_sink: Some({
-                let tx = self.terminal_notice_tx.clone();
+                let tx = self.overlay.read(cx).notice_sender();
                 Arc::new(move |notice| {
                     let _ = tx.send(notice);
                 })
