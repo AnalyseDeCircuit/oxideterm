@@ -7,6 +7,10 @@ impl IdeSurface {
         backend_runtime: Arc<tokio::runtime::Runtime>,
         cx: &mut Context<Self>,
     ) -> Self {
+        // A surface owns an independent client scope. Its node/session cleanup
+        // must not release same-node consumers retained by AI tools or another
+        // IDE surface, while all scopes still share the NodeRouter transport.
+        let fs = fs.scoped_owner();
         Self {
             workspace: IdeWorkspace::new(),
             fs,
@@ -58,6 +62,14 @@ impl IdeSurface {
             agent_poll_generation: 0,
             agent_watch_generation: 0,
             watched_root_path: None,
+            agent_watch_task: None,
+            agent_watch_retry_task: None,
+            agent_watch_stop_task: None,
+            agent_watch_backend_abort: None,
+            agent_watch_stop_in_flight: false,
+            agent_watch_restart_requested: false,
+            agent_watch_stop_generation: 0,
+            agent_watch_stop_release_queue: None,
         }
     }
 
@@ -74,6 +86,9 @@ impl IdeSurface {
         self.tokens = tokens;
         self.runtime_settings = runtime_settings;
         self.fs.set_mode(runtime_settings.agent_mode);
+        if runtime_settings.agent_mode == NodeAgentMode::Disabled {
+            self.stop_agent_watch(cx);
+        }
         if runtime_settings.agent_mode != NodeAgentMode::Ask {
             self.agent_opt_in_open = false;
         }
@@ -135,8 +150,7 @@ impl IdeSurface {
             && previous_node_id != node_id
         {
             self.stop_agent_watch(cx);
-            self.fs
-                .release_ide_session_for_node(&previous_node_id);
+            self.release_ide_node_after_watch_stop(previous_node_id);
         } else if self.root_path.as_deref() != Some(root_path.as_str()) {
             self.stop_agent_watch(cx);
         }
@@ -215,6 +229,20 @@ impl IdeSurface {
         self.pending_reconnect_restore_node_id = None;
         self.pending_reconnect_restore_files_remaining = 0;
         if let Some(node_id) = self.node_id.take() {
+            self.release_ide_node_after_watch_stop(node_id);
+        }
+    }
+
+    fn release_ide_node_after_watch_stop(&mut self, node_id: String) {
+        if self.agent_watch_stop_in_flight {
+            // Keep the node consumer until watch/stop has used the existing
+            // agent session; releasing first would turn cleanup into a no-op.
+            if let Some(release_queue) = self.agent_watch_stop_release_queue.as_ref() {
+                release_queue.request_release(&self.fs, node_id);
+            } else {
+                self.fs.release_ide_session_for_node(&node_id);
+            }
+        } else {
             self.fs.release_ide_session_for_node(&node_id);
         }
     }
@@ -227,8 +255,8 @@ impl IdeSurface {
         self.pending_search_queries.clear();
         self.pending_reconnect_restore_node_id = None;
         self.pending_reconnect_restore_files_remaining = 0;
-        if let Some(node_id) = self.node_id.as_deref() {
-            self.fs.release_ide_session_for_node(node_id);
+        if let Some(node_id) = self.node_id.clone() {
+            self.release_ide_node_after_watch_stop(node_id);
         }
         if matches!(self.load_state, IdeLoadState::Ready) {
             self.load_state = IdeLoadState::Disconnected;
@@ -290,11 +318,20 @@ impl IdeSurface {
 
 impl Drop for IdeSurface {
     fn drop(&mut self) {
+        if let Some(abort_handle) = self.agent_watch_backend_abort.take() {
+            abort_handle.abort();
+        }
         // GPUI can drop an IDE surface during workspace teardown without a
         // `Context`. Release only this surface's node because the file-system
         // registry is shared with other IDE surfaces and AI consumers.
-        if let Some(node_id) = self.node_id.as_deref() {
-            self.fs.release_ide_session_for_node(node_id);
+        if let Some(node_id) = self.node_id.take() {
+            if let Some(release_queue) = self.agent_watch_stop_release_queue.as_ref() {
+                // The detached Tokio stop task owns the final remote cleanup
+                // and consumer release even when no GPUI update can run.
+                release_queue.request_release(&self.fs, node_id);
+            } else {
+                self.fs.release_ide_session_for_node(&node_id);
+            }
         }
     }
 }
@@ -330,6 +367,26 @@ mod lifecycle_tests {
         (node_id, handle)
     }
 
+    fn has_ide_consumer(handle: &SshConnectionHandle, node_id: &str) -> bool {
+        ide_consumer_count(handle, node_id) > 0
+    }
+
+    fn ide_consumer_count(handle: &SshConnectionHandle, node_id: &str) -> usize {
+        let session_prefix = format!("{node_id}:");
+        handle
+            .info()
+            .consumers
+            .iter()
+            .filter(|consumer| {
+                matches!(
+                    consumer,
+                    ConnectionConsumer::Ide(consumer_id)
+                        if consumer_id == node_id || consumer_id.starts_with(&session_prefix)
+                )
+            })
+            .count()
+    }
+
     #[gpui::test]
     fn releasing_one_surface_preserves_other_node_consumer(cx: &mut TestAppContext) {
         let registry = SshConnectionRegistry::default();
@@ -345,21 +402,6 @@ mod lifecycle_tests {
                 .build()
                 .expect("build IDE test runtime"),
         );
-
-        // Explicit deployment acquires each node-scoped IDE lease before the
-        // fake SSH transport rejects the agent probe.
-        backend_runtime.block_on(async {
-            let _ = fs.deploy_agent_for_node(first_node.0.clone()).await;
-            let _ = fs.deploy_agent_for_node(second_node.0.clone()).await;
-        });
-        assert!(first_handle
-            .info()
-            .consumers
-            .contains(&ConnectionConsumer::Ide(first_node.0.clone())));
-        assert!(second_handle
-            .info()
-            .consumers
-            .contains(&ConnectionConsumer::Ide(second_node.0.clone())));
 
         let first_surface = cx.new({
             let fs = fs.clone();
@@ -378,7 +420,7 @@ mod lifecycle_tests {
                 surface
             }
         });
-        let _second_surface = cx.new({
+        let second_surface = cx.new({
             let fs = fs.clone();
             let backend_runtime = backend_runtime.clone();
             let second_node_id = second_node.0.clone();
@@ -395,16 +437,148 @@ mod lifecycle_tests {
                 surface
             }
         });
+        let first_surface_fs = first_surface.read_with(cx, |surface, _cx| surface.fs.clone());
+        let second_surface_fs = second_surface.read_with(cx, |surface, _cx| surface.fs.clone());
+        // Each surface-owned scope acquires only its node lease before the fake
+        // SSH transport rejects the agent probe.
+        backend_runtime.block_on(async {
+            let _ = first_surface_fs
+                .deploy_agent_for_node(first_node.0.clone())
+                .await;
+            let _ = second_surface_fs
+                .deploy_agent_for_node(second_node.0.clone())
+                .await;
+        });
+        assert!(has_ide_consumer(&first_handle, &first_node.0));
+        assert!(has_ide_consumer(&second_handle, &second_node.0));
 
         first_surface.update(cx, |surface, cx| surface.release_remote_session(cx));
 
-        assert!(!first_handle
-            .info()
-            .consumers
-            .contains(&ConnectionConsumer::Ide(first_node.0)));
-        assert!(second_handle
-            .info()
-            .consumers
-            .contains(&ConnectionConsumer::Ide(second_node.0)));
+        assert!(!has_ide_consumer(&first_handle, &first_node.0));
+        assert!(has_ide_consumer(&second_handle, &second_node.0));
+    }
+
+    #[gpui::test]
+    fn stopping_agent_watch_cancels_tasks_and_orders_same_path_restart(
+        cx: &mut TestAppContext,
+    ) {
+        let registry = SshConnectionRegistry::default();
+        let router = NodeRouter::new(registry);
+        let fs = NodeAgentIdeFileSystem::new(router, NodeAgentMode::Disabled);
+        let backend_runtime = Arc::new(
+            tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .expect("build IDE test runtime"),
+        );
+        let surface = cx.new(move |cx| {
+            IdeSurface::new(
+                fs,
+                default_tokens(),
+                IdeLabels::default(),
+                IdeRuntimeSettings::default(),
+                backend_runtime,
+                cx,
+            )
+        });
+
+        surface.update(cx, |surface, cx| {
+            surface.agent_watch_task = Some(cx.spawn(async move |_weak, _cx| {
+                std::future::pending::<()>().await;
+            }));
+            surface.schedule_agent_watch_retry(cx);
+            surface.watched_root_path = Some("/srv/app".to_string());
+            surface.root_path = Some("/srv/app".to_string());
+            surface.node_id = Some("node-watch".to_string());
+            assert!(surface.agent_watch_task.is_some());
+            assert!(surface.agent_watch_retry_task.is_some());
+
+            surface.stop_agent_watch(cx);
+
+            assert!(surface.agent_watch_task.is_none());
+            assert!(surface.agent_watch_retry_task.is_none());
+            assert!(surface.watched_root_path.is_none());
+            assert!(surface.agent_watch_stop_task.is_some());
+            assert!(surface.agent_watch_stop_in_flight);
+            surface.release_ide_node_after_watch_stop("node-watch".to_string());
+            assert!(surface.agent_watch_stop_release_queue.is_some());
+
+            surface.start_agent_watch_if_ready(cx);
+
+            assert!(surface.agent_watch_restart_requested);
+            assert!(surface.agent_watch_task.is_none());
+        });
+    }
+
+    #[gpui::test]
+    fn releasing_surface_preserves_same_node_ai_owner(cx: &mut TestAppContext) {
+        let registry = SshConnectionRegistry::default();
+        let router = NodeRouter::new(registry.clone());
+        let shared_node_id = "surface-ai-shared";
+        let (_node_id, handle) =
+            bind_active_node(&registry, &router, shared_node_id, "shared-host");
+        let ai_fs = NodeAgentIdeFileSystem::new(router, NodeAgentMode::Disabled);
+        let backend_runtime = Arc::new(
+            tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .expect("build IDE test runtime"),
+        );
+        let surface = cx.new({
+            let ai_fs = ai_fs.clone();
+            let backend_runtime = backend_runtime.clone();
+            let shared_node_id = shared_node_id.to_string();
+            move |cx| {
+                let mut surface = IdeSurface::new(
+                    ai_fs,
+                    default_tokens(),
+                    IdeLabels::default(),
+                    IdeRuntimeSettings::default(),
+                    backend_runtime,
+                    cx,
+                );
+                surface.node_id = Some(shared_node_id);
+                surface
+            }
+        });
+        let surface_fs = surface.read_with(cx, |surface, _cx| surface.fs.clone());
+
+        backend_runtime.block_on(async {
+            let _ = ai_fs.deploy_agent_for_node(shared_node_id).await;
+            let _ = surface_fs.deploy_agent_for_node(shared_node_id).await;
+        });
+        assert_eq!(ide_consumer_count(&handle, shared_node_id), 2);
+
+        surface.update(cx, |surface, cx| surface.release_remote_session(cx));
+
+        assert_eq!(ide_consumer_count(&handle, shared_node_id), 1);
+        ai_fs.release_ide_session_for_node(shared_node_id);
+        assert_eq!(ide_consumer_count(&handle, shared_node_id), 0);
+    }
+
+    #[test]
+    fn background_stop_completion_releases_owner_without_gpui_update() {
+        let registry = SshConnectionRegistry::default();
+        let router = NodeRouter::new(registry.clone());
+        let node_id = "surface-drop-during-stop";
+        let (_node_id, handle) = bind_active_node(&registry, &router, node_id, "drop-host");
+        let fs = NodeAgentIdeFileSystem::new(router, NodeAgentMode::Disabled);
+        let backend_runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("build IDE test runtime");
+        backend_runtime.block_on(async {
+            let _ = fs.deploy_agent_for_node(node_id).await;
+        });
+        assert_eq!(ide_consumer_count(&handle, node_id), 1);
+
+        let release_queue = IdeWatchStopReleaseQueue::default();
+        release_queue.request_release(&fs, node_id.to_string());
+        assert_eq!(ide_consumer_count(&handle, node_id), 1);
+
+        // This is the backend completion path used when the GPUI weak update
+        // cannot run because the surface was released during watch/stop.
+        release_queue.finish_stop(&fs);
+        assert_eq!(ide_consumer_count(&handle, node_id), 0);
     }
 }

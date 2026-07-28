@@ -371,6 +371,11 @@ impl IdeSurface {
     }
 
     fn start_agent_watch_if_ready(&mut self, cx: &mut Context<Self>) {
+        if self.agent_watch_stop_in_flight {
+            // Re-evaluate readiness after the retained stop operation finishes.
+            self.agent_watch_restart_requested = true;
+            return;
+        }
         if !matches!(
             self.fs.status_for_node(self.node_id.as_deref()),
             AgentStatus::Ready { .. }
@@ -388,20 +393,24 @@ impl IdeSurface {
         if self.watched_root_path.as_deref() == Some(root_path.as_str()) {
             return;
         }
-
-        self.stop_agent_watch(cx);
+        if self.watched_root_path.is_some() {
+            self.stop_agent_watch_with_restart(true, cx);
+            return;
+        }
         self.agent_watch_generation = self.agent_watch_generation.wrapping_add(1);
         let generation = self.agent_watch_generation;
         self.watched_root_path = Some(root_path.clone());
         let fs = self.fs.clone();
         let backend_runtime = self.backend_runtime.clone();
-        cx.spawn(async move |weak, cx| {
-            let watch = await_ide_backend(backend_runtime.spawn({
-                let node_id = node_id.clone();
-                let root_path = root_path.clone();
-                async move { fs.watch_directory(node_id, root_path, Vec::new()).await }
-            }))
-            .await;
+        let watch_backend_task = backend_runtime.spawn({
+            let node_id = node_id.clone();
+            let root_path = root_path.clone();
+            async move { fs.watch_directory(node_id, root_path, Vec::new()).await }
+        });
+        self.agent_watch_backend_abort = Some(watch_backend_task.abort_handle());
+        self.agent_watch_task = Some(cx.spawn(async move |weak, cx| {
+            let watch = await_ide_backend(watch_backend_task)
+                .await;
 
             match watch {
                 Ok(Some(mut subscription)) => {
@@ -429,16 +438,16 @@ impl IdeSurface {
                 if this.agent_watch_generation == generation
                     && this.watched_root_path.as_deref() == Some(root_path.as_str())
                 {
+                    this.agent_watch_backend_abort = None;
                     this.schedule_agent_watch_retry(cx);
                 }
             });
-        })
-        .detach();
+        }));
     }
 
     fn schedule_agent_watch_retry(&mut self, cx: &mut Context<Self>) {
         let generation = self.agent_watch_generation;
-        cx.spawn(async move |weak, cx| {
+        self.agent_watch_retry_task = Some(cx.spawn(async move |weak, cx| {
             cx.background_executor()
                 .timer(Duration::from_secs(IDE_AGENT_WATCH_RETRY_SECS))
                 .await;
@@ -448,12 +457,30 @@ impl IdeSurface {
                     this.start_agent_watch_if_ready(cx);
                 }
             });
-        })
-        .detach();
+        }));
     }
 
     fn stop_agent_watch(&mut self, cx: &mut Context<Self>) {
+        self.stop_agent_watch_with_restart(false, cx);
+    }
+
+    fn stop_agent_watch_with_restart(
+        &mut self,
+        restart_after_stop: bool,
+        cx: &mut Context<Self>,
+    ) {
         self.agent_watch_generation = self.agent_watch_generation.wrapping_add(1);
+        self.agent_watch_task = None;
+        self.agent_watch_retry_task = None;
+        if let Some(abort_handle) = self.agent_watch_backend_abort.take() {
+            // The Tokio acquisition can otherwise outlive the cancelled GPUI
+            // listener and register a consumer after the surface is released.
+            abort_handle.abort();
+        }
+        if self.agent_watch_stop_in_flight {
+            self.agent_watch_restart_requested = restart_after_stop;
+            return;
+        }
         let Some(root_path) = self.watched_root_path.take() else {
             return;
         };
@@ -462,12 +489,32 @@ impl IdeSurface {
         };
         let fs = self.fs.clone();
         let backend_runtime = self.backend_runtime.clone();
-        cx.spawn(async move |_weak, _cx| {
+        let release_queue = Arc::new(IdeWatchStopReleaseQueue::default());
+        self.agent_watch_stop_release_queue = Some(release_queue.clone());
+        self.agent_watch_stop_generation = self.agent_watch_stop_generation.wrapping_add(1);
+        let stop_generation = self.agent_watch_stop_generation;
+        self.agent_watch_stop_in_flight = true;
+        self.agent_watch_restart_requested = restart_after_stop;
+        self.agent_watch_stop_task = Some(cx.spawn(async move |weak, cx| {
             let _ = backend_runtime
-                .spawn(async move { fs.stop_watch_directory(node_id, root_path).await })
+                .spawn(async move {
+                    let _ = fs.stop_watch_directory(node_id, root_path).await;
+                    // Resource release belongs to this backend completion path,
+                    // not the optional GPUI weak update below.
+                    release_queue.finish_stop(&fs);
+                })
                 .await;
-        })
-        .detach();
+            let _ = weak.update(cx, |this, cx| {
+                if this.agent_watch_stop_generation != stop_generation {
+                    return;
+                }
+                this.agent_watch_stop_in_flight = false;
+                this.agent_watch_stop_release_queue = None;
+                if std::mem::take(&mut this.agent_watch_restart_requested) {
+                    this.start_agent_watch_if_ready(cx);
+                }
+            });
+        }));
     }
 
     fn open_project_search(&mut self, window: &mut Window, cx: &mut Context<Self>) {

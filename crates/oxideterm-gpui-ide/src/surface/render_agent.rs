@@ -711,6 +711,9 @@ impl IdeSurface {
         if mode == NodeAgentMode::Enabled {
             self.start_deploy_agent(cx);
         } else {
+            if mode == NodeAgentMode::Disabled {
+                self.stop_agent_watch(cx);
+            }
             self.refresh_agent_status(cx);
         }
         cx.notify();
