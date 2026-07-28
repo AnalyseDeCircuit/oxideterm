@@ -267,9 +267,9 @@ impl WorkspaceApp {
                 for theme in themes {
                     let theme_id = theme.id.to_string();
                     let selected = self
-                        .settings_page
-                        .theme_editor
-                        .as_ref()
+                        .settings_workspace
+                        .read(cx)
+                        .theme_editor()
                         .is_some_and(|editor| editor.duplicate_theme == theme_id);
                     popup = popup.child(select_option_action(
                         select_option(&self.tokens, theme_display_name(theme.id), selected),
@@ -277,17 +277,10 @@ impl WorkspaceApp {
                         false,
                         cx.listener(move |this, _event, _window, cx| {
                             this.close_settings_select();
-                            if let Some(editor) = this.settings_page.theme_editor.as_mut() {
-                                let theme = theme_by_id(&theme_id);
-                                editor.duplicate_theme = theme_id.clone();
-                                editor.duplicate_theme_touched = true;
-                                editor.terminal_colors = terminal_theme_to_colors(theme.terminal);
-                                editor.ui_colors = app_ui_colors_to_colors(
-                                    derive_ui_colors_from_terminal(theme.terminal),
-                                );
-                            }
+                            this.settings_workspace.update(cx, |settings, cx| {
+                                settings.duplicate_theme_editor_from(&theme_id, cx);
+                            });
                             cx.stop_propagation();
-                            cx.notify();
                         }),
                     ));
                 }

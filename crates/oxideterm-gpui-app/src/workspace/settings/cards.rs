@@ -1285,8 +1285,14 @@ impl WorkspaceApp {
         if let Some(value) = self.ai_entity.read(cx).settings_input_value(input) {
             return value.to_owned();
         }
-        if let Some(value) = self.settings_page.page_input_value(input) {
-            return value;
+        if let Some(value) = self
+            .settings_workspace
+            .read(cx)
+            .settings_entity_input_value(input)
+        {
+            // This copy is only made at an explicit focus/action boundary;
+            // render paths borrow the Entity-owned theme draft directly.
+            return value.to_owned();
         }
         if let Some(value) =
             cloud_sync_form_input_value_ref(&self.cloud_sync.read(cx).view.form, input)
@@ -1375,13 +1381,6 @@ impl WorkspaceApp {
         if ai_state::AiWorkspaceEntity::owns_settings_input(input) {
             // Entity-owned inputs are updated directly by the IME adapter and
             // must not be copied into the legacy settings page model.
-            cx.notify();
-            return;
-        }
-        if self
-            .settings_page
-            .apply_page_input_draft(input, &self.settings_input_draft)
-        {
             cx.notify();
             return;
         }

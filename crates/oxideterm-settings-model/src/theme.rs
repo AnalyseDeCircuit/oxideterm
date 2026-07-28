@@ -257,11 +257,19 @@ pub fn save_theme_editor_to_settings(
     settings: &mut PersistedSettings,
     editor: ThemeEditorState,
 ) -> Option<String> {
+    save_theme_editor_snapshot_to_settings(settings, &editor)
+}
+
+/// Persists an immutable editor snapshot without requiring a deep draft clone.
+pub fn save_theme_editor_snapshot_to_settings(
+    settings: &mut PersistedSettings,
+    editor: &ThemeEditorState,
+) -> Option<String> {
     let name = editor.name.trim().to_string();
     if name.is_empty() {
         return None;
     }
-    let theme_id = editor.edit_theme_id.unwrap_or_else(|| {
+    let theme_id = editor.edit_theme_id.clone().unwrap_or_else(|| {
         format!(
             "{}{}",
             CUSTOM_THEME_PREFIX,
@@ -796,6 +804,18 @@ mod tests {
                 .custom_themes
                 .contains_key(&settings.terminal.theme)
         );
+    }
+
+    #[test]
+    fn saving_borrowed_theme_editor_snapshot_keeps_the_draft_available() {
+        let mut settings = PersistedSettings::default();
+        let editor = theme_editor_from_settings(&settings, None, "Borrowed".to_string());
+
+        let saved_name = save_theme_editor_snapshot_to_settings(&mut settings, &editor);
+
+        assert_eq!(saved_name.as_deref(), Some("Borrowed"));
+        assert_eq!(editor.name, "Borrowed");
+        assert!(settings.terminal.theme.starts_with(CUSTOM_THEME_PREFIX));
     }
 
     #[test]

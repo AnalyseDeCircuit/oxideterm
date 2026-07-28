@@ -12,6 +12,11 @@ use oxideterm_connections::{
 };
 use oxideterm_gpui_settings_view::{SettingsInput, SettingsKeybindingScopeFilter};
 use oxideterm_gpui_ui::confirm::ConfirmDialogAction;
+use oxideterm_settings_model::{
+    ThemeEditorSection, ThemeEditorState, app_ui_colors_to_colors, editor_terminal_theme,
+    terminal_theme_to_colors,
+};
+use oxideterm_theme::{derive_ui_colors_from_terminal, theme_by_id};
 use zeroize::Zeroizing;
 
 use crate::workspace::browser_behavior;
@@ -227,6 +232,19 @@ pub(in crate::workspace) enum ThemeImportResult {
     Failed(String),
 }
 
+/// Moves a completed theme editor action into the root persistence adapter.
+pub(in crate::workspace) enum ThemeEditorOperationResult {
+    Save(Arc<ThemeEditorState>),
+    Delete(Arc<ThemeEditorState>),
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ThemeEditorExitAction {
+    Cancel,
+    Save,
+    Delete,
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(in crate::workspace) enum KeybindingRecordingFooterAction {
     Confirm,
@@ -282,6 +300,15 @@ fn background_gallery_strings(settings_path: &Path) -> anyhow::Result<Vec<String
         .into_iter()
         .map(|path| path.to_string_lossy().into_owned())
         .collect())
+}
+
+fn is_theme_editor_input(input: SettingsInput) -> bool {
+    matches!(
+        input,
+        SettingsInput::CustomThemeName
+            | SettingsInput::CustomThemeTerminalColor(_)
+            | SettingsInput::CustomThemeUiColor(_)
+    )
 }
 
 /// Owns settings work that must complete independently from root rendering.
@@ -356,6 +383,11 @@ pub(in crate::workspace) struct SettingsWorkspaceEntity {
     background_gallery_results: VecDeque<BackgroundGalleryOperationResult>,
     theme_import_task: Option<Task<()>>,
     theme_import_results: VecDeque<ThemeImportResult>,
+    theme_editor: Option<Arc<ThemeEditorState>>,
+    theme_editor_presence: oxideterm_gpui_ui::motion::ExitPresence,
+    theme_editor_exit_action: Option<ThemeEditorExitAction>,
+    theme_editor_exit_task: Option<Task<()>>,
+    theme_editor_results: VecDeque<ThemeEditorOperationResult>,
     keybinding_scope_filter: SettingsKeybindingScopeFilter,
     previous_keybinding_scope_filter: SettingsKeybindingScopeFilter,
     keybinding_search_query: String,
@@ -411,6 +443,7 @@ pub(in crate::workspace) enum SettingsWorkspaceEvent {
     BackgroundBlurCommitReady(i64),
     BackgroundGalleryOperationReady,
     ThemeImportReady,
+    ThemeEditorOperationReady,
     KeybindingFileOperationReady,
     PortablePasswordChangeFinished {
         success: bool,
@@ -496,6 +529,11 @@ impl SettingsWorkspaceEntity {
             background_gallery_results: VecDeque::new(),
             theme_import_task: None,
             theme_import_results: VecDeque::new(),
+            theme_editor: None,
+            theme_editor_presence: oxideterm_gpui_ui::motion::ExitPresence::visible(),
+            theme_editor_exit_action: None,
+            theme_editor_exit_task: None,
+            theme_editor_results: VecDeque::new(),
             keybinding_scope_filter: SettingsKeybindingScopeFilter::All,
             previous_keybinding_scope_filter: SettingsKeybindingScopeFilter::All,
             keybinding_search_query: String::new(),
@@ -1367,6 +1405,201 @@ impl SettingsWorkspaceEntity {
         std::mem::take(&mut self.theme_import_results)
     }
 
+    pub(in crate::workspace) fn theme_editor(&self) -> Option<&ThemeEditorState> {
+        self.theme_editor.as_deref()
+    }
+
+    /// Shares one immutable render snapshot without copying the color arrays.
+    pub(in crate::workspace) fn theme_editor_snapshot(&self) -> Option<Arc<ThemeEditorState>> {
+        self.theme_editor.as_ref().map(Arc::clone)
+    }
+
+    pub(in crate::workspace) fn theme_editor_phase(&self) -> oxideterm_gpui_ui::motion::ExitPhase {
+        self.theme_editor_presence.phase()
+    }
+
+    pub(in crate::workspace) fn open_theme_editor(
+        &mut self,
+        editor: ThemeEditorState,
+        cx: &mut Context<Self>,
+    ) {
+        // Replacing the retained task cancels a stale exit before installing
+        // the new draft. The presence generation is an additional stale guard.
+        self.theme_editor_exit_task = None;
+        self.theme_editor_exit_action = None;
+        self.theme_editor = Some(Arc::new(editor));
+        self.theme_editor_presence.reopen();
+        // A modal editor supersedes any settings input that was focused behind it.
+        self.settings_focused_input = None;
+        cx.notify();
+    }
+
+    pub(in crate::workspace) fn select_theme_editor_section(
+        &mut self,
+        section: ThemeEditorSection,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let Some(editor) = self.theme_editor.as_mut() else {
+            return false;
+        };
+        let editor = Arc::make_mut(editor);
+        if editor.active_section == section {
+            return false;
+        }
+        editor.active_section = section;
+        cx.notify();
+        true
+    }
+
+    pub(in crate::workspace) fn duplicate_theme_editor_from(
+        &mut self,
+        theme_id: &str,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let Some(editor) = self.theme_editor.as_mut() else {
+            return false;
+        };
+        let editor = Arc::make_mut(editor);
+        let theme = theme_by_id(theme_id);
+        editor.duplicate_theme.clear();
+        editor.duplicate_theme.push_str(theme.id);
+        editor.duplicate_theme_touched = true;
+        editor.terminal_colors = terminal_theme_to_colors(theme.terminal);
+        editor.ui_colors = app_ui_colors_to_colors(derive_ui_colors_from_terminal(theme.terminal));
+        cx.notify();
+        true
+    }
+
+    pub(in crate::workspace) fn derive_theme_editor_ui_colors(
+        &mut self,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let Some(editor) = self.theme_editor.as_mut() else {
+            return false;
+        };
+        let editor = Arc::make_mut(editor);
+        let terminal = editor_terminal_theme(&editor.terminal_colors);
+        editor.ui_colors = app_ui_colors_to_colors(derive_ui_colors_from_terminal(terminal));
+        cx.notify();
+        true
+    }
+
+    pub(in crate::workspace) fn cancel_theme_editor(
+        &mut self,
+        delay: Duration,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        self.begin_theme_editor_exit(ThemeEditorExitAction::Cancel, delay, cx)
+    }
+
+    pub(in crate::workspace) fn save_theme_editor(
+        &mut self,
+        delay: Duration,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if self
+            .theme_editor
+            .as_ref()
+            .is_none_or(|editor| editor.name.trim().is_empty())
+        {
+            return false;
+        }
+        self.begin_theme_editor_exit(ThemeEditorExitAction::Save, delay, cx)
+    }
+
+    pub(in crate::workspace) fn delete_theme_editor(
+        &mut self,
+        delay: Duration,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if self
+            .theme_editor
+            .as_ref()
+            .and_then(|editor| editor.edit_theme_id.as_ref())
+            .is_none()
+        {
+            return false;
+        }
+        self.begin_theme_editor_exit(ThemeEditorExitAction::Delete, delay, cx)
+    }
+
+    fn begin_theme_editor_exit(
+        &mut self,
+        action: ThemeEditorExitAction,
+        delay: Duration,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if self.theme_editor.is_none() {
+            return false;
+        }
+        let Some(generation) = self.theme_editor_presence.begin_exit() else {
+            return false;
+        };
+        self.theme_editor_exit_action = Some(action);
+        self.theme_editor_exit_task = None;
+        if self
+            .settings_focused_input
+            .is_some_and(is_theme_editor_input)
+        {
+            self.settings_focused_input = None;
+        }
+        if delay.is_zero() {
+            self.finish_theme_editor_exit(generation, cx);
+            return true;
+        }
+        // The settings Entity retains the exit task so reopen and release
+        // cancel it without a WeakEntity<WorkspaceApp> completion path.
+        self.theme_editor_exit_task = Some(cx.spawn(async move |settings, cx| {
+            Timer::after(delay).await;
+            let _ = settings.update(cx, |settings, cx| {
+                settings.finish_theme_editor_exit(generation, cx);
+            });
+        }));
+        cx.notify();
+        true
+    }
+
+    fn finish_theme_editor_exit(&mut self, generation: u64, cx: &mut Context<Self>) {
+        if !self.theme_editor_presence.finish_exit(generation) {
+            return;
+        }
+        self.theme_editor_exit_task = None;
+        let action = self
+            .theme_editor_exit_action
+            .take()
+            .unwrap_or(ThemeEditorExitAction::Cancel);
+        let editor = self.theme_editor.take();
+        if self
+            .settings_focused_input
+            .is_some_and(is_theme_editor_input)
+        {
+            self.settings_focused_input = None;
+        }
+        let result = match (action, editor) {
+            (ThemeEditorExitAction::Save, Some(editor)) => {
+                Some(ThemeEditorOperationResult::Save(editor))
+            }
+            (ThemeEditorExitAction::Delete, Some(editor)) if editor.edit_theme_id.is_some() => {
+                Some(ThemeEditorOperationResult::Delete(editor))
+            }
+            (ThemeEditorExitAction::Cancel, _)
+            | (ThemeEditorExitAction::Delete, Some(_))
+            | (_, None) => None,
+        };
+        self.theme_editor_presence.reopen();
+        if let Some(result) = result {
+            self.theme_editor_results.push_back(result);
+            cx.emit(SettingsWorkspaceEvent::ThemeEditorOperationReady);
+        }
+        cx.notify();
+    }
+
+    pub(in crate::workspace) fn take_theme_editor_results(
+        &mut self,
+    ) -> VecDeque<ThemeEditorOperationResult> {
+        std::mem::take(&mut self.theme_editor_results)
+    }
+
     pub(in crate::workspace) fn start_keybinding_export(
         &mut self,
         selection: impl std::future::Future<Output = Option<PathBuf>> + 'static,
@@ -1578,6 +1811,20 @@ impl SettingsWorkspaceEntity {
         input: SettingsInput,
     ) -> Option<&str> {
         match input {
+            SettingsInput::CustomThemeName => self
+                .theme_editor
+                .as_deref()
+                .map(|editor| editor.name.as_str()),
+            SettingsInput::CustomThemeTerminalColor(index) => self
+                .theme_editor
+                .as_deref()
+                .and_then(|editor| editor.terminal_colors.get(index))
+                .map(String::as_str),
+            SettingsInput::CustomThemeUiColor(index) => self
+                .theme_editor
+                .as_deref()
+                .and_then(|editor| editor.ui_colors.get(index))
+                .map(String::as_str),
             SettingsInput::KeybindingSearch => Some(&self.keybinding_search_query),
             SettingsInput::PortableCurrentPassword => Some(&self.portable_current_password),
             SettingsInput::PortableNewPassword => Some(&self.portable_new_password),
@@ -1612,6 +1859,9 @@ impl SettingsWorkspaceEntity {
     ) -> bool {
         let portable_open = self.portable_dialog == Some(PortableSettingsDialog::ChangePassword);
         let can_focus = match input {
+            SettingsInput::CustomThemeName
+            | SettingsInput::CustomThemeTerminalColor(_)
+            | SettingsInput::CustomThemeUiColor(_) => self.theme_editor.is_some(),
             SettingsInput::KeybindingSearch => true,
             SettingsInput::PortableCurrentPassword
             | SettingsInput::PortableNewPassword
@@ -1677,6 +1927,17 @@ impl SettingsWorkspaceEntity {
             return false;
         };
         oxideterm_editor_core::utf16::replace_utf16(value, replacement_range, text);
+        if matches!(
+            input,
+            SettingsInput::CustomThemeTerminalColor(_) | SettingsInput::CustomThemeUiColor(_)
+        ) {
+            // Preserve the legacy color-editor contract: partial values remain
+            // valid while typing, but surrounding whitespace is discarded.
+            let trimmed = value.trim();
+            if trimmed.len() != value.len() {
+                *value = trimmed.to_string();
+            }
+        }
         self.clear_settings_entity_input_error(input);
         cx.notify();
         true
@@ -1725,6 +1986,21 @@ impl SettingsWorkspaceEntity {
 
     fn settings_entity_input_mut(&mut self, input: SettingsInput) -> Option<&mut String> {
         match input {
+            SettingsInput::CustomThemeName => self
+                .theme_editor
+                .as_mut()
+                .map(Arc::make_mut)
+                .map(|editor| &mut editor.name),
+            SettingsInput::CustomThemeTerminalColor(index) => self
+                .theme_editor
+                .as_mut()
+                .map(Arc::make_mut)
+                .and_then(|editor| editor.terminal_colors.get_mut(index)),
+            SettingsInput::CustomThemeUiColor(index) => self
+                .theme_editor
+                .as_mut()
+                .map(Arc::make_mut)
+                .and_then(|editor| editor.ui_colors.get_mut(index)),
             SettingsInput::KeybindingSearch => Some(&mut self.keybinding_search_query),
             SettingsInput::PortableCurrentPassword => Some(&mut self.portable_current_password),
             SettingsInput::PortableNewPassword => Some(&mut self.portable_new_password),
@@ -1781,11 +2057,14 @@ mod tests {
     use gpui::{AppContext, TestAppContext};
     use oxideterm_gpui_settings_view::{SettingsInput, SettingsKeybindingScopeFilter};
     use oxideterm_gpui_ui::confirm::ConfirmDialogAction;
+    use oxideterm_settings::PersistedSettings;
+    use oxideterm_settings_model::{ThemeEditorSection, theme_editor_from_settings};
 
     use super::{
         BackgroundGalleryOperationResult, DataDirectoryConfirm, ExternalStoreWatch,
         KeybindingFileOperationResult, KeybindingRecordingFooterAction,
         KeybindingResetConfirmKeyAction, LaunchAtLoginError, SettingsWorkspaceEntity,
+        ThemeEditorOperationResult,
     };
 
     struct DropSignal(Arc<AtomicBool>);
@@ -2324,6 +2603,125 @@ mod tests {
         entity.update(cx, |entity, _cx| {
             assert!(entity.theme_import_task.is_none());
             assert!(entity.take_theme_import_results().is_empty());
+        });
+    }
+
+    #[gpui::test]
+    fn theme_editor_state_input_and_save_handoff_are_entity_owned(cx: &mut TestAppContext) {
+        let entity = cx.new(SettingsWorkspaceEntity::new);
+        entity.update(cx, |entity, cx| {
+            entity.open_theme_editor(
+                theme_editor_from_settings(
+                    &PersistedSettings::default(),
+                    None,
+                    "New theme".to_string(),
+                ),
+                cx,
+            );
+            assert_eq!(
+                entity.settings_entity_input_value(SettingsInput::CustomThemeName),
+                Some("New theme")
+            );
+            assert!(entity.focus_settings_entity_input(SettingsInput::CustomThemeName, cx));
+            let name_utf16_len = "New theme".encode_utf16().count();
+            assert!(entity.replace_settings_entity_input(
+                SettingsInput::CustomThemeName,
+                Some(0..name_utf16_len),
+                "Owned theme",
+                cx,
+            ));
+            assert!(entity.select_theme_editor_section(ThemeEditorSection::Ui, cx));
+            assert!(entity.duplicate_theme_editor_from("oxide", cx));
+            assert!(entity.derive_theme_editor_ui_colors(cx));
+
+            assert!(
+                entity.focus_settings_entity_input(SettingsInput::CustomThemeTerminalColor(0), cx,)
+            );
+            let color_utf16_len = entity
+                .settings_entity_input_value(SettingsInput::CustomThemeTerminalColor(0))
+                .expect("terminal color")
+                .encode_utf16()
+                .count();
+            assert!(entity.replace_settings_entity_input(
+                SettingsInput::CustomThemeTerminalColor(0),
+                Some(0..color_utf16_len),
+                "  #abcdef  ",
+                cx,
+            ));
+            assert_eq!(
+                entity.settings_entity_input_value(SettingsInput::CustomThemeTerminalColor(0)),
+                Some("#abcdef")
+            );
+
+            let render_snapshot = entity.theme_editor_snapshot().expect("render snapshot");
+            assert!(entity.save_theme_editor(Duration::ZERO, cx));
+            assert!(entity.theme_editor().is_none());
+            assert!(entity.settings_entity_focused_input().is_none());
+            let Some(ThemeEditorOperationResult::Save(editor)) =
+                entity.take_theme_editor_results().pop_front()
+            else {
+                panic!("expected an owned save result");
+            };
+            assert!(Arc::ptr_eq(&render_snapshot, &editor));
+            assert_eq!(editor.name, "Owned theme");
+            assert_eq!(editor.active_section, ThemeEditorSection::Ui);
+            assert!(entity.take_theme_editor_results().is_empty());
+
+            let mut editor = theme_editor_from_settings(
+                &PersistedSettings::default(),
+                None,
+                "Delete theme".to_string(),
+            );
+            editor.edit_theme_id = Some("custom:delete-theme".to_string());
+            entity.open_theme_editor(editor, cx);
+            let render_snapshot = entity.theme_editor_snapshot().expect("render snapshot");
+            assert!(entity.delete_theme_editor(Duration::ZERO, cx));
+            let Some(ThemeEditorOperationResult::Delete(editor)) =
+                entity.take_theme_editor_results().pop_front()
+            else {
+                panic!("expected an owned delete result");
+            };
+            assert!(Arc::ptr_eq(&render_snapshot, &editor));
+            assert_eq!(editor.edit_theme_id.as_deref(), Some("custom:delete-theme"));
+        });
+    }
+
+    #[gpui::test]
+    fn theme_editor_reopen_cancels_stale_retained_exit(cx: &mut TestAppContext) {
+        let entity = cx.new(SettingsWorkspaceEntity::new);
+        entity.update(cx, |entity, cx| {
+            entity.open_theme_editor(
+                theme_editor_from_settings(
+                    &PersistedSettings::default(),
+                    None,
+                    "First".to_string(),
+                ),
+                cx,
+            );
+            assert!(entity.cancel_theme_editor(Duration::from_secs(60), cx));
+            assert!(entity.theme_editor_exit_task.is_some());
+            assert_eq!(
+                entity.theme_editor_phase(),
+                oxideterm_gpui_ui::motion::ExitPhase::Exiting
+            );
+
+            entity.open_theme_editor(
+                theme_editor_from_settings(
+                    &PersistedSettings::default(),
+                    None,
+                    "Second".to_string(),
+                ),
+                cx,
+            );
+            assert!(entity.theme_editor_exit_task.is_none());
+            assert_eq!(
+                entity.theme_editor_phase(),
+                oxideterm_gpui_ui::motion::ExitPhase::Visible
+            );
+            assert_eq!(
+                entity.theme_editor().map(|editor| editor.name.as_str()),
+                Some("Second")
+            );
         });
     }
 }

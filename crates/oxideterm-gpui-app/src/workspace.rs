@@ -235,7 +235,7 @@ use oxideterm_terminal::{
 };
 use oxideterm_theme::{
     AppUiColors, TerminalTheme, ThemeTokens, UiDensityProfile, UiMotionProfile, UiRadii,
-    derive_ui_colors_from_terminal, theme_by_id,
+    theme_by_id,
 };
 use oxideterm_workspace::{
     ActiveSessionNode, ActiveSessionReadiness, ActiveSessionStatus, MAX_PANES_PER_TAB, PaneId,
@@ -711,7 +711,6 @@ pub(crate) struct WorkspaceApp {
     _settings_workspace_subscription: Subscription,
     settings_navigation_draft: Option<SettingsNavigationLayout>,
     segmented_control_user_motion: selection_motion::UserSegmentedControlMotionState,
-    theme_editor_presence: oxideterm_gpui_ui::motion::ExitPresence,
     help_legal_notice_presence: oxideterm_gpui_ui::motion::ExitPresence,
     // Prompt and memory documents are edited outside the virtual settings list.
     ai_text_editor_dialog: Option<settings::AiTextEditorDialog>,

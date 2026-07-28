@@ -23,18 +23,17 @@ use oxideterm_settings_model::{
     ai_model_context_window_row as ai_model_context_window_row_model, ai_provider_card_signature,
     ai_provider_model_chip_rows, ai_provider_model_row_signature, ai_provider_views,
     ai_tool_auto_approve_total_count, ai_tool_auto_approved_count, ai_tool_policy_groups,
-    ai_update_provider, app_ui_colors_to_colors, apply_cloud_sync_form_input_owned,
-    apply_persisted_settings_input_draft, cloud_sync_form_input_value_ref, current_time_millis,
-    custom_theme_display_name, delete_custom_theme_from_settings, editor_terminal_theme,
-    editor_ui_colors, is_custom_theme_id, parse_color_hex, persisted_settings_input_value,
-    plugin_setting_draft_to_value, plugin_setting_input_value, reconnect_attempt_label,
-    reconnect_base_delay_options, reconnect_delay_label, reconnect_max_attempt_options,
-    reconnect_max_delay_options, save_theme_editor_to_settings, set_ai_user_context_window,
+    ai_update_provider, apply_cloud_sync_form_input_owned, apply_persisted_settings_input_draft,
+    cloud_sync_form_input_value_ref, current_time_millis, custom_theme_display_name,
+    delete_custom_theme_from_settings, editor_terminal_theme, editor_ui_colors, is_custom_theme_id,
+    parse_color_hex, persisted_settings_input_value, plugin_setting_draft_to_value,
+    plugin_setting_input_value, reconnect_attempt_label, reconnect_base_delay_options,
+    reconnect_delay_label, reconnect_max_attempt_options, reconnect_max_delay_options,
+    save_theme_editor_snapshot_to_settings, set_ai_user_context_window,
     settings_multiline_line_ranges, settings_multiline_line_selection,
     settings_section_list_identity as settings_model_section_list_identity,
     settings_section_list_item_count as settings_model_section_list_item_count,
-    take_cloud_sync_form_input_value, terminal_theme_to_colors, theme_editor_from_settings,
-    toggle_string_set,
+    take_cloud_sync_form_input_value, theme_editor_from_settings, toggle_string_set,
 };
 use oxideterm_ssh::{HostKeyStatus, UpstreamProxyConfig, probe_upstream_proxy_route};
 use oxideterm_theme::BUILT_IN_THEMES;
@@ -178,7 +177,7 @@ pub(in crate::workspace) use entity::{
     NetworkProxyPasswordSnapshot, NetworkProxyTestSnapshot, PortablePasswordDialogSnapshot,
     PortableStatusRefresh, PrivilegeCredentialDraft, PrivilegeCredentialSnapshot,
     SettingsWorkspaceEntity, SettingsWorkspaceEvent, SettingsWorkspaceToast,
-    SshConfigImportSnapshot, ThemeImportResult,
+    SshConfigImportSnapshot, ThemeEditorOperationResult, ThemeImportResult,
 };
 mod general_terminal_pages;
 pub(in crate::workspace) use general_terminal_pages::SETTINGS_TERMINAL_CUSTOM_FONT_INPUT_WIDTH;

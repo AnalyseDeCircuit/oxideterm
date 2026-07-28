@@ -9,7 +9,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use crate::{AiSettingsPage, SettingsInput, SettingsTab, TerminalSettingsPage, ThemeEditorState};
+use crate::{AiSettingsPage, SettingsTab, TerminalSettingsPage};
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct CliCompanionStatus {
@@ -40,7 +40,6 @@ pub struct SettingsPageModel {
     pub expanded_ai_provider_models: HashSet<String>,
     pub expanded_ai_context_providers: HashSet<String>,
     pub legal_notice_open: bool,
-    pub theme_editor: Option<ThemeEditorState>,
     pub background_cache_poll_scheduled: bool,
 }
 
@@ -61,7 +60,6 @@ impl Default for SettingsPageModel {
             expanded_ai_provider_models: HashSet::new(),
             expanded_ai_context_providers: HashSet::new(),
             legal_notice_open: false,
-            theme_editor: None,
             background_cache_poll_scheduled: false,
         }
     }
@@ -131,85 +129,6 @@ impl SettingsPageModel {
         self.expanded_ai_providers.remove(provider_id);
         self.expanded_ai_provider_models.remove(provider_id);
         self.expanded_ai_context_providers.remove(provider_id);
-    }
-
-    /// Installs a new theme editor model.
-    pub fn open_theme_editor(&mut self, editor: ThemeEditorState) {
-        self.theme_editor = Some(editor);
-    }
-
-    /// Closes the active theme editor.
-    pub fn close_theme_editor(&mut self) {
-        self.theme_editor = None;
-    }
-
-    /// Mutates the active theme editor when it exists.
-    pub fn update_theme_editor(&mut self, update: impl FnOnce(&mut ThemeEditorState)) {
-        if let Some(editor) = self.theme_editor.as_mut() {
-            update(editor);
-        }
-    }
-
-    /// Returns the draft text for inputs whose state is owned by the settings page model.
-    pub fn page_input_value(&self, input: SettingsInput) -> Option<String> {
-        let value = match input {
-            SettingsInput::CustomThemeName => self
-                .theme_editor
-                .as_ref()
-                .map(|editor| editor.name.clone())
-                .unwrap_or_default(),
-            SettingsInput::CustomThemeTerminalColor(index) => self
-                .theme_editor
-                .as_ref()
-                .and_then(|editor| editor.terminal_colors.get(index).cloned())
-                .unwrap_or_default(),
-            SettingsInput::CustomThemeUiColor(index) => self
-                .theme_editor
-                .as_ref()
-                .and_then(|editor| editor.ui_colors.get(index).cloned())
-                .unwrap_or_default(),
-            _ => return None,
-        };
-        Some(value)
-    }
-
-    /// Applies a draft to inputs whose state is page-local rather than persisted settings.
-    pub fn apply_page_input_draft(&mut self, input: SettingsInput, draft: &str) -> bool {
-        match input {
-            SettingsInput::CustomThemeName => {
-                self.update_theme_editor(|editor| editor.name = draft.to_string());
-                true
-            }
-            SettingsInput::CustomThemeTerminalColor(index) => {
-                self.apply_theme_editor_color_slot(index, draft, true)
-            }
-            SettingsInput::CustomThemeUiColor(index) => {
-                self.apply_theme_editor_color_slot(index, draft, false)
-            }
-            _ => false,
-        }
-    }
-
-    fn apply_theme_editor_color_slot(
-        &mut self,
-        index: usize,
-        draft: &str,
-        is_terminal_color: bool,
-    ) -> bool {
-        let Some(editor) = self.theme_editor.as_mut() else {
-            return true;
-        };
-        // Color text remains intentionally unvalidated during typing so partial
-        // hex or rgb() values can be edited without the view fighting the user.
-        let colors = if is_terminal_color {
-            &mut editor.terminal_colors
-        } else {
-            &mut editor.ui_colors
-        };
-        if let Some(slot) = colors.get_mut(index) {
-            *slot = draft.trim().to_string();
-        }
-        true
     }
 
     /// Marks whether the background image cache poll has already been scheduled.

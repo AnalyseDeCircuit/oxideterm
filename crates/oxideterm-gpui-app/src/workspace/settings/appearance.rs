@@ -958,7 +958,13 @@ impl WorkspaceApp {
         &self,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
-        let editor = self.settings_page.theme_editor.as_ref()?;
+        let (editor, editor_phase) = {
+            let settings_workspace = self.settings_workspace.read(cx);
+            (
+                settings_workspace.theme_editor_snapshot()?,
+                settings_workspace.theme_editor_phase(),
+            )
+        };
         let terminal = editor_terminal_theme(&editor.terminal_colors);
         let ui = editor_ui_colors(&editor.ui_colors);
         let title_key = if editor.edit_theme_id.is_some() {
@@ -967,8 +973,7 @@ impl WorkspaceApp {
             "settings_view.custom_theme.create_title"
         };
         let save_disabled = editor.name.trim().is_empty();
-        let form_visible =
-            self.theme_editor_presence.phase() == oxideterm_gpui_ui::motion::ExitPhase::Visible;
+        let form_visible = editor_phase == oxideterm_gpui_ui::motion::ExitPhase::Visible;
 
         let dialog = div()
             .w(px(THEME_EDITOR_MODAL_WIDTH))
@@ -1025,10 +1030,10 @@ impl WorkspaceApp {
                     .flex()
                     .flex_col()
                     .gap(px(THEME_EDITOR_BODY_GAP))
-                    .child(self.theme_editor_name_duplicate_row(editor, cx))
-                    .child(self.theme_editor_preview(editor, terminal, ui))
-                    .child(self.theme_editor_section_tabs(editor, cx))
-                    .child(self.theme_editor_color_grid(editor, cx)),
+                    .child(self.theme_editor_name_duplicate_row(&editor, cx))
+                    .child(self.theme_editor_preview(&editor, terminal, ui))
+                    .child(self.theme_editor_section_tabs(&editor, cx))
+                    .child(self.theme_editor_color_grid(&editor, cx)),
             )
             .child(
                 div()
@@ -1157,7 +1162,7 @@ impl WorkspaceApp {
             self.theme_editor_label("settings_view.custom_theme.name"),
             self.theme_editor_text_input(
                 SettingsInput::CustomThemeName,
-                editor.name.clone(),
+                &editor.name,
                 self.i18n.t("settings_view.custom_theme.name_placeholder"),
                 ThemeEditorTextInputKind::Form,
                 cx,
@@ -1274,12 +1279,11 @@ impl WorkspaceApp {
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |this, _event, _window, cx| {
-                    if let Some(editor) = this.settings_page.theme_editor.as_mut() {
-                        editor.active_section = section;
-                    }
+                    this.settings_workspace.update(cx, |settings, cx| {
+                        settings.select_theme_editor_section(section, cx);
+                    });
                     this.close_settings_select();
                     cx.stop_propagation();
-                    cx.notify();
                 }),
             )
             .into_any_element()
@@ -1291,7 +1295,7 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         if editor.active_section == ThemeEditorSection::Ui {
-            return self.theme_editor_ui_color_sections(cx);
+            return self.theme_editor_ui_color_sections(editor, cx);
         }
 
         let (fields, colors, section) = match editor.active_section {
@@ -1307,11 +1311,9 @@ impl WorkspaceApp {
 
     pub(in crate::workspace) fn theme_editor_ui_color_sections(
         &self,
+        editor: &ThemeEditorState,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let Some(editor) = self.settings_page.theme_editor.as_ref() else {
-            return div().into_any_element();
-        };
         let colors = editor.ui_colors.as_slice();
 
         div()
@@ -1351,14 +1353,10 @@ impl WorkspaceApp {
                                 ..ToolbarButtonOptions::default()
                             },
                             cx.listener(|this, _event, _window, cx| {
-                                if let Some(editor) = this.settings_page.theme_editor.as_mut() {
-                                    let ui = derive_ui_colors_from_terminal(editor_terminal_theme(
-                                        &editor.terminal_colors,
-                                    ));
-                                    editor.ui_colors = app_ui_colors_to_colors(ui);
-                                }
+                                this.settings_workspace.update(cx, |settings, cx| {
+                                    settings.derive_theme_editor_ui_colors(cx);
+                                });
                                 cx.stop_propagation();
-                                cx.notify();
                             }),
                         ),
                     ),
@@ -1453,7 +1451,11 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let parsed = parse_color_hex(&color).unwrap_or(0);
-        let focused = self.focused_settings_input == Some(input);
+        let focused = self
+            .settings_workspace
+            .read(cx)
+            .settings_entity_focused_input()
+            == Some(input);
         let label = self.i18n.t(&format!(
             "settings_view.custom_theme.colors.{}",
             field.label_key
@@ -1462,8 +1464,7 @@ impl WorkspaceApp {
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |this, _event, window, cx| {
-                    let current = this.current_settings_input_value(input, cx);
-                    this.focus_settings_input(input, current, cx);
+                    this.focus_settings_input(input, String::new(), cx);
                     this.ime_marked_text = None;
                     window.focus(&this.focus_handle, cx);
                     cx.stop_propagation();
@@ -1473,7 +1474,7 @@ impl WorkspaceApp {
         let value_control = if focused {
             self.theme_editor_text_input(
                 input,
-                color,
+                &color,
                 "#RRGGBB".to_string(),
                 ThemeEditorTextInputKind::InlineColor,
                 cx,
@@ -1487,8 +1488,7 @@ impl WorkspaceApp {
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |this, _event, window, cx| {
-                    let current = this.current_settings_input_value(input, cx);
-                    this.focus_settings_input(input, current, cx);
+                    this.focus_settings_input(input, String::new(), cx);
                     this.ime_marked_text = None;
                     window.focus(&this.focus_handle, cx);
                     cx.stop_propagation();
@@ -1506,17 +1506,16 @@ impl WorkspaceApp {
     pub(in crate::workspace) fn theme_editor_text_input(
         &self,
         input: SettingsInput,
-        value: String,
+        value: &str,
         placeholder: String,
         kind: ThemeEditorTextInputKind,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let focused = self.focused_settings_input == Some(input);
-        let display_value = if focused {
-            self.settings_input_draft.as_str()
-        } else {
-            value.as_str()
-        };
+        let settings_workspace = self.settings_workspace.read(cx);
+        let focused = settings_workspace.settings_entity_focused_input() == Some(input);
+        let display_value = settings_workspace
+            .settings_entity_input_value(input)
+            .unwrap_or(value);
         let target = WorkspaceImeTarget::Settings(input);
         let workspace = cx.entity();
         let control = settings_theme_editor_text_input(
@@ -1537,8 +1536,7 @@ impl WorkspaceApp {
         .on_mouse_down(
             MouseButton::Left,
             cx.listener(move |this, event: &gpui::MouseDownEvent, window, cx| {
-                let current = this.current_settings_input_value(input, cx);
-                this.focus_settings_input(input, current, cx);
+                this.focus_settings_input(input, String::new(), cx);
                 this.ime_marked_text = None;
                 window.focus(&this.focus_handle, cx);
                 this.begin_ime_selection_from_mouse_down(target, event, window, cx);
@@ -1548,7 +1546,12 @@ impl WorkspaceApp {
         .on_mouse_down_out(cx.listener(move |this, _event, _window, cx| {
             // Settings inputs are manually focused rather than native controls.
             // Release this editor when the next pointer press lands elsewhere.
-            if this.focused_settings_input == Some(input) {
+            let is_focused = this
+                .settings_workspace
+                .read(cx)
+                .settings_entity_focused_input()
+                == Some(input);
+            if is_focused {
                 this.blur_text_inputs(cx);
             }
         }))
@@ -1600,98 +1603,52 @@ impl WorkspaceApp {
         edit_theme_id: Option<String>,
         cx: &mut Context<Self>,
     ) {
-        self.settings_page
-            .open_theme_editor(theme_editor_from_settings(
-                self.settings_store.settings(),
-                edit_theme_id,
-                self.i18n.t("settings_view.custom_theme.new_theme_name"),
-            ));
-        self.theme_editor_presence.reopen();
+        let editor = theme_editor_from_settings(
+            self.settings_store.settings(),
+            edit_theme_id,
+            self.i18n.t("settings_view.custom_theme.new_theme_name"),
+        );
+        self.settings_workspace.update(cx, |settings, cx| {
+            settings.open_theme_editor(editor, cx);
+        });
         self.close_settings_select();
         self.focused_settings_input = None;
-        cx.notify();
     }
 
     pub(in crate::workspace) fn close_theme_editor(&mut self, cx: &mut Context<Self>) {
         self.close_settings_select();
         self.focused_settings_input = None;
-        let Some(generation) = self.theme_editor_presence.begin_exit() else {
-            return;
-        };
         let delay = oxideterm_gpui_ui::motion::duration(
             &self.tokens,
             oxideterm_gpui_ui::motion::MotionDuration::Overlay,
         );
-        if delay.is_zero() {
-            self.finish_theme_editor_exit(generation);
-            cx.notify();
-            return;
-        }
-        cx.spawn(async move |weak, cx| {
-            gpui::Timer::after(delay).await;
-            let _ = weak.update(cx, |this, cx| {
-                if this.finish_theme_editor_exit(generation) {
-                    cx.notify();
-                }
-            });
-        })
-        .detach();
-        cx.notify();
-    }
-
-    fn finish_theme_editor_exit(&mut self, generation: u64) -> bool {
-        if !self.theme_editor_presence.finish_exit(generation) {
-            return false;
-        }
-        self.settings_page.close_theme_editor();
-        self.theme_editor_presence.reopen();
-        true
+        self.settings_workspace.update(cx, |settings, cx| {
+            settings.cancel_theme_editor(delay, cx);
+        });
     }
 
     pub(in crate::workspace) fn save_theme_editor(&mut self, cx: &mut Context<Self>) {
-        let Some(editor) = self.settings_page.theme_editor.clone() else {
-            return;
-        };
-        let notice_name = editor.name.trim().to_string();
-        if notice_name.is_empty() {
-            return;
-        }
-        self.edit_settings(
-            move |settings| {
-                let _ = save_theme_editor_to_settings(settings, editor);
-            },
-            cx,
-        );
-        self.close_theme_editor(cx);
+        self.close_settings_select();
         self.focused_settings_input = None;
-        self.send_settings_notice(
-            self.i18n
-                .t("settings_view.appearance.theme_import_success")
-                .replace("{{name}}", &notice_name),
-            TerminalNoticeVariant::Success,
-            cx,
+        let delay = oxideterm_gpui_ui::motion::duration(
+            &self.tokens,
+            oxideterm_gpui_ui::motion::MotionDuration::Overlay,
         );
-        cx.notify();
+        self.settings_workspace.update(cx, |settings, cx| {
+            settings.save_theme_editor(delay, cx);
+        });
     }
 
     pub(in crate::workspace) fn delete_theme_editor_theme(&mut self, cx: &mut Context<Self>) {
-        let Some(theme_id) = self
-            .settings_page
-            .theme_editor
-            .as_ref()
-            .and_then(|editor| editor.edit_theme_id.clone())
-        else {
-            return;
-        };
-        self.edit_settings(
-            move |settings| {
-                delete_custom_theme_from_settings(settings, &theme_id, "azurite");
-            },
-            cx,
-        );
-        self.close_theme_editor(cx);
+        self.close_settings_select();
         self.focused_settings_input = None;
-        cx.notify();
+        let delay = oxideterm_gpui_ui::motion::duration(
+            &self.tokens,
+            oxideterm_gpui_ui::motion::MotionDuration::Overlay,
+        );
+        self.settings_workspace.update(cx, |settings, cx| {
+            settings.delete_theme_editor(delay, cx);
+        });
     }
 
     pub(in crate::workspace) fn import_theme_from_file(&mut self, cx: &mut Context<Self>) {

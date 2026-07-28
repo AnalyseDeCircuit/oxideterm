@@ -696,6 +696,48 @@ impl WorkspaceApp {
                 }
                 cx.notify();
             }
+            SettingsWorkspaceEvent::ThemeEditorOperationReady => {
+                let results =
+                    settings.update(cx, |settings, _cx| settings.take_theme_editor_results());
+                for result in results {
+                    match result {
+                        ThemeEditorOperationResult::Save(editor) => {
+                            let mut saved_name = None;
+                            self.edit_settings(
+                                |settings| {
+                                    saved_name =
+                                        save_theme_editor_snapshot_to_settings(settings, &editor);
+                                },
+                                cx,
+                            );
+                            if let Some(name) = saved_name {
+                                self.send_settings_notice(
+                                    self.i18n
+                                        .t("settings_view.appearance.theme_import_success")
+                                        .replace("{{name}}", &name),
+                                    TerminalNoticeVariant::Success,
+                                    cx,
+                                );
+                            }
+                        }
+                        ThemeEditorOperationResult::Delete(editor) => {
+                            self.edit_settings(
+                                move |settings| {
+                                    if let Some(theme_id) = editor.edit_theme_id.as_deref() {
+                                        delete_custom_theme_from_settings(
+                                            settings,
+                                            theme_id,
+                                            oxideterm_theme::DEFAULT_THEME.id,
+                                        );
+                                    }
+                                },
+                                cx,
+                            );
+                        }
+                    }
+                }
+                cx.notify();
+            }
             SettingsWorkspaceEvent::KeybindingFileOperationReady => {
                 let results = settings.update(cx, |settings, _cx| {
                     settings.take_keybinding_file_operation_results()
