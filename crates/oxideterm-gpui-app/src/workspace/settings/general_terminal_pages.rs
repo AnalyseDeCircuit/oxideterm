@@ -1701,7 +1701,7 @@ impl WorkspaceApp {
                     false,
                     selection_range,
                     caret_offset,
-                    self.new_connection_caret_visible,
+                    self.input_caret.visible(),
                 ));
             }
             textarea = textarea.child(line);

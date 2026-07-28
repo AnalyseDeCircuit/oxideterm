@@ -890,7 +890,7 @@ impl WorkspaceApp {
                     value,
                     placeholder,
                     focused,
-                    caret_visible: self.new_connection_caret_visible,
+                    caret_visible: self.input_caret.visible(),
                     secret,
                     selected_all,
                     selected_range: self.ime_selected_range_for_target(target, cx),
@@ -910,7 +910,7 @@ impl WorkspaceApp {
                     });
                     this.close_new_connection_select(cx);
                     this.ime_marked_text = None;
-                    this.new_connection_caret_visible = true;
+                    this.show_active_input_caret(cx);
                     window.focus(&this.focus_handle, cx);
                     this.begin_ime_selection_from_mouse_down(target, event, window, cx);
                     cx.stop_propagation();

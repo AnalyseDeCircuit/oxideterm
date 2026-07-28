@@ -66,7 +66,7 @@ impl WorkspaceApp {
                     return;
                 };
                 self.ime_marked_text = None;
-                self.new_connection_caret_visible = true;
+                self.show_active_input_caret(cx);
                 window.focus(&self.focus_handle, cx);
                 self.begin_ime_selection_from_mouse_down(target, &event, window, cx);
             }
@@ -74,7 +74,7 @@ impl WorkspaceApp {
                 // Only focus state crosses this boundary; the zeroizing input stays in the Entity.
                 self.ime_marked_text = None;
                 self.clear_ime_selection();
-                self.new_connection_caret_visible = true;
+                self.show_active_input_caret(cx);
                 window.focus(&self.focus_handle, cx);
                 cx.notify();
             }

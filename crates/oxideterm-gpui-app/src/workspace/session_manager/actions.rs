@@ -718,7 +718,7 @@ impl WorkspaceApp {
             state.duplicating_saved_connection_id = Some(id.to_string());
         });
         self.close_session_row_menus(cx);
-        self.new_connection_caret_visible = true;
+        self.show_active_input_caret(cx);
         self.needs_active_pane_focus = false;
         window.focus(&self.focus_handle, cx);
         cx.notify();

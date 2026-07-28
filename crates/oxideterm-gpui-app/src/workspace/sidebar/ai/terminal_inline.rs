@@ -278,7 +278,7 @@ window.focus(&this.focus_handle, cx);
                                             }),
                                         )
                                         .when(focused && showing_placeholder, |input| {
-                                            input.child(text_caret(&self.tokens, self.new_connection_caret_visible))
+                                            input.child(text_caret(&self.tokens, self.input_caret.visible()))
                                         })
                                         .child(if showing_placeholder {
                                             div().truncate().child(prompt_text).into_any_element()
@@ -289,7 +289,7 @@ window.focus(&this.focus_handle, cx);
                                                 false,
                                                 selection_range,
                                                 caret_offset,
-                                                self.new_connection_caret_visible,
+                                                self.input_caret.visible(),
                                                 Some(theme.text),
                                             )
                                             .into_any_element()
@@ -310,7 +310,7 @@ window.focus(&this.focus_handle, cx);
                                             |input| {
                                                 input.child(text_caret(
                                                     &self.tokens,
-                                                    self.new_connection_caret_visible,
+                                                    self.input_caret.visible(),
                                                 ))
                                             },
                                         ),

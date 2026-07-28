@@ -810,7 +810,7 @@ impl WorkspaceApp {
                 value: value.as_str(),
                 placeholder: control.placeholder.clone().unwrap_or_default(),
                 focused,
-                caret_visible: self.new_connection_caret_visible,
+                caret_visible: self.input_caret.visible(),
                 input_type: if control.kind == "password" {
                     oxideterm_gpui_ui::input::InputType::Password
                 } else {
@@ -835,7 +835,7 @@ impl WorkspaceApp {
                             ui.open_select = None;
                         });
                         this.begin_ime_selection_from_mouse_down(target, event, window, cx);
-                        this.new_connection_caret_visible = true;
+                        this.show_active_input_caret(cx);
                         cx.stop_propagation();
                         cx.notify();
                     }),

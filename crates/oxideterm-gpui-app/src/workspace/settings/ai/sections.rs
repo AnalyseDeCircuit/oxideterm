@@ -1262,9 +1262,8 @@ impl WorkspaceApp {
         let marked_text = self
             .marked_text_for_target(target, cx)
             .map(|marked| marked.to_string());
-        let caret = focused.then(|| {
-            text_caret(&self.tokens, self.new_connection_caret_visible).into_any_element()
-        });
+        let caret = focused
+            .then(|| text_caret(&self.tokens, self.input_caret.visible()).into_any_element());
         let textarea = if entity_owned {
             let ai_workspace = self.ai_entity.read(cx);
             settings_ai_textarea_surface(

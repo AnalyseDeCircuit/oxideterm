@@ -144,7 +144,7 @@ impl WorkspaceApp {
             .min_w(px(0.0))
             .min_h(px(0.0))
             .on_scroll_wheel(cx.listener(|this, _event, _window, cx| {
-                this.pause_settings_caret_blink_during_scroll();
+                this.pause_settings_caret_blink_during_scroll(cx);
                 // Tauri only closes an open select on page scroll. When no select is
                 // visible, keep wheel scrolling free of state writes so large settings
                 // pages do not rebuild just to maintain stale overlay anchors.
@@ -691,16 +691,20 @@ impl WorkspaceApp {
             .retain(|id, _| matches!(id, SelectAnchorId::NewConnectionGroup));
     }
 
-    pub(in crate::workspace) fn pause_settings_caret_blink_during_scroll(&mut self) {
+    pub(in crate::workspace) fn pause_settings_caret_blink_during_scroll(
+        &mut self,
+        cx: &mut Context<Self>,
+    ) {
         if self.focused_settings_input.is_none() {
             return;
         }
         // Browser caret blinking is compositor-local. Native blinking repaints
         // the workspace, so keep the caret visible while a settings scroll is
         // active and let blinking resume shortly after inertial scrolling stops.
-        self.settings_caret_blink_pause_until =
-            Some(Instant::now() + Duration::from_millis(SETTINGS_SCROLL_CARET_PAUSE_MS));
-        self.new_connection_caret_visible = true;
+        let pause_until = Instant::now() + Duration::from_millis(SETTINGS_SCROLL_CARET_PAUSE_MS);
+        self.workspace_input.update(cx, |input, cx| {
+            input.pause_settings_caret_until(pause_until, cx);
+        });
     }
 
     pub(in crate::workspace) fn render_settings_nav(&self, cx: &mut Context<Self>) -> AnyElement {

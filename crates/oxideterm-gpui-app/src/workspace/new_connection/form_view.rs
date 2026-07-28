@@ -128,7 +128,7 @@ impl WorkspaceApp {
             return true;
         }
 
-        let caret_was_visible = self.new_connection_caret_visible;
+        let caret_was_visible = self.input_caret.visible();
         let uses_text_edit_modifier = keystroke_uses_text_edit_modifier(&event.keystroke);
         let (result, show_caret) = self.connection_flow.update(cx, |connection_flow, cx| {
             let Some(form) = connection_flow.form.form.as_mut() else {
@@ -265,7 +265,7 @@ impl WorkspaceApp {
         });
 
         if show_caret {
-            self.new_connection_caret_visible = true;
+            self.show_active_input_caret(cx);
             cx.notify();
         }
         match result {
@@ -321,7 +321,7 @@ impl WorkspaceApp {
             true
         });
         if pasted {
-            self.new_connection_caret_visible = true;
+            self.show_active_input_caret(cx);
             cx.notify();
         }
     }

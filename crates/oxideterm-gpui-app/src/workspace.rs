@@ -789,7 +789,9 @@ pub(crate) struct WorkspaceApp {
     // settings virtual list remains the only scroll owner behind it.
     terminal_command_specs_editor_open: bool,
     settings_slider_drag: Option<SettingsSlider>,
-    settings_caret_blink_pause_until: Option<Instant>,
+    workspace_input: Entity<ime::WorkspaceInputEntity>,
+    _workspace_input_observation: Subscription,
+    input_caret: ime::WorkspaceCaretVisibility,
     keybinding_recording_combo: Option<crate::keybindings::KeyCombo>,
     keybinding_recording_footer_focus: Option<KeybindingRecordingFooterAction>,
     native_update_notification_open: bool,
@@ -800,7 +802,6 @@ pub(crate) struct WorkspaceApp {
     settings_legal_notice_scroll: MarkdownVirtualListScrollHandle,
     _window_intents: Entity<WorkspaceWindowIntentEntity>,
     _window_intent_subscription: Subscription,
-    new_connection_caret_visible: bool,
     connection_flow: Entity<ConnectionFlowEntity>,
     _connection_flow_observation: Subscription,
     _connection_flow_subscription: Subscription,

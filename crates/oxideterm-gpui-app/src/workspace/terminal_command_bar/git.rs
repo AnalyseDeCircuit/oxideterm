@@ -1266,7 +1266,7 @@ impl WorkspaceApp {
                     value: terminal.git_panel_query(),
                     placeholder: self.i18n.t("terminal.git.search_branches"),
                     focused: terminal.git_panel_open(),
-                    caret_visible: self.new_connection_caret_visible,
+                    caret_visible: self.input_caret.visible(),
                     secret: false,
                     selected_all: false,
                     selected_range,

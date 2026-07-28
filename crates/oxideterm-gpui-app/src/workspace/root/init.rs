@@ -49,6 +49,15 @@ impl WorkspaceApp {
             // Entity-owned timers and delivery repaint the mounted window portal.
             cx.notify();
         });
+        let input_caret = ime::WorkspaceCaretVisibility::default();
+        let workspace_input = cx.new({
+            let input_caret = input_caret.clone();
+            move |_cx| ime::WorkspaceInputEntity::new(input_caret)
+        });
+        let workspace_input_observation = cx.observe(&workspace_input, |_, _, cx| {
+            // The input Entity only notifies when its window-scoped caret phase changes.
+            cx.notify();
+        });
         let detected_graphics = detect_graphics(window);
         let render_profile_override = render_profile_from_env();
         let render_policy = compute_render_policy(
@@ -644,7 +653,9 @@ impl WorkspaceApp {
             settings_input_draft: String::new(),
             terminal_command_specs_editor_open: false,
             settings_slider_drag: None,
-            settings_caret_blink_pause_until: None,
+            workspace_input,
+            _workspace_input_observation: workspace_input_observation,
+            input_caret,
             keybinding_recording_combo: None,
             keybinding_recording_footer_focus: None,
             native_update_notification_open: false,
@@ -656,7 +667,6 @@ impl WorkspaceApp {
             settings_legal_notice_scroll: MarkdownVirtualListScrollHandle::new(),
             _window_intents: window_intents,
             _window_intent_subscription: window_intent_subscription,
-            new_connection_caret_visible: true,
             connection_flow,
             _connection_flow_observation: connection_flow_observation,
             _connection_flow_subscription: connection_flow_subscription,
@@ -756,32 +766,6 @@ impl WorkspaceApp {
         workspace.sync_active_terminal_metadata_context(cx);
         workspace.sync_active_terminal_recording_elapsed_tick(cx);
         workspace.sync_active_privilege_prompt_inline_hint(cx);
-        let window_handle = window.window_handle();
-        cx.spawn(async move |weak, cx| {
-            loop {
-                Timer::after(Duration::from_millis(530)).await;
-                // Keep the workspace polling loop tied to the WorkspaceApp entity itself.
-                // Startup may still be between window construction and active workspace
-                // restoration, so use the captured weak entity instead of the window root.
-                if cx
-                    .update_window(window_handle, |_, _window, cx| {
-                        weak.update(cx, |workspace, cx| {
-                            if workspace.active_ime_target_blinks_caret(cx) {
-                                workspace.new_connection_caret_visible =
-                                    !workspace.new_connection_caret_visible;
-                                cx.notify();
-                            } else if !workspace.new_connection_caret_visible {
-                                workspace.new_connection_caret_visible = true;
-                            }
-                        })
-                    })
-                    .is_err()
-                {
-                    break;
-                }
-            }
-        })
-        .detach();
         workspace.schedule_automatic_native_update_check(cx);
         Ok(workspace)
     }

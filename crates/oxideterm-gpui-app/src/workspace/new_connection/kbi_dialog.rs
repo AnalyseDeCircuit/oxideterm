@@ -80,7 +80,7 @@ impl WorkspaceApp {
             return;
         }
         self.prepare_modal_interaction_boundary(cx);
-        self.new_connection_caret_visible = true;
+        self.show_active_input_caret(cx);
         self.needs_active_pane_focus = false;
         window.focus(&self.focus_handle, cx);
         cx.notify();
@@ -117,7 +117,7 @@ impl WorkspaceApp {
                 true
             }
             KeyboardInteractiveKeyAction::Handled => {
-                self.new_connection_caret_visible = true;
+                self.show_active_input_caret(cx);
                 cx.notify();
                 true
             }
@@ -134,7 +134,7 @@ impl WorkspaceApp {
             connection_flow.paste_keyboard_interactive_response(&single_line, cx)
         });
         if pasted {
-            self.new_connection_caret_visible = true;
+            self.show_active_input_caret(cx);
             cx.notify();
         }
     }
@@ -221,7 +221,7 @@ impl WorkspaceApp {
                             value,
                             placeholder: String::new(),
                             focused,
-                            caret_visible: self.new_connection_caret_visible,
+                            caret_visible: self.input_caret.visible(),
                             secret: !prompt.echo,
                             selected_all: false,
                             selected_range: self.ime_selected_range_for_target(target, cx),
@@ -236,7 +236,7 @@ impl WorkspaceApp {
                                 connection_flow.focus_keyboard_interactive_prompt(index, cx);
                             });
                             this.ime_marked_text = None;
-                            this.new_connection_caret_visible = true;
+                            this.show_active_input_caret(cx);
                             window.focus(&this.focus_handle, cx);
                             this.begin_ime_selection_from_mouse_down(target, event, window, cx);
                             cx.stop_propagation();

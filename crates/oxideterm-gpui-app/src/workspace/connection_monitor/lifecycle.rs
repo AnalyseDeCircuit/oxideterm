@@ -173,9 +173,7 @@ impl HostToolsEntity {
 }
 
 impl WorkspaceApp {
-    pub(in crate::workspace::connection_monitor) fn host_tools_visibility(
-        &self,
-    ) -> HostToolsVisibility {
+    pub(in crate::workspace) fn host_tools_visibility(&self) -> HostToolsVisibility {
         let main_tab_visible = self.tabs.iter().any(|tab| {
             is_host_tools_tab_kind(&tab.kind)
                 && self.main_window_tabs.active_tab_id == Some(tab.id)
@@ -340,6 +338,9 @@ mod tests {
             host_tools_visibility(false, false, false),
             HostToolsVisibility::Hidden
         );
+        assert!(host_tools_visibility(true, false, false).main_window_is_visible());
+        assert!(host_tools_visibility(false, false, true).main_window_is_visible());
+        assert!(!host_tools_visibility(false, true, false).main_window_is_visible());
         assert!(!HostToolsVisibility::Dropped.is_visible());
     }
 }

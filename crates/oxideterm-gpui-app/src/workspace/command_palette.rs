@@ -351,7 +351,7 @@ impl WorkspaceApp {
                     visually_empty,
                     selection_range,
                     caret_offset,
-                    self.new_connection_caret_visible,
+                    self.input_caret.visible(),
                 ))
                 .when(!marked_text.is_empty(), |input| {
                     input.child(
@@ -760,7 +760,7 @@ impl WorkspaceApp {
         form.focused_field = NewConnectionField::Password;
         form.group = self.i18n.t("ssh.form.ungrouped");
         self.update_connection_form_state(cx, |state| state.replace_with_new_form(form));
-        self.new_connection_caret_visible = true;
+        self.show_active_input_caret(cx);
         self.needs_active_pane_focus = false;
         window.focus(&self.focus_handle, cx);
         cx.notify();
@@ -780,7 +780,7 @@ impl WorkspaceApp {
                     self.update_connection_form_state(cx, |state| {
                         state.replace_with_new_form(form);
                     });
-                    self.new_connection_caret_visible = true;
+                    self.show_active_input_caret(cx);
                     self.needs_active_pane_focus = false;
                     window.focus(&self.focus_handle, cx);
                 }

@@ -217,7 +217,7 @@ impl WorkspaceApp {
                     value,
                     placeholder: self.i18n.t(placeholder_key),
                     focused,
-                    caret_visible: self.new_connection_caret_visible,
+                    caret_visible: self.input_caret.visible(),
                     secret,
                     selected_all: false,
                     selected_range,

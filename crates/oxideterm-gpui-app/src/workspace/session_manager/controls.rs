@@ -212,7 +212,7 @@ impl WorkspaceApp {
                         .items_center()
                         .overflow_hidden()
                         .when(active && visually_empty, |input| {
-                            input.child(text_caret(&self.tokens, self.new_connection_caret_visible))
+                            input.child(text_caret(&self.tokens, self.input_caret.visible()))
                         })
                         .child(text_input_value_segments(
                             &self.tokens,
@@ -220,7 +220,7 @@ impl WorkspaceApp {
                             visually_empty,
                             selection_range,
                             caret_offset,
-                            self.new_connection_caret_visible,
+                            self.input_caret.visible(),
                         ))
                         .when(active && !marked_text.is_empty(), |input| {
                             input.child(
@@ -236,10 +236,7 @@ impl WorkspaceApp {
                                 && !shows_selection
                                 && !shows_positioned_caret,
                             |input| {
-                                input.child(text_caret(
-                                    &self.tokens,
-                                    self.new_connection_caret_visible,
-                                ))
+                                input.child(text_caret(&self.tokens, self.input_caret.visible()))
                             },
                         ),
                 )

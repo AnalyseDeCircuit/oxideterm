@@ -3,7 +3,7 @@ use std::{cell::RefCell, collections::HashMap, ops::Range, rc::Rc, time::Instant
 use gpui::{
     App, Bounds, ClipboardItem, Context, Element, ElementId, Entity, FocusHandle, GlobalElementId,
     InputHandler, InspectorElementId, Keystroke, LayoutId, Pixels, Point, SharedString, Style,
-    TextRun, UTF16Selection, Window, font, point, px, rgb,
+    TextRun, Timer, UTF16Selection, Window, font, point, px, rgb,
 };
 use oxideterm_editor_core::utf16::{
     control_k_delete_end, floor_char_boundary, line_end_for_utf16_offset,
@@ -36,6 +36,7 @@ const READ_ONLY_TEXT_EM_WIDTH: f32 = 16.0;
 const READ_ONLY_TEXT_LINE_HEIGHT_ESTIMATE: f32 = 28.0;
 const SECRET_IME_BMP_PROXY: char = '\u{2022}';
 const SECRET_IME_ASTRAL_PROXY: char = '\u{1f512}';
+const CARET_BLINK_INTERVAL: std::time::Duration = std::time::Duration::from_millis(530);
 
 fn secret_ime_proxy(secret: &str) -> String {
     // Preserve every UTF-16 boundary without copying secret content across the
@@ -132,6 +133,181 @@ pub(super) enum WorkspaceImeTarget {
     Sftp(SftpInput),
     NewConnection(NewConnectionField),
     KeyboardInteractive(usize),
+}
+
+/// Read-only caret projection shared with render code without exposing timer writes.
+#[derive(Clone, Default)]
+pub(super) struct WorkspaceCaretVisibility {
+    visible: Rc<std::cell::Cell<bool>>,
+}
+
+impl WorkspaceCaretVisibility {
+    pub(super) fn visible(&self) -> bool {
+        self.visible.get()
+    }
+
+    fn set_visible(&self, visible: bool) -> bool {
+        if self.visible.get() == visible {
+            return false;
+        }
+        self.visible.set(visible);
+        true
+    }
+}
+
+#[derive(Clone, Copy)]
+struct CaretBlinkPause {
+    target: WorkspaceImeTarget,
+    until: Instant,
+}
+
+struct WorkspaceCaretState {
+    active_target: Option<WorkspaceImeTarget>,
+    visibility: WorkspaceCaretVisibility,
+    pause: Option<CaretBlinkPause>,
+}
+
+impl WorkspaceCaretState {
+    fn new(visibility: WorkspaceCaretVisibility) -> Self {
+        visibility.visible.set(true);
+        Self {
+            active_target: None,
+            visibility,
+            pause: None,
+        }
+    }
+
+    fn sync_active_target(&mut self, target: Option<WorkspaceImeTarget>) -> bool {
+        if self.active_target == target {
+            return false;
+        }
+        self.active_target = target;
+        self.pause = self
+            .pause
+            .filter(|pause| Some(pause.target) == self.active_target);
+        self.visibility.set_visible(true);
+        true
+    }
+
+    fn show_caret(&mut self) {
+        self.visibility.set_visible(true);
+    }
+
+    fn pause_settings_caret(&mut self, until: Instant) -> bool {
+        let Some(target @ WorkspaceImeTarget::Settings(_)) = self.active_target else {
+            return false;
+        };
+        self.pause = Some(CaretBlinkPause { target, until });
+        self.visibility.set_visible(true);
+        true
+    }
+
+    fn next_tick_delay(&self, now: Instant) -> Option<std::time::Duration> {
+        let target = self
+            .active_target
+            .filter(|target| ime_target_should_blink_caret(*target))?;
+        if let Some(pause) = self
+            .pause
+            .filter(|pause| pause.target == target && now < pause.until)
+        {
+            return Some(pause.until.saturating_duration_since(now));
+        }
+        Some(CARET_BLINK_INTERVAL)
+    }
+
+    fn advance_tick(&mut self, now: Instant) -> bool {
+        let Some(target) = self
+            .active_target
+            .filter(|target| ime_target_should_blink_caret(*target))
+        else {
+            return false;
+        };
+        if self
+            .pause
+            .is_some_and(|pause| pause.target == target && now < pause.until)
+        {
+            return false;
+        }
+        self.pause = None;
+        self.visibility.set_visible(!self.visibility.visible())
+    }
+}
+
+/// Owns the window-scoped caret phase and its only long-lived blink task.
+pub(super) struct WorkspaceInputEntity {
+    caret: WorkspaceCaretState,
+    blink_generation: u64,
+    blink_task: Option<gpui::Task<()>>,
+}
+
+impl WorkspaceInputEntity {
+    pub(super) fn new(visibility: WorkspaceCaretVisibility) -> Self {
+        Self {
+            caret: WorkspaceCaretState::new(visibility),
+            blink_generation: 0,
+            blink_task: None,
+        }
+    }
+
+    pub(super) fn sync_active_target(
+        &mut self,
+        target: Option<WorkspaceImeTarget>,
+        cx: &mut Context<Self>,
+    ) {
+        if self.caret.sync_active_target(target) {
+            self.restart_blink_task(cx);
+        }
+    }
+
+    pub(super) fn show_caret(&mut self, cx: &mut Context<Self>) {
+        self.caret.show_caret();
+        self.restart_blink_task(cx);
+    }
+
+    pub(super) fn pause_settings_caret_until(&mut self, until: Instant, cx: &mut Context<Self>) {
+        if self.caret.pause_settings_caret(until) {
+            self.restart_blink_task(cx);
+        }
+    }
+
+    fn restart_blink_task(&mut self, cx: &mut Context<Self>) {
+        self.blink_generation = self.blink_generation.wrapping_add(1);
+        self.blink_task = None;
+        if self.caret.next_tick_delay(Instant::now()).is_none() {
+            return;
+        }
+        let generation = self.blink_generation;
+        self.blink_task = Some(cx.spawn(async move |input, cx| {
+            loop {
+                let delay = input
+                    .update(cx, |input, _cx| {
+                        (input.blink_generation == generation)
+                            .then(|| input.caret.next_tick_delay(Instant::now()))
+                            .flatten()
+                    })
+                    .ok()
+                    .flatten();
+                let Some(delay) = delay else {
+                    break;
+                };
+                Timer::after(delay).await;
+                let should_continue = input
+                    .update(cx, |input, cx| {
+                        if input.blink_generation != generation {
+                            return false;
+                        }
+                        if input.caret.advance_tick(Instant::now()) {
+                            cx.notify();
+                        }
+                        input.caret.next_tick_delay(Instant::now()).is_some()
+                    })
+                    .unwrap_or(false);
+                if !should_continue {
+                    break;
+                }
+            }
+        }));
+    }
 }
 
 /// Captures non-secret Host Tools IME presentation state for one render frame.
@@ -628,11 +804,16 @@ impl WorkspaceApp {
         let target = workspace_ime_target_for_plain_host_tools_input(input)?;
         HostToolsPlainTextImeFrame::new(
             input,
-            self.new_connection_caret_visible,
+            self.input_caret.visible(),
             self.ime_selected_range_for_target(target, cx),
             self.marked_text_for_target(target, cx).map(str::to_owned),
             self.text_input_anchors.clone(),
         )
+    }
+
+    pub(super) fn show_active_input_caret(&mut self, cx: &mut Context<Self>) {
+        self.workspace_input
+            .update(cx, |input, cx| input.show_caret(cx));
     }
 
     pub(super) fn active_ime_target(&self, cx: &App) -> Option<WorkspaceImeTarget> {
@@ -673,19 +854,28 @@ impl WorkspaceApp {
             return Some(WorkspaceImeTarget::SessionManager(input));
         }
 
-        if let Some(input) = self
-            .settings_workspace
-            .read(cx)
-            .settings_entity_focused_input()
-        {
-            return Some(WorkspaceImeTarget::Settings(input));
+        let settings_tab_visible = self
+            .active_tab()
+            .is_some_and(|tab| tab.kind == oxideterm_workspace::TabKind::Settings);
+        if settings_tab_visible {
+            if let Some(input) = self
+                .settings_workspace
+                .read(cx)
+                .settings_entity_focused_input()
+            {
+                return Some(WorkspaceImeTarget::Settings(input));
+            }
+
+            if let Some(input) = self.ai_entity.read(cx).focused_settings_input() {
+                return Some(WorkspaceImeTarget::Settings(input));
+            }
         }
 
-        if let Some(input) = self.ai_entity.read(cx).focused_settings_input() {
-            return Some(WorkspaceImeTarget::Settings(input));
-        }
-
-        if let Some(input) = self.focused_settings_input {
+        let legacy_settings_input_visible = settings_tab_visible
+            || self
+                .active_tab()
+                .is_some_and(|tab| tab.kind == oxideterm_workspace::TabKind::CloudSync);
+        if legacy_settings_input_visible && let Some(input) = self.focused_settings_input {
             return Some(WorkspaceImeTarget::Settings(input));
         }
 
@@ -697,7 +887,9 @@ impl WorkspaceApp {
             return Some(WorkspaceImeTarget::ShortcutsModalSearch);
         }
 
-        if let Some(input) = self.host_tools.read(cx).ui.focused_input {
+        if self.host_tools_visibility().main_window_is_visible()
+            && let Some(input) = self.host_tools.read(cx).ui.focused_input
+        {
             return Some(match input {
                 HostToolsTextInput::ProcessSearch => WorkspaceImeTarget::HostProcessSearch,
                 HostToolsTextInput::ProcessRenice => WorkspaceImeTarget::HostProcessRenice,
@@ -713,27 +905,30 @@ impl WorkspaceApp {
             });
         }
 
-        let quick_command_input = {
-            let quick_commands = &self.terminal.read(cx).quick_commands;
-            quick_commands
-                .is_open()
-                .then(|| quick_commands.focused_input())
-                .flatten()
-        };
-        if let Some(input) = quick_command_input {
-            return Some(WorkspaceImeTarget::QuickCommand(input));
-        }
+        let terminal_tab_visible = self.active_tab().is_some_and(is_terminal_tab);
+        if terminal_tab_visible {
+            let quick_command_input = {
+                let quick_commands = &self.terminal.read(cx).quick_commands;
+                quick_commands
+                    .is_open()
+                    .then(|| quick_commands.focused_input())
+                    .flatten()
+            };
+            if let Some(input) = quick_command_input {
+                return Some(WorkspaceImeTarget::QuickCommand(input));
+            }
 
-        if self.terminal.read(cx).cwd_picker_open() {
-            return Some(WorkspaceImeTarget::TerminalCwdSearch);
-        }
+            if self.terminal.read(cx).cwd_picker_open() {
+                return Some(WorkspaceImeTarget::TerminalCwdSearch);
+            }
 
-        if self.terminal.read(cx).git_panel_open() {
-            return Some(WorkspaceImeTarget::TerminalGitBranchSearch);
-        }
+            if self.terminal.read(cx).git_panel_open() {
+                return Some(WorkspaceImeTarget::TerminalGitBranchSearch);
+            }
 
-        if self.terminal.read(cx).project_panel_open() {
-            return Some(WorkspaceImeTarget::TerminalProjectSearch);
+            if self.terminal.read(cx).project_panel_open() {
+                return Some(WorkspaceImeTarget::TerminalProjectSearch);
+            }
         }
 
         if let Some(input) = self.active_session_manager_input(cx) {
@@ -813,11 +1008,11 @@ impl WorkspaceApp {
             return Some(WorkspaceImeTarget::PluginControl { key, secret });
         }
 
-        if self.terminal_command_bar_focused && self.active_tab().is_some_and(is_terminal_tab) {
+        if self.terminal_command_bar_focused && terminal_tab_visible {
             return Some(WorkspaceImeTarget::TerminalCommandBar);
         }
 
-        if self.terminal.read(cx).cast_search_focused() {
+        if terminal_tab_visible && self.terminal.read(cx).cast_search_focused() {
             return Some(WorkspaceImeTarget::TerminalCastSearch);
         }
 
@@ -832,27 +1027,6 @@ impl WorkspaceApp {
         }
 
         self.search.visible.then_some(WorkspaceImeTarget::Search)
-    }
-
-    pub(super) fn active_ime_target_blinks_caret(&self, cx: &App) -> bool {
-        // Browser editable inputs keep their caret blinking regardless of which
-        // page owns the field. Drive the shared native blink timer from the IME
-        // owner instead of a hand-maintained list of focused booleans, otherwise
-        // newly migrated inputs such as the AI sidebar can render a stale
-        // invisible caret after text input.
-        if self.settings_caret_blink_paused(cx) {
-            return false;
-        }
-        self.active_ime_target(cx)
-            .is_some_and(ime_target_should_blink_caret)
-    }
-
-    fn settings_caret_blink_paused(&self, cx: &App) -> bool {
-        self.active_ime_target(cx)
-            .is_some_and(|target| matches!(target, WorkspaceImeTarget::Settings(_)))
-            && self
-                .settings_caret_blink_pause_until
-                .is_some_and(|until| Instant::now() < until)
     }
 
     pub(super) fn marked_text_for_target(
@@ -1879,7 +2053,7 @@ impl WorkspaceApp {
         self.set_ime_selection_from_anchor(target, anchor, index);
         self.ime_marked_text = None;
         self.ime_drag_selection = None;
-        self.new_connection_caret_visible = true;
+        self.show_active_input_caret(cx);
         cx.notify();
         true
     }
@@ -1922,7 +2096,7 @@ impl WorkspaceApp {
         self.replace_ime_target_text(target, Some(replacement_range), "\n", cx);
         self.set_ime_selection_from_anchor(target, caret, caret);
         self.ime_marked_text = None;
-        self.new_connection_caret_visible = true;
+        self.show_active_input_caret(cx);
         cx.notify();
         true
     }
@@ -1963,7 +2137,7 @@ impl WorkspaceApp {
         self.replace_ime_target_text(target, Some(0..text_len), &next_text, cx);
         self.set_ime_selection_from_anchor(target, next_caret, next_caret);
         self.ime_marked_text = None;
-        self.new_connection_caret_visible = true;
+        self.show_active_input_caret(cx);
         cx.notify();
         true
     }
@@ -2233,7 +2407,7 @@ impl WorkspaceApp {
             host_tools.replace_text_input(input, replacement_range, text)
         });
         if changed {
-            self.new_connection_caret_visible = true;
+            self.show_active_input_caret(cx);
             cx.notify();
         }
     }
@@ -2251,13 +2425,13 @@ impl WorkspaceApp {
                 self.command_palette.update(cx, |palette, cx| {
                     palette.replace_query_utf16(replacement_range, text, cx);
                 });
-                self.new_connection_caret_visible = true;
+                self.show_active_input_caret(cx);
                 cx.notify();
             }
             WorkspaceImeTarget::ShortcutsModalSearch => {
                 replace_utf16(&mut self.shortcuts_modal.query, replacement_range, text);
                 self.shortcuts_modal.scroll_handle = gpui::UniformListScrollHandle::new();
-                self.new_connection_caret_visible = true;
+                self.show_active_input_caret(cx);
                 cx.notify();
             }
             WorkspaceImeTarget::Search => {
@@ -2273,7 +2447,7 @@ impl WorkspaceApp {
                     );
                     self.terminal_command_suggestions_open = false;
                     self.terminal_command_suggestion_highlighted = None;
-                    self.new_connection_caret_visible = true;
+                    self.show_active_input_caret(cx);
                     cx.notify();
                 }
             }
@@ -2281,7 +2455,7 @@ impl WorkspaceApp {
                 if self.terminal.update(cx, |terminal, _cx| {
                     terminal.replace_cwd_query(replacement_range, text)
                 }) {
-                    self.new_connection_caret_visible = true;
+                    self.show_active_input_caret(cx);
                     cx.notify();
                 }
             }
@@ -2289,7 +2463,7 @@ impl WorkspaceApp {
                 if self.terminal.update(cx, |terminal, _cx| {
                     terminal.replace_git_panel_query(replacement_range, text)
                 }) {
-                    self.new_connection_caret_visible = true;
+                    self.show_active_input_caret(cx);
                     cx.notify();
                 }
             }
@@ -2300,7 +2474,7 @@ impl WorkspaceApp {
                         terminal.replace_project_query(&key, replacement_range, text)
                     })
                 {
-                    self.new_connection_caret_visible = true;
+                    self.show_active_input_caret(cx);
                     cx.notify();
                 }
             }
@@ -2308,7 +2482,7 @@ impl WorkspaceApp {
                 if self.terminal.update(cx, |terminal, cx| {
                     terminal.replace_cast_search(replacement_range, text, cx)
                 }) {
-                    self.new_connection_caret_visible = true;
+                    self.show_active_input_caret(cx);
                     cx.notify();
                 }
             }
@@ -2406,7 +2580,7 @@ impl WorkspaceApp {
                         .quick_commands
                         .replace_input(input, replacement_range, text)
                 }) {
-                    self.new_connection_caret_visible = true;
+                    self.show_active_input_caret(cx);
                     cx.notify();
                 }
             }
@@ -2450,7 +2624,7 @@ impl WorkspaceApp {
                     self.forwarding.update(cx, |forwarding, _cx| {
                         forwarding.replace_input_text(input, replacement_range, text);
                     });
-                    self.new_connection_caret_visible = true;
+                    self.show_active_input_caret(cx);
                     cx.notify();
                 }
             }
@@ -2461,7 +2635,7 @@ impl WorkspaceApp {
                     if input == FileManagerInput::Path {
                         self.refresh_file_manager_path_completion(cx);
                     }
-                    self.new_connection_caret_visible = true;
+                    self.show_active_input_caret(cx);
                     cx.notify();
                 }
             }
@@ -2469,7 +2643,7 @@ impl WorkspaceApp {
                 if self.launcher.update(cx, |launcher, cx| {
                     launcher.replace_input(input, replacement_range, text, cx)
                 }) {
-                    self.new_connection_caret_visible = true;
+                    self.show_active_input_caret(cx);
                     cx.notify();
                 }
             }
@@ -2477,7 +2651,7 @@ impl WorkspaceApp {
                 if self.graphics.update(cx, |graphics, cx| {
                     graphics.replace_input(input, replacement_range, text, cx)
                 }) {
-                    self.new_connection_caret_visible = true;
+                    self.show_active_input_caret(cx);
                     cx.notify();
                 }
             }
@@ -2492,7 +2666,7 @@ impl WorkspaceApp {
                     // Radix-style active item so keyboard focus cannot point at
                     // a filtered-out model.
                     self.ai.models.selector_highlighted_model = None;
-                    self.new_connection_caret_visible = true;
+                    self.show_active_input_caret(cx);
                     cx.notify();
                 }
             }
@@ -2507,7 +2681,7 @@ impl WorkspaceApp {
                     true
                 });
                 if changed {
-                    self.new_connection_caret_visible = true;
+                    self.show_active_input_caret(cx);
                     cx.notify();
                 }
             }
@@ -2516,7 +2690,7 @@ impl WorkspaceApp {
                     replace_utf16(&mut self.ai.chat.draft, replacement_range, text);
                     self.ai.chat.autocomplete_suppressed = false;
                     self.ai.chat.autocomplete_index = 0;
-                    self.new_connection_caret_visible = true;
+                    self.show_active_input_caret(cx);
                     cx.notify();
                 }
             }
@@ -2527,7 +2701,7 @@ impl WorkspaceApp {
                         replacement_range,
                         text,
                     );
-                    self.new_connection_caret_visible = true;
+                    self.show_active_input_caret(cx);
                     cx.notify();
                 }
             }
@@ -2540,7 +2714,7 @@ impl WorkspaceApp {
                             replace_utf16(value, replacement_range, text);
                         }
                     });
-                    self.new_connection_caret_visible = true;
+                    self.show_active_input_caret(cx);
                     self.dispatch_native_plugin_ui_input_event(key, cx);
                     cx.notify();
                 }
@@ -2553,7 +2727,7 @@ impl WorkspaceApp {
                     if matches!(input, SftpInput::LocalPath | SftpInput::RemotePath) {
                         self.refresh_sftp_path_completion(input, cx);
                     }
-                    self.new_connection_caret_visible = true;
+                    self.show_active_input_caret(cx);
                     cx.notify();
                 }
             }
@@ -2575,7 +2749,7 @@ impl WorkspaceApp {
                     true
                 });
                 if changed {
-                    self.new_connection_caret_visible = true;
+                    self.show_active_input_caret(cx);
                     cx.notify();
                 }
             }
@@ -2589,7 +2763,7 @@ impl WorkspaceApp {
                     )
                 });
                 if replaced {
-                    self.new_connection_caret_visible = true;
+                    self.show_active_input_caret(cx);
                     cx.notify();
                 }
             }
@@ -2978,11 +3152,12 @@ mod tests {
     use super::{
         CopyShortcutOwner, FileManagerInput, HostToolsPlainTextImeFrame, HostToolsTextInput,
         PendingPlatformTextCommit, SettingsInput, SftpInput, TextInputAnchor, TextInputAnchorId,
-        TextInputAnchorStore, TextInputContentAlign, WorkspaceApp, WorkspaceImeMarkedText,
-        WorkspaceImeTarget, active_ime_should_defer_input_key,
-        collapsed_copy_shortcut_is_owned_by_target, control_k_delete_end,
-        copy_shortcut_owner_for_target, effective_platform_text_replacement_range,
-        ime_target_accepts_newline, ime_target_should_blink_caret, keystroke_commits_platform_text,
+        TextInputAnchorStore, TextInputContentAlign, WorkspaceApp, WorkspaceCaretState,
+        WorkspaceCaretVisibility, WorkspaceImeMarkedText, WorkspaceImeTarget,
+        active_ime_should_defer_input_key, collapsed_copy_shortcut_is_owned_by_target,
+        control_k_delete_end, copy_shortcut_owner_for_target,
+        effective_platform_text_replacement_range, ime_target_accepts_newline,
+        ime_target_should_blink_caret, keystroke_commits_platform_text,
         keystroke_uses_text_edit_modifier, line_end_for_utf16_offset, line_range_for_utf16_offset,
         line_start_for_utf16_offset, next_utf16_boundary, next_word_boundary,
         normalize_clipboard_text_for_ime_target, path_completion_owns_vertical_navigation,
@@ -2998,6 +3173,45 @@ mod tests {
             key_char: key_char.map(str::to_string),
             modifiers,
         }
+    }
+
+    #[test]
+    fn caret_state_pauses_settings_blink_until_scroll_deadline() {
+        let now = std::time::Instant::now();
+        let visibility = WorkspaceCaretVisibility::default();
+        let mut caret = WorkspaceCaretState::new(visibility.clone());
+        let target = WorkspaceImeTarget::Settings(SettingsInput::KeybindingSearch);
+        assert!(caret.sync_active_target(Some(target)));
+        assert!(caret.pause_settings_caret(now + std::time::Duration::from_millis(700)));
+        assert_eq!(
+            caret.next_tick_delay(now),
+            Some(std::time::Duration::from_millis(700))
+        );
+        assert!(!caret.advance_tick(now + std::time::Duration::from_millis(699)));
+        assert!(visibility.visible());
+        assert!(caret.advance_tick(now + std::time::Duration::from_millis(700)));
+        assert!(!visibility.visible());
+    }
+
+    #[test]
+    fn caret_state_resets_phase_and_pause_when_visible_owner_changes() {
+        let now = std::time::Instant::now();
+        let visibility = WorkspaceCaretVisibility::default();
+        let mut caret = WorkspaceCaretState::new(visibility.clone());
+        let settings_target = WorkspaceImeTarget::Settings(SettingsInput::KeybindingSearch);
+        caret.sync_active_target(Some(settings_target));
+        caret.pause_settings_caret(now + std::time::Duration::from_secs(1));
+        caret.advance_tick(now + std::time::Duration::from_secs(1));
+        assert!(!visibility.visible());
+
+        assert!(caret.sync_active_target(Some(WorkspaceImeTarget::Search)));
+        assert!(visibility.visible());
+        assert_eq!(
+            caret.next_tick_delay(now),
+            Some(super::CARET_BLINK_INTERVAL)
+        );
+        assert!(caret.sync_active_target(Some(WorkspaceImeTarget::ReadOnlyText(7))));
+        assert_eq!(caret.next_tick_delay(now), None);
     }
 
     #[test]

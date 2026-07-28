@@ -100,6 +100,10 @@ impl WorkspaceApp {
 
 impl Render for WorkspaceApp {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let active_ime_target = self.active_ime_target(cx);
+        self.workspace_input.update(cx, |input, cx| {
+            input.sync_active_target(active_ime_target, cx);
+        });
         self.begin_selectable_text_frame();
         self.schedule_pending_auto_close_terminal_sessions(window, cx);
         if self.ai_sidebar_visible() || self.ai_entity.read(cx).terminal_inline_panel().open {

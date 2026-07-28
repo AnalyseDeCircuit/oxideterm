@@ -86,9 +86,7 @@ impl WorkspaceApp {
                             showing_placeholder,
                             index,
                         ),
-                        |line| {
-                            line.child(text_caret(&self.tokens, self.new_connection_caret_visible))
-                        },
+                        |line| line.child(text_caret(&self.tokens, self.input_caret.visible())),
                     )
                     .child(if showing_placeholder {
                         div().child(line.text.to_string()).into_any_element()
@@ -99,7 +97,7 @@ impl WorkspaceApp {
                             false,
                             line_selection,
                             line_caret,
-                            self.new_connection_caret_visible,
+                            self.input_caret.visible(),
                             Some(theme.text),
                         )
                         .into_any_element()
@@ -110,9 +108,7 @@ impl WorkspaceApp {
                             && !showing_placeholder
                             && !shows_selection
                             && !shows_positioned_caret,
-                        |line| {
-                            line.child(text_caret(&self.tokens, self.new_connection_caret_visible))
-                        },
+                        |line| line.child(text_caret(&self.tokens, self.input_caret.visible())),
                     )
                     .when_some(line_ghost, |line, ghost| {
                         line.child(

@@ -177,7 +177,7 @@ impl WorkspaceApp {
                     value: dialog.value.as_str(),
                     placeholder: self.i18n.t(host_tmux_input_placeholder_key(&dialog.kind)),
                     focused: ui.input_is_focused(HostToolsTextInput::TmuxDialog),
-                    caret_visible: self.new_connection_caret_visible,
+                    caret_visible: self.input_caret.visible(),
                     secret: false,
                     selected_all: false,
                     selected_range: self.ime_selected_range_for_target(target, cx),
@@ -206,7 +206,7 @@ impl WorkspaceApp {
                             host_tools.ui.focus_input(HostToolsTextInput::TmuxDialog);
                         });
                         this.ime_marked_text = None;
-                        this.new_connection_caret_visible = true;
+                        this.show_active_input_caret(cx);
                         window.focus(&this.focus_handle, cx);
                         this.begin_ime_selection_from_mouse_down(target, event, window, cx);
                         cx.stop_propagation();

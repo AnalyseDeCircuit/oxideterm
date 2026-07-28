@@ -126,19 +126,19 @@ impl WorkspaceApp {
                     .flex()
                     .items_center()
                     .when(focused && showing_placeholder && index == 0, |line| {
-                        line.child(text_caret(&self.tokens, self.new_connection_caret_visible))
+                        line.child(text_caret(&self.tokens, self.input_caret.visible()))
                     })
                     .child(ai_input_line_segments(
                         &self.tokens,
                         line,
                         line_selection,
                         line_caret,
-                        self.new_connection_caret_visible,
+                        self.input_caret.visible(),
                     ))
                     .when(
                         focused && is_last_line && !showing_placeholder && selected_range.is_none(),
                         |line| {
-                            line.child(text_caret(&self.tokens, self.new_connection_caret_visible))
+                            line.child(text_caret(&self.tokens, self.input_caret.visible()))
                         },
                     ),
             );

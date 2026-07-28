@@ -924,7 +924,7 @@ impl WorkspaceApp {
                     state.jump_server_presence.reopen();
                 });
                 this.close_new_connection_select(cx);
-                this.new_connection_caret_visible = true;
+                this.show_active_input_caret(cx);
                 window.focus(&this.focus_handle, cx);
                 cx.stop_propagation();
                 cx.notify();

@@ -225,7 +225,7 @@ impl WorkspaceApp {
             .new_connection
             .save_connection;
         self.update_connection_form_state(cx, |state| state.replace_with_new_form(form));
-        self.new_connection_caret_visible = true;
+        self.show_active_input_caret(cx);
         self.needs_active_pane_focus = false;
         window.focus(&self.focus_handle, cx);
         cx.notify();
@@ -297,7 +297,7 @@ impl WorkspaceApp {
             state.replace_with_new_form(form);
             state.drill_down_parent_node_id = Some(parent_node_id);
         });
-        self.new_connection_caret_visible = true;
+        self.show_active_input_caret(cx);
         self.needs_active_pane_focus = false;
         window.focus(&self.focus_handle, cx);
         cx.notify();

@@ -2354,10 +2354,7 @@ impl WorkspaceApp {
                                 rgb(theme.text_muted)
                             })
                             .when(!has_query && marked_text.is_none(), |input| {
-                                input.child(text_caret(
-                                    &self.tokens,
-                                    self.new_connection_caret_visible,
-                                ))
+                                input.child(text_caret(&self.tokens, self.input_caret.visible()))
                             })
                             .child(if has_query {
                                 text_input_value_segments_with_color(
@@ -2366,7 +2363,7 @@ impl WorkspaceApp {
                                     false,
                                     selection_range,
                                     caret_offset,
-                                    self.new_connection_caret_visible,
+                                    self.input_caret.visible(),
                                     Some(theme.text),
                                 )
                                 .into_any_element()
@@ -2384,10 +2381,8 @@ impl WorkspaceApp {
                             .when(
                                 has_query && !shows_selection && !shows_positioned_caret,
                                 |input| {
-                                    input.child(text_caret(
-                                        &self.tokens,
-                                        self.new_connection_caret_visible,
-                                    ))
+                                    input
+                                        .child(text_caret(&self.tokens, self.input_caret.visible()))
                                 },
                             )
                             .on_mouse_down(

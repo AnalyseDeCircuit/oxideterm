@@ -848,6 +848,16 @@ impl HostToolsVisibility {
             Self::VisibleSidebar | Self::VisibleMultiple { sidebar: true, .. }
         )
     }
+
+    pub(in crate::workspace) fn main_window_is_visible(self) -> bool {
+        matches!(
+            self,
+            Self::VisibleMainTab
+                | Self::VisibleSidebar
+                | Self::VisibleMultiple { main_tab: true, .. }
+                | Self::VisibleMultiple { sidebar: true, .. }
+        )
+    }
 }
 
 #[derive(Clone)]

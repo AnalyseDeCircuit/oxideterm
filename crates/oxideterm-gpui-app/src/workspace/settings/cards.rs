@@ -736,7 +736,7 @@ impl WorkspaceApp {
                         settings.blur_settings_entity_input(cx);
                     });
                     self.clear_ime_selection();
-                    self.new_connection_caret_visible = true;
+                    self.show_active_input_caret(cx);
                     return true;
                 }
                 "backspace" | "delete" if !modifiers.platform && !modifiers.control => {
@@ -769,7 +769,7 @@ impl WorkspaceApp {
                             ai.blur_settings_input(cx);
                         });
                         self.set_standard_confirm_focus(action);
-                        self.new_connection_caret_visible = true;
+                        self.show_active_input_caret(cx);
                         cx.notify();
                     }
                     return true;
@@ -779,7 +779,7 @@ impl WorkspaceApp {
                         ai.blur_settings_input(cx);
                     });
                     self.clear_ime_selection();
-                    self.new_connection_caret_visible = true;
+                    self.show_active_input_caret(cx);
                     return true;
                 }
                 "backspace" | "delete" if !modifiers.platform && !modifiers.control => {
@@ -805,7 +805,7 @@ impl WorkspaceApp {
                 // This input belongs to a workspace modal, so Escape dismisses
                 // the editor instead of leaving an unfocused modal behind.
                 self.close_terminal_command_specs_editor(cx);
-                self.new_connection_caret_visible = true;
+                self.show_active_input_caret(cx);
                 true
             }
             "escape" => {
@@ -820,7 +820,7 @@ impl WorkspaceApp {
                     self.focused_settings_input = None;
                     self.clear_settings_input_draft(input);
                 }
-                self.new_connection_caret_visible = true;
+                self.show_active_input_caret(cx);
                 cx.notify();
                 true
             }
@@ -841,7 +841,7 @@ impl WorkspaceApp {
                     self.focused_settings_input = None;
                     self.clear_settings_input_draft(input);
                 }
-                self.new_connection_caret_visible = true;
+                self.show_active_input_caret(cx);
                 cx.notify();
                 true
             }
@@ -1017,7 +1017,7 @@ impl WorkspaceApp {
         }
         if changed {
             self.clear_ime_selection();
-            self.new_connection_caret_visible = true;
+            self.show_active_input_caret(cx);
             cx.notify();
         }
     }
@@ -1137,7 +1137,7 @@ impl WorkspaceApp {
                 settings.focus_settings_entity_input(input, cx);
             });
             self.clear_ime_selection();
-            self.new_connection_caret_visible = true;
+            self.show_active_input_caret(cx);
             cx.notify();
             return;
         }
@@ -1152,7 +1152,7 @@ impl WorkspaceApp {
                 ai.focus_settings_input(input, cx);
             });
             self.clear_ime_selection();
-            self.new_connection_caret_visible = true;
+            self.show_active_input_caret(cx);
             cx.notify();
             return;
         }
@@ -1174,7 +1174,7 @@ impl WorkspaceApp {
         };
         if app_lock_input && self.focused_settings_input == Some(input) {
             self.clear_ime_selection();
-            self.new_connection_caret_visible = true;
+            self.show_active_input_caret(cx);
             cx.notify();
             return;
         }
@@ -1211,7 +1211,7 @@ impl WorkspaceApp {
         } else {
             current_value
         };
-        self.new_connection_caret_visible = true;
+        self.show_active_input_caret(cx);
         cx.notify();
     }
 

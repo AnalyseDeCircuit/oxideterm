@@ -879,7 +879,7 @@ impl WorkspaceApp {
                                 value: &launcher.core.search_query,
                                 placeholder: self.i18n.t("launcher.searchWsl"),
                                 focused,
-                                caret_visible: self.new_connection_caret_visible,
+                                caret_visible: self.input_caret.visible(),
                                 secret: false,
                                 selected_all: false,
                                 selected_range: self.ime_selected_range_for_target(target, cx),
@@ -896,7 +896,7 @@ impl WorkspaceApp {
                                 this.launcher.update(cx, |launcher, cx| {
                                     launcher.focus_search(cx);
                                 });
-                                this.new_connection_caret_visible = true;
+                                this.show_active_input_caret(cx);
                                 window.focus(&this.focus_handle, cx);
                                 this.begin_ime_selection_from_mouse_down(target, event, window, cx);
                             }),
@@ -1249,7 +1249,7 @@ impl WorkspaceApp {
                                 value: &launcher.core.search_query,
                                 placeholder: self.i18n.t("launcher.search"),
                                 focused,
-                                caret_visible: self.new_connection_caret_visible,
+                                caret_visible: self.input_caret.visible(),
                                 secret: false,
                                 selected_all: false,
                                 selected_range: self.ime_selected_range_for_target(target, cx),
@@ -1265,7 +1265,7 @@ impl WorkspaceApp {
                                 this.launcher.update(cx, |launcher, cx| {
                                     launcher.focus_search(cx);
                                 });
-                                this.new_connection_caret_visible = true;
+                                this.show_active_input_caret(cx);
                                 window.focus(&this.focus_handle, cx);
                                 this.begin_ime_selection_from_mouse_down(target, event, window, cx);
                             }),

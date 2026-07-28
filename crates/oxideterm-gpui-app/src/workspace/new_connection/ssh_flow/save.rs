@@ -77,7 +77,7 @@ impl WorkspaceApp {
         form.agent_available = detect_ssh_agent_available();
         form.save_connection = true;
         self.update_connection_form_state(cx, |state| state.replace_with_new_form(form));
-        self.new_connection_caret_visible = true;
+        self.show_active_input_caret(cx);
         self.needs_active_pane_focus = false;
         window.focus(&self.focus_handle, cx);
         cx.notify();
@@ -1027,7 +1027,7 @@ impl WorkspaceApp {
             state.editing_saved_connection_id = Some(id.to_string());
             state.saved_connection_prompt_action = Some(action);
         });
-        self.new_connection_caret_visible = true;
+        self.show_active_input_caret(cx);
         self.needs_active_pane_focus = false;
         window.focus(&self.focus_handle, cx);
         cx.notify();
@@ -1049,7 +1049,7 @@ impl WorkspaceApp {
             state.replace_with_new_form(form);
             state.editing_saved_connection_id = Some(id.to_string());
         });
-        self.new_connection_caret_visible = true;
+        self.show_active_input_caret(cx);
         self.needs_active_pane_focus = false;
         window.focus(&self.focus_handle, cx);
         cx.notify();
@@ -1098,7 +1098,7 @@ impl WorkspaceApp {
         form.agent_available = detect_ssh_agent_available();
         form.save_connection = false;
         self.update_connection_form_state(cx, |state| state.replace_with_new_form(form));
-        self.new_connection_caret_visible = true;
+        self.show_active_input_caret(cx);
         self.needs_active_pane_focus = false;
         window.focus(&self.focus_handle, cx);
         cx.notify();

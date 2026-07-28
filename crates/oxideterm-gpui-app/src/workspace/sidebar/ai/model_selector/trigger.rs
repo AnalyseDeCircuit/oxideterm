@@ -173,7 +173,7 @@ impl WorkspaceApp {
             })
             .cursor(CursorStyle::IBeam)
             .when(focused && showing_placeholder, |input| {
-                input.child(text_caret(&self.tokens, self.new_connection_caret_visible))
+                input.child(text_caret(&self.tokens, self.input_caret.visible()))
             })
             .child(div().truncate().child(display_text))
             .when(focused && !marked_text.is_empty(), |input| {
@@ -185,7 +185,7 @@ impl WorkspaceApp {
                 )
             })
             .when(focused && !showing_placeholder, |input| {
-                input.child(text_caret(&self.tokens, self.new_connection_caret_visible))
+                input.child(text_caret(&self.tokens, self.input_caret.visible()))
             })
             .on_mouse_down(
                 MouseButton::Left,

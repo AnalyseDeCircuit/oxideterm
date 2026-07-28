@@ -1785,7 +1785,7 @@ window.focus(&this.focus_handle, cx);
                     value: &value,
                     placeholder,
                     focused,
-                    caret_visible: self.new_connection_caret_visible,
+                    caret_visible: self.input_caret.visible(),
                     secret: false,
                     selected_all: false,
                     selected_range: self.ime_selected_range_for_target(target, cx),

@@ -433,7 +433,7 @@ window.focus(&this.focus_handle, cx);
                                                                 |input| {
                                                                     input.child(text_caret(
                                                                         &self.tokens,
-                                                                        self.new_connection_caret_visible,
+                                                                        self.input_caret.visible(),
                                                                     ))
                                                                 },
                                                             ),
