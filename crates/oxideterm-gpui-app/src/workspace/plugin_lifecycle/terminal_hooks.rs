@@ -1,19 +1,22 @@
 // Copyright (C) 2026 AnalyseDeCircuit
 // SPDX-License-Identifier: GPL-3.0-only
 
-use std::sync::{Arc, mpsc};
+use std::{
+    sync::{Arc, mpsc},
+    time::Duration,
+};
 
 use serde_json::{Value, json};
 
-use super::{
-    constants::NATIVE_PLUGIN_TERMINAL_HOOK_TIMEOUT,
-    types::{NativePluginTerminalAction, NativePluginTerminalRequest},
-};
+use super::types::{NativePluginTerminalAction, NativePluginTerminalRequest};
 use crate::workspace::{
     TerminalInputInterceptorResult, delivery,
     plugin_host::NativePluginRuntimeTerminalHookContribution, plugin_runtime,
     plugin_runtime::PluginResponseResult,
 };
+
+// Terminal hooks fail open when a plugin exceeds the foreground latency budget.
+const NATIVE_PLUGIN_TERMINAL_HOOK_TIMEOUT: Duration = Duration::from_millis(5);
 
 // Terminal hook execution has a strict timeout and fail-open behavior; keeping
 // it isolated makes that contract easier to audit than burying it in lifecycle.

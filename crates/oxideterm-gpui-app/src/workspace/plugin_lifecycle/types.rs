@@ -50,6 +50,7 @@ pub(in crate::workspace) struct NativePluginConfirmDialog {
     pub(super) title: String,
     pub(super) description: String,
     pub(super) response_tx: mpsc::Sender<bool>,
+    response_sent: bool,
 }
 
 impl From<NativePluginConfirmRequest> for NativePluginConfirmDialog {
@@ -60,15 +61,21 @@ impl From<NativePluginConfirmRequest> for NativePluginConfirmDialog {
             title: request.title,
             description: request.description,
             response_tx: request.response_tx,
+            response_sent: false,
         }
     }
 }
 
 impl NativePluginConfirmDialog {
-    pub(in crate::workspace) fn respond(&self, confirmed: bool) {
+    pub(in crate::workspace) fn respond(&mut self, confirmed: bool) -> bool {
+        if self.response_sent {
+            return false;
+        }
+        self.response_sent = true;
         // Keep the request identity alive with the retained exit-frame payload.
         let _request_id = &self.request_id;
         let _ = self.response_tx.send(confirmed);
+        true
     }
 }
 

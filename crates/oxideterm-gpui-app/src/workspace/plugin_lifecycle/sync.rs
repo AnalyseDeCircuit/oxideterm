@@ -27,6 +27,30 @@ use zeroize::Zeroizing;
 use super::types::{NativePluginSyncAction, NativePluginSyncRequest};
 use crate::workspace::{delivery, plugin_runtime, quick_commands::QuickCommandImportStrategy};
 
+struct SensitiveSyncHostCallOwner(plugin_runtime::PluginHostCall);
+
+impl std::ops::Deref for SensitiveSyncHostCallOwner {
+    type Target = plugin_runtime::PluginHostCall;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl std::ops::DerefMut for SensitiveSyncHostCallOwner {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
+impl Drop for SensitiveSyncHostCallOwner {
+    fn drop(&mut self) {
+        // Sync password methods move the JSON string into a Zeroizing worker
+        // owner; all remaining process-provided JSON is cleared on every exit.
+        self.0.zeroize_args();
+    }
+}
+
 // Sync owns the plugin-facing .oxide and saved-connection protocol. Mutating
 // operations are routed back through Workspace so cloned snapshots cannot
 // accidentally acknowledge state the application did not apply.
@@ -42,8 +66,10 @@ pub(super) fn native_plugin_sync_response(
     plugin_settings_revisions: &Map<String, Value>,
     sync_tx: Option<&delivery::ActiveDeliverySender<NativePluginSyncRequest>>,
 ) -> plugin_runtime::PluginResponse {
+    let mut call = SensitiveSyncHostCallOwner(call);
     let request_id = call.request_id.clone();
-    match call.method.as_str() {
+    let method = call.method.clone();
+    match method.as_str() {
         // These methods expose frozen Workspace snapshots. Mutating calls are
         // forwarded through the Workspace sync bridge so cloned stores cannot
         // acknowledge writes that the app did not really apply.
@@ -102,7 +128,7 @@ pub(super) fn native_plugin_sync_response(
             request_id,
             connection_store,
             plugin_settings,
-            &call.args,
+            &mut call.args,
             sync_tx,
         ),
         "validateOxide" => {
@@ -124,11 +150,11 @@ pub(super) fn native_plugin_sync_response(
             plugin_id,
             request_id,
             connection_store,
-            &call.args,
+            &mut call.args,
             sync_tx,
         ),
         "importOxide" => {
-            native_plugin_sync_import_oxide_response(plugin_id, request_id, &call.args, sync_tx)
+            native_plugin_sync_import_oxide_response(plugin_id, request_id, &mut call.args, sync_tx)
         }
         "onSavedConnectionsChange" => plugin_runtime::PluginResponse::error(
             request_id,
@@ -154,7 +180,7 @@ pub(super) fn native_plugin_sync_export_oxide_response(
     request_id: String,
     connection_store: &oxideterm_connections::ConnectionStore,
     plugin_settings: &[oxideterm_connections::oxide_file::EncryptedPluginSetting],
-    args: &Value,
+    args: &mut Value,
     sync_tx: Option<&delivery::ActiveDeliverySender<NativePluginSyncRequest>>,
 ) -> plugin_runtime::PluginResponse {
     let connection_ids = match native_plugin_sync_connection_ids(connection_store, args) {
@@ -166,7 +192,7 @@ pub(super) fn native_plugin_sync_export_oxide_response(
             );
         }
     };
-    let Some(password) = args.get("password").and_then(Value::as_str) else {
+    let Some(password) = take_native_plugin_sync_password(args) else {
         return plugin_runtime::PluginResponse::error(
             request_id,
             plugin_runtime::PluginError::protocol(
@@ -175,7 +201,6 @@ pub(super) fn native_plugin_sync_export_oxide_response(
             ),
         );
     };
-    let password = Zeroizing::new(password.to_string());
     let plugin_settings = match native_plugin_selected_plugin_settings(plugin_settings, args) {
         Ok(settings) => settings,
         Err(error) => {
@@ -236,7 +261,7 @@ fn native_plugin_sync_preview_import_response(
     plugin_id: &str,
     request_id: String,
     connection_store: &oxideterm_connections::ConnectionStore,
-    args: &Value,
+    args: &mut Value,
     sync_tx: Option<&delivery::ActiveDeliverySender<NativePluginSyncRequest>>,
 ) -> plugin_runtime::PluginResponse {
     let bytes = match native_plugin_file_data_arg(args) {
@@ -248,7 +273,7 @@ fn native_plugin_sync_preview_import_response(
             );
         }
     };
-    let Some(password) = args.get("password").and_then(Value::as_str) else {
+    let Some(password) = take_native_plugin_sync_password(args) else {
         return plugin_runtime::PluginResponse::error(
             request_id,
             plugin_runtime::PluginError::protocol(
@@ -257,7 +282,6 @@ fn native_plugin_sync_preview_import_response(
             ),
         );
     };
-    let password = Zeroizing::new(password.to_string());
     let strategy =
         match ImportConflictStrategy::parse(args.get("conflictStrategy").and_then(Value::as_str)) {
             Ok(strategy) => strategy,
@@ -353,6 +377,14 @@ fn native_plugin_sync_apply_saved_connections_response(
     })
 }
 
+fn take_native_plugin_sync_password(args: &mut Value) -> Option<Zeroizing<String>> {
+    let password = args.as_object_mut()?.get_mut("password")?;
+    let Value::String(password) = std::mem::replace(password, Value::Null) else {
+        return None;
+    };
+    Some(Zeroizing::new(password))
+}
+
 pub(super) fn native_plugin_emit_sync_progress(
     sync_tx: Option<&delivery::ActiveDeliverySender<NativePluginSyncRequest>>,
     plugin_id: &str,
@@ -379,7 +411,7 @@ pub(super) fn native_plugin_emit_sync_progress(
 fn native_plugin_sync_import_oxide_response(
     plugin_id: &str,
     request_id: String,
-    args: &Value,
+    args: &mut Value,
     sync_tx: Option<&delivery::ActiveDeliverySender<NativePluginSyncRequest>>,
 ) -> plugin_runtime::PluginResponse {
     let Some(sync_tx) = sync_tx else {

@@ -4,6 +4,7 @@
 use std::{
     collections::{HashMap, HashSet},
     sync::Arc,
+    time::Duration,
 };
 
 use gpui::{
@@ -22,16 +23,12 @@ use super::{
     plugin_runtime,
 };
 
-pub(in crate::workspace) mod constants;
-mod forwarding;
 mod host_api_snapshot;
 mod ide;
 mod product_host_calls;
 mod profiler;
-mod scp;
 mod secrets;
 mod settings_payload;
-mod sftp;
 mod snapshots;
 mod sync;
 mod terminal_hooks;
@@ -40,15 +37,11 @@ mod types;
 mod ui_helpers;
 mod ui_host_calls;
 
-use constants::*;
-use forwarding::*;
 use host_api_snapshot::*;
 use ide::*;
 use profiler::*;
-use scp::*;
 use secrets::*;
 use settings_payload::*;
-use sftp::*;
 use snapshots::*;
 use sync::*;
 use terminal_hooks::*;
@@ -64,10 +57,30 @@ use super::delivery;
 use oxideterm_plugin_host_api::terminal::NativePluginTerminalNodeSnapshot;
 use oxideterm_plugin_host_api::{
     ai::*,
+    backend::*,
     catalog::{allowed_host_apis_for_capabilities, is_supported_host_api_capability},
+    forwarding::{native_plugin_forward_response, native_plugin_forward_saved_forwards},
     host_tools::*,
+    scp::native_plugin_scp_response,
+    sftp::native_plugin_sftp_response,
     transfers::*,
 };
+#[cfg(test)]
+use oxideterm_plugin_host_api::{
+    forwarding::{
+        native_plugin_forward_check_capability, native_plugin_forward_create_request,
+        native_plugin_forward_rule_snapshot,
+    },
+    sftp::{
+        native_plugin_sftp_check_capability, native_plugin_sftp_node_id_arg,
+        native_plugin_sftp_path_arg,
+    },
+};
+
+// Runtime subscription sampling is independent from Plugin Manager visibility.
+const NATIVE_PLUGIN_TRANSFER_PROGRESS_INTERVAL: Duration = Duration::from_millis(500);
+const NATIVE_PLUGIN_PROFILER_METRICS_INTERVAL: Duration = Duration::from_secs(1);
+const NATIVE_PLUGIN_TOAST_TTL: Duration = Duration::from_secs(4);
 
 impl WorkspaceApp {
     fn promote_native_plugin_confirm(&mut self, cx: &mut Context<Self>) {

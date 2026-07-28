@@ -442,14 +442,17 @@ fn sync_import_oxide_args_and_core_import_match_tauri_defaults() {
         OxideExportOptions::default(),
     )
     .unwrap();
+    let mut import_args = serde_json::json!({
+        "fileData": bytes,
+        "password": "StrongPass!123",
+        "conflictStrategy": "rename",
+        "selectedPluginIds": []
+    });
+    let password_buffer = import_args["password"].as_str().unwrap().as_ptr();
     let (parsed_bytes, password, options) =
-        native_plugin_sync_import_oxide_args(&serde_json::json!({
-            "fileData": bytes,
-            "password": "StrongPass!123",
-            "conflictStrategy": "rename",
-            "selectedPluginIds": []
-        }))
-        .unwrap();
+        native_plugin_sync_import_oxide_args(&mut import_args).unwrap();
+    assert_eq!(password.as_ptr(), password_buffer);
+    assert!(import_args["password"].is_null());
     assert!(options.oxide_options.import_forwards);
     assert!(!options.oxide_options.import_portable_secrets);
     assert!(options.import_app_settings);
@@ -519,19 +522,21 @@ fn sync_plugin_settings_export_filters_selected_plugins_and_revisions() {
         },
     ];
 
+    let mut export_args = serde_json::json!({
+        "connectionIds": [],
+        "password": "StrongPass!123",
+        "includePluginSettings": true,
+        "selectedPluginIds": ["com.example.demo"]
+    });
     let response = native_plugin_sync_export_oxide_response(
         "com.example.demo",
         "sync-plugin-export-1".to_string(),
         &connection_store,
         &plugin_settings,
-        &serde_json::json!({
-            "connectionIds": [],
-            "password": "StrongPass!123",
-            "includePluginSettings": true,
-            "selectedPluginIds": ["com.example.demo"]
-        }),
+        &mut export_args,
         None,
     );
+    assert!(export_args["password"].is_null());
     let plugin_runtime::PluginResponseResult::Ok { value } = response.result else {
         panic!("expected sync.exportOxide to include selected plugin settings");
     };

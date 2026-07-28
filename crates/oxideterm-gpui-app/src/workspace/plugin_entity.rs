@@ -3,7 +3,16 @@
 
 use super::*;
 use gpui::Task;
-use std::time::{Duration, Instant};
+#[cfg(test)]
+use std::sync::atomic::AtomicUsize;
+use std::{
+    future::Future,
+    sync::{
+        Mutex,
+        atomic::{AtomicU64, Ordering},
+    },
+    time::{Duration, Instant},
+};
 use zeroize::Zeroizing;
 
 use super::plugin_lifecycle::{
@@ -14,6 +23,12 @@ use super::plugin_lifecycle::{
 };
 #[cfg(test)]
 use super::plugin_lifecycle::{NativePluginSyncAction, NativePluginTerminalAction};
+
+// Plugin-owned workers use bounded waits without involving the workspace heartbeat.
+const NATIVE_PLUGIN_LIFECYCLE_TIMEOUT: Duration = Duration::from_secs(5);
+const NATIVE_PLUGIN_DELIVERY_POLL_INTERVAL: Duration = Duration::from_millis(80);
+const NATIVE_PLUGIN_RELEASE_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(5);
+const NATIVE_PLUGIN_WORKSPACE_RELEASED_CODE: &str = "plugin_workspace_released";
 
 pub(in crate::workspace) enum PluginWorkspaceEvent {
     ManagerDeliveryReady,
@@ -101,6 +116,16 @@ fn native_plugin_runtime_failure_message(error: plugin_runtime::PluginError) -> 
     }
 }
 
+fn plugin_workspace_released_response(request_id: String) -> plugin_runtime::PluginResponse {
+    plugin_runtime::PluginResponse::error(
+        request_id,
+        plugin_runtime::PluginError::runtime(
+            NATIVE_PLUGIN_WORKSPACE_RELEASED_CODE,
+            "Plugin workspace is shutting down",
+        ),
+    )
+}
+
 /// Owns plugin workers and reliable delivery independently from plugin page visibility.
 pub(in crate::workspace) struct PluginWorkspaceEntity {
     task_runtime: Arc<tokio::runtime::Runtime>,
@@ -110,6 +135,13 @@ pub(in crate::workspace) struct PluginWorkspaceEntity {
     runtime_delivery_rx: std::sync::mpsc::Receiver<NativePluginRuntimeDelivery>,
     runtime_intents: VecDeque<PluginRuntimeIntent>,
     active_runtime_plugin_ids: HashSet<String>,
+    owned_tasks: Arc<Mutex<HashMap<u64, Option<tokio::task::AbortHandle>>>>,
+    next_owned_task_id: AtomicU64,
+    release_shutdown_started: bool,
+    #[cfg(test)]
+    release_shutdown_invocations: Option<Arc<AtomicUsize>>,
+    #[cfg(test)]
+    release_shutdown_targets: Option<Arc<AtomicUsize>>,
     manager_state: plugin_manager::NativePluginManagerState,
     ui_state: plugin_ui::NativePluginUiState,
     manager_operation_in_flight: bool,
@@ -170,6 +202,13 @@ impl PluginWorkspaceEntity {
             runtime_delivery_rx,
             runtime_intents: VecDeque::new(),
             active_runtime_plugin_ids: HashSet::new(),
+            owned_tasks: Arc::new(Mutex::new(HashMap::new())),
+            next_owned_task_id: AtomicU64::new(1),
+            release_shutdown_started: false,
+            #[cfg(test)]
+            release_shutdown_invocations: None,
+            #[cfg(test)]
+            release_shutdown_targets: None,
             manager_state: plugin_manager::NativePluginManagerState::new(),
             ui_state: plugin_ui::NativePluginUiState::default(),
             manager_operation_in_flight: false,
@@ -205,6 +244,7 @@ impl PluginWorkspaceEntity {
         entity.schedule_manager_delivery(cx);
         entity.schedule_runtime_request_delivery(cx);
         entity.schedule_oxide_import_delivery(cx);
+        entity.schedule_release_shutdown(cx);
         entity
     }
 
@@ -314,11 +354,44 @@ impl PluginWorkspaceEntity {
         self.runtime_host.clone()
     }
 
+    fn spawn_owned_task<F>(&self, future: F)
+    where
+        F: Future<Output = ()> + Send + 'static,
+    {
+        let task_id = self.next_owned_task_id.fetch_add(1, Ordering::Relaxed);
+        {
+            let mut tasks = self
+                .owned_tasks
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            tasks.insert(task_id, None);
+        }
+        let owned_tasks = Arc::clone(&self.owned_tasks);
+        let task = self.task_runtime.spawn(async move {
+            future.await;
+            owned_tasks
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .remove(&task_id);
+        });
+        let abort_handle = task.abort_handle();
+        let mut tasks = self
+            .owned_tasks
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if let Some(handle) = tasks.get_mut(&task_id) {
+            *handle = Some(abort_handle);
+        }
+    }
+
     pub(in crate::workspace) fn start_runtime_bootstrap(
         &mut self,
         host_api_resolver: plugin_runtime::NativeHostApiResolver,
         wasm_sidecar_path: Option<PathBuf>,
     ) -> bool {
+        if self.release_shutdown_started {
+            return false;
+        }
         let process_plans = self.registry.process_activation_plans();
         let wasm_plans = self.registry.wasm_activation_plans();
         if process_plans.is_empty() && wasm_plans.is_empty() {
@@ -334,7 +407,7 @@ impl PluginWorkspaceEntity {
 
         let host = self.runtime_host.clone();
         let delivery_tx = self.runtime_delivery_tx.clone();
-        self.task_runtime.spawn(async move {
+        self.spawn_owned_task(async move {
             let mut host = host.lock().await;
             host.set_wasm_sidecar_path(wasm_sidecar_path);
             host.set_host_api_resolver(host_api_resolver);
@@ -351,7 +424,7 @@ impl PluginWorkspaceEntity {
                             plan.install_dir,
                             plan.entry,
                             permissions,
-                            super::plugin_lifecycle::constants::NATIVE_PLUGIN_LIFECYCLE_TIMEOUT,
+                            NATIVE_PLUGIN_LIFECYCLE_TIMEOUT,
                         )
                         .await
                     }
@@ -375,7 +448,7 @@ impl PluginWorkspaceEntity {
                                 plan.install_dir,
                                 plan.entry,
                                 permissions,
-                                super::plugin_lifecycle::constants::NATIVE_PLUGIN_LIFECYCLE_TIMEOUT,
+                                NATIVE_PLUGIN_LIFECYCLE_TIMEOUT,
                             )
                             .await
                         }
@@ -398,9 +471,12 @@ impl PluginWorkspaceEntity {
         command: String,
         host_api_resolver: plugin_runtime::NativeHostApiResolver,
     ) {
+        if self.release_shutdown_started {
+            return;
+        }
         let host = self.runtime_host.clone();
         let delivery_tx = self.runtime_delivery_tx.clone();
-        self.task_runtime.spawn(async move {
+        self.spawn_owned_task(async move {
             let mut host = host.lock().await;
             host.set_host_api_resolver(host_api_resolver);
             let result = host
@@ -408,7 +484,7 @@ impl PluginWorkspaceEntity {
                     &plugin_id,
                     command,
                     serde_json::Value::Null,
-                    super::plugin_lifecycle::constants::NATIVE_PLUGIN_LIFECYCLE_TIMEOUT,
+                    NATIVE_PLUGIN_LIFECYCLE_TIMEOUT,
                 )
                 .await;
             let _ = delivery_tx
@@ -422,17 +498,16 @@ impl PluginWorkspaceEntity {
         event: plugin_runtime::PluginEvent,
         host_api_resolver: plugin_runtime::NativeHostApiResolver,
     ) {
+        if self.release_shutdown_started {
+            return;
+        }
         let host = self.runtime_host.clone();
         let delivery_tx = self.runtime_delivery_tx.clone();
-        self.task_runtime.spawn(async move {
+        self.spawn_owned_task(async move {
             let mut host = host.lock().await;
             host.set_host_api_resolver(host_api_resolver);
             let result = host
-                .dispatch_event(
-                    &plugin_id,
-                    event,
-                    super::plugin_lifecycle::constants::NATIVE_PLUGIN_LIFECYCLE_TIMEOUT,
-                )
+                .dispatch_event(&plugin_id, event, NATIVE_PLUGIN_LIFECYCLE_TIMEOUT)
                 .await;
             let _ =
                 delivery_tx.send(NativePluginRuntimeDelivery::EventDispatch { plugin_id, result });
@@ -440,11 +515,14 @@ impl PluginWorkspaceEntity {
     }
 
     fn start_runtime_deactivation(&mut self, plugin_id: String) {
+        if self.release_shutdown_started {
+            return;
+        }
         // Declarative views are no longer valid once their runtime starts deactivating.
         self.ui_state.remove_plugin(&plugin_id);
         let host = self.runtime_host.clone();
         let delivery_tx = self.runtime_delivery_tx.clone();
-        self.task_runtime.spawn(async move {
+        self.spawn_owned_task(async move {
             let result = host.lock().await.deactivate_plugin(&plugin_id).await;
             let _ =
                 delivery_tx.send(NativePluginRuntimeDelivery::Deactivation { plugin_id, result });
@@ -466,6 +544,11 @@ impl PluginWorkspaceEntity {
         progress_registration_id: Option<String>,
         response_tx: std::sync::mpsc::Sender<plugin_runtime::PluginResponse>,
     ) {
+        if self.release_shutdown_started {
+            // Dropping these owned inputs also erases the zeroizing password.
+            let _ = response_tx.send(plugin_workspace_released_response(request_id));
+            return;
+        }
         let operation_id = self.next_oxide_import_id;
         self.next_oxide_import_id = self.next_oxide_import_id.wrapping_add(1).max(1);
         let oxideterm_plugin_host_api::sync::NativePluginOxideImportOptions {
@@ -545,12 +628,12 @@ impl PluginWorkspaceEntity {
         checksum: Option<String>,
         overwrite: bool,
     ) -> bool {
-        if self.manager_operation_in_flight {
+        if self.manager_operation_in_flight || self.release_shutdown_started {
             return false;
         }
         self.manager_operation_in_flight = true;
         let delivery_tx = self.manager_delivery_tx.clone();
-        self.task_runtime.spawn(async move {
+        self.spawn_owned_task(async move {
             let result = plugin_host::NativePluginRegistry::install_plugin_package_from_url(
                 &settings_path,
                 download_url.trim(),
@@ -586,12 +669,12 @@ impl PluginWorkspaceEntity {
         registry_url: Zeroizing<String>,
         installed: Vec<plugin_host::NativePluginInstalledInfo>,
     ) -> bool {
-        if self.manager_operation_in_flight {
+        if self.manager_operation_in_flight || self.release_shutdown_started {
             return false;
         }
         self.manager_operation_in_flight = true;
         let delivery_tx = self.manager_delivery_tx.clone();
-        self.task_runtime.spawn(async move {
+        self.spawn_owned_task(async move {
             let result =
                 match plugin_host::NativePluginRegistry::fetch_plugin_registry(registry_url.trim())
                     .await
@@ -616,12 +699,12 @@ impl PluginWorkspaceEntity {
         &mut self,
         settings_path: PathBuf,
     ) -> bool {
-        if self.manager_operation_in_flight {
+        if self.manager_operation_in_flight || self.release_shutdown_started {
             return false;
         }
         self.manager_operation_in_flight = true;
         let delivery_tx = self.manager_delivery_tx.clone();
-        self.task_runtime.spawn(async move {
+        self.spawn_owned_task(async move {
             let result =
                 oxideterm_plugin_runtime_install::install_wasm_runtime_sidecar(&settings_path)
                     .await;
@@ -766,7 +849,7 @@ impl PluginWorkspaceEntity {
     }
 
     pub(in crate::workspace) fn begin_confirm_exit(&mut self, confirmed: bool) -> Option<u64> {
-        let dialog = self.confirm.as_ref()?;
+        let dialog = self.confirm.as_mut()?;
         let generation = self.confirm_presence.begin_exit()?;
         // Resolve exactly once while retaining the dialog for its exit frame.
         dialog.respond(confirmed);
@@ -821,11 +904,140 @@ impl PluginWorkspaceEntity {
     }
 
     pub(in crate::workspace) fn start_runtime_services(&mut self) -> bool {
-        if self.runtime_services_started {
+        if self.runtime_services_started || self.release_shutdown_started {
             return false;
         }
         self.runtime_services_started = true;
         true
+    }
+
+    fn schedule_release_shutdown(&self, cx: &mut Context<Self>) {
+        cx.on_release(|entity, _| {
+            entity.begin_release_shutdown();
+        })
+        .detach();
+    }
+
+    fn begin_release_shutdown(&mut self) -> bool {
+        if self.release_shutdown_started {
+            return false;
+        }
+        self.release_shutdown_started = true;
+        self.runtime_services_started = false;
+        self.manager_operation_in_flight = false;
+        self.subscription_sampler_running = false;
+        self.subscription_sampler_generation = self.subscription_sampler_generation.wrapping_add(1);
+        self.subscription_sampler_task.take();
+        self.subscription_samples.clear();
+        self.subscription_snapshots.clear();
+
+        // Stopping every wake rejects new foreground delivery before receivers drop.
+        self.manager_delivery_tx.wake().stop();
+        self.runtime_delivery_tx.wake().stop();
+        self.runtime_request_wake.stop();
+        self.oxide_import_delivery_tx.wake().stop();
+        self.reject_pending_runtime_requests();
+
+        let abort_handles = self
+            .owned_tasks
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .drain()
+            .filter_map(|(_, handle)| handle)
+            .collect::<Vec<_>>();
+        for abort_handle in abort_handles {
+            abort_handle.abort();
+        }
+        // Dropping queued producer results releases owned URLs and import data promptly.
+        while let Ok(delivery) = self.runtime_delivery_rx.try_recv() {
+            drop(delivery);
+        }
+        while let Ok(delivery) = self.manager_delivery_rx.try_recv() {
+            drop(delivery);
+        }
+        while let Ok(delivery) = self.oxide_import_delivery_rx.try_recv() {
+            drop(delivery);
+        }
+
+        let mut plugin_ids = std::mem::take(&mut self.active_runtime_plugin_ids);
+        plugin_ids.extend(
+            self.registry
+                .plugins()
+                .iter()
+                .filter(|plugin| {
+                    matches!(
+                        plugin.state,
+                        plugin_host::NativePluginState::ReadyProcess
+                            | plugin_host::NativePluginState::ReadyWasm
+                            | plugin_host::NativePluginState::Loading
+                            | plugin_host::NativePluginState::Active
+                    )
+                })
+                .map(|plugin| plugin.manifest.id.clone()),
+        );
+        let mut plugin_ids = plugin_ids.into_iter().collect::<Vec<_>>();
+        plugin_ids.sort_unstable();
+
+        #[cfg(test)]
+        {
+            if let Some(invocations) = &self.release_shutdown_invocations {
+                invocations.fetch_add(1, Ordering::SeqCst);
+            }
+            if let Some(targets) = &self.release_shutdown_targets {
+                targets.store(plugin_ids.len(), Ordering::SeqCst);
+            }
+        }
+
+        let runtime_host = Arc::clone(&self.runtime_host);
+        self.task_runtime.spawn(async move {
+            // One total deadline bounds lock acquisition and every process/WASM teardown.
+            let _ = tokio::time::timeout(NATIVE_PLUGIN_RELEASE_SHUTDOWN_TIMEOUT, async move {
+                let mut runtime_host = runtime_host.lock().await;
+                for plugin_id in plugin_ids {
+                    let _ = runtime_host.deactivate_plugin(&plugin_id).await;
+                }
+            })
+            .await;
+        });
+        true
+    }
+
+    fn reject_pending_runtime_requests(&mut self) {
+        if let Some(mut dialog) = self.confirm.take() {
+            dialog.respond(false);
+        }
+        while let Ok(request) = self.confirm_rx.try_recv() {
+            let _ = request.response_tx.send(false);
+        }
+        while let Ok(request) = self.terminal_rx.try_recv() {
+            let response = plugin_workspace_released_response(request.request_id);
+            let _ = request.response_tx.send(response);
+            // The action is dropped in place; terminal text is never cloned for shutdown.
+            drop(request.action);
+        }
+        while let Ok(request) = self.sync_rx.try_recv() {
+            let response = plugin_workspace_released_response(request.request_id);
+            let _ = request.response_tx.send(response);
+            // ImportOxide owns a Zeroizing password that is erased when this action drops.
+            drop(request.action);
+        }
+        for (_, context) in self.oxide_import_contexts.drain() {
+            let response = plugin_workspace_released_response(context.request_id);
+            let _ = context.response_tx.send(response);
+        }
+        while let Some(intent) = self.oxide_import_intents.pop_front() {
+            if let PluginOxideImportIntent::Complete {
+                request_id,
+                response_tx,
+                ..
+            } = intent
+            {
+                let _ = response_tx.send(plugin_workspace_released_response(request_id));
+            }
+        }
+        self.product_ui_effects.clear();
+        self.runtime_intents.clear();
+        self.manager_deliveries.clear();
     }
 
     pub(in crate::workspace) fn configure_subscription_samples(
@@ -834,6 +1046,9 @@ impl PluginWorkspaceEntity {
         event_log_last_id: Option<u64>,
         cx: &mut Context<Self>,
     ) {
+        if self.release_shutdown_started {
+            return;
+        }
         // These samples serve registered runtime event subscriptions. They are
         // intentionally independent from Plugin Manager page visibility.
         let sample_kinds = samples.iter().map(|(kind, _)| *kind).collect::<Vec<_>>();
@@ -859,10 +1074,7 @@ impl PluginWorkspaceEntity {
         let generation = self.subscription_sampler_generation;
         self.subscription_sampler_task = Some(cx.spawn(async move |entity, cx| {
             loop {
-                Timer::after(
-                    super::plugin_lifecycle::constants::NATIVE_PLUGIN_DELIVERY_POLL_INTERVAL,
-                )
-                .await;
+                Timer::after(NATIVE_PLUGIN_DELIVERY_POLL_INTERVAL).await;
                 let keep_running = entity
                     .update(cx, |entity, cx| {
                         if !entity.subscription_sampler_running
@@ -1206,8 +1418,7 @@ impl PluginWorkspaceEntity {
         let delivery_wake = self.manager_delivery_tx.wake();
         let release_wake = delivery_wake.clone();
         cx.on_release(move |_, _| {
-            // Releasing the window stops only its waiter; the workspace runtime
-            // still owns any package operation until that task finishes.
+            // The entity release path stops this waiter and aborts its package producer.
             release_wake.stop();
         })
         .detach();
@@ -1880,8 +2091,16 @@ mod tests {
         assert_eq!(confirm_response_rx.try_recv(), Ok(true));
     }
 
+    fn assert_workspace_released_response(response: plugin_runtime::PluginResponse) {
+        assert!(matches!(
+            response.result,
+            plugin_runtime::PluginResponseResult::Error { error }
+                if error.code == NATIVE_PLUGIN_WORKSPACE_RELEASED_CODE
+        ));
+    }
+
     #[gpui::test]
-    fn entity_release_stops_plugin_delivery_waiters(cx: &mut TestAppContext) {
+    fn release_shutdown_is_idempotent_and_aborts_runtime_producers(cx: &mut TestAppContext) {
         let runtime = Arc::new(
             tokio::runtime::Builder::new_current_thread()
                 .enable_all()
@@ -1890,6 +2109,132 @@ mod tests {
         );
         let entity = cx.new(|cx| {
             PluginWorkspaceEntity::new(runtime, plugin_host::NativePluginRegistry::default(), cx)
+        });
+        let shutdown_invocations = Arc::new(AtomicUsize::new(0));
+        let shutdown_targets = Arc::new(AtomicUsize::new(0));
+        entity.update(cx, |entity, cx| {
+            entity.release_shutdown_invocations = Some(Arc::clone(&shutdown_invocations));
+            entity.release_shutdown_targets = Some(Arc::clone(&shutdown_targets));
+            entity
+                .active_runtime_plugin_ids
+                .insert("plugin.release".to_string());
+            entity.manager_operation_in_flight = true;
+            entity.configure_subscription_samples(
+                vec![(
+                    PluginSubscriptionSample::Layout,
+                    serde_json::json!({"activeTabId": "tab-release"}),
+                )],
+                None,
+                cx,
+            );
+            assert!(entity.subscription_sampler_running);
+            assert!(entity.subscription_sampler_task.is_some());
+            entity.spawn_owned_task(std::future::pending::<()>());
+            assert_eq!(
+                entity
+                    .owned_tasks
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner())
+                    .len(),
+                1
+            );
+            assert!(entity.begin_release_shutdown());
+            assert!(!entity.begin_release_shutdown());
+            assert!(
+                entity
+                    .owned_tasks
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner())
+                    .is_empty()
+            );
+            assert!(!entity.subscription_sampler_running);
+            assert!(entity.subscription_sampler_task.is_none());
+            assert!(entity.subscription_samples.is_empty());
+            assert!(!entity.manager_operation_in_flight);
+            assert!(!entity.start_runtime_services());
+            entity.configure_subscription_samples(
+                vec![(PluginSubscriptionSample::Layout, serde_json::json!({}))],
+                None,
+                cx,
+            );
+            assert!(!entity.subscription_sampler_running);
+        });
+
+        assert_eq!(shutdown_invocations.load(Ordering::SeqCst), 1);
+        assert_eq!(shutdown_targets.load(Ordering::SeqCst), 1);
+    }
+
+    #[gpui::test]
+    fn last_entity_owner_release_rejects_pending_requests_and_stops_waiters(
+        cx: &mut TestAppContext,
+    ) {
+        let runtime = Arc::new(
+            tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .expect("plugin entity test runtime"),
+        );
+        let entity = cx.new(|cx| {
+            PluginWorkspaceEntity::new(runtime, plugin_host::NativePluginRegistry::default(), cx)
+        });
+        let shutdown_invocations = Arc::new(AtomicUsize::new(0));
+        let shutdown_targets = Arc::new(AtomicUsize::new(0));
+        let senders = entity.read_with(cx, |entity, _cx| entity.runtime_request_senders());
+        let (active_confirm_tx, active_confirm_rx) = std::sync::mpsc::channel();
+        let (queued_confirm_tx, queued_confirm_rx) = std::sync::mpsc::channel();
+        let (terminal_response_tx, terminal_response_rx) = std::sync::mpsc::channel();
+        let (sync_response_tx, sync_response_rx) = std::sync::mpsc::channel();
+        senders
+            .confirm
+            .send(NativePluginConfirmRequest {
+                plugin_id: "plugin.release".to_string(),
+                request_id: "confirm-active".to_string(),
+                title: "Active".to_string(),
+                description: "Already answered before release".to_string(),
+                response_tx: active_confirm_tx,
+            })
+            .expect("active confirm request");
+        senders
+            .confirm
+            .send(NativePluginConfirmRequest {
+                plugin_id: "plugin.release".to_string(),
+                request_id: "confirm-queued".to_string(),
+                title: "Queued".to_string(),
+                description: "Rejected on release".to_string(),
+                response_tx: queued_confirm_tx,
+            })
+            .expect("queued confirm request");
+        senders
+            .terminal
+            .send(NativePluginTerminalRequest {
+                request_id: "terminal-release".to_string(),
+                action: NativePluginTerminalAction::ClearBuffer {
+                    node_id: "node-release".to_string(),
+                },
+                response_tx: terminal_response_tx,
+            })
+            .expect("terminal request");
+        senders
+            .sync
+            .send(NativePluginSyncRequest {
+                request_id: "sync-release".to_string(),
+                action: NativePluginSyncAction::ReportProgress {
+                    plugin_id: "plugin.release".to_string(),
+                    registration_id: "progress-release".to_string(),
+                    value: serde_json::json!({"current": 1}),
+                },
+                response_tx: sync_response_tx,
+            })
+            .expect("sync request");
+
+        entity.update(cx, |entity, _cx| {
+            entity.release_shutdown_invocations = Some(Arc::clone(&shutdown_invocations));
+            entity.release_shutdown_targets = Some(Arc::clone(&shutdown_targets));
+            entity
+                .active_runtime_plugin_ids
+                .insert("plugin.release".to_string());
+            assert!(entity.promote_confirm_request());
+            assert!(entity.begin_confirm_exit(true).is_some());
         });
         let (manager_wake, runtime_delivery_wake, runtime_request_wake, oxide_import_wake) = cx
             .read(|cx| {
@@ -1902,15 +2247,43 @@ mod tests {
                 )
             });
 
+        let retained_for_detached_window = entity.clone();
         drop(entity);
         cx.update(|_cx| {});
         cx.run_until_parked();
 
-        // Releasing the Entity ends UI delivery without cancelling backend work.
+        // Closing one window cannot stop plugins while a detached owner retains the Entity.
+        assert_eq!(shutdown_invocations.load(Ordering::SeqCst), 0);
+        assert!(!manager_wake.is_stopped());
+        assert_eq!(active_confirm_rx.try_recv(), Ok(true));
+        assert!(queued_confirm_rx.try_recv().is_err());
+        assert!(terminal_response_rx.try_recv().is_err());
+        assert!(sync_response_rx.try_recv().is_err());
+
+        drop(retained_for_detached_window);
+        cx.update(|_cx| {});
+        cx.run_until_parked();
+
+        // Releasing the final shared owner ends delivery and rejects every pending action.
         assert!(manager_wake.is_stopped());
         assert!(runtime_delivery_wake.is_stopped());
         assert!(runtime_request_wake.is_stopped());
         assert!(oxide_import_wake.is_stopped());
+        assert_eq!(shutdown_invocations.load(Ordering::SeqCst), 1);
+        assert_eq!(shutdown_targets.load(Ordering::SeqCst), 1);
+        assert_eq!(queued_confirm_rx.try_recv(), Ok(false));
+        assert_workspace_released_response(
+            terminal_response_rx
+                .try_recv()
+                .expect("terminal release response"),
+        );
+        assert_workspace_released_response(
+            sync_response_rx.try_recv().expect("sync release response"),
+        );
+        assert!(matches!(
+            active_confirm_rx.try_recv(),
+            Err(std::sync::mpsc::TryRecvError::Disconnected)
+        ));
     }
 
     #[gpui::test]
