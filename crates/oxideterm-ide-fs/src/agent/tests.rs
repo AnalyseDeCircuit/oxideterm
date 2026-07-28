@@ -374,6 +374,61 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn releasing_one_ide_session_preserves_other_node_consumer() {
+        let registry = oxideterm_ssh::SshConnectionRegistry::default();
+        let router = NodeRouter::new(registry.clone());
+        let first_node = NodeId::new("node-ide-first");
+        let second_node = NodeId::new("node-ide-second");
+        let first_config =
+            oxideterm_ssh::SshConfig::password("first-host", 22, "first-user", "pw");
+        let second_config =
+            oxideterm_ssh::SshConfig::password("second-host", 22, "second-user", "pw");
+        router.upsert_node(first_node.clone(), first_config.clone());
+        router.upsert_node(second_node.clone(), second_config.clone());
+
+        let first_handle = registry.acquire(
+            first_config,
+            ConnectionConsumer::NodeRouter(first_node.0.clone()),
+        );
+        first_handle.set_physical(Arc::new(()));
+        registry.mark_state(
+            first_handle.connection_id(),
+            oxideterm_ssh::ConnectionState::Active,
+        );
+        router
+            .bind_connection(&first_node, first_handle.connection_id().to_string())
+            .unwrap();
+
+        let second_handle = registry.acquire(
+            second_config,
+            ConnectionConsumer::NodeRouter(second_node.0.clone()),
+        );
+        second_handle.set_physical(Arc::new(()));
+        registry.mark_state(
+            second_handle.connection_id(),
+            oxideterm_ssh::ConnectionState::Active,
+        );
+        router
+            .bind_connection(&second_node, second_handle.connection_id().to_string())
+            .unwrap();
+
+        let fs = NodeAgentIdeFileSystem::new(router, NodeAgentMode::Disabled);
+        fs.ensure_ide_session_for_node(&first_node).await.unwrap();
+        fs.ensure_ide_session_for_node(&second_node).await.unwrap();
+
+        fs.release_ide_session_for_node(&first_node.0);
+
+        assert!(!first_handle
+            .info()
+            .consumers
+            .contains(&ConnectionConsumer::Ide(first_node.0)));
+        assert!(second_handle
+            .info()
+            .consumers
+            .contains(&ConnectionConsumer::Ide(second_node.0)));
+    }
+
+    #[tokio::test]
     async fn release_all_ide_consumers_completes_and_releases_registered_consumer() {
         let registry = oxideterm_ssh::SshConnectionRegistry::default();
         let router = NodeRouter::new(registry.clone());
@@ -474,7 +529,7 @@ mod tests {
             "node-ide".to_string()
         )));
 
-        fs.close_ide_session("node-ide");
+        fs.release_ide_session_for_node("node-ide");
         assert!(!second.info().consumers.contains(&ConnectionConsumer::Ide(
             "node-ide".to_string()
         )));

@@ -506,13 +506,15 @@ impl NodeAgentIdeFileSystem {
         Ok(parse_grep_output(&output, &query.pattern, false))
     }
 
-    pub fn close_ide_session(&self, node_id: &str) {
+    pub fn release_ide_session_for_node(&self, node_id: &str) {
+        // Each IDE surface releases only the node consumer that it owns.
         if let Some((_, session)) = self.ide_sessions.remove(node_id) {
             session.close();
         }
     }
 
     pub fn close_all_ide_sessions(&self) {
+        // Full teardown belongs to the shared file-system owner, not one surface.
         // DashMap iteration holds shard read locks, so finish collecting keys
         // before remove acquires write locks for the same shards.
         let node_ids = self
@@ -530,7 +532,7 @@ impl NodeAgentIdeFileSystem {
     }
 
     pub fn release_ide_consumer(&self, node_id: &str) {
-        self.close_ide_session(node_id);
+        self.release_ide_session_for_node(node_id);
     }
 
     pub fn release_all_ide_consumers(&self) {

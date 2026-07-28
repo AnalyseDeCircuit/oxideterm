@@ -135,7 +135,8 @@ impl IdeSurface {
             && previous_node_id != node_id
         {
             self.stop_agent_watch(cx);
-            self.fs.close_ide_session(&previous_node_id);
+            self.fs
+                .release_ide_session_for_node(&previous_node_id);
         } else if self.root_path.as_deref() != Some(root_path.as_str()) {
             self.stop_agent_watch(cx);
         }
@@ -214,9 +215,8 @@ impl IdeSurface {
         self.pending_reconnect_restore_node_id = None;
         self.pending_reconnect_restore_files_remaining = 0;
         if let Some(node_id) = self.node_id.take() {
-            self.fs.close_ide_session(&node_id);
+            self.fs.release_ide_session_for_node(&node_id);
         }
-        self.fs.close_all_ide_sessions();
     }
 
     pub fn mark_connection_interrupted(&mut self, cx: &mut Context<Self>) {
@@ -228,7 +228,7 @@ impl IdeSurface {
         self.pending_reconnect_restore_node_id = None;
         self.pending_reconnect_restore_files_remaining = 0;
         if let Some(node_id) = self.node_id.as_deref() {
-            self.fs.close_ide_session(node_id);
+            self.fs.release_ide_session_for_node(node_id);
         }
         if matches!(self.load_state, IdeLoadState::Ready) {
             self.load_state = IdeLoadState::Disconnected;
@@ -286,15 +286,125 @@ impl IdeSurface {
         self.folder_picker.path_input_focused = true;
         self.load_folder_picker_path(node_id, initial_path, cx);
     }
-
 }
 
 impl Drop for IdeSurface {
     fn drop(&mut self) {
         // GPUI can drop an IDE surface during workspace teardown without a
-        // `Context`. Mirror Tauri's closeProject/invalidateAgentCache ownership
-        // boundary by releasing every NodeRouter IDE consumer here as a final
-        // guard against shutdown-time orphan node liveness.
-        self.fs.close_all_ide_sessions();
+        // `Context`. Release only this surface's node because the file-system
+        // registry is shared with other IDE surfaces and AI consumers.
+        if let Some(node_id) = self.node_id.as_deref() {
+            self.fs.release_ide_session_for_node(node_id);
+        }
+    }
+}
+
+#[cfg(test)]
+mod lifecycle_tests {
+    use super::*;
+    use gpui::TestAppContext;
+    use oxideterm_ssh::{
+        ConnectionConsumer, ConnectionState, NodeId, NodeRouter, SshConfig, SshConnectionHandle,
+        SshConnectionRegistry,
+    };
+    use oxideterm_theme::default_tokens;
+
+    fn bind_active_node(
+        registry: &SshConnectionRegistry,
+        router: &NodeRouter,
+        node_id: &str,
+        host: &str,
+    ) -> (NodeId, SshConnectionHandle) {
+        let node_id = NodeId::new(node_id);
+        let config = SshConfig::password(host, 22, "ide-user", "pw");
+        router.upsert_node(node_id.clone(), config.clone());
+        let handle = registry.acquire(
+            config,
+            ConnectionConsumer::NodeRouter(node_id.0.clone()),
+        );
+        handle.set_physical(Arc::new(()));
+        registry.mark_state(handle.connection_id(), ConnectionState::Active);
+        router
+            .bind_connection(&node_id, handle.connection_id().to_string())
+            .expect("bind active IDE test node");
+        (node_id, handle)
+    }
+
+    #[gpui::test]
+    fn releasing_one_surface_preserves_other_node_consumer(cx: &mut TestAppContext) {
+        let registry = SshConnectionRegistry::default();
+        let router = NodeRouter::new(registry.clone());
+        let (first_node, first_handle) =
+            bind_active_node(&registry, &router, "surface-node-first", "first-host");
+        let (second_node, second_handle) =
+            bind_active_node(&registry, &router, "surface-node-second", "second-host");
+        let fs = NodeAgentIdeFileSystem::new(router, NodeAgentMode::Disabled);
+        let backend_runtime = Arc::new(
+            tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .expect("build IDE test runtime"),
+        );
+
+        // Explicit deployment acquires each node-scoped IDE lease before the
+        // fake SSH transport rejects the agent probe.
+        backend_runtime.block_on(async {
+            let _ = fs.deploy_agent_for_node(first_node.0.clone()).await;
+            let _ = fs.deploy_agent_for_node(second_node.0.clone()).await;
+        });
+        assert!(first_handle
+            .info()
+            .consumers
+            .contains(&ConnectionConsumer::Ide(first_node.0.clone())));
+        assert!(second_handle
+            .info()
+            .consumers
+            .contains(&ConnectionConsumer::Ide(second_node.0.clone())));
+
+        let first_surface = cx.new({
+            let fs = fs.clone();
+            let backend_runtime = backend_runtime.clone();
+            let first_node_id = first_node.0.clone();
+            move |cx| {
+                let mut surface = IdeSurface::new(
+                    fs,
+                    default_tokens(),
+                    IdeLabels::default(),
+                    IdeRuntimeSettings::default(),
+                    backend_runtime,
+                    cx,
+                );
+                surface.node_id = Some(first_node_id);
+                surface
+            }
+        });
+        let _second_surface = cx.new({
+            let fs = fs.clone();
+            let backend_runtime = backend_runtime.clone();
+            let second_node_id = second_node.0.clone();
+            move |cx| {
+                let mut surface = IdeSurface::new(
+                    fs,
+                    default_tokens(),
+                    IdeLabels::default(),
+                    IdeRuntimeSettings::default(),
+                    backend_runtime,
+                    cx,
+                );
+                surface.node_id = Some(second_node_id);
+                surface
+            }
+        });
+
+        first_surface.update(cx, |surface, cx| surface.release_remote_session(cx));
+
+        assert!(!first_handle
+            .info()
+            .consumers
+            .contains(&ConnectionConsumer::Ide(first_node.0)));
+        assert!(second_handle
+            .info()
+            .consumers
+            .contains(&ConnectionConsumer::Ide(second_node.0)));
     }
 }
