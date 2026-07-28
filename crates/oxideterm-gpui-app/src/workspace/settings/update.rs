@@ -585,6 +585,20 @@ impl WorkspaceApp {
             SettingsWorkspaceEvent::RequestQuitAfterNativeUpdate => {
                 self.schedule_native_update_quit(cx);
             }
+            SettingsWorkspaceEvent::PortablePasswordChangeFinished { success } => {
+                if *success {
+                    self.push_ai_settings_toast(
+                        self.i18n
+                            .t("settings_view.general.portable_password_changed"),
+                        TerminalNoticeVariant::Success,
+                    );
+                    self.refresh_portable_settings_snapshot(true, cx);
+                } else if let Some(error) =
+                    settings.read(cx).portable_action_error().map(str::to_owned)
+                {
+                    self.push_ai_settings_toast(error, TerminalNoticeVariant::Error);
+                }
+            }
         }
     }
 

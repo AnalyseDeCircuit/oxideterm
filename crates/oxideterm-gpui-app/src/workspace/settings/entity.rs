@@ -1,8 +1,11 @@
 use std::sync::Arc;
 
 use gpui::{Context, EventEmitter, Task};
+use oxideterm_gpui_settings_view::SettingsInput;
+use zeroize::Zeroizing;
 
 use super::update::NativeUpdateRuntime;
+use super::{PortableSettingsAction, PortableSettingsDialog};
 
 /// Non-secret result produced by the portable runtime status worker.
 pub(in crate::workspace) struct PortableStatusRefresh {
@@ -20,6 +23,16 @@ pub(in crate::workspace) struct PortableStatusSnapshot {
     pub(in crate::workspace) refresh_pending: bool,
 }
 
+pub(in crate::workspace) struct PortablePasswordDialogSnapshot {
+    pub(in crate::workspace) open: bool,
+    pub(in crate::workspace) pending: bool,
+    pub(in crate::workspace) error: Option<String>,
+    pub(in crate::workspace) current_password: Zeroizing<String>,
+    pub(in crate::workspace) new_password: Zeroizing<String>,
+    pub(in crate::workspace) confirm_password: Zeroizing<String>,
+    pub(in crate::workspace) presence: oxideterm_gpui_ui::motion::ExitPresence,
+}
+
 /// Owns settings work that must complete independently from root rendering.
 pub(in crate::workspace) struct SettingsWorkspaceEntity {
     portable_status: Option<oxideterm_portable_runtime::PortableStatusSnapshot>,
@@ -27,6 +40,16 @@ pub(in crate::workspace) struct SettingsWorkspaceEntity {
     portable_exportable_secret_count: Option<usize>,
     portable_refresh_pending: bool,
     portable_refresh_task: Option<Task<()>>,
+    pub(super) portable_dialog: Option<PortableSettingsDialog>,
+    pub(super) portable_action_pending: Option<PortableSettingsAction>,
+    pub(super) portable_action_error: Option<String>,
+    pub(super) portable_current_password: Zeroizing<String>,
+    pub(super) portable_new_password: Zeroizing<String>,
+    pub(super) portable_confirm_password: Zeroizing<String>,
+    pub(super) portable_focused_input: Option<SettingsInput>,
+    pub(super) portable_dialog_presence: oxideterm_gpui_ui::motion::ExitPresence,
+    pub(super) portable_dialog_exit_task: Option<Task<()>>,
+    pub(super) portable_action_task: Option<Task<()>>,
     pub(super) native_update: NativeUpdateRuntime,
 }
 
@@ -44,6 +67,7 @@ pub(in crate::workspace) enum SettingsWorkspaceEvent {
     ShowNativeUpdateToast(SettingsWorkspaceToast),
     RequestAutomaticNativeUpdateCheck,
     RequestQuitAfterNativeUpdate,
+    PortablePasswordChangeFinished { success: bool },
 }
 
 impl EventEmitter<SettingsWorkspaceEvent> for SettingsWorkspaceEntity {}
@@ -56,6 +80,16 @@ impl SettingsWorkspaceEntity {
             portable_exportable_secret_count: None,
             portable_refresh_pending: false,
             portable_refresh_task: None,
+            portable_dialog: None,
+            portable_action_pending: None,
+            portable_action_error: None,
+            portable_current_password: Zeroizing::new(String::new()),
+            portable_new_password: Zeroizing::new(String::new()),
+            portable_confirm_password: Zeroizing::new(String::new()),
+            portable_focused_input: None,
+            portable_dialog_presence: oxideterm_gpui_ui::motion::ExitPresence::visible(),
+            portable_dialog_exit_task: None,
+            portable_action_task: None,
             native_update: NativeUpdateRuntime::new(cx),
         }
     }

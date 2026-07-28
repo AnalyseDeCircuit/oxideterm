@@ -230,6 +230,11 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let can_change_password = status.is_unlocked;
+        let action_error = self
+            .settings_workspace
+            .read(cx)
+            .portable_action_error()
+            .map(str::to_owned);
         div()
             .w_full()
             .flex()
@@ -282,23 +287,20 @@ impl WorkspaceApp {
                         ),
                     ),
             )
-            .when_some(
-                self.portable_settings_action_error.clone(),
-                |group, error| {
-                    group.child(
-                        div()
-                            .rounded(px(self.tokens.radii.md))
-                            .border_1()
-                            .border_color(rgba((self.tokens.ui.error << 8) | 0x4d))
-                            .bg(rgba((self.tokens.ui.error << 8) | 0x1a))
-                            .px(px(10.0))
-                            .py(px(8.0))
-                            .text_size(px(self.tokens.metrics.ui_text_sm))
-                            .text_color(rgb(self.tokens.ui.error))
-                            .child(error),
-                    )
-                },
-            )
+            .when_some(action_error, |group, error| {
+                group.child(
+                    div()
+                        .rounded(px(self.tokens.radii.md))
+                        .border_1()
+                        .border_color(rgba((self.tokens.ui.error << 8) | 0x4d))
+                        .bg(rgba((self.tokens.ui.error << 8) | 0x1a))
+                        .px(px(10.0))
+                        .py(px(8.0))
+                        .text_size(px(self.tokens.metrics.ui_text_sm))
+                        .text_color(rgb(self.tokens.ui.error))
+                        .child(error),
+                )
+            })
             .into_any_element()
     }
 

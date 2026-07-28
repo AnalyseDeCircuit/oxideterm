@@ -174,7 +174,8 @@ mod connections_page;
 mod controls;
 mod entity;
 pub(in crate::workspace) use entity::{
-    PortableStatusRefresh, SettingsWorkspaceEntity, SettingsWorkspaceEvent, SettingsWorkspaceToast,
+    PortablePasswordDialogSnapshot, PortableStatusRefresh, SettingsWorkspaceEntity,
+    SettingsWorkspaceEvent, SettingsWorkspaceToast,
 };
 mod general_terminal_pages;
 pub(in crate::workspace) use general_terminal_pages::SETTINGS_TERMINAL_CUSTOM_FONT_INPUT_WIDTH;

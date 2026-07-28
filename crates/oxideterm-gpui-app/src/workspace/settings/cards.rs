@@ -720,6 +720,27 @@ impl WorkspaceApp {
         event: &KeyDownEvent,
         cx: &mut Context<Self>,
     ) -> bool {
+        if let Some(input) = self.settings_workspace.read(cx).portable_focused_input() {
+            let key = event.keystroke.key.as_str();
+            let modifiers = event.keystroke.modifiers;
+            match key {
+                "escape" | "enter" => {
+                    self.settings_workspace.update(cx, |settings, cx| {
+                        settings.blur_portable_password_input(cx);
+                    });
+                    self.clear_ime_selection();
+                    self.new_connection_caret_visible = true;
+                    return true;
+                }
+                "backspace" | "delete" if !modifiers.platform && !modifiers.control => {
+                    self.settings_workspace.update(cx, |settings, cx| {
+                        settings.pop_portable_password_input(input, cx);
+                    });
+                    return true;
+                }
+                _ => return true,
+            }
+        }
         let Some(input) = self.focused_settings_input else {
             return false;
         };
@@ -795,6 +816,14 @@ impl WorkspaceApp {
 
     pub(in crate::workspace) fn blur_text_inputs(&mut self, cx: &mut Context<Self>) {
         let mut changed = false;
+        if self
+            .settings_workspace
+            .update(cx, |settings, cx| settings.blur_portable_password_input(cx))
+        {
+            self.ime_marked_text = None;
+            self.clear_ime_selection();
+            changed = true;
+        }
         if let Some(input) = self.focused_settings_input.take() {
             self.clear_settings_input_draft(input);
             self.ime_marked_text = None;
@@ -1018,6 +1047,26 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) {
         self.close_settings_select();
+        let portable_input = self
+            .settings_workspace
+            .read(cx)
+            .portable_input_value(input)
+            .is_some();
+        if portable_input {
+            if let Some(previous_input) = self.focused_settings_input.take() {
+                self.clear_settings_input_draft(previous_input);
+            }
+            self.settings_workspace.update(cx, |settings, cx| {
+                settings.focus_portable_password_input(input, cx);
+            });
+            self.clear_ime_selection();
+            self.new_connection_caret_visible = true;
+            cx.notify();
+            return;
+        }
+        self.settings_workspace.update(cx, |settings, cx| {
+            settings.blur_portable_password_input(cx);
+        });
         if let Some(previous_input) = self
             .focused_settings_input
             .filter(|previous| *previous != input)
@@ -1096,9 +1145,9 @@ impl WorkspaceApp {
             SettingsInput::NativePluginRegistryUrl => {
                 self.plugin_manager_state(cx).registry_url_draft.clone()
             }
-            SettingsInput::PortableCurrentPassword => self.portable_current_password.clone(),
-            SettingsInput::PortableNewPassword => self.portable_new_password.clone(),
-            SettingsInput::PortableConfirmPassword => self.portable_confirm_password.clone(),
+            SettingsInput::PortableCurrentPassword
+            | SettingsInput::PortableNewPassword
+            | SettingsInput::PortableConfirmPassword => String::new(),
             SettingsInput::AppLockCurrentPassword
             | SettingsInput::AppLockNewPassword
             | SettingsInput::AppLockConfirmPassword => self.app_lock_input_value(input).to_string(),
@@ -1221,21 +1270,9 @@ impl WorkspaceApp {
                 });
                 cx.notify();
             }
-            SettingsInput::PortableCurrentPassword => {
-                zeroize::Zeroize::zeroize(&mut self.portable_current_password);
-                self.portable_current_password = self.settings_input_draft.clone();
-                cx.notify();
-            }
-            SettingsInput::PortableNewPassword => {
-                zeroize::Zeroize::zeroize(&mut self.portable_new_password);
-                self.portable_new_password = self.settings_input_draft.clone();
-                cx.notify();
-            }
-            SettingsInput::PortableConfirmPassword => {
-                zeroize::Zeroize::zeroize(&mut self.portable_confirm_password);
-                self.portable_confirm_password = self.settings_input_draft.clone();
-                cx.notify();
-            }
+            SettingsInput::PortableCurrentPassword
+            | SettingsInput::PortableNewPassword
+            | SettingsInput::PortableConfirmPassword => {}
             SettingsInput::AppLockCurrentPassword
             | SettingsInput::AppLockNewPassword
             | SettingsInput::AppLockConfirmPassword => {
