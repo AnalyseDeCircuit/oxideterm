@@ -270,6 +270,74 @@ impl RemoteDesktopModifierState {
     }
 }
 
+struct RemoteDesktopWorkerOwner {
+    request_tx: Option<mpsc::Sender<RemoteDesktopHelperRequest>>,
+    worker_thread: Option<thread::JoinHandle<()>>,
+}
+
+impl RemoteDesktopWorkerOwner {
+    fn new(
+        request_tx: mpsc::Sender<RemoteDesktopHelperRequest>,
+        worker_thread: thread::JoinHandle<()>,
+    ) -> Self {
+        Self {
+            request_tx: Some(request_tx),
+            worker_thread: Some(worker_thread),
+        }
+    }
+
+    fn request_sender(&self) -> Option<&mpsc::Sender<RemoteDesktopHelperRequest>> {
+        self.request_tx.as_ref()
+    }
+
+    fn request_sender_cloned(&self) -> Option<mpsc::Sender<RemoteDesktopHelperRequest>> {
+        self.request_tx.clone()
+    }
+
+    fn send(&self, request: RemoteDesktopHelperRequest) {
+        if let Some(request_tx) = self.request_tx.as_ref() {
+            let _ = request_tx.send(request);
+        }
+    }
+
+    fn shutdown(&mut self) {
+        if let Some(request_tx) = self.request_tx.take() {
+            // Session shutdown and helper replacement release input state before
+            // asking the helper to exit cooperatively.
+            let _ = request_tx.send(RemoteDesktopHelperRequest::ReleaseAllInputs);
+            let _ = request_tx.send(RemoteDesktopHelperRequest::Close);
+        }
+        self.retire_worker_thread();
+    }
+
+    fn retire_worker_thread(&mut self) {
+        let Some(worker_thread) = self.worker_thread.take() else {
+            return;
+        };
+        if worker_thread.is_finished() {
+            let _ = worker_thread.join();
+            return;
+        }
+
+        let reaper_name = worker_thread
+            .thread()
+            .name()
+            .map(|name| format!("{name}-reaper"))
+            .unwrap_or_else(|| "remote-desktop-worker-reaper".to_string());
+        // The protocol worker has its own helper timeout, so this reaper owns a
+        // bounded join without blocking the GPUI thread during session teardown.
+        let _ = thread::Builder::new().name(reaper_name).spawn(move || {
+            let _ = worker_thread.join();
+        });
+    }
+}
+
+impl Drop for RemoteDesktopWorkerOwner {
+    fn drop(&mut self) {
+        self.shutdown();
+    }
+}
+
 pub(in crate::workspace) struct RemoteDesktopSessionEntity {
     tab_id: TabId,
     profile: RemoteDesktopConnectionProfile,
@@ -283,7 +351,7 @@ pub(in crate::workspace) struct RemoteDesktopSessionEntity {
     frame_slot: RemoteDesktopFrameDeliverySlot,
     delivery_tx: mpsc::Sender<RemoteDesktopWorkerDelivery>,
     delivery_rx: mpsc::Receiver<RemoteDesktopWorkerDelivery>,
-    request_tx: Option<mpsc::Sender<RemoteDesktopHelperRequest>>,
+    worker: Option<RemoteDesktopWorkerOwner>,
     worker_wake: Option<RemoteDesktopWorkerWake>,
     worker_generation: u64,
     window_handle: AnyWindowHandle,
@@ -333,7 +401,7 @@ impl RemoteDesktopSessionEntity {
             // must never drain another tab's lifecycle events or frame notices.
             delivery_tx,
             delivery_rx,
-            request_tx: None,
+            worker: None,
             worker_wake: None,
             worker_generation: 0,
             window_handle,
@@ -564,7 +632,10 @@ mod tests {
                 window.into(),
             );
             session.worker_wake = Some(worker_wake);
-            session.request_tx = Some(request_tx);
+            session.worker = Some(RemoteDesktopWorkerOwner::new(
+                request_tx,
+                thread::spawn(|| {}),
+            ));
             session.install_release_handler(cx);
             session
         });

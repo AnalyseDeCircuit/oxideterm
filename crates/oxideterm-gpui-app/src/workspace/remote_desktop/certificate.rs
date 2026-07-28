@@ -48,8 +48,8 @@ impl RemoteDesktopSessionEntity {
             || certificate.protocol != self.profile.protocol
         {
             // Credentials may only cross an identity challenge bound to this session.
-            if let Some(sender) = self.request_tx.as_ref() {
-                let _ = sender.send(RemoteDesktopHelperRequest::Close);
+            if let Some(worker) = self.worker.as_ref() {
+                worker.send(RemoteDesktopHelperRequest::Close);
             }
             return;
         }
@@ -72,8 +72,8 @@ impl RemoteDesktopSessionEntity {
                     remember: false,
                 });
                 cx.notify();
-            } else if let Some(sender) = self.request_tx.as_ref() {
-                let _ = sender.send(RemoteDesktopHelperRequest::Close);
+            } else if let Some(worker) = self.worker.as_ref() {
+                worker.send(RemoteDesktopHelperRequest::Close);
             }
             return;
         }
@@ -146,8 +146,8 @@ impl RemoteDesktopSessionEntity {
         }
         let request = remote_desktop_authenticate_request(self, &challenge.certificate);
         self.certificate_challenge = None;
-        if let Some(sender) = self.request_tx.as_ref() {
-            let _ = sender.send(request);
+        if let Some(worker) = self.worker.as_ref() {
+            worker.send(request);
         }
         cx.notify();
         RemoteDesktopCertificateAcceptance::Accepted
@@ -163,8 +163,8 @@ impl RemoteDesktopSessionEntity {
             return;
         }
         self.certificate_challenge = None;
-        if let Some(sender) = self.request_tx.as_ref() {
-            let _ = sender.send(RemoteDesktopHelperRequest::Close);
+        if let Some(worker) = self.worker.as_ref() {
+            worker.send(RemoteDesktopHelperRequest::Close);
         }
         cx.notify();
     }
@@ -464,7 +464,11 @@ fn send_remote_desktop_authentication(
     session: &mut RemoteDesktopSessionEntity,
     certificate: &RemoteDesktopServerCertificate,
 ) {
-    let Some(sender) = session.request_tx.clone() else {
+    let Some(sender) = session
+        .worker
+        .as_ref()
+        .and_then(RemoteDesktopWorkerOwner::request_sender_cloned)
+    else {
         return;
     };
     // The helper validates which optional credentials the negotiated security

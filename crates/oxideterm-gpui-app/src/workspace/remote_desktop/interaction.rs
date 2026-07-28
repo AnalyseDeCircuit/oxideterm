@@ -13,8 +13,8 @@ impl RemoteDesktopSessionEntity {
         if let RemoteDesktopHelperRequest::Resize { size, .. } = &request {
             self.state.mark_resize_requested(*size);
         }
-        if let Some(request_tx) = self.request_tx.as_ref() {
-            let _ = request_tx.send(request);
+        if let Some(worker) = self.worker.as_ref() {
+            worker.send(request);
         } else if matches!(request, RemoteDesktopHelperRequest::Close) {
             self.state
                 .apply_event(RemoteDesktopHelperEvent::Disconnected { reason: None });

@@ -11,10 +11,7 @@ impl RemoteDesktopSessionEntity {
             if let Some(worker_wake) = session.worker_wake.take() {
                 worker_wake.stop();
             }
-            if let Some(request_tx) = session.request_tx.take() {
-                let _ = request_tx.send(RemoteDesktopHelperRequest::ReleaseAllInputs);
-                let _ = request_tx.send(RemoteDesktopHelperRequest::Close);
-            }
+            session.shutdown_worker();
             drop(session.password.take());
         })
         .detach();
@@ -30,14 +27,17 @@ impl RemoteDesktopSessionEntity {
         }
     }
 
+    fn shutdown_worker(&mut self) {
+        if let Some(mut worker) = self.worker.take() {
+            worker.shutdown();
+        }
+    }
+
     fn shutdown(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if let Some(worker_wake) = self.worker_wake.take() {
             worker_wake.stop();
         }
-        if let Some(request_tx) = self.request_tx.take() {
-            let _ = request_tx.send(RemoteDesktopHelperRequest::ReleaseAllInputs);
-            let _ = request_tx.send(RemoteDesktopHelperRequest::Close);
-        }
+        self.shutdown_worker();
         drop(self.password.take());
         let images = self.state.take_all_images();
         let textures = self.state.take_all_textures();
@@ -46,8 +46,8 @@ impl RemoteDesktopSessionEntity {
     }
 
     fn disconnect(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if let Some(request_tx) = self.request_tx.as_ref() {
-            let _ = request_tx.send(RemoteDesktopHelperRequest::Close);
+        if let Some(worker) = self.worker.as_ref() {
+            worker.send(RemoteDesktopHelperRequest::Close);
             return;
         }
         self.state
@@ -61,7 +61,7 @@ impl RemoteDesktopSessionEntity {
 
     fn force_recover(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.release_inputs();
-        if self.request_tx.is_some() {
+        if self.worker.is_some() {
             self.send_request(RemoteDesktopHelperRequest::RequestFrame);
         }
         self.restart_worker(window, cx);
@@ -106,8 +106,8 @@ impl RemoteDesktopSessionEntity {
                     }
                     // Saturation breaks delta continuity, so the session asks
                     // its helper for one new base frame.
-                    if let Some(request_tx) = self.request_tx.as_ref() {
-                        let _ = request_tx.send(RemoteDesktopHelperRequest::RequestFrame);
+                    if let Some(worker) = self.worker.as_ref() {
+                        worker.send(RemoteDesktopHelperRequest::RequestFrame);
                     }
                 }
                 RemoteDesktopWorkerDelivery::Event {
@@ -157,6 +157,18 @@ impl RemoteDesktopSessionEntity {
                             intents.push(RemoteDesktopDeliveryIntent::ClipboardTransferFailed);
                             changed = true;
                         }
+                        RemoteDesktopHelperEvent::Terminated { exit_code } => {
+                            self.state
+                                .apply_event(RemoteDesktopHelperEvent::Terminated { exit_code });
+                            let retired_images = self.state.take_retired_images();
+                            let retired_textures = self.state.take_retired_textures();
+                            self.drop_images(retired_images, window, cx);
+                            Self::drop_textures(retired_textures, window);
+                            // The terminal delivery closes the current ownership
+                            // epoch and transfers its bounded join to the reaper.
+                            self.shutdown_worker();
+                            changed = true;
+                        }
                         event => {
                             self.state.apply_event(event);
                             let retired_images = self.state.take_retired_images();
@@ -188,6 +200,9 @@ impl RemoteDesktopSessionEntity {
                     let retired_textures = self.state.take_retired_textures();
                     self.drop_images(retired_images, window, cx);
                     Self::drop_textures(retired_textures, window);
+                    // Transport failure is terminal for this helper generation.
+                    // A reconnect starts a fresh explicitly owned worker.
+                    self.shutdown_worker();
                     changed = true;
                 }
             }
@@ -299,10 +314,10 @@ impl RemoteDesktopSessionEntity {
         scale_factor: Option<u32>,
         monitor_layout: RemoteDesktopMonitorLayout,
         delivery_tx: mpsc::Sender<RemoteDesktopWorkerDelivery>,
-    ) -> mpsc::Sender<RemoteDesktopHelperRequest> {
+    ) -> RemoteDesktopWorkerOwner {
         let tab_id = self.tab_id;
         let (request_tx, request_rx) = mpsc::channel();
-        thread::Builder::new()
+        let worker_thread = thread::Builder::new()
             .name(format!("remote-desktop-{}", tab_id.0))
             .spawn(move || {
                 run_remote_desktop_worker(
@@ -321,7 +336,7 @@ impl RemoteDesktopSessionEntity {
                 );
             })
             .expect("failed to start remote desktop worker");
-        request_tx
+        RemoteDesktopWorkerOwner::new(request_tx, worker_thread)
     }
 
     fn start_worker(
@@ -331,7 +346,7 @@ impl RemoteDesktopSessionEntity {
         scale_factor: Option<u32>,
         cx: &mut Context<Self>,
     ) -> bool {
-        if self.request_tx.is_some() {
+        if self.worker.is_some() {
             return false;
         }
         let profile = self.profile.clone();
@@ -345,7 +360,7 @@ impl RemoteDesktopSessionEntity {
         let generation = next_remote_desktop_worker_generation(self.worker_generation);
         let worker_wake = RemoteDesktopWorkerWake::default();
         let monitor_layout = remote_desktop_monitor_layout(&profile, cx);
-        let request_tx = self.spawn_worker(
+        let worker = self.spawn_worker(
             generation,
             profile,
             provider,
@@ -358,7 +373,7 @@ impl RemoteDesktopSessionEntity {
             delivery_tx,
         );
 
-        self.request_tx = Some(request_tx);
+        self.worker = Some(worker);
         let previous_worker_wake = self.worker_wake.replace(worker_wake.clone());
         self.worker_generation = generation;
         self.certificate_challenge = None;
@@ -391,9 +406,7 @@ impl RemoteDesktopSessionEntity {
             .is_some_and(|password| !password.is_empty());
         let generation = next_remote_desktop_worker_generation(self.worker_generation);
         let scale_factor = self.last_viewport_scale_factor;
-        if let Some(old_request_tx) = self.request_tx.take() {
-            let _ = old_request_tx.send(RemoteDesktopHelperRequest::Close);
-        }
+        self.shutdown_worker();
 
         let frame_slot = RemoteDesktopFrameDeliverySlot::new();
         // Helper replacement preserves presentation visibility independently
@@ -401,7 +414,7 @@ impl RemoteDesktopSessionEntity {
         frame_slot.set_visible(self.frame_slot.is_visible());
         let worker_wake = RemoteDesktopWorkerWake::default();
         let monitor_layout = remote_desktop_monitor_layout(&profile, cx);
-        let request_tx = self.spawn_worker(
+        let worker = self.spawn_worker(
             generation,
             profile.clone(),
             provider,
@@ -423,7 +436,7 @@ impl RemoteDesktopSessionEntity {
             message: None,
         });
         self.frame_slot = frame_slot;
-        self.request_tx = Some(request_tx);
+        self.worker = Some(worker);
         self.worker_generation = generation;
         self.certificate_challenge = None;
         self.last_viewport_size = initial_viewport_size;
@@ -449,8 +462,8 @@ impl RemoteDesktopSessionEntity {
         if layout == self.last_monitor_layout {
             return;
         }
-        if let Some(request_tx) = self.request_tx.as_ref() {
-            let _ = request_tx.send(RemoteDesktopHelperRequest::UpdateDisplayLayout {
+        if let Some(worker) = self.worker.as_ref() {
+            worker.send(RemoteDesktopHelperRequest::UpdateDisplayLayout {
                 layout: layout.clone(),
             });
         }
@@ -480,7 +493,7 @@ impl RemoteDesktopSessionEntity {
             size: request_size,
             scale_factor: self.last_viewport_scale_factor,
         };
-        if self.request_tx.is_none() {
+        if self.worker.is_none() {
             if self.last_viewport_scale_factor.is_none() {
                 return false;
             }
@@ -524,7 +537,11 @@ impl RemoteDesktopSessionEntity {
         self.state.mark_resize_requested(request_size);
         let generation = self.resize_generation.fetch_add(1, Ordering::Relaxed) + 1;
         let resize_generation = self.resize_generation.clone();
-        let Some(request_tx) = self.request_tx.clone() else {
+        let Some(request_tx) = self
+            .worker
+            .as_ref()
+            .and_then(RemoteDesktopWorkerOwner::request_sender_cloned)
+        else {
             return true;
         };
         thread::Builder::new()
@@ -551,7 +568,7 @@ impl RemoteDesktopSessionEntity {
         if self.schedule_viewport_resize(None, cx) {
             cx.notify();
         }
-        if self.request_tx.is_some() {
+        if self.worker.is_some() {
             return;
         }
 
@@ -560,7 +577,7 @@ impl RemoteDesktopSessionEntity {
                 Timer::after(REMOTE_DESKTOP_INITIAL_LAYOUT_PROBE_INTERVAL).await;
                 let done = session
                     .update(cx, |session, cx| {
-                        if session.request_tx.is_some() {
+                        if session.worker.is_some() {
                             return true;
                         }
                         // The worker must start from the measured viewport even
@@ -568,7 +585,7 @@ impl RemoteDesktopSessionEntity {
                         if session.schedule_viewport_resize(None, cx) {
                             cx.notify();
                         }
-                        session.request_tx.is_some()
+                        session.worker.is_some()
                     })
                     .unwrap_or(true);
                 if done {
@@ -658,7 +675,12 @@ impl RemoteDesktopSessionEntity {
     fn set_frame_visibility(&mut self, visible: bool, cx: &mut Context<Self>) {
         let visibility_changed = self.frame_slot.is_visible() != visible;
         let recovery_required = self.frame_slot.set_visible(visible);
-        if recovery_required && let Some(request_tx) = self.request_tx.as_ref() {
+        if recovery_required
+            && let Some(request_tx) = self
+                .worker
+                .as_ref()
+                .and_then(RemoteDesktopWorkerOwner::request_sender)
+        {
             // The worker remains alive while hidden; request one base frame so
             // sparse deltas do not become an unbounded off-screen history.
             let _ = request_tx.send(RemoteDesktopHelperRequest::RequestFrame);
@@ -1340,7 +1362,7 @@ mod tests {
             let (worker_started, measured_viewport, recorded_scale_factor) =
                 session.read_with(cx, |session, _cx| {
                     (
-                        session.request_tx.is_some(),
+                        session.worker.is_some(),
                         session.last_viewport_size,
                         session.last_viewport_scale_factor,
                     )
@@ -1649,7 +1671,10 @@ mod tests {
                 window.into(),
             );
             session.worker_wake = Some(worker_wake);
-            session.request_tx = Some(request_tx);
+            session.worker = Some(RemoteDesktopWorkerOwner::new(
+                request_tx,
+                thread::spawn(|| {}),
+            ));
             session
         });
 
