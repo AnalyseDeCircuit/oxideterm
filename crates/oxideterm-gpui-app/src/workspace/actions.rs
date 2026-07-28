@@ -801,7 +801,18 @@ impl WorkspaceApp {
             return;
         }
 
-        if self.focused_settings_input.is_some() {
+        if self.focused_settings_input.is_some()
+            || self
+                .settings_workspace
+                .read(cx)
+                .settings_entity_focused_input()
+                .is_some()
+            || self
+                .ai_entity
+                .read(cx)
+                .focused_settings_secret_input()
+                .is_some()
+        {
             let _ = self.handle_settings_input_key(event, cx);
             return;
         }

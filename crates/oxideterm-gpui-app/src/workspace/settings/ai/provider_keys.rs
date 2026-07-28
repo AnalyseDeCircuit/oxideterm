@@ -33,13 +33,14 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let input = SettingsInput::AiProviderApiKey(index);
-        let focused = self.focused_settings_input == Some(input);
-        let draft = if focused {
-            self.settings_input_draft.as_str()
-        } else {
-            ""
+        let (focused, save_disabled) = {
+            let ai_workspace = self.ai_entity.read(cx);
+            let focused = ai_workspace.focused_settings_secret_input() == Some(input);
+            let save_disabled = ai_workspace
+                .settings_secret_input_value(input)
+                .is_none_or(|draft| draft.trim().is_empty());
+            (focused, save_disabled)
         };
-        let save_disabled = draft.trim().is_empty();
         div()
             .w_full()
             .min_w(px(0.0))
@@ -63,7 +64,7 @@ impl WorkspaceApp {
                             .min_w(px(0.0))
                             .child(self.ai_provider_secret_input(
                                 input,
-                                draft,
+                                "",
                                 "sk-...".to_string(),
                                 focused,
                                 cx,
@@ -191,8 +192,24 @@ impl WorkspaceApp {
     ) -> AnyElement {
         let target = WorkspaceImeTarget::Settings(input);
         let workspace = cx.entity();
-        text_input_anchor_probe(
-            target.anchor_id(),
+        let input_control = if ai_state::AiWorkspaceEntity::owns_settings_secret_input(input) {
+            let ai_workspace = self.ai_entity.read(cx);
+            text_input(
+                &self.tokens,
+                TextInputView {
+                    value: ai_workspace
+                        .settings_secret_input_value(input)
+                        .unwrap_or_default(),
+                    placeholder,
+                    focused,
+                    caret_visible: self.new_connection_caret_visible,
+                    secret: true,
+                    selected_all: false,
+                    selected_range: self.ime_selected_range_for_target(target, cx),
+                    marked_text: self.marked_text_for_target(target, cx),
+                },
+            )
+        } else {
             text_input(
                 &self.tokens,
                 TextInputView {
@@ -206,27 +223,29 @@ impl WorkspaceApp {
                     marked_text: self.marked_text_for_target(target, cx),
                 },
             )
-            .w_full()
-            .h(px(32.0))
-            .text_size(px(self.tokens.metrics.ui_text_xs))
-            .cursor(CursorStyle::IBeam)
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(move |this, event: &gpui::MouseDownEvent, window, cx| {
-                    if this.focused_settings_input != Some(input) {
+        };
+        text_input_anchor_probe(
+            target.anchor_id(),
+            input_control
+                .w_full()
+                .h(px(32.0))
+                .text_size(px(self.tokens.metrics.ui_text_xs))
+                .cursor(CursorStyle::IBeam)
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(move |this, event: &gpui::MouseDownEvent, window, cx| {
                         this.focus_settings_input(input, String::new(), cx);
-                    }
-                    this.ime_marked_text = None;
-                    window.focus(&this.focus_handle, cx);
-                    this.begin_ime_selection_from_mouse_down(target, event, window, cx);
-                    cx.stop_propagation();
-                }),
-            )
-            .on_mouse_move(cx.listener(
-                |this, event: &gpui::MouseMoveEvent, window, cx| {
-                    this.update_ime_selection_drag_from_mouse_move(event, window, cx);
-                },
-            )),
+                        this.ime_marked_text = None;
+                        window.focus(&this.focus_handle, cx);
+                        this.begin_ime_selection_from_mouse_down(target, event, window, cx);
+                        cx.stop_propagation();
+                    }),
+                )
+                .on_mouse_move(
+                    cx.listener(|this, event: &gpui::MouseMoveEvent, window, cx| {
+                        this.update_ime_selection_drag_from_mouse_move(event, window, cx);
+                    }),
+                ),
             move |anchor, _window, cx| {
                 let _ = workspace.update(cx, |this, cx| {
                     this.update_text_input_anchor(anchor, cx);
@@ -284,58 +303,20 @@ impl WorkspaceApp {
         else {
             return;
         };
-        if self.focused_settings_input != Some(SettingsInput::AiProviderApiKey(index)) {
-            cx.notify();
-            return;
-        }
-
         // Match Tauri ProviderKeyInput: the visible UI draft is moved into a
         // zeroizing owner before crossing into the keychain boundary, and it is
         // never written into persisted settings.
-        let Some(secret) = ai_take_provider_key_secret(&mut self.settings_input_draft) else {
+        let input = SettingsInput::AiProviderApiKey(index);
+        let Some(secret) = self
+            .ai_entity
+            .update(cx, |ai, _cx| ai.take_provider_key_secret(input))
+        else {
             cx.notify();
             return;
         };
-        let key_store = self.ai.models.key_store.clone();
-        let runtime = self.forwarding_runtime.clone();
-        cx.spawn(async move |weak, cx| {
-            let provider_id_for_store = provider_id.clone();
-            let result = runtime
-                .spawn_blocking(move || {
-                    key_store.store_provider_key(&provider_id_for_store, secret)
-                })
-                .await
-                .map_err(|error| error.to_string())
-                .and_then(|result| result.map_err(|error| error.to_string()));
-            let _ = weak.update(cx, |this, cx| {
-                match result {
-                    Ok(()) => {
-                        this.ai_entity.update(cx, |ai, _cx| {
-                            ai.set_provider_key_status(provider_id.clone(), true);
-                        });
-                        this.focused_settings_input = None;
-                        if let Some(provider) = this
-                            .settings_store
-                            .settings()
-                            .ai
-                            .providers
-                            .get(index)
-                            .and_then(ai_provider_view)
-                        {
-                            this.refresh_ai_provider_models(index, provider, cx);
-                        }
-                    }
-                    Err(error) => {
-                        this.push_ai_settings_toast(
-                            this.ai_i18n_error("settings_view.ai.save_failed", &error),
-                            TerminalNoticeVariant::Error,
-                        );
-                    }
-                }
-                cx.notify();
-            });
-        })
-        .detach();
+        self.ai_entity.update(cx, |ai, cx| {
+            ai.store_provider_key(index, provider_id, secret, cx);
+        });
         cx.notify();
     }
 
@@ -345,34 +326,9 @@ impl WorkspaceApp {
         provider_id: &str,
         cx: &mut Context<Self>,
     ) {
-        let provider_id = provider_id.to_string();
-        let key_store = self.ai.models.key_store.clone();
-        let runtime = self.forwarding_runtime.clone();
-        cx.spawn(async move |weak, cx| {
-            let provider_id_for_delete = provider_id.clone();
-            let result = runtime
-                .spawn_blocking(move || key_store.delete_provider_key(&provider_id_for_delete))
-                .await
-                .map_err(|error| error.to_string())
-                .and_then(|result| result.map_err(|error| error.to_string()));
-            let _ = weak.update(cx, |this, cx| {
-                match result {
-                    Ok(()) => {
-                        this.ai_entity.update(cx, |ai, _cx| {
-                            ai.set_provider_key_status(provider_id.clone(), false);
-                        });
-                    }
-                    Err(error) => {
-                        this.push_ai_settings_toast(
-                            this.ai_i18n_error("settings_view.ai.remove_failed", &error),
-                            TerminalNoticeVariant::Error,
-                        );
-                    }
-                }
-                cx.notify();
-            });
-        })
-        .detach();
+        self.ai_entity.update(cx, |ai, cx| {
+            ai.remove_provider_key(provider_id.to_string(), cx);
+        });
         cx.notify();
     }
 }

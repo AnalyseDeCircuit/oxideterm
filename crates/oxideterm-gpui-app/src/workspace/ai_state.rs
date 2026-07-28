@@ -1,5 +1,7 @@
 use super::*;
 use crate::workspace::root::init::ai_chat_initialization_error;
+use gpui::Task;
+use oxideterm_editor_core::utf16::replace_utf16;
 
 pub(in crate::workspace) enum AiChatInitializationOutcome {
     AlreadyInitialized,
@@ -13,6 +15,7 @@ pub(in crate::workspace) enum AiWorkspaceEvent {
     ChatStreamDeliveryReady,
     CompactionDeliveryReady,
     CompactionStateChanged,
+    CredentialOperationReady,
     KnowledgeReindexDeliveryReady,
     ModelRefreshDeliveryReady,
     ProviderKeyStatusChanged,
@@ -47,6 +50,24 @@ pub(in crate::workspace) enum AiModelRefreshIntent {
         provider_id: String,
     },
     Failed,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(in crate::workspace) enum AiCredentialFailure {
+    SaveProviderKey,
+    RemoveProviderKey,
+}
+
+pub(in crate::workspace) enum AiCredentialIntent {
+    ProviderKeyStored { index: usize, provider_id: String },
+    ProviderKeyRemoved,
+    Failed(AiCredentialFailure),
+}
+
+#[derive(Clone, Copy)]
+enum AiProviderKeyOperation {
+    Store { index: usize },
+    Remove,
 }
 
 enum AiModelRefreshFailure {
@@ -105,6 +126,10 @@ const AI_CHAT_STREAM_DELIVERY_BUDGET: crate::workspace::delivery::DeliveryBudget
 pub(in crate::workspace) struct AiWorkspaceEntity {
     task_runtime: Arc<tokio::runtime::Runtime>,
     key_store: oxideterm_ai::AiProviderKeyStore,
+    settings_secret_drafts: HashMap<SettingsInput, zeroize::Zeroizing<String>>,
+    focused_settings_secret_input: Option<SettingsInput>,
+    provider_key_operation_tasks: HashMap<String, Task<()>>,
+    credential_intents: VecDeque<AiCredentialIntent>,
     model_refresh_generations: HashMap<String, u64>,
     refreshing_models: HashSet<String>,
     model_refresh_tx:
@@ -220,6 +245,10 @@ impl AiWorkspaceEntity {
         let entity = Self {
             task_runtime,
             key_store,
+            settings_secret_drafts: HashMap::new(),
+            focused_settings_secret_input: None,
+            provider_key_operation_tasks: HashMap::new(),
+            credential_intents: VecDeque::new(),
             model_refresh_generations: HashMap::new(),
             refreshing_models: HashSet::new(),
             model_refresh_tx,
@@ -297,6 +326,117 @@ impl AiWorkspaceEntity {
 
     pub(in crate::workspace) fn model_is_refreshing(&self, provider_id: &str) -> bool {
         self.refreshing_models.contains(provider_id)
+    }
+
+    pub(in crate::workspace) fn owns_settings_secret_input(input: SettingsInput) -> bool {
+        matches!(input, SettingsInput::AiProviderApiKey(_))
+    }
+
+    pub(in crate::workspace) fn focused_settings_secret_input(&self) -> Option<SettingsInput> {
+        self.focused_settings_secret_input
+    }
+
+    pub(in crate::workspace) fn settings_secret_input_value(
+        &self,
+        input: SettingsInput,
+    ) -> Option<&str> {
+        Self::owns_settings_secret_input(input)
+            .then(|| {
+                self.settings_secret_drafts
+                    .get(&input)
+                    .map(|draft| draft.as_str())
+            })
+            .flatten()
+    }
+
+    pub(in crate::workspace) fn focus_settings_secret_input(
+        &mut self,
+        input: SettingsInput,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if !Self::owns_settings_secret_input(input) {
+            return false;
+        }
+        if self.focused_settings_secret_input == Some(input) {
+            return true;
+        }
+
+        self.clear_focused_settings_secret_input();
+        self.settings_secret_drafts
+            .insert(input, zeroize::Zeroizing::new(String::new()));
+        self.focused_settings_secret_input = Some(input);
+        cx.notify();
+        true
+    }
+
+    pub(in crate::workspace) fn blur_settings_secret_input(
+        &mut self,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let changed = self.clear_focused_settings_secret_input();
+        if changed {
+            cx.notify();
+        }
+        changed
+    }
+
+    pub(in crate::workspace) fn replace_settings_secret_input(
+        &mut self,
+        input: SettingsInput,
+        replacement_range: Option<std::ops::Range<usize>>,
+        text: &str,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if self.focused_settings_secret_input != Some(input) {
+            return false;
+        }
+        let Some(draft) = self.settings_secret_drafts.get_mut(&input) else {
+            return false;
+        };
+        replace_utf16(draft, replacement_range, text);
+        cx.notify();
+        true
+    }
+
+    pub(in crate::workspace) fn pop_settings_secret_input(
+        &mut self,
+        input: SettingsInput,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if self.focused_settings_secret_input != Some(input) {
+            return false;
+        }
+        let changed = self
+            .settings_secret_drafts
+            .get_mut(&input)
+            .is_some_and(|draft| draft.pop().is_some());
+        if changed {
+            cx.notify();
+        }
+        true
+    }
+
+    pub(in crate::workspace) fn take_provider_key_secret(
+        &mut self,
+        input: SettingsInput,
+    ) -> Option<zeroize::Zeroizing<String>> {
+        if !matches!(input, SettingsInput::AiProviderApiKey(_))
+            || self.focused_settings_secret_input != Some(input)
+        {
+            return None;
+        }
+        self.focused_settings_secret_input = None;
+        let secret = self.settings_secret_drafts.remove(&input)?;
+        (!secret.trim().is_empty()).then_some(secret)
+    }
+
+    fn clear_focused_settings_secret_input(&mut self) -> bool {
+        let Some(input) = self.focused_settings_secret_input.take() else {
+            return false;
+        };
+        // Dropping the Zeroizing owner clears the only AI settings draft copy.
+        self.settings_secret_drafts.remove(&input);
+        true
     }
 
     pub(in crate::workspace) fn conversation_state(&self) -> &oxideterm_ai::AiChatState {
@@ -612,6 +752,105 @@ impl AiWorkspaceEntity {
     ) {
         self.provider_key_status_pending.remove(&provider_id);
         self.provider_key_status.insert(provider_id, has_key);
+    }
+
+    pub(in crate::workspace) fn store_provider_key(
+        &mut self,
+        index: usize,
+        provider_id: String,
+        secret: zeroize::Zeroizing<String>,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let key_store = self.key_store.clone();
+        let task_runtime = self.task_runtime.clone();
+        let provider_id_for_store = provider_id.clone();
+        let operation = async move {
+            task_runtime
+                .spawn_blocking(move || {
+                    key_store.store_provider_key(&provider_id_for_store, secret)
+                })
+                .await
+                .is_ok_and(|result| result.is_ok())
+        };
+        self.start_provider_key_operation(
+            provider_id,
+            AiProviderKeyOperation::Store { index },
+            operation,
+            cx,
+        )
+    }
+
+    pub(in crate::workspace) fn remove_provider_key(
+        &mut self,
+        provider_id: String,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let key_store = self.key_store.clone();
+        let task_runtime = self.task_runtime.clone();
+        let provider_id_for_delete = provider_id.clone();
+        let operation = async move {
+            task_runtime
+                .spawn_blocking(move || key_store.delete_provider_key(&provider_id_for_delete))
+                .await
+                .is_ok_and(|result| result.is_ok())
+        };
+        self.start_provider_key_operation(
+            provider_id,
+            AiProviderKeyOperation::Remove,
+            operation,
+            cx,
+        )
+    }
+
+    fn start_provider_key_operation(
+        &mut self,
+        provider_id: String,
+        operation_kind: AiProviderKeyOperation,
+        operation: impl std::future::Future<Output = bool> + 'static,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if self.provider_key_operation_tasks.contains_key(&provider_id) {
+            return false;
+        }
+
+        let operation_provider_id = provider_id.clone();
+        let operation_task = cx.spawn(async move |entity, cx| {
+            let succeeded = operation.await;
+            let _ = entity.update(cx, |entity, cx| {
+                entity
+                    .provider_key_operation_tasks
+                    .remove(&operation_provider_id);
+                let intent = match (operation_kind, succeeded) {
+                    (AiProviderKeyOperation::Store { index }, true) => {
+                        entity.set_provider_key_status(operation_provider_id.clone(), true);
+                        AiCredentialIntent::ProviderKeyStored {
+                            index,
+                            provider_id: operation_provider_id,
+                        }
+                    }
+                    (AiProviderKeyOperation::Remove, true) => {
+                        entity.set_provider_key_status(operation_provider_id, false);
+                        AiCredentialIntent::ProviderKeyRemoved
+                    }
+                    (AiProviderKeyOperation::Store { .. }, false) => {
+                        AiCredentialIntent::Failed(AiCredentialFailure::SaveProviderKey)
+                    }
+                    (AiProviderKeyOperation::Remove, false) => {
+                        AiCredentialIntent::Failed(AiCredentialFailure::RemoveProviderKey)
+                    }
+                };
+                entity.credential_intents.push_back(intent);
+                cx.emit(AiWorkspaceEvent::CredentialOperationReady);
+                cx.notify();
+            });
+        });
+        self.provider_key_operation_tasks
+            .insert(provider_id, operation_task);
+        true
+    }
+
+    pub(in crate::workspace) fn take_credential_intents(&mut self) -> VecDeque<AiCredentialIntent> {
+        std::mem::take(&mut self.credential_intents)
     }
 
     pub(in crate::workspace) fn invalidate_provider_key_status(&mut self, provider_id: &str) {
@@ -2035,6 +2274,93 @@ mod entity_tests {
                 .build()
                 .expect("AI entity test runtime"),
         )
+    }
+
+    #[gpui::test]
+    fn provider_secret_draft_and_operation_are_entity_owned(cx: &mut TestAppContext) {
+        let entity = cx.new(|cx| {
+            AiWorkspaceEntity::new(test_runtime(), oxideterm_ai::AiProviderKeyStore::new(), cx)
+        });
+        let input = SettingsInput::AiProviderApiKey(3);
+        let draft_allocation = entity.update(cx, |entity, cx| {
+            assert!(entity.focus_settings_secret_input(input, cx));
+            assert!(entity.replace_settings_secret_input(input, None, "test-secret", cx));
+            entity
+                .settings_secret_input_value(input)
+                .expect("provider draft")
+                .as_ptr()
+        });
+        let secret = entity
+            .update(cx, |entity, _cx| entity.take_provider_key_secret(input))
+            .expect("moved provider secret");
+        assert_eq!(secret.as_ptr(), draft_allocation);
+        cx.read(|cx| {
+            let entity = entity.read(cx);
+            assert_eq!(entity.focused_settings_secret_input(), None);
+            assert!(entity.settings_secret_input_value(input).is_none());
+        });
+
+        entity.update(cx, |entity, cx| {
+            assert!(entity.start_provider_key_operation(
+                "provider-test".to_string(),
+                AiProviderKeyOperation::Store { index: 3 },
+                std::future::ready(true),
+                cx,
+            ));
+            assert!(
+                entity
+                    .provider_key_operation_tasks
+                    .contains_key("provider-test")
+            );
+        });
+        cx.run_until_parked();
+
+        entity.update(cx, |entity, _cx| {
+            assert!(
+                !entity
+                    .provider_key_operation_tasks
+                    .contains_key("provider-test")
+            );
+            assert!(entity.provider_has_key("provider-test"));
+            let intent = entity
+                .take_credential_intents()
+                .pop_front()
+                .expect("provider completion intent");
+            assert!(matches!(
+                intent,
+                AiCredentialIntent::ProviderKeyStored {
+                    index: 3,
+                    provider_id
+                } if provider_id == "provider-test"
+            ));
+        });
+    }
+
+    #[gpui::test]
+    fn provider_operation_failure_exposes_only_typed_category(cx: &mut TestAppContext) {
+        let entity = cx.new(|cx| {
+            AiWorkspaceEntity::new(test_runtime(), oxideterm_ai::AiProviderKeyStore::new(), cx)
+        });
+        entity.update(cx, |entity, cx| {
+            assert!(entity.start_provider_key_operation(
+                "provider-test".to_string(),
+                AiProviderKeyOperation::Remove,
+                std::future::ready(false),
+                cx,
+            ));
+        });
+        cx.run_until_parked();
+
+        entity.update(cx, |entity, _cx| {
+            let intent = entity
+                .take_credential_intents()
+                .pop_front()
+                .expect("provider failure intent");
+            assert!(matches!(
+                intent,
+                AiCredentialIntent::Failed(AiCredentialFailure::RemoveProviderKey)
+            ));
+        });
     }
 
     #[gpui::test]

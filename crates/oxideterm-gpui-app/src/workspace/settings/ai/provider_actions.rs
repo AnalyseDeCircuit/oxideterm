@@ -71,6 +71,48 @@ impl WorkspaceApp {
                 cx.notify();
             }
             ai_state::AiWorkspaceEvent::CompactionStateChanged => cx.notify(),
+            ai_state::AiWorkspaceEvent::CredentialOperationReady => {
+                let intents = self
+                    .ai_entity
+                    .update(cx, |ai, _cx| ai.take_credential_intents());
+                for intent in intents {
+                    match intent {
+                        ai_state::AiCredentialIntent::ProviderKeyStored { index, provider_id } => {
+                            if let Some(provider) = self
+                                .settings_store
+                                .settings()
+                                .ai
+                                .providers
+                                .get(index)
+                                .and_then(ai_provider_view)
+                                .filter(|provider| provider.id == provider_id)
+                            {
+                                self.refresh_ai_provider_models(index, provider, cx);
+                            }
+                        }
+                        ai_state::AiCredentialIntent::ProviderKeyRemoved => {}
+                        ai_state::AiCredentialIntent::Failed(failure) => {
+                            let message_key = match failure {
+                                ai_state::AiCredentialFailure::SaveProviderKey => {
+                                    "settings_view.ai.save_failed"
+                                }
+                                ai_state::AiCredentialFailure::RemoveProviderKey => {
+                                    "settings_view.ai.remove_failed"
+                                }
+                            };
+                            // Keychain errors can include local account details.
+                            // Only a localized stable category reaches the toast.
+                            let safe_error =
+                                self.i18n.t("settings_view.ai.acp_agent_error_unknown");
+                            self.push_ai_settings_toast(
+                                self.ai_i18n_error(message_key, &safe_error),
+                                TerminalNoticeVariant::Error,
+                            );
+                        }
+                    }
+                }
+                cx.notify();
+            }
             ai_state::AiWorkspaceEvent::KnowledgeReindexDeliveryReady => {
                 let intents = self
                     .ai_entity

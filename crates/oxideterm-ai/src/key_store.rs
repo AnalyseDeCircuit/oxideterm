@@ -45,9 +45,9 @@ impl AiProviderKeyStore {
         // receives the secret, and the session cache mirrors Tauri's post-save
         // cache so the next chat send does not immediately re-authenticate.
         self.store_provider_key_to_os(provider_id, api_key.as_str())?;
-        self.cache
-            .write()
-            .insert(provider_id.to_string(), Zeroizing::new(api_key.to_string()));
+        // Move the existing zeroizing allocation into the cache after the OS
+        // write instead of creating a second in-memory secret copy.
+        self.cache.write().insert(provider_id.to_string(), api_key);
         Ok(())
     }
 

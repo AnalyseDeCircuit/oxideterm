@@ -745,6 +745,27 @@ impl WorkspaceApp {
                 _ => return true,
             }
         }
+        if let Some(input) = self.ai_entity.read(cx).focused_settings_secret_input() {
+            let key = event.keystroke.key.as_str();
+            let modifiers = event.keystroke.modifiers;
+            match key {
+                "escape" | "enter" => {
+                    self.ai_entity.update(cx, |ai, cx| {
+                        ai.blur_settings_secret_input(cx);
+                    });
+                    self.clear_ime_selection();
+                    self.new_connection_caret_visible = true;
+                    return true;
+                }
+                "backspace" | "delete" if !modifiers.platform && !modifiers.control => {
+                    self.ai_entity.update(cx, |ai, cx| {
+                        ai.pop_settings_secret_input(input, cx);
+                    });
+                    return true;
+                }
+                _ => return true,
+            }
+        }
         let Some(input) = self.focused_settings_input else {
             return false;
         };
@@ -841,6 +862,14 @@ impl WorkspaceApp {
         if self
             .settings_workspace
             .update(cx, |settings, cx| settings.blur_settings_entity_input(cx))
+        {
+            self.ime_marked_text = None;
+            self.clear_ime_selection();
+            changed = true;
+        }
+        if self
+            .ai_entity
+            .update(cx, |ai, cx| ai.blur_settings_secret_input(cx))
         {
             self.ime_marked_text = None;
             self.clear_ime_selection();
@@ -1085,6 +1114,9 @@ impl WorkspaceApp {
             .settings_entity_input_value(input)
             .is_some();
         if entity_owned_input {
+            self.ai_entity.update(cx, |ai, cx| {
+                ai.blur_settings_secret_input(cx);
+            });
             if let Some(previous_input) = self.focused_settings_input.take() {
                 self.clear_settings_input_draft(previous_input);
             }
@@ -1096,8 +1128,26 @@ impl WorkspaceApp {
             cx.notify();
             return;
         }
+        if ai_state::AiWorkspaceEntity::owns_settings_secret_input(input) {
+            if let Some(previous_input) = self.focused_settings_input.take() {
+                self.clear_settings_input_draft(previous_input);
+            }
+            self.settings_workspace.update(cx, |settings, cx| {
+                settings.blur_settings_entity_input(cx);
+            });
+            self.ai_entity.update(cx, |ai, cx| {
+                ai.focus_settings_secret_input(input, cx);
+            });
+            self.clear_ime_selection();
+            self.new_connection_caret_visible = true;
+            cx.notify();
+            return;
+        }
         self.settings_workspace.update(cx, |settings, cx| {
             settings.blur_settings_entity_input(cx);
+        });
+        self.ai_entity.update(cx, |ai, cx| {
+            ai.blur_settings_secret_input(cx);
         });
         let app_lock_input = matches!(
             input,
