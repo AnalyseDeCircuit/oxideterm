@@ -66,6 +66,20 @@ pub(super) fn connection_info_fixture(icon: Option<&str>) -> ConnectionInfo {
     }
 }
 
+fn session_manager_display_fixture(
+    id: &str,
+    group: Option<&str>,
+    last_used_at: Option<&str>,
+) -> SessionManagerDisplayItem {
+    SessionManagerDisplayItem::Connection(ConnectionInfo {
+        id: id.to_string(),
+        name: id.to_string(),
+        group: group.map(ToOwned::to_owned),
+        last_used_at: last_used_at.map(ToOwned::to_owned),
+        ..connection_info_fixture(None)
+    })
+}
+
 pub(super) fn saved_connection_fixture(auth: SavedAuth) -> SavedConnection {
     let now = Utc::now();
     SavedConnection {
@@ -103,6 +117,148 @@ pub(super) fn session_manager_table_width_matches_tauri_connection_table_columns
 }
 
 #[test]
+pub(super) fn session_manager_grid_projection_virtualizes_cards_by_responsive_row() {
+    let items = (0..7)
+        .map(|index| {
+            session_manager_display_fixture(
+                &format!("connection-{index}"),
+                None,
+                (index < 3).then_some("2026-06-15T00:00:00Z"),
+            )
+        })
+        .collect::<Vec<_>>();
+
+    let rows =
+        session_manager_grid_rows(&items, &[], "Recent".to_string(), "Hosts".to_string(), 3, 2);
+
+    assert_eq!(
+        rows,
+        vec![
+            SessionManagerGridRow::SectionHeader {
+                title: "Recent".to_string(),
+                item_count: 3,
+            },
+            SessionManagerGridRow::RecentItems {
+                item_indices: vec![0, 1],
+                is_last_in_section: false,
+            },
+            SessionManagerGridRow::RecentItems {
+                item_indices: vec![2],
+                is_last_in_section: true,
+            },
+            SessionManagerGridRow::SectionHeader {
+                title: "Hosts".to_string(),
+                item_count: 7,
+            },
+            SessionManagerGridRow::Cards {
+                item_indices: vec![0, 1, 2],
+            },
+            SessionManagerGridRow::Cards {
+                item_indices: vec![3, 4, 5],
+            },
+            SessionManagerGridRow::Cards {
+                item_indices: vec![6],
+            },
+        ]
+    );
+}
+
+#[test]
+pub(super) fn session_manager_tree_projection_only_contains_visible_rows() {
+    let items = vec![
+        session_manager_display_fixture("parent-item", Some("parent"), None),
+        session_manager_display_fixture("child-item", Some("parent/child"), None),
+        session_manager_display_fixture("ungrouped-item", None, None),
+    ];
+    let roots = vec!["parent".to_string()];
+    let children = HashMap::from([("parent".to_string(), vec!["parent/child".to_string()])]);
+
+    assert_eq!(
+        session_manager_tree_rows(&items, &roots, &children, &HashSet::new()),
+        vec![
+            SessionManagerTreeRow::Group {
+                path: "parent".to_string(),
+                depth: 0,
+                expanded: false,
+                has_children: true,
+            },
+            SessionManagerTreeRow::Item {
+                item_index: 2,
+                depth: 0,
+            },
+        ]
+    );
+
+    let expanded = HashSet::from(["parent".to_string(), "parent/child".to_string()]);
+    assert_eq!(
+        session_manager_tree_rows(&items, &roots, &children, &expanded),
+        vec![
+            SessionManagerTreeRow::Group {
+                path: "parent".to_string(),
+                depth: 0,
+                expanded: true,
+                has_children: true,
+            },
+            SessionManagerTreeRow::Group {
+                path: "parent/child".to_string(),
+                depth: 1,
+                expanded: true,
+                has_children: true,
+            },
+            SessionManagerTreeRow::Item {
+                item_index: 1,
+                depth: 2,
+            },
+            SessionManagerTreeRow::Item {
+                item_index: 0,
+                depth: 1,
+            },
+            SessionManagerTreeRow::Item {
+                item_index: 2,
+                depth: 0,
+            },
+        ]
+    );
+}
+
+#[test]
+pub(super) fn session_manager_main_views_keep_independent_empty_list_states() {
+    let state = SessionManagerState::default();
+
+    assert_eq!(state.main_grid_list_state.item_count(), 0);
+    assert_eq!(state.main_list_state.item_count(), 0);
+    assert_eq!(state.main_tree_list_state.item_count(), 0);
+}
+
+#[test]
+pub(super) fn session_manager_main_views_use_virtual_lists_as_scroll_owners() {
+    let source = include_str!("views.rs");
+    for (function_name, next_function_name) in [
+        (
+            "pub(super) fn render_session_manager_grid_view",
+            "pub(super) fn render_session_manager_grid_row",
+        ),
+        (
+            "pub(super) fn render_session_manager_list_view",
+            "pub(super) fn render_session_manager_tree_view",
+        ),
+        (
+            "pub(super) fn render_session_manager_tree_view",
+            "pub(super) fn render_session_manager_view_actions",
+        ),
+    ] {
+        let function_start = source.find(function_name).expect("main view function");
+        let function_tail = &source[function_start + function_name.len()..];
+        let function_end = function_tail
+            .find(next_function_name)
+            .expect("next main view function");
+        let function_source = &function_tail[..function_end];
+        assert!(function_source.contains("tauri_virtual_list("));
+        assert!(!function_source.contains("overflow_y_scrollbar"));
+    }
+}
+
+#[test]
 pub(super) fn session_menu_dismissal_closes_all_manager_popovers() {
     let mut state = SessionManagerState {
         show_batch_move: true,
@@ -131,6 +287,22 @@ pub(super) fn connection_display_item_falls_back_to_server_icon() {
     let item = SessionManagerDisplayItem::Connection(connection_info_fixture(Some("missing")));
 
     assert!(matches!(item.icon(), LucideIcon::Server));
+}
+
+#[test]
+pub(super) fn ssh_config_display_projection_never_copies_proxy_command_secrets() {
+    let host = SshConfigHost {
+        alias: "safe-alias".to_string(),
+        hostname: Some("example.com".to_string()),
+        proxy_command: Some(vec![SecretString::new("secret-proxy-token")]),
+        ..SshConfigHost::default()
+    };
+    let item =
+        SessionManagerDisplayItem::SshConfig(SessionManagerSshConfigDisplayItem::from(&host));
+
+    let search_text = item.search_text();
+    assert!(search_text.contains("safe-alias"));
+    assert!(!search_text.contains("secret-proxy-token"));
 }
 
 #[test]

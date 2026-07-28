@@ -1,6 +1,28 @@
 use super::*;
 
 impl WorkspaceApp {
+    pub(in crate::workspace) fn handle_session_manager_delete_confirm_key(
+        &mut self,
+        event: &KeyDownEvent,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if self.session_manager.read(cx).delete_confirm.is_none() {
+            return false;
+        }
+        match self.handle_standard_confirm_key(event, cx) {
+            Some(ConfirmKeyboardAction::Cancel) => {
+                self.cancel_session_manager_delete(cx);
+                true
+            }
+            Some(ConfirmKeyboardAction::Confirm) => {
+                self.confirm_session_manager_delete(cx);
+                true
+            }
+            Some(ConfirmKeyboardAction::Handled) => true,
+            None => false,
+        }
+    }
+
     pub(in crate::workspace) fn handle_session_manager_basic_dialog_footer_key(
         &mut self,
         event: &KeyDownEvent,
@@ -131,7 +153,7 @@ impl WorkspaceApp {
                 !session_manager.selected_items.is_empty(),
             )
         };
-        let content = self.render_session_manager_view_content(has_background, cx);
+        let content = self.render_session_manager_view_content(window, has_background, cx);
         let content = oxideterm_gpui_ui::motion::fade_in(
             &self.tokens,
             ("session-manager-view", view_mode as usize),

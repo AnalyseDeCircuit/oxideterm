@@ -3,10 +3,70 @@ use super::*;
 #[derive(Clone)]
 pub(super) enum SessionManagerDisplayItem {
     Connection(ConnectionInfo),
-    SshConfig(SshConfigHost),
+    SshConfig(SessionManagerSshConfigDisplayItem),
     Serial(SerialProfile),
     Telnet(TelnetProfile),
     RemoteDesktop(RemoteDesktopProfile),
+}
+
+#[derive(Clone)]
+pub(super) struct SessionManagerSshConfigDisplayItem {
+    alias: String,
+    hostname: Option<String>,
+    user: Option<String>,
+    port: Option<u16>,
+}
+
+impl From<&SshConfigHost> for SessionManagerSshConfigDisplayItem {
+    fn from(host: &SshConfigHost) -> Self {
+        // Session Manager only needs non-secret SSH config metadata. In
+        // particular, never copy proxy commands or their SecretString values
+        // into the long-lived virtual-list projection.
+        Self {
+            alias: host.alias.clone(),
+            hostname: host.hostname.clone(),
+            user: host.user.clone(),
+            port: host.port,
+        }
+    }
+}
+
+#[derive(Clone)]
+pub(super) enum SessionManagerOpenTarget {
+    Connection(String),
+    SshConfig(String),
+    Serial(String),
+    Telnet(String),
+    RemoteDesktop(String),
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(super) enum SessionManagerGridRow {
+    SectionHeader {
+        title: String,
+        item_count: usize,
+    },
+    RecentItems {
+        item_indices: Vec<usize>,
+        is_last_in_section: bool,
+    },
+    Cards {
+        item_indices: Vec<usize>,
+    },
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(super) enum SessionManagerTreeRow {
+    Group {
+        path: String,
+        depth: usize,
+        expanded: bool,
+        has_children: bool,
+    },
+    Item {
+        item_index: usize,
+        depth: usize,
+    },
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -48,6 +108,20 @@ impl SessionManagerDisplayItem {
                 profile.id.clone(),
             )),
             Self::SshConfig(_) | Self::Serial(_) | Self::Telnet(_) => None,
+        }
+    }
+
+    pub(super) fn open_target(&self) -> SessionManagerOpenTarget {
+        match self {
+            Self::Connection(connection) => {
+                SessionManagerOpenTarget::Connection(connection.id.clone())
+            }
+            Self::SshConfig(host) => SessionManagerOpenTarget::SshConfig(host.alias.clone()),
+            Self::Serial(profile) => SessionManagerOpenTarget::Serial(profile.id.clone()),
+            Self::Telnet(profile) => SessionManagerOpenTarget::Telnet(profile.id.clone()),
+            Self::RemoteDesktop(profile) => {
+                SessionManagerOpenTarget::RemoteDesktop(profile.id.clone())
+            }
         }
     }
 
@@ -280,7 +354,7 @@ impl WorkspaceApp {
                     .ssh_config_hosts
                     .iter()
                     .filter(|host| !host.already_imported)
-                    .cloned()
+                    .map(SessionManagerSshConfigDisplayItem::from)
                     .map(SessionManagerDisplayItem::SshConfig),
             )
             .filter(|item| {
@@ -321,8 +395,110 @@ impl WorkspaceApp {
         });
     }
 
+    fn session_manager_grid_columns(&self, window: &Window) -> (usize, usize) {
+        let settings = self.settings_store.settings();
+        let mut available_width = f32::from(window.viewport_size().width);
+        if !settings.sidebar_ui.zen_mode {
+            available_width -= self.tokens.metrics.activity_bar_width;
+            if !self.sidebar_collapsed {
+                available_width -= self.sidebar_panel_width();
+            }
+        }
+        if self.context_sidebar_visible() {
+            available_width -= self.ai.chat.sidebar_width;
+        }
+        let grid_width =
+            (available_width - self.tokens.spacing.three * 2.0).max(MANAGER_GRID_CARD_MIN_WIDTH);
+        let gap = self.tokens.spacing.three;
+        let card_columns = ((grid_width + gap) / (MANAGER_GRID_CARD_BASIS + gap))
+            .floor()
+            .max(1.0) as usize;
+        let recent_columns = ((grid_width + self.tokens.spacing.two)
+            / (MANAGER_RECENT_ITEM_BASIS + self.tokens.spacing.two))
+            .floor()
+            .max(1.0) as usize;
+        (card_columns, recent_columns)
+    }
+
+    fn session_manager_grid_list_spec() -> TauriVirtualListSpec {
+        TauriVirtualListSpec::new(
+            px(MANAGER_GRID_ESTIMATED_ROW_HEIGHT),
+            MANAGER_MAIN_VIEW_OVERSCAN,
+        )
+    }
+
+    fn session_manager_list_spec() -> TauriVirtualListSpec {
+        TauriVirtualListSpec::new(
+            px(MANAGER_LIST_ESTIMATED_ROW_HEIGHT),
+            MANAGER_MAIN_VIEW_OVERSCAN,
+        )
+    }
+
+    fn session_manager_tree_list_spec() -> TauriVirtualListSpec {
+        TauriVirtualListSpec::new(
+            px(MANAGER_TREE_ESTIMATED_ROW_HEIGHT),
+            MANAGER_MAIN_VIEW_OVERSCAN,
+        )
+    }
+
+    fn sync_session_manager_grid_list_state(
+        &self,
+        rows: &[SessionManagerGridRow],
+        items: &[SessionManagerDisplayItem],
+        cx: &App,
+    ) {
+        let signatures = rows
+            .iter()
+            .map(|row| session_manager_grid_row_signature(row, items))
+            .collect::<Vec<_>>();
+        let manager = self.session_manager.read(cx);
+        sync_tauri_variable_list_state_by_signatures(
+            &manager.main_grid_list_state,
+            &mut manager.main_grid_list_cache.borrow_mut(),
+            "session-manager-grid",
+            &signatures,
+            Self::session_manager_grid_list_spec(),
+        );
+    }
+
+    fn sync_session_manager_main_list_state(&self, items: &[SessionManagerDisplayItem], cx: &App) {
+        let signatures = items
+            .iter()
+            .map(session_manager_display_item_signature)
+            .collect::<Vec<_>>();
+        let manager = self.session_manager.read(cx);
+        sync_tauri_variable_list_state_by_signatures(
+            &manager.main_list_state,
+            &mut manager.main_list_cache.borrow_mut(),
+            "session-manager-list",
+            &signatures,
+            Self::session_manager_list_spec(),
+        );
+    }
+
+    fn sync_session_manager_tree_list_state(
+        &self,
+        rows: &[SessionManagerTreeRow],
+        items: &[SessionManagerDisplayItem],
+        cx: &App,
+    ) {
+        let signatures = rows
+            .iter()
+            .map(|row| session_manager_tree_row_signature(row, items))
+            .collect::<Vec<_>>();
+        let manager = self.session_manager.read(cx);
+        sync_tauri_variable_list_state_by_signatures(
+            &manager.main_tree_list_state,
+            &mut manager.main_tree_list_cache.borrow_mut(),
+            "session-manager-tree",
+            &signatures,
+            Self::session_manager_tree_list_spec(),
+        );
+    }
+
     pub(super) fn render_session_manager_view_content(
         &mut self,
+        window: &Window,
         has_background: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
@@ -334,7 +510,7 @@ impl WorkspaceApp {
         }
         match self.session_manager.read(cx).view_mode {
             SessionManagerViewMode::Grid => {
-                self.render_session_manager_grid_view(items, has_background, cx)
+                self.render_session_manager_grid_view(items, window, has_background, cx)
             }
             SessionManagerViewMode::List => {
                 self.render_session_manager_list_view(items, has_background, cx)
@@ -382,21 +558,44 @@ impl WorkspaceApp {
     pub(super) fn render_session_manager_grid_view(
         &self,
         items: Vec<SessionManagerDisplayItem>,
+        window: &Window,
         has_background: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
-        let recent = recent_session_items(&items);
+        let (card_columns, recent_columns) = self.session_manager_grid_columns(window);
         let (roots, _) = self.session_group_tree();
-        let has_groups = !roots.is_empty();
-        let mut sections = div()
-            .p(px(self.tokens.spacing.three))
-            .flex()
-            .flex_col()
-            .gap(px(self.tokens.spacing.three));
+        let rows = Arc::<[SessionManagerGridRow]>::from(session_manager_grid_rows(
+            &items,
+            &roots,
+            self.i18n.t("sessionManager.views.recent"),
+            self.i18n.t("sessionManager.views.hosts"),
+            card_columns,
+            recent_columns,
+        ));
+        self.sync_session_manager_grid_list_state(&rows, &items, cx);
+        let state = self.session_manager.read(cx).main_grid_list_state.clone();
+        let workspace = cx.entity();
+        let items = Arc::<[SessionManagerDisplayItem]>::from(items);
+        let list = tauri_virtual_list(
+            state,
+            Self::session_manager_grid_list_spec(),
+            move |index, _window, cx| {
+                workspace.update(cx, |this, cx| {
+                    this.render_session_manager_grid_row(
+                        rows.get(index),
+                        &items,
+                        has_background,
+                        cx,
+                    )
+                })
+            },
+        )
+        .p(px(self.tokens.spacing.three));
         let content = div()
             .size_full()
-            .overflow_y_scrollbar()
+            .flex()
+            .flex_col()
             .bg(if has_background {
                 rgba(0x00000000)
             } else {
@@ -404,91 +603,66 @@ impl WorkspaceApp {
             })
             .child(self.render_session_manager_view_actions(false, has_background, cx));
 
-        if !recent.is_empty() {
-            sections = sections.child(self.render_session_manager_recent_section(
-                self.i18n.t("sessionManager.views.recent"),
-                recent,
-                has_background,
-                cx,
-            ));
-        }
-
-        // Grid mode treats groups as containers for hosts, not as standalone
-        // cards, so the visual relationship stays obvious without switching
-        // to the explicit tree view.
-        for group in &roots {
-            let group_items = session_items_for_group_subtree(&items, group);
-            if group_items.is_empty() {
-                continue;
-            }
-            sections = sections.child(self.render_session_manager_grid_section(
-                group_display_name(group),
-                group_items,
-                has_background,
-                cx,
-            ));
-        }
-
-        let ungrouped_items = direct_session_items_for_group(&items, None);
-        let host_items = if has_groups { ungrouped_items } else { items };
-        if host_items.is_empty() {
-            return content.child(sections).into_any_element();
-        }
-
         content
-            .child(sections.child(self.render_session_manager_grid_section(
-                self.i18n.t("sessionManager.views.hosts"),
-                host_items,
-                has_background,
-                cx,
-            )))
+            .child(div().flex_1().min_h(px(0.0)).child(list))
             .into_any_element()
     }
 
-    pub(super) fn render_session_manager_grid_section(
+    pub(super) fn render_session_manager_grid_row(
         &self,
-        title: String,
-        items: Vec<SessionManagerDisplayItem>,
+        row: Option<&SessionManagerGridRow>,
+        items: &[SessionManagerDisplayItem],
         has_background: bool,
         cx: &mut Context<Self>,
-    ) -> Div {
-        let count = items.len();
-        let mut cards = div().flex().flex_wrap().gap(px(self.tokens.spacing.three));
-        for item in items {
-            cards = cards.child(self.render_session_manager_item_card(item, has_background, cx));
+    ) -> AnyElement {
+        match row {
+            Some(SessionManagerGridRow::SectionHeader { title, item_count }) => self
+                .render_session_manager_section_header(title.clone(), *item_count)
+                .pb(px(self.tokens.spacing.three))
+                .into_any_element(),
+            Some(SessionManagerGridRow::RecentItems {
+                item_indices,
+                is_last_in_section,
+            }) => div()
+                .flex()
+                .flex_wrap()
+                .gap(px(self.tokens.spacing.two))
+                .pb(px(if *is_last_in_section {
+                    self.tokens.spacing.three
+                } else {
+                    self.tokens.spacing.two
+                }))
+                .children(item_indices.iter().filter_map(|index| {
+                    items.get(*index).map(|item| {
+                        self.render_session_manager_recent_item(item, has_background, cx)
+                    })
+                }))
+                .into_any_element(),
+            Some(SessionManagerGridRow::Cards { item_indices }) => div()
+                .flex()
+                .flex_wrap()
+                .gap(px(self.tokens.spacing.three))
+                .pb(px(self.tokens.spacing.three))
+                .children(item_indices.iter().filter_map(|index| {
+                    items
+                        .get(*index)
+                        .map(|item| self.render_session_manager_item_card(item, has_background, cx))
+                }))
+                .into_any_element(),
+            None => div().into_any_element(),
         }
-        self.render_session_manager_section_header(title, count)
-            .child(cards)
-    }
-
-    pub(super) fn render_session_manager_recent_section(
-        &self,
-        title: String,
-        items: Vec<SessionManagerDisplayItem>,
-        has_background: bool,
-        cx: &mut Context<Self>,
-    ) -> Div {
-        let count = items.len();
-        let mut shortcuts = div().flex().flex_wrap().gap(px(self.tokens.spacing.two));
-        for item in items {
-            shortcuts =
-                shortcuts.child(self.render_session_manager_recent_item(item, has_background, cx));
-        }
-        // Recent sessions are shortcuts, not a second full card collection.
-        self.render_session_manager_section_header(title, count)
-            .child(shortcuts)
     }
 
     pub(super) fn render_session_manager_recent_item(
         &self,
-        item: SessionManagerDisplayItem,
+        item: &SessionManagerDisplayItem,
         has_background: bool,
         cx: &mut Context<Self>,
     ) -> Div {
         let theme = self.tokens.ui;
-        let open_item = item.clone();
+        let open_target = item.open_target();
         let selection_target = item.selection_target();
-        let open_button_item = item.clone();
+        let open_button_target = item.open_target();
         let last_used = format_last_used(item.last_used().as_deref(), &self.i18n);
         let is_selected = selection_target.as_ref().is_some_and(|target| {
             self.session_manager
@@ -519,7 +693,7 @@ impl WorkspaceApp {
                             }
                         }
                         SessionManagerItemPointerAction::Open => {
-                            this.open_session_manager_display_item(open_item.clone(), window, cx);
+                            this.open_session_manager_target(open_target.clone(), window, cx);
                         }
                         SessionManagerItemPointerAction::None => {}
                     }
@@ -571,7 +745,7 @@ impl WorkspaceApp {
                 rgb(theme.accent),
                 has_background,
                 move |this, _event, window, cx| {
-                    this.open_session_manager_display_item(open_button_item.clone(), window, cx);
+                    this.open_session_manager_target(open_button_target.clone(), window, cx);
                     cx.stop_propagation();
                 },
                 cx,
@@ -606,12 +780,12 @@ impl WorkspaceApp {
 
     pub(super) fn render_session_manager_item_card(
         &self,
-        item: SessionManagerDisplayItem,
+        item: &SessionManagerDisplayItem,
         has_background: bool,
         cx: &mut Context<Self>,
     ) -> Div {
         let theme = self.tokens.ui;
-        let open_item = item.clone();
+        let open_target = item.open_target();
         let selection_target = item.selection_target();
         let checkbox_target = selection_target.clone();
         let subtitle = if matches!(item, SessionManagerDisplayItem::SshConfig(_)) {
@@ -653,7 +827,7 @@ impl WorkspaceApp {
                             }
                         }
                         SessionManagerItemPointerAction::Open => {
-                            this.open_session_manager_display_item(open_item.clone(), window, cx);
+                            this.open_session_manager_target(open_target.clone(), window, cx);
                         }
                         SessionManagerItemPointerAction::None => {}
                     }
@@ -671,7 +845,7 @@ impl WorkspaceApp {
                     ),
                 )
             })
-            .child(self.render_session_manager_item_icon(&item, theme.text))
+            .child(self.render_session_manager_item_icon(item, theme.text))
             .child(
                 div()
                     .min_w(px(0.0))
@@ -706,18 +880,27 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
-        let mut rows = div().flex().flex_col();
-        for item in items {
-            rows = rows.child(self.render_session_manager_display_item_row(
-                item,
-                0,
-                has_background,
-                cx,
-            ));
-        }
+        self.sync_session_manager_main_list_state(&items, cx);
+        let state = self.session_manager.read(cx).main_list_state.clone();
+        let workspace = cx.entity();
+        let items = Arc::<[SessionManagerDisplayItem]>::from(items);
+        let list = tauri_virtual_list(
+            state,
+            Self::session_manager_list_spec(),
+            move |index, _window, cx| {
+                workspace.update(cx, |this, cx| {
+                    let Some(item) = items.get(index) else {
+                        return div().into_any_element();
+                    };
+                    this.render_session_manager_display_item_row(item, 0, has_background, cx)
+                        .into_any_element()
+                })
+            },
+        );
         div()
             .size_full()
-            .overflow_y_scrollbar()
+            .flex()
+            .flex_col()
             .bg(if has_background {
                 rgba(0x00000000)
             } else {
@@ -760,7 +943,7 @@ impl WorkspaceApp {
                             .child(self.i18n.t("sessionManager.table.actions")),
                     ),
             )
-            .child(rows)
+            .child(div().flex_1().min_h(px(0.0)).child(list))
             .into_any_element()
     }
 
@@ -771,36 +954,44 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
-        let (roots, _children) = self.session_group_tree();
-        let mut body = div().flex().flex_col();
-        for group in roots {
-            body = body.child(self.render_session_manager_tree_group(
-                &group,
-                0,
-                &items,
-                has_background,
-                cx,
-            ));
-        }
-        for item in direct_session_items_for_group(&items, None) {
-            body = body.child(self.render_session_manager_display_item_row(
-                item,
-                0,
-                has_background,
-                cx,
-            ));
-        }
+        let (roots, children) = self.session_group_tree();
+        let expanded_groups = self.session_manager.read(cx).expanded_groups.clone();
+        let rows = Arc::<[SessionManagerTreeRow]>::from(session_manager_tree_rows(
+            &items,
+            &roots,
+            &children,
+            &expanded_groups,
+        ));
+        self.sync_session_manager_tree_list_state(&rows, &items, cx);
+        let state = self.session_manager.read(cx).main_tree_list_state.clone();
+        let workspace = cx.entity();
+        let items = Arc::<[SessionManagerDisplayItem]>::from(items);
+        let list = tauri_virtual_list(
+            state,
+            Self::session_manager_tree_list_spec(),
+            move |index, _window, cx| {
+                workspace.update(cx, |this, cx| {
+                    this.render_session_manager_tree_row(
+                        rows.get(index),
+                        &items,
+                        has_background,
+                        cx,
+                    )
+                })
+            },
+        );
 
         div()
             .size_full()
-            .overflow_y_scrollbar()
+            .flex()
+            .flex_col()
             .bg(if has_background {
                 rgba(0x00000000)
             } else {
                 rgb(theme.bg)
             })
             .child(self.render_session_manager_view_actions(true, has_background, cx))
-            .child(body)
+            .child(div().flex_1().min_h(px(0.0)).child(list))
             .into_any_element()
     }
 
@@ -927,118 +1118,121 @@ impl WorkspaceApp {
         )
     }
 
-    pub(super) fn render_session_manager_tree_group(
-        &mut self,
+    pub(super) fn render_session_manager_tree_row(
+        &self,
+        row: Option<&SessionManagerTreeRow>,
+        items: &[SessionManagerDisplayItem],
+        has_background: bool,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        match row {
+            Some(SessionManagerTreeRow::Group {
+                path,
+                depth,
+                expanded,
+                has_children,
+            }) => self
+                .render_session_manager_tree_group_row(
+                    path,
+                    *depth,
+                    *expanded,
+                    *has_children,
+                    has_background,
+                    cx,
+                )
+                .into_any_element(),
+            Some(SessionManagerTreeRow::Item { item_index, depth }) => items
+                .get(*item_index)
+                .map(|item| {
+                    self.render_session_manager_display_item_row(item, *depth, has_background, cx)
+                        .into_any_element()
+                })
+                .unwrap_or_else(|| div().into_any_element()),
+            None => div().into_any_element(),
+        }
+    }
+
+    pub(super) fn render_session_manager_tree_group_row(
+        &self,
         group: &str,
         depth: usize,
-        items: &[SessionManagerDisplayItem],
+        expanded: bool,
+        has_children: bool,
         has_background: bool,
         cx: &mut Context<Self>,
     ) -> Div {
         let theme = self.tokens.ui;
-        let (_roots, children) = self.session_group_tree();
-        let group_items = direct_session_items_for_group(items, Some(group));
-        let child_groups = children.get(group).cloned().unwrap_or_default();
-        let expanded = self
-            .session_manager
-            .read(cx)
-            .expanded_groups
-            .contains(group);
-        let has_children = !child_groups.is_empty() || !group_items.is_empty();
         let group_name = group.rsplit('/').next().unwrap_or(group).to_string();
         let group_id = group.to_string();
-        let mut group_container = div().flex().flex_col().child(
-            div()
-                .border_b_1()
-                .border_color(theme_border_half(theme.border, has_background))
-                .px_3()
-                .py_2()
-                .pl(px(depth as f32 * 24.0 + 12.0))
-                .flex()
-                .items_center()
-                .gap(px(self.tokens.spacing.two))
-                .hover(|row| row.bg(theme_row_hover_bg(theme.bg_hover, has_background)))
-                .on_mouse_down(
-                    MouseButton::Left,
-                    cx.listener(move |this, _event, _window, cx| {
-                        if has_children {
-                            this.toggle_session_group_expanded(&group_id, cx);
-                            cx.notify();
-                        }
-                        cx.stop_propagation();
-                    }),
-                )
-                .child(self.render_animated_chevron(
-                    (
-                        gpui::SharedString::from(format!("session-group-chevron-{group}")),
-                        expanded as usize,
-                    ),
-                    expanded,
-                    16.0,
-                    rgb(theme.text_muted),
-                ))
-                .child(Self::render_lucide_icon(
-                    if expanded {
-                        LucideIcon::FolderOpen
-                    } else {
-                        LucideIcon::Folder
-                    },
-                    16.0,
-                    rgb(theme.warning),
-                ))
-                .child(
-                    div()
-                        .flex_1()
-                        .min_w(px(0.0))
-                        .truncate()
-                        .text_size(px(MANAGER_ROW_TEXT_SIZE))
-                        .font_weight(gpui::FontWeight::MEDIUM)
-                        .text_color(rgb(theme.text))
-                        .child(group_name),
-                )
-                .child(
-                    div()
-                        .rounded(px(self.tokens.radii.sm))
-                        .bg(theme_input_bg(theme.bg, has_background))
-                        .px_2()
-                        .py(px(1.0))
-                        .text_size(px(MANAGER_ROW_META_TEXT_SIZE))
-                        .text_color(rgb(theme.text_muted))
-                        .child(self.connection_count_for_group(group).to_string()),
+        div()
+            .border_b_1()
+            .border_color(theme_border_half(theme.border, has_background))
+            .px_3()
+            .py_2()
+            .pl(px(depth as f32 * 24.0 + 12.0))
+            .flex()
+            .items_center()
+            .gap(px(self.tokens.spacing.two))
+            .hover(|row| row.bg(theme_row_hover_bg(theme.bg_hover, has_background)))
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(move |this, _event, _window, cx| {
+                    if has_children {
+                        this.toggle_session_group_expanded(&group_id, cx);
+                        cx.notify();
+                    }
+                    cx.stop_propagation();
+                }),
+            )
+            .child(self.render_animated_chevron(
+                (
+                    gpui::SharedString::from(format!("session-group-chevron-{group}")),
+                    expanded as usize,
                 ),
-        );
-        if expanded {
-            for child in child_groups {
-                group_container = group_container.child(self.render_session_manager_tree_group(
-                    &child,
-                    depth + 1,
-                    items,
-                    has_background,
-                    cx,
-                ));
-            }
-            for item in group_items {
-                group_container =
-                    group_container.child(self.render_session_manager_display_item_row(
-                        item,
-                        depth + 1,
-                        has_background,
-                        cx,
-                    ));
-            }
-        }
-        group_container
+                expanded,
+                16.0,
+                rgb(theme.text_muted),
+            ))
+            .child(Self::render_lucide_icon(
+                if expanded {
+                    LucideIcon::FolderOpen
+                } else {
+                    LucideIcon::Folder
+                },
+                16.0,
+                rgb(theme.warning),
+            ))
+            .child(
+                div()
+                    .flex_1()
+                    .min_w(px(0.0))
+                    .truncate()
+                    .text_size(px(MANAGER_ROW_TEXT_SIZE))
+                    .font_weight(gpui::FontWeight::MEDIUM)
+                    .text_color(rgb(theme.text))
+                    .child(group_name),
+            )
+            .child(
+                div()
+                    .rounded(px(self.tokens.radii.sm))
+                    .bg(theme_input_bg(theme.bg, has_background))
+                    .px_2()
+                    .py(px(1.0))
+                    .text_size(px(MANAGER_ROW_META_TEXT_SIZE))
+                    .text_color(rgb(theme.text_muted))
+                    .child(self.connection_count_for_group(group).to_string()),
+            )
     }
 
     pub(super) fn render_session_manager_display_item_row(
         &self,
-        item: SessionManagerDisplayItem,
+        item: &SessionManagerDisplayItem,
         depth: usize,
         has_background: bool,
         cx: &mut Context<Self>,
     ) -> Div {
         let theme = self.tokens.ui;
-        let open_item = item.clone();
+        let open_target = item.open_target();
         let selection_target = item.selection_target();
         let checkbox_target = selection_target.clone();
         let last_used = item.last_used();
@@ -1101,14 +1295,14 @@ impl WorkspaceApp {
                             }
                         }
                         SessionManagerItemPointerAction::Open => {
-                            this.open_session_manager_display_item(open_item.clone(), window, cx);
+                            this.open_session_manager_target(open_target.clone(), window, cx);
                         }
                         SessionManagerItemPointerAction::None => {}
                     }
                 }),
             )
             .child(selection)
-            .child(self.render_session_manager_item_icon(&item, theme.text))
+            .child(self.render_session_manager_item_icon(item, theme.text))
             .child(
                 div()
                     .min_w(px(0.0))
@@ -1186,7 +1380,7 @@ impl WorkspaceApp {
 
     pub(super) fn render_session_manager_display_item_actions(
         &self,
-        item: SessionManagerDisplayItem,
+        item: &SessionManagerDisplayItem,
         has_background: bool,
         cx: &mut Context<Self>,
     ) -> Div {
@@ -1194,7 +1388,7 @@ impl WorkspaceApp {
             SessionManagerDisplayItem::Connection(connection) => {
                 let open_id = connection.id.clone();
                 let edit_id = connection.id.clone();
-                let menu_id = connection.id;
+                let menu_id = connection.id.clone();
                 div()
                     .w(px(MANAGER_ROW_ACTIONS_WIDTH))
                     .flex_none()
@@ -1246,7 +1440,7 @@ impl WorkspaceApp {
             }
             SessionManagerDisplayItem::SshConfig(host) => {
                 let open_alias = host.alias.clone();
-                let import_alias = host.alias;
+                let import_alias = host.alias.clone();
                 div()
                     .w(px(MANAGER_ROW_ACTIONS_WIDTH))
                     .flex_none()
@@ -1281,7 +1475,7 @@ impl WorkspaceApp {
             }
             SessionManagerDisplayItem::Serial(profile) => {
                 let open_id = profile.id.clone();
-                let menu_id = profile.id;
+                let menu_id = profile.id.clone();
                 div()
                     .w(px(MANAGER_ROW_ACTIONS_WIDTH))
                     .flex_none()
@@ -1321,7 +1515,7 @@ impl WorkspaceApp {
             }
             SessionManagerDisplayItem::Telnet(profile) => {
                 let open_id = profile.id.clone();
-                let menu_id = profile.id;
+                let menu_id = profile.id.clone();
                 div()
                     .w(px(MANAGER_ROW_ACTIONS_WIDTH))
                     .flex_none()
@@ -1362,7 +1556,7 @@ impl WorkspaceApp {
             SessionManagerDisplayItem::RemoteDesktop(profile) => {
                 let open_id = profile.id.clone();
                 let edit_id = profile.id.clone();
-                let menu_id = profile.id;
+                let menu_id = profile.id.clone();
                 div()
                     .w(px(MANAGER_ROW_ACTIONS_WIDTH))
                     .flex_none()
@@ -1628,27 +1822,27 @@ impl WorkspaceApp {
         )
     }
 
-    pub(super) fn open_session_manager_display_item(
+    pub(super) fn open_session_manager_target(
         &mut self,
-        item: SessionManagerDisplayItem,
+        target: SessionManagerOpenTarget,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        match item {
-            SessionManagerDisplayItem::Connection(connection) => {
-                self.open_saved_connection(&connection.id, window, cx)
+        match target {
+            SessionManagerOpenTarget::Connection(connection_id) => {
+                self.open_saved_connection(&connection_id, window, cx)
             }
-            SessionManagerDisplayItem::SshConfig(host) => {
-                self.open_ssh_config_alias_from_palette(host.alias, window, cx)
+            SessionManagerOpenTarget::SshConfig(alias) => {
+                self.open_ssh_config_alias_from_palette(alias, window, cx)
             }
-            SessionManagerDisplayItem::Serial(profile) => {
-                self.open_saved_serial_profile(&profile.id, window, cx)
+            SessionManagerOpenTarget::Serial(profile_id) => {
+                self.open_saved_serial_profile(&profile_id, window, cx)
             }
-            SessionManagerDisplayItem::Telnet(profile) => {
-                self.open_saved_telnet_profile(&profile.id, window, cx)
+            SessionManagerOpenTarget::Telnet(profile_id) => {
+                self.open_saved_telnet_profile(&profile_id, window, cx)
             }
-            SessionManagerDisplayItem::RemoteDesktop(profile) => {
-                self.open_saved_remote_desktop_profile(&profile.id, window, cx)
+            SessionManagerOpenTarget::RemoteDesktop(profile_id) => {
+                self.open_saved_remote_desktop_profile(&profile_id, window, cx)
             }
         }
     }
@@ -1662,48 +1856,259 @@ pub(super) fn compare_option_lower(left: Option<&str>, right: Option<&str>) -> s
     compare_lower(left.unwrap_or_default(), right.unwrap_or_default())
 }
 
-pub(super) fn recent_session_items(
+pub(super) fn session_manager_grid_rows(
     items: &[SessionManagerDisplayItem],
-) -> Vec<SessionManagerDisplayItem> {
-    let mut recent = items
-        .iter()
-        .filter(|item| item.last_used().is_some())
-        .cloned()
-        .collect::<Vec<_>>();
-    recent.sort_by(|left, right| right.last_used().cmp(&left.last_used()));
-    recent.truncate(8);
-    recent
+    roots: &[String],
+    recent_title: String,
+    hosts_title: String,
+    card_columns: usize,
+    recent_columns: usize,
+) -> Vec<SessionManagerGridRow> {
+    let mut rows = Vec::new();
+    let recent_indices = recent_session_item_indices(items);
+    push_session_manager_grid_section(
+        &mut rows,
+        recent_title,
+        &recent_indices,
+        recent_columns,
+        true,
+    );
+
+    // Grid mode keeps each root group as one section containing its subtree.
+    for group in roots {
+        let group_indices = session_item_indices_for_group_subtree(items, group);
+        push_session_manager_grid_section(
+            &mut rows,
+            group_display_name(group),
+            &group_indices,
+            card_columns,
+            false,
+        );
+    }
+
+    let host_indices = if roots.is_empty() {
+        (0..items.len()).collect::<Vec<_>>()
+    } else {
+        direct_session_item_indices_for_group(items, None)
+    };
+    push_session_manager_grid_section(&mut rows, hosts_title, &host_indices, card_columns, false);
+    rows
 }
 
-pub(super) fn direct_session_items_for_group(
+fn push_session_manager_grid_section(
+    rows: &mut Vec<SessionManagerGridRow>,
+    title: String,
+    item_indices: &[usize],
+    columns: usize,
+    recent: bool,
+) {
+    if item_indices.is_empty() {
+        return;
+    }
+    rows.push(SessionManagerGridRow::SectionHeader {
+        title,
+        item_count: item_indices.len(),
+    });
+    let chunk_count = item_indices.len().div_ceil(columns.max(1));
+    for (row_index, chunk) in item_indices.chunks(columns.max(1)).enumerate() {
+        if recent {
+            rows.push(SessionManagerGridRow::RecentItems {
+                item_indices: chunk.to_vec(),
+                is_last_in_section: row_index + 1 == chunk_count,
+            });
+        } else {
+            rows.push(SessionManagerGridRow::Cards {
+                item_indices: chunk.to_vec(),
+            });
+        }
+    }
+}
+
+pub(super) fn session_manager_tree_rows(
+    items: &[SessionManagerDisplayItem],
+    roots: &[String],
+    children: &HashMap<String, Vec<String>>,
+    expanded_groups: &HashSet<String>,
+) -> Vec<SessionManagerTreeRow> {
+    let mut rows = Vec::new();
+    for root in roots {
+        push_session_manager_tree_group_rows(&mut rows, root, 0, items, children, expanded_groups);
+    }
+    rows.extend(
+        direct_session_item_indices_for_group(items, None)
+            .into_iter()
+            .map(|item_index| SessionManagerTreeRow::Item {
+                item_index,
+                depth: 0,
+            }),
+    );
+    rows
+}
+
+fn push_session_manager_tree_group_rows(
+    rows: &mut Vec<SessionManagerTreeRow>,
+    group: &str,
+    depth: usize,
+    items: &[SessionManagerDisplayItem],
+    children: &HashMap<String, Vec<String>>,
+    expanded_groups: &HashSet<String>,
+) {
+    let group_item_indices = direct_session_item_indices_for_group(items, Some(group));
+    let child_groups = children.get(group).map(Vec::as_slice).unwrap_or_default();
+    let expanded = expanded_groups.contains(group);
+    rows.push(SessionManagerTreeRow::Group {
+        path: group.to_string(),
+        depth,
+        expanded,
+        has_children: !child_groups.is_empty() || !group_item_indices.is_empty(),
+    });
+    if !expanded {
+        return;
+    }
+
+    for child_group in child_groups {
+        push_session_manager_tree_group_rows(
+            rows,
+            child_group,
+            depth + 1,
+            items,
+            children,
+            expanded_groups,
+        );
+    }
+    rows.extend(
+        group_item_indices
+            .into_iter()
+            .map(|item_index| SessionManagerTreeRow::Item {
+                item_index,
+                depth: depth + 1,
+            }),
+    );
+}
+
+fn recent_session_item_indices(items: &[SessionManagerDisplayItem]) -> Vec<usize> {
+    let mut indices = items
+        .iter()
+        .enumerate()
+        .filter_map(|(index, item)| item.last_used().is_some().then_some(index))
+        .collect::<Vec<_>>();
+    indices.sort_by(|left, right| items[*right].last_used().cmp(&items[*left].last_used()));
+    indices.truncate(8);
+    indices
+}
+
+fn direct_session_item_indices_for_group(
     items: &[SessionManagerDisplayItem],
     group: Option<&str>,
-) -> Vec<SessionManagerDisplayItem> {
+) -> Vec<usize> {
     items
         .iter()
-        .filter(|item| match (group, item.group()) {
-            (None, None) => true,
-            (Some(group), Some(item_group)) => item_group == group,
-            _ => false,
+        .enumerate()
+        .filter_map(|(index, item)| match (group, item.group()) {
+            (None, None) => Some(index),
+            (Some(group), Some(item_group)) if item_group == group => Some(index),
+            _ => None,
         })
-        .cloned()
         .collect()
 }
 
-pub(super) fn session_items_for_group_subtree(
+fn session_item_indices_for_group_subtree(
     items: &[SessionManagerDisplayItem],
     group: &str,
-) -> Vec<SessionManagerDisplayItem> {
+) -> Vec<usize> {
     let child_prefix = format!("{group}/");
     items
         .iter()
-        .filter(|item| {
-            item.group().is_some_and(|item_group| {
-                item_group == group || item_group.starts_with(&child_prefix)
-            })
+        .enumerate()
+        .filter_map(|(index, item)| {
+            item.group()
+                .is_some_and(|item_group| {
+                    item_group == group || item_group.starts_with(&child_prefix)
+                })
+                .then_some(index)
         })
-        .cloned()
         .collect()
+}
+
+fn session_manager_display_item_signature(item: &SessionManagerDisplayItem) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    std::mem::discriminant(item).hash(&mut hasher);
+    item.id().hash(&mut hasher);
+    item.name().hash(&mut hasher);
+    item.group().hash(&mut hasher);
+    item.subtitle().hash(&mut hasher);
+    item.last_used().hash(&mut hasher);
+    item.icon_color().hash(&mut hasher);
+    item.icon_background_color().hash(&mut hasher);
+    hasher.finish()
+}
+
+fn session_manager_grid_row_signature(
+    row: &SessionManagerGridRow,
+    items: &[SessionManagerDisplayItem],
+) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    match row {
+        SessionManagerGridRow::SectionHeader { title, item_count } => {
+            0_u8.hash(&mut hasher);
+            title.hash(&mut hasher);
+            item_count.hash(&mut hasher);
+        }
+        SessionManagerGridRow::RecentItems {
+            item_indices,
+            is_last_in_section,
+        } => {
+            1_u8.hash(&mut hasher);
+            is_last_in_section.hash(&mut hasher);
+            hash_session_manager_row_items(item_indices, items, &mut hasher);
+        }
+        SessionManagerGridRow::Cards { item_indices } => {
+            2_u8.hash(&mut hasher);
+            hash_session_manager_row_items(item_indices, items, &mut hasher);
+        }
+    }
+    hasher.finish()
+}
+
+fn session_manager_tree_row_signature(
+    row: &SessionManagerTreeRow,
+    items: &[SessionManagerDisplayItem],
+) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    match row {
+        SessionManagerTreeRow::Group {
+            path,
+            depth,
+            expanded,
+            has_children,
+        } => {
+            0_u8.hash(&mut hasher);
+            path.hash(&mut hasher);
+            depth.hash(&mut hasher);
+            expanded.hash(&mut hasher);
+            has_children.hash(&mut hasher);
+        }
+        SessionManagerTreeRow::Item { item_index, depth } => {
+            1_u8.hash(&mut hasher);
+            depth.hash(&mut hasher);
+            if let Some(item) = items.get(*item_index) {
+                session_manager_display_item_signature(item).hash(&mut hasher);
+            }
+        }
+    }
+    hasher.finish()
+}
+
+fn hash_session_manager_row_items(
+    item_indices: &[usize],
+    items: &[SessionManagerDisplayItem],
+    hasher: &mut DefaultHasher,
+) {
+    for item_index in item_indices {
+        if let Some(item) = items.get(*item_index) {
+            session_manager_display_item_signature(item).hash(hasher);
+        }
+    }
 }
 
 pub(super) fn group_display_name(group: &str) -> String {

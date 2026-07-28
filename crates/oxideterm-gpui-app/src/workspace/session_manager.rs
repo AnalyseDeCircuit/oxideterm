@@ -81,6 +81,12 @@ const MANAGER_RECENT_ITEM_BASIS: f32 = 240.0;
 const MANAGER_RECENT_ICON_SIZE: f32 = 28.0;
 const MANAGER_RECENT_ICON_GLYPH_SIZE: f32 = 14.0;
 const MANAGER_RECENT_ACCENT_BG_ALPHA: u32 = 0x1a;
+const MANAGER_GRID_CARD_MIN_WIDTH: f32 = 260.0;
+const MANAGER_GRID_CARD_BASIS: f32 = 320.0;
+const MANAGER_GRID_ESTIMATED_ROW_HEIGHT: f32 = 84.0;
+const MANAGER_LIST_ESTIMATED_ROW_HEIGHT: f32 = 57.0;
+const MANAGER_TREE_ESTIMATED_ROW_HEIGHT: f32 = 52.0;
+const MANAGER_MAIN_VIEW_OVERSCAN: usize = 6;
 const MANAGER_ROW_ACTION_MENU_WIDTH: f32 = 176.0;
 const MANAGER_ROW_ACTION_MENU_CONNECTION_HEIGHT: f32 = 120.0;
 const MANAGER_ROW_ACTION_MENU_PROFILE_HEIGHT: f32 = 44.0;
@@ -369,6 +375,12 @@ pub(super) struct SessionManagerState {
     pub(super) status: Option<String>,
     pub(super) ssh_config_hosts: Vec<SshConfigHost>,
     pub(super) saved_sidebar_scroll_handle: UniformListScrollHandle,
+    pub(super) main_grid_list_state: ListState,
+    pub(super) main_grid_list_cache: RefCell<VirtualListSignatureCache>,
+    pub(super) main_list_state: ListState,
+    pub(super) main_list_cache: RefCell<VirtualListSignatureCache>,
+    pub(super) main_tree_list_state: ListState,
+    pub(super) main_tree_list_cache: RefCell<VirtualListSignatureCache>,
     pub(super) oxide_export_connection_list_state: ListState,
     pub(super) oxide_export_connection_list_cache: RefCell<VirtualListSignatureCache>,
     pub(super) oxide_import_connection_preview_list_state: ListState,
@@ -420,6 +432,33 @@ impl Default for SessionManagerState {
             status: None,
             ssh_config_hosts: Vec::new(),
             saved_sidebar_scroll_handle: UniformListScrollHandle::new(),
+            main_grid_list_state: tauri_virtual_list_state(
+                0,
+                ListAlignment::Top,
+                TauriVirtualListSpec::new(
+                    px(MANAGER_GRID_ESTIMATED_ROW_HEIGHT),
+                    MANAGER_MAIN_VIEW_OVERSCAN,
+                ),
+            ),
+            main_grid_list_cache: RefCell::new(VirtualListSignatureCache::default()),
+            main_list_state: tauri_virtual_list_state(
+                0,
+                ListAlignment::Top,
+                TauriVirtualListSpec::new(
+                    px(MANAGER_LIST_ESTIMATED_ROW_HEIGHT),
+                    MANAGER_MAIN_VIEW_OVERSCAN,
+                ),
+            ),
+            main_list_cache: RefCell::new(VirtualListSignatureCache::default()),
+            main_tree_list_state: tauri_virtual_list_state(
+                0,
+                ListAlignment::Top,
+                TauriVirtualListSpec::new(
+                    px(MANAGER_TREE_ESTIMATED_ROW_HEIGHT),
+                    MANAGER_MAIN_VIEW_OVERSCAN,
+                ),
+            ),
+            main_tree_list_cache: RefCell::new(VirtualListSignatureCache::default()),
             oxide_export_connection_list_state: ListState::new(
                 OXIDE_EXPORT_CONNECTION_LIST_INITIAL_ITEM_COUNT,
                 ListAlignment::Top,

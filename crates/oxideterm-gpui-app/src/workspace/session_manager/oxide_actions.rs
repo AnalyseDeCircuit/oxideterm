@@ -672,6 +672,46 @@ impl WorkspaceApp {
         false
     }
 
+    pub(in crate::workspace) fn handle_oxide_import_modal_key(
+        &mut self,
+        event: &KeyDownEvent,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let exiting = self
+            .session_manager
+            .read(cx)
+            .oxide_import_dialog
+            .as_ref()
+            .is_some_and(|dialog| {
+                dialog.presence.phase() == oxideterm_gpui_ui::motion::ExitPhase::Exiting
+            });
+        if exiting {
+            true
+        } else {
+            self.handle_oxide_import_footer_key(event, cx)
+        }
+    }
+
+    pub(in crate::workspace) fn handle_oxide_export_modal_key(
+        &mut self,
+        event: &KeyDownEvent,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let exiting = self
+            .session_manager
+            .read(cx)
+            .oxide_export_dialog
+            .as_ref()
+            .is_some_and(|dialog| {
+                dialog.presence.phase() == oxideterm_gpui_ui::motion::ExitPhase::Exiting
+            });
+        if exiting {
+            true
+        } else {
+            self.handle_oxide_export_footer_key(event, cx)
+        }
+    }
+
     pub(super) fn handle_oxide_import_footer_key(
         &mut self,
         event: &KeyDownEvent,
