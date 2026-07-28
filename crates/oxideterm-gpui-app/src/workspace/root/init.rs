@@ -755,6 +755,7 @@ impl WorkspaceApp {
         workspace.restore_session_tree_snapshot();
         workspace.sync_active_terminal_metadata_context(cx);
         workspace.sync_active_terminal_recording_elapsed_tick(cx);
+        workspace.sync_active_privilege_prompt_inline_hint(cx);
         let window_handle = window.window_handle();
         cx.spawn(async move |weak, cx| {
             loop {
@@ -765,13 +766,6 @@ impl WorkspaceApp {
                 if cx
                     .update_window(window_handle, |_, _window, cx| {
                         weak.update(cx, |workspace, cx| {
-                            if workspace.sync_active_privilege_prompt_inline_hint(cx) {
-                                // Privilege prompts are rendered as terminal ghost text,
-                                // so the workspace heartbeat only mirrors the prompt
-                                // state into the active pane instead of repainting a
-                                // command-bar chip.
-                                cx.notify();
-                            }
                             if workspace.active_ime_target_blinks_caret(cx) {
                                 workspace.new_connection_caret_visible =
                                     !workspace.new_connection_caret_visible;

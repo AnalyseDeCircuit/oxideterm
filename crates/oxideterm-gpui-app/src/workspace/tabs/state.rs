@@ -32,6 +32,7 @@ impl WorkspaceApp {
             self.sync_host_tools_lifecycle(false, cx);
             self.sync_active_terminal_metadata_context(cx);
             self.sync_active_terminal_recording_elapsed_tick(cx);
+            self.sync_active_privilege_prompt_inline_hint(cx);
         }
     }
 

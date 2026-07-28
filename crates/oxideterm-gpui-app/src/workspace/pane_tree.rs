@@ -62,6 +62,13 @@ impl WorkspaceApp {
                     self.sync_active_terminal_recording_elapsed_tick(cx);
                 }
             }
+            TerminalPaneEvent::PrivilegePromptStateChanged => {
+                if self.active_pane_id() == Some(pane_id)
+                    && self.sync_active_privilege_prompt_inline_hint(cx)
+                {
+                    cx.notify();
+                }
+            }
             TerminalPaneEvent::PrivilegePromptSubmitRequested => self
                 .deliver_terminal_pane_interaction(
                     pane_id,

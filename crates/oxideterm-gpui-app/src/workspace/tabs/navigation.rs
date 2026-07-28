@@ -296,6 +296,7 @@ impl WorkspaceApp {
         }
         self.sync_active_terminal_metadata_context(cx);
         self.sync_active_terminal_recording_elapsed_tick(cx);
+        self.sync_active_privilege_prompt_inline_hint(cx);
     }
 
     fn focus_active_tab_keyboard_owner(&mut self, window: &mut Window, cx: &mut Context<Self>) {

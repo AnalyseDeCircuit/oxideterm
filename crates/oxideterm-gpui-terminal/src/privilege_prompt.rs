@@ -120,6 +120,7 @@ pub struct PrivilegePromptTracker {
     output_tail: String,
     next_command_id: u64,
     state: PrivilegePromptTrackerState,
+    state_generation: u64,
 }
 
 impl Default for PrivilegePromptTracker {
@@ -129,11 +130,50 @@ impl Default for PrivilegePromptTracker {
             output_tail: String::new(),
             next_command_id: 1,
             state: PrivilegePromptTrackerState::Idle,
+            state_generation: 0,
         }
     }
 }
 
 impl PrivilegePromptTracker {
+    pub(crate) fn state_generation(&self) -> u64 {
+        self.state_generation
+    }
+
+    pub(crate) fn next_expiry_deadline(&self) -> Option<Instant> {
+        match &self.state {
+            PrivilegePromptTrackerState::CommandCandidate { observed_at, .. } => {
+                observed_at.checked_add(PRIVILEGE_COMMAND_CONTEXT_TTL)
+            }
+            PrivilegePromptTrackerState::PromptVisible { last_seen_at, .. } => {
+                last_seen_at.checked_add(PRIVILEGE_PROMPT_VISIBLE_TTL)
+            }
+            PrivilegePromptTrackerState::Filled { filled_at, .. } => {
+                filled_at.checked_add(PRIVILEGE_PROMPT_FILLED_TTL)
+            }
+            PrivilegePromptTrackerState::ManualEntry { started_at, .. } => {
+                started_at.checked_add(PRIVILEGE_PROMPT_VISIBLE_TTL)
+            }
+            PrivilegePromptTrackerState::Idle => None,
+        }
+    }
+
+    pub(crate) fn expire_at(&mut self, now: Instant) -> bool {
+        let Some(deadline) = self.next_expiry_deadline() else {
+            return false;
+        };
+        if now < deadline {
+            return false;
+        }
+        self.state = PrivilegePromptTrackerState::Idle;
+        self.advance_state_generation();
+        true
+    }
+
+    fn advance_state_generation(&mut self) {
+        self.state_generation = self.state_generation.wrapping_add(1);
+    }
+
     pub fn observe_user_input_bytes(
         &mut self,
         bytes: &[u8],
@@ -296,6 +336,7 @@ impl PrivilegePromptTracker {
                 filled_at: now,
                 retry_count,
             };
+            self.advance_state_generation();
         };
         self.input_line.clear();
     }
@@ -355,6 +396,7 @@ impl PrivilegePromptTracker {
                 context,
                 observed_at: now,
             };
+            self.advance_state_generation();
         } else if !matches!(self.state, PrivilegePromptTrackerState::Filled { .. }) {
             if !matches!(self.state, PrivilegePromptTrackerState::Idle) {
                 log_privilege_prompt_tracker(format_args!(
@@ -363,6 +405,7 @@ impl PrivilegePromptTracker {
                 ));
             }
             self.state = PrivilegePromptTrackerState::Idle;
+            self.advance_state_generation();
         }
     }
 
@@ -412,6 +455,7 @@ impl PrivilegePromptTracker {
                 privilege_command_context_name(&candidate.1)
             ));
             self.state = PrivilegePromptTrackerState::Idle;
+            self.advance_state_generation();
             return None;
         }
         Some((candidate.0, candidate.1))
@@ -468,6 +512,7 @@ impl PrivilegePromptTracker {
             last_seen_at: now,
             retry_count,
         };
+        self.advance_state_generation();
     }
 
     fn current_retry_count_for(&self, prompt: &PrivilegePromptMatch) -> u8 {
@@ -492,7 +537,7 @@ impl PrivilegePromptTracker {
     }
 
     fn increment_retry_count(&mut self) {
-        match &mut self.state {
+        let changed = match &mut self.state {
             PrivilegePromptTrackerState::PromptVisible { retry_count, .. }
             | PrivilegePromptTrackerState::Filled { retry_count, .. }
             | PrivilegePromptTrackerState::ManualEntry { retry_count, .. } => {
@@ -501,8 +546,12 @@ impl PrivilegePromptTracker {
                     "tracker state: retry_count incremented value={}",
                     *retry_count
                 ));
+                true
             }
-            _ => {}
+            _ => false,
+        };
+        if changed {
+            self.advance_state_generation();
         }
     }
 
@@ -527,6 +576,7 @@ impl PrivilegePromptTracker {
             started_at: now,
             retry_count: *retry_count,
         };
+        self.advance_state_generation();
     }
 
     fn reset(&mut self) {
@@ -534,6 +584,7 @@ impl PrivilegePromptTracker {
         let had_input = !self.input_line.is_empty();
         self.input_line.clear();
         self.state = PrivilegePromptTrackerState::Idle;
+        self.advance_state_generation();
         log_privilege_prompt_tracker(format_args!(
             "tracker state: reset previous_state={} had_input={}",
             previous_state, had_input
@@ -1106,6 +1157,38 @@ fn prompt_context(prompt: &PrivilegePromptMatch) -> Option<PrivilegeCommandConte
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn tracker_generation_and_expiry_follow_state_transitions() {
+        let now = Instant::now();
+        let mut tracker = PrivilegePromptTracker::default();
+        assert_eq!(tracker.state_generation(), 0);
+        assert_eq!(tracker.next_expiry_deadline(), None);
+
+        tracker.observe_submitted_command("sudo true", now);
+        let command_generation = tracker.state_generation();
+        assert!(command_generation > 0);
+        assert_eq!(
+            tracker.next_expiry_deadline(),
+            now.checked_add(PRIVILEGE_COMMAND_CONTEXT_TTL)
+        );
+
+        tracker.observe_output_text("[sudo] password for test:", now);
+        assert!(tracker.state_generation() > command_generation);
+        assert_eq!(
+            tracker.next_expiry_deadline(),
+            now.checked_add(PRIVILEGE_PROMPT_VISIBLE_TTL)
+        );
+
+        tracker.mark_secret_filled(now);
+        assert_eq!(
+            tracker.next_expiry_deadline(),
+            now.checked_add(PRIVILEGE_PROMPT_FILLED_TTL)
+        );
+        assert!(!tracker.expire_at(now));
+        assert!(tracker.expire_at(now + PRIVILEGE_PROMPT_FILLED_TTL));
+        assert_eq!(tracker.next_expiry_deadline(), None);
+    }
 
     #[test]
     fn detects_sudo_prompts_with_username() {

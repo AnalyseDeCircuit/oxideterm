@@ -112,7 +112,7 @@ impl WorkspaceApp {
 
     pub(super) fn active_privilege_prompt_state(
         &self,
-        cx: &mut Context<Self>,
+        cx: &App,
     ) -> Option<PrivilegePromptHelperState> {
         let Some(active_tab) = self.active_tab() else {
             log_privilege_prompt_helper(format_args!("state unavailable: no active tab"));
@@ -192,7 +192,7 @@ impl WorkspaceApp {
 
     pub(in crate::workspace) fn sync_active_privilege_prompt_inline_hint(
         &mut self,
-        cx: &mut Context<Self>,
+        cx: &mut App,
     ) -> bool {
         let Some(active_pane) = self.active_pane(cx) else {
             return false;
@@ -203,10 +203,7 @@ impl WorkspaceApp {
         })
     }
 
-    pub(super) fn active_privilege_prompt_inline_hint(
-        &self,
-        cx: &mut Context<Self>,
-    ) -> Option<String> {
+    pub(super) fn active_privilege_prompt_inline_hint(&self, cx: &App) -> Option<String> {
         let Some(state) = self.active_privilege_prompt_state(cx) else {
             log_privilege_prompt_helper(format_args!("hint unavailable: no prompt state"));
             return None;
