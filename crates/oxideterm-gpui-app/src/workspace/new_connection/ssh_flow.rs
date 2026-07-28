@@ -3,7 +3,7 @@ use std::{
     time::Duration,
 };
 
-use gpui::{Context, Window};
+use gpui::{App, Context, Window};
 use oxideterm_connections::{
     SaveConnectionRequest, SaveRemoteDesktopProfileRequest, SaveSerialProfileRequest,
     SaveTelnetProfileRequest, SavedUpstreamProxyProtocol, SecretString,
@@ -22,6 +22,7 @@ use oxideterm_ssh::{
 use tokio::sync::oneshot;
 
 use super::{
+    ConnectionFormState,
     form_state::{
         NewConnectionForm, NewConnectionFormMode, NewConnectionProxyHop, NewConnectionSubmitAction,
         NewConnectionTransport, NewConnectionUpstreamProxyAuth, NewConnectionUpstreamProxyPolicy,
@@ -139,15 +140,64 @@ impl SshPromptHandler for NativeSshPromptHandler {
 }
 
 impl WorkspaceApp {
-    pub(in crate::workspace) fn saved_connection_form_source_id(&self) -> Option<&str> {
-        self.editing_saved_connection_id
-            .as_deref()
-            .or(self.duplicating_saved_connection_id.as_deref())
+    /// Borrows the entity-owned form state without copying secret drafts.
+    pub(in crate::workspace) fn connection_form_state<'a>(
+        &self,
+        cx: &'a App,
+    ) -> &'a super::ConnectionFormState {
+        &self.connection_flow.read(cx).form
     }
 
-    pub(in crate::workspace) fn saved_connection_form_uses_unloaded_secret(&self) -> bool {
-        self.saved_connection_form_source_id().is_some()
-            && self.saved_connection_prompt_action.is_none()
+    /// Applies one UI transition inside the form entity and schedules its repaint.
+    pub(in crate::workspace) fn update_connection_form_state<R>(
+        &self,
+        cx: &mut App,
+        update: impl FnOnce(&mut super::ConnectionFormState) -> R,
+    ) -> R {
+        self.connection_flow.update(cx, |connection_flow, cx| {
+            let result = update(&mut connection_flow.form);
+            cx.notify();
+            result
+        })
+    }
+
+    /// Moves the secret-bearing form through one synchronous root adapter without cloning it.
+    pub(in crate::workspace) fn with_connection_form_mut<R>(
+        &mut self,
+        cx: &mut Context<Self>,
+        update: impl FnOnce(&mut Self, Option<&mut NewConnectionForm>, &mut Context<Self>) -> R,
+    ) -> R {
+        let mut form = self.connection_flow.update(cx, |connection_flow, cx| {
+            let form = connection_flow.form.form.take();
+            cx.notify();
+            form
+        });
+        let result = update(self, form.as_mut(), cx);
+        self.connection_flow.update(cx, |connection_flow, cx| {
+            debug_assert!(
+                connection_flow.form.form.is_none(),
+                "synchronous form adapter must remain the only draft owner"
+            );
+            connection_flow.form.form = form;
+            cx.notify();
+        });
+        result
+    }
+
+    pub(in crate::workspace) fn saved_connection_form_source_id<'a>(
+        &self,
+        cx: &'a App,
+    ) -> Option<&'a str> {
+        self.connection_form_state(cx).saved_connection_source_id()
+    }
+
+    pub(in crate::workspace) fn saved_connection_form_uses_unloaded_secret(
+        &self,
+        cx: &App,
+    ) -> bool {
+        let state = self.connection_form_state(cx);
+        state.saved_connection_source_id().is_some()
+            && state.saved_connection_prompt_action.is_none()
     }
 
     pub(in crate::workspace) fn open_new_connection_form(
@@ -164,13 +214,7 @@ impl WorkspaceApp {
             .settings()
             .new_connection
             .save_connection;
-        self.new_connection_form = Some(form);
-        self.drill_down_parent_node_id = None;
-        self.editing_saved_connection_id = None;
-        self.editing_saved_connection_connect_after_save_node_id = None;
-        self.duplicating_saved_connection_id = None;
-        self.saved_connection_prompt_action = None;
-        self.close_new_connection_select();
+        self.update_connection_form_state(cx, |state| state.replace_with_new_form(form));
         self.new_connection_caret_visible = true;
         self.needs_active_pane_focus = false;
         window.focus(&self.focus_handle, cx);
@@ -183,11 +227,13 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) {
         self.open_new_connection_form(window, cx);
-        if let Some(form) = self.new_connection_form.as_mut() {
-            form.transport = NewConnectionTransport::Serial;
-            form.focused_field = super::form_state::NewConnectionField::SerialPortPath;
-            form.field_focused = false;
-        }
+        self.update_connection_form_state(cx, |state| {
+            if let Some(form) = state.form.as_mut() {
+                form.transport = NewConnectionTransport::Serial;
+                form.focused_field = super::form_state::NewConnectionField::SerialPortPath;
+                form.field_focused = false;
+            }
+        });
         self.refresh_serial_ports(cx);
     }
 
@@ -197,12 +243,14 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) {
         self.open_new_connection_form(window, cx);
-        if let Some(form) = self.new_connection_form.as_mut() {
-            form.transport = NewConnectionTransport::Telnet;
-            form.port = super::form_state::TELNET_DEFAULT_PORT_TEXT.to_string();
-            form.focused_field = super::form_state::NewConnectionField::Host;
-            form.field_focused = false;
-        }
+        self.update_connection_form_state(cx, |state| {
+            if let Some(form) = state.form.as_mut() {
+                form.transport = NewConnectionTransport::Telnet;
+                form.port = super::form_state::TELNET_DEFAULT_PORT_TEXT.to_string();
+                form.focused_field = super::form_state::NewConnectionField::Host;
+                form.field_focused = false;
+            }
+        });
     }
 
     pub(in crate::workspace) fn open_drill_down_form(
@@ -233,13 +281,10 @@ impl WorkspaceApp {
         form.group = self.i18n.t("ssh.form.ungrouped");
         form.agent_available = detect_ssh_agent_available();
         form.username = String::new();
-        self.new_connection_form = Some(form);
-        self.drill_down_parent_node_id = Some(parent_node_id);
-        self.editing_saved_connection_id = None;
-        self.editing_saved_connection_connect_after_save_node_id = None;
-        self.duplicating_saved_connection_id = None;
-        self.saved_connection_prompt_action = None;
-        self.close_new_connection_select();
+        self.update_connection_form_state(cx, |state| {
+            state.replace_with_new_form(form);
+            state.drill_down_parent_node_id = Some(parent_node_id);
+        });
         self.new_connection_caret_visible = true;
         self.needs_active_pane_focus = false;
         window.focus(&self.focus_handle, cx);
@@ -307,10 +352,7 @@ impl WorkspaceApp {
         self.connection_flow.update(cx, |connection_flow, cx| {
             connection_flow.clear_host_key_challenge(cx);
         });
-        self.new_connection_form = None;
-        self.drill_down_parent_node_id = None;
-        self.duplicating_saved_connection_id = None;
-        self.close_new_connection_select();
+        self.update_connection_form_state(cx, ConnectionFormState::clear);
         self.session_manager.status = Some(self.i18n.t("ssh.drill_down.connecting"));
         self.ensure_node_connection_started(&target_node_id, cx);
         let _ = self.connection_store.mark_used(&saved_connection_id);

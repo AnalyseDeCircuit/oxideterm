@@ -176,7 +176,7 @@ impl Render for WorkspaceApp {
                 )
             })
             && !self.search.visible
-            && self.new_connection_form.is_none()
+            && self.connection_form_state(cx).form.is_none()
             && let Some(pane) = self.active_pane(cx)
         {
             self.needs_active_pane_focus = false;
@@ -437,7 +437,7 @@ impl Render for WorkspaceApp {
                     this.open_command_palette(cx);
                     window.prevent_default();
                     cx.stop_propagation();
-                } else if this.new_connection_form.is_some() {
+                } else if this.connection_form_state(cx).form.is_some() {
                     let _ = this.handle_new_connection_key(event, window, cx);
                     window.prevent_default();
                     cx.stop_propagation();
@@ -696,7 +696,7 @@ impl Render for WorkspaceApp {
                 if this.copy_active_ide_selection(cx) {
                     return;
                 }
-                if this.new_connection_form.is_none() {
+                if this.connection_form_state(cx).form.is_none() {
                     this.copy(cx);
                 }
             }))
@@ -707,7 +707,7 @@ impl Render for WorkspaceApp {
                 if this.cut_active_ide_selection(cx) {
                     return;
                 }
-                if this.new_connection_form.is_none() {
+                if this.connection_form_state(cx).form.is_none() {
                     let _ = this.cut(cx);
                 }
             }))
@@ -718,7 +718,7 @@ impl Render for WorkspaceApp {
                 if this.paste_into_active_ide_editor(cx) {
                     return;
                 }
-                if this.new_connection_form.is_some() {
+                if this.connection_form_state(cx).form.is_some() {
                     this.paste_into_new_connection_field(cx);
                 } else {
                     this.paste(cx);
@@ -952,14 +952,15 @@ impl Render for WorkspaceApp {
                     .is_some_and(browser_behavior::pointer_capture_needs_workspace_overlay),
                 |root| root.child(self.render_workspace_pointer_capture_overlay(cx)),
             )
-            .when(self.new_connection_form.is_some(), |root| {
+            .when(self.connection_form_state(cx).form.is_some(), |root| {
                 root.child(self.render_new_connection_modal(window, cx))
             })
             .when(self.local_shell_launcher_open, |root| {
                 root.child(self.render_local_shell_launcher(window, cx))
             })
             .when(
-                self.new_connection_form
+                self.connection_form_state(cx)
+                    .form
                     .as_ref()
                     .is_some_and(|form| form.jump_server_form.is_some()),
                 |root| root.child(self.render_add_jump_server_modal(window, cx)),

@@ -695,7 +695,7 @@ impl WorkspaceApp {
             return;
         }
 
-        if self.new_connection_form.is_some() {
+        if self.connection_form_state(cx).form.is_some() {
             let _ = self.handle_new_connection_key(event, window, cx);
             return;
         }

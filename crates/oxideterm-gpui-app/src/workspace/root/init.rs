@@ -149,6 +149,18 @@ impl WorkspaceApp {
                 // Connection-flow lifecycle changes repaint mounted dialogs without root mirrors.
                 cx.notify();
             });
+        let connection_flow_subscription = cx.subscribe(
+            &connection_flow,
+            |workspace, _connection_flow, event: &ConnectionFlowEvent, cx| {
+                match event {
+                    ConnectionFlowEvent::ConnectionFormClosed => {
+                        // Proxy workers are root-coordinated until their runtime slice moves.
+                        workspace.cancel_active_proxy_connect_run(cx);
+                    }
+                }
+                cx.notify();
+            },
+        );
         let (profiler_update_tx, profiler_update_rx) = tokio::sync::mpsc::unbounded_channel();
         let host_tools_messages = HostToolsMessages::from_i18n(&i18n);
         let host_tools = cx.new(|cx| {
@@ -483,20 +495,10 @@ impl WorkspaceApp {
             portable_current_password: String::new(),
             portable_new_password: String::new(),
             portable_confirm_password: String::new(),
-            new_connection_form: None,
-            new_connection_form_presence: oxideterm_gpui_ui::motion::ExitPresence::visible(),
-            jump_server_form_presence: oxideterm_gpui_ui::motion::ExitPresence::visible(),
-            jump_server_exit_commits: false,
-            drill_down_parent_node_id: None,
-            editing_saved_connection_id: None,
-            editing_saved_connection_connect_after_save_node_id: None,
-            duplicating_saved_connection_id: None,
-            saved_connection_prompt_action: None,
-            open_new_connection_select: None,
-            new_connection_select_focus_origin: None,
             new_connection_caret_visible: true,
             connection_flow,
             _connection_flow_observation: connection_flow_observation,
+            _connection_flow_subscription: connection_flow_subscription,
             active_proxy_connect_run: None,
             workspace_runtime,
             _workspace_runtime_subscription: workspace_runtime_subscription,

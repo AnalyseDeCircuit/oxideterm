@@ -1,4 +1,5 @@
 mod entity;
+mod form_entity;
 mod form_state;
 mod form_view;
 mod host_key_dialog;
@@ -6,7 +7,8 @@ mod kbi_dialog;
 mod session_tree_plan;
 mod ssh_flow;
 
-pub(super) use entity::ConnectionFlowEntity;
+pub(super) use entity::{ConnectionFlowEntity, ConnectionFlowEvent};
+pub(super) use form_entity::ConnectionFormState;
 pub(super) use form_state::{
     NewConnectionField, NewConnectionForm, NewConnectionProxyHop, NewConnectionSelect,
     NewConnectionTransport, NewConnectionUpstreamProxyAuth, NewConnectionUpstreamProxyPolicy,

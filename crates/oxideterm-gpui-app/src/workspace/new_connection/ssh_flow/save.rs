@@ -5,7 +5,7 @@ use super::*;
 use crate::workspace::{
     WorkspaceNotificationKind, WorkspaceNotificationScope, WorkspaceNotificationSeverity,
 };
-use gpui::{App, Timer};
+use gpui::App;
 use oxideterm_connections::{ConnectionStore, SavedConnection};
 use oxideterm_gpui_terminal::TerminalNoticeVariant;
 
@@ -19,10 +19,10 @@ impl WorkspaceApp {
         message: String,
         cx: &mut Context<Self>,
     ) {
-        if let Some(form) = self.new_connection_form.as_mut() {
-            form.pending = false;
-            form.error = Some(message);
-        } else {
+        let reported_to_form = self.connection_flow.update(cx, |connection_flow, cx| {
+            connection_flow.set_form_feedback(Some(false), Some(message.clone()), cx)
+        });
+        if !reported_to_form {
             self.session_manager.status = Some(message);
         }
         cx.notify();
@@ -68,13 +68,7 @@ impl WorkspaceApp {
         form.proxy_chain_expanded = !form.proxy_hops.is_empty();
         form.agent_available = detect_ssh_agent_available();
         form.save_connection = true;
-        self.new_connection_form = Some(form);
-        self.drill_down_parent_node_id = None;
-        self.editing_saved_connection_id = None;
-        self.editing_saved_connection_connect_after_save_node_id = None;
-        self.duplicating_saved_connection_id = None;
-        self.saved_connection_prompt_action = None;
-        self.close_new_connection_select();
+        self.update_connection_form_state(cx, |state| state.replace_with_new_form(form));
         self.new_connection_caret_visible = true;
         self.needs_active_pane_focus = false;
         window.focus(&self.focus_handle, cx);
@@ -131,50 +125,17 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(generation) = self.new_connection_form_presence.begin_exit() else {
-            return;
-        };
-        self.close_new_connection_select();
-        self.focus_active_pane(window, cx);
         let delay = oxideterm_gpui_ui::motion::duration(
             &self.tokens,
             oxideterm_gpui_ui::motion::MotionDuration::Overlay,
         );
-        if delay.is_zero() {
-            self.finish_new_connection_form_exit(generation, cx);
+        if !self.connection_flow.update(cx, |connection_flow, cx| {
+            connection_flow.begin_connection_form_exit(delay, cx)
+        }) {
             return;
         }
-        // Secret-bearing form state stays in its single owner until the inert
-        // visual exit completes; no password or passphrase payload is cloned.
-        cx.spawn(async move |weak, cx| {
-            Timer::after(delay).await;
-            let _ = weak.update(cx, |this, cx| {
-                if this.finish_new_connection_form_exit(generation, cx) {
-                    cx.notify();
-                }
-            });
-        })
-        .detach();
+        self.focus_active_pane(window, cx);
         cx.notify();
-    }
-
-    fn finish_new_connection_form_exit(&mut self, generation: u64, cx: &mut Context<Self>) -> bool {
-        if !self.new_connection_form_presence.finish_exit(generation) {
-            return false;
-        }
-        self.new_connection_form = None;
-        self.drill_down_parent_node_id = None;
-        self.editing_saved_connection_id = None;
-        self.editing_saved_connection_connect_after_save_node_id = None;
-        self.duplicating_saved_connection_id = None;
-        self.saved_connection_prompt_action = None;
-        self.connection_flow.update(cx, |connection_flow, cx| {
-            connection_flow.clear_host_key_challenge(cx);
-        });
-        self.cancel_active_proxy_connect_run(cx);
-        self.cancel_keyboard_interactive_challenge(cx);
-        self.new_connection_form_presence.reopen();
-        true
     }
 
     pub(in crate::workspace) fn submit_new_connection_form(
@@ -195,77 +156,46 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self
-            .new_connection_form
-            .as_ref()
-            .is_some_and(|form| form.transport == NewConnectionTransport::Serial)
-            && self.drill_down_parent_node_id.is_none()
-            && matches!(
-                new_connection_form_mode(
-                    self.editing_saved_connection_id.as_deref(),
-                    self.duplicating_saved_connection_id.as_deref(),
-                    self.saved_connection_prompt_action,
-                ),
-                NewConnectionFormMode::NewConnection
+        let (transport, drill_down_parent_id, mode) = {
+            let state = self.connection_form_state(cx);
+            (
+                state.form.as_ref().map(|form| form.transport),
+                state.drill_down_parent_node_id.clone(),
+                state.mode(),
             )
+        };
+        if transport == Some(NewConnectionTransport::Serial)
+            && drill_down_parent_id.is_none()
+            && mode == NewConnectionFormMode::NewConnection
         {
             self.submit_serial_connection_form(action, window, cx);
             return;
         }
-        if self
-            .new_connection_form
-            .as_ref()
-            .is_some_and(|form| form.transport == NewConnectionTransport::Telnet)
-            && self.drill_down_parent_node_id.is_none()
-            && matches!(
-                new_connection_form_mode(
-                    self.editing_saved_connection_id.as_deref(),
-                    self.duplicating_saved_connection_id.as_deref(),
-                    self.saved_connection_prompt_action,
-                ),
-                NewConnectionFormMode::NewConnection
-            )
+        if transport == Some(NewConnectionTransport::Telnet)
+            && drill_down_parent_id.is_none()
+            && mode == NewConnectionFormMode::NewConnection
         {
             self.submit_telnet_connection_form(action, window, cx);
             return;
         }
-        if self
-            .new_connection_form
-            .as_ref()
-            .and_then(|form| remote_desktop_protocol_for_transport(form.transport))
+        if transport
+            .and_then(remote_desktop_protocol_for_transport)
             .is_some()
-            && self.drill_down_parent_node_id.is_none()
-            && matches!(
-                new_connection_form_mode(
-                    self.editing_saved_connection_id.as_deref(),
-                    self.duplicating_saved_connection_id.as_deref(),
-                    self.saved_connection_prompt_action,
-                ),
-                NewConnectionFormMode::NewConnection
-            )
+            && drill_down_parent_id.is_none()
+            && mode == NewConnectionFormMode::NewConnection
         {
             self.submit_remote_desktop_connection_form(action, window, cx);
             return;
         }
-        if self
-            .new_connection_form
-            .as_ref()
-            .is_some_and(|form| form.transport == NewConnectionTransport::WslGraphics)
-            && self.drill_down_parent_node_id.is_none()
-            && matches!(
-                new_connection_form_mode(
-                    self.editing_saved_connection_id.as_deref(),
-                    self.duplicating_saved_connection_id.as_deref(),
-                    self.saved_connection_prompt_action,
-                ),
-                NewConnectionFormMode::NewConnection
-            )
+        if transport == Some(NewConnectionTransport::WslGraphics)
+            && drill_down_parent_id.is_none()
+            && mode == NewConnectionFormMode::NewConnection
         {
             self.close_new_connection_form(window, cx);
             self.open_graphics_tab(window, cx);
             return;
         }
-        if let Some(parent_id) = self.drill_down_parent_node_id.clone() {
+        if let Some(parent_id) = drill_down_parent_id {
             match action {
                 NewConnectionSubmitAction::Save => {
                     self.save_new_connection_without_connecting(Some(&parent_id), window, cx);
@@ -275,24 +205,24 @@ impl WorkspaceApp {
                     if !self.save_current_connection_form(Some(&parent_id), cx) {
                         return;
                     }
-                    if let Some(form) = self.new_connection_form.as_mut() {
-                        form.save_connection = false;
-                    }
+                    self.update_connection_form_state(cx, |state| {
+                        if let Some(form) = state.form.as_mut() {
+                            form.save_connection = false;
+                        }
+                    });
                 }
                 NewConnectionSubmitAction::Connect => {
-                    if let Some(form) = self.new_connection_form.as_mut() {
-                        form.save_connection = false;
-                    }
+                    self.update_connection_form_state(cx, |state| {
+                        if let Some(form) = state.form.as_mut() {
+                            form.save_connection = false;
+                        }
+                    });
                 }
             }
             self.start_new_connection_flow(SshConnectionIntent::DrillDown(parent_id), window, cx);
             return;
         }
-        match new_connection_form_mode(
-            self.editing_saved_connection_id.as_deref(),
-            self.duplicating_saved_connection_id.as_deref(),
-            self.saved_connection_prompt_action,
-        ) {
+        match mode {
             NewConnectionFormMode::SavedConnectionPrompt => {
                 self.submit_saved_connection_prompt(window, cx);
             }
@@ -304,9 +234,11 @@ impl WorkspaceApp {
             }
             NewConnectionFormMode::NewConnection => match action {
                 NewConnectionSubmitAction::Connect => {
-                    if let Some(form) = self.new_connection_form.as_mut() {
-                        form.save_connection = false;
-                    }
+                    self.update_connection_form_state(cx, |state| {
+                        if let Some(form) = state.form.as_mut() {
+                            form.save_connection = false;
+                        }
+                    });
                     self.start_new_connection_flow(SshConnectionIntent::Connect, window, cx);
                 }
                 NewConnectionSubmitAction::Save => {
@@ -316,9 +248,11 @@ impl WorkspaceApp {
                     if !self.save_current_connection_form(None, cx) {
                         return;
                     }
-                    if let Some(form) = self.new_connection_form.as_mut() {
-                        form.save_connection = false;
-                    }
+                    self.update_connection_form_state(cx, |state| {
+                        if let Some(form) = state.form.as_mut() {
+                            form.save_connection = false;
+                        }
+                    });
                     self.start_new_connection_flow(SshConnectionIntent::Connect, window, cx);
                 }
             },
@@ -341,13 +275,15 @@ impl WorkspaceApp {
         drill_down_parent_id: Option<&NodeId>,
         cx: &mut Context<Self>,
     ) -> bool {
-        self.ensure_new_connection_save_name_is_unique(drill_down_parent_id);
-        let request = match self.save_request_for_current_form(drill_down_parent_id) {
+        self.ensure_new_connection_save_name_is_unique(drill_down_parent_id, cx);
+        let request = match self.save_request_for_current_form(drill_down_parent_id, cx) {
             Some(Ok(request)) => request,
             Some(Err(error)) => {
-                if let Some(form) = self.new_connection_form.as_mut() {
-                    form.error = Some(error.to_string());
-                }
+                self.update_connection_form_state(cx, |state| {
+                    if let Some(form) = state.form.as_mut() {
+                        form.error = Some(error.to_string());
+                    }
+                });
                 cx.notify();
                 return false;
             }
@@ -362,12 +298,14 @@ impl WorkspaceApp {
                 true
             }
             Err(error) => {
-                if let Some(form) = self.new_connection_form.as_mut() {
-                    form.error = Some(format!(
-                        "{}: {error}",
-                        self.i18n.t("modals.new_connection.save_failed")
-                    ));
-                }
+                self.update_connection_form_state(cx, |state| {
+                    if let Some(form) = state.form.as_mut() {
+                        form.error = Some(format!(
+                            "{}: {error}",
+                            self.i18n.t("modals.new_connection.save_failed")
+                        ));
+                    }
+                });
                 cx.notify();
                 false
             }
@@ -377,6 +315,7 @@ impl WorkspaceApp {
     pub(super) fn ensure_new_connection_save_name_is_unique(
         &mut self,
         _drill_down_parent_id: Option<&NodeId>,
+        cx: &mut Context<Self>,
     ) {
         let occupied_names: Vec<String> = self
             .connection_store
@@ -384,40 +323,43 @@ impl WorkspaceApp {
             .iter()
             .map(|connection| connection.name.clone())
             .collect();
-        let Some(form) = self.new_connection_form.as_mut() else {
-            return;
-        };
-        let fallback_name = if form.name.trim().is_empty() {
-            let host = form.host.trim();
-            let username = form.username.trim();
-            if host.is_empty() || username.is_empty() {
+        self.update_connection_form_state(cx, |state| {
+            let Some(form) = state.form.as_mut() else {
                 return;
-            }
-            format!("{username}@{host}")
-        } else {
-            form.name.trim().to_string()
-        };
-        let name_exists = occupied_names
-            .iter()
-            .any(|name| name.trim().eq_ignore_ascii_case(&fallback_name));
-        let next_name = if name_exists {
-            // New/save-as flows create a fresh connection id, so avoid storing a
-            // second indistinguishable row when the draft name already exists.
-            duplicate_connection_template_name(
-                &fallback_name,
-                occupied_names.iter().map(String::as_str),
-            )
-        } else {
-            fallback_name
-        };
-        form.name = next_name;
+            };
+            let fallback_name = if form.name.trim().is_empty() {
+                let host = form.host.trim();
+                let username = form.username.trim();
+                if host.is_empty() || username.is_empty() {
+                    return;
+                }
+                format!("{username}@{host}")
+            } else {
+                form.name.trim().to_string()
+            };
+            let name_exists = occupied_names
+                .iter()
+                .any(|name| name.trim().eq_ignore_ascii_case(&fallback_name));
+            let next_name = if name_exists {
+                // New/save-as flows create a fresh connection id, so avoid storing a
+                // second indistinguishable row when the draft name already exists.
+                duplicate_connection_template_name(
+                    &fallback_name,
+                    occupied_names.iter().map(String::as_str),
+                )
+            } else {
+                fallback_name
+            };
+            form.name = next_name;
+        });
     }
 
     pub(super) fn save_request_for_current_form(
         &self,
         drill_down_parent_id: Option<&NodeId>,
+        cx: &App,
     ) -> Option<anyhow::Result<SaveConnectionRequest>> {
-        let form = self.new_connection_form.as_ref()?;
+        let form = self.connection_form_state(cx).form.as_ref()?;
         let runtime_proxy_hops = match drill_down_parent_id {
             Some(parent_id) => match self.runtime_proxy_hops_for_parent_path(parent_id) {
                 Ok(hops) => hops,
@@ -438,50 +380,55 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(form) = self.new_connection_form.as_mut() else {
+        let Some((config, mut save_request)) =
+            self.with_connection_form_mut(cx, |this, form, cx| {
+                let form = form?;
+                let port_path = form.serial_port_path.trim().to_string();
+                let baud_rate = form.serial_baud_rate.trim().parse::<u32>().ok();
+                if port_path.is_empty() {
+                    form.error = Some(this.i18n.t("modals.new_connection.serial_port_required"));
+                    cx.notify();
+                    return None;
+                }
+                let Some(baud_rate) = baud_rate.filter(|baud| *baud > 0) else {
+                    form.error = Some(
+                        this.i18n
+                            .t("modals.new_connection.serial_invalid_baud_rate"),
+                    );
+                    cx.notify();
+                    return None;
+                };
+                let config = SerialSessionConfig {
+                    port_path: port_path.clone(),
+                    baud_rate,
+                    data_bits: form.serial_data_bits,
+                    stop_bits: form.serial_stop_bits,
+                    parity: form.serial_parity,
+                    flow_control: form.serial_flow_control,
+                };
+                let should_save_profile = action != NewConnectionSubmitAction::Connect;
+                let save_request = should_save_profile.then(|| SaveSerialProfileRequest {
+                    id: None,
+                    name: serial_profile_name_or_port(&form.serial_profile_name, &port_path),
+                    group: serial_profile_group_from_form(&form.group, &this.i18n),
+                    icon: asset_icon_from_form(&form.icon),
+                    color: asset_color_from_form(&form.color),
+                    icon_background_color: asset_color_from_form(&form.icon_background_color),
+                    port_path,
+                    baud_rate: Some(baud_rate),
+                    data_bits: Some(form.serial_data_bits),
+                    stop_bits: Some(form.serial_stop_bits),
+                    parity: Some(serial_profile_parity_from_terminal(form.serial_parity)),
+                    flow_control: Some(serial_profile_flow_from_terminal(form.serial_flow_control)),
+                    connect_on_open: None,
+                });
+                form.pending = true;
+                form.error = None;
+                Some((config, save_request))
+            })
+        else {
             return;
         };
-        let port_path = form.serial_port_path.trim().to_string();
-        let baud_rate = form.serial_baud_rate.trim().parse::<u32>().ok();
-        if port_path.is_empty() {
-            form.error = Some(self.i18n.t("modals.new_connection.serial_port_required"));
-            cx.notify();
-            return;
-        }
-        let Some(baud_rate) = baud_rate.filter(|baud| *baud > 0) else {
-            form.error = Some(
-                self.i18n
-                    .t("modals.new_connection.serial_invalid_baud_rate"),
-            );
-            cx.notify();
-            return;
-        };
-        let config = SerialSessionConfig {
-            port_path: port_path.clone(),
-            baud_rate,
-            data_bits: form.serial_data_bits,
-            stop_bits: form.serial_stop_bits,
-            parity: form.serial_parity,
-            flow_control: form.serial_flow_control,
-        };
-        let should_save_profile = action != NewConnectionSubmitAction::Connect;
-        let mut save_request = should_save_profile.then(|| SaveSerialProfileRequest {
-            id: None,
-            name: serial_profile_name_or_port(&form.serial_profile_name, &port_path),
-            group: serial_profile_group_from_form(&form.group, &self.i18n),
-            icon: asset_icon_from_form(&form.icon),
-            color: asset_color_from_form(&form.color),
-            icon_background_color: asset_color_from_form(&form.icon_background_color),
-            port_path: port_path.clone(),
-            baud_rate: Some(baud_rate),
-            data_bits: Some(form.serial_data_bits),
-            stop_bits: Some(form.serial_stop_bits),
-            parity: Some(serial_profile_parity_from_terminal(form.serial_parity)),
-            flow_control: Some(serial_profile_flow_from_terminal(form.serial_flow_control)),
-            connect_on_open: None,
-        });
-        form.pending = true;
-        form.error = None;
 
         if action == NewConnectionSubmitAction::Save {
             let request =
@@ -489,17 +436,18 @@ impl WorkspaceApp {
             match self.connection_store.upsert_serial_profile(request) {
                 Ok(_) => {
                     self.queue_cloud_sync_dirty_refresh(cx);
-                    self.new_connection_form = None;
-                    self.close_new_connection_select();
+                    self.update_connection_form_state(cx, ConnectionFormState::clear);
                 }
                 Err(error) => {
-                    if let Some(form) = self.new_connection_form.as_mut() {
-                        form.pending = false;
-                        form.error = Some(format!(
-                            "{}: {error}",
-                            self.i18n.t("modals.new_connection.serial_save_failed")
-                        ));
-                    }
+                    self.update_connection_form_state(cx, |state| {
+                        if let Some(form) = state.form.as_mut() {
+                            form.pending = false;
+                            form.error = Some(format!(
+                                "{}: {error}",
+                                self.i18n.t("modals.new_connection.serial_save_failed")
+                            ));
+                        }
+                    });
                 }
             }
             cx.notify();
@@ -513,13 +461,15 @@ impl WorkspaceApp {
             match self.connection_store.upsert_serial_profile(request) {
                 Ok(_) => self.queue_cloud_sync_dirty_refresh(cx),
                 Err(error) => {
-                    if let Some(form) = self.new_connection_form.as_mut() {
-                        form.pending = false;
-                        form.error = Some(format!(
-                            "{}: {error}",
-                            self.i18n.t("modals.new_connection.serial_save_failed")
-                        ));
-                    }
+                    self.update_connection_form_state(cx, |state| {
+                        if let Some(form) = state.form.as_mut() {
+                            form.pending = false;
+                            form.error = Some(format!(
+                                "{}: {error}",
+                                self.i18n.t("modals.new_connection.serial_save_failed")
+                            ));
+                        }
+                    });
                     cx.notify();
                     return;
                 }
@@ -539,14 +489,15 @@ impl WorkspaceApp {
                         }
                     }
                 }
-                self.new_connection_form = None;
-                self.close_new_connection_select();
+                self.update_connection_form_state(cx, ConnectionFormState::clear);
             }
             Err(error) => {
-                if let Some(form) = self.new_connection_form.as_mut() {
-                    form.pending = false;
-                    form.error = Some(error.to_string());
-                }
+                self.update_connection_form_state(cx, |state| {
+                    if let Some(form) = state.form.as_mut() {
+                        form.pending = false;
+                        form.error = Some(error.to_string());
+                    }
+                });
             }
         }
         cx.notify();
@@ -558,53 +509,59 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(form) = self.new_connection_form.as_mut() else {
+        let Some((config, mut save_request)) =
+            self.with_connection_form_mut(cx, |this, form, cx| {
+                let form = form?;
+                let host = form.host.trim().to_string();
+                let port = form.port.trim().parse::<u16>().ok();
+                if host.is_empty() {
+                    form.error = Some(this.i18n.t("modals.new_connection.telnet_host_required"));
+                    cx.notify();
+                    return None;
+                }
+                let Some(port) = port else {
+                    form.error = Some(this.i18n.t("modals.new_connection.telnet_invalid_port"));
+                    cx.notify();
+                    return None;
+                };
+                let should_save_profile = action != NewConnectionSubmitAction::Connect;
+                let save_request = should_save_profile.then(|| SaveTelnetProfileRequest {
+                    id: None,
+                    name: telnet_profile_name_or_endpoint(&form.telnet_profile_name, &host, port),
+                    group: serial_profile_group_from_form(&form.group, &this.i18n),
+                    icon: asset_icon_from_form(&form.icon),
+                    color: asset_color_from_form(&form.color),
+                    icon_background_color: asset_color_from_form(&form.icon_background_color),
+                    host: host.clone(),
+                    port,
+                    connect_on_open: None,
+                });
+                let config = TelnetSessionConfig { host, port };
+                form.pending = true;
+                form.error = None;
+                Some((config, save_request))
+            })
+        else {
             return;
         };
-        let host = form.host.trim().to_string();
-        let port = form.port.trim().parse::<u16>().ok();
-        if host.is_empty() {
-            form.error = Some(self.i18n.t("modals.new_connection.telnet_host_required"));
-            cx.notify();
-            return;
-        }
-        let Some(port) = port else {
-            form.error = Some(self.i18n.t("modals.new_connection.telnet_invalid_port"));
-            cx.notify();
-            return;
-        };
-        let should_save_profile = action != NewConnectionSubmitAction::Connect;
-        let mut save_request = should_save_profile.then(|| SaveTelnetProfileRequest {
-            id: None,
-            name: telnet_profile_name_or_endpoint(&form.telnet_profile_name, &host, port),
-            group: serial_profile_group_from_form(&form.group, &self.i18n),
-            icon: asset_icon_from_form(&form.icon),
-            color: asset_color_from_form(&form.color),
-            icon_background_color: asset_color_from_form(&form.icon_background_color),
-            host: host.clone(),
-            port,
-            connect_on_open: None,
-        });
-        let config = TelnetSessionConfig { host, port };
-        form.pending = true;
-        form.error = None;
 
         if action == NewConnectionSubmitAction::Save {
             let request =
                 save_request.expect("telnet save action must build a telnet profile request");
             match self.connection_store.upsert_telnet_profile(request) {
                 Ok(_) => {
-                    self.new_connection_form = None;
-                    self.close_new_connection_select();
+                    self.update_connection_form_state(cx, ConnectionFormState::clear);
                 }
                 Err(error) => {
-                    if let Some(form) = self.new_connection_form.as_mut() {
-                        form.pending = false;
-                        form.error = Some(format!(
-                            "{}: {error}",
-                            self.i18n.t("modals.new_connection.telnet_save_failed")
-                        ));
-                    }
+                    self.update_connection_form_state(cx, |state| {
+                        if let Some(form) = state.form.as_mut() {
+                            form.pending = false;
+                            form.error = Some(format!(
+                                "{}: {error}",
+                                self.i18n.t("modals.new_connection.telnet_save_failed")
+                            ));
+                        }
+                    });
                 }
             }
             cx.notify();
@@ -618,13 +575,15 @@ impl WorkspaceApp {
             match self.connection_store.upsert_telnet_profile(request) {
                 Ok(_) => {}
                 Err(error) => {
-                    if let Some(form) = self.new_connection_form.as_mut() {
-                        form.pending = false;
-                        form.error = Some(format!(
-                            "{}: {error}",
-                            self.i18n.t("modals.new_connection.telnet_save_failed")
-                        ));
-                    }
+                    self.update_connection_form_state(cx, |state| {
+                        if let Some(form) = state.form.as_mut() {
+                            form.pending = false;
+                            form.error = Some(format!(
+                                "{}: {error}",
+                                self.i18n.t("modals.new_connection.telnet_save_failed")
+                            ));
+                        }
+                    });
                     cx.notify();
                     return;
                 }
@@ -646,14 +605,15 @@ impl WorkspaceApp {
                         }
                     }
                 }
-                self.new_connection_form = None;
-                self.close_new_connection_select();
+                self.update_connection_form_state(cx, ConnectionFormState::clear);
             }
             Err(error) => {
-                if let Some(form) = self.new_connection_form.as_mut() {
-                    form.pending = false;
-                    form.error = Some(error.to_string());
-                }
+                self.update_connection_form_state(cx, |state| {
+                    if let Some(form) = state.form.as_mut() {
+                        form.pending = false;
+                        form.error = Some(error.to_string());
+                    }
+                });
             }
         }
         cx.notify();
@@ -665,121 +625,126 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(form) = self.new_connection_form.as_mut() else {
+        let Some((mut profile, save_request, mut runtime_password)) = self
+            .with_connection_form_mut(cx, |this, form, cx| {
+                let form = form?;
+                let Some(protocol) = remote_desktop_protocol_for_transport(form.transport) else {
+                    return None;
+                };
+                let host = form.host.trim().to_string();
+                let port = form
+                    .port
+                    .trim()
+                    .parse::<u16>()
+                    .ok()
+                    .filter(|port| *port > 0);
+                if host.is_empty() {
+                    form.error = Some(
+                        this.i18n
+                            .t("modals.new_connection.remote_desktop_host_required"),
+                    );
+                    cx.notify();
+                    return None;
+                }
+                let Some(port) = port else {
+                    form.error = Some(
+                        this.i18n
+                            .t("modals.new_connection.remote_desktop_invalid_port"),
+                    );
+                    cx.notify();
+                    return None;
+                };
+                if protocol == RemoteDesktopProtocol::Rdp && form.username.trim().is_empty() {
+                    form.error = Some(
+                        this.i18n
+                            .t("modals.new_connection.remote_desktop_username_required"),
+                    );
+                    cx.notify();
+                    return None;
+                }
+                let editing_profile_id = form.remote_desktop_profile_id.clone();
+                let existing_profile = editing_profile_id
+                    .as_deref()
+                    .and_then(|id| this.connection_store.get_remote_desktop_profile(id))
+                    .cloned();
+                let has_saved_credential = form.saved_password_keychain_id.is_some();
+                if protocol == RemoteDesktopProtocol::Rdp
+                    && action != NewConnectionSubmitAction::Save
+                    && form.password.is_empty()
+                    && !has_saved_credential
+                {
+                    form.error = Some(
+                        this.i18n
+                            .t("modals.new_connection.remote_desktop_password_required"),
+                    );
+                    cx.notify();
+                    return None;
+                }
+                let label = remote_desktop_profile_label(&form.name, protocol, &host, port);
+                let username = (protocol == RemoteDesktopProtocol::Rdp)
+                    .then(|| form.username.trim().to_string())
+                    .filter(|username| !username.is_empty());
+                let password = if !form.password.is_empty() {
+                    // Move the UI draft into a zeroizing type before saving or starting a worker.
+                    Some(SecretString::from(std::mem::take(&mut form.password)))
+                } else {
+                    None
+                };
+                let save_credential = form.save_password;
+                let should_save =
+                    editing_profile_id.is_some() || action != NewConnectionSubmitAction::Connect;
+                let clear_credential =
+                    editing_profile_id.is_some() && has_saved_credential && !save_credential;
+                let (credential_to_save, runtime_password) = if should_save && save_credential {
+                    // Saving and connecting reloads the protected value below instead of cloning it.
+                    (password, None)
+                } else {
+                    (None, password)
+                };
+                let domain = existing_profile
+                    .as_ref()
+                    .and_then(|profile| profile.domain.clone());
+                let read_only = existing_profile
+                    .as_ref()
+                    .is_some_and(|profile| profile.read_only);
+                let save_request = should_save.then(|| SaveRemoteDesktopProfileRequest {
+                    id: editing_profile_id,
+                    name: label.clone(),
+                    group: serial_profile_group_from_form(&form.group, &this.i18n),
+                    icon: asset_icon_from_form(&form.icon),
+                    color: asset_color_from_form(&form.color),
+                    icon_background_color: asset_color_from_form(&form.icon_background_color),
+                    protocol,
+                    host: host.clone(),
+                    port,
+                    username: username.clone(),
+                    domain: domain.clone(),
+                    credential_ref: None,
+                    credential: credential_to_save,
+                    clear_credential,
+                    read_only,
+                    session_options: form.remote_desktop_session_options,
+                });
+                let profile = RemoteDesktopConnectionProfile {
+                    id: format!("new-remote-desktop-{}", uuid::Uuid::new_v4()),
+                    label,
+                    protocol,
+                    endpoint: RemoteDesktopEndpoint::new(host, port),
+                    username,
+                    domain,
+                    credential_ref: None,
+                    read_only,
+                    // A reconnect reuses the profile, so keep the user's per-session
+                    // redirection choices on the profile instead of rebuilding defaults.
+                    session_options: form.remote_desktop_session_options,
+                };
+                form.pending = true;
+                form.error = None;
+                Some((profile, save_request, runtime_password))
+            })
+        else {
             return;
         };
-        let Some(protocol) = remote_desktop_protocol_for_transport(form.transport) else {
-            return;
-        };
-        let host = form.host.trim().to_string();
-        let port = form
-            .port
-            .trim()
-            .parse::<u16>()
-            .ok()
-            .filter(|port| *port > 0);
-        if host.is_empty() {
-            form.error = Some(
-                self.i18n
-                    .t("modals.new_connection.remote_desktop_host_required"),
-            );
-            cx.notify();
-            return;
-        }
-        let Some(port) = port else {
-            form.error = Some(
-                self.i18n
-                    .t("modals.new_connection.remote_desktop_invalid_port"),
-            );
-            cx.notify();
-            return;
-        };
-        if protocol == RemoteDesktopProtocol::Rdp && form.username.trim().is_empty() {
-            form.error = Some(
-                self.i18n
-                    .t("modals.new_connection.remote_desktop_username_required"),
-            );
-            cx.notify();
-            return;
-        }
-        let editing_profile_id = form.remote_desktop_profile_id.clone();
-        let existing_profile = editing_profile_id
-            .as_deref()
-            .and_then(|id| self.connection_store.get_remote_desktop_profile(id))
-            .cloned();
-        let has_saved_credential = form.saved_password_keychain_id.is_some();
-        if protocol == RemoteDesktopProtocol::Rdp
-            && action != NewConnectionSubmitAction::Save
-            && form.password.is_empty()
-            && !has_saved_credential
-        {
-            form.error = Some(
-                self.i18n
-                    .t("modals.new_connection.remote_desktop_password_required"),
-            );
-            cx.notify();
-            return;
-        }
-        let label = remote_desktop_profile_label(&form.name, protocol, &host, port);
-        let username = (protocol == RemoteDesktopProtocol::Rdp)
-            .then(|| form.username.trim().to_string())
-            .filter(|username| !username.is_empty());
-        let password = if !form.password.is_empty() {
-            // Move the UI draft into a zeroizing type before saving or starting a worker.
-            Some(SecretString::from(std::mem::take(&mut form.password)))
-        } else {
-            None
-        };
-        let save_credential = form.save_password;
-        let should_save =
-            editing_profile_id.is_some() || action != NewConnectionSubmitAction::Connect;
-        let clear_credential =
-            editing_profile_id.is_some() && has_saved_credential && !save_credential;
-        let (credential_to_save, mut runtime_password) = if should_save && save_credential {
-            // Saving and connecting reloads the protected value below instead of cloning it.
-            (password, None)
-        } else {
-            (None, password)
-        };
-        let domain = existing_profile
-            .as_ref()
-            .and_then(|profile| profile.domain.clone());
-        let read_only = existing_profile
-            .as_ref()
-            .is_some_and(|profile| profile.read_only);
-        let save_request = should_save.then(|| SaveRemoteDesktopProfileRequest {
-            id: editing_profile_id,
-            name: label.clone(),
-            group: serial_profile_group_from_form(&form.group, &self.i18n),
-            icon: asset_icon_from_form(&form.icon),
-            color: asset_color_from_form(&form.color),
-            icon_background_color: asset_color_from_form(&form.icon_background_color),
-            protocol,
-            host: host.clone(),
-            port,
-            username: username.clone(),
-            domain: domain.clone(),
-            credential_ref: None,
-            credential: credential_to_save,
-            clear_credential,
-            read_only,
-            session_options: form.remote_desktop_session_options,
-        });
-        let mut profile = RemoteDesktopConnectionProfile {
-            id: format!("new-remote-desktop-{}", uuid::Uuid::new_v4()),
-            label,
-            protocol,
-            endpoint: RemoteDesktopEndpoint::new(host, port),
-            username,
-            domain,
-            credential_ref: None,
-            read_only,
-            // A reconnect reuses the profile, so keep the user's per-session
-            // redirection choices on the profile instead of rebuilding defaults.
-            session_options: form.remote_desktop_session_options,
-        };
-        form.pending = true;
-        form.error = None;
 
         if let Some(request) = save_request {
             match self.connection_store.upsert_remote_desktop_profile(request) {
@@ -795,15 +760,17 @@ impl WorkspaceApp {
                         {
                             Ok(password) => runtime_password = password,
                             Err(error) => {
-                                if let Some(form) = self.new_connection_form.as_mut() {
-                                    form.pending = false;
-                                    form.error = Some(format!(
-                                        "{}: {error}",
-                                        self.i18n.t(
-                                            "sessionManager.remote_desktop_profiles.open_failed"
-                                        )
-                                    ));
-                                }
+                                self.update_connection_form_state(cx, |state| {
+                                    if let Some(form) = state.form.as_mut() {
+                                        form.pending = false;
+                                        form.error = Some(format!(
+                                            "{}: {error}",
+                                            self.i18n.t(
+                                                "sessionManager.remote_desktop_profiles.open_failed"
+                                            )
+                                        ));
+                                    }
+                                });
                                 cx.notify();
                                 return;
                             }
@@ -811,22 +778,23 @@ impl WorkspaceApp {
                     }
                 }
                 Err(error) => {
-                    if let Some(form) = self.new_connection_form.as_mut() {
-                        form.pending = false;
-                        form.error = Some(format!(
-                            "{}: {error}",
-                            self.i18n
-                                .t("modals.new_connection.remote_desktop_save_failed")
-                        ));
-                    }
+                    self.update_connection_form_state(cx, |state| {
+                        if let Some(form) = state.form.as_mut() {
+                            form.pending = false;
+                            form.error = Some(format!(
+                                "{}: {error}",
+                                self.i18n
+                                    .t("modals.new_connection.remote_desktop_save_failed")
+                            ));
+                        }
+                    });
                     cx.notify();
                     return;
                 }
             }
         }
 
-        self.new_connection_form = None;
-        self.close_new_connection_select();
+        self.update_connection_form_state(cx, ConnectionFormState::clear);
         if action != NewConnectionSubmitAction::Save {
             let runtime_password =
                 runtime_password.map(|secret| RemoteDesktopSecret::from(secret.into_zeroizing()));
@@ -843,13 +811,16 @@ impl WorkspaceApp {
     ) {
         if intent == SshConnectionIntent::Test
             && self
-                .new_connection_form
+                .connection_form_state(cx)
+                .form
                 .as_ref()
                 .is_some_and(|form| form.auth_tab == SshAuthTab::TwoFactor)
         {
-            if let Some(form) = self.new_connection_form.as_mut() {
-                form.error = Some(self.i18n.t("ssh.form.test_not_supported_kbi"));
-            }
+            self.update_connection_form_state(cx, |state| {
+                if let Some(form) = state.form.as_mut() {
+                    form.error = Some(self.i18n.t("ssh.form.test_not_supported_kbi"));
+                }
+            });
             cx.notify();
             return;
         }
@@ -862,9 +833,10 @@ impl WorkspaceApp {
         }
         let mut config = config;
         if let Err(error) = prepare_tree_connect_config(&mut config) {
-            if let Some(form) = self.new_connection_form.as_mut() {
-                form.error = Some(error);
-            } else {
+            let reported_to_form = self.connection_flow.update(cx, |connection_flow, cx| {
+                connection_flow.set_form_feedback(None, Some(error.clone()), cx)
+            });
+            if !reported_to_form {
                 self.session_manager.status = Some(error);
             }
             cx.notify();
@@ -884,10 +856,12 @@ impl WorkspaceApp {
             );
             return;
         }
-        if let Some(form) = self.new_connection_form.as_mut() {
-            form.pending = true;
-            form.error = Some(self.i18n.t("ssh.form.checking_host_key"));
-        }
+        self.update_connection_form_state(cx, |state| {
+            if let Some(form) = state.form.as_mut() {
+                form.pending = true;
+                form.error = Some(self.i18n.t("ssh.form.checking_host_key"));
+            }
+        });
 
         if config.proxy_chain.is_some() {
             let save_after_open = match self.save_after_open_request_for_connect_intent(cx) {
@@ -968,12 +942,12 @@ impl WorkspaceApp {
             return;
         };
         self.prepare_modal_interaction_boundary(cx);
-        self.new_connection_form = Some(form_from_saved_connection(&conn, error));
-        self.editing_saved_connection_id = Some(id.to_string());
-        self.editing_saved_connection_connect_after_save_node_id = None;
-        self.duplicating_saved_connection_id = None;
-        self.saved_connection_prompt_action = Some(action);
-        self.close_new_connection_select();
+        let form = form_from_saved_connection(&conn, error);
+        self.update_connection_form_state(cx, |state| {
+            state.replace_with_new_form(form);
+            state.editing_saved_connection_id = Some(id.to_string());
+            state.saved_connection_prompt_action = Some(action);
+        });
         self.new_connection_caret_visible = true;
         self.needs_active_pane_focus = false;
         window.focus(&self.focus_handle, cx);
@@ -991,12 +965,11 @@ impl WorkspaceApp {
             return;
         };
         self.prepare_modal_interaction_boundary(cx);
-        self.new_connection_form = Some(form_from_saved_connection(&conn, error));
-        self.editing_saved_connection_id = Some(id.to_string());
-        self.editing_saved_connection_connect_after_save_node_id = None;
-        self.duplicating_saved_connection_id = None;
-        self.saved_connection_prompt_action = None;
-        self.close_new_connection_select();
+        let form = form_from_saved_connection(&conn, error);
+        self.update_connection_form_state(cx, |state| {
+            state.replace_with_new_form(form);
+            state.editing_saved_connection_id = Some(id.to_string());
+        });
         self.new_connection_caret_visible = true;
         self.needs_active_pane_focus = false;
         window.focus(&self.focus_handle, cx);
@@ -1011,10 +984,17 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) {
         self.open_saved_connection_editor(id, None, window, cx);
-        if self.editing_saved_connection_id.as_deref() == Some(id) {
+        if self
+            .connection_form_state(cx)
+            .editing_saved_connection_id
+            .as_deref()
+            == Some(id)
+        {
             // This marker is consumed after a successful save so normal
             // connection edits keep their existing save-only behavior.
-            self.editing_saved_connection_connect_after_save_node_id = Some(node_id);
+            self.update_connection_form_state(cx, |state| {
+                state.editing_saved_connection_connect_after_save_node_id = Some(node_id);
+            });
         }
     }
 
@@ -1038,13 +1018,7 @@ impl WorkspaceApp {
         );
         form.agent_available = detect_ssh_agent_available();
         form.save_connection = false;
-        self.new_connection_form = Some(form);
-        self.drill_down_parent_node_id = None;
-        self.editing_saved_connection_id = None;
-        self.editing_saved_connection_connect_after_save_node_id = None;
-        self.duplicating_saved_connection_id = None;
-        self.saved_connection_prompt_action = None;
-        self.close_new_connection_select();
+        self.update_connection_form_state(cx, |state| state.replace_with_new_form(form));
         self.new_connection_caret_visible = true;
         self.needs_active_pane_focus = false;
         window.focus(&self.focus_handle, cx);
@@ -1056,10 +1030,17 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(action) = self.saved_connection_prompt_action else {
+        let Some(action) = self
+            .connection_form_state(cx)
+            .saved_connection_prompt_action
+        else {
             return;
         };
-        let Some(id) = self.editing_saved_connection_id.clone() else {
+        let Some(id) = self
+            .connection_form_state(cx)
+            .editing_saved_connection_id
+            .clone()
+        else {
             return;
         };
         let Some((mut config, title)) = self.build_new_connection_config(cx) else {
@@ -1077,10 +1058,12 @@ impl WorkspaceApp {
 
         match action {
             SavedConnectionPromptAction::Connect => {
-                if let Some(form) = self.new_connection_form.as_mut() {
-                    form.pending = true;
-                    form.error = Some(self.i18n.t("ssh.form.checking_host_key"));
-                }
+                self.update_connection_form_state(cx, |state| {
+                    if let Some(form) = state.form.as_mut() {
+                        form.pending = true;
+                        form.error = Some(self.i18n.t("ssh.form.checking_host_key"));
+                    }
+                });
                 self.start_saved_connection_flow(id, config, title, window, cx);
             }
             SavedConnectionPromptAction::Test => {
@@ -1101,37 +1084,48 @@ impl WorkspaceApp {
     }
 
     pub(super) fn save_editing_connection(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(id) = self.editing_saved_connection_id.clone() else {
-            return;
-        };
-        let Some(form) = self.new_connection_form.as_ref() else {
+        let Some(id) = self
+            .connection_form_state(cx)
+            .editing_saved_connection_id
+            .clone()
+        else {
             return;
         };
         let existing_connection = self.connection_store.get(&id).cloned();
         let existing_auth = existing_connection
             .as_ref()
             .map(|connection| connection.auth.clone());
-        match save_request_from_form_with_existing_auth(
-            form,
-            Some(id.clone()),
-            existing_auth.as_ref(),
-        ) {
-            Ok(mut request) => {
+        let save_request = {
+            let Some(form) = self.connection_form_state(cx).form.as_ref() else {
+                return;
+            };
+            save_request_from_form_with_existing_auth(
+                form,
+                Some(id.clone()),
+                existing_auth.as_ref(),
+            )
+            .map(|mut request| {
                 if form.proxy_hops.is_empty()
                     && let Some(connection) = existing_connection.as_ref()
                 {
                     request.proxy_chain = connection.proxy_chain.clone();
                 }
+                request
+            })
+        };
+        match save_request {
+            Ok(request) => {
                 match self.connection_store.upsert(request) {
                     Ok(_) => {
                         self.sync_saved_connection_node_title(&id);
-                        let connect_after_save_node_id = self
-                            .editing_saved_connection_connect_after_save_node_id
-                            .take();
-                        self.new_connection_form = None;
-                        self.editing_saved_connection_id = None;
-                        self.duplicating_saved_connection_id = None;
-                        self.close_new_connection_select();
+                        let connect_after_save_node_id =
+                            self.update_connection_form_state(cx, |state| {
+                                let node_id = state
+                                    .editing_saved_connection_connect_after_save_node_id
+                                    .take();
+                                state.clear();
+                                node_id
+                            });
                         self.queue_cloud_sync_dirty_refresh(cx);
                         if let Some(node_id) = connect_after_save_node_id {
                             if let Some(conn) = self.connection_store.get(&id).cloned()
@@ -1166,16 +1160,20 @@ impl WorkspaceApp {
                         }
                     }
                     Err(error) => {
-                        if let Some(form) = self.new_connection_form.as_mut() {
-                            form.error = Some(error.to_string());
-                        }
+                        self.update_connection_form_state(cx, |state| {
+                            if let Some(form) = state.form.as_mut() {
+                                form.error = Some(error.to_string());
+                            }
+                        });
                     }
                 }
             }
             Err(error) => {
-                if let Some(form) = self.new_connection_form.as_mut() {
-                    form.error = Some(error.to_string());
-                }
+                self.update_connection_form_state(cx, |state| {
+                    if let Some(form) = state.form.as_mut() {
+                        form.error = Some(error.to_string());
+                    }
+                });
             }
         }
         cx.notify();
@@ -1186,49 +1184,56 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(source_id) = self.duplicating_saved_connection_id.clone() else {
-            return;
-        };
-        let Some(form) = self.new_connection_form.as_ref() else {
+        let Some(source_id) = self
+            .connection_form_state(cx)
+            .duplicating_saved_connection_id
+            .clone()
+        else {
             return;
         };
         let source_connection = self.connection_store.get(&source_id).cloned();
         let source_auth = source_connection
             .as_ref()
             .map(|connection| connection.auth.clone());
-        match save_request_from_form_with_existing_auth(form, None, source_auth.as_ref()) {
-            Ok(mut request) => {
-                if form.proxy_hops.is_empty()
-                    && let Some(connection) = source_connection.as_ref()
-                {
-                    // The modal edits the target connection fields only. If the
-                    // proxy chain was not expanded into editable rows, keep the
-                    // source chain just like Tauri's duplicate draft does.
-                    request.proxy_chain = connection.proxy_chain.clone();
-                }
-                match self.connection_store.upsert(request) {
-                    Ok(_) => {
-                        self.new_connection_form = None;
-                        self.editing_saved_connection_id = None;
-                        self.editing_saved_connection_connect_after_save_node_id = None;
-                        self.duplicating_saved_connection_id = None;
-                        self.close_new_connection_select();
-                        self.session_manager.status =
-                            Some(self.i18n.t("sessionManager.toast.connection_duplicated"));
-                        self.queue_cloud_sync_dirty_refresh(cx);
-                        self.focus_active_pane(window, cx);
+        let save_request = {
+            let Some(form) = self.connection_form_state(cx).form.as_ref() else {
+                return;
+            };
+            save_request_from_form_with_existing_auth(form, None, source_auth.as_ref()).map(
+                |mut request| {
+                    if form.proxy_hops.is_empty()
+                        && let Some(connection) = source_connection.as_ref()
+                    {
+                        // Preserve the source chain when it was not expanded for editing.
+                        request.proxy_chain = connection.proxy_chain.clone();
                     }
-                    Err(error) => {
-                        if let Some(form) = self.new_connection_form.as_mut() {
+                    request
+                },
+            )
+        };
+        match save_request {
+            Ok(request) => match self.connection_store.upsert(request) {
+                Ok(_) => {
+                    self.update_connection_form_state(cx, ConnectionFormState::clear);
+                    self.session_manager.status =
+                        Some(self.i18n.t("sessionManager.toast.connection_duplicated"));
+                    self.queue_cloud_sync_dirty_refresh(cx);
+                    self.focus_active_pane(window, cx);
+                }
+                Err(error) => {
+                    self.update_connection_form_state(cx, |state| {
+                        if let Some(form) = state.form.as_mut() {
                             form.error = Some(error.to_string());
                         }
-                    }
+                    });
                 }
-            }
+            },
             Err(error) => {
-                if let Some(form) = self.new_connection_form.as_mut() {
-                    form.error = Some(error.to_string());
-                }
+                self.update_connection_form_state(cx, |state| {
+                    if let Some(form) = state.form.as_mut() {
+                        form.error = Some(error.to_string());
+                    }
+                });
             }
         }
         cx.notify();
@@ -1243,9 +1248,10 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) {
         if let Err(error) = prepare_tree_connect_config(&mut config) {
-            if let Some(form) = self.new_connection_form.as_mut() {
-                form.error = Some(error);
-            } else {
+            let reported_to_form = self.connection_flow.update(cx, |connection_flow, cx| {
+                connection_flow.set_form_feedback(None, Some(error.clone()), cx)
+            });
+            if !reported_to_form {
                 self.session_manager.status = Some(error);
             }
             cx.notify();

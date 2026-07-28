@@ -933,7 +933,7 @@ impl WorkspaceApp {
         // popovers and input focus before the overlay starts trapping events.
         self.release_active_remote_desktop_inputs(cx);
         self.close_settings_select();
-        self.close_new_connection_select();
+        self.close_new_connection_select(cx);
         // Cloud Sync provider/config selects are Radix-like transient popovers;
         // a modal boundary must release both the open menu and the trigger
         // focus owner so keyboard rings do not leak behind the dialog.
@@ -961,8 +961,8 @@ impl WorkspaceApp {
             self.close_settings_select();
             changed = true;
         }
-        if self.open_new_connection_select.is_some() {
-            self.close_new_connection_select();
+        if self.connection_form_state(cx).open_select.is_some() {
+            self.close_new_connection_select(cx);
             changed = true;
         }
         if self.cloud_sync.view.open_select.take().is_some() {

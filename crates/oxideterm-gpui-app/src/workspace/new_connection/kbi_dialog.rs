@@ -148,7 +148,7 @@ impl WorkspaceApp {
             connection_flow.submit_keyboard_interactive_challenge(cx)
         });
         if matches!(result, KeyboardInteractiveSubmitResult::Submitted)
-            && self.new_connection_form.is_none()
+            && self.connection_form_state(cx).form.is_none()
         {
             self.focus_active_pane(window, cx);
         }
@@ -166,10 +166,13 @@ impl WorkspaceApp {
             connection_flow.cancel_keyboard_interactive_challenge(delay, cx)
         });
         if cancelled {
-            if let Some(form) = self.new_connection_form.as_mut() {
-                form.pending = false;
-                form.error = Some(self.i18n.t("ssh.kbi.cancelled"));
-            }
+            let message = self.i18n.t("ssh.kbi.cancelled");
+            self.update_connection_form_state(cx, |state| {
+                if let Some(form) = state.form.as_mut() {
+                    form.pending = false;
+                    form.error = Some(message);
+                }
+            });
             cx.notify();
         }
     }

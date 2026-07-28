@@ -9,13 +9,19 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> Result<Option<SaveConnectionRequest>, ()> {
         let mode = new_connection_form_mode(
-            self.editing_saved_connection_id.as_deref(),
-            self.duplicating_saved_connection_id.as_deref(),
-            self.saved_connection_prompt_action,
+            self.connection_form_state(cx)
+                .editing_saved_connection_id
+                .as_deref(),
+            self.connection_form_state(cx)
+                .duplicating_saved_connection_id
+                .as_deref(),
+            self.connection_form_state(cx)
+                .saved_connection_prompt_action,
         );
         if !mode.stores_connection_on_connect()
             || !self
-                .new_connection_form
+                .connection_form_state(cx)
+                .form
                 .as_ref()
                 .is_some_and(|form| form.save_connection)
         {
@@ -23,15 +29,18 @@ impl WorkspaceApp {
         }
 
         match self
-            .new_connection_form
+            .connection_form_state(cx)
+            .form
             .as_ref()
             .map(|form| save_request_from_form(form, None))
         {
             Some(Ok(request)) => Ok(Some(request)),
             Some(Err(error)) => {
-                if let Some(form) = self.new_connection_form.as_mut() {
-                    form.error = Some(error.to_string());
-                }
+                self.update_connection_form_state(cx, |state| {
+                    if let Some(form) = state.form.as_mut() {
+                        form.error = Some(error.to_string());
+                    }
+                });
                 cx.notify();
                 Err(())
             }
@@ -43,107 +52,107 @@ impl WorkspaceApp {
         &mut self,
         cx: &mut Context<Self>,
     ) -> Option<(SshConfig, String)> {
-        let Some(form) = self.new_connection_form.as_mut() else {
-            return None;
-        };
-        let host = form.host.trim().to_string();
-        let username = form.username.trim().to_string();
-        let port = form.port.trim().parse::<u16>().ok();
-        if host.is_empty() || username.is_empty() || port.is_none() {
-            form.error = Some(self.i18n.t("ssh.form.validation_required"));
-            cx.notify();
-            return None;
-        }
-        let auth = match form.auth_tab {
-            SshAuthTab::Password => {
-                // UI inputs own plain String drafts; crossing into SSH auth moves a
-                // zeroizing clone so backend tasks never retain a normal String password.
-                AuthMethod::password_secret(zeroizing_secret_clone(&form.password))
-            }
-            SshAuthTab::Agent => AuthMethod::Agent,
-            SshAuthTab::DefaultKey => {
-                AuthMethod::key_secret("", zeroizing_non_empty_secret(&form.passphrase))
-            }
-            SshAuthTab::SshKey => {
-                if form.key_path.trim().is_empty() {
-                    form.error = Some(self.i18n.t("ssh.form.key_path_required"));
-                    cx.notify();
-                    return None;
-                }
-                AuthMethod::key_secret(
-                    form.key_path.trim().to_string(),
-                    zeroizing_non_empty_secret(&form.passphrase),
-                )
-            }
-            SshAuthTab::ManagedKey => {
-                if form.managed_key_id.trim().is_empty() {
-                    form.error = Some(self.i18n.t("ssh.form.managed_key_required"));
-                    cx.notify();
-                    return None;
-                }
-                // The connection config carries only the managed-key reference; the
-                // private key remains owned by the local managed keychain resolver.
-                AuthMethod::managed_key_secret(
-                    form.managed_key_id.trim().to_string(),
-                    zeroizing_non_empty_secret(&form.passphrase),
-                )
-            }
-            SshAuthTab::Certificate => {
-                if form.key_path.trim().is_empty() || form.cert_path.trim().is_empty() {
-                    form.error = Some(self.i18n.t("ssh.form.certificate_paths_required"));
-                    cx.notify();
-                    return None;
-                }
-                AuthMethod::certificate_secret(
-                    form.key_path.trim().to_string(),
-                    form.cert_path.trim().to_string(),
-                    zeroizing_non_empty_secret(&form.passphrase),
-                )
-            }
-            SshAuthTab::TwoFactor => AuthMethod::KeyboardInteractive,
-        };
-        let proxy_chain = match proxy_chain_from_form(form) {
-            Ok(proxy_chain) => proxy_chain,
-            Err(error) => {
-                form.error = Some(error);
+        self.with_connection_form_mut(cx, |this, form, cx| {
+            let form = form?;
+            let host = form.host.trim().to_string();
+            let username = form.username.trim().to_string();
+            let port = form.port.trim().parse::<u16>().ok();
+            if host.is_empty() || username.is_empty() || port.is_none() {
+                form.error = Some(this.i18n.t("ssh.form.validation_required"));
                 cx.notify();
                 return None;
             }
-        };
-        let upstream_proxy = match upstream_proxy_config_from_form(
-            &self.connection_store,
-            self.settings_store.settings(),
-            form,
-        ) {
-            Ok(upstream_proxy) => upstream_proxy,
-            Err(error) => {
-                form.error = Some(error.to_string());
-                cx.notify();
-                return None;
-            }
-        };
-        let config = SshConfig {
-            host: host.clone(),
-            port: port.unwrap_or(22),
-            username: username.clone(),
-            auth,
-            agent_forwarding: form.agent_forwarding,
-            identity_agent: form.identity_agent.clone(),
-            agent_forwarding_socket: form.agent_forwarding_socket.clone(),
-            legacy_ssh_compatibility: form.legacy_ssh_compatibility,
-            proxy_chain,
-            upstream_proxy,
-            strict_host_key_checking: true,
-            post_connect_command: (!form.post_connect_command.trim().is_empty())
-                .then(|| form.post_connect_command.trim().to_string()),
-            ..SshConfig::default()
-        };
-        let title = if form.name.trim().is_empty() {
-            format!("{username}@{host}")
-        } else {
-            form.name.trim().to_string()
-        };
-        Some((config, title))
+            let auth = match form.auth_tab {
+                SshAuthTab::Password => {
+                    // UI inputs own plain String drafts; crossing into SSH auth moves a
+                    // zeroizing clone so backend tasks never retain a normal String password.
+                    AuthMethod::password_secret(zeroizing_secret_clone(&form.password))
+                }
+                SshAuthTab::Agent => AuthMethod::Agent,
+                SshAuthTab::DefaultKey => {
+                    AuthMethod::key_secret("", zeroizing_non_empty_secret(&form.passphrase))
+                }
+                SshAuthTab::SshKey => {
+                    if form.key_path.trim().is_empty() {
+                        form.error = Some(this.i18n.t("ssh.form.key_path_required"));
+                        cx.notify();
+                        return None;
+                    }
+                    AuthMethod::key_secret(
+                        form.key_path.trim().to_string(),
+                        zeroizing_non_empty_secret(&form.passphrase),
+                    )
+                }
+                SshAuthTab::ManagedKey => {
+                    if form.managed_key_id.trim().is_empty() {
+                        form.error = Some(this.i18n.t("ssh.form.managed_key_required"));
+                        cx.notify();
+                        return None;
+                    }
+                    // The connection config carries only the managed-key reference; the
+                    // private key remains owned by the local managed keychain resolver.
+                    AuthMethod::managed_key_secret(
+                        form.managed_key_id.trim().to_string(),
+                        zeroizing_non_empty_secret(&form.passphrase),
+                    )
+                }
+                SshAuthTab::Certificate => {
+                    if form.key_path.trim().is_empty() || form.cert_path.trim().is_empty() {
+                        form.error = Some(this.i18n.t("ssh.form.certificate_paths_required"));
+                        cx.notify();
+                        return None;
+                    }
+                    AuthMethod::certificate_secret(
+                        form.key_path.trim().to_string(),
+                        form.cert_path.trim().to_string(),
+                        zeroizing_non_empty_secret(&form.passphrase),
+                    )
+                }
+                SshAuthTab::TwoFactor => AuthMethod::KeyboardInteractive,
+            };
+            let proxy_chain = match proxy_chain_from_form(form) {
+                Ok(proxy_chain) => proxy_chain,
+                Err(error) => {
+                    form.error = Some(error);
+                    cx.notify();
+                    return None;
+                }
+            };
+            let upstream_proxy = match upstream_proxy_config_from_form(
+                &this.connection_store,
+                this.settings_store.settings(),
+                form,
+            ) {
+                Ok(upstream_proxy) => upstream_proxy,
+                Err(error) => {
+                    form.error = Some(error.to_string());
+                    cx.notify();
+                    return None;
+                }
+            };
+            let config = SshConfig {
+                host: host.clone(),
+                port: port.unwrap_or(22),
+                username: username.clone(),
+                auth,
+                agent_forwarding: form.agent_forwarding,
+                identity_agent: form.identity_agent.clone(),
+                agent_forwarding_socket: form.agent_forwarding_socket.clone(),
+                legacy_ssh_compatibility: form.legacy_ssh_compatibility,
+                proxy_chain,
+                upstream_proxy,
+                strict_host_key_checking: true,
+                post_connect_command: (!form.post_connect_command.trim().is_empty())
+                    .then(|| form.post_connect_command.trim().to_string()),
+                ..SshConfig::default()
+            };
+            let title = if form.name.trim().is_empty() {
+                format!("{username}@{host}")
+            } else {
+                form.name.trim().to_string()
+            };
+            Some((config, title))
+        })
     }
 
     pub(in crate::workspace) fn apply_ssh_worker_results(
@@ -164,20 +173,25 @@ impl WorkspaceApp {
                     self.handle_session_tree_preflight_result(run, status, window, cx)
                 }
                 SshConnectionWorkerResult::Test { result } => {
-                    if let Some(form) = self.new_connection_form.as_mut() {
-                        form.pending = false;
-                        form.error = Some(match result {
-                            Ok(()) => self.i18n.t("ssh.form.test_success"),
-                            Err(error) => error,
-                        });
-                    } else {
-                        self.session_manager.status = Some(match result {
-                            Ok(()) => self.i18n.t("sessionManager.toast.test_success"),
-                            Err(error) => format!(
+                    let (form_message, session_message) = match result {
+                        Ok(()) => (
+                            self.i18n.t("ssh.form.test_success"),
+                            self.i18n.t("sessionManager.toast.test_success"),
+                        ),
+                        Err(error) => (
+                            error.clone(),
+                            format!(
                                 "{}: {error}",
                                 self.i18n.t("sessionManager.toast.test_failed")
                             ),
+                        ),
+                    };
+                    let reported_to_form =
+                        self.connection_flow.update(cx, |connection_flow, cx| {
+                            connection_flow.set_form_feedback(Some(false), Some(form_message), cx)
                         });
+                    if !reported_to_form {
+                        self.session_manager.status = Some(session_message);
                     }
                     cx.notify();
                 }
@@ -200,10 +214,12 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if let Some(form) = self.new_connection_form.as_mut() {
-            form.pending = false;
-            form.error = None;
-        }
+        self.update_connection_form_state(cx, |state| {
+            if let Some(form) = state.form.as_mut() {
+                form.pending = false;
+                form.error = None;
+            }
+        });
 
         match status {
             HostKeyStatus::Verified => {
@@ -230,9 +246,10 @@ impl WorkspaceApp {
                 cx.notify();
             }
             HostKeyStatus::Error { message } => {
-                if let Some(form) = self.new_connection_form.as_mut() {
-                    form.error = Some(message);
-                } else {
+                let reported_to_form = self.connection_flow.update(cx, |connection_flow, cx| {
+                    connection_flow.set_form_feedback(None, Some(message.clone()), cx)
+                });
+                if !reported_to_form {
                     self.session_manager.status = Some(message);
                 }
                 cx.notify();
@@ -400,10 +417,12 @@ impl WorkspaceApp {
         if !self.active_proxy_connect_result_is_current(&run) {
             return;
         }
-        if let Some(form) = self.new_connection_form.as_mut() {
-            form.pending = false;
-            form.error = None;
-        }
+        self.update_connection_form_state(cx, |state| {
+            if let Some(form) = state.form.as_mut() {
+                form.pending = false;
+                form.error = None;
+            }
+        });
 
         match status {
             HostKeyStatus::Verified => {
@@ -488,11 +507,12 @@ impl WorkspaceApp {
         step: NativeSessionTreeConnectStep,
         cx: &mut Context<Self>,
     ) {
-        if let Some(form) = self.new_connection_form.as_mut() {
-            form.pending = true;
-            form.error = Some(self.i18n.t("ssh.form.checking_host_key"));
-        } else {
-            self.session_manager.status = Some(self.i18n.t("ssh.form.checking_host_key"));
+        let message = self.i18n.t("ssh.form.checking_host_key");
+        let reported_to_form = self.connection_flow.update(cx, |connection_flow, cx| {
+            connection_flow.set_form_feedback(Some(true), Some(message.clone()), cx)
+        });
+        if !reported_to_form {
+            self.session_manager.status = Some(message);
         }
         let tx = self.ssh_worker_sender(cx);
         let router = self.node_router.clone();
@@ -607,9 +627,7 @@ impl WorkspaceApp {
 
         match run.intent {
             SshConnectionIntent::Connect => {
-                self.new_connection_form = None;
-                self.duplicating_saved_connection_id = None;
-                self.close_new_connection_select();
+                self.update_connection_form_state(cx, ConnectionFormState::clear);
                 let post_connect_command = target_config.post_connect_command.clone();
                 let _ = self.queue_ssh_terminal_tab_for_node_with_mark_used(
                     target_node_id,
@@ -624,13 +642,12 @@ impl WorkspaceApp {
                 );
             }
             SshConnectionIntent::ConnectSaved(id) => {
-                if self.saved_connection_prompt_action.is_some() {
-                    self.new_connection_form = None;
-                    self.editing_saved_connection_id = None;
-                    self.editing_saved_connection_connect_after_save_node_id = None;
-                    self.duplicating_saved_connection_id = None;
-                    self.saved_connection_prompt_action = None;
-                    self.close_new_connection_select();
+                if self
+                    .connection_form_state(cx)
+                    .saved_connection_prompt_action
+                    .is_some()
+                {
+                    self.update_connection_form_state(cx, ConnectionFormState::clear);
                 }
                 self.session_manager.status = None;
                 let post_connect_command = target_config.post_connect_command.clone();
@@ -802,10 +819,10 @@ impl WorkspaceApp {
         error: String,
         cx: &mut Context<Self>,
     ) {
-        if let Some(form) = self.new_connection_form.as_mut() {
-            form.pending = false;
-            form.error = Some(error);
-        } else {
+        let reported_to_form = self.connection_flow.update(cx, |connection_flow, cx| {
+            connection_flow.set_form_feedback(Some(false), Some(error.clone()), cx)
+        });
+        if !reported_to_form {
             self.session_manager.status = Some(error);
         }
         cx.notify();
@@ -827,11 +844,12 @@ impl WorkspaceApp {
             return;
         }
 
-        if let Some(form) = self.new_connection_form.as_mut() {
-            form.pending = true;
-            form.error = Some(self.i18n.t("ssh.form.checking_host_key"));
-        } else {
-            self.session_manager.status = Some(self.i18n.t("ssh.form.checking_host_key"));
+        let message = self.i18n.t("ssh.form.checking_host_key");
+        let reported_to_form = self.connection_flow.update(cx, |connection_flow, cx| {
+            connection_flow.set_form_feedback(Some(true), Some(message.clone()), cx)
+        });
+        if !reported_to_form {
+            self.session_manager.status = Some(message);
         }
         self.start_ssh_preflight(config, title, SshConnectionIntent::Test, cx);
         cx.notify();
@@ -848,26 +866,35 @@ impl WorkspaceApp {
         match intent {
             SshConnectionIntent::Connect => {
                 let mode = new_connection_form_mode(
-                    self.editing_saved_connection_id.as_deref(),
-                    self.duplicating_saved_connection_id.as_deref(),
-                    self.saved_connection_prompt_action,
+                    self.connection_form_state(cx)
+                        .editing_saved_connection_id
+                        .as_deref(),
+                    self.connection_form_state(cx)
+                        .duplicating_saved_connection_id
+                        .as_deref(),
+                    self.connection_form_state(cx)
+                        .saved_connection_prompt_action,
                 );
                 let save_after_open = if mode.stores_connection_on_connect()
                     && self
-                        .new_connection_form
+                        .connection_form_state(cx)
+                        .form
                         .as_ref()
                         .is_some_and(|form| form.save_connection)
                 {
                     match self
-                        .new_connection_form
+                        .connection_form_state(cx)
+                        .form
                         .as_ref()
                         .map(|form| save_request_from_form(form, None))
                     {
                         Some(Ok(request)) => Some(request),
                         Some(Err(error)) => {
-                            if let Some(form) = self.new_connection_form.as_mut() {
-                                form.error = Some(error.to_string());
-                            }
+                            self.update_connection_form_state(cx, |state| {
+                                if let Some(form) = state.form.as_mut() {
+                                    form.error = Some(error.to_string());
+                                }
+                            });
                             cx.notify();
                             return;
                         }
@@ -876,12 +903,11 @@ impl WorkspaceApp {
                 } else {
                     None
                 };
-                self.new_connection_form = None;
-                self.duplicating_saved_connection_id = None;
+                self.update_connection_form_state(cx, ConnectionFormState::clear);
                 self.connection_flow.update(cx, |connection_flow, cx| {
                     connection_flow.clear_host_key_challenge(cx);
                 });
-                self.close_new_connection_select();
+                self.close_new_connection_select(cx);
                 if config
                     .proxy_chain
                     .as_ref()
@@ -934,13 +960,12 @@ impl WorkspaceApp {
                 self.connection_flow.update(cx, |connection_flow, cx| {
                     connection_flow.clear_host_key_challenge(cx);
                 });
-                if self.saved_connection_prompt_action.is_some() {
-                    self.new_connection_form = None;
-                    self.editing_saved_connection_id = None;
-                    self.editing_saved_connection_connect_after_save_node_id = None;
-                    self.duplicating_saved_connection_id = None;
-                    self.saved_connection_prompt_action = None;
-                    self.close_new_connection_select();
+                if self
+                    .connection_form_state(cx)
+                    .saved_connection_prompt_action
+                    .is_some()
+                {
+                    self.update_connection_form_state(cx, ConnectionFormState::clear);
                 }
                 self.session_manager.status = None;
                 let _ = self.open_or_create_saved_ssh_terminal_tab(id, config, title, window, cx);
@@ -955,11 +980,17 @@ impl WorkspaceApp {
                 {
                     Ok(child_id) => child_id,
                     Err(error) => {
-                        if let Some(form) = self.new_connection_form.as_mut() {
-                            form.pending = false;
-                            form.error = Some(error.to_string());
-                        } else {
-                            self.session_manager.status = Some(error.to_string());
+                        let message = error.to_string();
+                        let reported_to_form =
+                            self.connection_flow.update(cx, |connection_flow, cx| {
+                                connection_flow.set_form_feedback(
+                                    Some(false),
+                                    Some(message.clone()),
+                                    cx,
+                                )
+                            });
+                        if !reported_to_form {
+                            self.session_manager.status = Some(message);
                         }
                         cx.notify();
                         return;
@@ -978,10 +1009,7 @@ impl WorkspaceApp {
                 self.expanded_ssh_nodes.insert(parent_id);
                 self.expanded_ssh_nodes.insert(child_id.clone());
                 self.active_ssh_node_id = Some(child_id.clone());
-                self.new_connection_form = None;
-                self.drill_down_parent_node_id = None;
-                self.duplicating_saved_connection_id = None;
-                self.close_new_connection_select();
+                self.update_connection_form_state(cx, ConnectionFormState::clear);
                 self.session_manager.status = Some(self.i18n.t("ssh.drill_down.connecting"));
                 self.ensure_node_connection_started(&child_id, cx);
                 self.persist_session_tree_snapshot();
@@ -995,11 +1023,12 @@ impl WorkspaceApp {
         config: SshConfig,
         cx: &mut Context<Self>,
     ) {
-        if let Some(form) = self.new_connection_form.as_mut() {
-            form.pending = true;
-            form.error = Some(self.i18n.t("ssh.form.test_running"));
-        } else {
-            self.session_manager.status = Some(self.i18n.t("ssh.form.test_running"));
+        let message = self.i18n.t("ssh.form.test_running");
+        let reported_to_form = self.connection_flow.update(cx, |connection_flow, cx| {
+            connection_flow.set_form_feedback(Some(true), Some(message.clone()), cx)
+        });
+        if !reported_to_form {
+            self.session_manager.status = Some(message);
         }
         let tx = self.ssh_worker_sender(cx);
         let managed_key_resolver = managed_key_resolver_from_store(&self.connection_store);

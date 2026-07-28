@@ -585,7 +585,7 @@ impl WorkspaceApp {
             .open_settings_select
             .is_some_and(|select| select.anchor_id() == anchor.id)
             || matches!(
-                (self.open_new_connection_select, anchor.id),
+                (self.connection_form_state(cx).open_select, anchor.id),
                 (
                     Some(NewConnectionSelect::Group),
                     SelectAnchorId::NewConnectionGroup
@@ -806,9 +806,9 @@ impl WorkspaceApp {
             self.close_settings_select();
             changed = true;
         }
-        if self.open_new_connection_select.is_some() {
+        if self.connection_form_state(cx).open_select.is_some() {
             self.ime_marked_text = None;
-            self.close_new_connection_select();
+            self.close_new_connection_select(cx);
             changed = true;
         }
         if self.terminal_command_bar_focused {
@@ -897,11 +897,18 @@ impl WorkspaceApp {
             self.ime_marked_text = None;
             changed = true;
         }
-        if let Some(form) = self.new_connection_form.as_mut()
-            && form.field_focused
-        {
+        let blurred_connection_form = self.update_connection_form_state(cx, |state| {
+            let Some(form) = state.form.as_mut() else {
+                return false;
+            };
+            if !form.field_focused {
+                return false;
+            }
             form.field_focused = false;
             form.selected_field = None;
+            true
+        });
+        if blurred_connection_form {
             self.ime_marked_text = None;
             changed = true;
         }

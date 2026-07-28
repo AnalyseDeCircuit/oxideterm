@@ -505,20 +505,22 @@ impl WorkspaceApp {
             // Synced and imported assets intentionally omit device-local credentials.
             // Reopen the regular form so the user can authenticate on this device.
             self.open_new_connection_form(window, cx);
-            if let Some(form) = self.new_connection_form.as_mut() {
-                form.transport = NewConnectionTransport::Rdp;
-                form.name = saved.name;
-                form.host = saved.host;
-                form.port = saved.port.to_string();
-                form.username = saved.username.unwrap_or_default();
-                form.group = saved.group.unwrap_or_default();
-                form.remote_desktop_session_options = saved.session_options;
-                form.error = Some(
-                    self.i18n
-                        .t("modals.new_connection.remote_desktop_password_required"),
-                );
-                form.focused_field = NewConnectionField::Password;
-            }
+            let password_required = self
+                .i18n
+                .t("modals.new_connection.remote_desktop_password_required");
+            self.update_connection_form_state(cx, |state| {
+                if let Some(form) = state.form.as_mut() {
+                    form.transport = NewConnectionTransport::Rdp;
+                    form.name = saved.name;
+                    form.host = saved.host;
+                    form.port = saved.port.to_string();
+                    form.username = saved.username.unwrap_or_default();
+                    form.group = saved.group.unwrap_or_default();
+                    form.remote_desktop_session_options = saved.session_options;
+                    form.error = Some(password_required);
+                    form.focused_field = NewConnectionField::Password;
+                }
+            });
             return;
         }
         let profile = RemoteDesktopConnectionProfile {
@@ -552,10 +554,8 @@ impl WorkspaceApp {
             return;
         };
         self.open_new_connection_form(window, cx);
-        self.new_connection_form = Some(form_from_remote_desktop_profile(
-            &saved,
-            self.i18n.t("ssh.form.ungrouped"),
-        ));
+        let form = form_from_remote_desktop_profile(&saved, self.i18n.t("ssh.form.ungrouped"));
+        self.update_connection_form_state(cx, |state| state.replace_with_new_form(form));
         cx.notify();
     }
 
@@ -624,14 +624,11 @@ impl WorkspaceApp {
         form.field_focused = true;
 
         self.prepare_modal_interaction_boundary(cx);
-        self.new_connection_form = Some(form);
-        self.drill_down_parent_node_id = None;
-        self.editing_saved_connection_id = None;
-        self.editing_saved_connection_connect_after_save_node_id = None;
-        self.duplicating_saved_connection_id = Some(id.to_string());
-        self.saved_connection_prompt_action = None;
+        self.update_connection_form_state(cx, |state| {
+            state.replace_with_new_form(form);
+            state.duplicating_saved_connection_id = Some(id.to_string());
+        });
         self.close_session_row_menus();
-        self.close_new_connection_select();
         self.new_connection_caret_visible = true;
         self.needs_active_pane_focus = false;
         window.focus(&self.focus_handle, cx);

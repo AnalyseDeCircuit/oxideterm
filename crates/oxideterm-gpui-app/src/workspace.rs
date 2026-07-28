@@ -260,9 +260,10 @@ use self::ime::{
 };
 use self::launcher::LauncherState;
 use self::new_connection::{
-    ConnectionFlowEntity, NativeSessionTreeConnectPlan, NativeSshPromptHandler, NewConnectionField,
-    NewConnectionForm, NewConnectionSelect, PrivilegeCredentialDraft, SavedConnectionPromptAction,
-    SshAuthTab, SshConnectionIntent, SshConnectionWorkerResult,
+    ConnectionFlowEntity, ConnectionFlowEvent, NativeSessionTreeConnectPlan,
+    NativeSshPromptHandler, NewConnectionField, NewConnectionForm, NewConnectionSelect,
+    PrivilegeCredentialDraft, SavedConnectionPromptAction, SshAuthTab, SshConnectionIntent,
+    SshConnectionWorkerResult,
 };
 use self::onboarding::OnboardingState;
 use self::pane_tree::SplitDrag;
@@ -875,20 +876,10 @@ pub(crate) struct WorkspaceApp {
     portable_current_password: String,
     portable_new_password: String,
     portable_confirm_password: String,
-    new_connection_form: Option<NewConnectionForm>,
-    new_connection_form_presence: oxideterm_gpui_ui::motion::ExitPresence,
-    jump_server_form_presence: oxideterm_gpui_ui::motion::ExitPresence,
-    jump_server_exit_commits: bool,
-    drill_down_parent_node_id: Option<NodeId>,
-    editing_saved_connection_id: Option<String>,
-    editing_saved_connection_connect_after_save_node_id: Option<NodeId>,
-    duplicating_saved_connection_id: Option<String>,
-    saved_connection_prompt_action: Option<SavedConnectionPromptAction>,
-    open_new_connection_select: Option<NewConnectionSelect>,
-    new_connection_select_focus_origin: Option<browser_behavior::BrowserFocusOrigin>,
     new_connection_caret_visible: bool,
     connection_flow: Entity<ConnectionFlowEntity>,
     _connection_flow_observation: Subscription,
+    _connection_flow_subscription: Subscription,
     active_proxy_connect_run: Option<NativeProxyConnectRun>,
     workspace_runtime: Entity<runtime_entity::WorkspaceRuntimeEntity>,
     _workspace_runtime_subscription: Subscription,

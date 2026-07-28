@@ -45,9 +45,12 @@ impl WorkspaceApp {
         let fingerprint = match &challenge.status {
             HostKeyStatus::Unknown { fingerprint, .. } => fingerprint.clone(),
             HostKeyStatus::Changed { .. } => {
-                if let Some(form) = self.new_connection_form.as_mut() {
-                    form.error = Some(self.i18n.t("ssh.host_key.changed_requires_remove"));
-                }
+                let message = self.i18n.t("ssh.host_key.changed_requires_remove");
+                self.update_connection_form_state(cx, |state| {
+                    if let Some(form) = state.form.as_mut() {
+                        form.error = Some(message);
+                    }
+                });
                 cx.notify();
                 return;
             }
@@ -55,11 +58,16 @@ impl WorkspaceApp {
         };
 
         if challenge.session_tree_challenge.is_some() {
-            if let Some(form) = self.new_connection_form.as_mut() {
-                form.pending = true;
-                form.error = Some(self.i18n.t("ssh.form.checking_host_key"));
+            let message = self.i18n.t("ssh.form.checking_host_key");
+            if self.connection_form_state(cx).form.is_some() {
+                self.update_connection_form_state(cx, |state| {
+                    if let Some(form) = state.form.as_mut() {
+                        form.pending = true;
+                        form.error = Some(message);
+                    }
+                });
             } else {
-                self.session_manager.status = Some(self.i18n.t("ssh.form.checking_host_key"));
+                self.session_manager.status = Some(message);
             }
             self.accept_active_proxy_connect_host_key(persist, fingerprint, window, cx);
             cx.notify();
@@ -93,9 +101,13 @@ impl WorkspaceApp {
         // Tauri HostKeyConfirmDialog cancellation only clears pending
         // connect/test state. It does not surface a form or session-manager
         // error for a user-initiated close.
-        if let Some(form) = self.new_connection_form.as_mut() {
-            form.pending = false;
-            form.error = None;
+        if self.connection_form_state(cx).form.is_some() {
+            self.update_connection_form_state(cx, |state| {
+                if let Some(form) = state.form.as_mut() {
+                    form.pending = false;
+                    form.error = None;
+                }
+            });
         } else {
             self.session_manager.status = None;
         }
@@ -127,11 +139,16 @@ impl WorkspaceApp {
             expected_fingerprint,
         ) {
             Ok(()) => {
-                if let Some(form) = self.new_connection_form.as_mut() {
-                    form.pending = true;
-                    form.error = Some(self.i18n.t("ssh.form.checking_host_key"));
+                let message = self.i18n.t("ssh.form.checking_host_key");
+                if self.connection_form_state(cx).form.is_some() {
+                    self.update_connection_form_state(cx, |state| {
+                        if let Some(form) = state.form.as_mut() {
+                            form.pending = true;
+                            form.error = Some(message);
+                        }
+                    });
                 } else {
-                    self.session_manager.status = Some(self.i18n.t("ssh.form.checking_host_key"));
+                    self.session_manager.status = Some(message);
                 }
                 if challenge.session_tree_challenge.is_some() {
                     self.continue_active_proxy_session_tree_preflight_only(cx);
@@ -145,10 +162,15 @@ impl WorkspaceApp {
                 }
             }
             Err(error) => {
-                if let Some(form) = self.new_connection_form.as_mut() {
-                    form.error = Some(error.to_string());
+                let message = error.to_string();
+                if self.connection_form_state(cx).form.is_some() {
+                    self.update_connection_form_state(cx, |state| {
+                        if let Some(form) = state.form.as_mut() {
+                            form.error = Some(message);
+                        }
+                    });
                 } else {
-                    self.session_manager.status = Some(error.to_string());
+                    self.session_manager.status = Some(message);
                 }
                 self.connection_flow.update(cx, |connection_flow, cx| {
                     connection_flow.restore_host_key_challenge(challenge, cx);

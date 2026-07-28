@@ -774,13 +774,7 @@ impl WorkspaceApp {
         form.username = username;
         form.focused_field = NewConnectionField::Password;
         form.group = self.i18n.t("ssh.form.ungrouped");
-        self.new_connection_form = Some(form);
-        self.drill_down_parent_node_id = None;
-        self.editing_saved_connection_id = None;
-        self.editing_saved_connection_connect_after_save_node_id = None;
-        self.duplicating_saved_connection_id = None;
-        self.saved_connection_prompt_action = None;
-        self.close_new_connection_select();
+        self.update_connection_form_state(cx, |state| state.replace_with_new_form(form));
         self.new_connection_caret_visible = true;
         self.needs_active_pane_focus = false;
         window.focus(&self.focus_handle, cx);
@@ -797,15 +791,10 @@ impl WorkspaceApp {
             Ok(Some(host)) => match saved_connection_from_ssh_host(host) {
                 Ok(conn) => {
                     self.prepare_modal_interaction_boundary(cx);
-                    self.new_connection_form = Some(
-                        super::session_manager::form_from_saved_connection(&conn, None),
-                    );
-                    self.drill_down_parent_node_id = None;
-                    self.editing_saved_connection_id = None;
-                    self.editing_saved_connection_connect_after_save_node_id = None;
-                    self.duplicating_saved_connection_id = None;
-                    self.saved_connection_prompt_action = None;
-                    self.close_new_connection_select();
+                    let form = super::session_manager::form_from_saved_connection(&conn, None);
+                    self.update_connection_form_state(cx, |state| {
+                        state.replace_with_new_form(form);
+                    });
                     self.new_connection_caret_visible = true;
                     self.needs_active_pane_focus = false;
                     window.focus(&self.focus_handle, cx);

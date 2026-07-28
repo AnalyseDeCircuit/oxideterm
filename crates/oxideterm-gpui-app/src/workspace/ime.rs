@@ -407,7 +407,8 @@ impl InputHandler for WorkspaceInputHandler {
                             _ if view.selected_ime_target == Some(target) => (0..text_len, false),
                             WorkspaceImeTarget::NewConnection(field)
                                 if view
-                                    .new_connection_form
+                                    .connection_form_state(cx)
+                                    .form
                                     .as_ref()
                                     .is_some_and(|form| form.selected_field == Some(field)) =>
                             {
@@ -628,9 +629,9 @@ impl WorkspaceApp {
             return Some(WorkspaceImeTarget::KeyboardInteractive(focused_prompt));
         }
 
-        if let Some(form) = self.new_connection_form.as_ref()
+        if let Some(form) = self.connection_form_state(cx).form.as_ref()
             && form.field_focused
-            && self.new_connection_field_accepts_ime(form.focused_field)
+            && self.new_connection_field_accepts_ime(form.focused_field, cx)
         {
             return Some(WorkspaceImeTarget::NewConnection(form.focused_field));
         }
@@ -1307,11 +1308,12 @@ impl WorkspaceApp {
         platform_range
     }
 
-    fn new_connection_field_accepts_ime(&self, field: NewConnectionField) -> bool {
+    fn new_connection_field_accepts_ime(&self, field: NewConnectionField, cx: &App) -> bool {
         if field == NewConnectionField::Password
-            && self.saved_connection_form_uses_unloaded_secret()
+            && self.saved_connection_form_uses_unloaded_secret(cx)
             && self
-                .new_connection_form
+                .connection_form_state(cx)
+                .form
                 .as_ref()
                 .is_some_and(|form| !form.password_loaded)
         {
@@ -1622,7 +1624,7 @@ impl WorkspaceApp {
                 }
             }
             WorkspaceImeTarget::NewConnection(field) => {
-                let form = self.new_connection_form.as_ref()?;
+                let form = self.connection_form_state(cx).form.as_ref()?;
                 new_connection_field_value(form, field).map(str::to_string)
             }
             WorkspaceImeTarget::KeyboardInteractive(index) => self
@@ -2557,7 +2559,10 @@ impl WorkspaceApp {
                 }
             }
             WorkspaceImeTarget::NewConnection(field) => {
-                if let Some(form) = self.new_connection_form.as_mut() {
+                let changed = self.update_connection_form_state(cx, |state| {
+                    let Some(form) = state.form.as_mut() else {
+                        return false;
+                    };
                     if form.selected_field == Some(field) && replacement_range.is_none() {
                         *connection_field_value_mut(form, field) = String::new();
                     }
@@ -2568,6 +2573,9 @@ impl WorkspaceApp {
                     );
                     form.selected_field = None;
                     form.error = None;
+                    true
+                });
+                if changed {
                     self.new_connection_caret_visible = true;
                     cx.notify();
                 }

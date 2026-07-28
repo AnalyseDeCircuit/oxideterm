@@ -3,14 +3,14 @@
 
 use std::{ops::Range, time::Duration};
 
-use gpui::{Context, Task, Timer};
+use gpui::{Context, EventEmitter, Task, Timer};
 use oxideterm_editor_core::utf16::replace_utf16;
 use oxideterm_ssh::{
     HostKeyStatus, KeyboardInteractivePromptRequest, KeyboardInteractiveResponses, SshPromptError,
 };
 use tokio::sync::oneshot;
 
-use super::{HostKeyChallenge, KeyboardInteractiveChallenge};
+use super::{ConnectionFormState, HostKeyChallenge, KeyboardInteractiveChallenge};
 
 /// Contains only non-secret values needed to render the host-key dialog.
 pub(in crate::workspace) struct HostKeyDialogSnapshot {
@@ -22,6 +22,9 @@ pub(in crate::workspace) struct HostKeyDialogSnapshot {
 
 /// Owns connection-flow state that must survive independently of root rendering.
 pub(in crate::workspace) struct ConnectionFlowEntity {
+    pub(in crate::workspace) form: ConnectionFormState,
+    connection_form_exit_task: Option<Task<()>>,
+    jump_server_exit_task: Option<Task<()>>,
     host_key_challenge: Option<HostKeyChallenge>,
     host_key_exit_task: Option<Task<()>>,
     keyboard_interactive_challenge: Option<KeyboardInteractiveChallenge>,
@@ -29,6 +32,13 @@ pub(in crate::workspace) struct ConnectionFlowEntity {
     keyboard_interactive_timer_task: Option<Task<()>>,
     keyboard_interactive_exit_task: Option<Task<()>>,
 }
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(in crate::workspace) enum ConnectionFlowEvent {
+    ConnectionFormClosed,
+}
+
+impl EventEmitter<ConnectionFlowEvent> for ConnectionFlowEntity {}
 
 pub(in crate::workspace) enum KeyboardInteractiveKeyAction {
     NotHandled,
@@ -47,6 +57,9 @@ pub(in crate::workspace) enum KeyboardInteractiveSubmitResult {
 impl ConnectionFlowEntity {
     pub(in crate::workspace) fn new() -> Self {
         Self {
+            form: ConnectionFormState::new(),
+            connection_form_exit_task: None,
+            jump_server_exit_task: None,
             host_key_challenge: None,
             host_key_exit_task: None,
             keyboard_interactive_challenge: None,
@@ -54,6 +67,119 @@ impl ConnectionFlowEntity {
             keyboard_interactive_timer_task: None,
             keyboard_interactive_exit_task: None,
         }
+    }
+
+    pub(in crate::workspace) fn begin_connection_form_exit(
+        &mut self,
+        delay: Duration,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let Some(generation) = self.form.presence.begin_exit() else {
+            return false;
+        };
+        self.form.close_select();
+        self.connection_form_exit_task = None;
+        if delay.is_zero() {
+            self.finish_connection_form_exit(generation, cx);
+            return true;
+        }
+        self.connection_form_exit_task = Some(cx.spawn(async move |connection_flow, cx| {
+            Timer::after(delay).await;
+            let _ = connection_flow.update(cx, |connection_flow, cx| {
+                connection_flow.finish_connection_form_exit(generation, cx);
+            });
+        }));
+        cx.notify();
+        true
+    }
+
+    pub(in crate::workspace) fn set_form_feedback(
+        &mut self,
+        pending: Option<bool>,
+        error: Option<String>,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let Some(form) = self.form.form.as_mut() else {
+            return false;
+        };
+        if let Some(pending) = pending {
+            form.pending = pending;
+        }
+        form.error = error;
+        cx.notify();
+        true
+    }
+
+    fn finish_connection_form_exit(&mut self, generation: u64, cx: &mut Context<Self>) -> bool {
+        if !self.form.presence.finish_exit(generation) {
+            return false;
+        }
+        self.connection_form_exit_task = None;
+        self.jump_server_exit_task = None;
+        self.form.clear();
+        self.form.presence.reopen();
+        self.clear_host_key_challenge(cx);
+        self.cancel_keyboard_interactive_challenge(Duration::ZERO, cx);
+        cx.emit(ConnectionFlowEvent::ConnectionFormClosed);
+        cx.notify();
+        true
+    }
+
+    pub(in crate::workspace) fn begin_jump_server_form_exit(
+        &mut self,
+        commit: bool,
+        delay: Duration,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let Some(generation) = self.form.jump_server_presence.begin_exit() else {
+            return false;
+        };
+        self.form.jump_server_exit_commits = commit;
+        if let Some(form) = self.form.form.as_mut() {
+            form.field_focused = false;
+            form.selected_field = None;
+        }
+        self.jump_server_exit_task = None;
+        if delay.is_zero() {
+            self.finish_jump_server_form_exit(generation, cx);
+            return true;
+        }
+        self.jump_server_exit_task = Some(cx.spawn(async move |connection_flow, cx| {
+            Timer::after(delay).await;
+            let _ = connection_flow.update(cx, |connection_flow, cx| {
+                connection_flow.finish_jump_server_form_exit(generation, cx);
+            });
+        }));
+        cx.notify();
+        true
+    }
+
+    fn finish_jump_server_form_exit(&mut self, generation: u64, cx: &mut Context<Self>) -> bool {
+        if !self.form.jump_server_presence.finish_exit(generation) {
+            return false;
+        }
+        self.jump_server_exit_task = None;
+        let commit = std::mem::take(&mut self.form.jump_server_exit_commits);
+        if let Some(form) = self.form.form.as_mut() {
+            if commit {
+                if let Some(jump_server) = form.jump_server_form.take() {
+                    form.proxy_hops.push(jump_server);
+                    if form.auth_tab == super::SshAuthTab::TwoFactor {
+                        form.auth_tab = super::SshAuthTab::Password;
+                        form.focused_field = super::NewConnectionField::Password;
+                    }
+                    form.proxy_chain_expanded = true;
+                    form.field_focused = false;
+                    form.selected_field = None;
+                    form.error = None;
+                }
+            } else {
+                form.jump_server_form = None;
+            }
+        }
+        self.form.jump_server_presence.reopen();
+        cx.notify();
+        true
     }
 
     pub(in crate::workspace) fn has_host_key_challenge(&self) -> bool {
@@ -424,7 +550,10 @@ mod tests {
     use tokio::sync::oneshot;
 
     use super::ConnectionFlowEntity;
-    use crate::workspace::new_connection::{HostKeyChallenge, SshConnectionIntent};
+    use crate::workspace::new_connection::{
+        HostKeyChallenge, NewConnectionForm, NewConnectionProxyHop, SavedConnectionPromptAction,
+        SshConnectionIntent,
+    };
 
     fn unknown_host_key_challenge() -> HostKeyChallenge {
         HostKeyChallenge {
@@ -562,5 +691,43 @@ mod tests {
             response_rx.try_recv(),
             Ok(Err(SshPromptError::Cancelled))
         ));
+    }
+
+    #[gpui::test]
+    fn connection_form_close_clears_secret_owner_and_mode_metadata(cx: &mut TestAppContext) {
+        let entity = cx.new(|_| ConnectionFlowEntity::new());
+
+        entity.update(cx, |entity, cx| {
+            let mut form = NewConnectionForm::default();
+            form.password = "secret".to_string();
+            entity.form.replace_with_new_form(form);
+            entity.form.editing_saved_connection_id = Some("saved-id".to_string());
+            entity.form.saved_connection_prompt_action = Some(SavedConnectionPromptAction::Connect);
+
+            assert!(entity.begin_connection_form_exit(Duration::ZERO, cx));
+            assert!(entity.form.form.is_none());
+            assert!(entity.form.editing_saved_connection_id.is_none());
+            assert!(entity.form.saved_connection_prompt_action.is_none());
+        });
+    }
+
+    #[gpui::test]
+    fn jump_server_exit_commits_once_inside_the_connection_entity(cx: &mut TestAppContext) {
+        let entity = cx.new(|_| ConnectionFlowEntity::new());
+
+        entity.update(cx, |entity, cx| {
+            let mut form = NewConnectionForm::default();
+            let mut jump_server = NewConnectionProxyHop::new();
+            jump_server.host = "jump.example.test".to_string();
+            jump_server.username = "alice".to_string();
+            form.jump_server_form = Some(jump_server);
+            entity.form.replace_with_new_form(form);
+
+            assert!(entity.begin_jump_server_form_exit(true, Duration::ZERO, cx));
+            let form = entity.form.form.as_ref().expect("retained connection form");
+            assert!(form.jump_server_form.is_none());
+            assert_eq!(form.proxy_hops.len(), 1);
+            assert_eq!(form.proxy_hops[0].host, "jump.example.test");
+        });
     }
 }
