@@ -117,23 +117,21 @@ impl WorkspaceApp {
         });
         let launcher_subscription = cx.subscribe(
             &launcher,
-            |workspace, _launcher, event: &LauncherWorkspaceEvent, cx| {
-                match event {
-                    LauncherWorkspaceEvent::EnabledChanged(enabled) => {
-                        workspace.settings_store.settings_mut().launcher.enabled = *enabled;
-                        let _ = workspace.settings_store.save();
-                        if !enabled {
-                            workspace.ime_marked_text = None;
-                        }
+            |workspace, _launcher, event: &LauncherWorkspaceEvent, cx| match event {
+                LauncherWorkspaceEvent::EnabledChanged(enabled) => {
+                    workspace.settings_store.settings_mut().launcher.enabled = *enabled;
+                    let _ = workspace.settings_store.save();
+                    if !enabled {
+                        workspace.ime_marked_text = None;
+                    }
+                    cx.notify();
+                }
+                LauncherWorkspaceEvent::TooltipRequested { id, label, x, y } => {
+                    workspace.queue_workspace_tooltip(id, label, *x, *y, cx);
+                }
+                LauncherWorkspaceEvent::TooltipCleared { id } => {
+                    if workspace.clear_workspace_tooltip_state(id) {
                         cx.notify();
-                    }
-                    LauncherWorkspaceEvent::TooltipRequested { id, label, x, y } => {
-                        workspace.queue_workspace_tooltip(id, label, *x, *y, cx);
-                    }
-                    LauncherWorkspaceEvent::TooltipCleared { id } => {
-                        if workspace.clear_workspace_tooltip_state(id) {
-                            cx.notify();
-                        }
                     }
                 }
             },
