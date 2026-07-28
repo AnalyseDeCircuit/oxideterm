@@ -1064,7 +1064,7 @@ impl WorkspaceApp {
                 super::plugin_host::NATIVE_PLUGIN_PROFILER_METRICS_EVENT,
             );
         let metrics_due = self.plugin_entity.update(cx, |plugins, _cx| {
-            plugins.profiler_metrics_due(NATIVE_PLUGIN_PROFILER_METRICS_INTERVAL)
+            plugins.runtime_profiler_metrics_due(NATIVE_PLUGIN_PROFILER_METRICS_INTERVAL)
         });
         if subscriptions.is_empty() || !metrics_due {
             return;

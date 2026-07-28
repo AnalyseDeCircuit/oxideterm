@@ -139,7 +139,7 @@ pub(in crate::workspace) struct PluginWorkspaceEntity {
     subscription_sampler_running: bool,
     subscription_sampler_task: Option<Task<()>>,
     transfer_progress_last_emitted: Option<Instant>,
-    profiler_last_emitted: Option<Instant>,
+    runtime_profiler_last_emitted: Option<Instant>,
     event_log_last_id: u64,
 }
 
@@ -198,7 +198,7 @@ impl PluginWorkspaceEntity {
             subscription_sampler_running: false,
             subscription_sampler_task: None,
             transfer_progress_last_emitted: None,
-            profiler_last_emitted: None,
+            runtime_profiler_last_emitted: None,
             event_log_last_id: 0,
         };
         entity.schedule_runtime_delivery(cx);
@@ -834,6 +834,8 @@ impl PluginWorkspaceEntity {
         event_log_last_id: Option<u64>,
         cx: &mut Context<Self>,
     ) {
+        // These samples serve registered runtime event subscriptions. They are
+        // intentionally independent from Plugin Manager page visibility.
         let sample_kinds = samples.iter().map(|(kind, _)| *kind).collect::<Vec<_>>();
         self.subscription_samples = sample_kinds;
         self.subscription_snapshots = samples.into_iter().collect();
@@ -910,13 +912,16 @@ impl PluginWorkspaceEntity {
         due
     }
 
-    pub(in crate::workspace) fn profiler_metrics_due(&mut self, interval: Duration) -> bool {
+    pub(in crate::workspace) fn runtime_profiler_metrics_due(
+        &mut self,
+        interval: Duration,
+    ) -> bool {
         let due = self
-            .profiler_last_emitted
+            .runtime_profiler_last_emitted
             .map(|last_emitted| last_emitted.elapsed() >= interval)
             .unwrap_or(true);
         if due {
-            self.profiler_last_emitted = Some(Instant::now());
+            self.runtime_profiler_last_emitted = Some(Instant::now());
         }
         due
     }
@@ -1727,6 +1732,155 @@ mod tests {
     }
 
     #[gpui::test]
+    fn hidden_plugin_manager_keeps_runtime_and_reliable_deliveries_alive(cx: &mut TestAppContext) {
+        let runtime = Arc::new(
+            tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .expect("plugin entity test runtime"),
+        );
+        let workspace_owner = cx.new(|cx| {
+            PluginWorkspaceEntity::new(runtime, plugin_host::NativePluginRegistry::default(), cx)
+        });
+        // The page mount may disappear while the workspace-owned Entity remains
+        // alive. This models the manager surface transitioning visible->hidden.
+        let visible_manager_mount = workspace_owner.clone();
+        let (confirm_response_tx, confirm_response_rx) = std::sync::mpsc::channel();
+        let (import_response_tx, _import_response_rx) = std::sync::mpsc::channel();
+        let (runtime_delivery_tx, request_senders, import_delivery_tx) =
+            workspace_owner.update(cx, |entity, cx| {
+                assert!(entity.start_runtime_services());
+                entity.configure_subscription_samples(
+                    vec![(
+                        PluginSubscriptionSample::Profiler,
+                        serde_json::json!({ "nodes": [] }),
+                    )],
+                    None,
+                    cx,
+                );
+                entity.oxide_import_contexts.insert(
+                    11,
+                    PluginOxideImportContext {
+                        plugin_id: Arc::from("plugin.test"),
+                        progress_registration_id: None,
+                        request_id: "import-hidden".to_string(),
+                        options: NativePluginOxidePostImportOptions {
+                            import_app_settings: false,
+                            selected_app_settings_sections: None,
+                            import_plugin_settings: false,
+                            selected_plugin_ids: None,
+                            import_quick_commands: false,
+                            quick_command_strategy: oxideterm_plugin_host_api::sync::
+                                NativePluginQuickCommandImportStrategy::Rename,
+                        },
+                        response_tx: import_response_tx,
+                    },
+                );
+                (
+                    entity.runtime_delivery_tx.clone(),
+                    entity.runtime_request_senders(),
+                    entity.oxide_import_delivery_tx.clone(),
+                )
+            });
+
+        drop(visible_manager_mount);
+
+        runtime_delivery_tx
+            .send(NativePluginRuntimeDelivery::CommandDispatch {
+                plugin_id: "plugin.test".to_string(),
+                result: Ok(plugin_runtime::NativePluginRuntimeCommandDispatch {
+                    plugin_id: "plugin.test".to_string(),
+                    command: "demo.command".to_string(),
+                    response: plugin_runtime::PluginResponse::ok(
+                        "command-hidden",
+                        serde_json::Value::Null,
+                    ),
+                    messages: Vec::new(),
+                    effects: Vec::new(),
+                }),
+            })
+            .expect("hidden command delivery");
+        runtime_delivery_tx
+            .send(NativePluginRuntimeDelivery::EventDispatch {
+                plugin_id: "plugin.test".to_string(),
+                result: Ok(plugin_runtime::NativePluginRuntimeEventDispatch {
+                    plugin_id: "plugin.test".to_string(),
+                    event: plugin_runtime::PluginEvent {
+                        name: "demo.event".to_string(),
+                        payload: serde_json::Value::Null,
+                    },
+                    response: plugin_runtime::PluginResponse::ok(
+                        "event-hidden",
+                        serde_json::Value::Null,
+                    ),
+                    messages: Vec::new(),
+                    effects: Vec::new(),
+                }),
+            })
+            .expect("hidden event delivery");
+        request_senders
+            .confirm
+            .send(NativePluginConfirmRequest {
+                plugin_id: "plugin.test".to_string(),
+                request_id: "confirm-hidden".to_string(),
+                title: "Confirm".to_string(),
+                description: "Continue hidden request".to_string(),
+                response_tx: confirm_response_tx,
+            })
+            .expect("hidden confirm delivery");
+        import_delivery_tx
+            .send(NativePluginOxideImportWorkerMessage::Done {
+                operation_id: 11,
+                result: Err(()),
+            })
+            .expect("hidden import completion");
+
+        cx.run_until_parked();
+
+        workspace_owner.update(cx, |entity, cx| {
+            let mut runtime_intents = entity.take_runtime_intents();
+            assert!(matches!(
+                runtime_intents.pop_front(),
+                Some(PluginRuntimeIntent::ApplyEffects {
+                    refresh: PluginRuntimeAdapterRefresh::TerminalHooks,
+                    ..
+                })
+            ));
+            assert!(matches!(
+                runtime_intents.pop_front(),
+                Some(PluginRuntimeIntent::ApplyEffects {
+                    refresh: PluginRuntimeAdapterRefresh::TerminalInputInterceptors,
+                    ..
+                })
+            ));
+            assert!(runtime_intents.is_empty());
+
+            assert!(entity.promote_confirm_request());
+            let confirm_generation = entity
+                .begin_confirm_exit(true)
+                .expect("hidden confirm generation");
+            assert!(!entity.finish_confirm_exit(confirm_generation));
+
+            assert!(matches!(
+                entity.take_oxide_import_intents().pop_front(),
+                Some(PluginOxideImportIntent::Complete { request_id, .. })
+                    if request_id == "import-hidden"
+            ));
+
+            // Profiler sampling here belongs to a plugin runtime subscription,
+            // not to the hidden manager page, so it must remain active.
+            assert!(entity.subscription_sampler_running);
+            assert_eq!(
+                entity.subscription_samples(),
+                vec![PluginSubscriptionSample::Profiler]
+            );
+            assert!(entity.runtime_profiler_metrics_due(Duration::from_secs(1)));
+            entity.configure_subscription_samples(Vec::new(), None, cx);
+        });
+        assert_eq!(confirm_response_rx.try_recv(), Ok(true));
+    }
+
+    #[gpui::test]
     fn entity_release_stops_plugin_delivery_waiters(cx: &mut TestAppContext) {
         let runtime = Arc::new(
             tokio::runtime::Builder::new_current_thread()
@@ -1802,8 +1956,8 @@ mod tests {
 
             assert!(entity.transfer_progress_due(Duration::from_secs(1)));
             assert!(!entity.transfer_progress_due(Duration::from_secs(1)));
-            assert!(entity.profiler_metrics_due(Duration::from_secs(1)));
-            assert!(!entity.profiler_metrics_due(Duration::from_secs(1)));
+            assert!(entity.runtime_profiler_metrics_due(Duration::from_secs(1)));
+            assert!(!entity.runtime_profiler_metrics_due(Duration::from_secs(1)));
             assert_eq!(entity.advance_event_log_last_id(9), 7);
 
             entity.configure_subscription_samples(Vec::new(), None, cx);
