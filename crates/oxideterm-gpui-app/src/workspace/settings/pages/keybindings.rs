@@ -363,11 +363,9 @@ impl WorkspaceApp {
                     KeybindingToolbarAction::Import => this.import_keybindings(window, cx),
                     KeybindingToolbarAction::Export => this.export_keybindings(cx),
                     KeybindingToolbarAction::ResetAll => {
-                        this.settings_page
-                            .set_keybinding_reset_all_confirm_open(true);
-                        this.keybinding_reset_all_confirm_presence.reopen();
-                        this.reset_standard_confirm_focus();
-                        cx.notify();
+                        this.settings_workspace.update(cx, |settings, cx| {
+                            settings.open_keybinding_reset_confirm(cx);
+                        });
                     }
                 }
                 cx.stop_propagation();
@@ -876,10 +874,15 @@ impl WorkspaceApp {
         &self,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        let confirm = self
+            .settings_workspace
+            .read(cx)
+            .keybinding_reset_confirm_snapshot()
+            .expect("keybinding reset confirmation must be open while rendered");
         oxideterm_gpui_ui::confirm::confirm_dialog_with_focus_motion(
             &self.tokens,
             "settings-keybindings-reset-all-confirm-motion",
-            self.keybinding_reset_all_confirm_presence.phase(),
+            confirm.phase,
             ConfirmDialogView {
                 variant: ConfirmDialogVariant::Danger,
                 title: div()
@@ -915,7 +918,7 @@ impl WorkspaceApp {
                     ))
                     .into_any_element(),
             },
-            self.standard_confirm_focus(),
+            confirm.focused_action,
             cx.listener(|this, _event, _window, cx| {
                 this.begin_keybinding_reset_all_confirm_exit(cx);
                 cx.stop_propagation();

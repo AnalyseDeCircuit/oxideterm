@@ -33,7 +33,12 @@ impl WorkspaceApp {
                 if let Some(modal) = self.render_knowledge_delete_confirm_dialog(cx) {
                     modals.push(modal);
                 }
-                if self.settings_page.keybinding_reset_all_confirm_open {
+                if self
+                    .settings_workspace
+                    .read(cx)
+                    .keybinding_reset_confirm_snapshot()
+                    .is_some()
+                {
                     modals.push(self.render_keybinding_reset_all_confirm_dialog(cx));
                 }
                 if let Some(modal) = self.render_settings_managed_key_dialog(cx) {

@@ -11,7 +11,10 @@ use oxideterm_connections::{
     PrivilegeCredentialKind,
 };
 use oxideterm_gpui_settings_view::SettingsInput;
+use oxideterm_gpui_ui::confirm::ConfirmDialogAction;
 use zeroize::Zeroizing;
+
+use crate::workspace::browser_behavior;
 
 use super::update::NativeUpdateRuntime;
 use super::{
@@ -304,7 +307,24 @@ pub(in crate::workspace) struct SettingsWorkspaceEntity {
     background_gallery_results: VecDeque<BackgroundGalleryOperationResult>,
     theme_import_task: Option<Task<()>>,
     theme_import_results: VecDeque<ThemeImportResult>,
+    keybinding_reset_confirm_open: bool,
+    keybinding_reset_confirm_presence: oxideterm_gpui_ui::motion::ExitPresence,
+    keybinding_reset_confirm_focused_action: Option<ConfirmDialogAction>,
+    keybinding_reset_confirm_exit_task: Option<Task<()>>,
     pub(super) native_update: NativeUpdateRuntime,
+}
+
+#[derive(Clone, Copy)]
+pub(in crate::workspace) struct KeybindingResetConfirmSnapshot {
+    pub(in crate::workspace) phase: oxideterm_gpui_ui::motion::ExitPhase,
+    pub(in crate::workspace) focused_action: Option<ConfirmDialogAction>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(in crate::workspace) enum KeybindingResetConfirmKeyAction {
+    Cancel,
+    Confirm,
+    Handled,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -411,7 +431,114 @@ impl SettingsWorkspaceEntity {
             background_gallery_results: VecDeque::new(),
             theme_import_task: None,
             theme_import_results: VecDeque::new(),
+            keybinding_reset_confirm_open: false,
+            keybinding_reset_confirm_presence: oxideterm_gpui_ui::motion::ExitPresence::visible(),
+            keybinding_reset_confirm_focused_action: None,
+            keybinding_reset_confirm_exit_task: None,
             native_update: NativeUpdateRuntime::new(cx),
+        }
+    }
+
+    pub(in crate::workspace) fn open_keybinding_reset_confirm(&mut self, cx: &mut Context<Self>) {
+        self.keybinding_reset_confirm_exit_task = None;
+        self.keybinding_reset_confirm_open = true;
+        self.keybinding_reset_confirm_presence.reopen();
+        self.keybinding_reset_confirm_focused_action = None;
+        cx.notify();
+    }
+
+    pub(in crate::workspace) fn keybinding_reset_confirm_snapshot(
+        &self,
+    ) -> Option<KeybindingResetConfirmSnapshot> {
+        self.keybinding_reset_confirm_open
+            .then_some(KeybindingResetConfirmSnapshot {
+                phase: self.keybinding_reset_confirm_presence.phase(),
+                focused_action: self.keybinding_reset_confirm_focused_action,
+            })
+    }
+
+    pub(in crate::workspace) fn begin_keybinding_reset_confirm_exit(
+        &mut self,
+        delay: Duration,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if !self.keybinding_reset_confirm_open {
+            return false;
+        }
+        let Some(generation) = self.keybinding_reset_confirm_presence.begin_exit() else {
+            return false;
+        };
+        self.keybinding_reset_confirm_focused_action = None;
+        self.keybinding_reset_confirm_exit_task = None;
+        if delay.is_zero() {
+            self.finish_keybinding_reset_confirm_exit(generation, cx);
+            return true;
+        }
+        // Retaining the task makes reopen and Entity release cancel stale exits.
+        self.keybinding_reset_confirm_exit_task = Some(cx.spawn(async move |settings, cx| {
+            Timer::after(delay).await;
+            let _ = settings.update(cx, |settings, cx| {
+                settings.finish_keybinding_reset_confirm_exit(generation, cx);
+            });
+        }));
+        cx.notify();
+        true
+    }
+
+    pub(in crate::workspace) fn handle_keybinding_reset_confirm_key(
+        &mut self,
+        key: &str,
+        shift: bool,
+        blocked_by_primary_modifier: bool,
+        cx: &mut Context<Self>,
+    ) -> Option<KeybindingResetConfirmKeyAction> {
+        if blocked_by_primary_modifier
+            || !self.keybinding_reset_confirm_open
+            || self.keybinding_reset_confirm_presence.phase()
+                != oxideterm_gpui_ui::motion::ExitPhase::Visible
+        {
+            return None;
+        }
+        const ACTIONS: [ConfirmDialogAction; 2] =
+            [ConfirmDialogAction::Cancel, ConfirmDialogAction::Confirm];
+        match browser_behavior::modal_footer_key_action(
+            key,
+            shift,
+            &ACTIONS,
+            self.keybinding_reset_confirm_focused_action,
+            ConfirmDialogAction::Cancel,
+        ) {
+            Some(browser_behavior::ModalFooterKeyAction::Cancel) => {
+                self.keybinding_reset_confirm_focused_action = None;
+                Some(KeybindingResetConfirmKeyAction::Cancel)
+            }
+            Some(browser_behavior::ModalFooterKeyAction::Focus(action)) => {
+                self.keybinding_reset_confirm_focused_action = Some(action);
+                cx.notify();
+                Some(KeybindingResetConfirmKeyAction::Handled)
+            }
+            Some(browser_behavior::ModalFooterKeyAction::Activate(action)) => {
+                self.keybinding_reset_confirm_focused_action = None;
+                Some(match action {
+                    ConfirmDialogAction::Cancel => KeybindingResetConfirmKeyAction::Cancel,
+                    ConfirmDialogAction::Confirm => KeybindingResetConfirmKeyAction::Confirm,
+                })
+            }
+            None => None,
+        }
+    }
+
+    fn finish_keybinding_reset_confirm_exit(&mut self, generation: u64, cx: &mut Context<Self>) {
+        self.keybinding_reset_confirm_exit_task = None;
+        if self.keybinding_reset_confirm_open
+            && self
+                .keybinding_reset_confirm_presence
+                .finish_exit(generation)
+        {
+            self.keybinding_reset_confirm_open = false;
+            self.keybinding_reset_confirm_presence.reopen();
+            self.keybinding_reset_confirm_focused_action = None;
+            cx.notify();
         }
     }
 
@@ -1201,10 +1328,11 @@ mod tests {
     };
 
     use gpui::{AppContext, TestAppContext};
+    use oxideterm_gpui_ui::confirm::ConfirmDialogAction;
 
     use super::{
         BackgroundGalleryOperationResult, DataDirectoryConfirm, ExternalStoreWatch,
-        SettingsWorkspaceEntity,
+        KeybindingResetConfirmKeyAction, SettingsWorkspaceEntity,
     };
 
     #[test]
@@ -1346,6 +1474,44 @@ mod tests {
             assert!(entity.begin_data_directory_confirm_exit(false, Duration::ZERO, cx));
             assert!(entity.data_directory_confirm().is_none());
             assert!(!entity.data_directory_confirm_is_visible());
+        });
+    }
+
+    #[gpui::test]
+    fn keybinding_reset_confirm_focus_and_exit_are_entity_owned(cx: &mut TestAppContext) {
+        let entity = cx.new(SettingsWorkspaceEntity::new);
+        entity.update(cx, |entity, cx| {
+            entity.open_keybinding_reset_confirm(cx);
+            let snapshot = entity
+                .keybinding_reset_confirm_snapshot()
+                .expect("confirmation should be open");
+            assert_eq!(
+                snapshot.phase,
+                oxideterm_gpui_ui::motion::ExitPhase::Visible
+            );
+            assert_eq!(snapshot.focused_action, None);
+
+            assert_eq!(
+                entity.handle_keybinding_reset_confirm_key("end", false, false, cx),
+                Some(KeybindingResetConfirmKeyAction::Handled)
+            );
+            assert_eq!(
+                entity
+                    .keybinding_reset_confirm_snapshot()
+                    .and_then(|snapshot| snapshot.focused_action),
+                Some(ConfirmDialogAction::Confirm)
+            );
+            assert_eq!(
+                entity.handle_keybinding_reset_confirm_key("enter", false, false, cx),
+                Some(KeybindingResetConfirmKeyAction::Confirm)
+            );
+
+            assert!(entity.begin_keybinding_reset_confirm_exit(Duration::from_millis(10), cx,));
+            assert!(entity.keybinding_reset_confirm_exit_task.is_some());
+            entity.open_keybinding_reset_confirm(cx);
+            assert!(entity.keybinding_reset_confirm_exit_task.is_none());
+            assert!(entity.begin_keybinding_reset_confirm_exit(Duration::ZERO, cx));
+            assert!(entity.keybinding_reset_confirm_snapshot().is_none());
         });
     }
 

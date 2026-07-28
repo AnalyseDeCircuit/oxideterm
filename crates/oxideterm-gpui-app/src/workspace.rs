@@ -672,7 +672,6 @@ enum SimpleConfirmExitTarget {
     AiDeleteMessage,
     NodeDisconnect,
     TabClose,
-    KeybindingResetAll,
 }
 
 #[derive(Clone)]
@@ -760,7 +759,6 @@ pub(crate) struct WorkspaceApp {
     launch_at_login_error: Option<String>,
     standard_confirm_focused_action: Option<ConfirmDialogAction>,
     settings_reset_confirm_presence: oxideterm_gpui_ui::motion::ExitPresence,
-    keybinding_reset_all_confirm_presence: oxideterm_gpui_ui::motion::ExitPresence,
     ai_clear_all_confirm_presence: oxideterm_gpui_ui::motion::ExitPresence,
     ai_delete_message_confirm_presence: oxideterm_gpui_ui::motion::ExitPresence,
     tab_close_confirm_presence: oxideterm_gpui_ui::motion::ExitPresence,

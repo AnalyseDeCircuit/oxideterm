@@ -47,7 +47,6 @@ pub struct SettingsPageModel {
     pub keybinding_recording_action_id: Option<String>,
     pub keybinding_conflict_action_ids: Vec<String>,
     pub keybinding_search_query: String,
-    pub keybinding_reset_all_confirm_open: bool,
     pub legal_notice_open: bool,
     pub theme_editor: Option<ThemeEditorState>,
     pub background_cache_poll_scheduled: bool,
@@ -74,7 +73,6 @@ impl Default for SettingsPageModel {
             keybinding_recording_action_id: None,
             keybinding_conflict_action_ids: Vec::new(),
             keybinding_search_query: String::new(),
-            keybinding_reset_all_confirm_open: false,
             legal_notice_open: false,
             theme_editor: None,
             background_cache_poll_scheduled: false,
@@ -176,11 +174,6 @@ impl SettingsPageModel {
     /// Updates the keybinding search draft.
     pub fn set_keybinding_search_query(&mut self, query: impl Into<String>) {
         self.keybinding_search_query = query.into();
-    }
-
-    /// Opens or closes the reset-all keybindings confirmation.
-    pub fn set_keybinding_reset_all_confirm_open(&mut self, is_open: bool) {
-        self.keybinding_reset_all_confirm_open = is_open;
     }
 
     /// Installs a new theme editor model.

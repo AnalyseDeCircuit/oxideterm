@@ -157,14 +157,6 @@ impl WorkspaceApp {
                 self.tab_host
                     .update(cx, |tab_host, _| tab_host.clear_close_confirm());
             }
-            SimpleConfirmExitTarget::KeybindingResetAll
-                if self
-                    .keybinding_reset_all_confirm_presence
-                    .finish_exit(generation) =>
-            {
-                self.settings_page
-                    .set_keybinding_reset_all_confirm_open(false);
-            }
             _ => return false,
         }
         true
@@ -222,16 +214,13 @@ impl WorkspaceApp {
         &mut self,
         cx: &mut Context<Self>,
     ) -> bool {
-        let Some(generation) = self.keybinding_reset_all_confirm_presence.begin_exit() else {
-            return false;
-        };
-        self.clear_standard_confirm_focus();
-        self.schedule_simple_confirm_exit(
-            SimpleConfirmExitTarget::KeybindingResetAll,
-            generation,
-            cx,
+        let delay = oxideterm_gpui_ui::motion::duration(
+            &self.tokens,
+            oxideterm_gpui_ui::motion::MotionDuration::Control,
         );
-        true
+        self.settings_workspace.update(cx, |settings, cx| {
+            settings.begin_keybinding_reset_confirm_exit(delay, cx)
+        })
     }
     pub(super) fn open_search(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.search.visible = true;
@@ -1037,23 +1026,33 @@ impl WorkspaceApp {
                 Some(ConfirmKeyboardAction::Handled) => true,
                 None => false,
             }
-        } else if self.settings_page.keybinding_reset_all_confirm_open
-            && self.keybinding_reset_all_confirm_presence.phase()
-                == oxideterm_gpui_ui::motion::ExitPhase::Visible
+        } else if self
+            .settings_workspace
+            .read(cx)
+            .keybinding_reset_confirm_snapshot()
+            .is_some_and(|snapshot| snapshot.phase == oxideterm_gpui_ui::motion::ExitPhase::Visible)
         {
-            match self.handle_standard_confirm_key(event, cx) {
-                Some(ConfirmKeyboardAction::Cancel) => {
+            let key_action = self.settings_workspace.update(cx, |settings, cx| {
+                settings.handle_keybinding_reset_confirm_key(
+                    event.keystroke.key.as_str(),
+                    event.keystroke.modifiers.shift,
+                    event.keystroke.modifiers.platform || event.keystroke.modifiers.control,
+                    cx,
+                )
+            });
+            match key_action {
+                Some(settings::KeybindingResetConfirmKeyAction::Cancel) => {
                     self.begin_keybinding_reset_all_confirm_exit(cx);
                     cx.notify();
                     true
                 }
-                Some(ConfirmKeyboardAction::Confirm) => {
+                Some(settings::KeybindingResetConfirmKeyAction::Confirm) => {
                     if self.begin_keybinding_reset_all_confirm_exit(cx) {
                         self.reset_all_keybindings(window, cx);
                     }
                     true
                 }
-                Some(ConfirmKeyboardAction::Handled) => true,
+                Some(settings::KeybindingResetConfirmKeyAction::Handled) => true,
                 None => false,
             }
         } else if self

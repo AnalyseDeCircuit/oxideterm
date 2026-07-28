@@ -629,8 +629,6 @@ impl WorkspaceApp {
             launch_at_login_error: None,
             standard_confirm_focused_action: None,
             settings_reset_confirm_presence: oxideterm_gpui_ui::motion::ExitPresence::visible(),
-            keybinding_reset_all_confirm_presence: oxideterm_gpui_ui::motion::ExitPresence::visible(
-            ),
             ai_clear_all_confirm_presence: oxideterm_gpui_ui::motion::ExitPresence::visible(),
             ai_delete_message_confirm_presence: oxideterm_gpui_ui::motion::ExitPresence::visible(),
             tab_close_confirm_presence: oxideterm_gpui_ui::motion::ExitPresence::visible(),
