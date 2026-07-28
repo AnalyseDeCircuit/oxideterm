@@ -188,6 +188,7 @@ impl WorkspaceApp {
                 let detached_window_handle = handle.into();
                 self.detached_tab_windows
                     .insert(tab_id, detached_window_handle);
+                self.sync_ide_surface_mount(tab_id, cx);
                 self.tab_host.update(cx, |tab_host, _cx| {
                     tab_host.bind_tab_panes_to_window(tab_id, detached_window_handle);
                 });

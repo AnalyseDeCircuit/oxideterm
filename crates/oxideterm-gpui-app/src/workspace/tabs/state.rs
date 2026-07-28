@@ -22,12 +22,19 @@ impl WorkspaceApp {
         active_tab_id: Option<TabId>,
         cx: &mut App,
     ) {
-        let active_tab_changed = self.main_window_tabs.active_tab_id != active_tab_id;
+        let previous_active_tab_id = self.main_window_tabs.active_tab_id;
+        let active_tab_changed = previous_active_tab_id != active_tab_id;
         self.main_window_tabs.active_tab_id = active_tab_id;
         self.tab_host.update(cx, |tab_host, _| {
             tab_host.observe_active_tab(active_tab_id);
         });
         if active_tab_changed {
+            if let Some(tab_id) = previous_active_tab_id {
+                self.sync_ide_surface_mount(tab_id, cx);
+            }
+            if let Some(tab_id) = active_tab_id {
+                self.sync_ide_surface_mount(tab_id, cx);
+            }
             // Host Tools owns its timer; root only pushes mount visibility changes.
             self.sync_host_tools_lifecycle(false, cx);
             self.sync_active_terminal_metadata_context(cx);

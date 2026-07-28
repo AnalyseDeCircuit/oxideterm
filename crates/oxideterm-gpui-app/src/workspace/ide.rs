@@ -1,6 +1,6 @@
-use gpui::{AnyElement, AppContext, Context, IntoElement, div};
+use gpui::{AnyElement, App, AppContext, Context, IntoElement, div};
 use oxideterm_gpui_ide::{
-    IdeLabels, IdeRuntimeSettings, IdeSurface, IdeSurfaceEvent, NodeAgentMode,
+    IdeLabels, IdeRuntimeSettings, IdeSurface, IdeSurfaceEvent, IdeSurfaceMount, NodeAgentMode,
 };
 use oxideterm_settings::{IdeAgentMode, PersistedSettings};
 use oxideterm_ssh::{NodeId, PhaseResult, ReconnectIdeSnapshot};
@@ -29,6 +29,19 @@ impl IdeOpenIntent {
 }
 
 impl WorkspaceApp {
+    pub(in crate::workspace) fn sync_ide_surface_mount(&mut self, tab_id: TabId, cx: &mut App) {
+        let mount = ide_surface_mount_for_location(
+            self.main_window_tabs.active_tab_id == Some(tab_id),
+            self.detached_tabs.contains(&tab_id),
+            self.detached_tab_windows.contains_key(&tab_id),
+        );
+        if let Some(surface) = self.ide_tab_surfaces.get(&tab_id) {
+            // WorkspaceApp only reports window placement. The IDE entity owns
+            // the sampling, watcher, action, and node-session transitions.
+            surface.update(cx, |surface, cx| surface.set_mount(mount, cx));
+        }
+    }
+
     pub(super) fn open_ide_folder_picker_tab(&mut self, node_id: NodeId, cx: &mut Context<Self>) {
         let active_terminal_cwd = self.active_ssh_terminal_cwd_path_for_node(&node_id, cx);
         self.open_ide_folder_picker_tab_with_initial_path(
@@ -659,6 +672,20 @@ fn ide_restore_was_closed_after_snapshot(
     matches!((closed_at, snapshot_at), (Some(closed_at), Some(snapshot_at)) if closed_at > snapshot_at)
 }
 
+fn ide_surface_mount_for_location(
+    is_main_window_active: bool,
+    is_detached: bool,
+    has_detached_window: bool,
+) -> IdeSurfaceMount {
+    if has_detached_window {
+        IdeSurfaceMount::DetachedWindow
+    } else if is_main_window_active && !is_detached {
+        IdeSurfaceMount::MainWindow
+    } else {
+        IdeSurfaceMount::Hidden
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -698,5 +725,25 @@ mod tests {
     fn sidebar_ide_open_activates_existing_tab_without_choosing_folder() {
         assert!(!IdeOpenIntent::ActivateOrCreate.reopens_folder_picker());
         assert!(IdeOpenIntent::ChooseFolder.reopens_folder_picker());
+    }
+
+    #[test]
+    fn ide_mount_tracks_main_hidden_detaching_and_detached_locations() {
+        assert_eq!(
+            ide_surface_mount_for_location(true, false, false),
+            IdeSurfaceMount::MainWindow
+        );
+        assert_eq!(
+            ide_surface_mount_for_location(false, false, false),
+            IdeSurfaceMount::Hidden
+        );
+        assert_eq!(
+            ide_surface_mount_for_location(false, true, false),
+            IdeSurfaceMount::Hidden
+        );
+        assert_eq!(
+            ide_surface_mount_for_location(false, true, true),
+            IdeSurfaceMount::DetachedWindow
+        );
     }
 }

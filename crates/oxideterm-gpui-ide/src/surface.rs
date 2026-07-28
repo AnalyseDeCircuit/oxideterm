@@ -186,6 +186,20 @@ pub enum IdeLoadState {
     Disconnected,
 }
 
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum IdeSurfaceMount {
+    #[default]
+    Hidden,
+    MainWindow,
+    DetachedWindow,
+}
+
+impl IdeSurfaceMount {
+    fn is_visible(self) -> bool {
+        !matches!(self, Self::Hidden)
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct IdeRuntimeSettings {
     pub auto_save: bool,
@@ -378,6 +392,12 @@ enum AgentActionKind {
     Refresh,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum AgentStatusRefreshOrigin {
+    VisibilitySampling,
+    UserAction,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct TabDrag {
     tab_id: EditorTabId,
@@ -493,7 +513,12 @@ pub struct IdeSurface {
     agent_status_trigger_bounds: Option<Bounds<Pixels>>,
     agent_remove_confirm_open: bool,
     agent_action: Option<AgentActionKind>,
+    agent_refresh_origin: Option<AgentStatusRefreshOrigin>,
+    mount: IdeSurfaceMount,
     agent_poll_generation: u64,
+    agent_poll_task: Option<Task<()>>,
+    agent_sampling_refresh_task: Option<Task<()>>,
+    agent_sampling_backend_abort: Option<tokio::task::AbortHandle>,
     agent_watch_generation: u64,
     watched_root_path: Option<String>,
     agent_watch_task: Option<Task<()>>,

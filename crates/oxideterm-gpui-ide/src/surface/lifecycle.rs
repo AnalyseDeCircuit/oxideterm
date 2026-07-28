@@ -59,7 +59,12 @@ impl IdeSurface {
             agent_status_trigger_bounds: None,
             agent_remove_confirm_open: false,
             agent_action: None,
+            agent_refresh_origin: None,
+            mount: IdeSurfaceMount::default(),
             agent_poll_generation: 0,
+            agent_poll_task: None,
+            agent_sampling_refresh_task: None,
+            agent_sampling_backend_abort: None,
             agent_watch_generation: 0,
             watched_root_path: None,
             agent_watch_task: None,
@@ -77,17 +82,43 @@ impl IdeSurface {
         &self.load_state
     }
 
+    pub fn mount(&self) -> IdeSurfaceMount {
+        self.mount
+    }
+
+    pub fn set_mount(&mut self, mount: IdeSurfaceMount, cx: &mut Context<Self>) {
+        if self.mount == mount {
+            return;
+        }
+        let was_visible = self.mount.is_visible();
+        self.mount = mount;
+        if mount.is_visible() {
+            if !was_visible {
+                // Mount visibility controls only page sampling. User operations
+                // and node ownership continue independently while hidden.
+                self.resume_agent_sampling(cx);
+            }
+        } else {
+            self.cancel_agent_sampling();
+            self.stop_agent_watch(cx);
+        }
+    }
+
     pub fn set_visual_and_runtime_settings(
         &mut self,
         tokens: ThemeTokens,
         runtime_settings: IdeRuntimeSettings,
         cx: &mut Context<Self>,
     ) {
+        let previous_agent_mode = self.runtime_settings.agent_mode;
         self.tokens = tokens;
         self.runtime_settings = runtime_settings;
         self.fs.set_mode(runtime_settings.agent_mode);
         if runtime_settings.agent_mode == NodeAgentMode::Disabled {
+            self.cancel_agent_sampling();
             self.stop_agent_watch(cx);
+        } else if previous_agent_mode == NodeAgentMode::Disabled && self.mount.is_visible() {
+            self.resume_agent_sampling(cx);
         }
         if runtime_settings.agent_mode != NodeAgentMode::Ask {
             self.agent_opt_in_open = false;
@@ -146,6 +177,7 @@ impl IdeSurface {
     ) {
         let node_id = node_id.into();
         let root_path = root_path.into();
+        self.cancel_agent_sampling();
         if let Some(previous_node_id) = self.node_id.clone()
             && previous_node_id != node_id
         {
@@ -221,6 +253,7 @@ impl IdeSurface {
     }
 
     pub fn release_remote_session(&mut self, cx: &mut Context<Self>) {
+        self.cancel_agent_sampling();
         self.stop_agent_watch(cx);
         self.clear_search_cache();
         self.search.generation = self.search.generation.wrapping_add(1);
@@ -248,6 +281,7 @@ impl IdeSurface {
     }
 
     pub fn mark_connection_interrupted(&mut self, cx: &mut Context<Self>) {
+        self.cancel_agent_sampling();
         self.stop_agent_watch(cx);
         self.clear_search_cache();
         self.search.generation = self.search.generation.wrapping_add(1);
@@ -282,9 +316,7 @@ impl IdeSurface {
         if same_project_open {
             self.load_state = IdeLoadState::Ready;
             self.last_error = None;
-            self.refresh_agent_status(cx);
-            self.schedule_next_agent_status_poll(cx);
-            self.start_agent_watch_if_ready(cx);
+            self.resume_agent_sampling(cx);
             for path in snapshot.tab_paths {
                 self.open_remote_file(
                     IdeLocation::remote(snapshot.connection_id.clone(), path),
@@ -318,6 +350,9 @@ impl IdeSurface {
 
 impl Drop for IdeSurface {
     fn drop(&mut self) {
+        if let Some(abort_handle) = self.agent_sampling_backend_abort.take() {
+            abort_handle.abort();
+        }
         if let Some(abort_handle) = self.agent_watch_backend_abort.take() {
             abort_handle.abort();
         }
@@ -385,6 +420,198 @@ mod lifecycle_tests {
                 )
             })
             .count()
+    }
+
+    fn test_surface(cx: &mut TestAppContext) -> Entity<IdeSurface> {
+        let router = NodeRouter::new(SshConnectionRegistry::default());
+        let fs = NodeAgentIdeFileSystem::new(router, NodeAgentMode::Ask);
+        let backend_runtime = Arc::new(
+            tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .expect("build IDE visibility test runtime"),
+        );
+        cx.new(move |cx| {
+            IdeSurface::new(
+                fs,
+                default_tokens(),
+                IdeLabels::default(),
+                IdeRuntimeSettings::default(),
+                backend_runtime,
+                cx,
+            )
+        })
+    }
+
+    fn configure_ready_surface(surface: &mut IdeSurface, cx: &mut Context<IdeSurface>) {
+        surface.node_id = Some("visibility-node".to_string());
+        surface.root_path = Some("/srv/app".to_string());
+        surface.load_state = IdeLoadState::Ready;
+        surface.set_mount(IdeSurfaceMount::MainWindow, cx);
+    }
+
+    #[gpui::test]
+    fn main_window_mount_allows_agent_sampling(cx: &mut TestAppContext) {
+        let surface = test_surface(cx);
+
+        surface.update(cx, |surface, cx| {
+            configure_ready_surface(surface, cx);
+            assert_eq!(surface.mount(), IdeSurfaceMount::MainWindow);
+
+            surface.schedule_next_agent_status_poll(cx);
+
+            assert!(surface.agent_poll_task.is_some());
+        });
+    }
+
+    #[gpui::test]
+    fn hidden_mount_stops_sampling_watch_and_watch_reads_without_releasing_node(
+        cx: &mut TestAppContext,
+    ) {
+        let registry = SshConnectionRegistry::default();
+        let router = NodeRouter::new(registry.clone());
+        let node_id = "visibility-hidden-node";
+        let (_node_id, handle) = bind_active_node(&registry, &router, node_id, "hidden-host");
+        let fs = NodeAgentIdeFileSystem::new(router, NodeAgentMode::Ask);
+        let backend_runtime = Arc::new(
+            tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .expect("build IDE hidden visibility test runtime"),
+        );
+        let surface = cx.new({
+            let fs = fs.clone();
+            let backend_runtime = backend_runtime.clone();
+            move |cx| {
+                IdeSurface::new(
+                    fs,
+                    default_tokens(),
+                    IdeLabels::default(),
+                    IdeRuntimeSettings::default(),
+                    backend_runtime,
+                    cx,
+                )
+            }
+        });
+        let surface_fs = surface.read_with(cx, |surface, _cx| surface.fs.clone());
+        backend_runtime.block_on(async {
+            let _ = surface_fs.deploy_agent_for_node(node_id).await;
+        });
+        assert_eq!(ide_consumer_count(&handle, node_id), 1);
+
+        surface.update(cx, |surface, cx| {
+            surface.node_id = Some(node_id.to_string());
+            surface.root_path = Some("/srv/app".to_string());
+            surface.load_state = IdeLoadState::Ready;
+            surface.set_mount(IdeSurfaceMount::MainWindow, cx);
+            surface.schedule_next_agent_status_poll(cx);
+            surface.agent_watch_task = Some(cx.spawn(async move |_weak, _cx| {
+                std::future::pending::<()>().await;
+            }));
+            surface.schedule_agent_watch_retry(cx);
+            surface.watched_root_path = Some("/srv/app".to_string());
+
+            surface.set_mount(IdeSurfaceMount::Hidden, cx);
+            surface.refresh_tree_for_watch_path("/srv/app/src/main.rs".to_string(), cx);
+
+            assert!(surface.agent_poll_task.is_none());
+            assert!(surface.agent_sampling_refresh_task.is_none());
+            assert!(surface.agent_watch_task.is_none());
+            assert!(surface.agent_watch_retry_task.is_none());
+            assert!(surface.loading_paths.is_empty());
+        });
+        assert_eq!(ide_consumer_count(&handle, node_id), 1);
+    }
+
+    #[gpui::test]
+    fn detached_window_mount_resumes_sampling(cx: &mut TestAppContext) {
+        let surface = test_surface(cx);
+
+        surface.update(cx, |surface, cx| {
+            configure_ready_surface(surface, cx);
+            surface.set_mount(IdeSurfaceMount::Hidden, cx);
+            assert!(surface.agent_sampling_refresh_task.is_none());
+
+            surface.set_mount(IdeSurfaceMount::DetachedWindow, cx);
+
+            assert_eq!(surface.mount(), IdeSurfaceMount::DetachedWindow);
+            assert!(surface.agent_sampling_refresh_task.is_some());
+            assert_eq!(
+                surface.agent_refresh_origin,
+                Some(AgentStatusRefreshOrigin::VisibilitySampling)
+            );
+        });
+    }
+
+    #[gpui::test]
+    fn switching_between_visible_mounts_does_not_restart_sampling(cx: &mut TestAppContext) {
+        let surface = test_surface(cx);
+
+        surface.update(cx, |surface, cx| {
+            configure_ready_surface(surface, cx);
+            surface.cancel_agent_sampling();
+            surface.schedule_next_agent_status_poll(cx);
+            let poll_generation = surface.agent_poll_generation;
+
+            surface.set_mount(IdeSurfaceMount::DetachedWindow, cx);
+
+            assert_eq!(surface.agent_poll_generation, poll_generation);
+            assert!(surface.agent_poll_task.is_some());
+            assert!(surface.agent_sampling_refresh_task.is_none());
+        });
+    }
+
+    #[gpui::test]
+    fn hidden_surface_keeps_user_agent_refresh_completion_owned(cx: &mut TestAppContext) {
+        let surface = test_surface(cx);
+
+        surface.update(cx, |surface, cx| {
+            configure_ready_surface(surface, cx);
+            surface.set_mount(IdeSurfaceMount::Hidden, cx);
+
+            surface.refresh_agent_status(AgentStatusRefreshOrigin::UserAction, cx);
+
+            assert_eq!(surface.agent_action, Some(AgentActionKind::Refresh));
+            assert_eq!(
+                surface.agent_refresh_origin,
+                Some(AgentStatusRefreshOrigin::UserAction)
+            );
+            assert!(surface.agent_poll_task.is_none());
+            assert!(surface.agent_sampling_refresh_task.is_none());
+        });
+    }
+
+    #[gpui::test]
+    fn hidden_surface_applies_project_and_disconnect_lifecycle_without_sampling(
+        cx: &mut TestAppContext,
+    ) {
+        let surface = test_surface(cx);
+
+        surface.update(cx, |surface, cx| {
+            surface.set_mount(IdeSurfaceMount::Hidden, cx);
+            surface.apply_project_open(
+                ProjectOpenResult {
+                    node_id: "visibility-node".to_string(),
+                    root: IdeLocation::remote("visibility-node", "/srv/app"),
+                    title: "app".to_string(),
+                    git_branch: None,
+                    children: Vec::new(),
+                },
+                cx,
+            );
+
+            assert_eq!(surface.load_state, IdeLoadState::Ready);
+            assert!(surface.agent_poll_task.is_none());
+            assert!(surface.agent_sampling_refresh_task.is_none());
+            assert!(surface.agent_watch_task.is_none());
+
+            surface.mark_connection_interrupted(cx);
+
+            assert_eq!(surface.load_state, IdeLoadState::Disconnected);
+            assert_eq!(surface.mount(), IdeSurfaceMount::Hidden);
+            assert!(surface.agent_poll_task.is_none());
+            assert!(surface.agent_watch_task.is_none());
+        });
     }
 
     #[gpui::test]
@@ -483,6 +710,7 @@ mod lifecycle_tests {
         });
 
         surface.update(cx, |surface, cx| {
+            surface.set_mount(IdeSurfaceMount::MainWindow, cx);
             surface.agent_watch_task = Some(cx.spawn(async move |_weak, _cx| {
                 std::future::pending::<()>().await;
             }));

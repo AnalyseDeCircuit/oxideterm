@@ -264,9 +264,7 @@ impl IdeSurface {
         for buffer in buffers {
             self.create_editor(buffer.tab_id, &buffer.location, buffer.text, cx);
         }
-        self.refresh_agent_status(cx);
-        self.schedule_next_agent_status_poll(cx);
-        self.start_agent_watch_if_ready(cx);
+        self.resume_agent_sampling(cx);
         cx.notify();
     }
 
@@ -280,9 +278,7 @@ impl IdeSurface {
         self.load_state = IdeLoadState::Ready;
         self.agent_opt_in_open = self.runtime_settings.agent_mode == NodeAgentMode::Ask;
         self.clear_search_cache();
-        self.refresh_agent_status(cx);
-        self.schedule_next_agent_status_poll(cx);
-        self.start_agent_watch_if_ready(cx);
+        self.resume_agent_sampling(cx);
         cx.emit(IdeSurfaceEvent::ProjectOpened);
         let node_id = self.node_id.clone();
         let pending_restore_files = std::mem::take(&mut self.pending_restore_files);
@@ -355,6 +351,9 @@ impl IdeSurface {
     }
 
     fn refresh_tree_for_watch_path(&mut self, path: String, cx: &mut Context<Self>) {
+        if !self.mount.is_visible() {
+            return;
+        }
         let Some(node_id) = self.node_id.clone() else {
             return;
         };
@@ -371,6 +370,10 @@ impl IdeSurface {
     }
 
     fn start_agent_watch_if_ready(&mut self, cx: &mut Context<Self>) {
+        if !self.mount.is_visible() {
+            self.stop_agent_watch(cx);
+            return;
+        }
         if self.agent_watch_stop_in_flight {
             // Re-evaluate readiness after the retained stop operation finishes.
             self.agent_watch_restart_requested = true;
@@ -418,7 +421,9 @@ impl IdeSurface {
                         let refresh_path = watch_refresh_path(&root_path, &event.path);
                         let should_continue = weak
                             .update(cx, |this, cx| {
-                                if this.agent_watch_generation != generation {
+                                if this.agent_watch_generation != generation
+                                    || !this.mount.is_visible()
+                                {
                                     return false;
                                 }
                                 this.clear_search_cache();
@@ -437,6 +442,7 @@ impl IdeSurface {
             let _ = weak.update(cx, |this, cx| {
                 if this.agent_watch_generation == generation
                     && this.watched_root_path.as_deref() == Some(root_path.as_str())
+                    && this.mount.is_visible()
                 {
                     this.agent_watch_backend_abort = None;
                     this.schedule_agent_watch_retry(cx);
@@ -446,13 +452,16 @@ impl IdeSurface {
     }
 
     fn schedule_agent_watch_retry(&mut self, cx: &mut Context<Self>) {
+        if !self.mount.is_visible() {
+            return;
+        }
         let generation = self.agent_watch_generation;
         self.agent_watch_retry_task = Some(cx.spawn(async move |weak, cx| {
             cx.background_executor()
                 .timer(Duration::from_secs(IDE_AGENT_WATCH_RETRY_SECS))
                 .await;
             let _ = weak.update(cx, |this, cx| {
-                if this.agent_watch_generation == generation {
+                if this.agent_watch_generation == generation && this.mount.is_visible() {
                     this.watched_root_path = None;
                     this.start_agent_watch_if_ready(cx);
                 }

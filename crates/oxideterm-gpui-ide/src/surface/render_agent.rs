@@ -712,9 +712,10 @@ impl IdeSurface {
             self.start_deploy_agent(cx);
         } else {
             if mode == NodeAgentMode::Disabled {
+                self.cancel_agent_sampling();
                 self.stop_agent_watch(cx);
             }
-            self.refresh_agent_status(cx);
+            self.refresh_agent_status(AgentStatusRefreshOrigin::UserAction, cx);
         }
         cx.notify();
     }
@@ -726,6 +727,7 @@ impl IdeSurface {
         let Some(node_id) = self.node_id.clone() else {
             return;
         };
+        self.cancel_agent_sampling();
         self.agent_action = Some(AgentActionKind::Deploy);
         self.runtime_settings.agent_mode = NodeAgentMode::Enabled;
         self.fs.set_mode(NodeAgentMode::Enabled);
@@ -749,8 +751,10 @@ impl IdeSurface {
                 }
                 this.agent_action = None;
                 let _ = status;
-                this.start_agent_watch_if_ready(cx);
-                this.schedule_next_agent_status_poll(cx);
+                if this.mount.is_visible() {
+                    this.start_agent_watch_if_ready(cx);
+                    this.schedule_next_agent_status_poll(cx);
+                }
                 cx.notify();
             });
         })
@@ -764,6 +768,7 @@ impl IdeSurface {
         let Some(node_id) = self.node_id.clone() else {
             return;
         };
+        self.cancel_agent_sampling();
         self.agent_action = Some(AgentActionKind::Remove);
         self.agent_remove_confirm_open = false;
         let fs = self.fs.clone();
@@ -786,52 +791,121 @@ impl IdeSurface {
                 if let Err(error) = result {
                     this.last_error = Some(error.message);
                 }
-                this.refresh_agent_status(cx);
+                this.refresh_agent_status(AgentStatusRefreshOrigin::UserAction, cx);
                 cx.notify();
             });
         })
         .detach();
     }
 
-    fn refresh_agent_status(&mut self, cx: &mut Context<Self>) {
+    fn resume_agent_sampling(&mut self, cx: &mut Context<Self>) {
+        if !self.mount.is_visible()
+            || self.runtime_settings.agent_mode == NodeAgentMode::Disabled
+            || self.node_id.is_none()
+            || !matches!(
+                self.load_state,
+                IdeLoadState::Ready | IdeLoadState::Disconnected
+            )
+        {
+            return;
+        }
+        self.start_agent_watch_if_ready(cx);
+        if self.agent_refresh_origin == Some(AgentStatusRefreshOrigin::VisibilitySampling)
+            || self.agent_poll_task.is_some()
+        {
+            return;
+        }
+        if self.agent_action.is_none() {
+            self.refresh_agent_status(AgentStatusRefreshOrigin::VisibilitySampling, cx);
+        } else {
+            self.schedule_next_agent_status_poll(cx);
+        }
+    }
+
+    fn cancel_agent_sampling(&mut self) {
+        self.agent_poll_generation = self.agent_poll_generation.wrapping_add(1);
+        self.agent_poll_task = None;
+        self.agent_sampling_refresh_task = None;
+        if let Some(abort_handle) = self.agent_sampling_backend_abort.take() {
+            // Hidden surfaces cancel only the page sampler. User-started agent
+            // operations use a separate completion path and remain reliable.
+            abort_handle.abort();
+        }
+        if self.agent_refresh_origin == Some(AgentStatusRefreshOrigin::VisibilitySampling) {
+            self.agent_refresh_origin = None;
+            if self.agent_action == Some(AgentActionKind::Refresh) {
+                self.agent_action = None;
+            }
+        }
+    }
+
+    fn refresh_agent_status(&mut self, origin: AgentStatusRefreshOrigin, cx: &mut Context<Self>) {
         if !matches!(
             self.load_state,
             IdeLoadState::Ready | IdeLoadState::Disconnected
         ) || self.agent_action.is_some()
+            || (origin == AgentStatusRefreshOrigin::VisibilitySampling
+                && (!self.mount.is_visible()
+                    || self.runtime_settings.agent_mode == NodeAgentMode::Disabled))
         {
+            if origin == AgentStatusRefreshOrigin::VisibilitySampling {
+                self.schedule_next_agent_status_poll(cx);
+            }
             return;
         }
         let Some(node_id) = self.node_id.clone() else {
             return;
         };
         self.agent_action = Some(AgentActionKind::Refresh);
+        self.agent_refresh_origin = Some(origin);
         let fs = self.fs.clone();
         let backend_runtime = self.backend_runtime.clone();
         let generation = self.generation;
         let expected_node_id = node_id.clone();
+        let sampling_generation = self.agent_poll_generation;
         cx.notify();
-        cx.spawn(async move |weak, cx| {
-            let _ = backend_runtime
-                .spawn(async move { fs.refresh_agent_status(node_id).await })
-                .await;
+        let backend_task =
+            backend_runtime.spawn(async move { fs.refresh_agent_status(node_id).await });
+        let backend_abort = backend_task.abort_handle();
+        let refresh_task = cx.spawn(async move |weak, cx| {
+            let _ = backend_task.await;
             let _ = weak.update(cx, |this, cx| {
                 if this.generation != generation
                     || this.node_id.as_deref() != Some(expected_node_id.as_str())
+                    || this.agent_refresh_origin != Some(origin)
+                    || (origin == AgentStatusRefreshOrigin::VisibilitySampling
+                        && (this.agent_poll_generation != sampling_generation
+                            || !this.mount.is_visible()))
                 {
                     return;
                 }
                 if this.agent_action == Some(AgentActionKind::Refresh) {
                     this.agent_action = None;
                 }
-                this.start_agent_watch_if_ready(cx);
+                this.agent_refresh_origin = None;
+                if origin == AgentStatusRefreshOrigin::VisibilitySampling {
+                    this.agent_sampling_backend_abort = None;
+                    this.agent_sampling_refresh_task = None;
+                }
+                if this.mount.is_visible() {
+                    this.start_agent_watch_if_ready(cx);
+                    this.schedule_next_agent_status_poll(cx);
+                }
                 cx.notify();
             });
-        })
-        .detach();
+        });
+        if origin == AgentStatusRefreshOrigin::VisibilitySampling {
+            self.agent_sampling_backend_abort = Some(backend_abort);
+            self.agent_sampling_refresh_task = Some(refresh_task);
+        } else {
+            refresh_task.detach();
+        }
     }
 
     fn schedule_next_agent_status_poll(&mut self, cx: &mut Context<Self>) {
-        if self.node_id.is_none()
+        if !self.mount.is_visible()
+            || self.runtime_settings.agent_mode == NodeAgentMode::Disabled
+            || self.node_id.is_none()
             || !matches!(
                 self.load_state,
                 IdeLoadState::Ready | IdeLoadState::Disconnected
@@ -842,17 +916,15 @@ impl IdeSurface {
         self.agent_poll_generation = self.agent_poll_generation.wrapping_add(1);
         let generation = self.agent_poll_generation;
         let delay = self.agent_poll_delay();
-        cx.spawn(async move |weak, cx| {
+        self.agent_poll_task = Some(cx.spawn(async move |weak, cx| {
             cx.background_executor().timer(delay).await;
             let _ = weak.update(cx, |this, cx| {
-                if this.agent_poll_generation != generation {
+                if this.agent_poll_generation != generation || !this.mount.is_visible() {
                     return;
                 }
-                this.refresh_agent_status(cx);
-                this.schedule_next_agent_status_poll(cx);
+                this.refresh_agent_status(AgentStatusRefreshOrigin::VisibilitySampling, cx);
             });
-        })
-        .detach();
+        }));
     }
 
     fn agent_poll_delay(&self) -> Duration {
