@@ -1,6 +1,8 @@
 use std::{collections::HashMap, sync::Arc};
 
-use crate::workspace::ai_state::{AiChatInitializationOutcome, AiWorkspaceEntity};
+use crate::workspace::ai_state::{
+    AiChatInitializationOutcome, AiWorkspaceEntity, AiWorkspaceVisibility,
+};
 use crate::workspace::ime::WorkspaceImeTarget;
 use crate::workspace::*;
 use gpui::{Context, Div, MouseDownEvent, Rgba, Window};

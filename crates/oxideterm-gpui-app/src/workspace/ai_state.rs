@@ -32,6 +32,19 @@ pub(in crate::workspace) enum AiWorkspaceEvent {
     TerminalInlineDeliveryReady,
 }
 
+/// Describes which workspace-owned AI surfaces can currently consume UI probes.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub(in crate::workspace) struct AiWorkspaceVisibility {
+    pub(in crate::workspace) model_selector_surface: bool,
+    pub(in crate::workspace) settings_surface: bool,
+}
+
+impl AiWorkspaceVisibility {
+    fn provider_status_visible(self) -> bool {
+        self.model_selector_surface || self.settings_surface
+    }
+}
+
 pub(in crate::workspace) struct AiAcpAgentProbeIntent {
     pub(in crate::workspace) agent_id: String,
     pub(in crate::workspace) runtime_state: oxideterm_settings::AcpAgentRuntimeState,
@@ -202,6 +215,7 @@ impl Default for AiSettingsViewState {
 pub(in crate::workspace) struct AiWorkspaceEntity {
     task_runtime: Arc<tokio::runtime::Runtime>,
     key_store: oxideterm_ai::AiProviderKeyStore,
+    visibility: AiWorkspaceVisibility,
     settings_view: AiSettingsViewState,
     settings_secret_drafts: HashMap<SettingsInput, zeroize::Zeroizing<String>>,
     focused_settings_input: Option<SettingsInput>,
@@ -337,6 +351,7 @@ impl AiWorkspaceEntity {
         let entity = Self {
             task_runtime,
             key_store,
+            visibility: AiWorkspaceVisibility::default(),
             settings_view: AiSettingsViewState::default(),
             settings_secret_drafts: HashMap::new(),
             focused_settings_input: None,
@@ -430,6 +445,29 @@ impl AiWorkspaceEntity {
         entity.schedule_chat_stream_delivery(cx);
         entity.schedule_compaction_delivery(cx);
         entity
+    }
+
+    pub(in crate::workspace) fn set_workspace_visibility(
+        &mut self,
+        visibility: AiWorkspaceVisibility,
+    ) -> bool {
+        if self.visibility == visibility {
+            return false;
+        }
+        // Visibility controls admission of new UI-only probes. In-flight chat,
+        // compaction, Knowledge, and user-triggered operations retain delivery.
+        self.visibility = visibility;
+        if !visibility.settings_surface {
+            // Dropping the retained timer prevents a hidden MCP page from
+            // generating repaint-only runtime notifications.
+            self.mcp_status_tick_task.take();
+        }
+        true
+    }
+
+    #[cfg(test)]
+    fn workspace_visibility(&self) -> AiWorkspaceVisibility {
+        self.visibility
     }
 
     pub(in crate::workspace) fn model_is_refreshing(&self, provider_id: &str) -> bool {
@@ -1698,9 +1736,9 @@ impl AiWorkspaceEntity {
         &mut self,
         delay: Duration,
         cx: &mut Context<Self>,
-    ) {
-        if self.mcp_status_tick_task.is_some() {
-            return;
+    ) -> bool {
+        if !self.visibility.settings_surface || self.mcp_status_tick_task.is_some() {
+            return false;
         }
         self.mcp_status_tick_task = Some(cx.spawn(async move |entity, cx| {
             Timer::after(delay).await;
@@ -1710,6 +1748,7 @@ impl AiWorkspaceEntity {
                 cx.notify();
             });
         }));
+        true
     }
 
     pub(in crate::workspace) fn refresh_mcp_tools(
@@ -1815,6 +1854,9 @@ impl AiWorkspaceEntity {
         &mut self,
         provider_ids: impl IntoIterator<Item = String>,
     ) {
+        if !self.visibility.provider_status_visible() {
+            return;
+        }
         for provider_id in provider_ids {
             if self.provider_key_status.contains_key(&provider_id)
                 || !self.provider_key_status_pending.insert(provider_id.clone())
@@ -1864,7 +1906,10 @@ impl AiWorkspaceEntity {
         &mut self,
         provider: oxideterm_ai::AiProviderView,
         endpoint: &'static str,
-    ) {
+    ) -> bool {
+        if !self.visibility.model_selector_surface {
+            return false;
+        }
         self.next_selector_probe_generation = self.next_selector_probe_generation.saturating_add(1);
         let generation = self.next_selector_probe_generation;
         let provider_id = provider.id.clone();
@@ -1882,6 +1927,7 @@ impl AiWorkspaceEntity {
                 online,
             });
         });
+        true
     }
 
     pub(in crate::workspace) fn acp_agent_probe_is_pending(&self, agent_id: &str) -> bool {
@@ -1892,7 +1938,7 @@ impl AiWorkspaceEntity {
         &mut self,
         agent: oxideterm_settings::AcpAgentConfig,
     ) -> bool {
-        if self.acp_agent_probe_pending.contains(&agent.id) {
+        if !self.visibility.settings_surface || self.acp_agent_probe_pending.contains(&agent.id) {
             return false;
         }
         let agent_id = agent.id.clone();
@@ -1986,6 +2032,9 @@ impl AiWorkspaceEntity {
         agent: oxideterm_settings::AcpAgentConfig,
         session_cwd: std::path::PathBuf,
     ) -> bool {
+        if !self.visibility.model_selector_surface {
+            return false;
+        }
         let agent_id = agent.id.clone();
         let discovery_key = (conversation_id.clone(), agent_id.clone());
         if self.acp_model_options.contains_key(&discovery_key)
@@ -3220,7 +3269,7 @@ pub(super) struct AiModelWorkspaceState {
     pub(super) selector_search_query: String,
     pub(super) selector_expanded_providers: HashSet<String>,
     pub(super) selector_highlighted_model: Option<(String, String)>,
-    pub(super) selector_status_signature: u64,
+    pub(super) selector_status_signature: Option<u64>,
     pub(super) key_store: oxideterm_ai::AiProviderKeyStore,
 }
 
@@ -3324,7 +3373,7 @@ impl AiModelWorkspaceState {
             selector_search_query: String::new(),
             selector_expanded_providers: HashSet::new(),
             selector_highlighted_model: None,
-            selector_status_signature: 0,
+            selector_status_signature: None,
             key_store,
         }
     }
@@ -3350,6 +3399,21 @@ mod entity_tests {
                 .build()
                 .expect("AI entity test runtime"),
         )
+    }
+
+    fn test_acp_agent(agent_id: &str) -> oxideterm_settings::AcpAgentConfig {
+        oxideterm_settings::AcpAgentConfig {
+            id: agent_id.to_string(),
+            display_name: "Test Agent".to_string(),
+            command: "test-agent".to_string(),
+            args: Vec::new(),
+            env: std::collections::BTreeMap::new(),
+            cwd: None,
+            enabled: true,
+            auth: Default::default(),
+            capability_policy: Default::default(),
+            status: Default::default(),
+        }
     }
 
     #[gpui::test]
@@ -3725,6 +3789,82 @@ mod entity_tests {
     }
 
     #[gpui::test]
+    fn hidden_ai_surfaces_suspend_ui_probes_and_resume_mcp_ticks(cx: &mut TestAppContext) {
+        let entity = cx.new(|cx| {
+            AiWorkspaceEntity::new(test_runtime(), oxideterm_ai::AiProviderKeyStore::new(), cx)
+        });
+        entity.update(cx, |entity, cx| {
+            assert_eq!(
+                entity.workspace_visibility(),
+                AiWorkspaceVisibility::default()
+            );
+            assert!(!entity.request_mcp_status_tick(Duration::from_secs(60), cx));
+            entity.request_provider_key_statuses(["provider-a".to_string()]);
+            assert!(entity.provider_key_status_pending.is_empty());
+            assert!(!entity.request_selector_provider_probe(
+                oxideterm_ai::AiProviderView {
+                    id: "provider-a".to_string(),
+                    provider_type: "ollama".to_string(),
+                    name: "Provider A".to_string(),
+                    base_url: "http://127.0.0.1:11434".to_string(),
+                    models: Vec::new(),
+                    enabled: true,
+                    custom: false,
+                },
+                "/api/tags",
+            ));
+            assert!(!entity.request_acp_agent_probe(test_acp_agent("agent-a")));
+            assert!(!entity.request_acp_model_discovery(
+                "conversation-a".to_string(),
+                test_acp_agent("agent-a"),
+                std::path::PathBuf::new(),
+            ));
+
+            assert!(entity.set_workspace_visibility(AiWorkspaceVisibility {
+                model_selector_surface: false,
+                settings_surface: true,
+            }));
+            assert!(entity.request_mcp_status_tick(Duration::from_secs(60), cx));
+            assert!(entity.mcp_status_tick_task.is_some());
+            assert!(!entity.request_mcp_status_tick(Duration::from_secs(60), cx));
+
+            assert!(entity.set_workspace_visibility(AiWorkspaceVisibility::default()));
+            assert!(entity.mcp_status_tick_task.is_none());
+            assert!(entity.set_workspace_visibility(AiWorkspaceVisibility {
+                model_selector_surface: false,
+                settings_surface: true,
+            }));
+            assert!(entity.request_mcp_status_tick(Duration::from_secs(60), cx));
+        });
+    }
+
+    #[test]
+    fn provider_status_visibility_covers_selector_and_settings_surfaces() {
+        assert!(!AiWorkspaceVisibility::default().provider_status_visible());
+        assert!(
+            AiWorkspaceVisibility {
+                model_selector_surface: true,
+                settings_surface: false,
+            }
+            .provider_status_visible()
+        );
+        assert!(
+            AiWorkspaceVisibility {
+                model_selector_surface: false,
+                settings_surface: true,
+            }
+            .provider_status_visible()
+        );
+        assert!(
+            AiWorkspaceVisibility {
+                model_selector_surface: true,
+                settings_surface: true,
+            }
+            .provider_status_visible()
+        );
+    }
+
+    #[gpui::test]
     fn model_refresh_state_and_delivery_are_entity_owned(cx: &mut TestAppContext) {
         let entity = cx.new(|cx| {
             AiWorkspaceEntity::new(test_runtime(), oxideterm_ai::AiProviderKeyStore::new(), cx)
@@ -4040,6 +4180,10 @@ mod entity_tests {
         .expect("create Knowledge test collection");
 
         entity.update(cx, |entity, cx| {
+            entity.set_workspace_visibility(AiWorkspaceVisibility {
+                model_selector_surface: false,
+                settings_surface: true,
+            });
             assert!(entity.start_knowledge_import(
                 std::future::ready(Some(vec![document_path])),
                 collection.id.clone(),
@@ -4047,6 +4191,7 @@ mod entity_tests {
                 cx,
             ));
             assert!(entity.knowledge_import_task.is_some());
+            entity.set_workspace_visibility(AiWorkspaceVisibility::default());
         });
         // No settings page or workspace callback is present while the task
         // finishes; the entity must still apply the completion reliably.
@@ -4156,7 +4301,15 @@ mod entity_tests {
         let entity = cx.new(|cx| {
             AiWorkspaceEntity::new(test_runtime(), oxideterm_ai::AiProviderKeyStore::new(), cx)
         });
-        let (generation, worker_tx) = entity.update(cx, |entity, _cx| entity.begin_chat_stream());
+        let (generation, worker_tx) = entity.update(cx, |entity, _cx| {
+            entity.set_workspace_visibility(AiWorkspaceVisibility {
+                model_selector_surface: true,
+                settings_surface: false,
+            });
+            let stream = entity.begin_chat_stream();
+            entity.set_workspace_visibility(AiWorkspaceVisibility::default());
+            stream
+        });
         worker_tx
             .send(AiStreamDelivery {
                 generation,
@@ -4296,9 +4449,14 @@ mod entity_tests {
             AiWorkspaceEntity::new(test_runtime(), oxideterm_ai::AiProviderKeyStore::new(), cx)
         });
         let worker_tx = entity.update(cx, |entity, cx| {
+            entity.set_workspace_visibility(AiWorkspaceVisibility {
+                model_selector_surface: true,
+                settings_surface: false,
+            });
             assert!(entity.begin_compaction("conversation-a"));
             assert!(!entity.begin_compaction("conversation-a"));
             entity.set_compaction_notice_running("conversation-a", cx);
+            entity.set_workspace_visibility(AiWorkspaceVisibility::default());
             entity.compaction_tx.clone()
         });
         worker_tx

@@ -155,13 +155,44 @@ impl WorkspaceApp {
     ) {
         let providers = self.ai_model_selector_providers(cx);
         let signature = ai_model_selector_status_signature(&providers);
-        if self.ai.models.selector_status_signature == signature {
+        if self.ai.models.selector_status_signature == Some(signature) {
             return;
         }
-        self.ai.models.selector_status_signature = signature;
+        self.ai.models.selector_status_signature = Some(signature);
         // Mirrors Tauri ModelSelector's mount/provider-change checkAllKeys
         // effect: the trigger indicator starts probing before the user opens it.
         self.refresh_ai_model_selector_provider_statuses(cx);
+    }
+
+    pub(in crate::workspace) fn sync_ai_workspace_visibility(&mut self, cx: &mut Context<Self>) {
+        // Inline AI can be mounted in a detached terminal window, so its own
+        // open state is the stable cross-window visibility signal.
+        let terminal_inline_surface = self.ai_entity.read(cx).terminal_inline_panel().open;
+        let model_selector_surface = self.ai_sidebar_visible() || terminal_inline_surface;
+        let main_settings_surface = self
+            .active_tab()
+            .is_some_and(|tab| tab.kind == TabKind::Settings);
+        let detached_settings_surface = self.tabs.iter().any(|tab| {
+            tab.kind == TabKind::Settings && self.tab_host.read(cx).is_outside_main_window(tab.id)
+        });
+        let settings_surface = !self.app_lock.locked
+            && (main_settings_surface || detached_settings_surface)
+            && self.settings_workspace.read(cx).route_snapshot().active_tab == SettingsTab::Ai;
+        let visibility = AiWorkspaceVisibility {
+            model_selector_surface: !self.app_lock.locked && model_selector_surface,
+            settings_surface,
+        };
+        let changed = self
+            .ai_entity
+            .update(cx, |ai, _cx| ai.set_workspace_visibility(visibility));
+        if changed && !visibility.model_selector_surface {
+            // A later remount must re-run status checks even when provider
+            // configuration stayed unchanged while the surface was hidden.
+            self.ai.models.selector_status_signature = None;
+        }
+        if visibility.model_selector_surface {
+            self.ensure_ai_model_selector_mount_statuses(cx);
+        }
     }
 
     pub(in crate::workspace) fn toggle_ai_model_selector(

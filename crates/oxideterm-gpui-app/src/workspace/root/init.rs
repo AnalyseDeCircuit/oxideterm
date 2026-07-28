@@ -758,6 +758,7 @@ impl WorkspaceApp {
                     this.knowledge_sync_external_edit(false, cx);
                 }
             }));
+        workspace.sync_ai_workspace_visibility(cx);
         if workspace.ai_sidebar_visible() {
             workspace.ensure_ai_chat_initialized(cx);
             workspace.bootstrap_ai_mcp_registry(cx);
