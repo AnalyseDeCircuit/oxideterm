@@ -64,6 +64,111 @@ impl OxideImportNameGroup {
     }
 }
 
+#[derive(Clone)]
+struct OxideImportNameGroupRenderer {
+    // ImportPreview is already shared by the dialog, so rows borrow one Arc-backed snapshot.
+    session_manager: Entity<SessionManagerState>,
+    tokens: ThemeTokens,
+    preview: Arc<ImportPreview>,
+    group: OxideImportNameGroup,
+}
+
+impl OxideImportNameGroupRenderer {
+    fn render(&self, index: usize, cx: &App) -> AnyElement {
+        let Some((name, label)) = self.group.item(&self.preview, index) else {
+            return div().into_any_element();
+        };
+        let checked = self
+            .session_manager
+            .read(cx)
+            .oxide_import_dialog
+            .as_ref()
+            .is_some_and(|dialog| dialog.selected_names.contains(&name));
+        let session_manager = self.session_manager.clone();
+        div()
+            .pb(px(4.0))
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(px(6.0))
+                    .text_size(px(self.tokens.metrics.ui_text_xs))
+                    .text_color(rgb(self.tokens.ui.text_muted))
+                    .cursor_pointer()
+                    .hover({
+                        let text = self.tokens.ui.text;
+                        move |row| row.text_color(rgb(text))
+                    })
+                    .child(WorkspaceApp::render_lucide_icon(
+                        if checked {
+                            LucideIcon::CheckSquare
+                        } else {
+                            LucideIcon::Square
+                        },
+                        14.0,
+                        if checked {
+                            rgb(self.tokens.ui.accent)
+                        } else {
+                            rgb(self.tokens.ui.text_muted)
+                        },
+                    ))
+                    .child(label)
+                    .on_mouse_down(MouseButton::Left, move |_event, _window, cx| {
+                        session_manager.update(cx, |manager, cx| {
+                            if let Some(dialog) = manager.oxide_import_dialog.as_mut() {
+                                if !dialog.selected_names.remove(&name) {
+                                    dialog.selected_names.insert(name.clone());
+                                }
+                                cx.notify();
+                            }
+                        });
+                        cx.stop_propagation();
+                    }),
+            )
+            .into_any_element()
+    }
+}
+
+#[derive(Clone)]
+struct OxideImportForwardDetailRenderer {
+    // Selection and preview lifetime stay with SessionManagerState.
+    session_manager: Entity<SessionManagerState>,
+    tokens: ThemeTokens,
+}
+
+impl OxideImportForwardDetailRenderer {
+    fn render(&self, index: usize, cx: &App) -> AnyElement {
+        let detail = self
+            .session_manager
+            .read(cx)
+            .oxide_import_dialog
+            .as_ref()
+            .and_then(|dialog| dialog.preview.as_ref())
+            .and_then(|preview| preview.forward_details.get(index))
+            .cloned();
+        detail
+            .map(|detail| {
+                div()
+                    .pb(px(4.0))
+                    .child(
+                        div()
+                            .rounded(px(self.tokens.radii.md))
+                            .bg(rgba((self.tokens.ui.bg << 8) | OXIDE_SUBCARD_BG_ALPHA))
+                            .px_2()
+                            .py(px(6.0))
+                            .text_size(px(self.tokens.metrics.ui_text_xs))
+                            .text_color(rgb(self.tokens.ui.text_muted))
+                            .child(format!(
+                                "{} · {}",
+                                detail.owner_connection_name, detail.description
+                            )),
+                    )
+                    .into_any_element()
+            })
+            .unwrap_or_else(|| div().into_any_element())
+    }
+}
+
 impl WorkspaceApp {
     pub(super) fn render_oxide_import_preview(
         &self,
@@ -284,30 +389,24 @@ impl WorkspaceApp {
             .collect::<Vec<_>>();
         let state = self.sync_oxide_import_name_group_list_state(group_key, &signatures, cx);
         let spec = self.oxide_import_name_group_list_spec();
-        let workspace = cx.entity();
         let list_height =
             (item_count as f32 * OXIDE_IMPORT_NAME_GROUP_LIST_ESTIMATED_HEIGHT).min(96.0);
-        let virtual_preview = preview;
-        let scroll_handle =
-            self.selectable_text_scroll_handle(format!("oxide-import-preview-section-{group_key}"));
+        let renderer = OxideImportNameGroupRenderer {
+            session_manager: self.session_manager.clone(),
+            tokens: self.tokens,
+            preview,
+            group,
+        };
         let list = div()
             .id((
                 "oxide-import-preview-section",
                 oxide_import_name_group_signature(group_key, group_key),
             ))
             .h(px(list_height))
-            .selectable_overflow_y_scrollbar(&scroll_handle)
             .child(tauri_virtual_list(
                 state,
                 spec,
-                move |index, _window, cx| {
-                    let Some((name, label)) = group.item(&virtual_preview, index) else {
-                        return div().into_any_element();
-                    };
-                    workspace.update(cx, |this, cx| {
-                        this.render_oxide_import_name_group_list_item(name, label, cx)
-                    })
-                },
+                move |index, _window, cx| renderer.render(index, cx),
             ));
 
         div()
@@ -384,80 +483,6 @@ impl WorkspaceApp {
             px(OXIDE_IMPORT_NAME_GROUP_LIST_ESTIMATED_HEIGHT),
             OXIDE_IMPORT_NAME_GROUP_LIST_OVERSCAN,
         )
-    }
-
-    pub(super) fn render_oxide_import_name_group_list_item(
-        &self,
-        name: String,
-        label: String,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let checked = self
-            .session_manager
-            .read(cx)
-            .oxide_import_dialog
-            .as_ref()
-            .is_some_and(|dialog| dialog.selected_names.contains(&name));
-        div()
-            .pb(px(4.0))
-            .child(self.render_oxide_import_check_line(name, label, checked, cx))
-            .into_any_element()
-    }
-
-    pub(super) fn render_oxide_import_check_line(
-        &self,
-        name: String,
-        label: String,
-        checked: bool,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        div()
-            .flex()
-            .items_center()
-            .gap(px(6.0))
-            .text_size(px(self.tokens.metrics.ui_text_xs))
-            .text_color(rgb(self.tokens.ui.text_muted))
-            .cursor_pointer()
-            .hover(|row| row.text_color(rgb(self.tokens.ui.text)))
-            .child(Self::render_lucide_icon(
-                if checked {
-                    LucideIcon::CheckSquare
-                } else {
-                    LucideIcon::Square
-                },
-                14.0,
-                if checked {
-                    rgb(self.tokens.ui.accent)
-                } else {
-                    rgb(self.tokens.ui.text_muted)
-                },
-            ))
-            // Import preview check rows toggle on row click; labels must not own mouse-down.
-            .child(self.render_display_text_with_role(
-                SelectableTextRole::NonSelectable,
-                "oxide-import-check-line",
-                name.as_str(),
-                label,
-                self.tokens.ui.text_muted,
-                cx,
-            ))
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(move |this, _event, _window, cx| {
-                    this.session_manager.update(cx, |manager, cx| {
-                        if let Some(dialog) = manager.oxide_import_dialog.as_mut() {
-                            if dialog.selected_names.contains(&name) {
-                                dialog.selected_names.remove(&name);
-                            } else {
-                                dialog.selected_names.insert(name.clone());
-                            }
-                        }
-                        cx.notify();
-                    });
-                    cx.stop_propagation();
-                }),
-            )
-            .into_any_element()
     }
 
     pub(super) fn render_oxide_import_app_settings(
@@ -1110,7 +1135,10 @@ impl WorkspaceApp {
                 .oxide_import_forward_detail_list_state
                 .clone();
             let spec = self.oxide_import_forward_detail_list_spec();
-            let workspace = cx.entity();
+            let renderer = OxideImportForwardDetailRenderer {
+                session_manager: self.session_manager.clone(),
+                tokens: self.tokens,
+            };
             let list_height = (preview.forward_details.len() as f32
                 * OXIDE_IMPORT_FORWARD_DETAIL_LIST_ESTIMATED_HEIGHT)
                 .min(112.0);
@@ -1120,11 +1148,7 @@ impl WorkspaceApp {
                 .child(tauri_virtual_list(
                     state,
                     spec,
-                    move |index, _window, cx| {
-                        workspace.update(cx, |this, cx| {
-                            this.render_oxide_import_forward_detail_item(index, cx)
-                        })
-                    },
+                    move |index, _window, cx| renderer.render(index, cx),
                 ));
             children.push(list.into_any_element());
         }
@@ -1155,43 +1179,6 @@ impl WorkspaceApp {
             px(OXIDE_IMPORT_FORWARD_DETAIL_LIST_ESTIMATED_HEIGHT),
             OXIDE_IMPORT_FORWARD_DETAIL_LIST_OVERSCAN,
         )
-    }
-
-    pub(super) fn render_oxide_import_forward_detail_item(
-        &self,
-        index: usize,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let Some(detail) = self
-            .session_manager
-            .read(cx)
-            .oxide_import_dialog
-            .as_ref()
-            .and_then(|dialog| dialog.preview.as_ref())
-            .and_then(|preview| preview.forward_details.get(index))
-            .cloned()
-        else {
-            return div().into_any_element();
-        };
-        div()
-            .pb(px(4.0))
-            .child(
-                div()
-                    .rounded(px(self.tokens.radii.md))
-                    .bg(self.render_oxide_subcard_bg(false))
-                    .px_2()
-                    .py(px(6.0))
-                    .text_size(px(self.tokens.metrics.ui_text_xs))
-                    .text_color(rgb(self.tokens.ui.text_muted))
-                    .child(self.render_selectable_text_scoped(
-                        "oxide-import-forward-detail",
-                        index,
-                        format!("{} · {}", detail.owner_connection_name, detail.description),
-                        self.tokens.ui.text_muted,
-                        cx,
-                    )),
-            )
-            .into_any_element()
     }
 
     pub(super) fn render_oxide_import_preview_subcard(

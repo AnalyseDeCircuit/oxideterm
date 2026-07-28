@@ -14,6 +14,35 @@ struct OxideExportPreflightRenderSnapshot {
     total_key_bytes: u64,
 }
 
+#[derive(Clone)]
+struct OxideExportSummaryLineRenderer {
+    // Warning lines are immutable for this frame and shared across visible callbacks.
+    session_manager: Entity<SessionManagerState>,
+    tokens: ThemeTokens,
+    color: u32,
+    lines: Arc<[String]>,
+}
+
+impl OxideExportSummaryLineRenderer {
+    fn render(&self, index: usize, cx: &App) -> AnyElement {
+        if self.session_manager.read(cx).oxide_export_dialog.is_none() {
+            return div().into_any_element();
+        }
+        self.lines
+            .get(index)
+            .map(|line| {
+                div()
+                    .opacity(0.8)
+                    .line_height(px(16.0))
+                    .text_size(px(self.tokens.metrics.ui_text_xs))
+                    .text_color(rgb(self.color))
+                    .child(format!("• {line}"))
+                    .into_any_element()
+            })
+            .unwrap_or_else(|| div().into_any_element())
+    }
+}
+
 pub(super) fn oxide_export_summary_line_signature(line: &str) -> u64 {
     let mut hasher = DefaultHasher::new();
     // Warning lines are visible verbatim in the compact preflight body.
@@ -572,32 +601,23 @@ impl WorkspaceApp {
                 .oxide_export_summary_line_list_state
                 .clone();
             let spec = self.oxide_export_summary_line_list_spec();
-            let workspace = cx.entity();
-            let line_color = color;
             let item_count = lines.len();
-            let virtual_lines = lines;
+            let renderer = OxideExportSummaryLineRenderer {
+                session_manager: self.session_manager.clone(),
+                tokens: self.tokens,
+                color,
+                lines: lines.into(),
+            };
             Some(
                 div()
                     .id("oxide-export-summary-lines")
                     .h(px((item_count as f32
                         * OXIDE_EXPORT_SUMMARY_LINE_LIST_ESTIMATED_HEIGHT)
                         .min(64.0)))
-                    .selectable_overflow_y_scrollbar(
-                        &self.selectable_text_scroll_handle("oxide-export-summary-lines"),
-                    )
                     .child(tauri_virtual_list(
                         state,
                         spec,
-                        move |index, _window, cx| {
-                            let Some(line) = virtual_lines.get(index).cloned() else {
-                                return div().into_any_element();
-                            };
-                            workspace.update(cx, |this, cx| {
-                                this.render_oxide_export_summary_line_item(
-                                    index, line, line_color, cx,
-                                )
-                            })
-                        },
+                        move |index, _window, cx| renderer.render(index, cx),
                     ))
                     .into_any_element(),
             )
@@ -657,26 +677,6 @@ impl WorkspaceApp {
             px(OXIDE_EXPORT_SUMMARY_LINE_LIST_ESTIMATED_HEIGHT),
             OXIDE_EXPORT_SUMMARY_LINE_LIST_OVERSCAN,
         )
-    }
-
-    pub(super) fn render_oxide_export_summary_line_item(
-        &self,
-        index: usize,
-        line: String,
-        color: u32,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        div()
-            .opacity(0.8)
-            .line_height(px(16.0))
-            .child(self.render_selectable_text_scoped(
-                "oxide-export-compact-warning-line",
-                index,
-                format!("• {line}"),
-                color,
-                cx,
-            ))
-            .into_any_element()
     }
 
     pub(super) fn render_oxide_export_footer(&self, cx: &mut Context<Self>) -> AnyElement {

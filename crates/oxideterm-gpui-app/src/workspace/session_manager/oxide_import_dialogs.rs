@@ -1,5 +1,33 @@
 use super::*;
 
+#[derive(Clone)]
+struct OxideImportConnectionPreviewRenderer {
+    // The Entity remains the source of truth; each list callback clones one visible name.
+    session_manager: Entity<SessionManagerState>,
+    tokens: ThemeTokens,
+}
+
+impl OxideImportConnectionPreviewRenderer {
+    fn render(&self, index: usize, cx: &App) -> AnyElement {
+        let name = self
+            .session_manager
+            .read(cx)
+            .oxide_import_dialog
+            .as_ref()
+            .and_then(|dialog| dialog.metadata.as_ref())
+            .and_then(|metadata| metadata.connection_names.get(index))
+            .cloned();
+        name.map(|name| {
+            div()
+                .text_size(px(self.tokens.metrics.ui_text_xs))
+                .text_color(rgb(self.tokens.ui.text_muted))
+                .child(format!("• {name}"))
+                .into_any_element()
+        })
+        .unwrap_or_else(|| div().into_any_element())
+    }
+}
+
 pub(super) fn oxide_import_connection_preview_signature(name: &String) -> u64 {
     let mut hasher = DefaultHasher::new();
     // The file-info preview is read-only; the connection name is both identity
@@ -341,7 +369,10 @@ impl WorkspaceApp {
                 .oxide_import_connection_preview_list_state
                 .clone();
             let spec = self.oxide_import_connection_preview_list_spec();
-            let workspace = cx.entity();
+            let renderer = OxideImportConnectionPreviewRenderer {
+                session_manager: self.session_manager.clone(),
+                tokens: self.tokens,
+            };
             let list_height = (connection_count as f32
                 * OXIDE_IMPORT_CONNECTION_PREVIEW_LIST_ESTIMATED_HEIGHT)
                 .min(128.0);
@@ -352,11 +383,7 @@ impl WorkspaceApp {
                 .child(tauri_virtual_list(
                     state,
                     spec,
-                    move |index, _window, cx| {
-                        workspace.update(cx, |this, cx| {
-                            this.render_oxide_import_connection_preview_item(index, cx)
-                        })
-                    },
+                    move |index, _window, cx| renderer.render(index, cx),
                 ));
             children.push(
                 div()
@@ -401,35 +428,6 @@ impl WorkspaceApp {
             px(OXIDE_IMPORT_CONNECTION_PREVIEW_LIST_ESTIMATED_HEIGHT),
             OXIDE_IMPORT_CONNECTION_PREVIEW_LIST_OVERSCAN,
         )
-    }
-
-    pub(super) fn render_oxide_import_connection_preview_item(
-        &self,
-        index: usize,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let Some(name) = self
-            .session_manager
-            .read(cx)
-            .oxide_import_dialog
-            .as_ref()
-            .and_then(|dialog| dialog.metadata.as_ref())
-            .and_then(|metadata| metadata.connection_names.get(index))
-            .cloned()
-        else {
-            return div().into_any_element();
-        };
-        div()
-            .text_size(px(self.tokens.metrics.ui_text_xs))
-            .text_color(rgb(self.tokens.ui.text_muted))
-            .child(self.render_selectable_text_scoped(
-                "oxide-import-file-info-connection-name",
-                index,
-                format!("• {name}"),
-                self.tokens.ui.text_muted,
-                cx,
-            ))
-            .into_any_element()
     }
 
     pub(super) fn render_oxide_conflict_strategy(&self, cx: &mut Context<Self>) -> AnyElement {
