@@ -83,7 +83,6 @@ impl RemoteDesktopSessionEntity {
 
     fn poll_deliveries(
         &mut self,
-        visible: bool,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> RemoteDesktopDeliveryOutcome {
@@ -94,7 +93,9 @@ impl RemoteDesktopSessionEntity {
             match delivery {
                 RemoteDesktopWorkerDelivery::FrameReady { tab_id, generation } => {
                     debug_assert_eq!(tab_id, self.tab_id);
-                    if visible && self.apply_frame_ready(generation, window, cx) {
+                    if self.frame_slot.is_visible()
+                        && self.apply_frame_ready(generation, window, cx)
+                    {
                         changed = true;
                     }
                 }
@@ -175,7 +176,7 @@ impl RemoteDesktopSessionEntity {
                     if self.worker_generation != generation {
                         continue;
                     }
-                    if visible {
+                    if self.frame_slot.is_visible() {
                         let _ = self.apply_frame_ready(generation, window, cx);
                     }
                     self.state
@@ -208,7 +209,7 @@ impl RemoteDesktopSessionEntity {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
-        if self.worker_generation != generation {
+        if self.worker_generation != generation || !self.frame_slot.is_visible() {
             return false;
         }
         let frame_slot = self.frame_slot.clone();
@@ -395,6 +396,9 @@ impl RemoteDesktopSessionEntity {
         }
 
         let frame_slot = RemoteDesktopFrameDeliverySlot::new();
+        // Helper replacement preserves presentation visibility independently
+        // from the worker lifetime.
+        frame_slot.set_visible(self.frame_slot.is_visible());
         let worker_wake = RemoteDesktopWorkerWake::default();
         let monitor_layout = remote_desktop_monitor_layout(&profile, cx);
         let request_tx = self.spawn_worker(
@@ -575,12 +579,7 @@ impl RemoteDesktopSessionEntity {
         .detach();
     }
 
-    fn schedule_window_event(
-        &self,
-        event: RemoteDesktopSessionEvent,
-        visible: bool,
-        cx: &mut Context<Self>,
-    ) {
+    fn schedule_window_event(&self, event: RemoteDesktopSessionEvent, cx: &mut Context<Self>) {
         cx.spawn(async move |session, cx| {
             let generation = match event {
                 RemoteDesktopSessionEvent::DeliveryReady { generation }
@@ -606,7 +605,7 @@ impl RemoteDesktopSessionEntity {
                         RemoteDesktopSessionEvent::DeliveryReady { .. } => {
                             let scale_factor =
                                 Some(remote_desktop_scale_factor_percent(window.scale_factor()));
-                            let mut outcome = session.poll_deliveries(visible, window, cx);
+                            let mut outcome = session.poll_deliveries(window, cx);
                             outcome.changed |= session.schedule_viewport_resize(scale_factor, cx);
                             session.sync_monitor_layout(cx);
                             if outcome.changed {
@@ -626,7 +625,7 @@ impl RemoteDesktopSessionEntity {
                             }
                         }
                         RemoteDesktopSessionEvent::FrameApplyReady { .. } => {
-                            if visible && session.apply_frame_ready(generation, window, cx) {
+                            if session.apply_frame_ready(generation, window, cx) {
                                 cx.notify();
                             }
                         }
@@ -655,6 +654,19 @@ impl RemoteDesktopSessionEntity {
             let _ = window.drop_dynamic_texture(texture);
         }
     }
+
+    fn set_frame_visibility(&mut self, visible: bool, cx: &mut Context<Self>) {
+        let visibility_changed = self.frame_slot.is_visible() != visible;
+        let recovery_required = self.frame_slot.set_visible(visible);
+        if recovery_required && let Some(request_tx) = self.request_tx.as_ref() {
+            // The worker remains alive while hidden; request one base frame so
+            // sparse deltas do not become an unbounded off-screen history.
+            let _ = request_tx.send(RemoteDesktopHelperRequest::RequestFrame);
+        }
+        if visible && visibility_changed && self.frame_slot.has_queued_frame_events() {
+            self.schedule_frame_apply(self.worker_generation, Duration::ZERO, cx);
+        }
+    }
 }
 
 impl WorkspaceApp {
@@ -680,7 +692,8 @@ impl WorkspaceApp {
         // The root supplies cross-tab visibility, then the Entity owns the
         // window-affine delivery and lifecycle transition.
         session_entity.update(cx, |session, cx| {
-            session.schedule_window_event(*event, visible, cx);
+            session.set_frame_visibility(visible, cx);
+            session.schedule_window_event(*event, cx);
         });
     }
 
@@ -723,12 +736,20 @@ impl WorkspaceApp {
         let Some(session_entity) = self.remote_desktop_session_entity(tab_id, cx) else {
             return;
         };
-        let has_queued_frame = session_entity.read(cx).frame_slot.has_queued_frame_events();
-        if has_queued_frame {
-            // Hidden tabs retain a coalesced frame slot. Visibility resumes that existing
-            // delivery without restarting or disconnecting the remote session.
+        // Hidden tabs retain one coalesced frame. Visibility resumes that frame
+        // without restarting or disconnecting either protocol worker.
+        session_entity.update(cx, |session, cx| session.set_frame_visibility(true, cx));
+    }
+
+    pub(in crate::workspace) fn sync_remote_desktop_frame_visibility(
+        &self,
+        tab_id: TabId,
+        cx: &mut App,
+    ) {
+        let visible = self.remote_desktop_tab_visible(tab_id, cx);
+        if let Some(session_entity) = self.remote_desktop_session_entity(tab_id, cx) {
             session_entity.update(cx, |session, cx| {
-                session.schedule_frame_apply(session.worker_generation, Duration::ZERO, cx);
+                session.set_frame_visibility(visible, cx);
             });
         }
     }
@@ -1245,6 +1266,9 @@ fn remote_desktop_monitor_layout(
 mod tests {
     use super::*;
     use gpui::{TestAppContext, VisualContext, point, size};
+    use oxideterm_remote_desktop::{
+        RemoteDesktopFrame, RemoteDesktopFrameFormat, RemoteDesktopFrameUpdate, RemoteDesktopRect,
+    };
 
     struct RemoteDesktopSessionTestRoot;
 
@@ -1334,49 +1358,271 @@ mod tests {
     }
 
     #[gpui::test]
-    fn hidden_session_still_applies_reliable_lifecycle_delivery(cx: &mut TestAppContext) {
+    fn hidden_rdp_and_vnc_sessions_apply_control_deliveries(cx: &mut TestAppContext) {
         let window = cx.add_window(|_window, _cx| RemoteDesktopSessionTestRoot);
-        let protocol = RemoteDesktopProtocol::Rdp;
-        let profile = preview_remote_desktop_profile(protocol);
-        let provider = builtin_preview_provider_registry()
-            .unwrap()
-            .get_for_protocol(protocol)
-            .cloned()
-            .unwrap();
-        let session = cx.new(|_cx| {
-            let mut session = RemoteDesktopSessionEntity::new(
-                TabId(11),
-                profile,
-                provider,
-                None,
-                std::env::temp_dir().join("oxideterm-hidden-test-certificates.json"),
-                RemoteDesktopFrameDeliverySlot::new(),
-                window.into(),
-            );
-            session.worker_generation = 1;
-            session
-        });
-
-        // Hidden sessions suppress frame uploads, not reliable lifecycle events.
-        session.update(cx, |session, cx| {
-            session
-                .delivery_tx
-                .send(RemoteDesktopWorkerDelivery::Event {
-                    tab_id: TabId(11),
-                    generation: 1,
-                    event: RemoteDesktopHelperEvent::Disconnected { reason: None },
-                })
+        for (tab_number, protocol) in [
+            (31, RemoteDesktopProtocol::Rdp),
+            (32, RemoteDesktopProtocol::Vnc),
+        ] {
+            let tab_id = TabId(tab_number);
+            let mut profile = preview_remote_desktop_profile(protocol);
+            profile.session_options.clipboard.images = true;
+            profile.session_options.clipboard.files = true;
+            let provider = builtin_preview_provider_registry()
+                .unwrap()
+                .get_for_protocol(protocol)
+                .cloned()
                 .unwrap();
-            session.schedule_window_event(
-                RemoteDesktopSessionEvent::DeliveryReady { generation: 1 },
-                false,
-                cx,
-            );
-        });
-        cx.run_until_parked();
+            let session = cx.new(|_cx| {
+                let mut session = RemoteDesktopSessionEntity::new(
+                    tab_id,
+                    profile,
+                    provider,
+                    None,
+                    std::env::temp_dir().join(format!(
+                        "oxideterm-hidden-control-{}-test-certificates.json",
+                        protocol.provider_id()
+                    )),
+                    RemoteDesktopFrameDeliverySlot::new(),
+                    window.into(),
+                );
+                session.worker_generation = 1;
+                session
+            });
+            let mut events = cx.events(&session);
 
-        let status = cx.read(|cx| session.read(cx).state.snapshot().status);
-        assert_eq!(status, RemoteDesktopSessionStatus::Disconnected);
+            // Clipboard and lifecycle messages remain reliable while frame
+            // presentation is suspended.
+            session.update(cx, |session, cx| {
+                session.set_frame_visibility(false, cx);
+                for event in [
+                    RemoteDesktopHelperEvent::ClipboardText {
+                        text: format!("hidden-{protocol:?}"),
+                    },
+                    RemoteDesktopHelperEvent::ClipboardTransferFailed {
+                        transfer_id: "hidden-transfer".to_string(),
+                        message: "content-free test failure".to_string(),
+                    },
+                ] {
+                    session
+                        .delivery_tx
+                        .send(RemoteDesktopWorkerDelivery::Event {
+                            tab_id,
+                            generation: 1,
+                            event,
+                        })
+                        .unwrap();
+                }
+                session.schedule_window_event(
+                    RemoteDesktopSessionEvent::DeliveryReady { generation: 1 },
+                    cx,
+                );
+            });
+            cx.run_until_parked();
+
+            assert_eq!(
+                cx.read_from_clipboard().and_then(|item| item.text()),
+                Some(format!("hidden-{protocol:?}"))
+            );
+            assert_eq!(
+                events.try_recv().unwrap(),
+                RemoteDesktopSessionEvent::ClipboardTransferFailed
+            );
+
+            session.update(cx, |session, cx| {
+                session
+                    .delivery_tx
+                    .send(RemoteDesktopWorkerDelivery::TransportFailed {
+                        tab_id,
+                        generation: 1,
+                        message: "hidden transport failed".to_string(),
+                    })
+                    .unwrap();
+                session.schedule_window_event(
+                    RemoteDesktopSessionEvent::DeliveryReady { generation: 1 },
+                    cx,
+                );
+            });
+            cx.run_until_parked();
+            assert_eq!(
+                cx.read(|cx| session.read(cx).state.snapshot().status),
+                RemoteDesktopSessionStatus::Failed
+            );
+
+            session.update(cx, |session, cx| {
+                session
+                    .delivery_tx
+                    .send(RemoteDesktopWorkerDelivery::Event {
+                        tab_id,
+                        generation: 1,
+                        event: RemoteDesktopHelperEvent::Disconnected { reason: None },
+                    })
+                    .unwrap();
+                session.schedule_window_event(
+                    RemoteDesktopSessionEvent::DeliveryReady { generation: 1 },
+                    cx,
+                );
+            });
+            cx.run_until_parked();
+            assert_eq!(
+                cx.read(|cx| session.read(cx).state.snapshot().status),
+                RemoteDesktopSessionStatus::Disconnected
+            );
+
+            let clipboard_path =
+                std::env::temp_dir().join(format!("hidden-{protocol:?}-clipboard.txt"));
+            session.update(cx, |session, cx| {
+                session
+                    .delivery_tx
+                    .send(RemoteDesktopWorkerDelivery::Event {
+                        tab_id,
+                        generation: 1,
+                        event: RemoteDesktopHelperEvent::ClipboardFilesReady {
+                            transfer_id: "hidden-files".to_string(),
+                            paths: vec![clipboard_path.clone()],
+                        },
+                    })
+                    .unwrap();
+                session.schedule_window_event(
+                    RemoteDesktopSessionEvent::DeliveryReady { generation: 1 },
+                    cx,
+                );
+            });
+            cx.run_until_parked();
+            let clipboard_item = cx.read_from_clipboard().unwrap();
+            assert!(matches!(
+                clipboard_item.entries().first(),
+                Some(ClipboardEntry::ExternalPaths(paths))
+                    if paths.paths() == std::slice::from_ref(&clipboard_path)
+            ));
+
+            session.update(cx, |session, cx| {
+                session
+                    .delivery_tx
+                    .send(RemoteDesktopWorkerDelivery::Event {
+                        tab_id,
+                        generation: 1,
+                        event: RemoteDesktopHelperEvent::ClipboardData {
+                            data: RemoteDesktopClipboardData::new(
+                                RemoteDesktopClipboardFormat::ImagePng,
+                                vec![1, 2, 3, 4],
+                            ),
+                        },
+                    })
+                    .unwrap();
+                session.schedule_window_event(
+                    RemoteDesktopSessionEvent::DeliveryReady { generation: 1 },
+                    cx,
+                );
+            });
+            cx.run_until_parked();
+            assert!(matches!(
+                cx.read_from_clipboard()
+                    .and_then(|item| item.entries.into_iter().next()),
+                Some(ClipboardEntry::Image(_))
+            ));
+        }
+    }
+
+    #[gpui::test]
+    fn hidden_rdp_and_vnc_sessions_resume_with_latest_frame(cx: &mut TestAppContext) {
+        let window = cx.add_window(|_window, _cx| RemoteDesktopSessionTestRoot);
+        let frame_size = RemoteDesktopSize {
+            width: 2,
+            height: 1,
+        };
+        for (tab_number, protocol) in [
+            (41, RemoteDesktopProtocol::Rdp),
+            (42, RemoteDesktopProtocol::Vnc),
+        ] {
+            let tab_id = TabId(tab_number);
+            let profile = preview_remote_desktop_profile(protocol);
+            let provider = builtin_preview_provider_registry()
+                .unwrap()
+                .get_for_protocol(protocol)
+                .cloned()
+                .unwrap();
+            let frame_slot = RemoteDesktopFrameDeliverySlot::new();
+            let session = cx.new(|_cx| {
+                let mut session = RemoteDesktopSessionEntity::new(
+                    tab_id,
+                    profile,
+                    provider,
+                    None,
+                    std::env::temp_dir().join(format!(
+                        "oxideterm-hidden-frame-{}-test-certificates.json",
+                        protocol.provider_id()
+                    )),
+                    frame_slot.clone(),
+                    window.into(),
+                );
+                session.worker_generation = 1;
+                session
+            });
+
+            session.update(cx, |session, cx| {
+                session.set_frame_visibility(false, cx);
+            });
+            let frame_decision = frame_slot.push(RemoteDesktopHelperEvent::Frame {
+                frame: RemoteDesktopFrame::new(
+                    frame_size,
+                    RemoteDesktopFrameFormat::Rgba8,
+                    vec![0; 8],
+                ),
+            });
+            assert!(frame_decision.frame_ready);
+            assert!(
+                !frame_slot
+                    .push(RemoteDesktopHelperEvent::FrameUpdate {
+                        update: RemoteDesktopFrameUpdate::new(
+                            frame_size,
+                            RemoteDesktopRect::new(1, 0, 1, 1),
+                            RemoteDesktopFrameFormat::Rgba8,
+                            vec![9, 8, 7, 0xff],
+                        ),
+                    })
+                    .frame_ready
+            );
+            session.update(cx, |session, cx| {
+                session
+                    .delivery_tx
+                    .send(RemoteDesktopWorkerDelivery::FrameReady {
+                        tab_id,
+                        generation: 1,
+                    })
+                    .unwrap();
+                session.schedule_window_event(
+                    RemoteDesktopSessionEvent::DeliveryReady { generation: 1 },
+                    cx,
+                );
+            });
+            cx.run_until_parked();
+
+            let hidden_snapshot = cx.read(|cx| session.read(cx).state.snapshot());
+            assert!(
+                !hidden_snapshot.has_frame,
+                "{protocol:?} uploaded while hidden"
+            );
+            assert_eq!(cx.read(|cx| session.read(cx).state.texture_generation()), 0);
+            assert!(frame_slot.has_queued_frame_events());
+
+            session.update(cx, |session, cx| {
+                session.set_frame_visibility(true, cx);
+                // The production subscription routes the emitted apply event
+                // back to this window-affine delivery method.
+                session.schedule_window_event(
+                    RemoteDesktopSessionEvent::FrameApplyReady { generation: 1 },
+                    cx,
+                );
+            });
+            cx.run_until_parked();
+
+            let visible_snapshot = cx.read(|cx| session.read(cx).state.snapshot());
+            assert!(visible_snapshot.has_frame, "{protocol:?} did not resume");
+            assert_eq!(visible_snapshot.size, Some(frame_size));
+            assert_eq!(cx.read(|cx| session.read(cx).state.texture_generation()), 1);
+            assert!(!frame_slot.has_queued_frame_events());
+        }
     }
 
     #[gpui::test]

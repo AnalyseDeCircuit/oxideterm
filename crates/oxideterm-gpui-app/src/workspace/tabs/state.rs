@@ -31,9 +31,11 @@ impl WorkspaceApp {
         if active_tab_changed {
             if let Some(tab_id) = previous_active_tab_id {
                 self.sync_ide_surface_mount(tab_id, cx);
+                self.sync_remote_desktop_frame_visibility(tab_id, cx);
             }
             if let Some(tab_id) = active_tab_id {
                 self.sync_ide_surface_mount(tab_id, cx);
+                self.sync_remote_desktop_frame_visibility(tab_id, cx);
             }
             // Host Tools owns its timer; root only pushes mount visibility changes.
             self.sync_host_tools_lifecycle(false, cx);
