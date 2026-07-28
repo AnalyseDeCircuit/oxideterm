@@ -2126,8 +2126,7 @@ mod tests {
         entity.update(cx, |entity, _cx| {
             let node_id = NodeId::new("node-a");
             let connection_id = "connection-a";
-            let attempt_id =
-                register_test_node_transport_attempt(entity, &node_id, connection_id);
+            let attempt_id = register_test_node_transport_attempt(entity, &node_id, connection_id);
             entity
                 .reconnect_results
                 .push_back(ReconnectWorkerResult::NodeConnected {
