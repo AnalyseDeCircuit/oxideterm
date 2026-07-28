@@ -15,10 +15,20 @@ from typing import Iterable
 WORKSPACE_FILE = Path("crates/oxideterm-gpui-app/src/workspace.rs")
 WORKSPACE_DIRECTORY = Path("crates/oxideterm-gpui-app/src/workspace")
 ROOT_RENDER_FILE = WORKSPACE_DIRECTORY / "root/render.rs"
+WINDOW_SHELL_FILE = WORKSPACE_DIRECTORY / "window_shell.rs"
 ROOT_INIT_FILE = WORKSPACE_DIRECTORY / "root/init.rs"
-WORKSPACE_STRUCT_PATTERN = re.compile(r"pub\(crate\)\s+struct\s+WorkspaceApp\s*\{")
+WORKSPACE_STRUCT_PATTERNS = (
+    re.compile(r"pub\(crate\)\s+struct\s+WorkspaceApp\s*\{"),
+    re.compile(r"pub\(crate\)\s+struct\s+WorkspaceSession\s*\{"),
+)
 WORKSPACE_IMPL_PATTERN = re.compile(r"(?m)^\s*impl\s+WorkspaceApp\b")
-ROOT_RENDER_IMPL_PATTERN = re.compile(r"impl\s+Render\s+for\s+WorkspaceApp\s*\{")
+ROOT_RENDER_OWNER_PATTERNS = (
+    (
+        "WorkspaceWindowShell",
+        re.compile(r"impl\s+Render\s+for\s+WorkspaceWindowShell\s*\{"),
+    ),
+    ("WorkspaceApp", re.compile(r"impl\s+Render\s+for\s+WorkspaceApp\s*\{")),
+)
 HEARTBEAT_ANCHOR = "Timer::after(Duration::from_millis(530)).await;"
 HIGH_LOAD_AREAS = {
     "host_tools": (WORKSPACE_DIRECTORY / "connection_monitor",),
@@ -204,9 +214,16 @@ def area_line_count(repo_root: Path, area_paths: tuple[Path, ...]) -> int:
 def collect_workspace_struct(
     workspace_source: str,
 ) -> tuple[list[tuple[str, str]], int]:
-    struct_match = WORKSPACE_STRUCT_PATTERN.search(workspace_source)
+    struct_match = next(
+        (
+            candidate
+            for pattern in WORKSPACE_STRUCT_PATTERNS
+            if (candidate := pattern.search(workspace_source)) is not None
+        ),
+        None,
+    )
     if struct_match is None:
-        raise ValueError("WorkspaceApp struct was not found")
+        raise ValueError("WorkspaceApp or WorkspaceSession struct was not found")
     opening_brace = struct_match.end() - 1
     struct_body, closing_brace = extract_braced_body(workspace_source, opening_brace)
     parsed_fields = [
@@ -219,10 +236,22 @@ def collect_workspace_struct(
     return parsed_fields, end_line - start_line + 1
 
 
-def collect_root_render_metrics(render_source: str) -> RenderDispatchMetrics:
-    render_impl_match = ROOT_RENDER_IMPL_PATTERN.search(render_source)
+def collect_root_render_metrics(*render_sources: str) -> RenderDispatchMetrics:
+    render_source = ""
+    render_impl_match: re.Match[str] | None = None
+    for _owner_name, owner_pattern in ROOT_RENDER_OWNER_PATTERNS:
+        for candidate_source in render_sources:
+            candidate_match = owner_pattern.search(candidate_source)
+            if candidate_match is not None:
+                render_source = candidate_source
+                render_impl_match = candidate_match
+                break
+        if render_impl_match is not None:
+            break
     if render_impl_match is None:
-        raise ValueError("Render implementation for WorkspaceApp was not found")
+        raise ValueError(
+            "Render implementation for WorkspaceWindowShell or WorkspaceApp was not found"
+        )
     render_body = extract_named_function_body(
         render_source, render_impl_match.start(), "render"
     )
@@ -286,6 +315,12 @@ def collect_channel_fields(
 def collect_metrics(repo_root: Path) -> AuditMetrics:
     workspace_source = read_source(repo_root, WORKSPACE_FILE)
     render_source = read_source(repo_root, ROOT_RENDER_FILE)
+    window_shell_path = repo_root / WINDOW_SHELL_FILE
+    window_shell_source = (
+        window_shell_path.read_text(encoding="utf-8")
+        if window_shell_path.is_file()
+        else ""
+    )
     init_source = read_source(repo_root, ROOT_INIT_FILE)
     workspace_fields, workspace_struct_lines = collect_workspace_struct(workspace_source)
 
@@ -339,7 +374,7 @@ def collect_metrics(repo_root: Path) -> AuditMetrics:
             line_count(source_file)
             for source_file in rust_files(repo_root / WORKSPACE_DIRECTORY)
         ),
-        root_render=collect_root_render_metrics(render_source),
+        root_render=collect_root_render_metrics(window_shell_source, render_source),
         heartbeat_calls=len(heartbeat_call_names),
         heartbeat_call_names=heartbeat_call_names,
         channel_fields=collect_channel_fields(workspace_fields),

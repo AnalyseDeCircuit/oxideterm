@@ -40,6 +40,19 @@ pub(crate) struct WorkspaceApp {
         self.assertEqual(metrics.sender_names, ("worker_tx",))
         self.assertEqual(metrics.receiver_names, ("worker_rx", "node_events"))
 
+    def test_shared_session_struct_is_supported(self) -> None:
+        source = """
+pub(crate) struct WorkspaceSession {
+    session_id: u64,
+    events: std::sync::mpsc::Receiver<Event>,
+}
+"""
+
+        fields, struct_lines = audit_workspace_app.collect_workspace_struct(source)
+
+        self.assertEqual([name for name, _ in fields], ["session_id", "events"])
+        self.assertEqual(struct_lines, 4)
+
 
 class RootDispatchTests(unittest.TestCase):
     def test_render_dispatch_counts_only_root_render_method(self) -> None:
@@ -68,6 +81,31 @@ impl Render for WorkspaceApp {
             metrics.dispatch_calls,
             ("poll_worker", "maybe_refresh_page"),
         )
+
+    def test_window_shell_render_takes_priority_over_legacy_app_render(self) -> None:
+        legacy_source = """
+impl Render for WorkspaceApp {
+    fn render(&mut self) {
+        self.poll_legacy_worker();
+    }
+}
+"""
+        shell_source = """
+impl Render for WorkspaceWindowShell {
+    fn render(&mut self) {
+        self.poll_shell_worker();
+        let _ = self.receiver.try_recv();
+    }
+}
+"""
+
+        metrics = audit_workspace_app.collect_root_render_metrics(
+            legacy_source, shell_source
+        )
+
+        self.assertEqual(metrics.poll_calls, 1)
+        self.assertEqual(metrics.try_recv_calls, 1)
+        self.assertEqual(metrics.dispatch_calls, ("poll_shell_worker",))
 
     def test_heartbeat_calls_are_scoped_to_workspace_update(self) -> None:
         source = """
