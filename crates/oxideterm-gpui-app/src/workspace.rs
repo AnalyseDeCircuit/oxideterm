@@ -238,9 +238,9 @@ use oxideterm_theme::{
     derive_ui_colors_from_terminal, theme_by_id,
 };
 use oxideterm_workspace::{
-    ActiveSessionNode, ActiveSessionReadiness, ActiveSessionStatus,
-    CommandPaletteMode as PaletteMode, MAX_PANES_PER_TAB, PaneId, PaneNode, SplitDirection, Tab,
-    TabId, TabKind, TabTitleSource, TerminalSessionId, adjusted_split_sizes,
+    ActiveSessionNode, ActiveSessionReadiness, ActiveSessionStatus, MAX_PANES_PER_TAB, PaneId,
+    PaneNode, SplitDirection, Tab, TabId, TabKind, TabTitleSource, TerminalSessionId,
+    adjusted_split_sizes,
 };
 
 use self::actions::SearchBarState;
@@ -518,18 +518,6 @@ struct AiContextTokenBreakdownCache {
     breakdown_without_draft: Option<AiContextTokenBreakdown>,
 }
 
-#[derive(Clone, Debug)]
-struct CommandPaletteState {
-    open: bool,
-    raw_query: String,
-    mode: PaletteMode,
-    selected_index: usize,
-    scroll_handle: UniformListScrollHandle,
-    ssh_config_hosts: Vec<oxideterm_connections::SshConfigHost>,
-    ssh_config_hosts_loading: bool,
-    error: Option<String>,
-}
-
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum ConfirmKeyboardAction {
     Cancel,
@@ -725,7 +713,8 @@ pub(crate) struct WorkspaceApp {
     detached_local_terminal_order: Vec<TerminalSessionId>,
     serial_terminal_configs: HashMap<TerminalSessionId, SerialSessionConfig>,
     detached_local_terminals_popover_open: bool,
-    command_palette: CommandPaletteState,
+    command_palette: Entity<command_palette::CommandPaletteEntity>,
+    _command_palette_observation: Subscription,
     version_migration: VersionMigrationState,
     onboarding: OnboardingState,
     shortcuts_modal: ShortcutsModalState,

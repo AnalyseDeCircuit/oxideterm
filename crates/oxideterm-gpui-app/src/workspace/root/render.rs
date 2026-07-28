@@ -422,7 +422,7 @@ impl Render for WorkspaceApp {
                 } else if this.onboarding.open && this.handle_onboarding_key(event, cx) {
                     window.prevent_default();
                     cx.stop_propagation();
-                } else if !this.command_palette.open
+                } else if !this.command_palette.read(cx).is_open()
                     && this.settings_page.keybinding_recording_action_id.is_none()
                     && crate::keybindings::keystroke_matches_action(
                         &event.keystroke,
@@ -437,7 +437,7 @@ impl Render for WorkspaceApp {
                     let _ = this.handle_new_connection_key(event, window, cx);
                     window.prevent_default();
                     cx.stop_propagation();
-                } else if this.command_palette.open {
+                } else if this.command_palette.read(cx).is_open() {
                     this.handle_command_palette_key(event, window, cx);
                     window.prevent_default();
                     cx.stop_propagation();
@@ -1138,7 +1138,7 @@ impl Render for WorkspaceApp {
                     root.child(self.render_oxide_export_dialog(cx))
                 },
             )
-            .when(self.command_palette.open, |root| {
+            .when(self.command_palette.read(cx).is_open(), |root| {
                 root.child(self.render_command_palette(cx))
             })
             .when(self.version_migration.open, |root| {

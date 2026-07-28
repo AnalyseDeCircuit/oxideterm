@@ -482,6 +482,9 @@ impl WorkspaceApp {
                 workspace.handle_tab_host_event(event, tab_host_window_handle, cx);
             },
         );
+        let command_palette =
+            cx.new(|_| command_palette::CommandPaletteEntity::new(forwarding_runtime.clone()));
+        let command_palette_observation = cx.observe(&command_palette, |_, _, cx| cx.notify());
         let mut workspace = Self {
             focus_handle,
             tabs: Vec::new(),
@@ -508,16 +511,8 @@ impl WorkspaceApp {
             detached_local_terminal_order: Vec::new(),
             serial_terminal_configs: HashMap::new(),
             detached_local_terminals_popover_open: false,
-            command_palette: CommandPaletteState {
-                open: false,
-                raw_query: String::new(),
-                mode: PaletteMode::All,
-                selected_index: 0,
-                scroll_handle: UniformListScrollHandle::new(),
-                ssh_config_hosts: Vec::new(),
-                ssh_config_hosts_loading: false,
-                error: None,
-            },
+            command_palette,
+            _command_palette_observation: command_palette_observation,
             version_migration,
             onboarding: OnboardingState::from_settings(&settings),
             shortcuts_modal: ShortcutsModalState {

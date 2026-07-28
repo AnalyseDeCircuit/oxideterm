@@ -785,7 +785,7 @@ impl WorkspaceApp {
                                     cx,
                                 );
                                 this.refresh_session_manager_ssh_config_hosts(cx);
-                                if this.command_palette.open {
+                                if this.command_palette.read(cx).is_open() {
                                     this.load_command_palette_ssh_config_hosts(cx);
                                 }
                             }),

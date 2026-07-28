@@ -31,7 +31,6 @@ use oxideterm_gpui_ui::{
         TextInputAnchor, TextInputAnchorId, TextInputContentAlign, text_input_secret_mask,
     },
 };
-use oxideterm_workspace::parse_command_palette_query;
 
 const READ_ONLY_TEXT_EM_WIDTH: f32 = 16.0;
 const READ_ONLY_TEXT_LINE_HEIGHT_ESTIMATE: f32 = 28.0;
@@ -690,7 +689,7 @@ impl WorkspaceApp {
             return Some(WorkspaceImeTarget::Settings(input));
         }
 
-        if self.command_palette.open {
+        if self.command_palette.read(cx).is_open() {
             return Some(WorkspaceImeTarget::CommandPalette);
         }
 
@@ -1470,7 +1469,9 @@ impl WorkspaceApp {
                 .get(&id)
                 .cloned()
                 .or_else(|| self.selectable_text_group_text(id)),
-            WorkspaceImeTarget::CommandPalette => Some(self.command_palette.raw_query.clone()),
+            WorkspaceImeTarget::CommandPalette => {
+                Some(self.command_palette.read(cx).query().to_string())
+            }
             WorkspaceImeTarget::ShortcutsModalSearch => Some(self.shortcuts_modal.query.clone()),
             WorkspaceImeTarget::Search => Some(self.search.query.clone()),
             WorkspaceImeTarget::TerminalCommandBar => self
@@ -2247,10 +2248,9 @@ impl WorkspaceApp {
         match target {
             WorkspaceImeTarget::ReadOnlyText(_) => {}
             WorkspaceImeTarget::CommandPalette => {
-                replace_utf16(&mut self.command_palette.raw_query, replacement_range, text);
-                let (mode, _) = parse_command_palette_query(&self.command_palette.raw_query);
-                self.command_palette.mode = mode;
-                self.command_palette.selected_index = 0;
+                self.command_palette.update(cx, |palette, cx| {
+                    palette.replace_query_utf16(replacement_range, text, cx);
+                });
                 self.new_connection_caret_visible = true;
                 cx.notify();
             }
