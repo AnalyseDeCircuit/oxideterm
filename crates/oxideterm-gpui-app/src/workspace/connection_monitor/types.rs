@@ -427,6 +427,20 @@ pub(in crate::workspace) enum HostSnapshotFeedback {
     Toast,
 }
 
+/// Identifies the top Host Tools portal using the same order as root rendering.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(in crate::workspace) enum HostToolsWindowModalSnapshot {
+    ProcessConfirm(oxideterm_gpui_ui::motion::ExitPhase),
+    DockerConfirm(oxideterm_gpui_ui::motion::ExitPhase),
+    DockerLogs,
+    ServiceConfirm(oxideterm_gpui_ui::motion::ExitPhase),
+    ServiceLogs,
+    TmuxConfirm(oxideterm_gpui_ui::motion::ExitPhase),
+    TmuxInput,
+    ScheduleConfirm(oxideterm_gpui_ui::motion::ExitPhase),
+    ScheduleLogs,
+}
+
 impl HostSnapshotFeedback {
     pub(super) fn should_toast(self) -> bool {
         matches!(self, Self::Toast)

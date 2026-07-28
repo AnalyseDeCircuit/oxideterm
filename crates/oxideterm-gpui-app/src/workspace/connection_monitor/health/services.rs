@@ -1777,7 +1777,10 @@ impl HostToolsEntity {
         self.host_services.logs_dialog.clone()
     }
 
-    pub(super) fn dismiss_service_logs_dialog(&mut self, cx: &mut Context<Self>) {
+    pub(in crate::workspace::connection_monitor) fn dismiss_service_logs_dialog(
+        &mut self,
+        cx: &mut Context<Self>,
+    ) {
         if self.host_services.logs_dialog.take().is_some() {
             cx.notify();
         }

@@ -81,6 +81,43 @@ pub(in crate::workspace) struct HostToolsEntity {
 }
 
 impl HostToolsEntity {
+    pub(in crate::workspace) fn window_modal_snapshot(
+        &self,
+    ) -> Option<HostToolsWindowModalSnapshot> {
+        if self.host_schedules.logs_dialog.is_some() {
+            Some(HostToolsWindowModalSnapshot::ScheduleLogs)
+        } else if let Some(confirm) = self.host_schedules.pending_confirm.as_ref() {
+            Some(HostToolsWindowModalSnapshot::ScheduleConfirm(
+                confirm.presence.phase(),
+            ))
+        } else if self.ui.host_tmux_input_dialog.is_some() {
+            Some(HostToolsWindowModalSnapshot::TmuxInput)
+        } else if let Some(confirm) = self.host_tmux.pending_confirm.as_ref() {
+            Some(HostToolsWindowModalSnapshot::TmuxConfirm(
+                confirm.presence.phase(),
+            ))
+        } else if self.host_services.logs_dialog.is_some() {
+            Some(HostToolsWindowModalSnapshot::ServiceLogs)
+        } else if let Some(confirm) = self.host_services.pending_confirm.as_ref() {
+            Some(HostToolsWindowModalSnapshot::ServiceConfirm(
+                confirm.presence.phase(),
+            ))
+        } else if self.host_docker_operations.logs_dialog.is_some() {
+            Some(HostToolsWindowModalSnapshot::DockerLogs)
+        } else if let Some(confirm) = self.host_docker_operations.pending_confirm.as_ref() {
+            Some(HostToolsWindowModalSnapshot::DockerConfirm(
+                confirm.presence.phase(),
+            ))
+        } else {
+            self.host_process_actions
+                .pending_confirm
+                .as_ref()
+                .map(|confirm| {
+                    HostToolsWindowModalSnapshot::ProcessConfirm(confirm.presence.phase())
+                })
+        }
+    }
+
     pub(in crate::workspace) fn new(
         profiler_update_tx: tokio::sync::mpsc::UnboundedSender<ProfilerUpdate>,
         profiler_update_rx: tokio::sync::mpsc::UnboundedReceiver<ProfilerUpdate>,
@@ -1310,6 +1347,69 @@ impl HostToolsEntity {
         }
         self.host_gpu.snapshot = None;
         self.sync_gpu_sampling(enabled_and_visible, selected_connection_id, runtime, cx);
+    }
+}
+
+impl WorkspaceApp {
+    pub(in crate::workspace) fn handle_host_tools_window_modal_key(
+        &mut self,
+        modal: HostToolsWindowModalSnapshot,
+        event: &KeyDownEvent,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        match modal {
+            HostToolsWindowModalSnapshot::ProcessConfirm(_) => {
+                self.handle_host_process_confirm_key(event, cx)
+            }
+            HostToolsWindowModalSnapshot::DockerConfirm(_) => {
+                self.handle_host_docker_confirm_key(event, cx)
+            }
+            HostToolsWindowModalSnapshot::DockerLogs => {
+                if self.handle_host_log_search_key(event, cx) {
+                    return true;
+                }
+                if event.keystroke.key.as_str() == "escape" {
+                    self.host_tools.update(cx, |host_tools, cx| {
+                        host_tools.dismiss_docker_logs_dialog(cx);
+                    });
+                }
+                true
+            }
+            HostToolsWindowModalSnapshot::ServiceConfirm(_) => {
+                self.handle_host_service_confirm_key(event, cx)
+            }
+            HostToolsWindowModalSnapshot::ServiceLogs => {
+                if self.handle_host_log_search_key(event, cx) {
+                    return true;
+                }
+                if event.keystroke.key.as_str() == "escape" {
+                    self.host_tools.update(cx, |host_tools, cx| {
+                        host_tools.dismiss_service_logs_dialog(cx);
+                    });
+                }
+                true
+            }
+            HostToolsWindowModalSnapshot::TmuxConfirm(_) => {
+                self.handle_host_tmux_confirm_key(event, cx)
+            }
+            HostToolsWindowModalSnapshot::TmuxInput => {
+                self.handle_host_tmux_input_dialog_key(event, cx)
+            }
+            HostToolsWindowModalSnapshot::ScheduleConfirm(_) => {
+                self.handle_host_schedule_confirm_key(event, cx)
+            }
+            HostToolsWindowModalSnapshot::ScheduleLogs => {
+                if self.handle_host_log_search_key(event, cx) {
+                    return true;
+                }
+                if event.keystroke.key.as_str() == "escape" {
+                    self.host_tools.update(cx, |host_tools, cx| {
+                        host_tools.dismiss_schedule_logs_dialog(cx);
+                    });
+                }
+                true
+            }
+        }
     }
 }
 

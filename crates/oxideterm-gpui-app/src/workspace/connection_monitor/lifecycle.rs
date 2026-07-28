@@ -180,13 +180,13 @@ impl HostToolsEntity {
 impl WorkspaceApp {
     pub(in crate::workspace) fn host_tools_visibility(&self, cx: &App) -> HostToolsVisibility {
         let tab_host = self.tab_host.read(cx);
-        let main_tab_visible = self.tabs.iter().any(|tab| {
+        let main_tab_visible = self.tabs(cx).iter().any(|tab| {
             is_host_tools_tab_kind(&tab.kind)
-                && self.main_window_tabs.active_tab_id == Some(tab.id)
+                && self.active_tab_id(cx) == Some(tab.id)
                 && !tab_host.is_outside_main_window(tab.id)
         });
         let detached_tab_visible = self
-            .tabs
+            .tabs(cx)
             .iter()
             .any(|tab| is_host_tools_tab_kind(&tab.kind) && tab_host.is_detached(tab.id));
         let sidebar_visible = self.context_sidebar_visible()
@@ -212,18 +212,18 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) {
         self.set_connection_runtime_section(section, cx);
-        let tab_id = if let Some(tab) = self.tabs.iter().find(|tab| tab.kind == TabKind::Runtime) {
+        let tab_id = if let Some(tab) = self.tabs(cx).iter().find(|tab| tab.kind == TabKind::Runtime) {
             tab.id
         } else {
             let tab_id = self.alloc_tab_id(cx);
-            self.tabs.push(Tab {
+            self.insert_tab(Tab {
                 id: tab_id,
                 kind: TabKind::Runtime,
                 title: self.i18n.t("sidebar.panels.runtime"),
                 title_source: TabTitleSource::I18nKey("sidebar.panels.runtime"),
                 root_pane: None,
                 active_pane_id: None,
-            });
+            }, cx);
             tab_id
         };
         self.set_active_tab(tab_id, window, cx);

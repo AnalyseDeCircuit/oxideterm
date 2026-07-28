@@ -1854,7 +1854,10 @@ impl HostToolsEntity {
         self.host_schedules.logs_dialog.clone()
     }
 
-    pub(super) fn dismiss_schedule_logs_dialog(&mut self, cx: &mut Context<Self>) {
+    pub(in crate::workspace::connection_monitor) fn dismiss_schedule_logs_dialog(
+        &mut self,
+        cx: &mut Context<Self>,
+    ) {
         if self.host_schedules.logs_dialog.take().is_some() {
             cx.notify();
         }

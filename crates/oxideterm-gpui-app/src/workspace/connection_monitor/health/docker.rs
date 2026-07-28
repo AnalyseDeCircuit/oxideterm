@@ -1626,7 +1626,10 @@ impl HostToolsEntity {
         self.host_docker_operations.logs_dialog.clone()
     }
 
-    pub(super) fn dismiss_docker_logs_dialog(&mut self, cx: &mut Context<Self>) {
+    pub(in crate::workspace::connection_monitor) fn dismiss_docker_logs_dialog(
+        &mut self,
+        cx: &mut Context<Self>,
+    ) {
         if self.host_docker_operations.logs_dialog.take().is_some() {
             cx.notify();
         }

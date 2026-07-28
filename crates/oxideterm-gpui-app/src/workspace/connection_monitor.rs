@@ -24,4 +24,5 @@ pub(super) use events::{
 pub(super) use health::host_tools_tab_index;
 pub(super) use types::{
     ConnectionRuntimeSection, HostSnapshotFeedback, HostToolsMessages, HostToolsTextInput,
+    HostToolsWindowModalSnapshot,
 };
