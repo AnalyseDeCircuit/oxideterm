@@ -18,6 +18,7 @@ pub(in crate::workspace) struct WorkspaceTabHostEntity {
     navigation_replaying: bool,
     navigation_observed_tab: Option<TabId>,
     process_close_check_generation: u64,
+    process_close_check_task: Option<gpui::Task<()>>,
     process_close_completion: Option<TabCloseProcessCompletion>,
     close_confirm: Option<TabCloseConfirm>,
 }
@@ -66,6 +67,7 @@ impl WorkspaceTabHostEntity {
             navigation_replaying: false,
             navigation_observed_tab: None,
             process_close_check_generation: 0,
+            process_close_check_task: None,
             process_close_completion: None,
             close_confirm: None,
         }
@@ -236,10 +238,6 @@ impl WorkspaceTabHostEntity {
         probes: Vec<TabCloseProcessProbe>,
         cx: &mut Context<Self>,
     ) {
-        self.process_close_check_generation = self.process_close_check_generation.wrapping_add(1);
-        // A newer user request invalidates a completion that has not reached the window adapter.
-        self.process_close_completion = None;
-        let generation = self.process_close_check_generation;
         let probe_task = cx.background_executor().spawn(async move {
             // Each probe owns its duplicated PTY descriptor, so no terminal mutex is held while
             // platform process and cwd commands run on the background executor.
@@ -255,7 +253,24 @@ impl WorkspaceTabHostEntity {
                 .collect::<Vec<_>>()
         });
 
-        cx.spawn(async move |entity, cx| {
+        self.start_close_process_check_with_future(request, probe_task, cx);
+    }
+
+    fn start_close_process_check_with_future(
+        &mut self,
+        request: LocalTerminalCloseCheck,
+        probe_task: impl std::future::Future<
+            Output = Vec<(PaneId, oxideterm_terminal::TerminalProcessInfo)>,
+        > + 'static,
+        cx: &mut Context<Self>,
+    ) {
+        self.process_close_check_generation = self.process_close_check_generation.wrapping_add(1);
+        // A newer user request invalidates a completion that has not reached the window adapter.
+        self.process_close_completion = None;
+        let generation = self.process_close_check_generation;
+        // The Entity is the sole task owner. Replacing this handle cancels the
+        // older check, and releasing the Entity cancels the current check.
+        self.process_close_check_task = Some(cx.spawn(async move |entity, cx| {
             let results = probe_task.await;
             let _ = entity.update(cx, |entity, cx| {
                 if entity.process_close_check_generation != generation {
@@ -271,8 +286,7 @@ impl WorkspaceTabHostEntity {
                 });
                 cx.emit(WorkspaceTabHostEvent::CloseProcessCheckReady);
             });
-        })
-        .detach();
+        }));
     }
 
     pub(in crate::workspace) fn take_close_process_completion(
@@ -516,22 +530,40 @@ mod tests {
     }
 
     #[gpui::test]
-    fn newer_close_process_check_rejects_stale_completion(cx: &mut TestAppContext) {
+    fn newer_close_process_check_cancels_and_replaces_the_previous_task(cx: &mut TestAppContext) {
         let tab_host = cx.new(|_| WorkspaceTabHostEntity::new());
+        let (first_sender, first_receiver) = tokio::sync::oneshot::channel();
+        let (replacement_sender, replacement_receiver) = tokio::sync::oneshot::channel();
         tab_host.update(cx, |tab_host, cx| {
-            tab_host.start_close_process_check(
+            tab_host.start_close_process_check_with_future(
                 LocalTerminalCloseCheck::Single { tab_id: TabId(1) },
-                Vec::new(),
+                async move {
+                    first_receiver.await.expect("first result released");
+                    Vec::new()
+                },
                 cx,
             );
-            tab_host.start_close_process_check(
+            tab_host.start_close_process_check_with_future(
                 LocalTerminalCloseCheck::Batch {
                     tab_ids: vec![TabId(2), TabId(3)],
                 },
-                Vec::new(),
+                async move {
+                    replacement_receiver
+                        .await
+                        .expect("replacement result released");
+                    Vec::new()
+                },
                 cx,
             );
         });
+        cx.run_until_parked();
+        assert!(
+            first_sender.send(()).is_err(),
+            "replacing the retained task must cancel the older future"
+        );
+        replacement_sender
+            .send(())
+            .expect("current task remains retained");
         cx.run_until_parked();
 
         let completion = tab_host
@@ -545,6 +577,89 @@ mod tests {
         );
         assert!(completion.results.is_empty());
         assert!(!completion.has_foreground_child);
+    }
+
+    #[gpui::test]
+    fn entity_release_cancels_close_process_check_without_completion(cx: &mut TestAppContext) {
+        let tab_host = cx.new(|_| WorkspaceTabHostEntity::new());
+        let completion_count = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let completion_count_for_task = completion_count.clone();
+        let (result_sender, result_receiver) = tokio::sync::oneshot::channel();
+        tab_host.update(cx, |tab_host, cx| {
+            tab_host.start_close_process_check_with_future(
+                LocalTerminalCloseCheck::Single { tab_id: TabId(1) },
+                async move {
+                    result_receiver.await.expect("test result released");
+                    completion_count_for_task.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                    Vec::new()
+                },
+                cx,
+            );
+        });
+
+        drop(tab_host);
+        cx.update(|_cx| {});
+        cx.run_until_parked();
+
+        assert!(
+            result_sender.send(()).is_err(),
+            "releasing the Entity must cancel its retained check"
+        );
+        assert_eq!(
+            completion_count.load(std::sync::atomic::Ordering::SeqCst),
+            0
+        );
+    }
+
+    #[gpui::test]
+    fn current_close_process_check_completes_and_notifies_exactly_once(cx: &mut TestAppContext) {
+        let tab_host = cx.new(|_| WorkspaceTabHostEntity::new());
+        let event_recorder = cx.new(|_| TabHostEventRecorder {
+            events: Vec::new(),
+            _subscription: None,
+        });
+        event_recorder.update(cx, |event_recorder, cx| {
+            event_recorder._subscription = Some(cx.subscribe(
+                &tab_host,
+                |event_recorder, _tab_host, event, _cx| {
+                    event_recorder.events.push(*event);
+                },
+            ));
+        });
+        let (result_sender, result_receiver) = tokio::sync::oneshot::channel();
+        tab_host.update(cx, |tab_host, cx| {
+            tab_host.start_close_process_check_with_future(
+                LocalTerminalCloseCheck::Single { tab_id: TabId(7) },
+                async move {
+                    result_receiver.await.expect("test result released");
+                    Vec::new()
+                },
+                cx,
+            );
+        });
+
+        result_sender.send(()).expect("current task retained");
+        cx.run_until_parked();
+
+        assert_eq!(
+            event_recorder.read_with(cx, |event_recorder, _cx| event_recorder.events.clone()),
+            vec![WorkspaceTabHostEvent::CloseProcessCheckReady]
+        );
+        tab_host.update(cx, |tab_host, _cx| {
+            let completion = tab_host
+                .take_close_process_completion()
+                .expect("current completion");
+            assert_eq!(
+                completion.request,
+                LocalTerminalCloseCheck::Single { tab_id: TabId(7) }
+            );
+            assert!(tab_host.take_close_process_completion().is_none());
+        });
+        cx.run_until_parked();
+        assert_eq!(
+            event_recorder.read_with(cx, |event_recorder, _cx| event_recorder.events.len()),
+            1
+        );
     }
 
     #[test]
