@@ -8,3 +8,4 @@ version.workspace = true
 oxideterm-plugin-manifest = { path = "../oxideterm-plugin-manifest" }
 serde.workspace = true
 serde_json.workspace = true
+zeroize.workspace = true

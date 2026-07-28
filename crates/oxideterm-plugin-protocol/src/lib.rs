@@ -12,6 +12,7 @@ mod permissions;
 mod request;
 mod response;
 mod runtime_state;
+mod sensitive;
 mod supervisor;
 
 pub use envelope::{

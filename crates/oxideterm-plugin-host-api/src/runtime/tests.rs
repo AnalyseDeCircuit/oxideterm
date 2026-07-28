@@ -798,6 +798,78 @@ printf '%s\n' "{\"protocolVersion\":1,\"requestId\":\"command:demo.read\",\"payl
 
 #[cfg(unix)]
 #[tokio::test]
+async fn process_runtime_does_not_retain_secret_host_call_copies() {
+    let temp_dir = unique_temp_dir("plugin-process-secret-host-call");
+    let plugin_dir = temp_dir.join("plugin");
+    fs::create_dir_all(&plugin_dir).unwrap();
+    write_process_plugin(
+        &plugin_dir,
+        r#"#!/bin/sh
+read activate
+printf '%s\n' '{"protocolVersion":1,"requestId":"activate-test","payload":{"requestId":"activate-test","result":{"status":"ok","value":{"activated":true}}}}'
+read dispatch
+printf '%s\n' '{"protocolVersion":1,"payload":{"type":"callHostApi","requestId":"host-secret-set","namespace":"secrets","method":"set","args":{"key":"token","value":"plugin-sensitive-value"}}}'
+read host_response
+case "$host_response" in
+  *'"host-sensitive-value"'*) result='{"status":"ok","value":{"received":true}}' ;;
+  *) result='{"status":"error","error":{"code":"bad_host_response","message":"missing host value","recoverable":false}}' ;;
+esac
+printf '%s\n' "{\"protocolVersion\":1,\"requestId\":\"command:demo.secret\",\"payload\":{\"requestId\":\"command:demo.secret\",\"result\":$result}}"
+"#,
+    );
+
+    let mut runtime = NativeProcessPluginRuntime::new(
+        "com.example.runtime",
+        &plugin_dir,
+        "bin/plugin",
+        process_runtime_test_timeout(),
+    );
+    runtime.set_host_call_handler(Box::new(|call| {
+        assert_eq!(call.namespace, "secrets");
+        assert_eq!(call.method, "set");
+        assert_eq!(call.args["value"], "plugin-sensitive-value");
+        Some(PluginResponse::sensitive_ok(
+            call.request_id,
+            serde_json::json!("host-sensitive-value"),
+        ))
+    }));
+    runtime
+        .activate(PluginActivateRequest {
+            request_id: "activate-test".to_string(),
+            manifest: sample_manifest(),
+            permissions: PluginPermissionSet::default(),
+            timeout_ms: PROCESS_RUNTIME_TEST_TIMEOUT_MS,
+        })
+        .await
+        .unwrap();
+
+    let response = runtime
+        .call(PluginRequest {
+            request_id: "command:demo.secret".to_string(),
+            kind: PluginRequestKind::DispatchCommand {
+                command: "demo.secret".to_string(),
+                args: Value::Null,
+            },
+            timeout_ms: Some(2_000),
+        })
+        .await
+        .unwrap();
+
+    assert_eq!(
+        response.result,
+        PluginResponseResult::Ok {
+            value: serde_json::json!({ "received": true }),
+        }
+    );
+    // Secret frames are consumed synchronously and must never reach retained
+    // audit queues that outlive the request/response exchange.
+    assert!(runtime.drain_outbound_messages().is_empty());
+    assert!(runtime.drain_outbound_effects().is_empty());
+    runtime.kill().await.unwrap();
+}
+
+#[cfg(unix)]
+#[tokio::test]
 async fn runtime_host_installs_returnable_host_call_resolver_for_commands() {
     let temp_dir = unique_temp_dir("plugin-runtime-host-returnable-host-call");
     let plugin_dir = temp_dir.join("plugin");

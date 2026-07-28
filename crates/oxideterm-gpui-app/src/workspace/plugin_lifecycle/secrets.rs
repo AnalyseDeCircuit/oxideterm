@@ -8,6 +8,17 @@ use zeroize::Zeroizing;
 
 use crate::workspace::plugin_runtime;
 
+struct SecretHostCallOwner(plugin_runtime::PluginHostCall);
+
+impl Drop for SecretHostCallOwner {
+    fn drop(&mut self) {
+        // The protocol DTO cannot zeroize every JSON argument because most host
+        // APIs carry ordinary data. This owner is the secret-specific drop
+        // boundary for the one moved call received from the process transport.
+        self.0.zeroize_args();
+    }
+}
+
 // Secrets are scoped by plugin id before they touch the shared key store, so a
 // plugin can never address another plugin's persisted account id by raw key.
 pub(super) fn native_plugin_secret_response(
@@ -15,8 +26,14 @@ pub(super) fn native_plugin_secret_response(
     call: plugin_runtime::PluginHostCall,
     key_store: &oxideterm_ai::AiProviderKeyStore,
 ) -> plugin_runtime::PluginResponse {
-    let request_id = call.request_id.clone();
-    match native_plugin_secret_result(plugin_id, &call.method, &call.args, key_store) {
+    let mut call = SecretHostCallOwner(call);
+    let request_id = std::mem::take(&mut call.0.request_id);
+    let method = std::mem::take(&mut call.0.method);
+    let returns_secret = matches!(method.as_str(), "get" | "getMany");
+    match native_plugin_secret_result(plugin_id, &method, &mut call.0.args, key_store) {
+        Ok(value) if returns_secret => {
+            plugin_runtime::PluginResponse::sensitive_ok(request_id, value)
+        }
         Ok(value) => plugin_runtime::PluginResponse::ok(request_id, value),
         Err(error) => plugin_runtime::PluginResponse::error(
             request_id,
@@ -28,7 +45,7 @@ pub(super) fn native_plugin_secret_response(
 fn native_plugin_secret_result(
     plugin_id: &str,
     method: &str,
-    args: &Value,
+    args: &mut Value,
     key_store: &oxideterm_ai::AiProviderKeyStore,
 ) -> Result<Value, String> {
     match method {
@@ -67,20 +84,16 @@ fn native_plugin_secret_result(
         }
         "set" => {
             let key = native_plugin_secret_key_arg(args)?;
-            let value = args
-                .get("value")
-                .and_then(Value::as_str)
-                .ok_or_else(|| "secrets.set requires args.value".to_string())?;
             let account_id =
                 oxideterm_plugin_host_api::secrets::plugin_secret_account_id(plugin_id, key)?;
-            // The JSON bridge gives us a borrowed string; wrap the owned copy at
-            // the keychain boundary so the temporary is zeroized after storage,
-            // matching Tauri's rule that plugin secrets live only in keychain
-            // and the runtime response.
+            let value = take_native_plugin_secret_value(args)?;
+            let deletes_secret = value.is_empty();
+            // Move the JSON string into the zeroizing owner instead of cloning
+            // it for the keychain handoff.
             key_store
-                .store_provider_key(&account_id, Zeroizing::new(value.to_string()))
+                .store_provider_key(&account_id, value)
                 .map_err(|error| {
-                    if value.is_empty() {
+                    if deletes_secret {
                         format!("Failed to delete plugin secret: {error}")
                     } else {
                         format!("Failed to save plugin secret: {error}")
@@ -125,4 +138,62 @@ fn native_plugin_secret_keys_arg(args: &Value) -> Result<Vec<String>, String> {
                 .ok_or_else(|| "secrets.getMany keys must be strings".to_string())
         })
         .collect()
+}
+
+fn take_native_plugin_secret_value(args: &mut Value) -> Result<Zeroizing<String>, String> {
+    let value = args
+        .get_mut("value")
+        .ok_or_else(|| "secrets.set requires args.value".to_string())?;
+    let owned_value = std::mem::take(value);
+    match owned_value {
+        Value::String(secret) => Ok(Zeroizing::new(secret)),
+        other => {
+            // Restore invalid input so the call owner still clears any nested
+            // strings when it leaves the secret boundary.
+            *value = other;
+            Err("secrets.set requires args.value".to_string())
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn secret_set_moves_value_out_of_json_owner() {
+        let mut call = plugin_runtime::PluginHostCall {
+            request_id: "secret-1".to_string(),
+            namespace: "secrets".to_string(),
+            method: "set".to_string(),
+            args: serde_json::json!({
+                "key": "token",
+                "value": "sensitive-value",
+            }),
+        };
+
+        let secret = take_native_plugin_secret_value(&mut call.args).unwrap();
+
+        assert_eq!(secret.as_str(), "sensitive-value");
+        assert!(call.args["value"].is_null());
+        call.zeroize_args();
+    }
+
+    #[test]
+    fn invalid_secret_set_value_remains_owned_for_zeroization() {
+        let mut call = plugin_runtime::PluginHostCall {
+            request_id: "secret-2".to_string(),
+            namespace: "secrets".to_string(),
+            method: "set".to_string(),
+            args: serde_json::json!({
+                "key": "token",
+                "value": { "nested": "sensitive-value" },
+            }),
+        };
+
+        assert!(take_native_plugin_secret_value(&mut call.args).is_err());
+        assert_eq!(call.args["value"]["nested"], "sensitive-value");
+        call.zeroize_args();
+        assert!(call.args.is_null());
+    }
 }

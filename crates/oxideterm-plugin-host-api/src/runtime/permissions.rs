@@ -12,10 +12,16 @@ pub(super) fn install_process_host_call_handler(
     permissions: PluginPermissionSet,
     resolver: NativeHostApiResolver,
 ) {
-    runtime.set_host_call_handler(Box::new(move |call| {
+    runtime.set_host_call_handler(Box::new(move |mut call| {
         if !host_api_allowed(&permissions, &call.namespace, &call.method) {
+            let request_id = std::mem::take(&mut call.request_id);
+            if call.namespace == "secrets" {
+                // Rejected secret calls still own process-provided JSON and
+                // must clear it before returning the permission error.
+                call.zeroize_args();
+            }
             return Some(PluginResponse::error(
-                call.request_id,
+                request_id,
                 PluginError::protocol(
                     "host_api_not_allowed",
                     format!(

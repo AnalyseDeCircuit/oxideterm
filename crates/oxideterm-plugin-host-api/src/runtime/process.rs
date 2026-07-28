@@ -147,12 +147,12 @@ impl NativeProcessPluginRuntime {
             )
         })?;
         let envelope = PluginProtocolEnvelope::new(Some(request.request_id.clone()), request);
-        let mut line = serde_json::to_vec(&envelope).map_err(|error| {
+        let mut line = Zeroizing::new(serde_json::to_vec(&envelope).map_err(|error| {
             PluginError::protocol(
                 "process_request_encode_failed",
                 format!("Cannot encode native plugin request: {error}"),
             )
-        })?;
+        })?);
         line.push(b'\n');
         stdin.write_all(&line).await.map_err(|error| {
             PluginError::runtime(
@@ -178,13 +178,15 @@ impl NativeProcessPluginRuntime {
                 "Native plugin process stdin is not available",
             )
         })?;
-        let envelope = PluginProtocolEnvelope::new(Some(response.request_id.clone()), response);
-        let mut line = serde_json::to_vec(&envelope).map_err(|error| {
+        let response = PluginHostResponseOwner(response);
+        let envelope =
+            PluginProtocolEnvelope::new(Some(response.0.request_id.clone()), &response.0);
+        let mut line = Zeroizing::new(serde_json::to_vec(&envelope).map_err(|error| {
             PluginError::protocol(
                 "process_host_response_encode_failed",
                 format!("Cannot encode native plugin host-call response: {error}"),
             )
-        })?;
+        })?);
         line.push(b'\n');
         stdin.write_all(&line).await.map_err(|error| {
             PluginError::runtime(
@@ -206,7 +208,7 @@ impl NativeProcessPluginRuntime {
         timeout: Duration,
     ) -> Result<PluginResponse, PluginError> {
         let started_at = Instant::now();
-        let mut line = String::new();
+        let mut line = Zeroizing::new(String::new());
         loop {
             let remaining = timeout.checked_sub(started_at.elapsed()).ok_or_else(|| {
                 PluginError::runtime(
@@ -217,7 +219,9 @@ impl NativeProcessPluginRuntime {
                     ),
                 )
             })?;
-            line.clear();
+            // Wipe the previous frame before reusing its allocation. `clear`
+            // alone would leave the old bytes in the string capacity.
+            line.zeroize();
             let read = {
                 let stdout = self.stdout.as_mut().ok_or_else(|| {
                     PluginError::runtime(
@@ -249,7 +253,9 @@ impl NativeProcessPluginRuntime {
                     "Native plugin process closed stdout before responding",
                 ));
             }
-            match decode_process_output_frame(&line)? {
+            let frame = decode_process_output_frame(&line);
+            line.zeroize();
+            match frame? {
                 PluginProcessFrame::Response {
                     envelope_request_id,
                     response,
@@ -267,6 +273,19 @@ impl NativeProcessPluginRuntime {
                     return Ok(response);
                 }
                 PluginProcessFrame::Outbound(message) => {
+                    if matches!(
+                        &message,
+                        PluginOutboundMessage::CallHostApi { namespace, .. }
+                            if namespace == "secrets"
+                    ) {
+                        // Secret calls are synchronous and intentionally do not
+                        // enter the raw-message or effect audit queues.
+                        let host_call_response = self.returnable_secret_host_call_response(message);
+                        if let Some(response) = host_call_response {
+                            self.write_process_host_call_response(response).await?;
+                        }
+                        continue;
+                    }
                     let effect = self
                         .supervisor
                         .handle_outbound_message(message.clone())
@@ -306,6 +325,39 @@ impl NativeProcessPluginRuntime {
             namespace: namespace.clone(),
             method: method.clone(),
             args: args.clone(),
+        })
+    }
+
+    fn returnable_secret_host_call_response(
+        &self,
+        message: PluginOutboundMessage,
+    ) -> Option<PluginResponse> {
+        let PluginOutboundMessage::CallHostApi {
+            request_id,
+            namespace,
+            method,
+            args,
+        } = message
+        else {
+            return None;
+        };
+        let Some(handler) = self.host_call_handler.as_ref() else {
+            // No consumer may inherit a secret when the optional host-call
+            // resolver is absent.
+            let mut call = PluginHostCall {
+                request_id,
+                namespace,
+                method,
+                args,
+            };
+            call.zeroize_args();
+            return None;
+        };
+        handler(PluginHostCall {
+            request_id,
+            namespace,
+            method,
+            args,
         })
     }
 
@@ -400,7 +452,17 @@ impl PluginRuntimeBridge for NativeProcessPluginRuntime {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
+struct PluginHostResponseOwner(PluginResponse);
+
+impl Drop for PluginHostResponseOwner {
+    fn drop(&mut self) {
+        // Sensitive responses remain wire-compatible `PluginResponse` values,
+        // but this transport owner clears their JSON payload on every exit.
+        self.0.zeroize_sensitive_payload();
+    }
+}
+
+#[derive(Debug, PartialEq)]
 enum PluginProcessFrame {
     Response {
         envelope_request_id: Option<String>,

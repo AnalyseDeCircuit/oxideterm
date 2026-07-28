@@ -7990,6 +7990,7 @@ dependencies = [
  "oxideterm-plugin-manifest",
  "serde",
  "serde_json",
+ "zeroize",
 ]
 
 [[package]]

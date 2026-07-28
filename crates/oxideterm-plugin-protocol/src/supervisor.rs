@@ -1,7 +1,7 @@
 // Copyright (C) 2026 AnalyseDeCircuit
 // SPDX-License-Identifier: GPL-3.0-only
 
-use std::{collections::HashMap, time::Duration};
+use std::{collections::HashMap, fmt, time::Duration};
 
 use serde_json::Value;
 
@@ -174,7 +174,7 @@ impl PluginRuntimeSupervisorState {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, PartialEq)]
 pub enum PluginOutboundEffect {
     None,
     RegistrationChanged,
@@ -190,4 +190,41 @@ pub enum PluginOutboundEffect {
         method: String,
         args: Value,
     },
+}
+
+impl fmt::Debug for PluginOutboundEffect {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::None => formatter.write_str("None"),
+            Self::RegistrationChanged => formatter.write_str("RegistrationChanged"),
+            Self::LifecycleChanged => formatter.write_str("LifecycleChanged"),
+            Self::Progress {
+                registration_id,
+                value,
+            } => formatter
+                .debug_struct("Progress")
+                .field("registration_id", registration_id)
+                .field("value", value)
+                .finish(),
+            Self::Event(event) => formatter.debug_tuple("Event").field(event).finish(),
+            Self::HostCall {
+                request_id,
+                namespace,
+                method,
+                args,
+            } => {
+                let mut debug = formatter.debug_struct("HostCall");
+                debug
+                    .field("request_id", request_id)
+                    .field("namespace", namespace)
+                    .field("method", method);
+                if namespace == "secrets" {
+                    debug.field("args", &"<redacted>");
+                } else {
+                    debug.field("args", args);
+                }
+                debug.finish()
+            }
+        }
+    }
 }

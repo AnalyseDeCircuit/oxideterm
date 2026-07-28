@@ -24,6 +24,7 @@ use tokio::{
     process::{Child, ChildStdin, ChildStdout},
     time,
 };
+use zeroize::{Zeroize, Zeroizing};
 
 use oxideterm_plugin_manifest::NativePluginManifest;
 pub use oxideterm_plugin_protocol::{
@@ -61,7 +62,7 @@ pub trait PluginRuntimeBridge: Send {
     fn health<'a>(&'a mut self) -> PluginRuntimeFuture<'a, PluginRuntimeHealth>;
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Debug, PartialEq)]
 pub struct NativePluginRuntimeActivation {
     pub plugin_id: String,
     pub response: PluginResponse,
@@ -69,7 +70,7 @@ pub struct NativePluginRuntimeActivation {
     pub effects: Vec<PluginOutboundEffect>,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Debug, PartialEq)]
 pub struct NativePluginRuntimeCommandDispatch {
     pub plugin_id: String,
     pub command: String,
@@ -78,7 +79,7 @@ pub struct NativePluginRuntimeCommandDispatch {
     pub effects: Vec<PluginOutboundEffect>,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Debug, PartialEq)]
 pub struct NativePluginRuntimeEventDispatch {
     pub plugin_id: String,
     pub event: PluginEvent,
