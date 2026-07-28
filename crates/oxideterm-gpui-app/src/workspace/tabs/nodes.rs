@@ -159,7 +159,7 @@ impl WorkspaceApp {
                     }
                 }
                 runtime_entity::ReconnectScheduleAction::RetryNodeConnect { node_id, job_id } => {
-                    if !self.reconnect_worker_result_is_current(&node_id, Some(&job_id), cx) {
+                    if !self.reconnect_worker_result_is_current(&node_id, &job_id, cx) {
                         continue;
                     }
                     if let Some((attempt, max_attempts)) = self
@@ -306,9 +306,14 @@ impl WorkspaceApp {
                 ReconnectWorkerResult::NodeConnected {
                     node_id,
                     connection_id,
-                    job_id,
+                    attempt_id,
+                    job_id: _,
                 } => {
-                    if !self.reconnect_worker_result_is_current(&node_id, job_id.as_deref(), cx) {
+                    if !self
+                        .workspace_runtime
+                        .read(cx)
+                        .node_transport_result_is_current(&node_id, attempt_id)
+                    {
                         self.workspace_runtime.update(cx, |runtime, _cx| {
                             runtime.retire_stale_node_connection(&node_id, &connection_id);
                         });
@@ -316,6 +321,7 @@ impl WorkspaceApp {
                         continue;
                     }
                     self.workspace_runtime.update(cx, |runtime, cx| {
+                        runtime.complete_node_transport_attempt(&node_id, attempt_id);
                         runtime.finish_connection_trace_success(&node_id, cx);
                     });
                     if self
@@ -451,12 +457,24 @@ impl WorkspaceApp {
                 }
                 ReconnectWorkerResult::NodeConnectFailed {
                     node_id,
+                    connection_id,
                     error,
+                    attempt_id,
                     job_id,
                 } => {
-                    if !self.reconnect_worker_result_is_current(&node_id, job_id.as_deref(), cx) {
+                    if !self
+                        .workspace_runtime
+                        .read(cx)
+                        .node_transport_result_is_current(&node_id, attempt_id)
+                    {
+                        self.workspace_runtime.update(cx, |runtime, _cx| {
+                            runtime.retire_stale_node_connection(&node_id, &connection_id);
+                        });
                         continue;
                     }
+                    self.workspace_runtime.update(cx, |runtime, _cx| {
+                        runtime.complete_node_transport_attempt(&node_id, attempt_id);
+                    });
                     let active_reconnect_job = self
                         .workspace_runtime
                         .read(cx)
@@ -590,7 +608,7 @@ impl WorkspaceApp {
                     recovered_connections,
                     job_id,
                 } => {
-                    if !self.reconnect_worker_result_is_current(&node_id, Some(&job_id), cx) {
+                    if !self.reconnect_worker_result_is_current(&node_id, &job_id, cx) {
                         continue;
                     }
                     let _ = self
@@ -637,7 +655,7 @@ impl WorkspaceApp {
                     detail,
                     job_id,
                 } => {
-                    if !self.reconnect_worker_result_is_current(&node_id, Some(&job_id), cx) {
+                    if !self.reconnect_worker_result_is_current(&node_id, &job_id, cx) {
                         continue;
                     }
                     let _ = self
@@ -675,7 +693,7 @@ impl WorkspaceApp {
                     detail,
                     job_id,
                 } => {
-                    if !self.reconnect_worker_result_is_current(&node_id, Some(&job_id), cx) {
+                    if !self.reconnect_worker_result_is_current(&node_id, &job_id, cx) {
                         continue;
                     }
                     let _ = self
@@ -1604,12 +1622,9 @@ impl WorkspaceApp {
     fn reconnect_worker_result_is_current(
         &self,
         node_id: &NodeId,
-        worker_job_id: Option<&str>,
+        worker_job_id: &str,
         cx: &App,
     ) -> bool {
-        let Some(worker_job_id) = worker_job_id else {
-            return true;
-        };
         self.workspace_runtime
             .read(cx)
             .reconnect_job_is_current(node_id, worker_job_id)
@@ -1650,7 +1665,7 @@ impl WorkspaceApp {
         bindings: Vec<(String, String, ConnectionConsumer)>,
         cx: &mut Context<Self>,
     ) -> bool {
-        if !self.reconnect_worker_result_is_current(&node_id, Some(&job_id), cx) {
+        if !self.reconnect_worker_result_is_current(&node_id, &job_id, cx) {
             self.release_stale_reconnect_forward_bindings(bindings);
             self.cleanup_stale_reconnect_forward_restores(created_forwards);
             return true;

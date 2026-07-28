@@ -53,6 +53,16 @@ pub(in crate::workspace) enum NodeTransportStartError {
     Route(String),
 }
 
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub(in crate::workspace) struct NodeTransportAttemptId(u64);
+
+#[derive(Debug)]
+struct NodeTransportAttempt {
+    id: NodeTransportAttemptId,
+    connection_id: String,
+    abort_handle: tokio::task::AbortHandle,
+}
+
 pub(in crate::workspace) struct ReconnectGraceProbeRequest {
     pub(in crate::workspace) node_id: NodeId,
     pub(in crate::workspace) connection_id: String,
@@ -110,6 +120,8 @@ pub(in crate::workspace) struct WorkspaceRuntimeEntity {
     _node_event_subscription: NodeEventSubscription,
     node_event_rx: NodeEventReceiver,
     reconnect_results: VecDeque<ReconnectWorkerResult>,
+    node_transport_attempts: HashMap<NodeId, NodeTransportAttempt>,
+    next_node_transport_attempt_id: u64,
     node_events: VecDeque<NodeStateEvent>,
     node_event_generations: HashMap<NodeId, u64>,
     node_router: NodeRouter,
@@ -198,6 +210,8 @@ impl WorkspaceRuntimeEntity {
             _node_event_subscription: node_event_subscription,
             node_event_rx,
             reconnect_results: VecDeque::new(),
+            node_transport_attempts: HashMap::new(),
+            next_node_transport_attempt_id: 0,
             node_events: VecDeque::new(),
             node_event_generations: HashMap::new(),
             node_router,
@@ -268,6 +282,9 @@ impl WorkspaceRuntimeEntity {
         node_id: &NodeId,
         managed_key_resolver: ManagedKeyResolver,
     ) -> Result<(), NodeTransportStartError> {
+        // A replacement must retire the old registry entry before reacquiring the
+        // same logical consumer, so an old task cannot release the new attempt.
+        self.cancel_node_transport_attempt(node_id);
         let runtime_snapshot = self
             .node_router
             .node_runtime_snapshot(node_id)
@@ -312,9 +329,11 @@ impl WorkspaceRuntimeEntity {
         let router = self.node_router.clone();
         let reconnect_tx = self.reconnect_worker_tx.clone();
         let worker_job_id = self.reconnect_orchestrator.active_job_id(&node_id.0);
-        let node_id = node_id.clone();
+        let attempt_id = self.next_node_transport_attempt_id();
+        let worker_node_id = node_id.clone();
+        let worker_connection_id = connection_id.clone();
         let prompt_handler = Arc::new(NativeSshPromptHandler::new(self.ssh_worker_tx.clone()));
-        self.task_runtime.spawn(async move {
+        let task = self.task_runtime.spawn(async move {
             // This task owns the node transport independently from terminal panes and pages.
             if force_reconnect {
                 node_handle.clear_physical().await;
@@ -324,7 +343,7 @@ impl WorkspaceRuntimeEntity {
                 .with_managed_key_resolver(managed_key_resolver);
             let parent = if let Some(parent_id) = parent_id {
                 let parent_consumer =
-                    ConnectionConsumer::NodeRouter(format!("{}:ancestor", node_id.0));
+                    ConnectionConsumer::NodeRouter(format!("{}:ancestor", worker_node_id.0));
                 match router
                     .acquire_connection_wait(
                         &parent_id,
@@ -341,8 +360,10 @@ impl WorkspaceRuntimeEntity {
                             ConnectionState::Error(error.to_string()),
                         );
                         let _ = reconnect_tx.send(ReconnectWorkerResult::NodeConnectFailed {
-                            node_id,
+                            node_id: worker_node_id,
+                            connection_id: worker_connection_id,
                             error: error.to_string(),
+                            attempt_id,
                             job_id: worker_job_id,
                         });
                         return;
@@ -370,18 +391,91 @@ impl WorkspaceRuntimeEntity {
             .map_err(|error| error.to_string());
             let _ = match result {
                 Ok(connection_id) => reconnect_tx.send(ReconnectWorkerResult::NodeConnected {
-                    node_id,
+                    node_id: worker_node_id,
                     connection_id,
+                    attempt_id,
                     job_id: worker_job_id,
                 }),
                 Err(error) => reconnect_tx.send(ReconnectWorkerResult::NodeConnectFailed {
-                    node_id,
+                    node_id: worker_node_id,
+                    connection_id: worker_connection_id,
                     error,
+                    attempt_id,
                     job_id: worker_job_id,
                 }),
             };
         });
+        self.node_transport_attempts.insert(
+            node_id.clone(),
+            NodeTransportAttempt {
+                id: attempt_id,
+                connection_id,
+                abort_handle: task.abort_handle(),
+            },
+        );
         Ok(())
+    }
+
+    fn next_node_transport_attempt_id(&mut self) -> NodeTransportAttemptId {
+        self.next_node_transport_attempt_id = self.next_node_transport_attempt_id.wrapping_add(1);
+        NodeTransportAttemptId(self.next_node_transport_attempt_id)
+    }
+
+    fn invalidate_node_transport_attempt(
+        &mut self,
+        node_id: &NodeId,
+    ) -> Option<NodeTransportAttempt> {
+        let attempt = self.node_transport_attempts.remove(node_id)?;
+        // Authentication and jump-host setup must not outlive their owning Entity attempt.
+        attempt.abort_handle.abort();
+        Some(attempt)
+    }
+
+    fn cancel_node_transport_attempt(&mut self, node_id: &NodeId) {
+        let Some(attempt) = self.invalidate_node_transport_attempt(node_id) else {
+            return;
+        };
+        self.retire_node_connection(node_id, &attempt.connection_id);
+        if self.node_router.connection_id_for_node(node_id).as_deref()
+            == Some(attempt.connection_id.as_str())
+        {
+            let _ = self.node_router.prepare_node_connection_attempt(node_id);
+        }
+        self.reconnect_results
+            .retain(|result| !node_transport_result_targets_attempt(result, node_id, attempt.id));
+    }
+
+    pub(in crate::workspace) fn node_transport_result_is_current(
+        &self,
+        node_id: &NodeId,
+        attempt_id: NodeTransportAttemptId,
+    ) -> bool {
+        self.node_transport_attempts
+            .get(node_id)
+            .is_some_and(|attempt| attempt.id == attempt_id)
+    }
+
+    pub(in crate::workspace) fn complete_node_transport_attempt(
+        &mut self,
+        node_id: &NodeId,
+        attempt_id: NodeTransportAttemptId,
+    ) {
+        if self.node_transport_result_is_current(node_id, attempt_id) {
+            self.node_transport_attempts.remove(node_id);
+        }
+    }
+
+    fn shutdown_node_transport_attempts(&mut self) {
+        for (_, attempt) in self.node_transport_attempts.drain() {
+            attempt.abort_handle.abort();
+        }
+        self.reconnect_results.retain(|result| {
+            !matches!(
+                result,
+                ReconnectWorkerResult::NodeConnected { .. }
+                    | ReconnectWorkerResult::NodeConnectFailed { .. }
+            )
+        });
     }
 
     pub(in crate::workspace) fn start_remote_shell_integration_gate(
@@ -607,7 +701,8 @@ impl WorkspaceRuntimeEntity {
         self.retire_node_connection(node_id, connection_id);
     }
 
-    pub(in crate::workspace) fn reset_node_connection(&self, node_id: &NodeId) {
+    pub(in crate::workspace) fn reset_node_connection(&mut self, node_id: &NodeId) {
+        self.cancel_node_transport_attempt(node_id);
         if let Some(connection_id) = self.node_router.connection_id_for_node(node_id) {
             self.retire_node_connection(node_id, &connection_id);
         }
@@ -668,7 +763,6 @@ impl WorkspaceRuntimeEntity {
     fn retire_node_connection(&self, node_id: &NodeId, connection_id: &str) {
         let consumer = ConnectionConsumer::NodeRouter(node_id.0.clone());
         self.ssh_registry.release(connection_id, &consumer);
-        self.release_parent_ref_for_child_connection(node_id, connection_id);
         if let Some(handle) = self.ssh_registry.get(connection_id) {
             self.task_runtime.spawn(async move {
                 handle.clear_physical().await;
@@ -679,27 +773,6 @@ impl WorkspaceRuntimeEntity {
             .mark_state_without_event(connection_id, ConnectionState::Disconnected);
         self.node_router.emitter().unregister(connection_id);
         let _ = self.ssh_registry.retire_connection(connection_id);
-    }
-
-    fn release_parent_ref_for_child_connection(
-        &self,
-        child_node_id: &NodeId,
-        child_connection_id: &str,
-    ) {
-        let Some(parent_connection_id) = self
-            .ssh_registry
-            .get(child_connection_id)
-            .and_then(|handle| handle.info().parent_connection_id)
-        else {
-            return;
-        };
-        self.ssh_registry.release(
-            &parent_connection_id,
-            &ConnectionConsumer::NodeRouter(format!("{}:ancestor", child_node_id.0)),
-        );
-        let _ = self
-            .ssh_registry
-            .set_parent_connection_id(child_connection_id, None);
     }
 
     pub(in crate::workspace) fn reconnect_job_is_current(
@@ -1076,6 +1149,7 @@ impl WorkspaceRuntimeEntity {
             .retain(|node_id| !node_ids.contains(node_id));
         self.cancel_reconnect_scheduler_nodes(node_ids);
         for node_id in node_ids {
+            self.cancel_node_transport_attempt(node_id);
             self.clear_reconnect_restore_state(node_id);
         }
     }
@@ -1149,6 +1223,7 @@ impl WorkspaceRuntimeEntity {
 
     pub(in crate::workspace) fn cancel_reconnect_retry(&mut self, node_id: &NodeId) {
         self.reconnect_requeue_states.remove(node_id);
+        self.cancel_node_transport_attempt(node_id);
     }
 
     pub(in crate::workspace) fn replace_reconnect_cascade(
@@ -1378,8 +1453,9 @@ impl WorkspaceRuntimeEntity {
     fn schedule_worker_delivery(&self, cx: &mut Context<Self>) {
         let runtime_wake = self.reconnect_worker_tx.wake();
         let release_wake = runtime_wake.clone();
-        cx.on_release(move |_, _| {
-            // Workspace release stops UI delivery, not in-flight backend work.
+        cx.on_release(move |entity, _| {
+            // Workspace release invalidates Entity-owned attempts before delivery stops.
+            entity.shutdown_node_transport_attempts();
             release_wake.stop();
         })
         .detach();
@@ -1449,8 +1525,13 @@ impl WorkspaceRuntimeEntity {
             delivery::drain_channel(&self.active_probe_rx, delivery::LIFECYCLE_DELIVERY_BUDGET);
         let (node_event_items, node_event_backlog_remaining) =
             drain_node_event_mailbox(&self.node_event_rx);
-        let received_reconnect_results = !reconnect_batch.items.is_empty();
-        self.reconnect_results.extend(reconnect_batch.items);
+        let mut received_reconnect_results = false;
+        for result in reconnect_batch.items {
+            if self.accept_reconnect_worker_result(&result) {
+                self.reconnect_results.push_back(result);
+                received_reconnect_results = true;
+            }
+        }
         let mut received_node_events = false;
         for event in node_event_items {
             if self.accept_node_event(&event) {
@@ -1479,6 +1560,39 @@ impl WorkspaceRuntimeEntity {
         reconnect_batch.outcome.backlog_remaining
             || active_probe_batch.outcome.backlog_remaining
             || node_event_backlog_remaining
+    }
+
+    fn accept_reconnect_worker_result(&mut self, result: &ReconnectWorkerResult) -> bool {
+        let (node_id, connection_id, attempt_id, job_id) = match result {
+            ReconnectWorkerResult::NodeConnected {
+                node_id,
+                connection_id,
+                attempt_id,
+                job_id,
+            }
+            | ReconnectWorkerResult::NodeConnectFailed {
+                node_id,
+                connection_id,
+                attempt_id,
+                job_id,
+                ..
+            } => (node_id, connection_id, *attempt_id, job_id.as_deref()),
+            _ => return true,
+        };
+        let attempt_is_current = self.node_transport_result_is_current(node_id, attempt_id);
+        let job_is_current =
+            job_id.is_none_or(|job_id| self.reconnect_job_is_current(node_id, job_id));
+        if attempt_is_current && job_is_current {
+            return true;
+        }
+
+        if attempt_is_current {
+            // A cancelled reconnect job invalidates the attempt even if its result won the race.
+            self.cancel_node_transport_attempt(node_id);
+        } else {
+            self.retire_stale_node_connection(node_id, connection_id);
+        }
+        false
     }
 
     fn accept_node_event(&mut self, event: &NodeStateEvent) -> bool {
@@ -1522,6 +1636,26 @@ fn should_install_remote_shell_integration(
     force_install
         || (mode == RemoteShellIntegrationMode::Enabled
             && state != oxideterm_terminal::RemoteShellIntegrationState::Installed)
+}
+
+fn node_transport_result_targets_attempt(
+    result: &ReconnectWorkerResult,
+    target_node_id: &NodeId,
+    target_attempt_id: NodeTransportAttemptId,
+) -> bool {
+    match result {
+        ReconnectWorkerResult::NodeConnected {
+            node_id,
+            attempt_id,
+            ..
+        }
+        | ReconnectWorkerResult::NodeConnectFailed {
+            node_id,
+            attempt_id,
+            ..
+        } => node_id == target_node_id && *attempt_id == target_attempt_id,
+        _ => false,
+    }
 }
 
 fn reconnect_schedule_action_targets_any(
@@ -1648,6 +1782,25 @@ mod tests {
                 "managed key unavailable in test".to_string(),
             ))
         })
+    }
+
+    fn register_test_node_transport_attempt(
+        entity: &mut WorkspaceRuntimeEntity,
+        node_id: &NodeId,
+        connection_id: &str,
+    ) -> NodeTransportAttemptId {
+        let attempt_id = entity.next_node_transport_attempt_id();
+        // A pending task models authentication work that remains cancellable.
+        let task = entity.task_runtime.spawn(std::future::pending::<()>());
+        entity.node_transport_attempts.insert(
+            node_id.clone(),
+            NodeTransportAttempt {
+                id: attempt_id,
+                connection_id: connection_id.to_string(),
+                abort_handle: task.abort_handle(),
+            },
+        );
+        attempt_id
     }
 
     #[gpui::test]
@@ -1968,6 +2121,30 @@ mod tests {
     }
 
     #[gpui::test]
+    fn entity_shutdown_invalidates_attempt_and_queued_completion(cx: &mut TestAppContext) {
+        let entity = test_runtime_entity(cx);
+        entity.update(cx, |entity, _cx| {
+            let node_id = NodeId::new("node-a");
+            let connection_id = "connection-a";
+            let attempt_id =
+                register_test_node_transport_attempt(entity, &node_id, connection_id);
+            entity
+                .reconnect_results
+                .push_back(ReconnectWorkerResult::NodeConnected {
+                    node_id: node_id.clone(),
+                    connection_id: connection_id.to_string(),
+                    attempt_id,
+                    job_id: None,
+                });
+
+            entity.shutdown_node_transport_attempts();
+
+            assert!(!entity.node_transport_result_is_current(&node_id, attempt_id));
+            assert!(entity.take_worker_results().is_empty());
+        });
+    }
+
+    #[gpui::test]
     fn node_transport_start_requires_entity_owned_runtime_config(cx: &mut TestAppContext) {
         let entity = test_runtime_entity(cx);
         entity.update(cx, |entity, _cx| {
@@ -2062,6 +2239,207 @@ mod tests {
     }
 
     #[gpui::test]
+    fn explicit_disconnect_rejects_late_node_transport_success(cx: &mut TestAppContext) {
+        let ssh_registry = SshConnectionRegistry::new(ConnectionPoolConfig::default());
+        let node_router = NodeRouter::new(ssh_registry.clone());
+        let node_id = NodeId::new("node-a");
+        let config = SshConfig {
+            host: "node-a.example.test".to_string(),
+            ..SshConfig::default()
+        };
+        node_router.upsert_node(node_id.clone(), config.clone());
+        let connection =
+            ssh_registry.acquire(config, ConnectionConsumer::NodeRouter(node_id.0.clone()));
+        let connection_id = connection.connection_id().to_string();
+        node_router
+            .bind_connection(&node_id, connection_id.clone())
+            .expect("node connection binding");
+        let entity = cx.new(|cx| {
+            WorkspaceRuntimeEntity::new(
+                ssh_registry.clone(),
+                node_router,
+                test_task_runtime(),
+                true,
+                ReconnectTiming::default(),
+                3,
+                cx,
+            )
+        });
+        let (sender, attempt_id) = entity.update(cx, |entity, cx| {
+            let attempt_id = register_test_node_transport_attempt(entity, &node_id, &connection_id);
+            entity.disconnect_node_runtime_subtree(&node_id, cx);
+            (entity.reconnect_worker_sender(), attempt_id)
+        });
+
+        sender
+            .send(ReconnectWorkerResult::NodeConnected {
+                node_id: node_id.clone(),
+                connection_id: connection_id.clone(),
+                attempt_id,
+                job_id: None,
+            })
+            .expect("late worker result");
+        entity.update(cx, |entity, cx| {
+            entity.drain_worker_results(cx);
+            assert!(entity.take_worker_results().is_empty());
+            assert!(!entity.node_transport_result_is_current(&node_id, attempt_id));
+            assert_eq!(
+                entity
+                    .node_router
+                    .node_runtime_snapshot(&node_id)
+                    .expect("node runtime")
+                    .state
+                    .readiness,
+                NodeReadiness::Disconnected
+            );
+        });
+        assert!(ssh_registry.get(&connection_id).is_none());
+    }
+
+    #[gpui::test]
+    fn explicit_disconnect_rejects_late_node_transport_failure(cx: &mut TestAppContext) {
+        let ssh_registry = SshConnectionRegistry::new(ConnectionPoolConfig::default());
+        let node_router = NodeRouter::new(ssh_registry.clone());
+        let node_id = NodeId::new("node-a");
+        let config = SshConfig {
+            host: "node-a.example.test".to_string(),
+            ..SshConfig::default()
+        };
+        node_router.upsert_node(node_id.clone(), config.clone());
+        let connection =
+            ssh_registry.acquire(config, ConnectionConsumer::NodeRouter(node_id.0.clone()));
+        let connection_id = connection.connection_id().to_string();
+        node_router
+            .bind_connection(&node_id, connection_id.clone())
+            .expect("node connection binding");
+        let entity = cx.new(|cx| {
+            WorkspaceRuntimeEntity::new(
+                ssh_registry,
+                node_router,
+                test_task_runtime(),
+                true,
+                ReconnectTiming::default(),
+                3,
+                cx,
+            )
+        });
+        let (sender, attempt_id) = entity.update(cx, |entity, cx| {
+            let attempt_id = register_test_node_transport_attempt(entity, &node_id, &connection_id);
+            entity.disconnect_node_runtime_subtree(&node_id, cx);
+            (entity.reconnect_worker_sender(), attempt_id)
+        });
+
+        sender
+            .send(ReconnectWorkerResult::NodeConnectFailed {
+                node_id: node_id.clone(),
+                connection_id,
+                error: "late authentication failure".to_string(),
+                attempt_id,
+                job_id: None,
+            })
+            .expect("late worker result");
+        entity.update(cx, |entity, cx| {
+            entity.drain_worker_results(cx);
+            assert!(entity.take_worker_results().is_empty());
+            assert_eq!(
+                entity
+                    .node_router
+                    .node_runtime_snapshot(&node_id)
+                    .expect("node runtime")
+                    .state
+                    .readiness,
+                NodeReadiness::Disconnected
+            );
+        });
+    }
+
+    #[gpui::test]
+    fn replacement_attempt_rejects_old_completion_and_accepts_new_completion(
+        cx: &mut TestAppContext,
+    ) {
+        let ssh_registry = SshConnectionRegistry::new(ConnectionPoolConfig::default());
+        let node_router = NodeRouter::new(ssh_registry.clone());
+        let node_id = NodeId::new("node-a");
+        let config = SshConfig {
+            host: "node-a.example.test".to_string(),
+            ..SshConfig::default()
+        };
+        node_router.upsert_node(node_id.clone(), config.clone());
+        let old_connection = ssh_registry.acquire(
+            config.clone(),
+            ConnectionConsumer::NodeRouter(node_id.0.clone()),
+        );
+        let old_connection_id = old_connection.connection_id().to_string();
+        node_router
+            .bind_connection(&node_id, old_connection_id.clone())
+            .expect("old node connection binding");
+        let entity = cx.new(|cx| {
+            WorkspaceRuntimeEntity::new(
+                ssh_registry.clone(),
+                node_router,
+                test_task_runtime(),
+                true,
+                ReconnectTiming::default(),
+                3,
+                cx,
+            )
+        });
+        let (sender, old_attempt_id, new_attempt_id, new_connection_id) =
+            entity.update(cx, |entity, _cx| {
+                let old_attempt_id =
+                    register_test_node_transport_attempt(entity, &node_id, &old_connection_id);
+                entity.cancel_node_transport_attempt(&node_id);
+                let new_connection =
+                    ssh_registry.acquire(config, ConnectionConsumer::NodeRouter(node_id.0.clone()));
+                let new_connection_id = new_connection.connection_id().to_string();
+                entity
+                    .node_router
+                    .bind_connection(&node_id, new_connection_id.clone())
+                    .expect("new node connection binding");
+                let new_attempt_id =
+                    register_test_node_transport_attempt(entity, &node_id, &new_connection_id);
+                (
+                    entity.reconnect_worker_sender(),
+                    old_attempt_id,
+                    new_attempt_id,
+                    new_connection_id,
+                )
+            });
+
+        sender
+            .send(ReconnectWorkerResult::NodeConnected {
+                node_id: node_id.clone(),
+                connection_id: old_connection_id,
+                attempt_id: old_attempt_id,
+                job_id: None,
+            })
+            .expect("old worker result");
+        sender
+            .send(ReconnectWorkerResult::NodeConnected {
+                node_id: node_id.clone(),
+                connection_id: new_connection_id.clone(),
+                attempt_id: new_attempt_id,
+                job_id: None,
+            })
+            .expect("new worker result");
+        entity.update(cx, |entity, cx| {
+            entity.drain_worker_results(cx);
+            let results = entity.take_worker_results();
+            assert_eq!(results.len(), 1);
+            assert!(matches!(
+                results.front(),
+                Some(ReconnectWorkerResult::NodeConnected {
+                    attempt_id,
+                    connection_id,
+                    ..
+                }) if *attempt_id == new_attempt_id && connection_id == &new_connection_id
+            ));
+            assert!(entity.node_transport_result_is_current(&node_id, new_attempt_id));
+        });
+        assert!(ssh_registry.get(&new_connection_id).is_some());
+    }
+
+    #[gpui::test]
     fn child_reset_releases_only_ancestor_consumer(cx: &mut TestAppContext) {
         let ssh_registry = SshConnectionRegistry::new(ConnectionPoolConfig::default());
         let node_runtime_store = NodeRuntimeStore::default();
@@ -2092,13 +2470,17 @@ mod tests {
         node_router
             .bind_connection(&child_id, child_connection_id.clone())
             .expect("child connection binding");
-        ssh_registry
-            .set_parent_connection_id(&child_connection_id, Some(parent_connection_id.clone()))
-            .expect("parent connection link");
         let ancestor_consumer = ConnectionConsumer::NodeRouter(format!("{}:ancestor", child_id.0));
         ssh_registry
             .acquire_consumer_for_connection(&parent_connection_id, ancestor_consumer.clone())
             .expect("ancestor consumer");
+        ssh_registry
+            .set_parent_connection_ownership(
+                &child_connection_id,
+                parent_connection_id.clone(),
+                ancestor_consumer.clone(),
+            )
+            .expect("parent connection ownership");
         let task_runtime = test_task_runtime();
         let entity = cx.new(|cx| {
             WorkspaceRuntimeEntity::new(

@@ -65,11 +65,14 @@ pub(in crate::workspace) enum ReconnectWorkerResult {
     NodeConnected {
         node_id: NodeId,
         connection_id: String,
+        attempt_id: runtime_entity::NodeTransportAttemptId,
         job_id: Option<String>,
     },
     NodeConnectFailed {
         node_id: NodeId,
+        connection_id: String,
         error: String,
+        attempt_id: runtime_entity::NodeTransportAttemptId,
         job_id: Option<String>,
     },
     GraceRecovered {
