@@ -108,7 +108,7 @@ impl WorkspaceApp {
                 }
             }
             TabKind::FileManager => {
-                if self.file_manager.dialog.is_some() {
+                if self.file_manager.read(cx).dialog.is_some() {
                     let has_background = self
                         .terminal_background_preferences("file_manager")
                         .is_some();

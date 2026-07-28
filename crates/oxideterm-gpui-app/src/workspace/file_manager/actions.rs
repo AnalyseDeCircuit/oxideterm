@@ -14,7 +14,7 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.refresh_file_manager_drives();
+        self.refresh_file_manager_drives(cx);
         let initial_path = self.active_local_terminal_cwd_path(cx);
         let tab_id = if let Some(tab) = self
             .tabs
@@ -45,9 +45,9 @@ impl WorkspaceApp {
         if let Some(path) = initial_path {
             // Opening File Manager from a local terminal should start where the
             // user is already working, without turning cwd into global state.
-            self.set_file_manager_path(path);
+            self.set_file_manager_path(path, cx);
         } else {
-            self.refresh_file_manager();
+            self.refresh_file_manager(cx);
         }
         self.persist_sidebar_settings();
         self.reveal_active_tab(window);
@@ -65,7 +65,7 @@ impl WorkspaceApp {
             // The cwd picker can browse away from the active terminal's
             // confirmed cwd before opening the surface, so apply that explicit
             // selection after the tab is active.
-            self.set_file_manager_path(path);
+            self.set_file_manager_path(path, cx);
         }
         cx.notify();
     }
@@ -79,8 +79,7 @@ impl WorkspaceApp {
         if event.keystroke.modifiers.platform || event.keystroke.modifiers.control {
             match key {
                 "a" => {
-                    self.select_all_file_manager_files();
-                    cx.notify();
+                    self.select_all_file_manager_files(cx);
                     return true;
                 }
                 "c" => {
@@ -96,8 +95,7 @@ impl WorkspaceApp {
                     return true;
                 }
                 "l" => {
-                    self.start_file_manager_path_edit();
-                    cx.notify();
+                    self.start_file_manager_path_edit(cx);
                     return true;
                 }
                 _ => return false,
@@ -110,14 +108,14 @@ impl WorkspaceApp {
         if self.handle_file_manager_dialog_input_footer_key(event, cx) {
             return true;
         }
-        if let Some(input) = self.file_manager.focused_input {
+        if let Some(input) = self.file_manager.read(cx).focused_input {
             // Inline inputs share the workspace IME/text-editing model so
             // selection, caret movement, and platform shortcuts stay browser-like.
             if self.handle_active_text_input_edit_shortcut(&event.keystroke, cx) {
                 return true;
             }
             if input == FileManagerInput::Path
-                && self.handle_file_manager_path_completion_key(event)
+                && self.handle_file_manager_path_completion_key(event, cx)
             {
                 cx.notify();
                 return true;
@@ -127,15 +125,18 @@ impl WorkspaceApp {
                     if !event.keystroke.modifiers.platform
                         && !event.keystroke.modifiers.control =>
                 {
-                    self.handle_file_manager_input_tab(input, event.keystroke.modifiers.shift);
+                    self.handle_file_manager_input_tab(input, event.keystroke.modifiers.shift, cx);
                     cx.notify();
                     return true;
                 }
                 "escape" => {
                     match input {
-                        FileManagerInput::Path => self.cancel_file_manager_path_edit(),
+                        FileManagerInput::Path => self.cancel_file_manager_path_edit(cx),
                         FileManagerInput::Filter => {
-                            self.file_manager.focused_input = None;
+                            self.file_manager.update(cx, |file_manager, cx| {
+                                file_manager.focused_input = None;
+                                cx.notify();
+                            });
                             self.ime_marked_text = None;
                         }
                         FileManagerInput::DialogValue => {}
@@ -145,7 +146,7 @@ impl WorkspaceApp {
                 }
                 "enter" => {
                     match input {
-                        FileManagerInput::Path => self.commit_file_manager_path_input(),
+                        FileManagerInput::Path => self.commit_file_manager_path_input(cx),
                         FileManagerInput::DialogValue => {}
                         FileManagerInput::Filter => {}
                     }
@@ -167,12 +168,17 @@ impl WorkspaceApp {
         if self.handle_file_manager_dialog_footer_key(event, cx) {
             return true;
         }
-        if matches!(
-            self.file_manager.dialog,
-            Some(FileManagerDialog::Preview { .. })
-        ) {
-            let is_video_preview =
-                matches!(self.file_manager.preview, Some(LocalPreview::Video { .. }));
+        let (preview_dialog_open, is_video_preview) = {
+            let file_manager = self.file_manager.read(cx);
+            (
+                matches!(file_manager.dialog, Some(FileManagerDialog::Preview { .. })),
+                matches!(
+                    file_manager.preview.as_deref(),
+                    Some(LocalPreview::Video { .. })
+                ),
+            )
+        };
+        if preview_dialog_open {
             match key {
                 "escape" => {
                     self.begin_file_manager_rich_dialog_exit(cx);
@@ -193,53 +199,76 @@ impl WorkspaceApp {
                     return true;
                 }
                 "i" => {
-                    self.file_manager.preview_show_metadata =
-                        !self.file_manager.preview_show_metadata;
-                    cx.notify();
+                    self.file_manager.update(cx, |file_manager, cx| {
+                        file_manager.preview_show_metadata = !file_manager.preview_show_metadata;
+                        cx.notify();
+                    });
                     return true;
                 }
                 "u" => {
                     if matches!(
-                        self.file_manager.preview,
+                        self.file_manager.read(cx).preview.as_deref(),
                         Some(LocalPreview::Markdown { .. })
                     ) {
-                        self.file_manager.preview_markdown_source =
-                            !self.file_manager.preview_markdown_source;
-                        cx.notify();
+                        self.file_manager.update(cx, |file_manager, cx| {
+                            file_manager.preview_markdown_source =
+                                !file_manager.preview_markdown_source;
+                            cx.notify();
+                        });
                         return true;
                     }
                 }
                 "+" | "=" => {
-                    if matches!(self.file_manager.preview, Some(LocalPreview::Image { .. })) {
-                        self.file_manager.preview_image_zoom =
-                            (self.file_manager.preview_image_zoom + 0.25)
+                    if matches!(
+                        self.file_manager.read(cx).preview.as_deref(),
+                        Some(LocalPreview::Image { .. })
+                    ) {
+                        self.file_manager.update(cx, |file_manager, cx| {
+                            file_manager.preview_image_zoom = (file_manager.preview_image_zoom
+                                + 0.25)
                                 .min(FILE_MANAGER_PREVIEW_MAX_ZOOM);
-                        cx.notify();
+                            cx.notify();
+                        });
                         return true;
                     }
                 }
                 "-" => {
-                    if matches!(self.file_manager.preview, Some(LocalPreview::Image { .. })) {
-                        self.file_manager.preview_image_zoom =
-                            (self.file_manager.preview_image_zoom - 0.25)
+                    if matches!(
+                        self.file_manager.read(cx).preview.as_deref(),
+                        Some(LocalPreview::Image { .. })
+                    ) {
+                        self.file_manager.update(cx, |file_manager, cx| {
+                            file_manager.preview_image_zoom = (file_manager.preview_image_zoom
+                                - 0.25)
                                 .max(FILE_MANAGER_PREVIEW_MIN_ZOOM);
-                        cx.notify();
+                            cx.notify();
+                        });
                         return true;
                     }
                 }
                 "0" => {
-                    if matches!(self.file_manager.preview, Some(LocalPreview::Image { .. })) {
-                        self.file_manager.preview_image_zoom = 1.0;
-                        self.file_manager.preview_image_rotation = 0;
-                        cx.notify();
+                    if matches!(
+                        self.file_manager.read(cx).preview.as_deref(),
+                        Some(LocalPreview::Image { .. })
+                    ) {
+                        self.file_manager.update(cx, |file_manager, cx| {
+                            file_manager.preview_image_zoom = 1.0;
+                            file_manager.preview_image_rotation = 0;
+                            cx.notify();
+                        });
                         return true;
                     }
                 }
                 "r" => {
-                    if matches!(self.file_manager.preview, Some(LocalPreview::Image { .. })) {
-                        self.file_manager.preview_image_rotation =
-                            (self.file_manager.preview_image_rotation + 90) % 360;
-                        cx.notify();
+                    if matches!(
+                        self.file_manager.read(cx).preview.as_deref(),
+                        Some(LocalPreview::Image { .. })
+                    ) {
+                        self.file_manager.update(cx, |file_manager, cx| {
+                            file_manager.preview_image_rotation =
+                                (file_manager.preview_image_rotation + 90) % 360;
+                            cx.notify();
+                        });
                         return true;
                     }
                 }
@@ -248,15 +277,17 @@ impl WorkspaceApp {
         }
         match key {
             "escape" => {
-                self.dismiss_file_manager_context_menu();
-                self.file_manager.dialog = None;
-                self.file_manager.focused_input = None;
-                self.file_manager.focused_dialog_footer_action = None;
-                cx.notify();
+                self.dismiss_file_manager_context_menu(cx);
+                self.file_manager.update(cx, |file_manager, cx| {
+                    file_manager.dialog = None;
+                    file_manager.focused_input = None;
+                    file_manager.focused_dialog_footer_action = None;
+                    cx.notify();
+                });
                 true
             }
             "enter" => {
-                if let Some(file) = self.single_selected_file_manager_file() {
+                if let Some(file) = self.single_selected_file_manager_file(cx) {
                     self.open_file_manager_entry(file, cx);
                     cx.notify();
                     return true;
@@ -264,7 +295,7 @@ impl WorkspaceApp {
                 false
             }
             "space" | " " => {
-                if let Some(file) = self.single_selected_file_manager_file()
+                if let Some(file) = self.single_selected_file_manager_file(cx)
                     && file.file_type != LocalFileType::Directory
                 {
                     self.open_file_manager_preview(file, cx);
@@ -276,9 +307,8 @@ impl WorkspaceApp {
             "delete" => {
                 // Tauri FileList handles Delete as the selected-file delete
                 // shortcut. Keep it ahead of any navigation fallback.
-                if !self.file_manager.selected.is_empty() {
-                    self.open_file_manager_delete_dialog();
-                    cx.notify();
+                if !self.file_manager.read(cx).selected.is_empty() {
+                    self.open_file_manager_delete_dialog(cx);
                     return true;
                 }
                 false
@@ -287,19 +317,16 @@ impl WorkspaceApp {
                 // Browser/React FileList receives Backspace while the list is
                 // focused: selected rows delete; an empty selection keeps the
                 // native file-manager convenience of navigating to the parent.
-                if !self.file_manager.selected.is_empty() {
-                    self.open_file_manager_delete_dialog();
-                    cx.notify();
+                if !self.file_manager.read(cx).selected.is_empty() {
+                    self.open_file_manager_delete_dialog(cx);
                     return true;
                 }
-                self.navigate_file_manager_parent();
-                cx.notify();
+                self.navigate_file_manager_parent(cx);
                 true
             }
             "f2" | "F2" => {
-                if let Some(file) = self.single_selected_file_manager_file() {
-                    self.open_file_manager_rename_dialog(file.name);
-                    cx.notify();
+                if let Some(file) = self.single_selected_file_manager_file(cx) {
+                    self.open_file_manager_rename_dialog(file.name, cx);
                     return true;
                 }
                 false
@@ -308,72 +335,43 @@ impl WorkspaceApp {
         }
     }
 
-    pub(in crate::workspace) fn file_manager_input_value(&self, input: FileManagerInput) -> &str {
-        match input {
-            FileManagerInput::Path => &self.file_manager.path_input,
-            FileManagerInput::Filter => &self.file_manager.filter,
-            FileManagerInput::DialogValue => &self.file_manager.dialog_value,
-        }
+    pub(super) fn refresh_file_manager(&mut self, cx: &mut Context<Self>) {
+        self.file_manager.update(cx, |file_manager, cx| {
+            file_manager.refresh();
+            cx.notify();
+        });
     }
 
-    pub(in crate::workspace) fn file_manager_input_value_mut(
-        &mut self,
-        input: FileManagerInput,
-    ) -> &mut String {
-        match input {
-            FileManagerInput::Path => &mut self.file_manager.path_input,
-            FileManagerInput::Filter => &mut self.file_manager.filter,
-            FileManagerInput::DialogValue => &mut self.file_manager.dialog_value,
-        }
-    }
-
-    pub(super) fn refresh_file_manager(&mut self) {
-        self.file_manager.loading = true;
-        match list_local_files(&self.file_manager.path) {
-            Ok(files) => {
-                self.file_manager.replace_files(files);
-                self.file_manager.error = None;
-                self.prune_file_manager_selection();
-            }
-            Err(error) => {
-                self.file_manager.clear_files();
-                self.file_manager.error = Some(error.to_string());
-            }
-        }
-        self.file_manager.loading = false;
-    }
-
-    pub(super) fn refresh_file_manager_with_drives(&mut self) {
+    pub(super) fn refresh_file_manager_with_drives(&mut self, cx: &mut Context<Self>) {
         // Explicit refresh updates both the current directory and mounted volumes.
-        self.refresh_file_manager_drives();
-        self.refresh_file_manager();
+        self.file_manager.update(cx, |file_manager, cx| {
+            file_manager.refresh_drives();
+            file_manager.refresh();
+            cx.notify();
+        });
     }
 
-    pub(super) fn open_file_manager_drives_dialog(&mut self) {
+    pub(super) fn open_file_manager_drives_dialog(&mut self, cx: &mut Context<Self>) {
         // Refresh before presenting the picker so newly mounted volumes are visible.
-        self.refresh_file_manager_drives();
-        self.file_manager.dialog = Some(FileManagerDialog::Drives);
+        self.file_manager.update(cx, |file_manager, cx| {
+            file_manager.refresh_drives();
+            file_manager.dialog = Some(FileManagerDialog::Drives);
+            cx.notify();
+        });
     }
 
-    fn refresh_file_manager_drives(&mut self) {
-        self.file_manager.drives = local_drives();
+    fn refresh_file_manager_drives(&mut self, cx: &mut Context<Self>) {
+        self.file_manager.update(cx, |file_manager, cx| {
+            file_manager.refresh_drives();
+            cx.notify();
+        });
     }
 
-    pub(super) fn set_file_manager_path(&mut self, path: String) {
-        let normalized = normalize_local_path(&path);
-        self.file_manager.path = normalized.clone();
-        self.file_manager.path_input = normalized;
-        self.file_manager.path_completion.dismiss();
-        self.file_manager
-            .path_scroll
-            .set_offset(Point::new(px(0.0), px(0.0)));
-        self.file_manager.editing_path = false;
-        self.file_manager.focused_input = None;
-        self.file_manager.selected.clear();
-        self.file_manager.last_selected = None;
-        self.dismiss_file_manager_context_menu();
-        self.file_manager.list_scroll = UniformListScrollHandle::new();
-        self.refresh_file_manager();
+    pub(super) fn set_file_manager_path(&mut self, path: String, cx: &mut Context<Self>) {
+        self.file_manager.update(cx, |file_manager, cx| {
+            file_manager.set_path(path);
+            cx.notify();
+        });
     }
 
     pub(in crate::workspace::file_manager) fn handle_file_manager_breadcrumb_scroll(
@@ -382,7 +380,7 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) {
         if let Some(changed) = scroll_breadcrumb_by_wheel(
-            &self.file_manager.path_scroll,
+            &self.file_manager.read(cx).path_scroll,
             event,
             px(FILE_MANAGER_HEADER_HEIGHT),
         ) {
@@ -393,19 +391,20 @@ impl WorkspaceApp {
         }
     }
 
-    pub(super) fn commit_file_manager_path_input(&mut self) {
-        let path = self.file_manager.path_input.trim().to_string();
+    pub(super) fn commit_file_manager_path_input(&mut self, cx: &mut Context<Self>) {
+        let path = self.file_manager.read(cx).path_input.trim().to_string();
         if path.is_empty() {
             return;
         }
-        self.set_file_manager_path(path);
+        self.set_file_manager_path(path, cx);
     }
 
-    pub(super) fn navigate_file_manager_parent(&mut self) {
-        if let Some(parent) = local_parent_path(&self.file_manager.path) {
-            self.set_file_manager_path(parent);
+    pub(super) fn navigate_file_manager_parent(&mut self, cx: &mut Context<Self>) {
+        let current_path = self.file_manager.read(cx).path.clone();
+        if let Some(parent) = local_parent_path(&current_path) {
+            self.set_file_manager_path(parent, cx);
         } else {
-            self.open_file_manager_drives_dialog();
+            self.open_file_manager_drives_dialog(cx);
         }
     }
 
@@ -415,7 +414,7 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) {
         match entry.file_type {
-            LocalFileType::Directory => self.set_file_manager_path(entry.path),
+            LocalFileType::Directory => self.set_file_manager_path(entry.path, cx),
             LocalFileType::File | LocalFileType::Symlink => {
                 // Tauri's FileList treats both Enter and double-click on files
                 // as Quick Look. External open remains an explicit context-menu
@@ -425,44 +424,55 @@ impl WorkspaceApp {
         }
     }
 
-    pub(super) fn start_file_manager_path_edit(&mut self) {
-        self.file_manager.path_input = self.file_manager.path.clone();
-        self.file_manager.editing_path = true;
-        self.file_manager.focused_input = Some(FileManagerInput::Path);
-        self.file_manager.focused_dialog_footer_action = None;
+    pub(super) fn start_file_manager_path_edit(&mut self, cx: &mut Context<Self>) {
+        self.file_manager.update(cx, |file_manager, cx| {
+            file_manager.path_input = file_manager.path.clone();
+            file_manager.editing_path = true;
+            file_manager.focused_input = Some(FileManagerInput::Path);
+            file_manager.focused_dialog_footer_action = None;
+            cx.notify();
+        });
         self.ime_marked_text = None;
     }
 
-    pub(super) fn cancel_file_manager_path_edit(&mut self) {
-        self.file_manager.path_input = self.file_manager.path.clone();
-        self.file_manager.path_completion.dismiss();
-        if self.file_manager.focused_input == Some(FileManagerInput::Path) {
-            self.file_manager.focused_input = None;
-        }
-        self.file_manager.editing_path = false;
+    pub(super) fn cancel_file_manager_path_edit(&mut self, cx: &mut Context<Self>) {
+        self.file_manager.update(cx, |file_manager, cx| {
+            file_manager.path_input = file_manager.path.clone();
+            file_manager.path_completion.dismiss();
+            if file_manager.focused_input == Some(FileManagerInput::Path) {
+                file_manager.focused_input = None;
+            }
+            file_manager.editing_path = false;
+            cx.notify();
+        });
         self.ime_marked_text = None;
     }
 
-    fn handle_file_manager_input_tab(&mut self, input: FileManagerInput, shift: bool) {
+    fn handle_file_manager_input_tab(
+        &mut self,
+        input: FileManagerInput,
+        shift: bool,
+        cx: &mut Context<Self>,
+    ) {
         // Tauri FileList inputs are real DOM controls: Tab first blurs the
         // current text field, and the path editor's onBlur cancels unsubmitted
         // edits unless the Go button receives focus. Native has no button focus
         // owner here yet, so preserve the blur/cancel half explicitly.
         match input {
-            FileManagerInput::Path => self.cancel_file_manager_path_edit(),
+            FileManagerInput::Path => self.cancel_file_manager_path_edit(cx),
             FileManagerInput::Filter | FileManagerInput::DialogValue => {
-                self.file_manager.focused_input = None;
+                self.file_manager.update(cx, |file_manager, cx| {
+                    file_manager.focused_input = None;
+                    if input == FileManagerInput::DialogValue {
+                        file_manager.focused_dialog_footer_action = Some(if shift {
+                            ConfirmDialogAction::Confirm
+                        } else {
+                            ConfirmDialogAction::Cancel
+                        });
+                    }
+                    cx.notify();
+                });
                 self.ime_marked_text = None;
-                if input == FileManagerInput::DialogValue {
-                    // Radix focus trap wraps dialog tab order. Since the input
-                    // is the first focusable control, Tab enters Cancel and
-                    // Shift+Tab wraps to the primary footer action.
-                    self.file_manager.focused_dialog_footer_action = Some(if shift {
-                        ConfirmDialogAction::Confirm
-                    } else {
-                        ConfirmDialogAction::Cancel
-                    });
-                }
             }
         }
         self.clear_ime_selection();
@@ -476,18 +486,23 @@ impl WorkspaceApp {
         if event.keystroke.modifiers.platform || event.keystroke.modifiers.control {
             return false;
         }
-        let input_available = matches!(
-            self.file_manager.dialog,
-            Some(
-                FileManagerDialog::NewFolder
-                    | FileManagerDialog::NewFile
-                    | FileManagerDialog::Rename { .. }
-                    | FileManagerDialog::EditBookmark { .. }
+        let (input_available, focused_input, focused_footer) = {
+            let file_manager = self.file_manager.read(cx);
+            (
+                matches!(
+                    file_manager.dialog,
+                    Some(
+                        FileManagerDialog::NewFolder
+                            | FileManagerDialog::NewFile
+                            | FileManagerDialog::Rename { .. }
+                            | FileManagerDialog::EditBookmark { .. }
+                    )
+                ),
+                file_manager.focused_input,
+                file_manager.focused_dialog_footer_action,
             )
-        );
-        if !input_available
-            && self.file_manager.focused_input != Some(FileManagerInput::DialogValue)
-        {
+        };
+        if !input_available && focused_input != Some(FileManagerInput::DialogValue) {
             return false;
         }
 
@@ -496,19 +511,22 @@ impl WorkspaceApp {
             event.keystroke.modifiers.shift,
             &FILE_MANAGER_DIALOG_FOOTER_ACTIONS,
             input_available,
-            self.file_manager.focused_input == Some(FileManagerInput::DialogValue),
-            self.file_manager.focused_dialog_footer_action,
+            focused_input == Some(FileManagerInput::DialogValue),
+            focused_footer,
             ConfirmDialogAction::Cancel,
             Some(ConfirmDialogAction::Confirm),
         ) {
             Some(crate::workspace::browser_behavior::ModalFooterInputKeyAction::Cancel) => {
-                self.close_file_manager_dialog();
+                self.close_file_manager_dialog(cx);
                 cx.notify();
                 true
             }
             Some(crate::workspace::browser_behavior::ModalFooterInputKeyAction::FocusInput) => {
-                self.file_manager.focused_input = Some(FileManagerInput::DialogValue);
-                self.file_manager.focused_dialog_footer_action = None;
+                self.file_manager.update(cx, |file_manager, cx| {
+                    file_manager.focused_input = Some(FileManagerInput::DialogValue);
+                    file_manager.focused_dialog_footer_action = None;
+                    cx.notify();
+                });
                 self.ime_marked_text = None;
                 self.clear_ime_selection();
                 cx.notify();
@@ -517,8 +535,11 @@ impl WorkspaceApp {
             Some(crate::workspace::browser_behavior::ModalFooterInputKeyAction::FocusFooter(
                 action,
             )) => {
-                self.file_manager.focused_input = None;
-                self.file_manager.focused_dialog_footer_action = Some(action);
+                self.file_manager.update(cx, |file_manager, cx| {
+                    file_manager.focused_input = None;
+                    file_manager.focused_dialog_footer_action = Some(action);
+                    cx.notify();
+                });
                 self.ime_marked_text = None;
                 self.clear_ime_selection();
                 cx.notify();
@@ -528,7 +549,7 @@ impl WorkspaceApp {
                 action,
             )) => {
                 match action {
-                    ConfirmDialogAction::Cancel => self.close_file_manager_dialog(),
+                    ConfirmDialogAction::Cancel => self.close_file_manager_dialog(cx),
                     ConfirmDialogAction::Confirm => self.accept_file_manager_dialog(cx),
                 }
                 cx.notify();
@@ -538,25 +559,42 @@ impl WorkspaceApp {
         }
     }
 
-    pub(super) fn blur_file_manager_inline_inputs(&mut self) {
-        if self.file_manager.editing_path
-            || self.file_manager.focused_input == Some(FileManagerInput::Path)
-        {
-            self.cancel_file_manager_path_edit();
-        } else if self.file_manager.focused_input == Some(FileManagerInput::Filter) {
-            self.file_manager.focused_input = None;
+    pub(super) fn blur_file_manager_inline_inputs(&mut self, cx: &mut Context<Self>) {
+        let (editing_path, focused_input) = {
+            let file_manager = self.file_manager.read(cx);
+            (file_manager.editing_path, file_manager.focused_input)
+        };
+        if editing_path || focused_input == Some(FileManagerInput::Path) {
+            self.cancel_file_manager_path_edit(cx);
+        } else if focused_input == Some(FileManagerInput::Filter) {
+            self.file_manager.update(cx, |file_manager, cx| {
+                file_manager.focused_input = None;
+                cx.notify();
+            });
             self.ime_marked_text = None;
         }
     }
 
     /// Refreshes path suggestions from one cached parent-directory listing.
-    pub(in crate::workspace) fn refresh_file_manager_path_completion(&mut self) {
-        let Some(request) = local_path_completion_request(&self.file_manager.path_input) else {
-            self.file_manager.path_completion.dismiss();
+    pub(in crate::workspace) fn refresh_file_manager_path_completion(
+        &mut self,
+        cx: &mut Context<Self>,
+    ) {
+        let request = {
+            let file_manager = self.file_manager.read(cx);
+            local_path_completion_request(&file_manager.path_input)
+        };
+        let Some(request) = request else {
+            self.file_manager.update(cx, |file_manager, cx| {
+                file_manager.path_completion.dismiss();
+                cx.notify();
+            });
             return;
         };
-        let Some((generation, parent_path)) = self.file_manager.path_completion.request(request)
-        else {
+        let request_state = self.file_manager.update(cx, |file_manager, _cx| {
+            file_manager.path_completion.request(request)
+        });
+        let Some((generation, parent_path)) = request_state else {
             return;
         };
         let entries = list_local_files(&parent_path)
@@ -571,21 +609,28 @@ impl WorkspaceApp {
                 }
             })
             .collect();
-        self.file_manager
-            .path_completion
-            .apply_entries(generation, &parent_path, entries);
+        self.file_manager.update(cx, |file_manager, cx| {
+            file_manager
+                .path_completion
+                .apply_entries(generation, &parent_path, entries);
+            cx.notify();
+        });
     }
 
     pub(in crate::workspace) fn accept_file_manager_path_completion(
         &mut self,
         index: usize,
-        _cx: &mut Context<Self>,
+        cx: &mut Context<Self>,
     ) {
-        self.accept_file_manager_path_completion_without_context(index);
+        self.accept_file_manager_path_completion_without_context(index, cx);
     }
 
-    fn handle_file_manager_path_completion_key(&mut self, event: &KeyDownEvent) -> bool {
-        if !self.file_manager.path_completion.is_visible()
+    fn handle_file_manager_path_completion_key(
+        &mut self,
+        event: &KeyDownEvent,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if !self.file_manager.read(cx).path_completion.is_visible()
             || event.keystroke.modifiers.platform
             || event.keystroke.modifiers.control
             || event.keystroke.modifiers.alt
@@ -593,46 +638,71 @@ impl WorkspaceApp {
             return false;
         }
         match event.keystroke.key.as_str() {
-            "up" | "arrowup" => self.file_manager.path_completion.move_selection(-1),
-            "down" | "arrowdown" => self.file_manager.path_completion.move_selection(1),
+            "up" | "arrowup" => {
+                self.file_manager.update(cx, |file_manager, cx| {
+                    file_manager.path_completion.move_selection(-1);
+                    cx.notify();
+                });
+                true
+            }
+            "down" | "arrowdown" => {
+                self.file_manager.update(cx, |file_manager, cx| {
+                    file_manager.path_completion.move_selection(1);
+                    cx.notify();
+                });
+                true
+            }
             "enter" | "tab" => {
-                let index = self.file_manager.path_completion.selected_index();
-                self.accept_file_manager_path_completion_without_context(index);
+                let index = self.file_manager.read(cx).path_completion.selected_index();
+                self.accept_file_manager_path_completion_without_context(index, cx);
                 true
             }
             "escape" => {
-                self.file_manager.path_completion.dismiss();
+                self.file_manager.update(cx, |file_manager, cx| {
+                    file_manager.path_completion.dismiss();
+                    cx.notify();
+                });
                 true
             }
             _ => false,
         }
     }
 
-    fn accept_file_manager_path_completion_without_context(&mut self, index: usize) {
-        let Some(candidate) = self.file_manager.path_completion.candidate(index).cloned() else {
+    fn accept_file_manager_path_completion_without_context(
+        &mut self,
+        index: usize,
+        cx: &mut Context<Self>,
+    ) {
+        let (candidate, parent_path) = {
+            let file_manager = self.file_manager.read(cx);
+            (
+                file_manager.path_completion.candidate(index).cloned(),
+                file_manager
+                    .path_completion
+                    .parent_path()
+                    .map(str::to_string)
+                    .unwrap_or_else(|| file_manager.path.clone()),
+            )
+        };
+        let Some(candidate) = candidate else {
             return;
         };
-        let parent_path = self
-            .file_manager
-            .path_completion
-            .parent_path()
-            .map(str::to_string)
-            .unwrap_or_else(|| self.file_manager.path.clone());
-        self.file_manager.path_completion.dismiss();
         if candidate.is_directory {
-            self.set_file_manager_path(candidate.path);
+            self.set_file_manager_path(candidate.path, cx);
         } else {
             // File suggestions navigate to their parent and preserve the intended row selection.
-            self.set_file_manager_path(parent_path);
-            if self
-                .file_manager
-                .files
-                .iter()
-                .any(|entry| entry.name == candidate.name)
-            {
-                self.file_manager.selected.insert(candidate.name.clone());
-                self.file_manager.last_selected = Some(candidate.name);
-            }
+            self.set_file_manager_path(parent_path, cx);
+            self.file_manager.update(cx, |file_manager, cx| {
+                if file_manager
+                    .files
+                    .iter()
+                    .any(|entry| entry.name == candidate.name)
+                {
+                    file_manager.selected.insert(candidate.name.clone());
+                    file_manager.last_selected = Some(candidate.name);
+                    cx.notify();
+                }
+            });
         }
     }
 
@@ -641,36 +711,39 @@ impl WorkspaceApp {
         name: String,
         modifiers: gpui::Modifiers,
         visible_files: &[LocalFileEntry],
+        cx: &mut Context<Self>,
     ) {
-        self.blur_file_manager_inline_inputs();
-        if modifiers.shift {
-            let anchor = self
-                .file_manager
-                .last_selected
-                .clone()
-                .unwrap_or_else(|| name.clone());
-            let start = visible_files
-                .iter()
-                .position(|file| file.name == anchor)
-                .unwrap_or(0);
-            let end = visible_files
-                .iter()
-                .position(|file| file.name == name)
-                .unwrap_or(start);
-            self.file_manager.selected.clear();
-            for file in &visible_files[start.min(end)..=start.max(end)] {
-                self.file_manager.selected.insert(file.name.clone());
+        self.blur_file_manager_inline_inputs(cx);
+        self.file_manager.update(cx, |file_manager, cx| {
+            if modifiers.shift {
+                let anchor = file_manager
+                    .last_selected
+                    .clone()
+                    .unwrap_or_else(|| name.clone());
+                let start = visible_files
+                    .iter()
+                    .position(|file| file.name == anchor)
+                    .unwrap_or(0);
+                let end = visible_files
+                    .iter()
+                    .position(|file| file.name == name)
+                    .unwrap_or(start);
+                file_manager.selected.clear();
+                for file in &visible_files[start.min(end)..=start.max(end)] {
+                    file_manager.selected.insert(file.name.clone());
+                }
+            } else if modifiers.platform || modifiers.control {
+                if !file_manager.selected.insert(name.clone()) {
+                    file_manager.selected.remove(&name);
+                }
+                file_manager.last_selected = Some(name);
+            } else {
+                file_manager.selected.clear();
+                file_manager.selected.insert(name.clone());
+                file_manager.last_selected = Some(name);
             }
-        } else if modifiers.platform || modifiers.control {
-            if !self.file_manager.selected.insert(name.clone()) {
-                self.file_manager.selected.remove(&name);
-            }
-            self.file_manager.last_selected = Some(name);
-        } else {
-            self.file_manager.selected.clear();
-            self.file_manager.selected.insert(name.clone());
-            self.file_manager.last_selected = Some(name);
-        }
+            cx.notify();
+        });
     }
 
     pub(super) fn open_file_manager_context_menu(
@@ -678,222 +751,174 @@ impl WorkspaceApp {
         file: Option<LocalFileEntry>,
         x: f32,
         y: f32,
+        cx: &mut Context<Self>,
     ) {
-        self.blur_file_manager_inline_inputs();
-        if let Some(file) = file.as_ref()
-            && crate::workspace::browser_behavior::preserve_or_move_context_selection(
-                &mut self.file_manager.selected,
-                file.name.clone(),
-            )
-        {
-            self.file_manager.last_selected = Some(file.name.clone());
-        }
-        self.file_manager.context_menu_presence.reopen();
-        self.file_manager.context_menu_exit_generation = None;
-        self.file_manager.context_menu = Some(FileManagerContextMenu { file, x, y });
+        self.blur_file_manager_inline_inputs(cx);
+        self.file_manager.update(cx, |file_manager, cx| {
+            if let Some(file) = file.as_ref()
+                && crate::workspace::browser_behavior::preserve_or_move_context_selection(
+                    &mut file_manager.selected,
+                    file.name.clone(),
+                )
+            {
+                file_manager.last_selected = Some(file.name.clone());
+            }
+            file_manager.context_menu_presence.reopen();
+            file_manager.context_menu_exit_generation = None;
+            file_manager.context_menu = Some(FileManagerContextMenu { file, x, y });
+            cx.notify();
+        });
     }
 
-    pub(in crate::workspace) fn dismiss_file_manager_context_menu(&mut self) -> bool {
+    pub(in crate::workspace) fn dismiss_file_manager_context_menu(
+        &mut self,
+        cx: &mut Context<Self>,
+    ) -> bool {
         // Radix ContextMenu has one dismissal owner regardless of whether the
         // close came from outside click, Esc, or an item activation. Keep the
         // FileManager menu payload behind this helper so global browser
         // dismissal does not mutate feature state ad hoc.
-        if self.file_manager.context_menu.is_none() {
+        if self.file_manager.read(cx).context_menu.is_none() {
             return false;
         }
-        self.clear_file_manager_context_menu_immediately()
+        self.clear_file_manager_context_menu_immediately(cx)
     }
 
-    pub(in crate::workspace) fn clear_file_manager_context_menu_immediately(&mut self) -> bool {
-        let changed = self.file_manager.context_menu.take().is_some();
-        self.file_manager.context_menu_exit_generation = None;
-        self.file_manager.context_menu_presence.reopen();
-        changed
+    pub(in crate::workspace) fn clear_file_manager_context_menu_immediately(
+        &mut self,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        self.file_manager.update(cx, |file_manager, cx| {
+            let changed = file_manager.clear_context_menu_immediately();
+            if changed {
+                cx.notify();
+            }
+            changed
+        })
     }
 
-    pub(super) fn clear_file_manager_selection(&mut self) {
-        self.file_manager.selected.clear();
-        self.file_manager.last_selected = None;
-    }
-
-    pub(super) fn select_all_file_manager_files(&mut self) {
-        let files = self.file_manager.sorted_files();
-        self.file_manager.selected = files.iter().map(|file| file.name.clone()).collect();
-        self.file_manager.last_selected = self.file_manager.selected.iter().next().cloned();
-    }
-
-    pub(super) fn selected_file_manager_names(&self) -> Vec<String> {
-        self.file_manager.selected.iter().cloned().collect()
-    }
-
-    pub(super) fn selected_file_manager_entries(&self) -> Vec<LocalFileEntry> {
-        self.file_manager
-            .files
-            .iter()
-            .filter(|file| self.file_manager.selected.contains(&file.name))
-            .cloned()
-            .collect()
-    }
-
-    pub(super) fn single_selected_file_manager_file(&self) -> Option<LocalFileEntry> {
-        if self.file_manager.selected.len() != 1 {
-            return None;
-        }
-        let name = self.file_manager.selected.iter().next()?;
-        self.file_manager
-            .files
-            .iter()
-            .find(|file| &file.name == name)
-            .cloned()
-    }
-
-    fn prune_file_manager_selection(&mut self) {
-        let names = self
-            .file_manager
-            .files
-            .iter()
-            .map(|file| file.name.as_str())
-            .collect::<HashSet<_>>();
-        self.file_manager
-            .selected
-            .retain(|name| names.contains(name.as_str()));
-        if self
-            .file_manager
-            .last_selected
-            .as_ref()
-            .is_some_and(|name| !names.contains(name.as_str()))
-        {
-            self.file_manager.last_selected = None;
-        }
-    }
-
-    pub(super) fn toggle_file_manager_sort(&mut self, field: LocalSortField) {
-        self.blur_file_manager_inline_inputs();
-        if self.file_manager.sort_field == field {
-            self.file_manager.sort_direction = match self.file_manager.sort_direction {
-                LocalSortDirection::Asc => LocalSortDirection::Desc,
-                LocalSortDirection::Desc => LocalSortDirection::Asc,
-            };
-        } else {
-            self.file_manager.sort_field = field;
-            self.file_manager.sort_direction = LocalSortDirection::Asc;
-        }
-    }
-
-    pub(super) fn open_file_manager_new_folder_dialog(&mut self) {
-        self.file_manager.dialog = Some(FileManagerDialog::NewFolder);
-        self.file_manager.dialog_value.clear();
-        self.file_manager.focused_input = Some(FileManagerInput::DialogValue);
-        self.file_manager.focused_dialog_footer_action = None;
-    }
-
-    pub(super) fn open_file_manager_new_file_dialog(&mut self) {
-        self.file_manager.dialog = Some(FileManagerDialog::NewFile);
-        self.file_manager.dialog_value.clear();
-        self.file_manager.focused_input = Some(FileManagerInput::DialogValue);
-        self.file_manager.focused_dialog_footer_action = None;
-    }
-
-    pub(super) fn open_file_manager_rename_dialog(&mut self, old_name: String) {
-        self.file_manager.dialog = Some(FileManagerDialog::Rename {
-            old_name: old_name.clone(),
+    pub(super) fn clear_file_manager_selection(&mut self, cx: &mut Context<Self>) {
+        self.file_manager.update(cx, |file_manager, cx| {
+            file_manager.selected.clear();
+            file_manager.last_selected = None;
+            cx.notify();
         });
-        self.file_manager.dialog_value = old_name;
-        self.file_manager.focused_input = Some(FileManagerInput::DialogValue);
-        self.file_manager.focused_dialog_footer_action = None;
     }
 
-    pub(super) fn open_file_manager_delete_dialog(&mut self) {
-        let files = self.selected_file_manager_names();
+    pub(super) fn select_all_file_manager_files(&mut self, cx: &mut Context<Self>) {
+        self.file_manager.update(cx, |file_manager, cx| {
+            let files = file_manager.sorted_files();
+            file_manager.selected = files.iter().map(|file| file.name.clone()).collect();
+            file_manager.last_selected = file_manager.selected.iter().next().cloned();
+            cx.notify();
+        });
+    }
+
+    pub(super) fn selected_file_manager_names(&self, cx: &App) -> Vec<String> {
+        self.file_manager.read(cx).selected_names()
+    }
+
+    pub(super) fn selected_file_manager_entries(&self, cx: &App) -> Vec<LocalFileEntry> {
+        self.file_manager.read(cx).selected_entries()
+    }
+
+    pub(super) fn single_selected_file_manager_file(&self, cx: &App) -> Option<LocalFileEntry> {
+        self.file_manager.read(cx).single_selected_file()
+    }
+
+    pub(super) fn toggle_file_manager_sort(
+        &mut self,
+        field: LocalSortField,
+        cx: &mut Context<Self>,
+    ) {
+        self.blur_file_manager_inline_inputs(cx);
+        self.file_manager.update(cx, |file_manager, cx| {
+            if file_manager.sort_field == field {
+                file_manager.sort_direction = match file_manager.sort_direction {
+                    LocalSortDirection::Asc => LocalSortDirection::Desc,
+                    LocalSortDirection::Desc => LocalSortDirection::Asc,
+                };
+            } else {
+                file_manager.sort_field = field;
+                file_manager.sort_direction = LocalSortDirection::Asc;
+            }
+            cx.notify();
+        });
+    }
+
+    pub(super) fn open_file_manager_new_folder_dialog(&mut self, cx: &mut Context<Self>) {
+        self.file_manager.update(cx, |file_manager, cx| {
+            file_manager.dialog = Some(FileManagerDialog::NewFolder);
+            file_manager.dialog_value.clear();
+            file_manager.focused_input = Some(FileManagerInput::DialogValue);
+            file_manager.focused_dialog_footer_action = None;
+            cx.notify();
+        });
+    }
+
+    pub(super) fn open_file_manager_new_file_dialog(&mut self, cx: &mut Context<Self>) {
+        self.file_manager.update(cx, |file_manager, cx| {
+            file_manager.dialog = Some(FileManagerDialog::NewFile);
+            file_manager.dialog_value.clear();
+            file_manager.focused_input = Some(FileManagerInput::DialogValue);
+            file_manager.focused_dialog_footer_action = None;
+            cx.notify();
+        });
+    }
+
+    pub(super) fn open_file_manager_rename_dialog(
+        &mut self,
+        old_name: String,
+        cx: &mut Context<Self>,
+    ) {
+        self.file_manager.update(cx, |file_manager, cx| {
+            file_manager.dialog = Some(FileManagerDialog::Rename {
+                old_name: old_name.clone(),
+            });
+            file_manager.dialog_value = old_name;
+            file_manager.focused_input = Some(FileManagerInput::DialogValue);
+            file_manager.focused_dialog_footer_action = None;
+            cx.notify();
+        });
+    }
+
+    pub(super) fn open_file_manager_delete_dialog(&mut self, cx: &mut Context<Self>) {
+        let files = self.selected_file_manager_names(cx);
         if files.is_empty() {
             return;
         }
-        self.file_manager.dialog = Some(FileManagerDialog::Delete { files });
-        // The delete confirm has no text input, so keyboard focus starts at
-        // the same first footer action that a browser/Radix dialog exposes.
-        self.file_manager.focused_dialog_footer_action = Some(ConfirmDialogAction::Cancel);
-        self.dismiss_file_manager_context_menu();
+        self.file_manager.update(cx, |file_manager, cx| {
+            file_manager.dialog = Some(FileManagerDialog::Delete { files });
+            // The delete confirm has no text input, so keyboard focus starts at
+            // the same first footer action that a browser/Radix dialog exposes.
+            file_manager.focused_dialog_footer_action = Some(ConfirmDialogAction::Cancel);
+            file_manager.clear_context_menu_immediately();
+            cx.notify();
+        });
     }
 
-    pub(super) fn open_file_manager_properties(&mut self, entry: LocalFileEntry) {
+    pub(super) fn open_file_manager_properties(
+        &mut self,
+        entry: LocalFileEntry,
+        cx: &mut Context<Self>,
+    ) {
         let details = local_file_properties(&entry);
-        self.file_manager.properties_checksum = None;
-        self.file_manager.properties_checksum_loading = false;
-        self.file_manager.properties_checksum_rx = None;
-        self.file_manager.properties_checksum_poll_active = false;
-        self.file_manager.dialog = Some(FileManagerDialog::Properties { entry, details });
-        self.file_manager.dialog_presence.reopen();
-        self.file_manager.focused_dialog_footer_action = None;
-        self.dismiss_file_manager_context_menu();
+        self.file_manager.update(cx, |file_manager, cx| {
+            file_manager.properties_checksum = None;
+            file_manager.properties_checksum_loading = false;
+            file_manager.properties_checksum_task = None;
+            file_manager.dialog = Some(FileManagerDialog::Properties { entry, details });
+            file_manager.dialog_presence.reopen();
+            file_manager.focused_dialog_footer_action = None;
+            file_manager.clear_context_menu_immediately();
+            cx.notify();
+        });
     }
 
     pub(super) fn calculate_file_manager_properties_checksum(&mut self, cx: &mut Context<Self>) {
-        if self.file_manager.properties_checksum_loading {
-            return;
-        }
-        let Some(FileManagerDialog::Properties { entry, .. }) = self.file_manager.dialog.clone()
-        else {
-            return;
-        };
-        if entry.file_type != LocalFileType::File {
-            return;
-        }
-        let path = entry.path;
-        let (tx, rx) = std::sync::mpsc::channel();
-        self.file_manager.properties_checksum = None;
-        self.file_manager.properties_checksum_loading = true;
-        self.file_manager.properties_checksum_rx = Some(rx);
-        std::thread::spawn(move || {
-            let _ = tx.send(calculate_local_checksum(&path));
+        self.file_manager.update(cx, |file_manager, cx| {
+            file_manager.calculate_properties_checksum(cx);
         });
-        self.schedule_file_manager_checksum_poll(cx);
-        cx.notify();
-    }
-
-    fn schedule_file_manager_checksum_poll(&mut self, cx: &mut Context<Self>) {
-        if self.file_manager.properties_checksum_poll_active {
-            return;
-        }
-        self.file_manager.properties_checksum_poll_active = true;
-        cx.spawn(async move |weak, cx| {
-            loop {
-                cx.background_executor()
-                    .timer(std::time::Duration::from_millis(80))
-                    .await;
-                let keep_polling = weak
-                    .update(cx, |this, cx| {
-                        let result = this
-                            .file_manager
-                            .properties_checksum_rx
-                            .as_ref()
-                            .and_then(|rx| rx.try_recv().ok());
-                        let Some(result) = result else {
-                            cx.notify();
-                            return true;
-                        };
-                        this.file_manager.properties_checksum_rx = None;
-                        this.file_manager.properties_checksum_loading = false;
-                        this.file_manager.properties_checksum_poll_active = false;
-                        match result {
-                            Ok(checksum) => {
-                                this.file_manager.properties_checksum = Some(checksum);
-                            }
-                            Err(error) => this.push_file_manager_toast(
-                                this.i18n.t("fileManager.error"),
-                                Some(error),
-                                TerminalNoticeVariant::Error,
-                            ),
-                        }
-                        cx.notify();
-                        false
-                    })
-                    .unwrap_or(false);
-                if !keep_polling {
-                    break;
-                }
-            }
-        })
-        .detach();
     }
 
     pub(super) fn open_file_manager_preview(
@@ -901,29 +926,37 @@ impl WorkspaceApp {
         entry: LocalFileEntry,
         cx: &mut Context<Self>,
     ) {
-        self.file_manager.preview = Some(LocalPreview::Loading);
-        self.file_manager.preview_metadata = None;
-        self.file_manager.preview_markdown_source = false;
-        self.file_manager.preview_code_scroll = UniformListScrollHandle::new();
-        self.file_manager.preview_markdown_scroll = MarkdownVirtualListScrollHandle::new();
-        self.file_manager.preview_stream = FileManagerPreviewStreamState::default();
-        self.file_manager.preview_font_family = None;
-        self.file_manager.preview_font_error = None;
-        self.file_manager.focused_input = None;
+        let audio_stop_error = self.file_manager.update(cx, |file_manager, cx| {
+            file_manager.preview = Some(Arc::new(LocalPreview::Loading));
+            file_manager.preview_metadata = None;
+            file_manager.preview_markdown_source = false;
+            file_manager.preview_code_scroll = UniformListScrollHandle::new();
+            file_manager.preview_markdown_scroll = MarkdownVirtualListScrollHandle::new();
+            file_manager.preview_stream = FileManagerPreviewStreamState::default();
+            file_manager.preview_font_family = None;
+            file_manager.preview_font_error = None;
+            file_manager.focused_input = None;
+            file_manager.preview_video_surface.detach();
+            cx.notify();
+            file_manager
+                .preview_audio
+                .command(AudioPreviewCommand::Stop)
+                .err()
+        });
         self.ime_marked_text = None;
-        let _ = self
-            .file_manager
-            .preview_audio
-            .command(AudioPreviewCommand::Stop);
-        self.file_manager.preview_video_surface.detach();
+        if let Some(error) = audio_stop_error {
+            self.push_file_manager_toast(
+                self.i18n.t("fileManager.error"),
+                Some(error),
+                TerminalNoticeVariant::Error,
+            );
+        }
         let preview = read_local_preview(&entry.path);
         match &preview {
             LocalPreview::Audio { path, .. } => {
-                if let Err(error) = self
-                    .file_manager
-                    .preview_audio
-                    .load(std::path::Path::new(path))
-                {
+                if let Err(error) = self.file_manager.update(cx, |file_manager, _cx| {
+                    file_manager.preview_audio.load(std::path::Path::new(path))
+                }) {
                     self.push_file_manager_toast(
                         self.i18n.t("fileManager.error"),
                         Some(error),
@@ -940,85 +973,114 @@ impl WorkspaceApp {
                             .map(str::to_string)
                     });
                     match cx.text_system().add_fonts(vec![Cow::Owned(bytes)]) {
-                        Ok(()) => self.file_manager.preview_font_family = family,
+                        Ok(()) => {
+                            self.file_manager.update(cx, |file_manager, cx| {
+                                file_manager.preview_font_family = family;
+                                cx.notify();
+                            });
+                        }
                         Err(error) => {
-                            self.file_manager.preview_font_error = Some(error.to_string());
+                            self.file_manager.update(cx, |file_manager, cx| {
+                                file_manager.preview_font_error = Some(error.to_string());
+                                cx.notify();
+                            });
                         }
                     }
                 }
-                Err(error) => self.file_manager.preview_font_error = Some(error.to_string()),
+                Err(error) => {
+                    self.file_manager.update(cx, |file_manager, cx| {
+                        file_manager.preview_font_error = Some(error.to_string());
+                        cx.notify();
+                    });
+                }
             },
             LocalPreview::TextStream {
                 path,
                 size,
                 language,
             } => {
-                self.file_manager.preview_stream = FileManagerPreviewStreamState {
-                    path: path.clone(),
-                    size: *size,
-                    language: language.clone(),
-                    ..Default::default()
-                };
+                self.file_manager.update(cx, |file_manager, cx| {
+                    file_manager.preview_stream = FileManagerPreviewStreamState {
+                        path: path.clone(),
+                        size: *size,
+                        language: language.clone(),
+                        ..Default::default()
+                    };
+                    cx.notify();
+                });
                 self.load_more_file_manager_stream_preview(cx);
             }
             _ => {}
         }
-        self.file_manager.preview = Some(preview);
-        self.file_manager.preview_metadata = local_preview_metadata(&entry.path);
-        self.file_manager.preview_image_zoom = 1.0;
-        self.file_manager.preview_image_rotation = 0;
-        self.file_manager.dialog = Some(FileManagerDialog::Preview { entry });
-        self.file_manager.dialog_presence.reopen();
-        self.file_manager.focused_dialog_footer_action = None;
-        self.dismiss_file_manager_context_menu();
+        let preview_metadata = local_preview_metadata(&entry.path);
+        self.file_manager.update(cx, |file_manager, cx| {
+            file_manager.preview = Some(Arc::new(preview));
+            file_manager.preview_metadata = preview_metadata;
+            file_manager.preview_image_zoom = 1.0;
+            file_manager.preview_image_rotation = 0;
+            file_manager.dialog = Some(FileManagerDialog::Preview { entry });
+            file_manager.dialog_presence.reopen();
+            file_manager.focused_dialog_footer_action = None;
+            file_manager.clear_context_menu_immediately();
+            cx.notify();
+        });
     }
 
     pub(super) fn load_more_file_manager_stream_preview(&mut self, cx: &mut Context<Self>) {
-        if self.file_manager.preview_stream.path.is_empty() {
+        let request = self.file_manager.update(cx, |file_manager, cx| {
+            if file_manager.preview_stream.path.is_empty()
+                || file_manager.preview_stream.loading
+                || file_manager.preview_stream.eof
+                || file_manager.preview_stream.error.is_some()
+            {
+                return None;
+            }
+            file_manager.preview_stream.loading = true;
+            cx.notify();
+            Some((
+                file_manager.preview_stream.path.clone(),
+                file_manager.preview_stream.loaded_bytes,
+            ))
+        });
+        let Some((path, offset)) = request else {
             return;
-        }
-        if self.file_manager.preview_stream.loading
-            || self.file_manager.preview_stream.eof
-            || self.file_manager.preview_stream.error.is_some()
-        {
-            return;
-        }
-
-        self.file_manager.preview_stream.loading = true;
-        let path = self.file_manager.preview_stream.path.clone();
-        let offset = self.file_manager.preview_stream.loaded_bytes;
+        };
         let result =
             read_local_preview_range(&path, offset, FILE_MANAGER_PREVIEW_STREAM_CHUNK_SIZE);
-        self.file_manager.preview_stream.loading = false;
-
-        match result {
-            Ok(chunk) => {
-                self.file_manager.preview_stream.loaded_bytes += chunk.data.len() as u64;
-                append_file_manager_stream_preview_chunk(
-                    &mut self.file_manager.preview_stream,
-                    chunk.data,
-                    chunk.eof,
-                );
-                if chunk.eof
-                    || self.file_manager.preview_stream.loaded_bytes
-                        >= self.file_manager.preview_stream.size
-                {
-                    self.file_manager.preview_stream.eof = true;
+        self.file_manager.update(cx, |file_manager, cx| {
+            file_manager.preview_stream.loading = false;
+            match result {
+                Ok(chunk) => {
+                    file_manager.preview_stream.loaded_bytes += chunk.data.len() as u64;
+                    append_file_manager_stream_preview_chunk(
+                        &mut file_manager.preview_stream,
+                        chunk.data,
+                        chunk.eof,
+                    );
+                    if chunk.eof
+                        || file_manager.preview_stream.loaded_bytes
+                            >= file_manager.preview_stream.size
+                    {
+                        file_manager.preview_stream.eof = true;
+                    }
+                }
+                Err(error) => {
+                    file_manager.preview_stream.error = Some(error);
+                    file_manager.preview_stream.eof = true;
                 }
             }
-            Err(error) => {
-                self.file_manager.preview_stream.error = Some(error);
-                self.file_manager.preview_stream.eof = true;
-            }
-        }
-        cx.notify();
+            cx.notify();
+        });
     }
 
     pub(super) fn navigate_file_manager_preview(&mut self, delta: isize, cx: &mut Context<Self>) {
-        let Some(FileManagerDialog::Preview { entry }) = self.file_manager.dialog.clone() else {
-            return;
+        let (entry, sorted_files) = {
+            let file_manager = self.file_manager.read(cx);
+            let Some(FileManagerDialog::Preview { entry }) = file_manager.dialog.as_ref() else {
+                return;
+            };
+            (entry.clone(), file_manager.sorted_files())
         };
-        let sorted_files = self.file_manager.sorted_files();
         let files = sorted_files
             .iter()
             .filter(|file| file.file_type != LocalFileType::Directory)
@@ -1046,11 +1108,11 @@ impl WorkspaceApp {
     }
 
     pub(super) fn toggle_file_manager_preview_audio(&mut self, cx: &mut Context<Self>) {
-        if let Err(error) = self
-            .file_manager
-            .preview_audio
-            .command(AudioPreviewCommand::PlayPause)
-        {
+        if let Err(error) = self.file_manager.update(cx, |file_manager, _cx| {
+            file_manager
+                .preview_audio
+                .command(AudioPreviewCommand::PlayPause)
+        }) {
             self.push_file_manager_toast(
                 self.i18n.t("fileManager.error"),
                 Some(error),
@@ -1065,11 +1127,11 @@ impl WorkspaceApp {
         position: std::time::Duration,
         cx: &mut Context<Self>,
     ) {
-        if let Err(error) = self
-            .file_manager
-            .preview_audio
-            .command(AudioPreviewCommand::Seek(position))
-        {
+        if let Err(error) = self.file_manager.update(cx, |file_manager, _cx| {
+            file_manager
+                .preview_audio
+                .command(AudioPreviewCommand::Seek(position))
+        }) {
             self.push_file_manager_toast(
                 self.i18n.t("fileManager.error"),
                 Some(error),
@@ -1082,8 +1144,9 @@ impl WorkspaceApp {
     pub(super) fn copy_file_manager_preview_content(&mut self, cx: &mut Context<Self>) {
         let Some(content) = self
             .file_manager
+            .read(cx)
             .preview
-            .as_ref()
+            .as_deref()
             .and_then(|preview| match preview {
                 LocalPreview::Text { content, .. } | LocalPreview::Markdown { content } => {
                     Some(content.clone())
@@ -1103,10 +1166,11 @@ impl WorkspaceApp {
     }
 
     pub(super) fn accept_file_manager_dialog(&mut self, cx: &mut Context<Self>) {
-        if self.file_manager_dialog_primary_disabled() {
+        if self.file_manager_dialog_primary_disabled(cx) {
             return;
         }
-        match self.file_manager.dialog.clone() {
+        let dialog = self.file_manager.read(cx).dialog.clone();
+        match dialog {
             Some(FileManagerDialog::NewFolder) => self.create_file_manager_folder(cx),
             Some(FileManagerDialog::NewFile) => self.create_file_manager_file(cx),
             Some(FileManagerDialog::Rename { old_name }) => {
@@ -1119,21 +1183,25 @@ impl WorkspaceApp {
                 self.delete_file_manager_entries(files, cx)
             }
             _ => {
-                self.file_manager.dialog = None;
-                self.file_manager.focused_input = None;
-                self.file_manager.focused_dialog_footer_action = None;
+                self.file_manager.update(cx, |file_manager, cx| {
+                    file_manager.dialog = None;
+                    file_manager.focused_input = None;
+                    file_manager.focused_dialog_footer_action = None;
+                    cx.notify();
+                });
             }
         }
     }
 
-    pub(super) fn file_manager_dialog_primary_disabled(&self) -> bool {
-        match self.file_manager.dialog {
+    pub(super) fn file_manager_dialog_primary_disabled(&self, cx: &App) -> bool {
+        let file_manager = self.file_manager.read(cx);
+        match file_manager.dialog {
             Some(
                 FileManagerDialog::NewFolder
                 | FileManagerDialog::NewFile
                 | FileManagerDialog::Rename { .. }
                 | FileManagerDialog::EditBookmark { .. },
-            ) => self.file_manager.dialog_value.trim().is_empty(),
+            ) => file_manager.dialog_value.trim().is_empty(),
             _ => false,
         }
     }
@@ -1146,7 +1214,7 @@ impl WorkspaceApp {
         if event.keystroke.modifiers.platform || event.keystroke.modifiers.control {
             return false;
         }
-        let Some(focused) = self.file_manager.focused_dialog_footer_action else {
+        let Some(focused) = self.file_manager.read(cx).focused_dialog_footer_action else {
             return false;
         };
         match crate::workspace::browser_behavior::modal_footer_key_action(
@@ -1157,18 +1225,20 @@ impl WorkspaceApp {
             ConfirmDialogAction::Cancel,
         ) {
             Some(crate::workspace::browser_behavior::ModalFooterKeyAction::Cancel) => {
-                self.close_file_manager_dialog();
+                self.close_file_manager_dialog(cx);
                 cx.notify();
                 true
             }
             Some(crate::workspace::browser_behavior::ModalFooterKeyAction::Focus(action)) => {
-                self.file_manager.focused_dialog_footer_action = Some(action);
-                cx.notify();
+                self.file_manager.update(cx, |file_manager, cx| {
+                    file_manager.focused_dialog_footer_action = Some(action);
+                    cx.notify();
+                });
                 true
             }
             Some(crate::workspace::browser_behavior::ModalFooterKeyAction::Activate(action)) => {
                 match action {
-                    ConfirmDialogAction::Cancel => self.close_file_manager_dialog(),
+                    ConfirmDialogAction::Cancel => self.close_file_manager_dialog(cx),
                     ConfirmDialogAction::Confirm => self.accept_file_manager_dialog(cx),
                 }
                 cx.notify();
@@ -1179,14 +1249,20 @@ impl WorkspaceApp {
     }
 
     pub(super) fn create_file_manager_folder(&mut self, cx: &mut Context<Self>) {
-        let name = self.file_manager.dialog_value.trim().to_string();
+        let (name, current_path) = {
+            let file_manager = self.file_manager.read(cx);
+            (
+                file_manager.dialog_value.trim().to_string(),
+                file_manager.path.clone(),
+            )
+        };
         match validate_local_name(&name)
-            .map(|_| join_local_path(&self.file_manager.path, &name))
+            .map(|_| join_local_path(&current_path, &name))
             .and_then(|path| std::fs::create_dir(&path).map_err(|error| error.to_string()))
         {
             Ok(()) => {
-                self.close_file_manager_dialog();
-                self.refresh_file_manager();
+                self.close_file_manager_dialog(cx);
+                self.refresh_file_manager(cx);
                 self.push_file_manager_toast(
                     self.i18n.t("fileManager.folderCreated"),
                     None,
@@ -1203,9 +1279,15 @@ impl WorkspaceApp {
     }
 
     pub(super) fn create_file_manager_file(&mut self, cx: &mut Context<Self>) {
-        let name = self.file_manager.dialog_value.trim().to_string();
+        let (name, current_path) = {
+            let file_manager = self.file_manager.read(cx);
+            (
+                file_manager.dialog_value.trim().to_string(),
+                file_manager.path.clone(),
+            )
+        };
         match validate_local_name(&name)
-            .map(|_| join_local_path(&self.file_manager.path, &name))
+            .map(|_| join_local_path(&current_path, &name))
             .and_then(|path| {
                 std::fs::OpenOptions::new()
                     .write(true)
@@ -1215,8 +1297,8 @@ impl WorkspaceApp {
                     .map_err(|error| error.to_string())
             }) {
             Ok(()) => {
-                self.close_file_manager_dialog();
-                self.refresh_file_manager();
+                self.close_file_manager_dialog(cx);
+                self.refresh_file_manager(cx);
                 self.push_file_manager_toast(
                     self.i18n.t("fileManager.fileCreated"),
                     None,
@@ -1233,16 +1315,22 @@ impl WorkspaceApp {
     }
 
     pub(super) fn rename_file_manager_entry(&mut self, old_name: String, cx: &mut Context<Self>) {
-        let new_name = self.file_manager.dialog_value.trim().to_string();
+        let (new_name, current_path) = {
+            let file_manager = self.file_manager.read(cx);
+            (
+                file_manager.dialog_value.trim().to_string(),
+                file_manager.path.clone(),
+            )
+        };
         let result = validate_local_name(&new_name).and_then(|_| {
-            let old_path = join_local_path(&self.file_manager.path, &old_name);
-            let new_path = join_local_path(&self.file_manager.path, &new_name);
+            let old_path = join_local_path(&current_path, &old_name);
+            let new_path = join_local_path(&current_path, &new_name);
             std::fs::rename(old_path, new_path).map_err(|error| error.to_string())
         });
         match result {
             Ok(()) => {
-                self.close_file_manager_dialog();
-                self.refresh_file_manager();
+                self.close_file_manager_dialog(cx);
+                self.refresh_file_manager(cx);
                 self.push_file_manager_toast(
                     self.i18n.t("fileManager.renamed"),
                     None,
@@ -1263,9 +1351,10 @@ impl WorkspaceApp {
         names: Vec<String>,
         cx: &mut Context<Self>,
     ) {
+        let current_path = self.file_manager.read(cx).path.clone();
         let mut error = None;
         for name in &names {
-            let path = join_local_path(&self.file_manager.path, name);
+            let path = join_local_path(&current_path, name);
             let path_ref = std::path::Path::new(&path);
             let result = if path_ref.is_dir() {
                 std::fs::remove_dir_all(path_ref)
@@ -1284,8 +1373,8 @@ impl WorkspaceApp {
                 TerminalNoticeVariant::Error,
             ),
             None => {
-                self.close_file_manager_dialog();
-                self.refresh_file_manager();
+                self.close_file_manager_dialog(cx);
+                self.refresh_file_manager(cx);
                 self.push_file_manager_toast(
                     self.i18n
                         .t("fileManager.deletedCount")
@@ -1299,18 +1388,22 @@ impl WorkspaceApp {
     }
 
     pub(super) fn copy_file_manager_selection(&mut self, cut: bool, cx: &mut Context<Self>) {
-        let entries = self.selected_file_manager_entries();
+        let entries = self.selected_file_manager_entries(cx);
         if entries.is_empty() {
             return;
         }
-        self.file_manager.clipboard = Some(LocalClipboard {
-            mode: if cut {
-                LocalClipboardMode::Cut
-            } else {
-                LocalClipboardMode::Copy
-            },
-            paths: entries.iter().map(|entry| entry.path.clone()).collect(),
-            source_dir: self.file_manager.path.clone(),
+        self.file_manager.update(cx, |file_manager, cx| {
+            file_manager.clipboard = Some(LocalClipboard {
+                mode: if cut {
+                    LocalClipboardMode::Cut
+                } else {
+                    LocalClipboardMode::Copy
+                },
+                paths: entries.iter().map(|entry| entry.path.clone()).collect(),
+                source_dir: file_manager.path.clone(),
+            });
+            file_manager.clear_context_menu_immediately();
+            cx.notify();
         });
         let key = if cut {
             "fileManager.cutCount"
@@ -1324,108 +1417,36 @@ impl WorkspaceApp {
             None,
             TerminalNoticeVariant::Default,
         );
-        self.dismiss_file_manager_context_menu();
-        cx.notify();
     }
 
     fn start_file_manager_operation(
         &mut self,
         total: usize,
-        work: impl FnOnce(std::sync::mpsc::Sender<FileManagerOperationEvent>) -> Result<(), String>
+        work: impl FnOnce(
+            delivery::ActiveDeliverySender<FileManagerOperationEvent>,
+        ) -> Result<(), String>
         + Send
         + 'static,
         cx: &mut Context<Self>,
     ) {
-        let (tx, rx) = std::sync::mpsc::channel();
-        self.file_manager.operation_progress = Some(FileManagerOperationProgress {
-            current: 0,
-            total: total.max(1),
-            file_name: String::new(),
-            active: true,
+        self.file_manager.update(cx, |file_manager, cx| {
+            file_manager.start_operation(total, work, cx);
         });
-        self.file_manager.operation_rx = Some(rx);
-        std::thread::spawn(move || {
-            let result = work(tx.clone());
-            let _ = tx.send(FileManagerOperationEvent::Finished(result));
-        });
-        self.schedule_file_manager_operation_poll(cx);
-    }
-
-    fn schedule_file_manager_operation_poll(&mut self, cx: &mut Context<Self>) {
-        if self.file_manager.operation_poll_active {
-            return;
-        }
-        self.file_manager.operation_poll_active = true;
-        cx.spawn(async move |weak, cx| {
-            loop {
-                cx.background_executor()
-                    .timer(std::time::Duration::from_millis(80))
-                    .await;
-                let keep_polling = weak
-                    .update(cx, |this, cx| {
-                        let mut finished = None;
-                        if let Some(rx) = this.file_manager.operation_rx.as_ref() {
-                            while let Ok(event) = rx.try_recv() {
-                                match event {
-                                    FileManagerOperationEvent::Progress(progress) => {
-                                        this.file_manager.operation_progress = Some(progress);
-                                    }
-                                    FileManagerOperationEvent::Finished(result) => {
-                                        finished = Some(result);
-                                    }
-                                }
-                            }
-                        }
-                        if let Some(result) = finished {
-                            this.file_manager.operation_rx = None;
-                            this.file_manager.operation_poll_active = false;
-                            if let Some(progress) = this.file_manager.operation_progress.as_mut() {
-                                progress.active = false;
-                                progress.current = progress.total;
-                                progress.file_name.clear();
-                            }
-                            match result {
-                                Ok(()) => {
-                                    this.refresh_file_manager();
-                                    this.push_file_manager_toast(
-                                        this.i18n.t("fileManager.operationSuccess"),
-                                        None,
-                                        TerminalNoticeVariant::Success,
-                                    );
-                                }
-                                Err(error) => this.push_file_manager_toast(
-                                    this.i18n.t("fileManager.error"),
-                                    Some(error),
-                                    TerminalNoticeVariant::Error,
-                                ),
-                            }
-                            cx.notify();
-                            false
-                        } else {
-                            cx.notify();
-                            true
-                        }
-                    })
-                    .unwrap_or(false);
-                if !keep_polling {
-                    break;
-                }
-            }
-        })
-        .detach();
     }
 
     pub(super) fn paste_file_manager_clipboard(&mut self, cx: &mut Context<Self>) {
-        let Some(clipboard) = self.file_manager.clipboard.clone() else {
+        let (clipboard, current_path) = {
+            let file_manager = self.file_manager.read(cx);
+            (file_manager.clipboard.clone(), file_manager.path.clone())
+        };
+        let Some(clipboard) = clipboard else {
             return;
         };
-        if clipboard.mode == LocalClipboardMode::Cut
-            && clipboard.source_dir == self.file_manager.path
-        {
-            self.dismiss_file_manager_context_menu();
+        if clipboard.mode == LocalClipboardMode::Cut && clipboard.source_dir == current_path {
+            self.dismiss_file_manager_context_menu(cx);
             return;
         }
-        let destination = self.file_manager.path.clone();
+        let destination = current_path;
         let sources = clipboard.paths.clone();
         let mode = clipboard.mode;
         let total = sources
@@ -1489,14 +1510,18 @@ impl WorkspaceApp {
             cx,
         );
         if clipboard.mode == LocalClipboardMode::Cut {
-            self.file_manager.clipboard = None;
+            self.file_manager.update(cx, |file_manager, cx| {
+                file_manager.clipboard = None;
+                file_manager.clear_context_menu_immediately();
+                cx.notify();
+            });
+        } else {
+            self.dismiss_file_manager_context_menu(cx);
         }
-        self.dismiss_file_manager_context_menu();
-        cx.notify();
     }
 
     pub(super) fn duplicate_file_manager_selection(&mut self, cx: &mut Context<Self>) {
-        let entries = self.selected_file_manager_entries();
+        let entries = self.selected_file_manager_entries(cx);
         if entries.is_empty() {
             return;
         }
@@ -1537,8 +1562,7 @@ impl WorkspaceApp {
             },
             cx,
         );
-        self.dismiss_file_manager_context_menu();
-        cx.notify();
+        self.dismiss_file_manager_context_menu(cx);
     }
 
     pub(super) fn queue_file_manager_external_drop_paths(
@@ -1554,7 +1578,7 @@ impl WorkspaceApp {
         if sources.is_empty() {
             return;
         }
-        let destination = self.file_manager.path.clone();
+        let destination = self.file_manager.read(cx).path.clone();
         let total = sources
             .iter()
             .map(|source| local_operation_unit_count(std::path::Path::new(source)))
@@ -1591,12 +1615,11 @@ impl WorkspaceApp {
             },
             cx,
         );
-        self.dismiss_file_manager_context_menu();
-        cx.notify();
+        self.dismiss_file_manager_context_menu(cx);
     }
 
     pub(super) fn compress_file_manager_selection(&mut self, cx: &mut Context<Self>) {
-        let entries = self.selected_file_manager_entries();
+        let entries = self.selected_file_manager_entries(cx);
         if entries.is_empty() {
             return;
         }
@@ -1605,15 +1628,16 @@ impl WorkspaceApp {
         } else {
             format!("Archive_{}.zip", chrono::Local::now().format("%Y-%m-%d"))
         };
+        let current_path = self.file_manager.read(cx).path.clone();
         let archive_path =
-            unique_copy_path(&std::path::Path::new(&self.file_manager.path).join(archive_name));
+            unique_copy_path(&std::path::Path::new(&current_path).join(archive_name));
         let paths = entries
             .iter()
             .map(|entry| entry.path.clone())
             .collect::<Vec<_>>();
         match compress_local_files(&paths, &archive_path.to_string_lossy()) {
             Ok(()) => {
-                self.refresh_file_manager();
+                self.refresh_file_manager(cx);
                 self.push_file_manager_toast(
                     self.i18n.t("fileManager.operationSuccess"),
                     Some(format!("{}", archive_path.display())),
@@ -1626,20 +1650,20 @@ impl WorkspaceApp {
                 TerminalNoticeVariant::Error,
             ),
         }
-        self.dismiss_file_manager_context_menu();
-        cx.notify();
+        self.dismiss_file_manager_context_menu(cx);
     }
 
     pub(super) fn extract_selected_file_manager_archive(&mut self, cx: &mut Context<Self>) {
-        let Some(entry) = self.single_selected_file_manager_file() else {
+        let Some(entry) = self.single_selected_file_manager_file(cx) else {
             return;
         };
         if !can_extract_archive(&entry.name) {
             return;
         }
-        match extract_local_archive(&entry.path, &self.file_manager.path) {
+        let current_path = self.file_manager.read(cx).path.clone();
+        match extract_local_archive(&entry.path, &current_path) {
             Ok(()) => {
-                self.refresh_file_manager();
+                self.refresh_file_manager(cx);
                 self.push_file_manager_toast(
                     self.i18n.t("fileManager.operationSuccess"),
                     Some(entry.name),
@@ -1652,8 +1676,7 @@ impl WorkspaceApp {
                 TerminalNoticeVariant::Error,
             ),
         }
-        self.dismiss_file_manager_context_menu();
-        cx.notify();
+        self.dismiss_file_manager_context_menu(cx);
     }
 
     pub(super) fn copy_file_manager_path_to_clipboard(
@@ -1661,13 +1684,12 @@ impl WorkspaceApp {
         name_only: bool,
         cx: &mut Context<Self>,
     ) {
-        let Some(file) = self.single_selected_file_manager_file() else {
+        let Some(file) = self.single_selected_file_manager_file(cx) else {
             return;
         };
         let value = if name_only { file.name } else { file.path };
         cx.write_to_clipboard(ClipboardItem::new_string(value));
-        self.dismiss_file_manager_context_menu();
-        cx.notify();
+        self.dismiss_file_manager_context_menu(cx);
     }
 
     pub(super) fn browse_file_manager_folder(&mut self, cx: &mut Context<Self>) {
@@ -1677,20 +1699,15 @@ impl WorkspaceApp {
             multiple: false,
             prompt: Some(SharedString::from(self.i18n.t("fileManager.browse"))),
         });
-        cx.spawn(async move |weak, cx| {
+        let selection = async move {
             let Ok(Ok(Some(paths))) = receiver.await else {
-                return;
+                return None;
             };
-            let Some(path) = paths.into_iter().next() else {
-                return;
-            };
-            let path = path.to_string_lossy().to_string();
-            let _ = weak.update(cx, |this, cx| {
-                this.set_file_manager_path(path);
-                cx.notify();
-            });
-        })
-        .detach();
+            paths.into_iter().next()
+        };
+        self.file_manager.update(cx, |file_manager, cx| {
+            file_manager.start_folder_picker(selection, cx);
+        });
     }
 
     pub(super) fn open_terminal_at_file_manager_path(
@@ -1702,7 +1719,7 @@ impl WorkspaceApp {
         let pane_id = self.alloc_pane_id(cx);
         let session_id = self.alloc_session_id(cx);
         let mut terminal_config = self.local_terminal_config();
-        terminal_config.cwd = Some(PathBuf::from(self.file_manager.path.clone()));
+        terminal_config.cwd = Some(PathBuf::from(self.file_manager.read(cx).path.clone()));
         let preferences =
             self.prepare_terminal_preferences_for_tab_kind(&TabKind::LocalTerminal, cx);
         let pane = cx.new(|cx| {
@@ -1738,80 +1755,25 @@ impl WorkspaceApp {
         cx.notify();
     }
 
-    pub(super) fn close_file_manager_dialog(&mut self) {
-        let _ = self
-            .file_manager
-            .preview_audio
-            .command(AudioPreviewCommand::Stop);
-        self.file_manager.preview_video_surface.detach();
-        self.file_manager.dialog = None;
-        self.file_manager.focused_input = None;
-        self.file_manager.focused_dialog_footer_action = None;
-        self.file_manager.dialog_value.clear();
-        self.file_manager.preview = None;
-        self.file_manager.preview_metadata = None;
-        self.file_manager.preview_markdown_source = false;
-        self.file_manager.preview_code_scroll = UniformListScrollHandle::new();
-        self.file_manager.preview_markdown_scroll = MarkdownVirtualListScrollHandle::new();
-        self.file_manager.preview_stream = FileManagerPreviewStreamState::default();
-        self.file_manager.properties_checksum = None;
-        self.file_manager.properties_checksum_loading = false;
-        self.file_manager.properties_checksum_rx = None;
-        self.file_manager.properties_checksum_poll_active = false;
+    pub(super) fn close_file_manager_dialog(&mut self, cx: &mut Context<Self>) {
+        self.file_manager.update(cx, |file_manager, cx| {
+            file_manager.close_dialog(cx);
+        });
         self.ime_marked_text = None;
     }
 
     pub(super) fn begin_file_manager_rich_dialog_exit(&mut self, cx: &mut Context<Self>) -> bool {
-        if !matches!(
-            self.file_manager.dialog,
-            Some(FileManagerDialog::Preview { .. } | FileManagerDialog::Properties { .. })
-        ) {
-            self.close_file_manager_dialog();
-            cx.notify();
-            return true;
-        }
-        let Some(generation) = self.file_manager.dialog_presence.begin_exit() else {
-            return false;
-        };
-        // Media must stop when dismissal begins even though the visual payload
-        // remains mounted until the exit frame completes.
-        let _ = self
-            .file_manager
-            .preview_audio
-            .command(AudioPreviewCommand::Stop);
-        self.file_manager.preview_video_surface.detach();
         let delay = oxideterm_gpui_ui::motion::duration(
             &self.tokens,
             oxideterm_gpui_ui::motion::MotionDuration::Overlay,
         );
-        if delay.is_zero() {
-            self.finish_file_manager_rich_dialog_exit(generation);
-            cx.notify();
-            return true;
-        }
-        cx.spawn(async move |weak, cx| {
-            gpui::Timer::after(delay).await;
-            let _ = weak.update(cx, |this, cx| {
-                if this.finish_file_manager_rich_dialog_exit(generation) {
-                    cx.notify();
-                }
-            });
+        self.ime_marked_text = None;
+        self.file_manager.update(cx, |file_manager, cx| {
+            file_manager.begin_rich_dialog_exit(delay, cx)
         })
-        .detach();
-        cx.notify();
-        true
     }
 
-    fn finish_file_manager_rich_dialog_exit(&mut self, generation: u64) -> bool {
-        if !self.file_manager.dialog_presence.finish_exit(generation) {
-            return false;
-        }
-        self.close_file_manager_dialog();
-        self.file_manager.dialog_presence.reopen();
-        true
-    }
-
-    pub(super) fn push_file_manager_toast(
+    pub(in crate::workspace) fn push_file_manager_toast(
         &self,
         title: String,
         description: Option<String>,

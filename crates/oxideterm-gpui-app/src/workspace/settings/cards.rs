@@ -930,7 +930,10 @@ impl WorkspaceApp {
             self.ime_marked_text = None;
             changed = true;
         }
-        if self.file_manager.focused_input.take().is_some() {
+        if self
+            .file_manager
+            .update(cx, |file_manager, cx| file_manager.clear_input_focus(cx))
+        {
             self.ime_marked_text = None;
             changed = true;
         }

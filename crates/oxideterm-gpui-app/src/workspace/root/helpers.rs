@@ -1043,7 +1043,7 @@ impl WorkspaceApp {
         if self.close_session_row_menus() {
             changed = true;
         }
-        if self.dismiss_file_manager_context_menu() {
+        if self.dismiss_file_manager_context_menu(cx) {
             changed = true;
         }
         if self.dismiss_sftp_context_menu() {

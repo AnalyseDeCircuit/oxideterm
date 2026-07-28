@@ -248,7 +248,7 @@ use self::connection_monitor::{
     ConnectionRuntimeSection, HostToolsEntity, HostToolsEvent, HostToolsMessages,
     HostToolsWindowIntent, HostToolsWindowRequest,
 };
-use self::file_manager::FileManagerState;
+use self::file_manager::{FileManagerState, FileManagerWorkspaceEvent};
 use self::graphics::GraphicsWorkspaceEntity;
 use self::ime::{
     HostToolsPlainTextImeFrame, TextInputAnchorStore, WorkspaceImeDragSelection,
@@ -845,7 +845,9 @@ pub(crate) struct WorkspaceApp {
     next_ssh_node_id: u64,
     forwarding: Entity<forwards::ForwardingWorkspaceEntity>,
     _forwarding_subscriptions: Vec<Subscription>,
-    file_manager: FileManagerState,
+    file_manager: Entity<FileManagerState>,
+    _file_manager_observation: Subscription,
+    _file_manager_subscription: Subscription,
     sftp_tab_nodes: HashMap<TabId, NodeId>,
     sftp_view_node: Option<NodeId>,
     sftp_local_path_memory: HashMap<NodeId, String>,

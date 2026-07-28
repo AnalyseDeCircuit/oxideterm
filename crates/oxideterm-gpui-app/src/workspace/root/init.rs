@@ -120,6 +120,31 @@ impl WorkspaceApp {
                 cx.notify();
             },
         );
+        let file_manager = cx.new(|cx| FileManagerState::load(settings_store.path(), cx));
+        let file_manager_observation =
+            cx.observe(&file_manager, |_workspace, _file_manager, cx| {
+                // Entity-owned local file operations repaint every mounted file-manager surface.
+                cx.notify();
+            });
+        let file_manager_subscription = cx.subscribe(
+            &file_manager,
+            |workspace, _file_manager, event: &FileManagerWorkspaceEvent, cx| {
+                match event {
+                    FileManagerWorkspaceEvent::Error(error) => workspace.push_file_manager_toast(
+                        workspace.i18n.t("fileManager.error"),
+                        Some(error.clone()),
+                        TerminalNoticeVariant::Error,
+                    ),
+                    FileManagerWorkspaceEvent::OperationSucceeded => workspace
+                        .push_file_manager_toast(
+                            workspace.i18n.t("fileManager.operationSuccess"),
+                            None,
+                            TerminalNoticeVariant::Success,
+                        ),
+                }
+                cx.notify();
+            },
+        );
         let ssh_worker_tx = connection_flow.read(cx).ssh_worker_sender();
         let workspace_runtime = cx.new(|cx| {
             runtime_entity::WorkspaceRuntimeEntity::new_with_ssh_worker_sender(
@@ -539,7 +564,9 @@ impl WorkspaceApp {
             next_ssh_node_id: 1,
             forwarding,
             _forwarding_subscriptions: vec![forwarding_subscription, forwarding_observation],
-            file_manager: FileManagerState::load(settings_store.path()),
+            file_manager,
+            _file_manager_observation: file_manager_observation,
+            _file_manager_subscription: file_manager_subscription,
             sftp_tab_nodes: HashMap::new(),
             sftp_view_node: None,
             sftp_local_path_memory: HashMap::new(),

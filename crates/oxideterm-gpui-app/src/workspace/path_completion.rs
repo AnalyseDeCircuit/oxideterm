@@ -268,7 +268,7 @@ impl WorkspaceApp {
     ) {
         let changed = self.text_input_anchors.changed(anchor);
         self.update_text_input_anchor(anchor, cx);
-        if changed && self.path_completion_state(owner).is_visible() {
+        if changed && self.path_completion_is_visible(owner, cx) {
             // Geometry-only updates repaint only while a visible popup depends on them.
             cx.notify();
         }
@@ -279,15 +279,15 @@ impl WorkspaceApp {
         owner: PathCompletionOwner,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
-        let state = self.path_completion_state(owner);
-        if !state.is_visible() {
+        let (visible, selected_index, scroll_handle, suggestions) =
+            self.path_completion_snapshot(owner, cx);
+        if !visible {
             return None;
         }
         let anchor = self
             .text_input_anchors
             .get(owner.ime_target().anchor_id())?;
         let theme = self.tokens.ui;
-        let selected_index = state.selected_index();
         let mut popup = div()
             .id(owner.popup_id())
             .w(anchor.bounds.size.width)
@@ -297,7 +297,7 @@ impl WorkspaceApp {
             .flex()
             .flex_col()
             .overflow_y_scroll()
-            .track_scroll(&state.scroll_handle)
+            .track_scroll(&scroll_handle)
             .rounded(px(self.tokens.radii.md))
             .border_1()
             .border_color(rgb(theme.border))
@@ -306,7 +306,7 @@ impl WorkspaceApp {
             // Deferred drawing alone does not prevent the file list behind the popup from hit-testing.
             .occlude();
 
-        for (index, candidate) in state.suggestions().iter().cloned().enumerate() {
+        for (index, candidate) in suggestions.into_iter().enumerate() {
             let label = if candidate.is_directory {
                 format!("{}/", candidate.name)
             } else {
@@ -374,12 +374,32 @@ impl WorkspaceApp {
         )
     }
 
-    fn path_completion_state(&self, owner: PathCompletionOwner) -> &PathCompletionState {
+    fn path_completion_is_visible(&self, owner: PathCompletionOwner, cx: &App) -> bool {
         match owner {
-            PathCompletionOwner::FileManager => &self.file_manager.path_completion,
+            PathCompletionOwner::FileManager => {
+                self.file_manager.read(cx).path_completion.is_visible()
+            }
+            PathCompletionOwner::SftpLocal => self.sftp_view.local_path_completion.is_visible(),
+            PathCompletionOwner::SftpRemote => self.sftp_view.remote_path_completion.is_visible(),
+        }
+    }
+
+    fn path_completion_snapshot(
+        &self,
+        owner: PathCompletionOwner,
+        cx: &App,
+    ) -> (bool, usize, ScrollHandle, Vec<PathCompletionCandidate>) {
+        let state = match owner {
+            PathCompletionOwner::FileManager => &self.file_manager.read(cx).path_completion,
             PathCompletionOwner::SftpLocal => &self.sftp_view.local_path_completion,
             PathCompletionOwner::SftpRemote => &self.sftp_view.remote_path_completion,
-        }
+        };
+        (
+            state.is_visible(),
+            state.selected_index(),
+            state.scroll_handle.clone(),
+            state.suggestions().to_vec(),
+        )
     }
 
     fn accept_path_completion(

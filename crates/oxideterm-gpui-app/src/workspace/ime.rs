@@ -720,7 +720,7 @@ impl WorkspaceApp {
         if self
             .active_tab()
             .is_some_and(|tab| tab.kind == oxideterm_workspace::TabKind::FileManager)
-            && let Some(input) = self.file_manager.focused_input
+            && let Some(input) = self.file_manager.read(cx).focused_input()
         {
             return Some(WorkspaceImeTarget::FileManager(input));
         }
@@ -1602,8 +1602,9 @@ impl WorkspaceApp {
                 }
             }
             WorkspaceImeTarget::FileManager(input) => {
-                if self.file_manager.focused_input == Some(input) {
-                    Some(self.file_manager_input_value(input).to_string())
+                let file_manager = self.file_manager.read(cx);
+                if file_manager.focused_input() == Some(input) {
+                    Some(file_manager.input_value(input).to_string())
                 } else {
                     None
                 }
@@ -1783,7 +1784,7 @@ impl WorkspaceApp {
         };
         let path_completion_visible = match target {
             WorkspaceImeTarget::FileManager(FileManagerInput::Path) => {
-                self.file_manager.path_completion.is_visible()
+                self.file_manager.read(cx).path_completion.is_visible()
             }
             WorkspaceImeTarget::Sftp(SftpInput::LocalPath) => {
                 self.sftp_view.local_path_completion.is_visible()
@@ -2493,14 +2494,11 @@ impl WorkspaceApp {
                 }
             }
             WorkspaceImeTarget::FileManager(input) => {
-                if self.file_manager.focused_input == Some(input) {
-                    replace_utf16(
-                        self.file_manager_input_value_mut(input),
-                        replacement_range,
-                        text,
-                    );
+                if self.file_manager.update(cx, |file_manager, cx| {
+                    file_manager.replace_input(input, replacement_range, text, cx)
+                }) {
                     if input == FileManagerInput::Path {
-                        self.refresh_file_manager_path_completion();
+                        self.refresh_file_manager_path_completion(cx);
                     }
                     self.new_connection_caret_visible = true;
                     cx.notify();
