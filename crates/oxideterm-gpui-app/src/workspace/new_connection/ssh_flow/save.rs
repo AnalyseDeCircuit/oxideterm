@@ -68,7 +68,7 @@ impl WorkspaceApp {
 
         self.prepare_modal_interaction_boundary(cx);
         let mut form = form_from_runtime_config(
-            &runtime_snapshot.config,
+            runtime_snapshot.config,
             Some(&title),
             self.i18n.t("ssh.form.ungrouped"),
         );
@@ -210,14 +210,12 @@ impl WorkspaceApp {
                     return;
                 }
                 NewConnectionSubmitAction::SaveAndConnect => {
-                    if !self.save_current_connection_form(Some(&parent_id), cx) {
+                    let Some(handoff) = self.save_current_connection_form(Some(&parent_id), cx)
+                    else {
                         return;
-                    }
-                    self.update_connection_form_state(cx, |state| {
-                        if let Some(form) = state.form.as_mut() {
-                            form.save_connection = false;
-                        }
-                    });
+                    };
+                    self.start_saved_form_connection_flow(handoff, Some(parent_id), window, cx);
+                    return;
                 }
                 NewConnectionSubmitAction::Connect => {
                     self.update_connection_form_state(cx, |state| {
@@ -253,15 +251,10 @@ impl WorkspaceApp {
                     self.save_new_connection_without_connecting(None, window, cx);
                 }
                 NewConnectionSubmitAction::SaveAndConnect => {
-                    if !self.save_current_connection_form(None, cx) {
+                    let Some(handoff) = self.save_current_connection_form(None, cx) else {
                         return;
-                    }
-                    self.update_connection_form_state(cx, |state| {
-                        if let Some(form) = state.form.as_mut() {
-                            form.save_connection = false;
-                        }
-                    });
-                    self.start_new_connection_flow(SshConnectionIntent::Connect, window, cx);
+                    };
+                    self.start_saved_form_connection_flow(handoff, None, window, cx);
                 }
             },
         }
@@ -273,7 +266,10 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.save_current_connection_form(drill_down_parent_id, cx) {
+        if self
+            .save_current_connection_form(drill_down_parent_id, cx)
+            .is_some()
+        {
             self.close_new_connection_form(window, cx);
         }
     }
@@ -282,7 +278,7 @@ impl WorkspaceApp {
         &mut self,
         drill_down_parent_id: Option<&NodeId>,
         cx: &mut Context<Self>,
-    ) -> bool {
+    ) -> Option<SavedConnectionRuntimeHandoff> {
         self.ensure_new_connection_save_name_is_unique(drill_down_parent_id, cx);
         let request = match self.save_request_for_current_form(drill_down_parent_id, cx) {
             Some(Ok(request)) => request,
@@ -293,17 +289,26 @@ impl WorkspaceApp {
                     }
                 });
                 cx.notify();
-                return false;
+                return None;
             }
-            None => return false,
+            None => return None,
         };
+        let auth_override = self.with_connection_form_mut(cx, |_this, form, _cx| {
+            let form = form?;
+            (form.auth_tab == SshAuthTab::Password && !form.save_password)
+                .then(|| AuthMethod::password_secret(take_zeroizing_secret(&mut form.password)))
+        });
 
         // The Save and Save & Connect buttons mean "persist this draft now",
         // so duplicate-name and keychain failures should block connection start.
-        match self.connection_store.upsert(request) {
-            Ok(_) => {
+        match self.connection_store.upsert_with_runtime_secrets(request) {
+            Ok((connection, secrets)) => {
                 self.queue_cloud_sync_dirty_refresh(cx);
-                true
+                Some(SavedConnectionRuntimeHandoff {
+                    connection_id: connection.id,
+                    secrets,
+                    auth_override,
+                })
             }
             Err(error) => {
                 self.update_connection_form_state(cx, |state| {
@@ -315,9 +320,65 @@ impl WorkspaceApp {
                     }
                 });
                 cx.notify();
-                false
+                None
             }
         }
+    }
+
+    fn start_saved_form_connection_flow(
+        &mut self,
+        handoff: SavedConnectionRuntimeHandoff,
+        drill_down_parent_id: Option<NodeId>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(connection) = self.connection_store.get(&handoff.connection_id).cloned() else {
+            self.report_saved_next_hop_error("modals.new_connection.save_failed", cx);
+            return;
+        };
+        let Some(mut config) = ssh_config_from_saved_connection_with_runtime_secrets(
+            &self.connection_store,
+            self.settings_store.settings(),
+            &connection,
+            handoff.secrets,
+            handoff.auth_override,
+        ) else {
+            self.report_saved_next_hop_error("modals.new_connection.save_failed", cx);
+            return;
+        };
+        let intent = if let Some(parent_id) = drill_down_parent_id {
+            let prefix_count = match self.runtime_proxy_hops_for_parent_path(&parent_id) {
+                Ok(hops) => hops.len(),
+                Err(error) => {
+                    self.report_saved_next_hop_message(error.to_string(), cx);
+                    return;
+                }
+            };
+            if prefix_count > 0 {
+                let Some(proxy_chain) = config.proxy_chain.as_mut() else {
+                    self.report_saved_next_hop_error("modals.new_connection.save_failed", cx);
+                    return;
+                };
+                if proxy_chain.len() < prefix_count {
+                    self.report_saved_next_hop_error("modals.new_connection.save_failed", cx);
+                    return;
+                }
+                // Existing parent nodes already own the persisted prefix path.
+                proxy_chain.drain(..prefix_count);
+                if proxy_chain.is_empty() {
+                    config.proxy_chain = None;
+                }
+            }
+            SshConnectionIntent::DrillDown(parent_id)
+        } else {
+            SshConnectionIntent::Connect
+        };
+        self.update_connection_form_state(cx, |state| {
+            if let Some(form) = state.form.as_mut() {
+                form.save_connection = false;
+            }
+        });
+        self.start_new_connection_config_flow(config, connection.name, intent, window, cx);
     }
 
     pub(super) fn ensure_new_connection_save_name_is_unique(
@@ -363,23 +424,25 @@ impl WorkspaceApp {
     }
 
     pub(super) fn save_request_for_current_form(
-        &self,
+        &mut self,
         drill_down_parent_id: Option<&NodeId>,
-        cx: &App,
+        cx: &mut Context<Self>,
     ) -> Option<anyhow::Result<SaveConnectionRequest>> {
-        let form = self.connection_form_state(cx).form.as_ref()?;
-        let runtime_proxy_hops = match drill_down_parent_id {
+        let mut runtime_proxy_hops = match drill_down_parent_id {
             Some(parent_id) => match self.runtime_proxy_hops_for_parent_path(parent_id) {
                 Ok(hops) => hops,
                 Err(error) => return Some(Err(error)),
             },
             None => Vec::new(),
         };
-        Some(save_request_from_form_with_proxy_hop_prefix(
-            form,
-            &runtime_proxy_hops,
-            None,
-        ))
+        self.with_connection_form_mut(cx, |_this, form, _cx| {
+            let form = form?;
+            Some(save_request_from_form_with_proxy_hop_prefix(
+                form,
+                &mut runtime_proxy_hops,
+                None,
+            ))
+        })
     }
 
     pub(super) fn submit_serial_connection_form(
@@ -841,6 +904,17 @@ impl WorkspaceApp {
         let Some((config, title)) = self.build_new_connection_config(cx) else {
             return;
         };
+        self.start_new_connection_config_flow(config, title, intent, window, cx);
+    }
+
+    fn start_new_connection_config_flow(
+        &mut self,
+        config: SshConfig,
+        title: String,
+        intent: SshConnectionIntent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         if intent == SshConnectionIntent::Test {
             self.start_ssh_test_flow(config, title, cx);
             return;
@@ -880,18 +954,7 @@ impl WorkspaceApp {
         });
 
         if config.proxy_chain.is_some() {
-            let save_after_open = match self.save_after_open_request_for_connect_intent(cx) {
-                Ok(save_after_open) => save_after_open,
-                Err(()) => return,
-            };
-            self.start_proxy_session_tree_connect(
-                config,
-                title,
-                intent,
-                save_after_open,
-                window,
-                cx,
-            );
+            self.start_proxy_session_tree_connect(config, title, intent, None, window, cx);
             cx.notify();
             return;
         }
@@ -1028,7 +1091,7 @@ impl WorkspaceApp {
         };
         self.prepare_modal_interaction_boundary(cx);
         let mut form = form_from_runtime_config(
-            &runtime_snapshot.config,
+            runtime_snapshot.config,
             Some(&title),
             self.i18n.t("ssh.form.ungrouped"),
         );
@@ -1111,23 +1174,25 @@ impl WorkspaceApp {
         let existing_auth = existing_connection
             .as_ref()
             .map(|connection| connection.auth.clone());
-        let save_request = {
-            let Some(form) = self.connection_form_state(cx).form.as_ref() else {
-                return;
-            };
-            save_request_from_form_with_existing_auth(
-                form,
-                Some(id.clone()),
-                existing_auth.as_ref(),
+        let Some(save_request) = self.with_connection_form_mut(cx, |_this, form, _cx| {
+            let form = form?;
+            Some(
+                save_request_from_form_with_existing_auth(
+                    form,
+                    Some(id.clone()),
+                    existing_auth.as_ref(),
+                )
+                .map(|mut request| {
+                    if form.proxy_hops.is_empty()
+                        && let Some(connection) = existing_connection.as_ref()
+                    {
+                        request.proxy_chain = connection.proxy_chain.clone();
+                    }
+                    request
+                }),
             )
-            .map(|mut request| {
-                if form.proxy_hops.is_empty()
-                    && let Some(connection) = existing_connection.as_ref()
-                {
-                    request.proxy_chain = connection.proxy_chain.clone();
-                }
-                request
-            })
+        }) else {
+            return;
         };
         match save_request {
             Ok(request) => {
@@ -1213,21 +1278,23 @@ impl WorkspaceApp {
         let source_auth = source_connection
             .as_ref()
             .map(|connection| connection.auth.clone());
-        let save_request = {
-            let Some(form) = self.connection_form_state(cx).form.as_ref() else {
-                return;
-            };
-            save_request_from_form_with_existing_auth(form, None, source_auth.as_ref()).map(
-                |mut request| {
-                    if form.proxy_hops.is_empty()
-                        && let Some(connection) = source_connection.as_ref()
-                    {
-                        // Preserve the source chain when it was not expanded for editing.
-                        request.proxy_chain = connection.proxy_chain.clone();
-                    }
-                    request
-                },
+        let Some(save_request) = self.with_connection_form_mut(cx, |_this, form, _cx| {
+            let form = form?;
+            Some(
+                save_request_from_form_with_existing_auth(form, None, source_auth.as_ref()).map(
+                    |mut request| {
+                        if form.proxy_hops.is_empty()
+                            && let Some(connection) = source_connection.as_ref()
+                        {
+                            // Preserve the source chain when it was not expanded for editing.
+                            request.proxy_chain = connection.proxy_chain.clone();
+                        }
+                        request
+                    },
+                ),
             )
+        }) else {
+            return;
         };
         match save_request {
             Ok(request) => match self.connection_store.upsert(request) {

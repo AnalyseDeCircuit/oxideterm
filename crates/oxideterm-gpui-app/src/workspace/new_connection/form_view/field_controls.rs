@@ -807,45 +807,18 @@ impl WorkspaceApp {
                 self.i18n.t("sessionManager.edit_properties.browse"),
             )),
         });
-        cx.spawn(async move |weak, cx| {
+        let selection = async move {
             let Ok(Ok(Some(paths))) = receiver.await else {
-                return;
+                return None;
             };
             let Some(path) = paths.into_iter().next() else {
-                return;
+                return None;
             };
-            let path = path.to_string_lossy().to_string();
-            let _ = weak.update(cx, |this, cx| {
-                this.update_connection_form_state(cx, |state| {
-                    if let Some(form) = state.form.as_mut() {
-                        match field {
-                            NewConnectionField::KeyPath => form.key_path = path,
-                            NewConnectionField::CertPath => form.cert_path = path,
-                            NewConnectionField::JumpKeyPath => {
-                                let Some(jump_form) = form.jump_server_form.as_mut() else {
-                                    return;
-                                };
-                                jump_form.key_path = path;
-                            }
-                            NewConnectionField::JumpCertPath => {
-                                let Some(jump_form) = form.jump_server_form.as_mut() else {
-                                    return;
-                                };
-                                jump_form.cert_path = path;
-                            }
-                            _ => return,
-                        }
-                        form.focused_field = field;
-                        form.field_focused = true;
-                        form.error = None;
-                        clear_connection_selection(form);
-                    }
-                });
-                this.new_connection_caret_visible = true;
-                cx.notify();
-            });
-        })
-        .detach();
+            Some(path.to_string_lossy().to_string())
+        };
+        self.connection_flow.update(cx, |connection_flow, cx| {
+            connection_flow.start_path_picker(field, selection, cx);
+        });
     }
 
     fn toggle_edit_saved_password_visibility(&mut self, cx: &mut Context<Self>) {
@@ -883,43 +856,10 @@ impl WorkspaceApp {
         cx.notify();
 
         let store = self.connection_store.clone();
-        cx.spawn(async move |weak, cx| {
-            let result = store.get_connection_password(&connection_id);
-            let _ = weak.update(cx, |this, cx| {
-                let loaded = this.update_connection_form_state(cx, |state| {
-                    if let Some(form) = state.form.as_mut() {
-                        form.password_loading = false;
-                        match result {
-                            Ok(password) => {
-                                // Replacing an editable password draft should wipe
-                                // the previous buffer before the newly loaded value
-                                // is exposed for user editing.
-                                zeroize::Zeroize::zeroize(&mut form.password);
-                                form.password = password.expose_secret().to_string();
-                                form.password_loaded = true;
-                                form.password_visible = true;
-                                form.password_error = None;
-                                form.focused_field = NewConnectionField::Password;
-                                form.field_focused = true;
-                                clear_connection_selection(form);
-                                true
-                            }
-                            Err(error) => {
-                                form.password_error = Some(error.to_string());
-                                false
-                            }
-                        }
-                    } else {
-                        false
-                    }
-                });
-                if loaded {
-                    this.new_connection_caret_visible = true;
-                }
-                cx.notify();
-            });
-        })
-        .detach();
+        let load = async move { store.get_connection_password(&connection_id) };
+        self.connection_flow.update(cx, |connection_flow, cx| {
+            connection_flow.start_password_load(load, cx);
+        });
     }
 
     fn render_connection_input(

@@ -32,50 +32,6 @@ impl WorkspaceApp {
         .detach();
     }
 
-    pub(super) fn save_after_open_request_for_connect_intent(
-        &mut self,
-        cx: &mut Context<Self>,
-    ) -> Result<Option<SaveConnectionRequest>, ()> {
-        let mode = new_connection_form_mode(
-            self.connection_form_state(cx)
-                .editing_saved_connection_id
-                .as_deref(),
-            self.connection_form_state(cx)
-                .duplicating_saved_connection_id
-                .as_deref(),
-            self.connection_form_state(cx)
-                .saved_connection_prompt_action,
-        );
-        if !mode.stores_connection_on_connect()
-            || !self
-                .connection_form_state(cx)
-                .form
-                .as_ref()
-                .is_some_and(|form| form.save_connection)
-        {
-            return Ok(None);
-        }
-
-        match self
-            .connection_form_state(cx)
-            .form
-            .as_ref()
-            .map(|form| save_request_from_form(form, None))
-        {
-            Some(Ok(request)) => Ok(Some(request)),
-            Some(Err(error)) => {
-                self.update_connection_form_state(cx, |state| {
-                    if let Some(form) = state.form.as_mut() {
-                        form.error = Some(error.to_string());
-                    }
-                });
-                cx.notify();
-                Err(())
-            }
-            None => Ok(None),
-        }
-    }
-
     pub(super) fn build_new_connection_config(
         &mut self,
         cx: &mut Context<Self>,
@@ -90,26 +46,17 @@ impl WorkspaceApp {
                 cx.notify();
                 return None;
             }
-            let auth = match form.auth_tab {
-                SshAuthTab::Password => {
-                    // UI inputs own plain String drafts; crossing into SSH auth moves a
-                    // zeroizing clone so backend tasks never retain a normal String password.
-                    AuthMethod::password_secret(zeroizing_secret_clone(&form.password))
-                }
-                SshAuthTab::Agent => AuthMethod::Agent,
-                SshAuthTab::DefaultKey => {
-                    AuthMethod::key_secret("", zeroizing_non_empty_secret(&form.passphrase))
-                }
+            match form.auth_tab {
+                SshAuthTab::Password
+                | SshAuthTab::Agent
+                | SshAuthTab::DefaultKey
+                | SshAuthTab::TwoFactor => {}
                 SshAuthTab::SshKey => {
                     if form.key_path.trim().is_empty() {
                         form.error = Some(this.i18n.t("ssh.form.key_path_required"));
                         cx.notify();
                         return None;
                     }
-                    AuthMethod::key_secret(
-                        form.key_path.trim().to_string(),
-                        zeroizing_non_empty_secret(&form.passphrase),
-                    )
                 }
                 SshAuthTab::ManagedKey => {
                     if form.managed_key_id.trim().is_empty() {
@@ -117,12 +64,6 @@ impl WorkspaceApp {
                         cx.notify();
                         return None;
                     }
-                    // The connection config carries only the managed-key reference; the
-                    // private key remains owned by the local managed keychain resolver.
-                    AuthMethod::managed_key_secret(
-                        form.managed_key_id.trim().to_string(),
-                        zeroizing_non_empty_secret(&form.passphrase),
-                    )
                 }
                 SshAuthTab::Certificate => {
                     if form.key_path.trim().is_empty() || form.cert_path.trim().is_empty() {
@@ -130,22 +71,14 @@ impl WorkspaceApp {
                         cx.notify();
                         return None;
                     }
-                    AuthMethod::certificate_secret(
-                        form.key_path.trim().to_string(),
-                        form.cert_path.trim().to_string(),
-                        zeroizing_non_empty_secret(&form.passphrase),
-                    )
                 }
-                SshAuthTab::TwoFactor => AuthMethod::KeyboardInteractive,
-            };
-            let proxy_chain = match proxy_chain_from_form(form) {
-                Ok(proxy_chain) => proxy_chain,
-                Err(error) => {
-                    form.error = Some(error);
-                    cx.notify();
-                    return None;
-                }
-            };
+            }
+            if let Err(error) = validate_proxy_chain_form(form) {
+                form.error = Some(error);
+                cx.notify();
+                return None;
+            }
+            // Resolve every fallible proxy input before moving any form-owned secret.
             let upstream_proxy = match upstream_proxy_config_from_form(
                 &this.connection_store,
                 this.settings_store.settings(),
@@ -158,6 +91,35 @@ impl WorkspaceApp {
                     return None;
                 }
             };
+            let auth = match form.auth_tab {
+                SshAuthTab::Password => {
+                    AuthMethod::password_secret(take_zeroizing_secret(&mut form.password))
+                }
+                SshAuthTab::Agent => AuthMethod::Agent,
+                SshAuthTab::DefaultKey => AuthMethod::key_secret(
+                    "",
+                    take_zeroizing_non_empty_secret(&mut form.passphrase),
+                ),
+                SshAuthTab::SshKey => AuthMethod::key_secret(
+                    form.key_path.trim().to_string(),
+                    take_zeroizing_non_empty_secret(&mut form.passphrase),
+                ),
+                SshAuthTab::ManagedKey => {
+                    // Runtime auth carries only the managed-key reference and moved passphrase.
+                    AuthMethod::managed_key_secret(
+                        form.managed_key_id.trim().to_string(),
+                        take_zeroizing_non_empty_secret(&mut form.passphrase),
+                    )
+                }
+                SshAuthTab::Certificate => AuthMethod::certificate_secret(
+                    form.key_path.trim().to_string(),
+                    form.cert_path.trim().to_string(),
+                    take_zeroizing_non_empty_secret(&mut form.passphrase),
+                ),
+                SshAuthTab::TwoFactor => AuthMethod::KeyboardInteractive,
+            };
+            let proxy_chain = proxy_chain_from_form(form)
+                .expect("proxy-chain validation completed before secret handoff");
             let config = SshConfig {
                 host: host.clone(),
                 port: port.unwrap_or(22),
@@ -956,44 +918,6 @@ impl WorkspaceApp {
     ) {
         match intent {
             SshConnectionIntent::Connect => {
-                let mode = new_connection_form_mode(
-                    self.connection_form_state(cx)
-                        .editing_saved_connection_id
-                        .as_deref(),
-                    self.connection_form_state(cx)
-                        .duplicating_saved_connection_id
-                        .as_deref(),
-                    self.connection_form_state(cx)
-                        .saved_connection_prompt_action,
-                );
-                let save_after_open = if mode.stores_connection_on_connect()
-                    && self
-                        .connection_form_state(cx)
-                        .form
-                        .as_ref()
-                        .is_some_and(|form| form.save_connection)
-                {
-                    match self
-                        .connection_form_state(cx)
-                        .form
-                        .as_ref()
-                        .map(|form| save_request_from_form(form, None))
-                    {
-                        Some(Ok(request)) => Some(request),
-                        Some(Err(error)) => {
-                            self.update_connection_form_state(cx, |state| {
-                                if let Some(form) = state.form.as_mut() {
-                                    form.error = Some(error.to_string());
-                                }
-                            });
-                            cx.notify();
-                            return;
-                        }
-                        None => return,
-                    }
-                } else {
-                    None
-                };
                 self.update_connection_form_state(cx, ConnectionFormState::clear);
                 self.connection_flow.update(cx, |connection_flow, cx| {
                     connection_flow.clear_host_key_challenge(cx);
@@ -1021,7 +945,7 @@ impl WorkspaceApp {
                                     title,
                                     None,
                                     None,
-                                    save_after_open,
+                                    None,
                                     window,
                                     cx,
                                 );
@@ -1045,7 +969,7 @@ impl WorkspaceApp {
                     title,
                     None,
                     None,
-                    save_after_open,
+                    None,
                     window,
                     cx,
                 );

@@ -42,6 +42,92 @@ mod tests {
     }
 
     #[test]
+    fn upsert_runtime_handoff_preserves_secret_allocations_and_persists_no_plaintext() {
+        let store_path = temp_store_path("runtime-secret-handoff");
+        let mut store = ConnectionStore::load(&store_path).expect("store should load");
+        let target_secret = SecretString::from("target-secret-marker");
+        let target_pointer = target_secret.expose_secret().as_ptr();
+        let proxy_secret = SecretString::from("proxy-secret-marker");
+        let proxy_pointer = proxy_secret.expose_secret().as_ptr();
+        let upstream_secret = SecretString::from("upstream-secret-marker");
+        let upstream_pointer = upstream_secret.expose_secret().as_ptr();
+        let mut request = request(
+            "conn-runtime-handoff",
+            SavedAuth::Password {
+                keychain_id: None,
+                plaintext_password: Some(target_secret),
+            },
+        );
+        request.proxy_chain.push(SavedProxyHop {
+            host: "jump.example.com".to_string(),
+            port: 22,
+            username: "ops".to_string(),
+            auth: SavedAuth::Password {
+                keychain_id: None,
+                plaintext_password: Some(proxy_secret),
+            },
+            agent_forwarding: false,
+            identity_agent: None,
+            agent_forwarding_socket: None,
+            legacy_ssh_compatibility: false,
+        });
+        request.upstream_proxy = SavedUpstreamProxyPolicy::Custom {
+            proxy: SavedUpstreamProxyConfig {
+                protocol: SavedUpstreamProxyProtocol::Socks5,
+                host: "proxy.example.com".to_string(),
+                port: 1080,
+                auth: SavedUpstreamProxyAuth::Password {
+                    username: "proxy-user".to_string(),
+                    keychain_id: None,
+                    plaintext_password: Some(upstream_secret),
+                },
+                remote_dns: true,
+                no_proxy: String::new(),
+            },
+        };
+
+        let (_connection, handoff) = store
+            .upsert_with_runtime_secrets(request)
+            .expect("connection should save");
+
+        assert_eq!(
+            handoff
+                .auth
+                .as_ref()
+                .expect("target runtime secret")
+                .expose_secret()
+                .as_ptr(),
+            target_pointer
+        );
+        assert_eq!(
+            handoff.proxy_chain[0]
+                .as_ref()
+                .expect("proxy runtime secret")
+                .expose_secret()
+                .as_ptr(),
+            proxy_pointer
+        );
+        assert_eq!(
+            handoff
+                .upstream_proxy
+                .as_ref()
+                .expect("upstream runtime secret")
+                .expose_secret()
+                .as_ptr(),
+            upstream_pointer
+        );
+        let persisted = fs::read_to_string(store_path).expect("persisted connection store");
+        for secret in [
+            "target-secret-marker",
+            "proxy-secret-marker",
+            "upstream-secret-marker",
+        ] {
+            assert!(!persisted.contains(secret));
+            assert!(!format!("{handoff:?}").contains(secret));
+        }
+    }
+
+    #[test]
     fn connection_info_search_uses_the_same_non_secret_fields_on_every_surface() {
         let mut request = request("conn-search", SavedAuth::Agent);
         request.name = "Production".to_string();

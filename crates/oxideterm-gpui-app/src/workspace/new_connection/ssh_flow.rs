@@ -6,8 +6,8 @@ use std::{
 use gpui::{App, Context, Window};
 use oxideterm_connections::{
     SaveConnectionRequest, SaveRemoteDesktopProfileRequest, SaveSerialProfileRequest,
-    SaveTelnetProfileRequest, SavedUpstreamProxyProtocol, SecretString,
-    first_available_default_key_path,
+    SaveTelnetProfileRequest, SavedConnectionRuntimeSecrets, SavedUpstreamProxyProtocol,
+    SecretString, first_available_default_key_path,
 };
 use oxideterm_remote_desktop::{
     RemoteDesktopConnectionProfile, RemoteDesktopEndpoint, RemoteDesktopProtocol,
@@ -26,7 +26,7 @@ use super::{
     form_state::{
         NewConnectionForm, NewConnectionFormMode, NewConnectionProxyHop, NewConnectionSubmitAction,
         NewConnectionTransport, NewConnectionUpstreamProxyAuth, NewConnectionUpstreamProxyPolicy,
-        SavedConnectionPromptAction, SshAuthTab, new_connection_form_mode,
+        SavedConnectionPromptAction, SshAuthTab,
     },
     host_key_dialog::HostKeyChallenge,
     session_tree_plan::{
@@ -38,14 +38,14 @@ use crate::workspace::{
     WorkspaceApp, WorkspaceSshNode,
     delivery::ActiveDeliverySender,
     session_manager::{
-        duplicate_connection_template_name, form_from_saved_connection, save_request_from_form,
+        duplicate_connection_template_name, form_from_saved_connection,
         save_request_from_form_with_existing_auth, save_request_from_form_with_proxy_hop_prefix,
         upstream_proxy_config_from_form,
     },
 };
 use oxideterm_session_adapter::{
     managed_key_resolver_from_store, proxy_chain_config_from_saved_connection,
-    ssh_config_from_saved_connection,
+    ssh_config_from_saved_connection, ssh_config_from_saved_connection_with_runtime_secrets,
 };
 use oxideterm_terminal::{SerialSessionConfig, TelnetSessionConfig};
 
@@ -54,6 +54,13 @@ mod conversion;
 mod save;
 
 use conversion::*;
+
+/// Carries the original zeroizing allocations from persistence into one runtime start.
+struct SavedConnectionRuntimeHandoff {
+    connection_id: String,
+    secrets: SavedConnectionRuntimeSecrets,
+    auth_override: Option<AuthMethod>,
+}
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(in crate::workspace) enum SshConnectionIntent {

@@ -181,7 +181,7 @@ pub(super) fn save_request_from_form_preserves_custom_icon_and_independent_color
     form.icon = "cloud".to_string();
     form.color = "#7dd3fc".to_string();
     form.icon_background_color = "#082f49".to_string();
-    let request = save_request_from_form(&form, Some("conn-1".to_string())).unwrap();
+    let request = save_request_from_form(&mut form, Some("conn-1".to_string())).unwrap();
 
     assert_eq!(request.icon.as_deref(), Some("cloud"));
     assert_eq!(request.color.as_deref(), Some("#7dd3fc"));
@@ -307,7 +307,7 @@ pub(super) fn new_connection_save_password_false_does_not_request_keychain_stora
     form.password = "secret".to_string();
     form.save_password = false;
 
-    let request = save_request_from_form(&form, None).unwrap();
+    let request = save_request_from_form(&mut form, None).unwrap();
 
     match request.auth {
         SavedAuth::Password {
@@ -324,7 +324,7 @@ pub(super) fn new_connection_save_password_true_keeps_empty_password_as_submitte
     form.password = String::new();
     form.save_password = true;
 
-    let request = save_request_from_form(&form, None).unwrap();
+    let request = save_request_from_form(&mut form, None).unwrap();
 
     match request.auth {
         SavedAuth::Password {
@@ -347,7 +347,7 @@ pub(super) fn edit_properties_unloaded_password_preserves_saved_keychain_id() {
     form.save_password = true;
 
     let request = save_request_from_form_with_existing_auth(
-        &form,
+        &mut form,
         Some("conn-1".to_string()),
         Some(&existing),
     )
@@ -371,7 +371,7 @@ pub(super) fn edit_properties_switch_from_agent_to_password_submits_new_password
     form.password = "new-secret".to_string();
 
     let request = save_request_from_form_with_existing_auth(
-        &form,
+        &mut form,
         Some(saved_connection.id),
         Some(&existing),
     )
@@ -408,8 +408,8 @@ pub(super) fn edit_properties_preserves_legacy_ssh_compatibility() {
     saved_connection.options.legacy_ssh_compatibility = true;
 
     // Editing and saving an existing connection must round-trip its transport policy.
-    let form = form_from_saved_connection(&saved_connection, None);
-    let request = save_request_from_form(&form, Some(saved_connection.id)).unwrap();
+    let mut form = form_from_saved_connection(&saved_connection, None);
+    let request = save_request_from_form(&mut form, Some(saved_connection.id)).unwrap();
 
     assert!(form.legacy_ssh_compatibility);
     assert!(request.legacy_ssh_compatibility);
@@ -458,7 +458,7 @@ pub(super) fn edit_properties_same_key_empty_passphrase_submits_no_new_secret() 
     form.passphrase = String::new();
 
     let request = save_request_from_form_with_existing_auth(
-        &form,
+        &mut form,
         Some("conn-1".to_string()),
         Some(&existing),
     )
@@ -502,7 +502,7 @@ pub(super) fn new_connection_request_carries_proxy_chain() {
             legacy_ssh_compatibility: true,
         });
 
-    let request = save_request_from_form(&form, None).unwrap();
+    let request = save_request_from_form(&mut form, None).unwrap();
 
     assert_eq!(
         request.identity_agent.as_deref(),
@@ -534,6 +534,104 @@ pub(super) fn new_connection_request_carries_proxy_chain() {
 }
 
 #[test]
+pub(super) fn save_request_moves_all_visible_password_allocations_and_redacts_debug() {
+    let mut form = base_form();
+    form.password = "target-secret-marker".to_string();
+    form.save_password = true;
+    let target_pointer = form.password.as_ptr();
+
+    let mut hop = crate::workspace::new_connection::NewConnectionProxyHop::new();
+    hop.host = "jump.example.com".to_string();
+    hop.username = "ops".to_string();
+    hop.auth_tab = SshAuthTab::Password;
+    hop.password = "jump-secret-marker".to_string();
+    let hop_pointer = hop.password.as_ptr();
+    form.proxy_hops.push(hop);
+
+    form.upstream_proxy_policy = NewConnectionUpstreamProxyPolicy::Custom;
+    form.upstream_proxy_host = "proxy.example.com".to_string();
+    form.upstream_proxy_port = "1080".to_string();
+    form.upstream_proxy_auth = NewConnectionUpstreamProxyAuth::Password;
+    form.upstream_proxy_username = "proxy-user".to_string();
+    form.upstream_proxy_password = "upstream-secret-marker".to_string();
+    let upstream_pointer = form.upstream_proxy_password.as_ptr();
+
+    let request = save_request_from_form(&mut form, None).unwrap();
+
+    assert!(form.password.is_empty());
+    assert!(form.proxy_hops[0].password.is_empty());
+    assert!(form.upstream_proxy_password.is_empty());
+    match &request.auth {
+        SavedAuth::Password {
+            plaintext_password: Some(password),
+            ..
+        } => assert_eq!(password.expose_secret().as_ptr(), target_pointer),
+        other => panic!("unexpected target auth: {other:?}"),
+    }
+    match &request.proxy_chain[0].auth {
+        SavedAuth::Password {
+            plaintext_password: Some(password),
+            ..
+        } => assert_eq!(password.expose_secret().as_ptr(), hop_pointer),
+        other => panic!("unexpected proxy auth: {other:?}"),
+    }
+    match &request.upstream_proxy {
+        SavedUpstreamProxyPolicy::Custom { proxy } => match &proxy.auth {
+            oxideterm_connections::SavedUpstreamProxyAuth::Password {
+                plaintext_password: Some(password),
+                ..
+            } => assert_eq!(password.expose_secret().as_ptr(), upstream_pointer),
+            other => panic!("unexpected upstream auth: {other:?}"),
+        },
+        other => panic!("unexpected upstream policy: {other:?}"),
+    }
+
+    let debug = format!("{request:?}");
+    for secret in [
+        "target-secret-marker",
+        "jump-secret-marker",
+        "upstream-secret-marker",
+    ] {
+        assert!(!debug.contains(secret));
+    }
+}
+
+#[test]
+pub(super) fn save_request_moves_key_passphrase_allocation() {
+    let mut form = base_form();
+    form.auth_tab = SshAuthTab::SshKey;
+    form.key_path = "/tmp/id_ed25519".to_string();
+    form.passphrase = "passphrase-secret-marker".to_string();
+    let passphrase_pointer = form.passphrase.as_ptr();
+
+    let request = save_request_from_form(&mut form, None).unwrap();
+
+    assert!(form.passphrase.is_empty());
+    match request.auth {
+        SavedAuth::Key {
+            plaintext_passphrase: Some(passphrase),
+            ..
+        } => assert_eq!(passphrase.expose_secret().as_ptr(), passphrase_pointer),
+        other => panic!("unexpected auth: {other:?}"),
+    }
+}
+
+#[test]
+pub(super) fn save_validation_failure_keeps_secret_allocations_in_the_form() {
+    let mut form = base_form();
+    form.host.clear();
+    form.password = "validation-secret-marker".to_string();
+    form.save_password = true;
+    let password_pointer = form.password.as_ptr();
+
+    let error = save_request_from_form(&mut form, None).unwrap_err();
+
+    assert!(error.to_string().contains("Host is required"));
+    assert_eq!(form.password, "validation-secret-marker");
+    assert_eq!(form.password.as_ptr(), password_pointer);
+}
+
+#[test]
 pub(super) fn proxy_hop_two_factor_is_saved_as_keyboard_interactive() {
     let mut form = base_form();
     form.auth_tab = SshAuthTab::Agent;
@@ -555,7 +653,7 @@ pub(super) fn proxy_hop_two_factor_is_saved_as_keyboard_interactive() {
             legacy_ssh_compatibility: false,
         });
 
-    let request = save_request_from_form(&form, None).unwrap();
+    let request = save_request_from_form(&mut form, None).unwrap();
 
     assert!(matches!(
         request.proxy_chain[0].auth,
@@ -575,8 +673,12 @@ pub(super) fn runtime_proxy_hops_are_prepended_without_cloning_the_connection_fo
     let mut runtime_hop = crate::workspace::new_connection::NewConnectionProxyHop::new();
     runtime_hop.host = "runtime-hop.example.com".to_string();
     runtime_hop.username = "runtime-user".to_string();
-    let request =
-        save_request_from_form_with_proxy_hop_prefix(&form, &[runtime_hop], None).unwrap();
+    let request = save_request_from_form_with_proxy_hop_prefix(
+        &mut form,
+        std::slice::from_mut(&mut runtime_hop),
+        None,
+    )
+    .unwrap();
 
     assert_eq!(request.proxy_chain.len(), 2);
     assert_eq!(request.proxy_chain[0].host, "runtime-hop.example.com");

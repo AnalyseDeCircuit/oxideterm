@@ -109,10 +109,6 @@ impl NewConnectionFormMode {
     pub(in crate::workspace) fn submits_saved_connection_properties(self) -> bool {
         matches!(self, Self::EditProperties | Self::DuplicateTemplate)
     }
-
-    pub(in crate::workspace) fn stores_connection_on_connect(self) -> bool {
-        self == Self::NewConnection
-    }
 }
 
 pub(in crate::workspace) fn new_connection_form_mode(
@@ -1780,8 +1776,6 @@ mod tests {
             NewConnectionFormMode::SavedConnectionPrompt
         );
 
-        assert!(NewConnectionFormMode::NewConnection.stores_connection_on_connect());
-        assert!(!NewConnectionFormMode::SavedConnectionPrompt.stores_connection_on_connect());
         assert!(NewConnectionFormMode::EditProperties.submits_saved_connection_properties());
         assert!(NewConnectionFormMode::DuplicateTemplate.submits_saved_connection_properties());
         assert!(

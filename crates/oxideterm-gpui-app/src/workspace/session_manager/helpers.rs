@@ -456,20 +456,27 @@ pub(super) fn default_upstream_proxy_form_fields(
     }
 }
 
+#[cfg(test)]
 pub(in crate::workspace) fn save_request_from_form(
-    form: &NewConnectionForm,
+    form: &mut NewConnectionForm,
     id: Option<String>,
 ) -> anyhow::Result<SaveConnectionRequest> {
-    save_request_from_form_with_proxy_hop_prefix(form, &[], id)
+    save_request_from_form_with_proxy_hop_prefix(form, &mut [], id)
 }
 
 pub(in crate::workspace) fn save_request_from_form_with_proxy_hop_prefix(
-    form: &NewConnectionForm,
-    proxy_hop_prefix: &[NewConnectionProxyHop],
+    form: &mut NewConnectionForm,
+    proxy_hop_prefix: &mut [NewConnectionProxyHop],
     id: Option<String>,
 ) -> anyhow::Result<SaveConnectionRequest> {
+    validate_save_form_non_secret(form, proxy_hop_prefix)?;
+    let persist_password_draft = form.save_password;
     let mut request = save_request_from_draft(
-        connection_draft_from_form_with_proxy_hop_prefix(form, proxy_hop_prefix),
+        connection_draft_from_form_with_proxy_hop_prefix(
+            form,
+            proxy_hop_prefix,
+            persist_password_draft,
+        ),
         id,
         None,
     )?;
@@ -478,12 +485,14 @@ pub(in crate::workspace) fn save_request_from_form_with_proxy_hop_prefix(
 }
 
 pub(in crate::workspace) fn save_request_from_form_with_existing_auth(
-    form: &NewConnectionForm,
+    form: &mut NewConnectionForm,
     id: Option<String>,
     existing_auth: Option<&SavedAuth>,
 ) -> anyhow::Result<SaveConnectionRequest> {
+    validate_save_form_non_secret(form, &[])?;
+    let persist_password_draft = form.password_loaded;
     let mut request = save_request_from_draft(
-        connection_draft_from_form_with_proxy_hop_prefix(form, &[]),
+        connection_draft_from_form_with_proxy_hop_prefix(form, &mut [], persist_password_draft),
         id,
         existing_auth,
     )?;
@@ -491,24 +500,64 @@ pub(in crate::workspace) fn save_request_from_form_with_existing_auth(
     Ok(request)
 }
 
-fn connection_draft_from_form_with_proxy_hop_prefix(
+fn validate_save_form_non_secret(
     form: &NewConnectionForm,
     proxy_hop_prefix: &[NewConnectionProxyHop],
+) -> anyhow::Result<()> {
+    if form.name.trim().is_empty() {
+        anyhow::bail!("Connection name is required");
+    }
+    if form.host.trim().is_empty() {
+        anyhow::bail!("Host is required");
+    }
+    if form.username.trim().is_empty() {
+        anyhow::bail!("Username is required");
+    }
+    let group = form.group.trim();
+    if !group.is_empty() && !matches!(group, "Ungrouped" | "未分组") {
+        validate_group_name(group)?;
+    }
+    for hop in proxy_hop_prefix.iter().chain(&form.proxy_hops) {
+        if hop.host.trim().is_empty() {
+            anyhow::bail!("Proxy host is required");
+        }
+        if hop.username.trim().is_empty() {
+            anyhow::bail!("Proxy username is required");
+        }
+    }
+    if form.upstream_proxy_policy == NewConnectionUpstreamProxyPolicy::Custom {
+        if form.upstream_proxy_host.trim().is_empty() {
+            anyhow::bail!("Upstream proxy host is required");
+        }
+        upstream_proxy_port_from_form(form)?;
+        if form.upstream_proxy_auth == NewConnectionUpstreamProxyAuth::Password
+            && form.upstream_proxy_username.trim().is_empty()
+        {
+            anyhow::bail!("Upstream proxy username is required");
+        }
+    }
+    Ok(())
+}
+
+fn connection_draft_from_form_with_proxy_hop_prefix(
+    form: &mut NewConnectionForm,
+    proxy_hop_prefix: &mut [NewConnectionProxyHop],
+    persist_password_draft: bool,
 ) -> ConnectionDraft {
     ConnectionDraft {
         name: form.name.clone(),
         host: form.host.clone(),
         port: form.port.clone(),
         username: form.username.clone(),
-        auth: auth_draft_from_form(form),
+        auth: auth_draft_from_form(form, persist_password_draft),
         group: form.group.clone(),
         color: form.color.clone(),
         icon_background_color: form.icon_background_color.clone(),
         icon: form.icon.clone(),
         tags: form.tags.clone(),
         proxy_hops: proxy_hop_prefix
-            .iter()
-            .chain(&form.proxy_hops)
+            .iter_mut()
+            .chain(form.proxy_hops.iter_mut())
             .map(proxy_hop_draft_from_form)
             .collect(),
         agent_forwarding: form.agent_forwarding,
@@ -520,7 +569,7 @@ fn connection_draft_from_form_with_proxy_hop_prefix(
 }
 
 pub(super) fn proxy_hop_draft_from_form(
-    hop: &super::new_connection::NewConnectionProxyHop,
+    hop: &mut super::new_connection::NewConnectionProxyHop,
 ) -> ProxyHopDraft {
     ProxyHopDraft {
         host: hop.host.clone(),
@@ -528,11 +577,11 @@ pub(super) fn proxy_hop_draft_from_form(
         username: hop.username.clone(),
         auth: ConnectionAuthDraft {
             kind: auth_draft_kind(hop.auth_tab),
-            password: secret_from_ui_draft(&hop.password),
+            password: take_secret_from_ui_draft(&mut hop.password),
             key_path: hop.key_path.clone(),
             managed_key_id: hop.managed_key_id.clone(),
             cert_path: hop.cert_path.clone(),
-            passphrase: secret_from_ui_draft(&hop.passphrase),
+            passphrase: take_secret_from_ui_draft(&mut hop.passphrase),
             save_password: true,
             ..ConnectionAuthDraft::default()
         },
@@ -543,28 +592,34 @@ pub(super) fn proxy_hop_draft_from_form(
     }
 }
 
-pub(super) fn auth_draft_from_form(form: &NewConnectionForm) -> ConnectionAuthDraft {
+pub(super) fn auth_draft_from_form(
+    form: &mut NewConnectionForm,
+    persist_password_draft: bool,
+) -> ConnectionAuthDraft {
     ConnectionAuthDraft {
         kind: auth_draft_kind(form.auth_tab),
-        password: secret_from_ui_draft(&form.password),
+        password: if form.auth_tab == SshAuthTab::Password && persist_password_draft {
+            take_secret_from_ui_draft(&mut form.password)
+        } else {
+            SecretString::default()
+        },
         password_keychain_id: form.saved_password_keychain_id.clone(),
         password_loaded: form.password_loaded,
         save_password: form.save_password,
         key_path: form.key_path.clone(),
         managed_key_id: form.managed_key_id.clone(),
         cert_path: form.cert_path.clone(),
-        passphrase: secret_from_ui_draft(&form.passphrase),
+        passphrase: take_secret_from_ui_draft(&mut form.passphrase),
     }
 }
 
-pub(super) fn secret_from_ui_draft(value: &str) -> SecretString {
-    // GPUI text inputs require plain String drafts. At the persistence boundary,
-    // clone into SecretString's Zeroizing owner before any store/keychain logic sees it.
-    SecretString::from(zeroize::Zeroizing::new(value.to_string()))
+pub(super) fn take_secret_from_ui_draft(value: &mut String) -> SecretString {
+    // Move the existing allocation into a zeroizing owner at the persistence boundary.
+    SecretString::from(std::mem::take(value))
 }
 
 pub(in crate::workspace) fn saved_upstream_proxy_policy_from_form(
-    form: &NewConnectionForm,
+    form: &mut NewConnectionForm,
 ) -> anyhow::Result<SavedUpstreamProxyPolicy> {
     match form.upstream_proxy_policy {
         NewConnectionUpstreamProxyPolicy::UseGlobal => Ok(SavedUpstreamProxyPolicy::UseGlobal),
@@ -576,7 +631,7 @@ pub(in crate::workspace) fn saved_upstream_proxy_policy_from_form(
 }
 
 pub(super) fn saved_upstream_proxy_config_from_form(
-    form: &NewConnectionForm,
+    form: &mut NewConnectionForm,
 ) -> anyhow::Result<SavedUpstreamProxyConfig> {
     Ok(SavedUpstreamProxyConfig {
         protocol: form.upstream_proxy_protocol,
@@ -589,7 +644,7 @@ pub(super) fn saved_upstream_proxy_config_from_form(
 }
 
 pub(super) fn saved_upstream_proxy_auth_from_form(
-    form: &NewConnectionForm,
+    form: &mut NewConnectionForm,
 ) -> SavedUpstreamProxyAuth {
     match form.upstream_proxy_auth {
         NewConnectionUpstreamProxyAuth::None => SavedUpstreamProxyAuth::None,
@@ -599,7 +654,7 @@ pub(super) fn saved_upstream_proxy_auth_from_form(
             // Only a visible draft secret crosses into persistence when the
             // user typed one; otherwise an existing keychain id remains intact.
             plaintext_password: (!form.upstream_proxy_password.is_empty())
-                .then(|| secret_from_ui_draft(&form.upstream_proxy_password)),
+                .then(|| take_secret_from_ui_draft(&mut form.upstream_proxy_password)),
         },
     }
 }
@@ -612,7 +667,7 @@ pub(super) fn upstream_proxy_port_from_form(form: &NewConnectionForm) -> anyhow:
 pub(in crate::workspace) fn upstream_proxy_config_from_form(
     store: &ConnectionStore,
     settings: &PersistedSettings,
-    form: &NewConnectionForm,
+    form: &mut NewConnectionForm,
 ) -> anyhow::Result<Option<UpstreamProxyConfig>> {
     match form.upstream_proxy_policy {
         NewConnectionUpstreamProxyPolicy::UseGlobal => upstream_proxy_config_from_saved_policy(
@@ -630,19 +685,31 @@ pub(in crate::workspace) fn upstream_proxy_config_from_form(
 
 pub(super) fn runtime_upstream_proxy_config_from_form(
     store: &ConnectionStore,
-    form: &NewConnectionForm,
+    form: &mut NewConnectionForm,
 ) -> anyhow::Result<UpstreamProxyConfig> {
+    // Parse the non-secret port before taking ownership of a visible password draft.
+    if form.upstream_proxy_host.trim().is_empty() {
+        anyhow::bail!("Upstream proxy host is required");
+    }
+    let port = upstream_proxy_port_from_form(form)?;
     let auth = match form.upstream_proxy_auth {
         NewConnectionUpstreamProxyAuth::None => UpstreamProxyAuth::None,
         NewConnectionUpstreamProxyAuth::Password => {
             let username = form.upstream_proxy_username.trim().to_string();
+            if username.is_empty() {
+                anyhow::bail!("Upstream proxy username is required");
+            }
             let password = if form.upstream_proxy_password.is_empty() {
-                let saved_auth = saved_upstream_proxy_auth_from_form(form);
+                let saved_auth = SavedUpstreamProxyAuth::Password {
+                    username: username.clone(),
+                    keychain_id: form.upstream_proxy_password_keychain_id.clone(),
+                    plaintext_password: None,
+                };
                 store
                     .get_saved_upstream_proxy_password(&saved_auth)?
                     .into_zeroizing()
             } else {
-                zeroize::Zeroizing::new(form.upstream_proxy_password.clone())
+                zeroize::Zeroizing::new(std::mem::take(&mut form.upstream_proxy_password))
             };
             UpstreamProxyAuth::Password { username, password }
         }
@@ -654,7 +721,7 @@ pub(super) fn runtime_upstream_proxy_config_from_form(
             SavedUpstreamProxyProtocol::HttpConnect => UpstreamProxyProtocol::HttpConnect,
         },
         host: form.upstream_proxy_host.trim().to_string(),
-        port: upstream_proxy_port_from_form(form)?,
+        port,
         auth,
         remote_dns: form.upstream_proxy_remote_dns,
         no_proxy: form.upstream_proxy_no_proxy.trim().to_string(),

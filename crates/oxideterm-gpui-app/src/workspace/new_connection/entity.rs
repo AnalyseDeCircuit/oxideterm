@@ -4,7 +4,7 @@
 use std::{collections::VecDeque, ops::Range, time::Duration};
 
 use gpui::{Context, EventEmitter, Task, Timer};
-use oxideterm_connections::SaveConnectionRequest;
+use oxideterm_connections::{SaveConnectionRequest, SecretString};
 use oxideterm_editor_core::utf16::replace_utf16;
 use oxideterm_ssh::{
     HostKeyStatus, KeyboardInteractivePromptRequest, KeyboardInteractiveResponses, SshPromptError,
@@ -14,8 +14,8 @@ use tokio::sync::oneshot;
 
 use super::{
     ConnectionFormState, HostKeyChallenge, KeyboardInteractiveChallenge,
-    NativeSessionTreeConnectAction, NativeSessionTreeConnectPlan, SshConnectionIntent,
-    SshConnectionWorkerResult,
+    NativeSessionTreeConnectAction, NativeSessionTreeConnectPlan, NewConnectionField,
+    SshConnectionIntent, SshConnectionWorkerResult, form_state::clear_connection_selection,
 };
 use crate::workspace::delivery;
 
@@ -53,6 +53,8 @@ pub(in crate::workspace) struct ConnectionFlowEntity {
     active_proxy_connect_run: Option<NativeProxyConnectRun>,
     cancelled_proxy_connect_runs: VecDeque<NativeProxyConnectRun>,
     next_proxy_connect_generation: u64,
+    path_picker_task: Option<Task<()>>,
+    password_load_task: Option<Task<()>>,
     connection_form_exit_task: Option<Task<()>>,
     jump_server_exit_task: Option<Task<()>>,
     host_key_challenge: Option<HostKeyChallenge>,
@@ -126,6 +128,8 @@ impl ConnectionFlowEntity {
             active_proxy_connect_run: None,
             cancelled_proxy_connect_runs: VecDeque::new(),
             next_proxy_connect_generation: 0,
+            path_picker_task: None,
+            password_load_task: None,
             connection_form_exit_task: None,
             jump_server_exit_task: None,
             host_key_challenge: None,
@@ -369,12 +373,103 @@ impl ConnectionFlowEntity {
         true
     }
 
+    pub(in crate::workspace) fn start_path_picker(
+        &mut self,
+        field: NewConnectionField,
+        selection: impl std::future::Future<Output = Option<String>> + 'static,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if self.path_picker_task.is_some() {
+            return false;
+        }
+        // Retain picker completion with the form owner so it cannot update a released root.
+        self.path_picker_task = Some(cx.spawn(async move |connection_flow, cx| {
+            let selected_path = selection.await;
+            let _ = connection_flow.update(cx, |connection_flow, cx| {
+                connection_flow.path_picker_task = None;
+                let Some(path) = selected_path else {
+                    return;
+                };
+                let Some(form) = connection_flow.form.form.as_mut() else {
+                    return;
+                };
+                match field {
+                    NewConnectionField::KeyPath => form.key_path = path,
+                    NewConnectionField::CertPath => form.cert_path = path,
+                    NewConnectionField::JumpKeyPath => {
+                        let Some(jump_form) = form.jump_server_form.as_mut() else {
+                            return;
+                        };
+                        jump_form.key_path = path;
+                    }
+                    NewConnectionField::JumpCertPath => {
+                        let Some(jump_form) = form.jump_server_form.as_mut() else {
+                            return;
+                        };
+                        jump_form.cert_path = path;
+                    }
+                    _ => return,
+                }
+                form.focused_field = field;
+                form.field_focused = true;
+                form.error = None;
+                clear_connection_selection(form);
+                cx.notify();
+            });
+        }));
+        true
+    }
+
+    pub(in crate::workspace) fn start_password_load(
+        &mut self,
+        load: impl std::future::Future<Output = anyhow::Result<SecretString>> + 'static,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if self.password_load_task.is_some() {
+            return false;
+        }
+        // The loaded allocation moves into the UI draft; no plaintext copy is created.
+        self.password_load_task = Some(cx.spawn(async move |connection_flow, cx| {
+            let result = load.await;
+            let _ = connection_flow.update(cx, |connection_flow, cx| {
+                connection_flow.password_load_task = None;
+                let Some(form) = connection_flow.form.form.as_mut() else {
+                    return;
+                };
+                if !form.password_loading {
+                    return;
+                }
+                form.password_loading = false;
+                match result {
+                    Ok(password) => {
+                        let mut password = password.into_zeroizing();
+                        zeroize::Zeroize::zeroize(&mut form.password);
+                        form.password = std::mem::take(&mut *password);
+                        form.password_loaded = true;
+                        form.password_visible = true;
+                        form.password_error = None;
+                        form.focused_field = NewConnectionField::Password;
+                        form.field_focused = true;
+                        clear_connection_selection(form);
+                    }
+                    Err(error) => {
+                        form.password_error = Some(error.to_string());
+                    }
+                }
+                cx.notify();
+            });
+        }));
+        true
+    }
+
     fn finish_connection_form_exit(&mut self, generation: u64, cx: &mut Context<Self>) -> bool {
         if !self.form.presence.finish_exit(generation) {
             return false;
         }
         self.connection_form_exit_task = None;
         self.jump_server_exit_task = None;
+        self.path_picker_task = None;
+        self.password_load_task = None;
         if let Some(run) = self.active_proxy_connect_run.take() {
             // Window/runtime cleanup is emitted as a typed effect after state ownership is cleared.
             self.cancelled_proxy_connect_runs.push_back(run);
@@ -812,6 +907,7 @@ mod tests {
     };
 
     use gpui::{AppContext, TestAppContext};
+    use oxideterm_connections::SecretString;
     use oxideterm_ssh::{
         HostKeyStatus, KeyboardInteractivePrompt, KeyboardInteractivePromptRequest, NodeId,
         SshConfig, SshPromptError,
@@ -821,8 +917,8 @@ mod tests {
     use super::{ConnectionFlowEntity, ConnectionFlowEvent, NativeProxyConnectRun};
     use crate::workspace::new_connection::{
         HostKeyChallenge, NativeSessionTreeConnectAction, NativeSessionTreeConnectPlan,
-        NewConnectionForm, NewConnectionProxyHop, SavedConnectionPromptAction, SshConnectionIntent,
-        SshConnectionWorkerResult,
+        NewConnectionField, NewConnectionForm, NewConnectionProxyHop, SavedConnectionPromptAction,
+        SshConnectionIntent, SshConnectionWorkerResult,
     };
     use oxideterm_ssh::NativeSessionTreeConnectStep;
 
@@ -1108,6 +1204,63 @@ mod tests {
             assert!(entity.form.form.is_none());
             assert!(entity.form.editing_saved_connection_id.is_none());
             assert!(entity.form.saved_connection_prompt_action.is_none());
+        });
+    }
+
+    #[gpui::test]
+    fn loaded_password_allocation_moves_into_entity_owned_form(cx: &mut TestAppContext) {
+        let entity = cx.new(ConnectionFlowEntity::new);
+        let password = SecretString::from("loaded-secret-marker");
+        let password_pointer = password.expose_secret().as_ptr();
+
+        entity.update(cx, |entity, cx| {
+            let mut form = NewConnectionForm::default();
+            form.password_loading = true;
+            entity.form.replace_with_new_form(form);
+            assert!(entity.start_password_load(async move { Ok(password) }, cx));
+        });
+        cx.run_until_parked();
+
+        entity.read_with(cx, |entity, _cx| {
+            assert!(entity.password_load_task.is_none());
+            let form = entity.form.form.as_ref().expect("retained form");
+            assert_eq!(form.password, "loaded-secret-marker");
+            assert_eq!(form.password.as_ptr(), password_pointer);
+            assert!(!form.password_loading);
+            assert!(form.password_loaded);
+        });
+    }
+
+    #[gpui::test]
+    fn closing_form_cancels_entity_owned_picker_and_password_tasks(cx: &mut TestAppContext) {
+        let entity = cx.new(ConnectionFlowEntity::new);
+        let (_path_tx, path_rx) = oneshot::channel::<Option<String>>();
+        let (_password_tx, password_rx) = oneshot::channel::<anyhow::Result<SecretString>>();
+
+        entity.update(cx, |entity, cx| {
+            let mut form = NewConnectionForm::default();
+            form.password_loading = true;
+            entity.form.replace_with_new_form(form);
+            assert!(entity.start_path_picker(
+                NewConnectionField::KeyPath,
+                async move { path_rx.await.ok().flatten() },
+                cx,
+            ));
+            assert!(entity.start_password_load(
+                async move {
+                    password_rx
+                        .await
+                        .unwrap_or_else(|_| anyhow::bail!("password load cancelled"))
+                },
+                cx,
+            ));
+            assert!(entity.path_picker_task.is_some());
+            assert!(entity.password_load_task.is_some());
+
+            assert!(entity.begin_connection_form_exit(Duration::ZERO, cx));
+            assert!(entity.path_picker_task.is_none());
+            assert!(entity.password_load_task.is_none());
+            assert!(entity.form.form.is_none());
         });
     }
 
