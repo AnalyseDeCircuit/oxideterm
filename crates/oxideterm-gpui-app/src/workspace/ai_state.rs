@@ -58,6 +58,18 @@ pub(in crate::workspace) enum AiChatConfirmKeyAction {
     Handled,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(in crate::workspace) enum AiChatConfirmOwnerKind {
+    ClearAll,
+    DeleteMessage,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(in crate::workspace) struct AiChatConfirmOwnerSnapshot {
+    pub(in crate::workspace) kind: AiChatConfirmOwnerKind,
+    pub(in crate::workspace) phase: oxideterm_gpui_ui::motion::ExitPhase,
+}
+
 /// Describes which workspace-owned AI surfaces can currently consume UI probes.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub(in crate::workspace) struct AiWorkspaceVisibility {
@@ -306,6 +318,7 @@ pub(in crate::workspace) struct AiWorkspaceEntity {
     terminal_inline_panel: AiInlinePanelState,
     terminal_inline_tx: crate::workspace::delivery::ActiveDeliverySender<AiTerminalInlineDelivery>,
     terminal_inline_rx: std::sync::mpsc::Receiver<AiTerminalInlineDelivery>,
+    terminal_inline_stream_task: Option<tokio::task::JoinHandle<()>>,
     chat_stream_generation: u64,
     chat_stream_task: Option<tokio::task::JoinHandle<()>>,
     chat_stream_tx: AiStreamDeliverySender,
@@ -441,6 +454,7 @@ impl AiWorkspaceEntity {
             terminal_inline_panel: AiInlinePanelState::default(),
             terminal_inline_tx,
             terminal_inline_rx,
+            terminal_inline_stream_task: None,
             chat_stream_generation: 0,
             chat_stream_task: None,
             chat_stream_tx,
@@ -1290,6 +1304,12 @@ impl AiWorkspaceEntity {
         self.settings_confirm.is_some()
     }
 
+    pub(in crate::workspace) fn settings_confirm_phase(
+        &self,
+    ) -> oxideterm_gpui_ui::motion::ExitPhase {
+        self.settings_confirm_presence.phase()
+    }
+
     pub(in crate::workspace) fn settings_confirm_is_enable(&self) -> bool {
         matches!(self.settings_confirm, Some(AiSettingsConfirm::Enable))
     }
@@ -1440,6 +1460,22 @@ impl AiWorkspaceEntity {
                 kind,
                 phase: self.chat_confirm_presence.phase(),
                 focused_action: self.chat_confirm_focused_action,
+            })
+    }
+
+    pub(in crate::workspace) fn chat_confirm_owner_snapshot(
+        &self,
+    ) -> Option<AiChatConfirmOwnerSnapshot> {
+        self.chat_confirm
+            .as_ref()
+            .map(|confirm| AiChatConfirmOwnerSnapshot {
+                kind: match confirm {
+                    AiChatConfirmKind::ClearAll => AiChatConfirmOwnerKind::ClearAll,
+                    AiChatConfirmKind::DeleteMessage { .. } => {
+                        AiChatConfirmOwnerKind::DeleteMessage
+                    }
+                },
+                phase: self.chat_confirm_presence.phase(),
             })
     }
 
@@ -2321,6 +2357,7 @@ impl AiWorkspaceEntity {
     }
 
     pub(in crate::workspace) fn open_terminal_inline_panel(&mut self, selection_context: String) {
+        self.abort_terminal_inline_stream();
         let panel = &mut self.terminal_inline_panel;
         panel.open = true;
         panel.prompt.clear();
@@ -2336,6 +2373,7 @@ impl AiWorkspaceEntity {
     }
 
     pub(in crate::workspace) fn close_terminal_inline_panel(&mut self) {
+        self.abort_terminal_inline_stream();
         let panel = &mut self.terminal_inline_panel;
         panel.open = false;
         panel.prompt_focused = false;
@@ -2367,6 +2405,7 @@ impl AiWorkspaceEntity {
         {
             return false;
         }
+        self.abort_terminal_inline_stream();
         let panel = &mut self.terminal_inline_panel;
         let generation = panel.generation.wrapping_add(1);
         panel.generation = generation;
@@ -2388,7 +2427,7 @@ impl AiWorkspaceEntity {
         let provider_id = config.provider_id.clone();
         let key_store = self.key_store.clone();
         let worker_tx = self.terminal_inline_tx.clone();
-        self.task_runtime.spawn(async move {
+        let task = self.task_runtime.spawn(async move {
             if let Some(provider_id) = provider_id {
                 let key_result =
                     tokio::task::spawn_blocking(move || key_store.get_provider_key(&provider_id))
@@ -2423,37 +2462,64 @@ impl AiWorkspaceEntity {
             }
 
             let (stream_tx, mut stream_rx) = tokio::sync::mpsc::unbounded_channel();
-            tokio::spawn(oxideterm_ai::stream_chat_completion(
+            let provider_stream = oxideterm_ai::stream_chat_completion(
                 config,
                 oxideterm_ai::sanitize_api_messages_for_provider(messages),
                 stream_tx,
-            ));
-            while let Some(event) = stream_rx.recv().await {
-                match event {
-                    oxideterm_ai::AiStreamEvent::Content(chunk) => {
-                        let _ =
-                            worker_tx.send(AiTerminalInlineDelivery::Content { generation, chunk });
+            );
+            let deliver_stream = async move {
+                while let Some(event) = stream_rx.recv().await {
+                    match event {
+                        oxideterm_ai::AiStreamEvent::Content(chunk) => {
+                            let _ = worker_tx
+                                .send(AiTerminalInlineDelivery::Content { generation, chunk });
+                        }
+                        oxideterm_ai::AiStreamEvent::Done => {
+                            let _ = worker_tx.send(AiTerminalInlineDelivery::Done { generation });
+                            break;
+                        }
+                        oxideterm_ai::AiStreamEvent::Error(_) => {
+                            // Provider errors may contain response bodies or request
+                            // metadata, so only localized safe copy reaches the UI.
+                            let _ = worker_tx.send(AiTerminalInlineDelivery::Error {
+                                generation,
+                                message: stream_failed,
+                            });
+                            break;
+                        }
+                        oxideterm_ai::AiStreamEvent::Thinking(_)
+                        | oxideterm_ai::AiStreamEvent::ToolCall { .. }
+                        | oxideterm_ai::AiStreamEvent::ToolCallComplete { .. } => {}
                     }
-                    oxideterm_ai::AiStreamEvent::Done => {
-                        let _ = worker_tx.send(AiTerminalInlineDelivery::Done { generation });
-                        break;
-                    }
-                    oxideterm_ai::AiStreamEvent::Error(_) => {
-                        // Provider errors may contain response bodies or request
-                        // metadata, so only localized safe copy reaches the UI.
-                        let _ = worker_tx.send(AiTerminalInlineDelivery::Error {
-                            generation,
-                            message: stream_failed,
-                        });
-                        break;
-                    }
-                    oxideterm_ai::AiStreamEvent::Thinking(_)
-                    | oxideterm_ai::AiStreamEvent::ToolCall { .. }
-                    | oxideterm_ai::AiStreamEvent::ToolCallComplete { .. } => {}
                 }
-            }
+            };
+            // Keeping producer and delivery in one retained task ensures an
+            // Entity abort cannot leave the provider request detached.
+            let _ = tokio::join!(provider_stream, deliver_stream);
         });
+        self.set_terminal_inline_stream_task(generation, task);
         true
+    }
+
+    fn set_terminal_inline_stream_task(
+        &mut self,
+        generation: u64,
+        task: tokio::task::JoinHandle<()>,
+    ) {
+        if generation == self.terminal_inline_panel.generation && self.terminal_inline_panel.loading
+        {
+            if let Some(replaced_task) = self.terminal_inline_stream_task.replace(task) {
+                replaced_task.abort();
+            }
+        } else {
+            task.abort();
+        }
+    }
+
+    fn abort_terminal_inline_stream(&mut self) {
+        if let Some(task) = self.terminal_inline_stream_task.take() {
+            task.abort();
+        }
     }
 
     pub(in crate::workspace) fn refresh_terminal_inline_key_status(
@@ -2516,7 +2582,9 @@ impl AiWorkspaceEntity {
         task: tokio::task::JoinHandle<()>,
     ) {
         if generation == self.chat_stream_generation {
-            self.chat_stream_task = Some(task);
+            if let Some(replaced_task) = self.chat_stream_task.replace(task) {
+                replaced_task.abort();
+            }
         } else {
             task.abort();
         }
@@ -2538,7 +2606,9 @@ impl AiWorkspaceEntity {
         self.reject_all_tool_approvals();
         // Invalidate any delivery queued after the terminal event, matching the
         // old one-shot receiver lifetime without keeping a receiver on the root.
-        self.chat_stream_task.take();
+        if let Some(task) = self.chat_stream_task.take() {
+            task.abort();
+        }
         self.chat_stream_generation = self.chat_stream_generation.saturating_add(1);
         true
     }
@@ -3091,6 +3161,7 @@ impl AiWorkspaceEntity {
             AI_TERMINAL_INLINE_DELIVERY_BUDGET,
         );
         let mut changed = false;
+        let mut stream_finished = false;
         for delivery in drain.items {
             let panel = &mut self.terminal_inline_panel;
             match delivery {
@@ -3110,6 +3181,7 @@ impl AiWorkspaceEntity {
                 AiTerminalInlineDelivery::Done { generation } if generation == panel.generation => {
                     panel.loading = false;
                     changed = true;
+                    stream_finished = true;
                 }
                 AiTerminalInlineDelivery::Error {
                     generation,
@@ -3118,9 +3190,15 @@ impl AiWorkspaceEntity {
                     panel.loading = false;
                     panel.error = Some(message);
                     changed = true;
+                    stream_finished = true;
                 }
                 _ => {}
             }
+        }
+        if stream_finished {
+            // A terminal delivery closes the retained generation even if the
+            // provider future has a few cleanup polls remaining.
+            self.abort_terminal_inline_stream();
         }
         if changed {
             cx.emit(AiWorkspaceEvent::TerminalInlineDeliveryReady);
@@ -3341,6 +3419,10 @@ impl Drop for AiWorkspaceEntity {
         // Releasing the workspace is an explicit rejection boundary for every
         // protocol worker still waiting on a user decision.
         self.reject_all_tool_approvals();
+        if let Some(task) = self.chat_stream_task.take() {
+            task.abort();
+        }
+        self.abort_terminal_inline_stream();
         // Runtime-backed reindex work is not a GPUI task, so entity release
         // must explicitly stop it as well as dropping the retained UI tasks.
         if let Some(cancel) = self.knowledge_reindex_cancel.take() {
@@ -3538,6 +3620,7 @@ impl AiKnowledgeWorkspaceState {
 mod entity_tests {
     use super::*;
     use gpui::TestAppContext;
+    use std::sync::atomic::AtomicUsize;
 
     fn test_runtime() -> Arc<tokio::runtime::Runtime> {
         Arc::new(
@@ -3546,6 +3629,53 @@ mod entity_tests {
                 .build()
                 .expect("AI entity test runtime"),
         )
+    }
+
+    fn test_worker_runtime() -> Arc<tokio::runtime::Runtime> {
+        Arc::new(
+            tokio::runtime::Builder::new_multi_thread()
+                .worker_threads(1)
+                .enable_all()
+                .build()
+                .expect("AI worker lifecycle test runtime"),
+        )
+    }
+
+    struct CountTaskDrop(Arc<AtomicUsize>);
+
+    impl Drop for CountTaskDrop {
+        fn drop(&mut self) {
+            self.0.fetch_add(1, Ordering::AcqRel);
+        }
+    }
+
+    fn spawn_abort_counted_task(
+        runtime: &tokio::runtime::Runtime,
+        drop_count: Arc<AtomicUsize>,
+    ) -> tokio::task::JoinHandle<()> {
+        let (started_tx, started_rx) = std::sync::mpsc::sync_channel(1);
+        let task = runtime.spawn(async move {
+            let _drop_count = CountTaskDrop(drop_count);
+            started_tx
+                .send(())
+                .expect("lifecycle test should observe task start");
+            std::future::pending::<()>().await;
+        });
+        started_rx
+            .recv_timeout(Duration::from_secs(2))
+            .expect("retained task should start");
+        task
+    }
+
+    fn wait_for_lifecycle_count(counter: &AtomicUsize, expected: usize) {
+        let deadline = std::time::Instant::now() + Duration::from_secs(2);
+        while counter.load(Ordering::Acquire) != expected {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "lifecycle counter should reach the expected value"
+            );
+            std::thread::sleep(Duration::from_millis(1));
+        }
     }
 
     fn test_acp_agent(agent_id: &str) -> oxideterm_settings::AcpAgentConfig {
@@ -4541,6 +4671,133 @@ mod entity_tests {
             assert!(!panel.open);
             assert_eq!(panel.generation, 8);
             assert_eq!(panel.response, "safe output");
+        });
+    }
+
+    #[gpui::test]
+    fn stream_task_replacement_and_cancel_abort_each_task_exactly_once(cx: &mut TestAppContext) {
+        let runtime = test_worker_runtime();
+        let entity = cx.new({
+            let runtime = Arc::clone(&runtime);
+            move |cx| AiWorkspaceEntity::new(runtime, oxideterm_ai::AiProviderKeyStore::new(), cx)
+        });
+        let chat_drop_count = Arc::new(AtomicUsize::new(0));
+        let terminal_drop_count = Arc::new(AtomicUsize::new(0));
+
+        let chat_generation = entity.update(cx, |entity, _cx| entity.begin_chat_stream().0);
+        let first_chat_task = spawn_abort_counted_task(&runtime, Arc::clone(&chat_drop_count));
+        entity.update(cx, |entity, _cx| {
+            entity.set_chat_stream_task(chat_generation, first_chat_task)
+        });
+        let replacement_chat_task =
+            spawn_abort_counted_task(&runtime, Arc::clone(&chat_drop_count));
+        entity.update(cx, |entity, _cx| {
+            entity.set_chat_stream_task(chat_generation, replacement_chat_task)
+        });
+        wait_for_lifecycle_count(&chat_drop_count, 1);
+
+        let terminal_generation = entity.update(cx, |entity, _cx| {
+            entity.terminal_inline_panel.loading = true;
+            entity.terminal_inline_panel.generation =
+                entity.terminal_inline_panel.generation.wrapping_add(1);
+            entity.terminal_inline_panel.generation
+        });
+        let first_terminal_task =
+            spawn_abort_counted_task(&runtime, Arc::clone(&terminal_drop_count));
+        entity.update(cx, |entity, _cx| {
+            entity.set_terminal_inline_stream_task(terminal_generation, first_terminal_task)
+        });
+        let replacement_terminal_task =
+            spawn_abort_counted_task(&runtime, Arc::clone(&terminal_drop_count));
+        entity.update(cx, |entity, _cx| {
+            entity.set_terminal_inline_stream_task(terminal_generation, replacement_terminal_task)
+        });
+        wait_for_lifecycle_count(&terminal_drop_count, 1);
+
+        entity.update(cx, |entity, _cx| {
+            entity.cancel_chat_stream();
+            entity.close_terminal_inline_panel();
+            // Repeated cancellation cannot abort an already-consumed handle.
+            entity.cancel_chat_stream();
+            entity.close_terminal_inline_panel();
+        });
+        wait_for_lifecycle_count(&chat_drop_count, 2);
+        wait_for_lifecycle_count(&terminal_drop_count, 2);
+    }
+
+    #[gpui::test]
+    fn entity_release_aborts_chat_and_terminal_stream_tasks_exactly_once(cx: &mut TestAppContext) {
+        let runtime = test_worker_runtime();
+        let entity = cx.new({
+            let runtime = Arc::clone(&runtime);
+            move |cx| AiWorkspaceEntity::new(runtime, oxideterm_ai::AiProviderKeyStore::new(), cx)
+        });
+        let chat_drop_count = Arc::new(AtomicUsize::new(0));
+        let terminal_drop_count = Arc::new(AtomicUsize::new(0));
+        let chat_generation = entity.update(cx, |entity, _cx| entity.begin_chat_stream().0);
+        let chat_task = spawn_abort_counted_task(&runtime, Arc::clone(&chat_drop_count));
+        let terminal_task = spawn_abort_counted_task(&runtime, Arc::clone(&terminal_drop_count));
+        entity.update(cx, |entity, _cx| {
+            entity.set_chat_stream_task(chat_generation, chat_task);
+            entity.terminal_inline_panel.loading = true;
+            entity.terminal_inline_panel.generation =
+                entity.terminal_inline_panel.generation.wrapping_add(1);
+            let terminal_generation = entity.terminal_inline_panel.generation;
+            entity.set_terminal_inline_stream_task(terminal_generation, terminal_task);
+        });
+
+        drop(entity);
+        cx.update(|_cx| {});
+        cx.run_until_parked();
+
+        wait_for_lifecycle_count(&chat_drop_count, 1);
+        wait_for_lifecycle_count(&terminal_drop_count, 1);
+        std::thread::sleep(Duration::from_millis(10));
+        assert_eq!(chat_drop_count.load(Ordering::Acquire), 1);
+        assert_eq!(terminal_drop_count.load(Ordering::Acquire), 1);
+    }
+
+    #[gpui::test]
+    fn hidden_ai_workspace_keeps_terminal_inline_stream_running(cx: &mut TestAppContext) {
+        let runtime = test_worker_runtime();
+        let entity = cx.new({
+            let runtime = Arc::clone(&runtime);
+            move |cx| AiWorkspaceEntity::new(runtime, oxideterm_ai::AiProviderKeyStore::new(), cx)
+        });
+        let completed = Arc::new(AtomicUsize::new(0));
+        let completed_for_task = Arc::clone(&completed);
+        let (release_tx, release_rx) = tokio::sync::oneshot::channel();
+        let (started_tx, started_rx) = std::sync::mpsc::sync_channel(1);
+        let terminal_task = runtime.spawn(async move {
+            started_tx
+                .send(())
+                .expect("visibility test should observe task start");
+            if release_rx.await.is_ok() {
+                completed_for_task.fetch_add(1, Ordering::AcqRel);
+            }
+        });
+        started_rx
+            .recv_timeout(Duration::from_secs(2))
+            .expect("terminal inline stream should start");
+        entity.update(cx, |entity, _cx| {
+            entity.terminal_inline_panel.loading = true;
+            entity.terminal_inline_panel.generation =
+                entity.terminal_inline_panel.generation.wrapping_add(1);
+            let terminal_generation = entity.terminal_inline_panel.generation;
+            entity.set_terminal_inline_stream_task(terminal_generation, terminal_task);
+            entity.set_workspace_visibility(AiWorkspaceVisibility {
+                model_selector_surface: true,
+                settings_surface: false,
+            });
+            entity.set_workspace_visibility(AiWorkspaceVisibility::default());
+        });
+
+        release_tx
+            .send(())
+            .expect("hiding AI surfaces must not abort terminal inline streaming");
+        wait_for_lifecycle_count(&completed, 1);
+        entity.read_with(cx, |entity, _cx| {
+            assert!(entity.terminal_inline_stream_task.is_some());
         });
     }
 
