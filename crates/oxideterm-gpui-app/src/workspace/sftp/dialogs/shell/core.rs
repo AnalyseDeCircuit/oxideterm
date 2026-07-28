@@ -7,25 +7,8 @@ impl WorkspaceApp {
         has_background: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let dialog_visible =
-            self.sftp_view.dialog_presence.phase() == oxideterm_gpui_ui::motion::ExitPhase::Visible;
-        if let Some(generation) = self.sftp_view.dialog_exit_generation {
-            let delay = oxideterm_gpui_ui::motion::duration(
-                &self.tokens,
-                oxideterm_gpui_ui::motion::MotionDuration::Control,
-            );
-            // The generation check prevents a stale close timer from clearing
-            // a replacement dialog that reopened during the exit interval.
-            cx.spawn(async move |weak, cx| {
-                Timer::after(delay).await;
-                let _ = weak.update(cx, |this, cx| {
-                    if this.finish_sftp_dialog_exit(generation) {
-                        cx.notify();
-                    }
-                });
-            })
-            .detach();
-        }
+        let dialog_visible = self.sftp_view.read(cx).dialog_presence.phase()
+            == oxideterm_gpui_ui::motion::ExitPhase::Visible;
         if let SftpDialog::EditorCloseConfirm { name } = dialog.clone() {
             return self.render_sftp_editor_close_confirm_dialog(name, cx);
         }
@@ -134,9 +117,9 @@ impl WorkspaceApp {
                     // to their onOpenChange(false) close/cancel path; editor
                     // shells run the same dirty-check path as the close button.
                     match outside_dialog {
-                        SftpDialog::Editor { .. } => this.request_close_sftp_editor(),
-                        SftpDialog::Conflict => this.cancel_sftp_transfer_conflicts(),
-                        _ => this.close_sftp_dialog(),
+                        SftpDialog::Editor { .. } => this.request_close_sftp_editor(cx),
+                        SftpDialog::Conflict => this.cancel_sftp_transfer_conflicts(cx),
+                        _ => this.close_sftp_dialog(cx),
                     }
                     cx.stop_propagation();
                     cx.notify();
@@ -234,7 +217,7 @@ impl WorkspaceApp {
                                         ))
                                         .text_color(rgb(theme.text_muted))
                                         .when(matches!(&dialog, SftpDialog::Conflict), |desc| {
-                                            let remaining = self.sftp_conflict_remaining_count();
+                                            let remaining = self.sftp_conflict_remaining_count(cx);
                                             desc.flex()
                                                 .items_center()
                                                 .gap(px(4.0))
@@ -338,12 +321,17 @@ impl WorkspaceApp {
             .gap(px(8.0));
 
         if let SftpDialog::Preview { name } = dialog.clone() {
-            let path = self.sftp_view.preview_path.clone().unwrap_or_default();
-            let can_compare = self.can_compare_sftp_preview(&name);
-            let can_edit = self.can_edit_sftp_preview();
-            let is_markdown = self.sftp_preview_is_markdown_content();
-            let can_download = self.sftp_view.preview_pane == Some(SftpPane::Remote)
-                && self.sftp_view.preview_path.is_some();
+            let (path, markdown_source_mode, can_download) = {
+                let sftp = self.sftp_view.read(cx);
+                (
+                    sftp.preview_path.clone().unwrap_or_default(),
+                    sftp.preview_markdown_source_mode,
+                    sftp.preview_pane == Some(SftpPane::Remote) && sftp.preview_path.is_some(),
+                )
+            };
+            let can_compare = self.can_compare_sftp_preview(&name, cx);
+            let can_edit = self.can_edit_sftp_preview(cx);
+            let is_markdown = self.sftp_preview_is_markdown_content(cx);
             return footer
                 .justify_between()
                 .child(
@@ -361,7 +349,7 @@ impl WorkspaceApp {
                         .flex()
                         .gap(px(8.0))
                         .when(is_markdown, |actions| {
-                            let label = if self.sftp_view.preview_markdown_source_mode {
+                            let label = if markdown_source_mode {
                                 self.i18n.t("sftp.preview.rendered")
                             } else {
                                 self.i18n.t("sftp.preview.source")
@@ -370,10 +358,12 @@ impl WorkspaceApp {
                                 label,
                                 false,
                                 cx.listener(|this, _event, _window, cx| {
-                                    this.sftp_view.preview_markdown_source_mode =
-                                        !this.sftp_view.preview_markdown_source_mode;
+                                    this.sftp_view.update(cx, |sftp, cx| {
+                                        sftp.preview_markdown_source_mode =
+                                            !sftp.preview_markdown_source_mode;
+                                        cx.notify();
+                                    });
                                     cx.stop_propagation();
-                                    cx.notify();
                                 }),
                             ))
                         })
@@ -395,7 +385,7 @@ impl WorkspaceApp {
                                 self.i18n.t("sftp.preview.compare"),
                                 false,
                                 cx.listener(move |this, _event, _window, cx| {
-                                    this.open_sftp_preview_compare(&name);
+                                    this.open_sftp_preview_compare(&name, cx);
                                     cx.stop_propagation();
                                     cx.notify();
                                 }),
@@ -407,8 +397,8 @@ impl WorkspaceApp {
                                 self.i18n.t("sftp.preview.download"),
                                 false,
                                 cx.listener(move |this, _event, _window, cx| {
-                                    this.download_sftp_preview(&name);
-                                    this.close_sftp_dialog();
+                                    this.download_sftp_preview(&name, cx);
+                                    this.close_sftp_dialog(cx);
                                     cx.stop_propagation();
                                     cx.notify();
                                 }),
@@ -418,7 +408,7 @@ impl WorkspaceApp {
                             self.i18n.t("sftp.preview.close"),
                             false,
                             cx.listener(|this, _event, _window, cx| {
-                                this.close_sftp_dialog();
+                                this.close_sftp_dialog(cx);
                                 cx.stop_propagation();
                                 cx.notify();
                             }),
@@ -428,9 +418,14 @@ impl WorkspaceApp {
         }
 
         if let SftpDialog::Editor { .. } = dialog.clone() {
-            let path = self.sftp_view.preview_path.clone().unwrap_or_default();
-            let saving = self.sftp_view.preview_editor_saving;
-            let dirty = self.sftp_view.preview_editor_dirty;
+            let (path, saving, dirty) = {
+                let sftp = self.sftp_view.read(cx);
+                (
+                    sftp.preview_path.clone().unwrap_or_default(),
+                    sftp.preview_editor_saving,
+                    sftp.preview_editor_dirty,
+                )
+            };
             let save_label = if saving {
                 self.i18n.t("sftp.preview.saving")
             } else {
@@ -467,7 +462,7 @@ impl WorkspaceApp {
                             self.i18n.t("sftp.preview.close"),
                             false,
                             cx.listener(|this, _event, _window, cx| {
-                                this.request_close_sftp_editor();
+                                this.request_close_sftp_editor(cx);
                                 cx.stop_propagation();
                                 cx.notify();
                             }),
@@ -482,7 +477,7 @@ impl WorkspaceApp {
                     self.i18n.t("sftp.dialogs.cancel"),
                     false,
                     cx.listener(move |this, _event, _window, cx| {
-                        this.cancel_sftp_editor_close_confirm(name.clone());
+                        this.cancel_sftp_editor_close_confirm(name.clone(), cx);
                         cx.stop_propagation();
                         cx.notify();
                     }),
@@ -491,7 +486,7 @@ impl WorkspaceApp {
                     self.i18n.t("sftp.preview.discard"),
                     true,
                     cx.listener(|this, _event, _window, cx| {
-                        this.discard_sftp_editor_changes();
+                        this.discard_sftp_editor_changes(cx);
                         cx.stop_propagation();
                         cx.notify();
                     }),
@@ -542,7 +537,7 @@ impl WorkspaceApp {
                     self.i18n.t("sftp.diff.close"),
                     false,
                     cx.listener(|this, _event, _window, cx| {
-                        this.close_sftp_dialog();
+                        this.close_sftp_dialog(cx);
                         cx.stop_propagation();
                         cx.notify();
                     }),
@@ -553,6 +548,7 @@ impl WorkspaceApp {
         if matches!(dialog, SftpDialog::Conflict) {
             let source_newer = self
                 .sftp_view
+                .read(cx)
                 .conflict_state
                 .as_ref()
                 .and_then(|state| state.conflicts.get(state.current_index))
@@ -567,7 +563,10 @@ impl WorkspaceApp {
                             self.i18n.t("sftp.conflict.skip"),
                             SftpButtonVariant::Ghost,
                             cx.listener(|this, _event, _window, cx| {
-                                this.resolve_sftp_transfer_conflict(SftpConflictResolution::Skip);
+                                this.resolve_sftp_transfer_conflict(
+                                    SftpConflictResolution::Skip,
+                                    cx,
+                                );
                                 cx.stop_propagation();
                                 cx.notify();
                             }),
@@ -579,6 +578,7 @@ impl WorkspaceApp {
                                 cx.listener(|this, _event, _window, cx| {
                                     this.resolve_sftp_transfer_conflict(
                                         SftpConflictResolution::SkipOlder,
+                                        cx,
                                     );
                                     cx.stop_propagation();
                                     cx.notify();
@@ -594,7 +594,10 @@ impl WorkspaceApp {
                             self.i18n.t("sftp.conflict.keep_both"),
                             SftpButtonVariant::Secondary,
                             cx.listener(|this, _event, _window, cx| {
-                                this.resolve_sftp_transfer_conflict(SftpConflictResolution::Rename);
+                                this.resolve_sftp_transfer_conflict(
+                                    SftpConflictResolution::Rename,
+                                    cx,
+                                );
                                 cx.stop_propagation();
                                 cx.notify();
                             }),
@@ -605,6 +608,7 @@ impl WorkspaceApp {
                             cx.listener(|this, _event, _window, cx| {
                                 this.resolve_sftp_transfer_conflict(
                                     SftpConflictResolution::Overwrite,
+                                    cx,
                                 );
                                 cx.stop_propagation();
                                 cx.notify();
@@ -619,7 +623,7 @@ impl WorkspaceApp {
                 self.i18n.t("sftp.dialogs.cancel"),
                 false,
                 cx.listener(|this, _event, _window, cx| {
-                    this.close_sftp_dialog();
+                    this.close_sftp_dialog(cx);
                     cx.stop_propagation();
                     cx.notify();
                 }),
@@ -629,7 +633,7 @@ impl WorkspaceApp {
                     label,
                     true,
                     cx.listener(|this, _event, _window, cx| {
-                        this.accept_sftp_dialog();
+                        this.accept_sftp_dialog(cx);
                         cx.stop_propagation();
                         cx.notify();
                     }),

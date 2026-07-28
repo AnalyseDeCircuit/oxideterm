@@ -1,5 +1,80 @@
 use super::*;
 
+struct SftpPaneRenderSnapshot {
+    path: String,
+    filter: String,
+    sort_field: SftpSortField,
+    sort_direction: SftpSortDirection,
+    selected_count: usize,
+    path_editing: bool,
+    path_input: String,
+    loading: bool,
+}
+
+struct SftpSurfaceRenderSnapshot {
+    init_error: Option<String>,
+    pane_split_ratio: f32,
+    active_pane: SftpPane,
+    drag_over_pane: Option<SftpPane>,
+    focused_input: Option<SftpInput>,
+    dialog_open: bool,
+    context_menu: Option<SftpContextMenu>,
+    local: SftpPaneRenderSnapshot,
+    remote: SftpPaneRenderSnapshot,
+}
+
+impl SftpWorkspaceEntity {
+    fn surface_render_snapshot(&self) -> SftpSurfaceRenderSnapshot {
+        SftpSurfaceRenderSnapshot {
+            init_error: self.init_error.clone(),
+            pane_split_ratio: self.pane_split_ratio,
+            active_pane: self.active_pane,
+            drag_over_pane: self.drag_over_pane,
+            focused_input: self.focused_input,
+            dialog_open: self.dialog.is_some(),
+            context_menu: self.context_menu.clone(),
+            local: SftpPaneRenderSnapshot {
+                path: self.local_path.clone(),
+                filter: self.local_filter.clone(),
+                sort_field: self.local_sort_field,
+                sort_direction: self.local_sort_direction,
+                selected_count: self.local_selected.len(),
+                path_editing: self.editing_local_path,
+                path_input: self.local_path_input.clone(),
+                loading: false,
+            },
+            remote: SftpPaneRenderSnapshot {
+                path: self.remote_path.clone(),
+                filter: self.remote_filter.clone(),
+                sort_field: self.remote_sort_field,
+                sort_direction: self.remote_sort_direction,
+                selected_count: self.remote_selected.len(),
+                path_editing: self.editing_remote_path,
+                path_input: self.remote_path_input.clone(),
+                loading: self.remote_loading,
+            },
+        }
+    }
+
+    fn schedule_context_menu_exit(&mut self, delay: Duration, cx: &mut Context<Self>) {
+        let Some(generation) = self.context_menu_exit_generation.take() else {
+            return;
+        };
+        // The entity owns the delayed retirement so root rendering never
+        // captures WorkspaceApp or schedules duplicate exit tasks.
+        cx.spawn(async move |entity, cx| {
+            Timer::after(delay).await;
+            let _ = entity.update(cx, |sftp, cx| {
+                if sftp.context_menu_presence.finish_exit(generation) {
+                    sftp.context_menu = None;
+                    cx.notify();
+                }
+            });
+        })
+        .detach();
+    }
+}
+
 impl WorkspaceApp {
     pub(in crate::workspace) fn render_sftp_surface(
         &self,
@@ -23,7 +98,29 @@ impl WorkspaceApp {
             return self.render_empty_workspace(cx);
         };
         let has_background = self.background_surface_active("sftp");
-        let queue_height = self.sftp_queue_height_for_window(window);
+        let context_menu_exit_delay = oxideterm_gpui_ui::motion::duration(
+            &self.tokens,
+            oxideterm_gpui_ui::motion::MotionDuration::Micro,
+        );
+        self.sftp_view.update(cx, |sftp, cx| {
+            sftp.schedule_context_menu_exit(context_menu_exit_delay, cx);
+        });
+        let SftpSurfaceRenderSnapshot {
+            init_error,
+            pane_split_ratio,
+            active_pane,
+            drag_over_pane,
+            focused_input,
+            dialog_open,
+            context_menu,
+            local,
+            remote,
+        } = self.sftp_view.read(cx).surface_render_snapshot();
+        let queue_height = self.sftp_queue_height_for_window(window, cx);
+        let local_active = active_pane == SftpPane::Local;
+        let remote_active = active_pane == SftpPane::Remote;
+        let local_drag_over = drag_over_pane == Some(SftpPane::Local);
+        let remote_drag_over = drag_over_pane == Some(SftpPane::Remote);
         let node_title = self
             .ssh_nodes
             .get(&node_id)
@@ -43,15 +140,17 @@ impl WorkspaceApp {
                 MouseButton::Left,
                 cx.listener(|this, _event, window, cx| {
                     window.focus(&this.focus_handle, cx);
-                    if this.dismiss_sftp_context_menu() {
+                    let menu_changed = this
+                        .sftp_view
+                        .update(cx, |sftp, _cx| sftp.clear_context_menu_immediately());
+                    if menu_changed {
                         // Ordinary pane clicks already repaint through their
-                        // own state changes; the root only owns context-menu
-                        // dismissal, so skip a no-op background repaint.
+                        // own state changes, so skip a no-op background repaint.
                         cx.notify();
                     }
                 }),
             )
-            .when_some(self.sftp_view.init_error.as_ref(), |root, error| {
+            .when_some(init_error.as_ref(), |root, error| {
                 root.child(self.render_sftp_init_error(error, has_background, cx))
             })
             .child(
@@ -65,22 +164,16 @@ impl WorkspaceApp {
                             .top_0()
                             .bottom_0()
                             .left_0()
-                            .right(relative(1.0 - self.sftp_view.pane_split_ratio))
+                            .right(relative(1.0 - pane_split_ratio))
                             .pr(px(SFTP_GAP / 2.0))
                             .flex()
                             .child(self.render_sftp_pane(
                                 SftpPane::Local,
                                 self.i18n.t("sftp.file_list.local"),
-                                &self.sftp_view.local_path,
-                                &self.sftp_view.local_filter,
-                                self.sftp_view.local_sort_field,
-                                self.sftp_view.local_sort_direction,
-                                &self.sftp_view.local_files,
-                                &self.sftp_view.local_selected,
-                                self.sftp_view.editing_local_path,
-                                &self.sftp_view.local_path_input,
-                                self.sftp_view.focused_input,
-                                false,
+                                local,
+                                local_active,
+                                local_drag_over,
+                                focused_input,
                                 has_background,
                                 window,
                                 cx,
@@ -91,7 +184,7 @@ impl WorkspaceApp {
                             .absolute()
                             .top_0()
                             .bottom_0()
-                            .left(relative(self.sftp_view.pane_split_ratio))
+                            .left(relative(pane_split_ratio))
                             .right_0()
                             .pl(px(SFTP_GAP / 2.0))
                             .flex()
@@ -101,16 +194,10 @@ impl WorkspaceApp {
                                     self.i18n
                                         .t("sftp.file_list.remote")
                                         .replace("{{host}}", node_title),
-                                    &self.sftp_view.remote_path,
-                                    &self.sftp_view.remote_filter,
-                                    self.sftp_view.remote_sort_field,
-                                    self.sftp_view.remote_sort_direction,
-                                    &self.sftp_view.remote_files,
-                                    &self.sftp_view.remote_selected,
-                                    self.sftp_view.editing_remote_path,
-                                    &self.sftp_view.remote_path_input,
-                                    self.sftp_view.focused_input,
-                                    self.sftp_view.remote_loading,
+                                    remote,
+                                    remote_active,
+                                    remote_drag_over,
+                                    focused_input,
                                     has_background,
                                     window,
                                     cx,
@@ -123,7 +210,7 @@ impl WorkspaceApp {
                             .absolute()
                             .top_0()
                             .bottom_0()
-                            .left(relative(self.sftp_view.pane_split_ratio))
+                            .left(relative(pane_split_ratio))
                             .ml(px(-SFTP_PANE_SPLIT_HOTZONE_WIDTH / 2.0))
                             .w(px(SFTP_PANE_SPLIT_HOTZONE_WIDTH))
                             .cursor(CursorStyle::ResizeColumn)
@@ -170,31 +257,11 @@ impl WorkspaceApp {
                     ),
             );
 
-        if let Some(generation) = self.sftp_view.context_menu_exit_generation {
-            let delay = oxideterm_gpui_ui::motion::duration(
-                &self.tokens,
-                oxideterm_gpui_ui::motion::MotionDuration::Micro,
-            );
-            // Dialog-opening actions still retire their retained menu payload.
-            cx.spawn(async move |weak, cx| {
-                Timer::after(delay).await;
-                let _ = weak.update(cx, |this, cx| {
-                    if this.sftp_view.context_menu_presence.finish_exit(generation) {
-                        this.sftp_view.context_menu = None;
-                        this.sftp_view.context_menu_exit_generation = None;
-                        cx.notify();
-                    }
-                });
-            })
-            .detach();
-        }
-        if self.sftp_view.dialog.is_none()
-            && let Some(menu) = self.sftp_view.context_menu.clone()
-        {
+        if !dialog_open && let Some(menu) = context_menu {
             root = root.child(self.render_sftp_context_menu(menu, window, has_background, cx));
         }
-        if self.sftp_view.dialog.is_none() {
-            let completion_owner = match self.sftp_view.focused_input {
+        if !dialog_open {
+            let completion_owner = match focused_input {
                 Some(SftpInput::LocalPath) => Some(PathCompletionOwner::SftpLocal),
                 Some(SftpInput::RemotePath) => Some(PathCompletionOwner::SftpRemote),
                 _ => None,
@@ -214,26 +281,27 @@ impl WorkspaceApp {
         &self,
         pane: SftpPane,
         title: String,
-        path: &str,
-        filter: &str,
-        sort_field: SftpSortField,
-        sort_direction: SftpSortDirection,
-        files: &[SftpFileEntry],
-        selected: &HashSet<String>,
-        path_editing: bool,
-        path_input: &str,
+        snapshot: SftpPaneRenderSnapshot,
+        active: bool,
+        drag_over: bool,
         focused_input: Option<SftpInput>,
-        loading: bool,
         has_background: bool,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
-        let active = self.sftp_view.active_pane == pane;
-        let drag_over = self.sftp_view.drag_over_pane == Some(pane);
+        let SftpPaneRenderSnapshot {
+            path,
+            filter,
+            sort_field,
+            sort_direction,
+            selected_count,
+            path_editing,
+            path_input,
+            loading,
+        } = snapshot;
         let drag_bg = rgba((theme.accent << 8) | SFTP_DRAG_BG_ALPHA);
         let drag_border = rgba((theme.accent << 8) | SFTP_DRAG_RING_ALPHA);
-        let filtered = sorted_sftp_files(files, filter, sort_field, sort_direction);
         let transfer_direction = if pane == SftpPane::Local {
             SftpTransferDirection::Upload
         } else {
@@ -266,20 +334,22 @@ impl WorkspaceApp {
                 MouseButton::Left,
                 cx.listener(move |this, _event, window, cx| {
                     window.focus(&this.focus_handle, cx);
-                    if this.sftp_view.active_pane != pane {
-                        this.sftp_view.active_pane = pane;
-                        cx.notify();
-                    }
+                    this.sftp_view.update(cx, |sftp, cx| {
+                        if sftp.active_pane != pane {
+                            sftp.active_pane = pane;
+                            cx.notify();
+                        }
+                    });
                 }),
             )
             .child(self.render_sftp_pane_header(
                 pane,
                 title,
-                path,
+                &path,
                 path_editing,
-                path_input,
+                &path_input,
                 focused_input,
-                selected.len(),
+                selected_count,
                 transfer_direction,
                 active,
                 has_background,
@@ -293,16 +363,8 @@ impl WorkspaceApp {
                 has_background,
                 cx,
             ))
-            .child(self.render_sftp_filter(pane, filter, focused_input, has_background, cx))
-            .child(self.render_sftp_file_list(
-                pane,
-                path,
-                filtered,
-                selected,
-                loading,
-                has_background,
-                cx,
-            ))
+            .child(self.render_sftp_filter(pane, &filter, focused_input, has_background, cx))
+            .child(self.render_sftp_file_list(pane, loading, has_background, cx))
             .into_any_element()
     }
 
@@ -378,9 +440,11 @@ impl WorkspaceApp {
                     LucideIcon::HardDrive,
                     self.i18n.t("sftp.toolbar.show_drives"),
                     cx.listener(|this, _event, _window, cx| {
-                        this.sftp_view.set_dialog(SftpDialog::Drives);
+                        this.sftp_view.update(cx, |sftp, cx| {
+                            sftp.set_dialog(SftpDialog::Drives);
+                            cx.notify();
+                        });
                         cx.stop_propagation();
-                        cx.notify();
                     }),
                     cx.entity(),
                 ))
@@ -499,9 +563,8 @@ impl WorkspaceApp {
                         .on_mouse_down(
                             MouseButton::Left,
                             cx.listener(move |this, _event, _window, cx| {
-                                this.commit_sftp_path_input(pane);
+                                this.commit_sftp_path_input(pane, cx);
                                 cx.stop_propagation();
-                                cx.notify();
                             }),
                         ),
                 )
@@ -512,45 +575,45 @@ impl WorkspaceApp {
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |this, event: &MouseDownEvent, _window, cx| {
-                    let mut changed = false;
-                    if this.sftp_view.active_pane != pane {
-                        this.sftp_view.active_pane = pane;
-                        changed = true;
-                    }
-                    if editing || event.click_count >= 2 {
-                        match pane {
-                            SftpPane::Local => {
-                                if !this.sftp_view.editing_local_path {
-                                    this.sftp_view.editing_local_path = true;
-                                    changed = true;
-                                }
-                                if this.sftp_view.local_path_input != this.sftp_view.local_path {
-                                    this.sftp_view.local_path_input =
-                                        this.sftp_view.local_path.clone();
-                                    changed = true;
-                                }
-                            }
-                            SftpPane::Remote => {
-                                if !this.sftp_view.editing_remote_path {
-                                    this.sftp_view.editing_remote_path = true;
-                                    changed = true;
-                                }
-                                if this.sftp_view.remote_path_input != this.sftp_view.remote_path {
-                                    this.sftp_view.remote_path_input =
-                                        this.sftp_view.remote_path.clone();
-                                    changed = true;
-                                }
-                            }
-                        }
-                        if this.sftp_view.focused_input != Some(input) {
-                            this.sftp_view.focused_input = Some(input);
+                    this.sftp_view.update(cx, |sftp, cx| {
+                        let mut changed = false;
+                        if sftp.active_pane != pane {
+                            sftp.active_pane = pane;
                             changed = true;
                         }
-                    }
+                        if editing || event.click_count >= 2 {
+                            match pane {
+                                SftpPane::Local => {
+                                    if !sftp.editing_local_path {
+                                        sftp.editing_local_path = true;
+                                        changed = true;
+                                    }
+                                    if sftp.local_path_input != sftp.local_path {
+                                        sftp.local_path_input.clone_from(&sftp.local_path);
+                                        changed = true;
+                                    }
+                                }
+                                SftpPane::Remote => {
+                                    if !sftp.editing_remote_path {
+                                        sftp.editing_remote_path = true;
+                                        changed = true;
+                                    }
+                                    if sftp.remote_path_input != sftp.remote_path {
+                                        sftp.remote_path_input.clone_from(&sftp.remote_path);
+                                        changed = true;
+                                    }
+                                }
+                            }
+                            if sftp.focused_input != Some(input) {
+                                sftp.focused_input = Some(input);
+                                changed = true;
+                            }
+                        }
+                        if changed {
+                            cx.notify();
+                        }
+                    });
                     cx.stop_propagation();
-                    if changed {
-                        cx.notify();
-                    }
                 }),
             );
 
@@ -567,8 +630,8 @@ impl WorkspaceApp {
         let theme = self.tokens.ui;
         let segments = sftp_path_segments(path, pane == SftpPane::Remote);
         let scroll_handle = match pane {
-            SftpPane::Local => &self.sftp_view.local_path_scroll,
-            SftpPane::Remote => &self.sftp_view.remote_path_scroll,
+            SftpPane::Local => self.sftp_view.read(cx).local_path_scroll.clone(),
+            SftpPane::Remote => self.sftp_view.read(cx).remote_path_scroll.clone(),
         };
         let mut inner = div()
             .flex_none()
@@ -644,9 +707,8 @@ impl WorkspaceApp {
                     .on_mouse_down(
                         MouseButton::Left,
                         cx.listener(move |this, _event, _window, cx| {
-                            this.set_sftp_path(pane, full_path.clone());
+                            this.set_sftp_path(pane, full_path.clone(), cx);
                             cx.stop_propagation();
-                            cx.notify();
                         }),
                     ),
             );
@@ -663,7 +725,7 @@ impl WorkspaceApp {
             .flex_row()
             .items_center()
             .overflow_hidden()
-            .track_scroll(scroll_handle)
+            .track_scroll(&scroll_handle)
             .text_size(px(SFTP_TEXT_SM))
             .on_scroll_wheel(
                 cx.listener(move |this, event: &ScrollWheelEvent, _window, cx| {
@@ -798,9 +860,8 @@ impl WorkspaceApp {
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |this, _event, _window, cx| {
-                    this.toggle_sftp_sort(pane, field);
+                    this.toggle_sftp_sort(pane, field, cx);
                     cx.stop_propagation();
-                    cx.notify();
                 }),
             )
             .into_any_element()
@@ -860,9 +921,11 @@ impl WorkspaceApp {
                         .on_mouse_down(
                             MouseButton::Left,
                             cx.listener(move |this, _event, _window, cx| {
-                                *this.sftp_input_value_mut(input) = String::new();
+                                this.sftp_view.update(cx, |sftp, cx| {
+                                    sftp.input_value_mut(input).clear();
+                                    cx.notify();
+                                });
                                 cx.stop_propagation();
-                                cx.notify();
                             }),
                         ),
                 )
@@ -870,19 +933,21 @@ impl WorkspaceApp {
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |this, _event, _window, cx| {
-                    let mut changed = false;
-                    if this.sftp_view.active_pane != pane {
-                        this.sftp_view.active_pane = pane;
-                        changed = true;
-                    }
-                    if this.sftp_view.focused_input != Some(input) {
-                        this.sftp_view.focused_input = Some(input);
-                        changed = true;
-                    }
+                    this.sftp_view.update(cx, |sftp, cx| {
+                        let mut changed = false;
+                        if sftp.active_pane != pane {
+                            sftp.active_pane = pane;
+                            changed = true;
+                        }
+                        if sftp.focused_input != Some(input) {
+                            sftp.focused_input = Some(input);
+                            changed = true;
+                        }
+                        if changed {
+                            cx.notify();
+                        }
+                    });
                     cx.stop_propagation();
-                    if changed {
-                        cx.notify();
-                    }
                 }),
             )
             .into_any_element()
@@ -925,10 +990,13 @@ impl WorkspaceApp {
                 MouseButton::Left,
                 cx.listener(move |this, event: &MouseDownEvent, window, cx| {
                     window.focus(&this.focus_handle, cx);
-                    if let Some(pane) = pane {
-                        this.sftp_view.active_pane = pane;
-                    }
-                    this.sftp_view.focused_input = Some(input);
+                    this.sftp_view.update(cx, |sftp, cx| {
+                        if let Some(pane) = pane {
+                            sftp.active_pane = pane;
+                        }
+                        sftp.focused_input = Some(input);
+                        cx.notify();
+                    });
                     this.ime_marked_text = None;
                     this.begin_ime_selection_from_mouse_down(target, event, window, cx);
                     cx.stop_propagation();

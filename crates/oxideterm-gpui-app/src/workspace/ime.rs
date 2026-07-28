@@ -744,7 +744,7 @@ impl WorkspaceApp {
         if self
             .active_tab()
             .is_some_and(|tab| tab.kind == oxideterm_workspace::TabKind::Sftp)
-            && let Some(input) = self.sftp_view.focused_input
+            && let Some(input) = self.sftp_view.read(cx).focused_input()
         {
             return Some(WorkspaceImeTarget::Sftp(input));
         }
@@ -1649,8 +1649,8 @@ impl WorkspaceApp {
                 .then(|| self.plugin_ui_state(cx).text(key).map(str::to_string))
                 .flatten(),
             WorkspaceImeTarget::Sftp(input) => {
-                if self.sftp_view.focused_input == Some(input) {
-                    Some(self.sftp_input_value(input).to_string())
+                if self.sftp_view.read(cx).focused_input() == Some(input) {
+                    Some(self.sftp_view.read(cx).input_value(input).to_string())
                 } else {
                     None
                 }
@@ -1787,10 +1787,10 @@ impl WorkspaceApp {
                 self.file_manager.read(cx).path_completion.is_visible()
             }
             WorkspaceImeTarget::Sftp(SftpInput::LocalPath) => {
-                self.sftp_view.local_path_completion.is_visible()
+                self.sftp_view.read(cx).local_path_completion.is_visible()
             }
             WorkspaceImeTarget::Sftp(SftpInput::RemotePath) => {
-                self.sftp_view.remote_path_completion.is_visible()
+                self.sftp_view.read(cx).remote_path_completion.is_visible()
             }
             _ => false,
         };
@@ -2585,10 +2585,12 @@ impl WorkspaceApp {
                 }
             }
             WorkspaceImeTarget::Sftp(input) => {
-                if self.sftp_view.focused_input == Some(input) {
-                    replace_utf16(self.sftp_input_value_mut(input), replacement_range, text);
+                if self.sftp_view.read(cx).focused_input() == Some(input) {
+                    self.sftp_view.update(cx, |sftp, _cx| {
+                        replace_utf16(sftp.input_value_mut(input), replacement_range, text);
+                    });
                     if matches!(input, SftpInput::LocalPath | SftpInput::RemotePath) {
-                        self.refresh_sftp_path_completion(input);
+                        self.refresh_sftp_path_completion(input, cx);
                     }
                     self.new_connection_caret_visible = true;
                     cx.notify();

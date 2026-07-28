@@ -379,8 +379,12 @@ impl WorkspaceApp {
             PathCompletionOwner::FileManager => {
                 self.file_manager.read(cx).path_completion.is_visible()
             }
-            PathCompletionOwner::SftpLocal => self.sftp_view.local_path_completion.is_visible(),
-            PathCompletionOwner::SftpRemote => self.sftp_view.remote_path_completion.is_visible(),
+            PathCompletionOwner::SftpLocal => {
+                self.sftp_view.read(cx).local_path_completion.is_visible()
+            }
+            PathCompletionOwner::SftpRemote => {
+                self.sftp_view.read(cx).remote_path_completion.is_visible()
+            }
         }
     }
 
@@ -389,17 +393,37 @@ impl WorkspaceApp {
         owner: PathCompletionOwner,
         cx: &App,
     ) -> (bool, usize, ScrollHandle, Vec<PathCompletionCandidate>) {
-        let state = match owner {
-            PathCompletionOwner::FileManager => &self.file_manager.read(cx).path_completion,
-            PathCompletionOwner::SftpLocal => &self.sftp_view.local_path_completion,
-            PathCompletionOwner::SftpRemote => &self.sftp_view.remote_path_completion,
-        };
-        (
-            state.is_visible(),
-            state.selected_index(),
-            state.scroll_handle.clone(),
-            state.suggestions().to_vec(),
-        )
+        match owner {
+            PathCompletionOwner::FileManager => {
+                let state = &self.file_manager.read(cx).path_completion;
+                (
+                    state.is_visible(),
+                    state.selected_index(),
+                    state.scroll_handle.clone(),
+                    state.suggestions().to_vec(),
+                )
+            }
+            PathCompletionOwner::SftpLocal => {
+                let sftp = self.sftp_view.read(cx);
+                let state = &sftp.local_path_completion;
+                (
+                    state.is_visible(),
+                    state.selected_index(),
+                    state.scroll_handle.clone(),
+                    state.suggestions().to_vec(),
+                )
+            }
+            PathCompletionOwner::SftpRemote => {
+                let sftp = self.sftp_view.read(cx);
+                let state = &sftp.remote_path_completion;
+                (
+                    state.is_visible(),
+                    state.selected_index(),
+                    state.scroll_handle.clone(),
+                    state.suggestions().to_vec(),
+                )
+            }
+        }
     }
 
     fn accept_path_completion(
@@ -411,10 +435,10 @@ impl WorkspaceApp {
         match owner {
             PathCompletionOwner::FileManager => self.accept_file_manager_path_completion(index, cx),
             PathCompletionOwner::SftpLocal => {
-                self.accept_sftp_path_completion(sftp::SftpPane::Local, index)
+                self.accept_sftp_path_completion(sftp::SftpPane::Local, index, cx)
             }
             PathCompletionOwner::SftpRemote => {
-                self.accept_sftp_path_completion(sftp::SftpPane::Remote, index)
+                self.accept_sftp_path_completion(sftp::SftpPane::Remote, index, cx)
             }
         }
     }

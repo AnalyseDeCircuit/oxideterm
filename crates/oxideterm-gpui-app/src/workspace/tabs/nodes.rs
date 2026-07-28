@@ -283,8 +283,11 @@ impl WorkspaceApp {
             // A failed node can still own stale tabs, reconnect jobs, forwards,
             // or transfer records. Clear those owners before dropping the tree.
             self.close_tabs_for_node(node_id, window, cx);
-            let _ =
-                self.interrupt_sftp_transfers_by_node(node_id, "Connection removed".to_string());
+            let _ = self.interrupt_sftp_transfers_by_node(
+                node_id,
+                "Connection removed".to_string(),
+                cx,
+            );
         }
         self.cleanup_temporary_session_tree_node(cleanup_root, cx);
         self.persist_session_tree_snapshot();
@@ -817,7 +820,7 @@ impl WorkspaceApp {
                     } else {
                         self.i18n.t("sftp.errors.connection_lost")
                     };
-                    let _ = self.interrupt_sftp_transfers_by_node(&node_id, message);
+                    let _ = self.interrupt_sftp_transfers_by_node(&node_id, message, cx);
                     let session_id = self.forwarding_session_id_for_node(&node_id);
                     let forwarding_connection_id = self.forwarding_connection_id_for_node(&node_id);
                     let forwarding_registry = self.forwarding_service.registry().clone();
@@ -943,7 +946,7 @@ impl WorkspaceApp {
                     } else {
                         self.i18n.t("sftp.errors.connection_lost")
                     };
-                    let _ = self.interrupt_sftp_transfers_by_node(&node_id, message);
+                    let _ = self.interrupt_sftp_transfers_by_node(&node_id, message, cx);
                     let session_id = self.forwarding_session_id_for_node(&node_id);
                     let connection_id = self.forwarding_connection_id_for_node(&node_id);
                     let forwarding_registry = self.forwarding_service.registry().clone();
@@ -979,7 +982,7 @@ impl WorkspaceApp {
                 cwd,
             } => {
                 let node_id = NodeId::new(node_id);
-                self.apply_sftp_ready_event(&node_id, ready, cwd);
+                self.apply_sftp_ready_event(&node_id, ready, cwd, cx);
                 true
             }
             NodeStateEvent::TerminalEndpointChanged { .. } => {
@@ -1074,7 +1077,7 @@ impl WorkspaceApp {
             } else {
                 self.i18n.t("sftp.errors.connection_lost")
             };
-            let _ = self.interrupt_sftp_transfers_by_node(affected_node_id, message);
+            let _ = self.interrupt_sftp_transfers_by_node(affected_node_id, message, cx);
             let session_id = self.forwarding_session_id_for_node(affected_node_id);
             let connection_id = self.forwarding_connection_id_for_node(affected_node_id);
             let forwarding_registry = self.forwarding_service.registry().clone();
@@ -1177,7 +1180,7 @@ impl WorkspaceApp {
         });
         let queued = requests.len();
         for (entry_node_id, transfer_id) in requests {
-            self.request_sftp_transfer_resume_for_node(entry_node_id, transfer_id);
+            self.request_sftp_transfer_resume_for_node(entry_node_id, transfer_id, cx);
         }
         queued
     }

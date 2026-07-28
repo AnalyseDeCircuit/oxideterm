@@ -16,7 +16,7 @@ impl WorkspaceApp {
         let visual_lines = sftp_diff_visual_lines(&lines);
         let line_count = visual_lines.len();
         let diff_lines = std::sync::Arc::new(visual_lines);
-        let diff_scroll = self.sftp_view.diff_scroll.clone();
+        let diff_scroll = self.sftp_view.read(cx).diff_scroll.clone();
         div()
             .w_full()
             .flex_1()

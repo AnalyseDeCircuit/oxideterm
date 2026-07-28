@@ -952,7 +952,7 @@ window.focus(&this.focus_handle, cx);
         self.ai_active_terminal_context_available(cx)
             || self.ai_active_tab_has_split_panes()
             || self.ai_has_ide_context(cx)
-            || self.ai_has_sftp_context()
+            || self.ai_has_sftp_context(cx)
     }
 
     pub(in crate::workspace) fn render_ai_context_chips(
@@ -1026,7 +1026,7 @@ window.focus(&this.focus_handle, cx);
                 Self::render_lucide_icon(LucideIcon::Code2, 12.0, rgb(self.tokens.ui.success)),
             ));
         }
-        if self.ai_has_sftp_context() {
+        if self.ai_has_sftp_context(cx) {
             chips = chips.child(ai_context_chip(
                 &self.tokens,
                 self.i18n.t("ai.input.sftp_context"),

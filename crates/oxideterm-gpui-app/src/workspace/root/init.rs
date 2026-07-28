@@ -187,7 +187,43 @@ impl WorkspaceApp {
             // forwarding surface without mirroring fields back to the root.
             cx.notify();
         });
-        let (sftp_worker_tx, mut sftp_worker_rx) = tokio::sync::mpsc::unbounded_channel();
+        let sftp_view = cx.new(sftp::SftpWorkspaceEntity::new);
+        let sftp_observation = cx.observe(&sftp_view, |_workspace, _sftp, cx| {
+            // Entity-owned SFTP state repaints every mounted SFTP surface.
+            cx.notify();
+        });
+        let sftp_subscription = cx.subscribe(
+            &sftp_view,
+            |workspace, _sftp, event: &sftp::SftpWorkspaceEvent, cx| {
+                match event {
+                    sftp::SftpWorkspaceEvent::WorkerResultsReady => {
+                        workspace.apply_sftp_worker_results(cx);
+                    }
+                    sftp::SftpWorkspaceEvent::PreviewSaveRequested {
+                        path,
+                        content,
+                        encoding,
+                        line_ending,
+                        generation,
+                    } => {
+                        if !workspace.spawn_remote_sftp_preview_save(
+                            path.clone(),
+                            content.clone(),
+                            encoding.clone(),
+                            *line_ending,
+                            *generation,
+                            cx,
+                        ) {
+                            workspace.report_sftp_preview_save_unavailable(cx);
+                        }
+                    }
+                    sftp::SftpWorkspaceEvent::RemoteLoadReady => {
+                        workspace.maybe_start_sftp_remote_load(cx);
+                    }
+                }
+                cx.notify();
+            },
+        );
         let terminal = cx.new(|cx| {
             WorkspaceTerminalEntity::new(
                 forwarding_runtime.clone(),
@@ -568,15 +604,13 @@ impl WorkspaceApp {
             _file_manager_observation: file_manager_observation,
             _file_manager_subscription: file_manager_subscription,
             sftp_tab_nodes: HashMap::new(),
-            sftp_view_node: None,
-            sftp_local_path_memory: HashMap::new(),
-            sftp_path_memory: HashMap::new(),
-            sftp_remote_home_by_node: HashMap::new(),
             ide_tab_surfaces: HashMap::new(),
             ide_surface_subscriptions: HashMap::new(),
             ide_tab_nodes: HashMap::new(),
             ide_last_closed_at_by_node: HashMap::new(),
-            sftp_view: sftp::SftpViewState::default(),
+            sftp_view,
+            _sftp_observation: sftp_observation,
+            _sftp_subscription: sftp_subscription,
             launcher,
             _launcher_observation: launcher_observation,
             _launcher_subscription: launcher_subscription,
@@ -613,7 +647,6 @@ impl WorkspaceApp {
             host_tools,
             _host_tools_subscription: host_tools_subscription,
             cloud_sync: cloud_sync::CloudSyncWorkspaceState::new(cloud_sync_store),
-            sftp_worker_tx,
             i18n,
             tokens,
             detected_graphics,
@@ -736,21 +769,6 @@ impl WorkspaceApp {
                     this.knowledge_sync_external_edit(false, cx);
                 }
             }));
-        cx.spawn(async move |weak, cx| {
-            // The receiver lives with the GPUI entity task, so every worker
-            // result crosses onto the UI thread exactly once without polling.
-            while let Some(result) = sftp_worker_rx.recv().await {
-                if weak
-                    .update(cx, |workspace, cx| {
-                        workspace.handle_sftp_worker_result(result, cx);
-                    })
-                    .is_err()
-                {
-                    break;
-                }
-            }
-        })
-        .detach();
         if workspace.ai_sidebar_visible() {
             workspace.ensure_ai_chat_initialized(cx);
             workspace.bootstrap_ai_mcp_registry(cx);

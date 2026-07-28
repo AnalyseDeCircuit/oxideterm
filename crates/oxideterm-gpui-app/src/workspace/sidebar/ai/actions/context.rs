@@ -120,7 +120,7 @@ impl WorkspaceApp {
             }
         }
 
-        if let Some((node_id, remote_path, selected_files)) = self.ai_active_sftp_context() {
+        if let Some((node_id, remote_path, selected_files)) = self.ai_active_sftp_context(cx) {
             parts.push(String::new());
             parts.push("## File Browser Context".to_string());
             parts.push(format!("- CWD: {remote_path}"));
@@ -494,17 +494,19 @@ impl WorkspaceApp {
 
     pub(in crate::workspace) fn ai_active_sftp_context(
         &self,
+        cx: &App,
     ) -> Option<(NodeId, String, Vec<String>)> {
         if !self.settings_store.settings().ai.context_sources.sftp {
             return None;
         }
         let tab_id = self.active_tab()?.id;
         let node_id = self.sftp_tab_nodes.get(&tab_id)?.clone();
-        let remote_path = self.sftp_view.current_remote_path().trim().to_string();
+        let sftp = self.sftp_view.read(cx);
+        let remote_path = sftp.current_remote_path().trim().to_string();
         if remote_path.is_empty() {
             return None;
         }
-        Some((node_id, remote_path, self.sftp_view.selected_remote_files()))
+        Some((node_id, remote_path, sftp.selected_remote_files()))
     }
 
     pub(in crate::workspace) fn ai_active_terminal_context_available(&self, cx: &App) -> bool {
@@ -528,8 +530,8 @@ impl WorkspaceApp {
         self.ai_active_ide_context(cx).is_some()
     }
 
-    pub(in crate::workspace) fn ai_has_sftp_context(&self) -> bool {
-        self.ai_active_sftp_context().is_some()
+    pub(in crate::workspace) fn ai_has_sftp_context(&self, cx: &App) -> bool {
+        self.ai_active_sftp_context(cx).is_some()
     }
 
     pub(in crate::workspace) fn resolve_ai_reference_content(

@@ -5,8 +5,9 @@ impl WorkspaceApp {
         self.i18n.t("sftp.conflict.description")
     }
 
-    pub(in crate::workspace::sftp) fn sftp_conflict_remaining_count(&self) -> usize {
+    pub(in crate::workspace::sftp) fn sftp_conflict_remaining_count(&self, cx: &App) -> usize {
         self.sftp_view
+            .read(cx)
             .conflict_state
             .as_ref()
             .map(|state| {
@@ -24,10 +25,16 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
-        let Some(state) = self.sftp_view.conflict_state.as_ref() else {
-            return div().into_any_element();
-        };
-        let Some(conflict) = state.conflicts.get(state.current_index) else {
+        let Some((conflict, conflict_count, apply_all)) = ({
+            let sftp_view = self.sftp_view.read(cx);
+            sftp_view.conflict_state.as_ref().and_then(|state| {
+                state
+                    .conflicts
+                    .get(state.current_index)
+                    .cloned()
+                    .map(|conflict| (conflict, state.conflicts.len(), state.apply_to_all))
+            })
+        }) else {
             return div().into_any_element();
         };
         let source_newer = match (conflict.source_modified, conflict.target_modified) {
@@ -42,8 +49,7 @@ impl WorkspaceApp {
             SftpTransferDirection::Upload => "sftp.conflict.remote_file",
             SftpTransferDirection::Download => "sftp.conflict.local_file",
         };
-        let show_apply_all = state.conflicts.len() > 1;
-        let apply_all = state.apply_to_all;
+        let show_apply_all = conflict_count > 1;
         div()
             .p(px(16.0))
             .flex()
@@ -123,7 +129,9 @@ impl WorkspaceApp {
                                 .on_mouse_down(
                                     MouseButton::Left,
                                     cx.listener(|this, _event, _window, cx| {
-                                        this.toggle_sftp_conflict_apply_all();
+                                        this.sftp_view.update(cx, |sftp, cx| {
+                                            sftp.toggle_conflict_apply_all(cx);
+                                        });
                                         cx.stop_propagation();
                                         cx.notify();
                                     }),
@@ -137,12 +145,14 @@ impl WorkspaceApp {
                                 .child(
                                     self.i18n
                                         .t("sftp.conflict.apply_all")
-                                        .replace("{{count}}", &state.conflicts.len().to_string()),
+                                        .replace("{{count}}", &conflict_count.to_string()),
                                 )
                                 .on_mouse_down(
                                     MouseButton::Left,
                                     cx.listener(|this, _event, _window, cx| {
-                                        this.toggle_sftp_conflict_apply_all();
+                                        this.sftp_view.update(cx, |sftp, cx| {
+                                            sftp.toggle_conflict_apply_all(cx);
+                                        });
                                         cx.stop_propagation();
                                         cx.notify();
                                     }),

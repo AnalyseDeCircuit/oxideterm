@@ -1,18 +1,68 @@
 use super::*;
 
+impl SftpWorkspaceEntity {
+    fn visible_file_indices(&self, pane: SftpPane) -> Vec<usize> {
+        let (files, filter, sort_field, sort_direction) = match pane {
+            SftpPane::Local => (
+                &self.local_files,
+                &self.local_filter,
+                self.local_sort_field,
+                self.local_sort_direction,
+            ),
+            SftpPane::Remote => (
+                &self.remote_files,
+                &self.remote_filter,
+                self.remote_sort_field,
+                self.remote_sort_direction,
+            ),
+        };
+        let filter = filter.trim().to_lowercase();
+        let mut indices = files
+            .iter()
+            .enumerate()
+            .filter_map(|(index, file)| {
+                (filter.is_empty() || file.name.to_lowercase().contains(&filter)).then_some(index)
+            })
+            .collect::<Vec<_>>();
+        // Sort lightweight indices so the virtual list never owns a duplicate
+        // of every file entry merely to preserve the requested presentation.
+        indices.sort_by(|left_index, right_index| {
+            let left = &files[*left_index];
+            let right = &files[*right_index];
+            if left.file_type == SftpFileType::Directory
+                && right.file_type != SftpFileType::Directory
+            {
+                return std::cmp::Ordering::Less;
+            }
+            if left.file_type != SftpFileType::Directory
+                && right.file_type == SftpFileType::Directory
+            {
+                return std::cmp::Ordering::Greater;
+            }
+            let ordering = match sort_field {
+                SftpSortField::Name => left.name.cmp(&right.name),
+                SftpSortField::Size => left.size.cmp(&right.size),
+                SftpSortField::Modified => left.modified.cmp(&right.modified),
+            };
+            match sort_direction {
+                SftpSortDirection::Asc => ordering,
+                SftpSortDirection::Desc => ordering.reverse(),
+            }
+        });
+        indices
+    }
+}
+
 impl WorkspaceApp {
     pub(in crate::workspace::sftp) fn render_sftp_file_list(
         &self,
         pane: SftpPane,
-        _path: &str,
-        files: Vec<SftpFileEntry>,
-        selected: &HashSet<String>,
         loading: bool,
         has_background: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
-        let drag_over = self.sftp_view.drag_over_pane == Some(pane);
+        let drag_over = self.sftp_view.read(cx).drag_over_pane == Some(pane);
         let list = div()
             .id(("sftp-file-list-scroll", pane as u64))
             .flex_1()
@@ -28,6 +78,7 @@ impl WorkspaceApp {
                         pane,
                         f32::from(event.position.x),
                         f32::from(event.position.y),
+                        cx,
                     ) {
                         cx.notify();
                     }
@@ -36,7 +87,7 @@ impl WorkspaceApp {
             .on_mouse_up(
                 MouseButton::Left,
                 cx.listener(move |this, _event, _window, cx| {
-                    if this.finish_sftp_drag(pane) {
+                    if this.finish_sftp_drag(pane, cx) {
                         // Mouse-up also fires for ordinary list clicks. Only
                         // repaint when it actually clears drag chrome or starts
                         // a cross-pane transfer.
@@ -48,27 +99,33 @@ impl WorkspaceApp {
                 list.can_drop(|drag, _window, _cx| drag.is::<gpui::ExternalPaths>())
                     .on_drop(
                         cx.listener(|this, paths: &gpui::ExternalPaths, _window, cx| {
-                            this.queue_sftp_external_upload_paths(paths.paths());
-                            this.sftp_view.drag_over_pane = None;
+                            this.queue_sftp_external_upload_paths(paths.paths(), cx);
+                            this.sftp_view.update(cx, |sftp, cx| {
+                                sftp.drag_over_pane = None;
+                                cx.notify();
+                            });
                             cx.stop_propagation();
-                            cx.notify();
                         }),
                     )
             })
             .on_scroll_wheel(cx.listener(|this, _event, _window, cx| {
                 // The menu is positioned in window coordinates, so any pane
                 // scroll invalidates the row that produced the coordinates.
-                if this.sftp_view.clear_context_menu_immediately() {
-                    cx.notify();
-                }
+                this.sftp_view.update(cx, |sftp, cx| {
+                    if sftp.clear_context_menu_immediately() {
+                        cx.notify();
+                    }
+                });
             }))
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |this, _event, window, cx| {
                     window.focus(&this.focus_handle, cx);
-                    let menu_changed = this.dismiss_sftp_context_menu();
-                    let drag_changed = this.cancel_sftp_drag_capture();
-                    let selection_changed = this.clear_sftp_selection(pane);
+                    let menu_changed = this
+                        .sftp_view
+                        .update(cx, |sftp, cx| sftp.dismiss_context_menu(cx));
+                    let drag_changed = this.cancel_sftp_drag_capture(cx);
+                    let selection_changed = this.clear_sftp_selection(pane, cx);
                     if menu_changed || drag_changed || selection_changed {
                         // Blank-list clicks can happen repeatedly while no
                         // row/menu/drag state exists; repaint only when the
@@ -81,12 +138,15 @@ impl WorkspaceApp {
                 MouseButton::Right,
                 cx.listener(move |this, event: &MouseDownEvent, window, cx| {
                     window.focus(&this.focus_handle, cx);
-                    this.open_sftp_context_menu(
-                        pane,
-                        None,
-                        f32::from(event.position.x),
-                        f32::from(event.position.y),
-                    );
+                    this.sftp_view.update(cx, |sftp, cx| {
+                        sftp.open_context_menu(
+                            pane,
+                            None,
+                            f32::from(event.position.x),
+                            f32::from(event.position.y),
+                            cx,
+                        );
+                    });
                     cx.stop_propagation();
                     cx.notify();
                 }),
@@ -120,7 +180,8 @@ impl WorkspaceApp {
                 .into_any_element();
         }
 
-        if files.is_empty() {
+        let visible_indices = self.sftp_view.read(cx).visible_file_indices(pane);
+        if visible_indices.is_empty() {
             return list
                 .child(
                     div()
@@ -154,15 +215,13 @@ impl WorkspaceApp {
         }
 
         let workspace = cx.entity();
-        let selected = std::sync::Arc::new(selected.clone());
-        let files = std::sync::Arc::new(files);
+        let sftp_view = self.sftp_view.clone();
+        let visible_indices = std::sync::Arc::new(visible_indices);
         let scroll_handle = match pane {
-            SftpPane::Local => self.sftp_view.local_file_scroll.clone(),
-            SftpPane::Remote => self.sftp_view.remote_file_scroll.clone(),
+            SftpPane::Local => self.sftp_view.read(cx).local_file_scroll.clone(),
+            SftpPane::Remote => self.sftp_view.read(cx).remote_file_scroll.clone(),
         };
-        let row_count = files.len();
-        let list_items = files;
-        let row_selected = selected;
+        let row_count = visible_indices.len();
         let row_workspace = workspace;
         let row_selectable_state = self.selectable_text_render_state(cx);
 
@@ -175,7 +234,19 @@ impl WorkspaceApp {
                 let selectable_state = row_selectable_state.clone();
                 range
                     .map(|index| {
-                        let file = list_items[index].clone();
+                        let source_index = visible_indices[index];
+                        let (file, is_selected) = {
+                            let sftp = sftp_view.read(_cx);
+                            let (files, selected) = match pane {
+                                SftpPane::Local => (&sftp.local_files, &sftp.local_selected),
+                                SftpPane::Remote => (&sftp.remote_files, &sftp.remote_selected),
+                            };
+                            let Some(file) = files.get(source_index).cloned() else {
+                                return div().into_any_element();
+                            };
+                            let is_selected = selected.contains(&file.name);
+                            (file, is_selected)
+                        };
                         let name = file.name.clone();
                         let row_file = file.clone();
                         let context_file = file.clone();
@@ -186,7 +257,6 @@ impl WorkspaceApp {
                         };
                         let _metadata_fields_consumed =
                             (&file.permissions, &file.owner, &file.group);
-                        let is_selected = row_selected.contains(&name);
                         let selection_group_id =
                             crate::workspace::selectable_text::selectable_text_id(
                                 "sftp-file-list-row",
@@ -300,20 +370,24 @@ impl WorkspaceApp {
                                 move |event: &MouseDownEvent, window, cx| {
                                     let _ = workspace.update(cx, |this, cx| {
                                         window.focus(&this.focus_handle, cx);
-                                        this.dismiss_sftp_context_menu();
+                                        this.sftp_view.update(cx, |sftp, cx| {
+                                            sftp.dismiss_context_menu(cx);
+                                        });
                                         if event.click_count >= 2 {
-                                            this.open_or_preview_sftp_file(pane, &row_file);
+                                            this.open_or_preview_sftp_file(pane, &row_file, cx);
                                         } else {
                                             this.select_sftp_file(
                                                 pane,
                                                 name.clone(),
                                                 event.modifiers,
+                                                cx,
                                             );
                                             if !this.read_only_selection_drag_active() {
                                                 this.start_sftp_drag_candidate(
                                                     pane,
                                                     f32::from(event.position.x),
                                                     f32::from(event.position.y),
+                                                    cx,
                                                 );
                                             }
                                         }
@@ -327,12 +401,15 @@ impl WorkspaceApp {
                                 move |event: &MouseDownEvent, window, cx| {
                                     let _ = workspace.update(cx, |this, cx| {
                                         window.focus(&this.focus_handle, cx);
-                                        this.open_sftp_context_menu(
-                                            pane,
-                                            Some(context_file.clone()),
-                                            f32::from(event.position.x),
-                                            f32::from(event.position.y),
-                                        );
+                                        this.sftp_view.update(cx, |sftp, cx| {
+                                            sftp.open_context_menu(
+                                                pane,
+                                                Some(context_file.clone()),
+                                                f32::from(event.position.x),
+                                                f32::from(event.position.y),
+                                                cx,
+                                            );
+                                        });
                                         cx.stop_propagation();
                                         cx.notify();
                                     });

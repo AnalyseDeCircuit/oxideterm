@@ -1046,7 +1046,10 @@ impl WorkspaceApp {
         if self.dismiss_file_manager_context_menu(cx) {
             changed = true;
         }
-        if self.dismiss_sftp_context_menu() {
+        if self
+            .sftp_view
+            .update(cx, |sftp, cx| sftp.dismiss_context_menu(cx))
+        {
             changed = true;
         }
         if self.dismiss_terminal_broadcast_menu(cx) {

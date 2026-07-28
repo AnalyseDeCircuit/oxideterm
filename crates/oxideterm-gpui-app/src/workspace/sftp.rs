@@ -1,9 +1,9 @@
 use super::ime::WorkspaceImeTarget;
 use super::*;
 use gpui::{
-    AnchoredPositionMode, Corner, Entity, Focusable, ObjectFit, PathPromptOptions, Pixels, Point,
-    SharedString, StyledText, Subscription, UniformListScrollHandle, anchored, deferred,
-    prelude::*,
+    AnchoredPositionMode, Corner, Entity, EventEmitter, Focusable, ObjectFit, PathPromptOptions,
+    Pixels, Point, SharedString, StyledText, Subscription, Task, UniformListScrollHandle, anchored,
+    deferred, prelude::*,
 };
 use oxideterm_editor_syntax::LanguageId;
 use oxideterm_gpui_editor::{EditorContextMenuLabels, TextEditorView};
@@ -23,7 +23,7 @@ use oxideterm_gpui_ui::{
     text_input::{TextInputView, text_input, text_input_anchor_probe},
 };
 use oxideterm_preview::{
-    AudioPreviewBackend, AudioPreviewCommand, AudioPreviewState, PreviewAssetOwner, PreviewSession,
+    AudioPreviewBackend, AudioPreviewCommand, AudioPreviewState, PreviewAssetOwner,
     RodioAudioPreviewBackend, TextLineEnding, font_family_name_from_bytes,
     normalize_text_line_endings, restore_text_line_endings,
 };
@@ -243,10 +243,10 @@ pub(super) struct SftpMutationToast {
 
 #[derive(Debug)]
 pub(super) enum SftpWorkerResult {
-    WakeRemoteLoad,
     RemoteList {
         tab_id: TabId,
         node_id: NodeId,
+        view_generation: u64,
         session_id: String,
         path: String,
         result: Result<RemoteSftpListing, String>,
@@ -310,9 +310,21 @@ pub(super) enum SftpWorkerResult {
     PreviewSaved {
         generation: u64,
         path: String,
-        content: String,
-        encoding: String,
+        content: Arc<str>,
+        encoding: Arc<str>,
         result: Result<SftpPreviewSaveResult, String>,
+    },
+}
+
+pub(super) enum SftpWorkspaceEvent {
+    WorkerResultsReady,
+    RemoteLoadReady,
+    PreviewSaveRequested {
+        path: String,
+        content: Arc<str>,
+        encoding: Arc<str>,
+        line_ending: TextLineEnding,
+        generation: u64,
     },
 }
 
@@ -642,7 +654,7 @@ struct SftpDrive {
     read_only: bool,
 }
 
-pub(super) struct SftpViewState {
+pub(super) struct SftpWorkspaceEntity {
     active_pane: SftpPane,
     local_path: String,
     remote_path: String,
@@ -678,6 +690,13 @@ pub(super) struct SftpViewState {
     remote_load_pending: bool,
     remote_load_inflight: bool,
     remote_load_retry_count: u8,
+    remote_load_retry_task: Option<Task<()>>,
+    current_tab_id: Option<TabId>,
+    current_node_id: Option<NodeId>,
+    local_path_by_node: HashMap<NodeId, String>,
+    remote_path_by_node: HashMap<NodeId, String>,
+    remote_home_by_node: HashMap<NodeId, String>,
+    view_generation: u64,
     init_error: Option<String>,
     pub(super) focused_input: Option<SftpInput>,
     editing_local_path: bool,
@@ -685,16 +704,19 @@ pub(super) struct SftpViewState {
     pub(super) dialog: Option<SftpDialog>,
     dialog_presence: oxideterm_gpui_ui::motion::ExitPresence,
     dialog_exit_generation: Option<u64>,
+    dialog_exit_task: Option<Task<()>>,
     conflict_state: Option<SftpConflictState>,
     dialog_value: String,
     preview_pane: Option<SftpPane>,
     preview_path: Option<String>,
-    preview_content: Option<PreviewContent>,
+    // Preview payloads can contain large text or media buffers. Renderers share
+    // immutable snapshots instead of cloning the payload on every frame.
+    preview_content: Option<Arc<PreviewContent>>,
     preview_asset_owner: Option<PreviewAssetOwner>,
-    preview_session: PreviewSession,
     preview_generation: u64,
     preview_audio: RodioAudioPreviewBackend,
     preview_audio_tick_active: bool,
+    preview_audio_tick_task: Option<Task<()>>,
     preview_video_surface: SharedSftpNativeVideoSurface,
     preview_error: Option<String>,
     preview_loading: bool,
@@ -705,8 +727,8 @@ pub(super) struct SftpViewState {
     preview_font_size: f32,
     preview_editor: Option<Entity<TextEditorView>>,
     preview_editor_observer: Option<Subscription>,
-    preview_editor_initial_content: String,
-    preview_editor_observed_content: String,
+    preview_editor_initial_content: Arc<str>,
+    preview_editor_observed_content: Arc<str>,
     preview_editor_language: Option<String>,
     preview_editor_encoding: String,
     preview_editor_line_ending: TextLineEnding,
@@ -717,6 +739,7 @@ pub(super) struct SftpViewState {
     preview_editor_retry_count: u32,
     preview_editor_last_saved_mtime: Option<u64>,
     preview_editor_last_atomic_write: Option<bool>,
+    preview_editor_retry_task: Option<Task<()>>,
     transfers: Vec<SftpTransferItem>,
     transfer_queue_list_state: ListState,
     transfer_queue_list_cache: RefCell<VirtualListSignatureCache>,
@@ -729,18 +752,23 @@ pub(super) struct SftpViewState {
     context_menu: Option<SftpContextMenu>,
     context_menu_presence: oxideterm_gpui_ui::motion::ExitPresence,
     context_menu_exit_generation: Option<u64>,
+    folder_picker_task: Option<Task<()>>,
     drag_state: Option<SftpDragState>,
     drag_over_pane: Option<SftpPane>,
     drag_autoscroll_position: Option<Point<Pixels>>,
     drag_autoscroll_scheduled: bool,
     next_transfer_id: u64,
     next_transfer_batch_id: u64,
+    worker_tx: delivery::ActiveDeliverySender<SftpWorkerResult>,
+    worker_rx: std::sync::mpsc::Receiver<SftpWorkerResult>,
+    worker_results: VecDeque<SftpWorkerResult>,
 }
 
-impl Default for SftpViewState {
+impl Default for SftpWorkspaceEntity {
     fn default() -> Self {
         let local_path = home_path();
         let remote_path = String::new();
+        let (worker_tx, worker_rx) = delivery::ActiveDeliverySender::channel();
         Self {
             active_pane: SftpPane::Remote,
             local_path_input: local_path.clone(),
@@ -777,6 +805,13 @@ impl Default for SftpViewState {
             remote_load_pending: false,
             remote_load_inflight: false,
             remote_load_retry_count: 0,
+            remote_load_retry_task: None,
+            current_tab_id: None,
+            current_node_id: None,
+            local_path_by_node: HashMap::new(),
+            remote_path_by_node: HashMap::new(),
+            remote_home_by_node: HashMap::new(),
+            view_generation: 0,
             init_error: None,
             focused_input: None,
             editing_local_path: false,
@@ -784,16 +819,17 @@ impl Default for SftpViewState {
             dialog: None,
             dialog_presence: oxideterm_gpui_ui::motion::ExitPresence::visible(),
             dialog_exit_generation: None,
+            dialog_exit_task: None,
             conflict_state: None,
             dialog_value: String::new(),
             preview_pane: None,
             preview_path: None,
             preview_content: None,
             preview_asset_owner: None,
-            preview_session: PreviewSession::default(),
             preview_generation: 0,
             preview_audio: RodioAudioPreviewBackend::new(),
             preview_audio_tick_active: false,
+            preview_audio_tick_task: None,
             preview_video_surface: SharedSftpNativeVideoSurface::default(),
             preview_error: None,
             preview_loading: false,
@@ -804,8 +840,8 @@ impl Default for SftpViewState {
             preview_font_size: SFTP_PREVIEW_FONT_DEFAULT_SIZE,
             preview_editor: None,
             preview_editor_observer: None,
-            preview_editor_initial_content: String::new(),
-            preview_editor_observed_content: String::new(),
+            preview_editor_initial_content: Arc::from(""),
+            preview_editor_observed_content: Arc::from(""),
             preview_editor_language: None,
             preview_editor_encoding: "UTF-8".to_string(),
             preview_editor_line_ending: TextLineEnding::Lf,
@@ -816,6 +852,7 @@ impl Default for SftpViewState {
             preview_editor_retry_count: 0,
             preview_editor_last_saved_mtime: None,
             preview_editor_last_atomic_write: None,
+            preview_editor_retry_task: None,
             transfers: Vec::new(),
             // Transfer queues are fixed-height browser scroll regions; use the
             // shared variable list state so large transfer batches do not build
@@ -852,19 +889,268 @@ impl Default for SftpViewState {
             context_menu: None,
             context_menu_presence: oxideterm_gpui_ui::motion::ExitPresence::visible(),
             context_menu_exit_generation: None,
+            folder_picker_task: None,
             drag_state: None,
             drag_over_pane: None,
             drag_autoscroll_position: None,
             drag_autoscroll_scheduled: false,
             next_transfer_id: 1,
             next_transfer_batch_id: 1,
+            worker_tx,
+            worker_rx,
+            worker_results: VecDeque::new(),
         }
     }
 }
 
-impl SftpViewState {
+impl SftpWorkspaceEntity {
+    pub(super) fn new(cx: &mut Context<Self>) -> Self {
+        let entity = Self::default();
+        entity.schedule_worker_delivery(cx);
+        entity
+    }
+
+    pub(in crate::workspace) fn worker_sender(
+        &self,
+    ) -> delivery::ActiveDeliverySender<SftpWorkerResult> {
+        // Background operations receive only the shallow delivery endpoint.
+        self.worker_tx.clone()
+    }
+
+    pub(in crate::workspace) fn take_worker_results(&mut self) -> VecDeque<SftpWorkerResult> {
+        std::mem::take(&mut self.worker_results)
+    }
+
+    fn schedule_worker_delivery(&self, cx: &mut Context<Self>) {
+        let worker_wake = self.worker_tx.wake();
+        let release_wake = worker_wake.clone();
+        cx.on_release(move |_, _| {
+            // Releasing the page owner stops UI delivery without cancelling
+            // node-owned transfers or their backend tasks.
+            release_wake.stop();
+        })
+        .detach();
+        cx.spawn(async move |entity, cx| {
+            loop {
+                worker_wake.wait().await;
+                let should_drain = worker_wake.take();
+                let stopped = worker_wake.is_stopped();
+                if should_drain {
+                    let backlog_remaining = entity
+                        .update(cx, |sftp, cx| sftp.drain_worker_results(cx))
+                        .unwrap_or(false);
+                    if backlog_remaining {
+                        // Continue one bounded batch at a time without a root heartbeat.
+                        worker_wake.mark();
+                    }
+                }
+                if stopped {
+                    break;
+                }
+            }
+        })
+        .detach();
+    }
+
+    fn drain_worker_results(&mut self, cx: &mut Context<Self>) -> bool {
+        let delivery_batch =
+            delivery::drain_channel(&self.worker_rx, delivery::LIFECYCLE_DELIVERY_BUDGET);
+        if !delivery_batch.items.is_empty() {
+            self.worker_results.extend(delivery_batch.items);
+            cx.emit(SftpWorkspaceEvent::WorkerResultsReady);
+        }
+        delivery_batch.outcome.backlog_remaining
+    }
+
+    pub(in crate::workspace) fn input_value(&self, input: SftpInput) -> &str {
+        match input {
+            SftpInput::LocalPath => &self.local_path_input,
+            SftpInput::RemotePath => &self.remote_path_input,
+            SftpInput::LocalFilter => &self.local_filter,
+            SftpInput::RemoteFilter => &self.remote_filter,
+            SftpInput::DialogValue => &self.dialog_value,
+        }
+    }
+
+    pub(in crate::workspace) fn input_value_mut(&mut self, input: SftpInput) -> &mut String {
+        match input {
+            SftpInput::LocalPath => &mut self.local_path_input,
+            SftpInput::RemotePath => &mut self.remote_path_input,
+            SftpInput::LocalFilter => &mut self.local_filter,
+            SftpInput::RemoteFilter => &mut self.remote_filter,
+            SftpInput::DialogValue => &mut self.dialog_value,
+        }
+    }
+
+    pub(in crate::workspace) fn focused_input(&self) -> Option<SftpInput> {
+        self.focused_input
+    }
+
+    pub(in crate::workspace) fn clear_input_focus(&mut self, cx: &mut Context<Self>) -> bool {
+        let changed = self.focused_input.take().is_some();
+        if changed {
+            cx.notify();
+        }
+        changed
+    }
+
+    pub(in crate::workspace) fn dialog(&self) -> Option<SftpDialog> {
+        self.dialog.clone()
+    }
+
+    pub(in crate::workspace::sftp) fn start_folder_picker(
+        &mut self,
+        selection: impl std::future::Future<Output = Option<String>> + 'static,
+        cx: &mut Context<Self>,
+    ) {
+        if self.folder_picker_task.is_some() {
+            return;
+        }
+        self.folder_picker_task = Some(cx.spawn(async move |entity, cx| {
+            let selected_path = selection.await;
+            let _ = entity.update(cx, |sftp, cx| {
+                sftp.folder_picker_task = None;
+                if let Some(path) = selected_path {
+                    if let Some(node_id) = sftp.current_node_id.clone() {
+                        sftp.local_path_by_node.insert(node_id, path.clone());
+                    }
+                    sftp.apply_local_path(path);
+                    cx.notify();
+                }
+            });
+        }));
+    }
+
+    pub(in crate::workspace::sftp) fn begin_dialog_exit(
+        &mut self,
+        delay: Duration,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if self.dialog.is_none() {
+            return false;
+        }
+        self.stop_preview_media();
+        self.preview_generation = self.preview_generation.wrapping_add(1);
+        let Some(generation) = self.dialog_presence.begin_exit() else {
+            return false;
+        };
+        self.focused_input = None;
+        if delay.is_zero() {
+            self.finish_dialog_exit(generation, cx);
+            return true;
+        }
+        self.dialog_exit_generation = Some(generation);
+        self.dialog_exit_task = Some(cx.spawn(async move |entity, cx| {
+            gpui::Timer::after(delay).await;
+            let _ = entity.update(cx, |sftp, cx| {
+                sftp.finish_dialog_exit(generation, cx);
+            });
+        }));
+        cx.notify();
+        true
+    }
+
+    pub(in crate::workspace::sftp) fn finish_dialog_exit(
+        &mut self,
+        generation: u64,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if !self.dialog_presence.finish_exit(generation) {
+            return false;
+        }
+        self.dialog = None;
+        self.dialog_exit_generation = None;
+        self.dialog_exit_task = None;
+        self.conflict_state = None;
+        self.dialog_value.clear();
+        self.preview_asset_owner = None;
+        self.preview_hex_loading_more = false;
+        self.preview_markdown_source_mode = false;
+        self.preview_markdown_scroll = MarkdownVirtualListScrollHandle::new();
+        self.preview_font_family = None;
+        self.preview_font_error = None;
+        self.preview_font_size = SFTP_PREVIEW_FONT_DEFAULT_SIZE;
+        self.reset_preview_editor();
+        self.focused_input = None;
+        cx.notify();
+        true
+    }
+
+    pub(in crate::workspace::sftp) fn reset_preview_editor(&mut self) {
+        self.preview_editor = None;
+        self.preview_editor_observer = None;
+        self.preview_editor_initial_content = Arc::from("");
+        self.preview_editor_observed_content = Arc::from("");
+        self.preview_editor_language = None;
+        self.preview_editor_encoding = "UTF-8".to_string();
+        self.preview_editor_line_ending = TextLineEnding::Lf;
+        self.preview_editor_dirty = false;
+        self.preview_editor_saving = false;
+        self.preview_editor_save_error = None;
+        self.preview_editor_network_error = false;
+        self.preview_editor_retry_count = 0;
+        self.preview_editor_last_saved_mtime = None;
+        self.preview_editor_last_atomic_write = None;
+        self.preview_editor_retry_task = None;
+    }
+
+    pub(in crate::workspace::sftp) fn stop_preview_media(&mut self) {
+        let _ = self.preview_audio.command(AudioPreviewCommand::Stop);
+        self.preview_audio_tick_active = false;
+        self.preview_audio_tick_task = None;
+        self.preview_video_surface.detach();
+    }
+
+    pub(in crate::workspace::sftp) fn toggle_preview_audio(&mut self, cx: &mut Context<Self>) {
+        let _ = self.preview_audio.command(AudioPreviewCommand::PlayPause);
+        self.schedule_preview_audio_tick(cx);
+    }
+
+    pub(in crate::workspace::sftp) fn seek_preview_audio(
+        &mut self,
+        position: Duration,
+        cx: &mut Context<Self>,
+    ) {
+        let _ = self
+            .preview_audio
+            .command(AudioPreviewCommand::Seek(position));
+        self.schedule_preview_audio_tick(cx);
+    }
+
+    fn schedule_preview_audio_tick(&mut self, cx: &mut Context<Self>) {
+        if self.preview_audio_tick_active {
+            return;
+        }
+        self.preview_audio_tick_active = true;
+        self.preview_audio_tick_task = Some(cx.spawn(async move |entity, cx| {
+            loop {
+                cx.background_executor()
+                    .timer(Duration::from_millis(250))
+                    .await;
+                let should_continue = entity
+                    .update(cx, |sftp, cx| {
+                        let playing = matches!(
+                            sftp.preview_audio.snapshot().state,
+                            AudioPreviewState::Playing
+                        );
+                        if !playing {
+                            sftp.preview_audio_tick_active = false;
+                            sftp.preview_audio_tick_task = None;
+                        }
+                        cx.notify();
+                        playing
+                    })
+                    .unwrap_or(false);
+                if !should_continue {
+                    break;
+                }
+            }
+        }));
+    }
+
     pub(super) fn set_dialog(&mut self, dialog: SftpDialog) {
         // SftpDialog remains the only payload owner across replacements.
+        self.dialog_exit_task = None;
         self.dialog_presence.reopen();
         self.dialog_exit_generation = None;
         self.dialog = Some(dialog);
@@ -899,6 +1185,60 @@ impl SftpViewState {
 
     pub(super) fn queue_resize_active(&self) -> bool {
         self.queue_resize_drag.is_some()
+    }
+}
+
+impl EventEmitter<SftpWorkspaceEvent> for SftpWorkspaceEntity {}
+
+#[cfg(test)]
+mod entity_delivery_tests {
+    use super::*;
+    use gpui::TestAppContext;
+    use std::sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    };
+
+    fn completion(index: usize) -> SftpWorkerResult {
+        SftpWorkerResult::RemotePathCompletion {
+            generation: index as u64,
+            node_id: NodeId("delivery-test".to_string()),
+            parent_path: "/".to_string(),
+            result: Ok(Vec::new()),
+        }
+    }
+
+    #[gpui::test]
+    fn hidden_entity_drains_backlog_by_budget_and_stops_on_release(cx: &mut TestAppContext) {
+        let entity = cx.new(SftpWorkspaceEntity::new);
+        let ready_events = Arc::new(AtomicUsize::new(0));
+        let observed_events = ready_events.clone();
+        let _subscription = entity.update(cx, |_, cx| {
+            cx.subscribe(&entity, move |_, _, event: &SftpWorkspaceEvent, _cx| {
+                if matches!(event, SftpWorkspaceEvent::WorkerResultsReady) {
+                    observed_events.fetch_add(1, Ordering::AcqRel);
+                }
+            })
+        });
+        let sender = cx.read(|cx| entity.read(cx).worker_sender());
+        let wake = sender.wake();
+
+        // More than two lifecycle budgets proves backlog continuation without rendering.
+        for index in 0..130 {
+            sender
+                .send(completion(index))
+                .expect("SFTP worker delivery");
+        }
+        cx.run_until_parked();
+
+        entity.update(cx, |entity, _cx| {
+            assert_eq!(entity.take_worker_results().len(), 130);
+        });
+        assert!(ready_events.load(Ordering::Acquire) >= 3);
+
+        drop(entity);
+        cx.update(|_cx| {});
+        assert!(wake.is_stopped());
     }
 }
 

@@ -8,7 +8,7 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
-        let snapshot = self.sftp_view.preview_audio.snapshot();
+        let snapshot = self.sftp_view.read(cx).preview_audio.snapshot();
         let name = std::path::Path::new(path)
             .file_name()
             .and_then(|name| name.to_str())
@@ -142,7 +142,7 @@ impl WorkspaceApp {
                                 )
                             },
                             cx.listener(move |this, _event, _window, cx| {
-                                let now = this.sftp_view.preview_audio.snapshot().position;
+                                let now = this.sftp_view.read(cx).preview_audio.snapshot().position;
                                 let next = now.saturating_sub(std::time::Duration::from_secs(15));
                                 this.seek_sftp_preview_audio(next, cx);
                                 cx.notify();
@@ -165,7 +165,7 @@ impl WorkspaceApp {
                                 )
                             },
                             cx.listener(move |this, _event, _window, cx| {
-                                let snapshot = this.sftp_view.preview_audio.snapshot();
+                                let snapshot = this.sftp_view.read(cx).preview_audio.snapshot();
                                 let Some(duration) = snapshot.duration else {
                                     return;
                                 };
@@ -214,23 +214,19 @@ impl WorkspaceApp {
     ) -> AnyElement {
         #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
         {
-            let snapshot = self.sftp_view.preview_video_surface.snapshot();
+            let video_surface = self.sftp_view.read(_cx).preview_video_surface.clone();
+            let snapshot = video_surface.snapshot();
             let detail = snapshot
                 .error
                 .unwrap_or_else(|| "Native video playback is initializing.".to_string());
             let fallback = self.render_sftp_native_asset_status_with_external(
                 "Video", path, mime_type, &detail, _cx,
             );
-            sftp_native_video_element(
-                path.to_string(),
-                self.sftp_view.preview_video_surface.clone(),
-                fallback,
-            )
-            .into_any_element()
+            sftp_native_video_element(path.to_string(), video_surface, fallback).into_any_element()
         }
         #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
         {
-            let snapshot = self.sftp_view.preview_video_surface.snapshot();
+            let snapshot = self.sftp_view.read(_cx).preview_video_surface.snapshot();
             let detail = snapshot
                 .error
                 .unwrap_or_else(|| format!("{} backend is unavailable", snapshot.backend));
@@ -364,7 +360,7 @@ impl WorkspaceApp {
                 ..ToolbarButtonOptions::default()
             },
             cx.listener(move |this, _event, _window, cx| {
-                this.open_sftp_preview_external(&path);
+                this.open_sftp_preview_external(&path, cx);
                 cx.stop_propagation();
                 cx.notify();
             }),

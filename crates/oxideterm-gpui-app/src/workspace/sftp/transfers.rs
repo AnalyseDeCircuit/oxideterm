@@ -48,23 +48,26 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
-        let active_count = self
-            .sftp_view
-            .transfers
-            .iter()
-            .filter(|item| {
-                matches!(
-                    item.state,
-                    SftpTransferState::Active | SftpTransferState::Pending
-                )
-            })
-            .count();
-        let has_completed = self
-            .sftp_view
-            .transfers
-            .iter()
-            .any(|item| item.state == SftpTransferState::Completed);
-        let incomplete_count = self.sftp_view.incomplete_transfers.len();
+        let (active_count, has_completed, incomplete_count, show_incomplete, transfers_empty) = {
+            let sftp = self.sftp_view.read(cx);
+            (
+                sftp.transfers
+                    .iter()
+                    .filter(|item| {
+                        matches!(
+                            item.state,
+                            SftpTransferState::Active | SftpTransferState::Pending
+                        )
+                    })
+                    .count(),
+                sftp.transfers
+                    .iter()
+                    .any(|item| item.state == SftpTransferState::Completed),
+                sftp.incomplete_transfers.len(),
+                sftp.show_incomplete,
+                sftp.transfers.is_empty(),
+            )
+        };
         let has_incomplete = incomplete_count > 0;
 
         div()
@@ -134,10 +137,11 @@ impl WorkspaceApp {
                                             ),
                                         false,
                                         cx.listener(|this, _event, _window, cx| {
-                                            this.sftp_view.show_incomplete =
-                                                !this.sftp_view.show_incomplete;
+                                            this.sftp_view.update(cx, |sftp, cx| {
+                                                sftp.show_incomplete = !sftp.show_incomplete;
+                                                cx.notify();
+                                            });
                                             cx.stop_propagation();
-                                            cx.notify();
                                         }),
                                     ),
                                 )
@@ -161,16 +165,17 @@ impl WorkspaceApp {
                                 )
                             },
                             cx.listener(|this, _event, _window, cx| {
-                                this.sftp_view
-                                    .transfers
-                                    .retain(|item| item.state != SftpTransferState::Completed);
+                                this.sftp_view.update(cx, |sftp, cx| {
+                                    sftp.transfers
+                                        .retain(|item| item.state != SftpTransferState::Completed);
+                                    cx.notify();
+                                });
                                 cx.stop_propagation();
-                                cx.notify();
                             }),
                         ))
                     }),
             )
-            .when(self.sftp_view.show_incomplete && has_incomplete, |queue| {
+            .when(show_incomplete && has_incomplete, |queue| {
                 queue.child(self.render_sftp_incomplete_section(has_background, cx))
             })
             .child(
@@ -178,7 +183,7 @@ impl WorkspaceApp {
                     .id("sftp-transfer-queue-scroll")
                     .flex_1()
                     .min_h(px(0.0))
-                    .when(self.sftp_view.transfers.is_empty(), |body| {
+                    .when(transfers_empty, |body| {
                         body.child(
                             div()
                                 .size_full()
@@ -196,9 +201,9 @@ impl WorkspaceApp {
                                 )),
                         )
                     })
-                    .when(!self.sftp_view.transfers.is_empty(), |body| {
-                        self.sync_sftp_transfer_queue_list_state();
-                        let state = self.sftp_view.transfer_queue_list_state.clone();
+                    .when(!transfers_empty, |body| {
+                        self.sync_sftp_transfer_queue_list_state(cx);
+                        let state = self.sftp_view.read(cx).transfer_queue_list_state.clone();
                         let spec = self.sftp_transfer_queue_list_spec();
                         let workspace = cx.entity();
                         body.child(tauri_virtual_list(
@@ -219,16 +224,16 @@ impl WorkspaceApp {
             .into_any_element()
     }
 
-    fn sync_sftp_transfer_queue_list_state(&self) {
-        let signatures = self
-            .sftp_view
+    fn sync_sftp_transfer_queue_list_state(&self, cx: &App) {
+        let sftp = self.sftp_view.read(cx);
+        let signatures = sftp
             .transfers
             .iter()
             .map(sftp_transfer_queue_row_signature)
             .collect::<Vec<_>>();
         sync_tauri_variable_list_state_by_signatures(
-            &self.sftp_view.transfer_queue_list_state,
-            &mut self.sftp_view.transfer_queue_list_cache.borrow_mut(),
+            &sftp.transfer_queue_list_state,
+            &mut sftp.transfer_queue_list_cache.borrow_mut(),
             "sftp-transfer-queue",
             &signatures,
             self.sftp_transfer_queue_list_spec(),
@@ -248,8 +253,11 @@ impl WorkspaceApp {
         has_background: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let total = self.sftp_view.transfers.len();
-        let Some(transfer) = self.sftp_view.transfers.get(index).cloned() else {
+        let (total, transfer) = {
+            let sftp = self.sftp_view.read(cx);
+            (sftp.transfers.len(), sftp.transfers.get(index).cloned())
+        };
+        let Some(transfer) = transfer else {
             return div().into_any_element();
         };
         div()
@@ -290,12 +298,16 @@ impl WorkspaceApp {
         .child(
             div()
                 .id("sftp-incomplete-transfer-scroll")
-                .h(px(self.sftp_incomplete_transfer_list_height()))
+                .h(px(self.sftp_incomplete_transfer_list_height(cx)))
                 .when(
-                    self.sftp_incomplete_transfer_list_item_count() > 0,
+                    self.sftp_incomplete_transfer_list_item_count(cx) > 0,
                     |list| {
-                        self.sync_sftp_incomplete_transfer_list_state();
-                        let state = self.sftp_view.incomplete_transfer_list_state.clone();
+                        self.sync_sftp_incomplete_transfer_list_state(cx);
+                        let state = self
+                            .sftp_view
+                            .read(cx)
+                            .incomplete_transfer_list_state
+                            .clone();
                         let spec = self.sftp_incomplete_transfer_list_spec();
                         let workspace = cx.entity();
                         list.child(tauri_virtual_list(
@@ -317,30 +329,30 @@ impl WorkspaceApp {
         .into_any_element()
     }
 
-    fn sftp_incomplete_transfer_list_item_count(&self) -> usize {
-        self.sftp_view.incomplete_transfers.len()
-            + usize::from(self.sftp_view.incomplete_load_inflight)
+    fn sftp_incomplete_transfer_list_item_count(&self, cx: &App) -> usize {
+        let sftp = self.sftp_view.read(cx);
+        sftp.incomplete_transfers.len() + usize::from(sftp.incomplete_load_inflight)
     }
 
-    fn sftp_incomplete_transfer_list_height(&self) -> f32 {
-        (self.sftp_incomplete_transfer_list_item_count() as f32
+    fn sftp_incomplete_transfer_list_height(&self, cx: &App) -> f32 {
+        (self.sftp_incomplete_transfer_list_item_count(cx) as f32
             * SFTP_INCOMPLETE_TRANSFER_LIST_ESTIMATED_HEIGHT)
             .min(128.0)
     }
 
-    fn sync_sftp_incomplete_transfer_list_state(&self) {
-        let mut signatures = self
-            .sftp_view
+    fn sync_sftp_incomplete_transfer_list_state(&self, cx: &App) {
+        let sftp = self.sftp_view.read(cx);
+        let mut signatures = sftp
             .incomplete_transfers
             .iter()
             .map(sftp_incomplete_transfer_row_signature)
             .collect::<Vec<_>>();
-        if self.sftp_view.incomplete_load_inflight {
+        if sftp.incomplete_load_inflight {
             signatures.push(sftp_incomplete_loading_signature());
         }
         sync_tauri_variable_list_state_by_signatures(
-            &self.sftp_view.incomplete_transfer_list_state,
-            &mut self.sftp_view.incomplete_transfer_list_cache.borrow_mut(),
+            &sftp.incomplete_transfer_list_state,
+            &mut sftp.incomplete_transfer_list_cache.borrow_mut(),
             "sftp-incomplete-transfers",
             &signatures,
             self.sftp_incomplete_transfer_list_spec(),
@@ -360,7 +372,13 @@ impl WorkspaceApp {
         has_background: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        if let Some(transfer) = self.sftp_view.incomplete_transfers.get(index).cloned() {
+        if let Some(transfer) = self
+            .sftp_view
+            .read(cx)
+            .incomplete_transfers
+            .get(index)
+            .cloned()
+        {
             return div()
                 .px(px(8.0))
                 .when(index == 0, |item| item.pt(px(8.0)))
@@ -576,7 +594,7 @@ impl WorkspaceApp {
                             cx.listener({
                                 let transfer_id = transfer.transfer_id.clone();
                                 move |this, _event, _window, cx| {
-                                    this.resume_sftp_incomplete_transfer(transfer_id.clone());
+                                    this.resume_sftp_incomplete_transfer(transfer_id.clone(), cx);
                                     cx.stop_propagation();
                                     cx.notify();
                                 }
@@ -762,7 +780,11 @@ impl WorkspaceApp {
                                 cx.listener({
                                     let id = transfer.id;
                                     move |this, _event, _window, cx| {
-                                        this.set_sftp_transfer_state(id, SftpTransferState::Paused);
+                                        this.set_sftp_transfer_state(
+                                            id,
+                                            SftpTransferState::Paused,
+                                            cx,
+                                        );
                                         cx.stop_propagation();
                                         cx.notify();
                                     }
@@ -778,7 +800,11 @@ impl WorkspaceApp {
                             cx.listener({
                                 let id = transfer.id;
                                 move |this, _event, _window, cx| {
-                                    this.set_sftp_transfer_state(id, SftpTransferState::Pending);
+                                    this.set_sftp_transfer_state(
+                                        id,
+                                        SftpTransferState::Pending,
+                                        cx,
+                                    );
                                     cx.stop_propagation();
                                     cx.notify();
                                 }
@@ -803,7 +829,7 @@ impl WorkspaceApp {
                         cx.listener({
                             let id = transfer.id;
                             move |this, _event, _window, cx| {
-                                this.cancel_or_remove_sftp_transfer(id);
+                                this.cancel_or_remove_sftp_transfer(id, cx);
                                 cx.stop_propagation();
                                 cx.notify();
                             }

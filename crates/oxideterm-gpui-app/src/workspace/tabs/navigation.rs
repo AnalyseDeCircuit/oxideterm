@@ -185,7 +185,7 @@ impl WorkspaceApp {
                 {
                     self.active_ssh_node_id = Some(node_id.clone());
                     self.expanded_ssh_nodes.insert(node_id.clone());
-                    self.activate_sftp_view_for_node(&node_id);
+                    self.activate_sftp_view_for_node(active_tab_id, &node_id, cx);
                 }
             }
             Some(TabKind::Ide) => {
@@ -492,6 +492,7 @@ impl WorkspaceApp {
             let _ = self.interrupt_sftp_transfers_by_node(
                 affected_node_id,
                 "Connection closed".to_string(),
+                cx,
             );
         }
         for affected_node_id in &nodes_to_disconnect {

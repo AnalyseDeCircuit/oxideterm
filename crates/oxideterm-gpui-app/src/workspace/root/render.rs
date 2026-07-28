@@ -102,7 +102,7 @@ impl WorkspaceApp {
                 ));
             }
             TabKind::Sftp => {
-                if let Some(dialog) = self.sftp_view.dialog.clone() {
+                if let Some(dialog) = self.sftp_view.read(cx).dialog() {
                     let has_background = self.terminal_background_preferences("sftp").is_some();
                     modals.push(self.render_sftp_dialog(dialog, has_background, cx));
                 }
@@ -1245,7 +1245,7 @@ impl WorkspaceApp {
         self.finish_ime_selection_drag(cx);
         self.stop_selectable_text_autoscroll();
         self.finish_tab_drag(event, window, cx);
-        let cancelled_sftp_drag = self.cancel_sftp_drag_capture();
+        let cancelled_sftp_drag = self.cancel_sftp_drag_capture(cx);
         let cleared_launcher_press = self
             .launcher
             .update(cx, |launcher, cx| launcher.clear_pressed_app(cx));

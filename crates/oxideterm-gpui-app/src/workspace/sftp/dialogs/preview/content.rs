@@ -13,14 +13,14 @@ impl WorkspaceApp {
                 language,
                 ..
             } if sftp_preview_is_markdown(language.as_deref(), mime_type.as_deref()) => {
-                if self.sftp_view.preview_markdown_source_mode {
-                    self.render_sftp_preview_code(data, Some("markdown"))
+                if self.sftp_view.read(cx).preview_markdown_source_mode {
+                    self.render_sftp_preview_code(data, Some("markdown"), cx)
                 } else {
                     self.render_sftp_preview_markdown(data, cx)
                 }
             }
             PreviewContent::Text { data, language, .. } => {
-                self.render_sftp_preview_code(data, language.as_deref())
+                self.render_sftp_preview_code(data, language.as_deref(), cx)
             }
             PreviewContent::Image { mime_type, data } => {
                 let source = format!("data:{mime_type};base64,{data}");
@@ -77,7 +77,7 @@ impl WorkspaceApp {
     ) -> AnyElement {
         let theme = self.tokens.ui;
         let showing = offset.saturating_add(chunk_size).min(total_size);
-        let loading_more = self.sftp_view.preview_hex_loading_more;
+        let loading_more = self.sftp_view.read(cx).preview_hex_loading_more;
         div()
             .flex()
             .flex_col()
@@ -148,7 +148,7 @@ impl WorkspaceApp {
                         false,
                         cx.listener(move |this, _event, _window, cx| {
                             if !loading_more {
-                                this.load_more_sftp_preview_hex();
+                                this.load_more_sftp_preview_hex(cx);
                             }
                             cx.stop_propagation();
                             cx.notify();

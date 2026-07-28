@@ -524,17 +524,19 @@ impl WorkspaceApp {
         &self,
         cx: &mut Context<Self>,
     ) -> Option<BrowserPointerCaptureOwner> {
+        let host_tools_tab_scrollbar_dragging = self.host_tools_tab_scrollbar_drag_active(cx);
+        let sftp = self.sftp_view.read(cx);
         resolve_browser_pointer_capture_owner(BrowserPointerCaptureState {
             sidebar_resizing: self.sidebar_resizing,
             ai_sidebar_resizing: self.ai.chat.sidebar_resizing,
-            sftp_pane_resizing: self.sftp_view.pane_resize_active(),
-            sftp_queue_resizing: self.sftp_view.queue_resize_active(),
+            sftp_pane_resizing: sftp.pane_resize_active(),
+            sftp_queue_resizing: sftp.queue_resize_active(),
             pane_splitter_dragging: self.split_drag.is_some(),
             settings_slider_dragging: self.settings_slider_drag.is_some(),
             terminal_cast_seekbar_dragging: self.terminal.read(cx).cast_seek_dragging(),
-            host_tools_tab_scrollbar_dragging: self.host_tools_tab_scrollbar_drag_active(cx),
+            host_tools_tab_scrollbar_dragging,
             text_selection_dragging: self.ime_drag_selection.is_some(),
-            sftp_file_dragging: self.sftp_view.has_drag_capture(),
+            sftp_file_dragging: sftp.has_drag_capture(),
             tab_dragging: self.main_window_tabs.drag.is_some(),
         })
     }

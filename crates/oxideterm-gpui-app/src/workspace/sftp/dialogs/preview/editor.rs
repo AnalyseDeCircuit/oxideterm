@@ -7,16 +7,24 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
-        let body = if self.sftp_view.preview_loading {
+        let (preview_loading, preview_error, preview_content) = {
+            let sftp_view = self.sftp_view.read(cx);
+            (
+                sftp_view.preview_loading,
+                sftp_view.preview_error.clone(),
+                sftp_view.preview_content.clone(),
+            )
+        };
+        let body = if preview_loading {
             self.render_sftp_preview_text(self.i18n.t("sftp.preview.loading"))
-        } else if let Some(error) = &self.sftp_view.preview_error {
-            self.render_sftp_preview_text(error.clone())
-        } else if let Some(content) = &self.sftp_view.preview_content {
+        } else if let Some(error) = preview_error {
+            self.render_sftp_preview_text(error)
+        } else if let Some(content) = preview_content.as_deref() {
             self.render_sftp_preview_content(content, cx)
         } else {
             self.render_sftp_preview_text(String::new())
         };
-        let uses_virtual_text = self.sftp_preview_uses_virtual_text();
+        let uses_virtual_text = self.sftp_preview_uses_virtual_text(cx);
         div()
             .flex_1()
             .min_h(px(0.0))
@@ -46,15 +54,21 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
-        let language = self
-            .sftp_view
-            .preview_editor_language
-            .clone()
-            .unwrap_or_else(|| "text".to_string());
-        let encoding = self.sftp_view.preview_editor_encoding.clone();
-        let (line, column) = self
-            .sftp_view
-            .preview_editor
+        let (language, encoding, editor, editor_saving, editor_dirty, editor_last_atomic_write) = {
+            let sftp_view = self.sftp_view.read(cx);
+            (
+                sftp_view
+                    .preview_editor_language
+                    .clone()
+                    .unwrap_or_else(|| "text".to_string()),
+                sftp_view.preview_editor_encoding.clone(),
+                sftp_view.preview_editor.clone(),
+                sftp_view.preview_editor_saving,
+                sftp_view.preview_editor_dirty,
+                sftp_view.preview_editor_last_atomic_write,
+            )
+        };
+        let (line, column) = editor
             .as_ref()
             .and_then(|editor| {
                 let editor = editor.read(cx);
@@ -65,11 +79,11 @@ impl WorkspaceApp {
                     .map(|pos| (pos.line + 1, pos.column + 1))
             })
             .unwrap_or((1, 1));
-        let status = if self.sftp_view.preview_editor_saving {
+        let status = if editor_saving {
             Some((self.i18n.t("sftp.preview.saving"), rgb(theme.text_muted)))
-        } else if self.sftp_view.preview_editor_dirty {
+        } else if editor_dirty {
             Some((self.i18n.t("sftp.preview.modified"), rgb(SFTP_YELLOW)))
-        } else if let Some(atomic) = self.sftp_view.preview_editor_last_atomic_write {
+        } else if let Some(atomic) = editor_last_atomic_write {
             let key = if atomic {
                 "sftp.preview.saved_atomic"
             } else {
@@ -91,10 +105,8 @@ impl WorkspaceApp {
                     .flex_1()
                     .min_h(px(0.0))
                     .overflow_hidden()
-                    .when_some(self.sftp_view.preview_editor.clone(), |body, editor| {
-                        body.child(editor)
-                    })
-                    .when(self.sftp_view.preview_editor.is_none(), |body| {
+                    .when_some(editor.clone(), |body, editor| body.child(editor))
+                    .when(editor.is_none(), |body| {
                         body.child(self.render_sftp_preview_text(String::new()))
                     }),
             )
@@ -153,10 +165,16 @@ impl WorkspaceApp {
         status: Option<(String, gpui::Rgba)>,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        if let Some(error) = &self.sftp_view.preview_editor_save_error {
-            let message = error.clone();
-            if self.sftp_view.preview_editor_network_error {
-                let retry_count = self.sftp_view.preview_editor_retry_count;
+        let (save_error, network_error, retry_count) = {
+            let sftp_view = self.sftp_view.read(cx);
+            (
+                sftp_view.preview_editor_save_error.clone(),
+                sftp_view.preview_editor_network_error,
+                sftp_view.preview_editor_retry_count,
+            )
+        };
+        if let Some(message) = save_error {
+            if network_error {
                 let label = if retry_count > 0 {
                     format!("{} ({retry_count})", self.i18n.t("sftp.preview.retry"))
                 } else {
