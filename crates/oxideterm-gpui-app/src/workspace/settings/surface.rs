@@ -488,8 +488,9 @@ impl WorkspaceApp {
                 if settings_connection_importers_list_item(index) {
                     // Importer state only changes the final importer card. Invalidating
                     // earlier measured rows makes GPUI move the current scroll anchor.
-                    self.settings_page
-                        .settings_connection_status
+                    self.settings_workspace
+                        .read(cx)
+                        .connection_import_status()
                         .is_some()
                         .hash(&mut hasher);
                     self.settings_connection_import_source

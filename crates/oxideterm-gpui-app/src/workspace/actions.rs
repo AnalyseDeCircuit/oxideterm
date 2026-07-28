@@ -1039,7 +1039,11 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
-        if self.settings_page.ssh_config_import_dialog_open {
+        if self
+            .settings_workspace
+            .read(cx)
+            .ssh_config_import_dialog_open()
+        {
             if event.keystroke.key.as_str() == "escape" {
                 self.close_settings_ssh_config_import_dialog(cx);
             }

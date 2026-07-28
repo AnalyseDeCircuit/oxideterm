@@ -24,6 +24,106 @@ struct ManagedKeyPasteImportRequest {
 }
 
 impl SettingsWorkspaceEntity {
+    pub(in crate::workspace) fn ssh_config_import_snapshot(&self) -> SshConfigImportSnapshot {
+        SshConfigImportSnapshot {
+            open: self.ssh_config_import_dialog_open,
+            selected_hosts: self.ssh_config_selected_hosts.clone(),
+            status: self.connection_import_status.clone(),
+            presence: self.ssh_config_import_dialog_presence,
+        }
+    }
+
+    pub(in crate::workspace) fn ssh_config_import_dialog_open(&self) -> bool {
+        self.ssh_config_import_dialog_open
+    }
+
+    pub(in crate::workspace) fn open_ssh_config_import_dialog(&mut self, cx: &mut Context<Self>) {
+        // Each visit starts from the current scanned host set instead of
+        // carrying selections or status from another import surface.
+        self.ssh_config_import_dialog_exit_task = None;
+        self.ssh_config_selected_hosts.clear();
+        self.connection_import_status = None;
+        self.ssh_config_import_dialog_presence.reopen();
+        self.ssh_config_import_dialog_open = true;
+        cx.notify();
+    }
+
+    pub(in crate::workspace) fn close_ssh_config_import_dialog(
+        &mut self,
+        delay: std::time::Duration,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(generation) = self.ssh_config_import_dialog_presence.begin_exit() else {
+            return;
+        };
+        self.ssh_config_import_dialog_exit_task = None;
+        if delay.is_zero() {
+            self.finish_ssh_config_import_dialog_exit(generation, cx);
+            return;
+        }
+        self.ssh_config_import_dialog_exit_task = Some(cx.spawn(async move |settings, cx| {
+            gpui::Timer::after(delay).await;
+            let _ = settings.update(cx, |settings, cx| {
+                settings.finish_ssh_config_import_dialog_exit(generation, cx);
+            });
+        }));
+        cx.notify();
+    }
+
+    fn finish_ssh_config_import_dialog_exit(&mut self, generation: u64, cx: &mut Context<Self>) {
+        self.ssh_config_import_dialog_exit_task = None;
+        if self
+            .ssh_config_import_dialog_presence
+            .finish_exit(generation)
+        {
+            self.ssh_config_import_dialog_open = false;
+            self.ssh_config_import_dialog_presence.reopen();
+            cx.notify();
+        }
+    }
+
+    pub(in crate::workspace) fn toggle_ssh_config_host(
+        &mut self,
+        alias: String,
+        cx: &mut Context<Self>,
+    ) {
+        if !self.ssh_config_selected_hosts.insert(alias.clone()) {
+            self.ssh_config_selected_hosts.remove(&alias);
+        }
+        cx.notify();
+    }
+
+    pub(in crate::workspace) fn clear_ssh_config_host_selection(&mut self, cx: &mut Context<Self>) {
+        self.ssh_config_selected_hosts.clear();
+        cx.notify();
+    }
+
+    pub(in crate::workspace) fn set_selected_ssh_config_hosts(
+        &mut self,
+        hosts: HashSet<String>,
+        cx: &mut Context<Self>,
+    ) {
+        self.ssh_config_selected_hosts = hosts;
+        cx.notify();
+    }
+
+    pub(in crate::workspace) fn selected_ssh_config_hosts(&self) -> Vec<String> {
+        self.ssh_config_selected_hosts.iter().cloned().collect()
+    }
+
+    pub(in crate::workspace) fn set_connection_import_status(
+        &mut self,
+        status: Option<String>,
+        cx: &mut Context<Self>,
+    ) {
+        self.connection_import_status = status;
+        cx.notify();
+    }
+
+    pub(in crate::workspace) fn connection_import_status(&self) -> Option<&str> {
+        self.connection_import_status.as_deref()
+    }
+
     pub(in crate::workspace) fn managed_key_status(&self) -> Option<&str> {
         self.managed_key_status.as_deref()
     }
@@ -580,7 +680,11 @@ impl WorkspaceApp {
         &self,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
-        if !self.settings_page.ssh_config_import_dialog_open {
+        let dialog = self
+            .settings_workspace
+            .read(cx)
+            .ssh_config_import_snapshot();
+        if !dialog.open {
             return None;
         }
 
@@ -589,7 +693,7 @@ impl WorkspaceApp {
             .iter()
             .filter(|host| !host.already_imported)
             .count();
-        let selected_count = self.settings_page.settings_selected_ssh_hosts.len();
+        let selected_count = dialog.selected_hosts.len();
         let all_selected = importable_count > 0 && selected_count == importable_count;
         let backdrop = dismissible_dialog_backdrop().on_mouse_down(
             MouseButton::Left,
@@ -617,7 +721,8 @@ impl WorkspaceApp {
             list = list.child(self.ssh_config_empty_state());
         } else {
             for host in ssh_hosts {
-                list = list.child(self.ssh_config_host_row(host, cx));
+                let selected = dialog.selected_hosts.contains(&host.alias);
+                list = list.child(self.ssh_config_host_row(host, selected, cx));
             }
         }
 
@@ -647,10 +752,9 @@ impl WorkspaceApp {
                         }),
                 )
             })
-            .when_some(
-                self.settings_page.settings_connection_status.clone(),
-                |body, status| body.child(self.connection_status_row(status)),
-            )
+            .when_some(dialog.status, |body, status| {
+                body.child(self.connection_status_row(status))
+            })
             .child(list);
 
         let form = dialog_content(&self.tokens)
@@ -695,7 +799,7 @@ impl WorkspaceApp {
             "ssh-config-import-dialog-form",
             backdrop,
             form,
-            self.ssh_config_import_dialog_presence,
+            dialog.presence,
         ))
     }
 
@@ -713,45 +817,24 @@ impl WorkspaceApp {
         &mut self,
         cx: &mut Context<Self>,
     ) {
-        self.ssh_config_import_dialog_presence.reopen();
-        self.settings_page.open_ssh_config_import_dialog();
+        self.settings_workspace.update(cx, |settings, cx| {
+            settings.open_ssh_config_import_dialog(cx);
+        });
         self.reset_standard_confirm_focus();
-        cx.notify();
     }
 
     pub(in crate::workspace) fn close_settings_ssh_config_import_dialog(
         &mut self,
         cx: &mut Context<Self>,
     ) {
-        let Some(generation) = self.ssh_config_import_dialog_presence.begin_exit() else {
-            return;
-        };
         self.clear_standard_confirm_focus();
         let delay = oxideterm_gpui_ui::motion::duration(
             &self.tokens,
             oxideterm_gpui_ui::motion::MotionDuration::Overlay,
         );
-        if delay.is_zero() {
-            self.settings_page.close_ssh_config_import_dialog();
-            self.ssh_config_import_dialog_presence.reopen();
-            cx.notify();
-            return;
-        }
-        cx.spawn(async move |weak, cx| {
-            gpui::Timer::after(delay).await;
-            let _ = weak.update(cx, |this, cx| {
-                if this
-                    .ssh_config_import_dialog_presence
-                    .finish_exit(generation)
-                {
-                    this.settings_page.close_ssh_config_import_dialog();
-                    this.ssh_config_import_dialog_presence.reopen();
-                    cx.notify();
-                }
-            });
-        })
-        .detach();
-        cx.notify();
+        self.settings_workspace.update(cx, |settings, cx| {
+            settings.close_ssh_config_import_dialog(delay, cx);
+        });
     }
 
     pub(in crate::workspace) fn connection_section(
@@ -851,14 +934,11 @@ impl WorkspaceApp {
     pub(in crate::workspace) fn ssh_config_host_row(
         &self,
         host: SshConfigHost,
+        selected: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
         let alias = host.alias.clone();
-        let checked = self
-            .settings_page
-            .settings_selected_ssh_hosts
-            .contains(&alias);
         let disabled = host.already_imported;
         let detail = format!(
             "{}@{}:{}",
@@ -899,7 +979,7 @@ impl WorkspaceApp {
                     .flex_row()
                     .items_center()
                     .gap(px(8.0))
-                    .child(self.ssh_config_checkbox(checked))
+                    .child(self.ssh_config_checkbox(selected))
                     .child(
                         div()
                             .min_w(px(0.0))
@@ -1056,8 +1136,8 @@ impl WorkspaceApp {
             rows.push(self.connection_import_preview_toolbar(&preview, cx));
             rows.push(self.connection_import_preview_list(preview, cx));
         }
-        if let Some(status) = self.settings_page.settings_connection_status.clone() {
-            rows.push(self.connection_status_row(status));
+        if let Some(status) = self.settings_workspace.read(cx).connection_import_status() {
+            rows.push(self.connection_status_row(status.to_string()));
         }
 
         self.connection_section(
@@ -2645,8 +2725,9 @@ impl WorkspaceApp {
         alias: String,
         cx: &mut Context<Self>,
     ) {
-        self.settings_page.toggle_ssh_host_selection(alias);
-        cx.notify();
+        self.settings_workspace.update(cx, |settings, cx| {
+            settings.toggle_ssh_config_host(alias, cx);
+        });
     }
 
     pub(in crate::workspace) fn toggle_all_settings_ssh_config_hosts(
@@ -2655,7 +2736,9 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) {
         if all_selected {
-            self.settings_page.clear_ssh_host_selection();
+            self.settings_workspace.update(cx, |settings, cx| {
+                settings.clear_ssh_config_host_selection(cx);
+            });
         } else {
             let existing_names = self
                 .connection_store
@@ -2664,16 +2747,16 @@ impl WorkspaceApp {
                 .map(|conn| conn.name.clone())
                 .collect::<HashSet<_>>();
             if let Ok(hosts) = list_ssh_config_hosts(&existing_names) {
-                self.settings_page.set_selected_ssh_hosts(
-                    hosts
-                        .into_iter()
-                        .filter(|host| !host.already_imported)
-                        .map(|host| host.alias)
-                        .collect(),
-                );
+                let selected_hosts = hosts
+                    .into_iter()
+                    .filter(|host| !host.already_imported)
+                    .map(|host| host.alias)
+                    .collect();
+                self.settings_workspace.update(cx, |settings, cx| {
+                    settings.set_selected_ssh_config_hosts(selected_hosts, cx);
+                });
             }
         }
-        cx.notify();
     }
 
     pub(in crate::workspace) fn import_settings_ssh_host(
@@ -2681,58 +2764,60 @@ impl WorkspaceApp {
         alias: String,
         cx: &mut Context<Self>,
     ) {
-        match oxideterm_connections::import_ssh_config_alias(&mut self.connection_store, &alias) {
+        let (completed, status) = match oxideterm_connections::import_ssh_config_alias(
+            &mut self.connection_store,
+            &alias,
+        ) {
             Ok(true) => {
-                self.settings_page.remove_selected_ssh_host(&alias);
-                self.settings_page.set_connection_status(Some(
-                    self.i18n
-                        .t("settings_view.errors.import_success")
-                        .replace("{{name}}", &alias),
-                ));
+                let status = self
+                    .i18n
+                    .t("settings_view.errors.import_success")
+                    .replace("{{name}}", &alias);
                 self.queue_cloud_sync_dirty_refresh(cx);
+                (true, status)
             }
-            Ok(false) => {
-                self.settings_page.set_connection_status(Some(
-                    self.i18n
-                        .t("settings_view.connections.ssh_config.batch_import_skipped")
-                        .replace("{{count}}", "1"),
-                ));
+            Ok(false) => (
+                false,
+                self.i18n
+                    .t("settings_view.connections.ssh_config.batch_import_skipped")
+                    .replace("{{count}}", "1"),
+            ),
+            Err(error) => (
+                false,
+                self.i18n
+                    .t("settings_view.errors.import_failed")
+                    .replace("{{error}}", &error.to_string()),
+            ),
+        };
+        self.settings_workspace.update(cx, |settings, cx| {
+            if completed {
+                settings.ssh_config_selected_hosts.remove(&alias);
             }
-            Err(error) => {
-                self.settings_page.set_connection_status(Some(
-                    self.i18n
-                        .t("settings_view.errors.import_failed")
-                        .replace("{{error}}", &error.to_string()),
-                ));
-            }
-        }
-        cx.notify();
+            settings.connection_import_status = Some(status);
+            cx.notify();
+        });
     }
 
     pub(in crate::workspace) fn import_selected_settings_ssh_hosts(
         &mut self,
         cx: &mut Context<Self>,
     ) {
-        let aliases = self
-            .settings_page
-            .settings_selected_ssh_hosts
-            .iter()
-            .cloned()
-            .collect::<Vec<_>>();
+        let aliases = self.settings_workspace.read(cx).selected_ssh_config_hosts();
         let mut imported = 0usize;
         let mut skipped = 0usize;
         let mut errors = Vec::new();
+        let mut completed_aliases = Vec::new();
 
         for alias in aliases {
             match oxideterm_connections::import_ssh_config_alias(&mut self.connection_store, &alias)
             {
                 Ok(true) => {
                     imported += 1;
-                    self.settings_page.remove_selected_ssh_host(&alias);
+                    completed_aliases.push(alias);
                 }
                 Ok(false) => {
                     skipped += 1;
-                    self.settings_page.remove_selected_ssh_host(&alias);
+                    completed_aliases.push(alias);
                 }
                 Err(error) => errors.push(format!("{alias}: {error}")),
             }
@@ -2756,12 +2841,17 @@ impl WorkspaceApp {
         if !errors.is_empty() {
             parts.push(errors.join(", "));
         }
-        self.settings_page
-            .set_connection_status((!parts.is_empty()).then(|| parts.join("; ")));
+        let status = (!parts.is_empty()).then(|| parts.join("; "));
+        self.settings_workspace.update(cx, |settings, cx| {
+            for alias in &completed_aliases {
+                settings.ssh_config_selected_hosts.remove(alias);
+            }
+            settings.connection_import_status = status;
+            cx.notify();
+        });
         if imported > 0 {
             self.queue_cloud_sync_dirty_refresh(cx);
         }
-        cx.notify();
     }
 
     pub(in crate::workspace) fn set_connection_import_source(
@@ -2775,8 +2865,9 @@ impl WorkspaceApp {
         self.settings_connection_import_source = source;
         self.clear_connection_import_preview();
         self.settings_connection_import_paths.clear();
-        self.settings_page.set_connection_status(None);
-        cx.notify();
+        self.settings_workspace.update(cx, |settings, cx| {
+            settings.set_connection_import_status(None, cx);
+        });
     }
 
     pub(in crate::workspace) fn pick_connection_import_paths(
@@ -2811,7 +2902,9 @@ impl WorkspaceApp {
             let _ = weak.update(cx, |this, cx| {
                 this.settings_connection_import_paths = selected;
                 this.clear_connection_import_preview();
-                this.settings_page.set_connection_status(None);
+                this.settings_workspace.update(cx, |settings, cx| {
+                    settings.set_connection_import_status(None, cx);
+                });
                 cx.notify();
             });
         })
@@ -2844,14 +2937,18 @@ impl WorkspaceApp {
                     .map(|draft| draft.id.clone())
                     .collect();
                 self.settings_connection_import_preview = Some(preview);
-                self.settings_page.set_connection_status(None);
+                self.settings_workspace.update(cx, |settings, cx| {
+                    settings.set_connection_import_status(None, cx);
+                });
             }
             Err(error) => {
-                self.settings_page.set_connection_status(Some(
-                    self.i18n
-                        .t("settings_view.connections.importers.preview_failed")
-                        .replace("{{error}}", &error.to_string()),
-                ));
+                let status = self
+                    .i18n
+                    .t("settings_view.connections.importers.preview_failed")
+                    .replace("{{error}}", &error.to_string());
+                self.settings_workspace.update(cx, |settings, cx| {
+                    settings.set_connection_import_status(Some(status), cx);
+                });
             }
         }
         cx.notify();
@@ -2941,24 +3038,28 @@ impl WorkspaceApp {
                             .replace("{{count}}", &result.errors.len().to_string()),
                     );
                 }
-                self.settings_page
-                    .set_connection_status(Some(if parts.is_empty() {
-                        self.i18n
-                            .t("settings_view.connections.importers.no_changes")
-                    } else {
-                        parts.join(" · ")
-                    }));
+                let status = if parts.is_empty() {
+                    self.i18n
+                        .t("settings_view.connections.importers.no_changes")
+                } else {
+                    parts.join(" · ")
+                };
+                self.settings_workspace.update(cx, |settings, cx| {
+                    settings.set_connection_import_status(Some(status), cx);
+                });
                 if result.imported > 0 {
                     self.queue_cloud_sync_dirty_refresh(cx);
                 }
                 self.preview_settings_connection_import(cx);
             }
             Err(error) => {
-                self.settings_page.set_connection_status(Some(
-                    self.i18n
-                        .t("settings_view.connections.importers.apply_failed")
-                        .replace("{{error}}", &error.to_string()),
-                ));
+                let status = self
+                    .i18n
+                    .t("settings_view.connections.importers.apply_failed")
+                    .replace("{{error}}", &error.to_string());
+                self.settings_workspace.update(cx, |settings, cx| {
+                    settings.set_connection_import_status(Some(status), cx);
+                });
             }
         }
         cx.notify();
@@ -3075,7 +3176,7 @@ pub(in crate::workspace) fn non_empty_trimmed(value: &str) -> Option<String> {
 }
 
 #[cfg(test)]
-mod managed_key_entity_tests {
+mod settings_connection_entity_tests {
     use gpui::{AppContext, TestAppContext};
 
     use super::*;
@@ -3140,6 +3241,30 @@ mod managed_key_entity_tests {
             assert!(settings.managed_key_file_passphrase.is_empty());
             assert_eq!(settings.settings_entity_focused_input(), None);
             assert!(settings.managed_key_dialog_exit_task.is_none());
+        });
+    }
+
+    #[gpui::test]
+    fn ssh_config_dialog_owns_selection_status_and_exit_lifecycle(cx: &mut TestAppContext) {
+        let settings = cx.new(SettingsWorkspaceEntity::new);
+        settings.update(cx, |settings, cx| {
+            settings
+                .ssh_config_selected_hosts
+                .insert("stale-host".into());
+            settings.connection_import_status = Some("stale-status".into());
+
+            settings.open_ssh_config_import_dialog(cx);
+
+            assert!(settings.ssh_config_import_dialog_open);
+            assert!(settings.ssh_config_selected_hosts.is_empty());
+            assert!(settings.connection_import_status.is_none());
+
+            settings.toggle_ssh_config_host("host-a".into(), cx);
+            assert!(settings.ssh_config_selected_hosts.contains("host-a"));
+
+            settings.close_ssh_config_import_dialog(std::time::Duration::ZERO, cx);
+            assert!(!settings.ssh_config_import_dialog_open);
+            assert!(settings.ssh_config_import_dialog_exit_task.is_none());
         });
     }
 }

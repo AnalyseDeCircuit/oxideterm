@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{collections::HashSet, sync::Arc};
 
 use gpui::{Context, EventEmitter, Task};
 use oxideterm_connections::PrivilegeCredentialKind;
@@ -115,6 +115,14 @@ pub(in crate::workspace) struct CliCompanionSnapshot {
     pub(in crate::workspace) error: Option<String>,
 }
 
+#[derive(Clone)]
+pub(in crate::workspace) struct SshConfigImportSnapshot {
+    pub(in crate::workspace) open: bool,
+    pub(in crate::workspace) selected_hosts: HashSet<String>,
+    pub(in crate::workspace) status: Option<String>,
+    pub(in crate::workspace) presence: oxideterm_gpui_ui::motion::ExitPresence,
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(in crate::workspace) enum CliCompanionOperation {
     Refresh,
@@ -168,6 +176,11 @@ pub(in crate::workspace) struct SettingsWorkspaceEntity {
     pub(super) cli_companion_loading: bool,
     pub(super) cli_companion_error: Option<String>,
     pub(super) cli_companion_task: Option<Task<()>>,
+    pub(super) ssh_config_import_dialog_open: bool,
+    pub(super) ssh_config_selected_hosts: HashSet<String>,
+    pub(super) connection_import_status: Option<String>,
+    pub(super) ssh_config_import_dialog_presence: oxideterm_gpui_ui::motion::ExitPresence,
+    pub(super) ssh_config_import_dialog_exit_task: Option<Task<()>>,
     pub(super) native_update: NativeUpdateRuntime,
 }
 
@@ -241,6 +254,11 @@ impl SettingsWorkspaceEntity {
             cli_companion_loading: false,
             cli_companion_error: None,
             cli_companion_task: None,
+            ssh_config_import_dialog_open: false,
+            ssh_config_selected_hosts: HashSet::new(),
+            connection_import_status: None,
+            ssh_config_import_dialog_presence: oxideterm_gpui_ui::motion::ExitPresence::visible(),
+            ssh_config_import_dialog_exit_task: None,
             native_update: NativeUpdateRuntime::new(cx),
         }
     }

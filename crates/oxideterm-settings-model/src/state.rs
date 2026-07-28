@@ -69,9 +69,6 @@ pub struct SettingsPageModel {
     pub background_blur_preview: Option<i64>,
     pub background_blur_commit_generation: u64,
     pub background_cache_poll_scheduled: bool,
-    pub ssh_config_import_dialog_open: bool,
-    pub settings_selected_ssh_hosts: HashSet<String>,
-    pub settings_connection_status: Option<String>,
 }
 
 impl Default for SettingsPageModel {
@@ -116,9 +113,6 @@ impl Default for SettingsPageModel {
             background_blur_preview: None,
             background_blur_commit_generation: 0,
             background_cache_poll_scheduled: false,
-            ssh_config_import_dialog_open: false,
-            settings_selected_ssh_hosts: HashSet::new(),
-            settings_connection_status: None,
         }
     }
 }
@@ -560,51 +554,6 @@ impl SettingsPageModel {
         self.background_cache_poll_scheduled = is_scheduled;
     }
 
-    /// Opens the SSH config import dialog.
-    pub fn open_ssh_config_import_dialog(&mut self) {
-        // Each visit starts from the current scanned host set instead of
-        // carrying selections or status from another import surface.
-        self.settings_selected_ssh_hosts.clear();
-        self.settings_connection_status = None;
-        self.ssh_config_import_dialog_open = true;
-    }
-
-    /// Closes the SSH config import dialog.
-    pub fn close_ssh_config_import_dialog(&mut self) {
-        self.ssh_config_import_dialog_open = false;
-    }
-
-    /// Toggles one SSH host selection and returns whether it is now selected.
-    pub fn toggle_ssh_host_selection(&mut self, alias: impl Into<String>) -> bool {
-        let alias = alias.into();
-        if self.settings_selected_ssh_hosts.insert(alias.clone()) {
-            true
-        } else {
-            self.settings_selected_ssh_hosts.remove(&alias);
-            false
-        }
-    }
-
-    /// Clears all selected SSH hosts.
-    pub fn clear_ssh_host_selection(&mut self) {
-        self.settings_selected_ssh_hosts.clear();
-    }
-
-    /// Replaces the selected SSH host set.
-    pub fn set_selected_ssh_hosts(&mut self, hosts: HashSet<String>) {
-        self.settings_selected_ssh_hosts = hosts;
-    }
-
-    /// Removes one selected SSH host after import or filtering.
-    pub fn remove_selected_ssh_host(&mut self, alias: &str) {
-        self.settings_selected_ssh_hosts.remove(alias);
-    }
-
-    /// Updates the connection import status shown on the settings page.
-    pub fn set_connection_status(&mut self, status: Option<String>) {
-        self.settings_connection_status = status;
-    }
-
     /// Toggles a context-window provider panel.
     pub fn toggle_ai_context_provider(&mut self, provider_id: impl Into<String>) {
         let provider_id = provider_id.into();
@@ -637,22 +586,6 @@ mod tests {
 
         assert!(!model.knowledge_create_dialog_open);
         assert!(model.knowledge_new_collection_name.is_empty());
-    }
-
-    #[test]
-    fn ssh_config_import_dialog_tracks_open_state() {
-        let mut model = SettingsPageModel::default();
-        model
-            .settings_selected_ssh_hosts
-            .insert("stale".to_string());
-        model.settings_connection_status = Some("stale status".to_string());
-        model.open_ssh_config_import_dialog();
-        assert!(model.ssh_config_import_dialog_open);
-        assert!(model.settings_selected_ssh_hosts.is_empty());
-        assert!(model.settings_connection_status.is_none());
-
-        model.close_ssh_config_import_dialog();
-        assert!(!model.ssh_config_import_dialog_open);
     }
 
     #[test]
