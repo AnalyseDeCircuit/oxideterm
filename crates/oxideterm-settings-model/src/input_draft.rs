@@ -633,7 +633,11 @@ impl From<Option<()>> for SettingsInputDraftApply {
 ///
 /// GPUI IME selections are tracked in UTF-16 code units to match browser input
 /// semantics, so the model layer owns this conversion instead of each view.
-pub fn settings_multiline_line_ranges(value: &str) -> Vec<(std::ops::Range<usize>, String)> {
+/// Visual lines may contain private-key material, so every owned line buffer is
+/// zeroized when the render frame releases it.
+pub fn settings_multiline_line_ranges(
+    value: &str,
+) -> Vec<(std::ops::Range<usize>, zeroize::Zeroizing<String>)> {
     let mut ranges = Vec::new();
     let mut utf16_start = 0usize;
     let mut utf16_offset = 0usize;
@@ -643,7 +647,7 @@ pub fn settings_multiline_line_ranges(value: &str) -> Vec<(std::ops::Range<usize
         if ch == '\n' {
             ranges.push((
                 utf16_start..utf16_offset,
-                value[byte_start..byte_index].to_string(),
+                zeroize::Zeroizing::new(value[byte_start..byte_index].to_string()),
             ));
             utf16_offset += ch.len_utf16();
             utf16_start = utf16_offset;
@@ -653,7 +657,10 @@ pub fn settings_multiline_line_ranges(value: &str) -> Vec<(std::ops::Range<usize
         }
     }
 
-    ranges.push((utf16_start..utf16_offset, value[byte_start..].to_string()));
+    ranges.push((
+        utf16_start..utf16_offset,
+        zeroize::Zeroizing::new(value[byte_start..].to_string()),
+    ));
     ranges
 }
 
@@ -806,10 +813,13 @@ mod tests {
     #[test]
     fn multiline_textarea_ranges_keep_trailing_empty_line() {
         let ranges = settings_multiline_line_ranges("vim\n");
+        let _: &zeroize::Zeroizing<String> = &ranges[0].1;
 
         assert_eq!(ranges.len(), 2);
-        assert_eq!(ranges[0], (0..3, "vim".to_string()));
-        assert_eq!(ranges[1], (4..4, String::new()));
+        assert_eq!(ranges[0].0, 0..3);
+        assert_eq!(ranges[0].1.as_str(), "vim");
+        assert_eq!(ranges[1].0, 4..4);
+        assert!(ranges[1].1.is_empty());
     }
 
     #[test]

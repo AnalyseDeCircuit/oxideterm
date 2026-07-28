@@ -317,13 +317,12 @@ impl SettingsWorkspaceEntity {
             SettingsManagedKeyDialog::ImportFile => Some(ManagedKeyDialogSnapshot::ImportFile {
                 file_path: self.managed_key_file_path.clone(),
                 file_name: self.managed_key_file_name.clone(),
-                file_passphrase: self.managed_key_file_passphrase.clone(),
                 presence,
             }),
             SettingsManagedKeyDialog::Paste => Some(ManagedKeyDialogSnapshot::Paste {
                 name: self.managed_key_paste_name.clone(),
-                private_key: self.managed_key_paste_private_key.clone(),
-                passphrase: self.managed_key_paste_passphrase.clone(),
+                // The view needs only validation state; plaintext remains in the Entity.
+                private_key_present: !self.managed_key_paste_private_key.trim().is_empty(),
                 presence,
             }),
             SettingsManagedKeyDialog::Rename { .. } => Some(ManagedKeyDialogSnapshot::Rename {
@@ -2259,24 +2258,17 @@ impl WorkspaceApp {
             ManagedKeyDialogSnapshot::ImportFile {
                 file_path,
                 file_name,
-                file_passphrase,
                 presence,
             } => Some(self.render_settings_managed_key_import_file_dialog(
-                file_path,
-                file_name,
-                file_passphrase,
-                presence,
-                cx,
+                file_path, file_name, presence, cx,
             )),
             ManagedKeyDialogSnapshot::Paste {
                 name,
-                private_key,
-                passphrase,
+                private_key_present,
                 presence,
             } => Some(self.render_settings_managed_key_paste_dialog(
                 name,
-                private_key,
-                passphrase,
+                private_key_present,
                 presence,
                 cx,
             )),
@@ -2295,7 +2287,6 @@ impl WorkspaceApp {
         &self,
         file_path: String,
         file_name: String,
-        file_passphrase: zeroize::Zeroizing<String>,
         presence: oxideterm_gpui_ui::motion::ExitPresence,
         cx: &mut Context<Self>,
     ) -> AnyElement {
@@ -2336,7 +2327,7 @@ impl WorkspaceApp {
                 self.settings_managed_key_secret_input_field(
                     "modals.managed_key.passphrase",
                     SettingsInput::ManagedKeyFilePassphrase,
-                    file_passphrase,
+                    String::new(),
                     self.i18n.t("modals.managed_key.passphrase_placeholder"),
                     420.0,
                     cx,
@@ -2356,12 +2347,11 @@ impl WorkspaceApp {
     pub(in crate::workspace) fn render_settings_managed_key_paste_dialog(
         &self,
         name: String,
-        private_key: zeroize::Zeroizing<String>,
-        passphrase: zeroize::Zeroizing<String>,
+        private_key_present: bool,
         presence: oxideterm_gpui_ui::motion::ExitPresence,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let can_import = !private_key.trim().is_empty();
+        let can_import = private_key_present;
         self.settings_managed_key_dialog_frame(
             "modals.managed_key.paste.title",
             "modals.managed_key.paste.description",
@@ -2374,11 +2364,11 @@ impl WorkspaceApp {
                     420.0,
                     cx,
                 ),
-                self.settings_managed_key_private_key_textarea(&private_key, cx),
+                self.settings_managed_key_private_key_textarea(cx),
                 self.settings_managed_key_secret_input_field(
                     "modals.managed_key.passphrase",
                     SettingsInput::ManagedKeyPastePassphrase,
-                    passphrase,
+                    String::new(),
                     self.i18n.t("modals.managed_key.passphrase_placeholder"),
                     420.0,
                     cx,
@@ -2594,15 +2584,16 @@ impl WorkspaceApp {
 
     pub(in crate::workspace) fn settings_managed_key_private_key_textarea(
         &self,
-        value: &str,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let input = SettingsInput::ManagedKeyPastePrivateKey;
-        let focused = self
-            .settings_workspace
-            .read(cx)
-            .settings_entity_focused_input()
-            == Some(input);
+        let settings = self.settings_workspace.read(cx);
+        // Keep the private key in the Entity; the multiline renderer derives
+        // only zeroizing line buffers for GPUI's owned visual text.
+        let value = settings
+            .settings_entity_input_value(input)
+            .expect("managed private-key input is owned by the Settings Entity");
+        let focused = settings.settings_entity_focused_input() == Some(input);
         let target = WorkspaceImeTarget::Settings(input);
         let workspace = cx.entity();
         let theme = self.tokens.ui;
@@ -3359,12 +3350,17 @@ mod settings_connection_entity_tests {
                 " key-passphrase ",
                 cx,
             ));
+            let private_key_allocation = settings.managed_key_paste_private_key.as_ptr();
 
             // Submission moves each secret into the one-shot store request.
             let request = settings
                 .take_managed_key_paste_import_request()
                 .expect("paste request");
             assert_eq!(request.private_key.expose_secret(), "private-key-material");
+            assert_eq!(
+                request.private_key.expose_secret().as_ptr(),
+                private_key_allocation
+            );
             assert_eq!(
                 request.passphrase.as_ref().map(SecretString::expose_secret),
                 Some("key-passphrase")

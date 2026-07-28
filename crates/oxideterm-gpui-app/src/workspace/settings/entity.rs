@@ -38,24 +38,20 @@ pub(in crate::workspace) struct PortablePasswordDialogSnapshot {
     pub(in crate::workspace) open: bool,
     pub(in crate::workspace) pending: bool,
     pub(in crate::workspace) error: Option<String>,
-    pub(in crate::workspace) current_password: Zeroizing<String>,
-    pub(in crate::workspace) new_password: Zeroizing<String>,
-    pub(in crate::workspace) confirm_password: Zeroizing<String>,
+    pub(in crate::workspace) current_password_present: bool,
     pub(in crate::workspace) presence: oxideterm_gpui_ui::motion::ExitPresence,
 }
 
-/// Copies only the active dialog payload; secret frame copies remain zeroizing.
+/// Copies only non-secret render state for the active managed-key dialog.
 pub(in crate::workspace) enum ManagedKeyDialogSnapshot {
     ImportFile {
         file_path: String,
         file_name: String,
-        file_passphrase: Zeroizing<String>,
         presence: oxideterm_gpui_ui::motion::ExitPresence,
     },
     Paste {
         name: String,
-        private_key: Zeroizing<String>,
-        passphrase: Zeroizing<String>,
+        private_key_present: bool,
         presence: oxideterm_gpui_ui::motion::ExitPresence,
     },
     Rename {
@@ -70,7 +66,7 @@ pub(in crate::workspace) enum ManagedKeyDialogSnapshot {
 }
 
 pub(in crate::workspace) struct NetworkProxyPasswordSnapshot {
-    pub(in crate::workspace) password: Zeroizing<String>,
+    pub(in crate::workspace) password_present: bool,
     pub(in crate::workspace) password_status: Option<String>,
 }
 
@@ -1114,6 +1110,47 @@ mod tests {
     use gpui::{AppContext, TestAppContext};
 
     use super::{BackgroundGalleryOperationResult, DataDirectoryConfirm, SettingsWorkspaceEntity};
+
+    #[test]
+    fn secret_render_projections_do_not_copy_entity_owned_plaintext() {
+        let portable_source = include_str!("portable_runtime/actions.rs");
+        let managed_key_source = include_str!("connections_page.rs");
+        let proxy_source = include_str!("network_page.rs");
+
+        for forbidden in [
+            concat!("portable_current_password", ".to_string()"),
+            concat!("portable_new_password", ".to_string()"),
+            concat!("portable_confirm_password", ".to_string()"),
+        ] {
+            assert!(!portable_source.contains(forbidden), "{forbidden}");
+        }
+        for forbidden in [
+            concat!(
+                "file_passphrase: self.managed_key_file_passphrase",
+                ".clone()"
+            ),
+            concat!(
+                "private_key: self.managed_key_paste_private_key",
+                ".clone()"
+            ),
+            concat!("passphrase: self.managed_key_paste_passphrase", ".clone()"),
+        ] {
+            assert!(!managed_key_source.contains(forbidden), "{forbidden}");
+        }
+        assert!(
+            !proxy_source.contains(concat!("password: self.network_proxy_password", ".clone()"))
+        );
+    }
+
+    #[test]
+    fn workspace_drop_zeroizes_the_transient_settings_ime_draft() {
+        let workspace_source = include_str!("../../workspace.rs");
+
+        assert!(workspace_source.contains("impl Drop for WorkspaceApp"));
+        assert!(
+            workspace_source.contains("zeroize::Zeroize::zeroize(&mut self.settings_input_draft)")
+        );
+    }
 
     #[gpui::test]
     fn portable_status_refresh_is_single_flight_and_entity_owned(cx: &mut TestAppContext) {

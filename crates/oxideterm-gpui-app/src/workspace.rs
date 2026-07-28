@@ -889,6 +889,14 @@ pub(crate) struct WorkspaceApp {
     _overlay_observation: Subscription,
 }
 
+impl Drop for WorkspaceApp {
+    fn drop(&mut self) {
+        // App Lock and Cloud Sync move the focused secret into this window IME
+        // adapter, so window destruction must zeroize it even without a blur event.
+        zeroize::Zeroize::zeroize(&mut self.settings_input_draft);
+    }
+}
+
 #[derive(Clone)]
 struct MermaidZoomState {
     source: String,

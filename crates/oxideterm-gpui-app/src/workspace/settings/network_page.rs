@@ -91,8 +91,8 @@ impl SettingsWorkspaceEntity {
         &self,
     ) -> NetworkProxyPasswordSnapshot {
         NetworkProxyPasswordSnapshot {
-            // GPUI input layout requires owned frame data; this copy is zeroized.
-            password: self.network_proxy_password.clone(),
+            // The input control borrows plaintext directly from the Entity.
+            password_present: !self.network_proxy_password.is_empty(),
             password_status: self.network_proxy_password_status.clone(),
         }
     }
@@ -973,8 +973,8 @@ impl WorkspaceApp {
             .settings_workspace
             .read(cx)
             .network_proxy_password_snapshot();
-        let save_disabled = snapshot.password.is_empty() || !enabled;
-        let remove_disabled = !has_saved_password && snapshot.password.is_empty();
+        let save_disabled = !snapshot.password_present || !enabled;
+        let remove_disabled = !has_saved_password && !snapshot.password_present;
         let mut row = div()
             .w_full()
             .min_w(px(0.0))
@@ -1003,7 +1003,7 @@ impl WorkspaceApp {
                             .flex_basis(px(SETTINGS_NETWORK_FIELD_WIDTH))
                             .child(self.settings_secret_text_input_control_fill(
                                 password_input,
-                                snapshot.password,
+                                String::new(),
                                 if has_saved_password {
                                     self.i18n
                                         .t("settings_view.network.password_saved_placeholder")
@@ -1352,11 +1352,13 @@ mod tests {
                 "proxy-secret",
                 cx,
             ));
+            let draft_allocation = settings.network_proxy_password.as_ptr();
 
             let password = settings
                 .take_network_proxy_password()
                 .expect("network proxy password");
             assert_eq!(password.expose_secret(), "proxy-secret");
+            assert_eq!(password.expose_secret().as_ptr(), draft_allocation);
             assert!(settings.network_proxy_password.is_empty());
 
             settings.restore_network_proxy_password(password, "retry".to_string(), cx);

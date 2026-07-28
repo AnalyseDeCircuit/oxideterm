@@ -1688,7 +1688,9 @@ impl WorkspaceApp {
             if placeholder {
                 // Browser placeholder text is not part of the editable value;
                 // keep it muted and do not feed it through selection segments.
-                line = line.text_color(rgb(theme.text_muted)).child(line_text);
+                line = line
+                    .text_color(rgb(theme.text_muted))
+                    .child(line_text.as_str().to_string());
             } else {
                 // Tauri uses a real textarea, so caret/selection sit inside the
                 // current visual line. Native renders line elements manually and

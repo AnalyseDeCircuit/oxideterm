@@ -14,10 +14,9 @@ impl SettingsWorkspaceEntity {
             open: self.portable_dialog == Some(PortableSettingsDialog::ChangePassword),
             pending: self.portable_action_pending == Some(PortableSettingsAction::ChangePassword),
             error: self.portable_action_error.clone(),
-            // GPUI text layout requires owned frame data; every secret copy is zeroized.
-            current_password: Zeroizing::new(self.portable_current_password.to_string()),
-            new_password: Zeroizing::new(self.portable_new_password.to_string()),
-            confirm_password: Zeroizing::new(self.portable_confirm_password.to_string()),
+            // Rendering borrows the secret from the Entity and needs only this
+            // non-secret flag to enable the submit action.
+            current_password_present: !self.portable_current_password.is_empty(),
             presence: self.portable_dialog_presence,
         }
     }
@@ -193,9 +192,6 @@ impl WorkspaceApp {
         &mut self,
         cx: &mut Context<Self>,
     ) {
-        if let Some(input) = self.focused_settings_input.take() {
-            self.clear_settings_input_draft(input);
-        }
         self.ime_marked_text = None;
         self.clear_ime_selection();
         self.settings_workspace.update(cx, |settings, cx| {
@@ -268,7 +264,11 @@ mod tests {
 
             let snapshot = settings.portable_password_dialog_snapshot();
             assert!(snapshot.open);
-            assert_eq!(snapshot.current_password.as_str(), "current-secret");
+            assert!(snapshot.current_password_present);
+            assert_eq!(
+                settings.settings_entity_input_value(SettingsInput::PortableCurrentPassword),
+                Some("current-secret")
+            );
             assert_eq!(
                 settings.settings_entity_focused_input(),
                 Some(SettingsInput::PortableCurrentPassword)
@@ -277,9 +277,19 @@ mod tests {
             settings.close_portable_password_dialog(std::time::Duration::ZERO, cx);
             let snapshot = settings.portable_password_dialog_snapshot();
             assert!(!snapshot.open);
-            assert!(snapshot.current_password.is_empty());
-            assert!(snapshot.new_password.is_empty());
-            assert!(snapshot.confirm_password.is_empty());
+            assert!(!snapshot.current_password_present);
+            assert_eq!(
+                settings.settings_entity_input_value(SettingsInput::PortableCurrentPassword),
+                Some("")
+            );
+            assert_eq!(
+                settings.settings_entity_input_value(SettingsInput::PortableNewPassword),
+                Some("")
+            );
+            assert_eq!(
+                settings.settings_entity_input_value(SettingsInput::PortableConfirmPassword),
+                Some("")
+            );
             assert_eq!(settings.settings_entity_focused_input(), None);
         });
     }
