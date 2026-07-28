@@ -318,9 +318,9 @@ impl WorkspaceApp {
         let input = SettingsInput::AiAcpAgentAuthToken(index);
         let (focused, save_disabled) = {
             let ai_workspace = self.ai_entity.read(cx);
-            let focused = ai_workspace.focused_settings_secret_input() == Some(input);
+            let focused = ai_workspace.focused_settings_input() == Some(input);
             let save_disabled = ai_workspace
-                .settings_secret_input_value(input)
+                .settings_input_value(input)
                 .is_none_or(|draft| draft.trim().is_empty());
             (focused, save_disabled)
         };
@@ -1251,11 +1251,11 @@ impl WorkspaceApp {
         min_height: f32,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let focused = self.focused_settings_input == Some(input);
-        let display_value = if focused {
-            self.settings_input_draft.as_str()
+        let entity_owned = ai_state::AiWorkspaceEntity::owns_settings_input(input);
+        let focused = if entity_owned {
+            self.ai_entity.read(cx).focused_settings_input() == Some(input)
         } else {
-            value.as_str()
+            self.focused_settings_input == Some(input)
         };
         let target = WorkspaceImeTarget::Settings(input);
         let workspace = cx.entity();
@@ -1265,19 +1265,39 @@ impl WorkspaceApp {
         let caret = focused.then(|| {
             text_caret(&self.tokens, self.new_connection_caret_visible).into_any_element()
         });
-        let textarea = settings_ai_textarea_surface(
-            &self.tokens,
-            min_height,
-            focused,
-            display_value,
-            &placeholder,
-            marked_text,
-            caret,
-        )
+        let textarea = if entity_owned {
+            let ai_workspace = self.ai_entity.read(cx);
+            settings_ai_textarea_surface(
+                &self.tokens,
+                min_height,
+                focused,
+                ai_workspace.settings_input_value(input).unwrap_or_default(),
+                &placeholder,
+                marked_text,
+                caret,
+            )
+        } else {
+            let display_value = if focused {
+                self.settings_input_draft.as_str()
+            } else {
+                value.as_str()
+            };
+            settings_ai_textarea_surface(
+                &self.tokens,
+                min_height,
+                focused,
+                display_value,
+                &placeholder,
+                marked_text,
+                caret,
+            )
+        }
         .on_mouse_down(
             MouseButton::Left,
             cx.listener(move |this, event: &gpui::MouseDownEvent, window, cx| {
-                let current = this.current_settings_input_value(input, cx);
+                let current = (!ai_state::AiWorkspaceEntity::owns_settings_input(input))
+                    .then(|| this.current_settings_input_value(input, cx))
+                    .unwrap_or_default();
                 this.focus_settings_input(input, current, cx);
                 this.ime_marked_text = None;
                 window.focus(&this.focus_handle, cx);

@@ -35,9 +35,9 @@ impl WorkspaceApp {
         let input = SettingsInput::AiProviderApiKey(index);
         let (focused, save_disabled) = {
             let ai_workspace = self.ai_entity.read(cx);
-            let focused = ai_workspace.focused_settings_secret_input() == Some(input);
+            let focused = ai_workspace.focused_settings_input() == Some(input);
             let save_disabled = ai_workspace
-                .settings_secret_input_value(input)
+                .settings_input_value(input)
                 .is_none_or(|draft| draft.trim().is_empty());
             (focused, save_disabled)
         };
@@ -192,14 +192,12 @@ impl WorkspaceApp {
     ) -> AnyElement {
         let target = WorkspaceImeTarget::Settings(input);
         let workspace = cx.entity();
-        let input_control = if ai_state::AiWorkspaceEntity::owns_settings_secret_input(input) {
+        let input_control = if ai_state::AiWorkspaceEntity::owns_settings_input(input) {
             let ai_workspace = self.ai_entity.read(cx);
             text_input(
                 &self.tokens,
                 TextInputView {
-                    value: ai_workspace
-                        .settings_secret_input_value(input)
-                        .unwrap_or_default(),
+                    value: ai_workspace.settings_input_value(input).unwrap_or_default(),
                     placeholder,
                     focused,
                     caret_visible: self.new_connection_caret_visible,

@@ -745,13 +745,35 @@ impl WorkspaceApp {
                 _ => return true,
             }
         }
-        if let Some(input) = self.ai_entity.read(cx).focused_settings_secret_input() {
+        if let Some(input) = self.ai_entity.read(cx).focused_settings_input() {
             let key = event.keystroke.key.as_str();
             let modifiers = event.keystroke.modifiers;
             match key {
+                "tab" if input.is_ai_mcp() && self.ai_entity.read(cx).mcp_dialog_is_open() => {
+                    if let Some(browser_behavior::ModalFooterInputKeyAction::FocusFooter(action)) =
+                        browser_behavior::modal_footer_input_key_action(
+                            key,
+                            event.keystroke.modifiers.shift,
+                            &CONFIRM_DIALOG_FOOTER_ACTIONS,
+                            true,
+                            true,
+                            self.standard_confirm_focus_owner(),
+                            ConfirmDialogAction::Cancel,
+                            None,
+                        )
+                    {
+                        self.ai_entity.update(cx, |ai, cx| {
+                            ai.blur_settings_input(cx);
+                        });
+                        self.set_standard_confirm_focus(action);
+                        self.new_connection_caret_visible = true;
+                        cx.notify();
+                    }
+                    return true;
+                }
                 "escape" | "enter" => {
                     self.ai_entity.update(cx, |ai, cx| {
-                        ai.blur_settings_secret_input(cx);
+                        ai.blur_settings_input(cx);
                     });
                     self.clear_ime_selection();
                     self.new_connection_caret_visible = true;
@@ -759,7 +781,7 @@ impl WorkspaceApp {
                 }
                 "backspace" | "delete" if !modifiers.platform && !modifiers.control => {
                     self.ai_entity.update(cx, |ai, cx| {
-                        ai.pop_settings_secret_input(input, cx);
+                        ai.pop_settings_input(input, cx);
                     });
                     return true;
                 }
@@ -773,32 +795,6 @@ impl WorkspaceApp {
         let modifiers = event.keystroke.modifiers;
 
         match key {
-            "tab" if self.ai.models.mcp_add_dialog.is_some() && input.is_ai_mcp() => {
-                // Tauri MCP add dialog lets Tab leave the active input and enter
-                // the DialogFooter. GPUI settings inputs are manually owned, so
-                // delegate the input-to-footer edge to the shared browser model.
-                if let Some(browser_behavior::ModalFooterInputKeyAction::FocusFooter(action)) =
-                    browser_behavior::modal_footer_input_key_action(
-                        key,
-                        event.keystroke.modifiers.shift,
-                        &CONFIRM_DIALOG_FOOTER_ACTIONS,
-                        true,
-                        true,
-                        self.standard_confirm_focus_owner(),
-                        ConfirmDialogAction::Cancel,
-                        None,
-                    )
-                {
-                    self.focused_settings_input = None;
-                    self.clear_settings_input_draft(input);
-                    self.set_standard_confirm_focus(action);
-                    self.new_connection_caret_visible = true;
-                    cx.notify();
-                    return true;
-                }
-
-                false
-            }
             "escape"
                 if input == SettingsInput::TerminalCommandSpecsJson
                     && self.terminal_command_specs_editor_open =>
@@ -869,7 +865,7 @@ impl WorkspaceApp {
         }
         if self
             .ai_entity
-            .update(cx, |ai, cx| ai.blur_settings_secret_input(cx))
+            .update(cx, |ai, cx| ai.blur_settings_input(cx))
         {
             self.ime_marked_text = None;
             self.clear_ime_selection();
@@ -1115,7 +1111,7 @@ impl WorkspaceApp {
             .is_some();
         if entity_owned_input {
             self.ai_entity.update(cx, |ai, cx| {
-                ai.blur_settings_secret_input(cx);
+                ai.blur_settings_input(cx);
             });
             if let Some(previous_input) = self.focused_settings_input.take() {
                 self.clear_settings_input_draft(previous_input);
@@ -1128,7 +1124,7 @@ impl WorkspaceApp {
             cx.notify();
             return;
         }
-        if ai_state::AiWorkspaceEntity::owns_settings_secret_input(input) {
+        if ai_state::AiWorkspaceEntity::owns_settings_input(input) {
             if let Some(previous_input) = self.focused_settings_input.take() {
                 self.clear_settings_input_draft(previous_input);
             }
@@ -1136,7 +1132,7 @@ impl WorkspaceApp {
                 settings.blur_settings_entity_input(cx);
             });
             self.ai_entity.update(cx, |ai, cx| {
-                ai.focus_settings_secret_input(input, cx);
+                ai.focus_settings_input(input, cx);
             });
             self.clear_ime_selection();
             self.new_connection_caret_visible = true;
@@ -1147,7 +1143,7 @@ impl WorkspaceApp {
             settings.blur_settings_entity_input(cx);
         });
         self.ai_entity.update(cx, |ai, cx| {
-            ai.blur_settings_secret_input(cx);
+            ai.blur_settings_input(cx);
         });
         let app_lock_input = matches!(
             input,
@@ -1233,9 +1229,8 @@ impl WorkspaceApp {
         if let Some(value) = self.settings_page.page_input_value(input) {
             return value;
         }
-        if let Some(value) = ai_mcp_draft_input_value(self.ai.models.mcp_add_dialog.as_ref(), input)
-        {
-            return value;
+        if let Some(value) = self.ai_entity.read(cx).settings_input_value(input) {
+            return value.to_owned();
         }
         if let Some(value) = cloud_sync_form_input_value(&self.cloud_sync.view.form, input) {
             return value;
@@ -1327,15 +1322,6 @@ impl WorkspaceApp {
             cx.notify();
             return;
         }
-        if apply_ai_mcp_draft_input(
-            self.ai.models.mcp_add_dialog.as_mut(),
-            input,
-            &self.settings_input_draft,
-        ) {
-            cx.notify();
-            return;
-        }
-
         match input {
             SettingsInput::TerminalCommandSpecsJson => {
                 cx.notify();

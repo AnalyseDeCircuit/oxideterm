@@ -548,11 +548,7 @@ impl Render for WorkspaceApp {
                         .read(cx)
                         .settings_entity_focused_input()
                         .is_some()
-                    || this
-                        .ai_entity
-                        .read(cx)
-                        .focused_settings_secret_input()
-                        .is_some()
+                    || this.ai_entity.read(cx).focused_settings_input().is_some()
                 {
                     let _ = this.handle_settings_input_key(event, cx);
                     window.prevent_default();

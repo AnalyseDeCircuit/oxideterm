@@ -2,6 +2,10 @@ use super::*;
 use crate::workspace::root::init::ai_chat_initialization_error;
 use gpui::Task;
 use oxideterm_editor_core::utf16::replace_utf16;
+use oxideterm_settings_model::{
+    ai_mcp_auth_mode_value, ai_mcp_draft_valid, ai_mcp_draft_valid_for_names,
+    ai_mcp_transport_value,
+};
 
 pub(in crate::workspace) enum AiChatInitializationOutcome {
     AlreadyInitialized,
@@ -17,6 +21,7 @@ pub(in crate::workspace) enum AiWorkspaceEvent {
     CompactionStateChanged,
     CredentialOperationReady,
     KnowledgeReindexDeliveryReady,
+    McpRuntimeChanged,
     ModelRefreshDeliveryReady,
     ProviderKeyStatusChanged,
     SelectorProviderStatusChanged,
@@ -58,6 +63,7 @@ pub(in crate::workspace) enum AiCredentialFailure {
     RemoveProviderKey,
     SaveAcpToken,
     RemoveAcpToken,
+    SaveMcpToken,
 }
 
 pub(in crate::workspace) enum AiCredentialIntent {
@@ -65,6 +71,8 @@ pub(in crate::workspace) enum AiCredentialIntent {
     ProviderKeyRemoved,
     AcpTokenStored { agent_id: String },
     AcpTokenRemoved { agent_id: String },
+    McpServerReady { config: serde_json::Value },
+    McpServerRemoved { server_id: String },
     Failed(AiCredentialFailure),
 }
 
@@ -137,10 +145,16 @@ pub(in crate::workspace) struct AiWorkspaceEntity {
     task_runtime: Arc<tokio::runtime::Runtime>,
     key_store: oxideterm_ai::AiProviderKeyStore,
     settings_secret_drafts: HashMap<SettingsInput, zeroize::Zeroizing<String>>,
-    focused_settings_secret_input: Option<SettingsInput>,
+    focused_settings_input: Option<SettingsInput>,
     provider_key_operation_tasks: HashMap<String, Task<()>>,
     acp_token_operation_tasks: HashMap<String, Task<()>>,
     credential_intents: VecDeque<AiCredentialIntent>,
+    mcp_add_dialog: Option<AiMcpServerDraft>,
+    mcp_dialog_presence: oxideterm_gpui_ui::motion::ExitPresence,
+    mcp_dialog_exit_task: Option<Task<()>>,
+    mcp_save_task: Option<Task<()>>,
+    mcp_runtime_tasks: HashMap<String, Task<()>>,
+    mcp_status_tick_task: Option<Task<()>>,
     model_refresh_generations: HashMap<String, u64>,
     refreshing_models: HashSet<String>,
     model_refresh_tx:
@@ -257,10 +271,16 @@ impl AiWorkspaceEntity {
             task_runtime,
             key_store,
             settings_secret_drafts: HashMap::new(),
-            focused_settings_secret_input: None,
+            focused_settings_input: None,
             provider_key_operation_tasks: HashMap::new(),
             acp_token_operation_tasks: HashMap::new(),
             credential_intents: VecDeque::new(),
+            mcp_add_dialog: None,
+            mcp_dialog_presence: oxideterm_gpui_ui::motion::ExitPresence::visible(),
+            mcp_dialog_exit_task: None,
+            mcp_save_task: None,
+            mcp_runtime_tasks: HashMap::new(),
+            mcp_status_tick_task: None,
             model_refresh_generations: HashMap::new(),
             refreshing_models: HashSet::new(),
             model_refresh_tx,
@@ -340,91 +360,121 @@ impl AiWorkspaceEntity {
         self.refreshing_models.contains(provider_id)
     }
 
-    pub(in crate::workspace) fn owns_settings_secret_input(input: SettingsInput) -> bool {
+    pub(in crate::workspace) fn owns_settings_input(input: SettingsInput) -> bool {
         matches!(
             input,
             SettingsInput::AiProviderApiKey(_) | SettingsInput::AiAcpAgentAuthToken(_)
-        )
+        ) || input.is_ai_mcp()
     }
 
-    pub(in crate::workspace) fn focused_settings_secret_input(&self) -> Option<SettingsInput> {
-        self.focused_settings_secret_input
+    pub(in crate::workspace) fn focused_settings_input(&self) -> Option<SettingsInput> {
+        self.focused_settings_input
     }
 
-    pub(in crate::workspace) fn settings_secret_input_value(
-        &self,
-        input: SettingsInput,
-    ) -> Option<&str> {
-        Self::owns_settings_secret_input(input)
-            .then(|| {
-                self.settings_secret_drafts
-                    .get(&input)
-                    .map(|draft| draft.as_str())
-            })
-            .flatten()
+    pub(in crate::workspace) fn settings_input_value(&self, input: SettingsInput) -> Option<&str> {
+        if let Some(draft) = self.settings_secret_drafts.get(&input) {
+            return Some(draft.as_str());
+        }
+        let draft = self.mcp_add_dialog.as_ref()?;
+        match input {
+            SettingsInput::AiMcpName => Some(&draft.name),
+            SettingsInput::AiMcpCommand => Some(&draft.command),
+            SettingsInput::AiMcpArgs => Some(&draft.args),
+            SettingsInput::AiMcpUrl => Some(&draft.url),
+            SettingsInput::AiMcpAuthHeaderName => Some(&draft.auth_header_name),
+            SettingsInput::AiMcpAuthToken => Some(&draft.auth_token),
+            SettingsInput::AiMcpEnvKey(index) => draft.env.get(index).map(|(key, _)| key.as_str()),
+            SettingsInput::AiMcpEnvValue(index) => {
+                draft.env.get(index).map(|(_, value)| value.as_str())
+            }
+            SettingsInput::AiMcpHeaderKey(index) => {
+                draft.headers.get(index).map(|(key, _)| key.as_str())
+            }
+            SettingsInput::AiMcpHeaderValue(index) => {
+                draft.headers.get(index).map(|(_, value)| value.as_str())
+            }
+            _ => None,
+        }
     }
 
-    pub(in crate::workspace) fn focus_settings_secret_input(
+    pub(in crate::workspace) fn focus_settings_input(
         &mut self,
         input: SettingsInput,
         cx: &mut Context<Self>,
     ) -> bool {
-        if !Self::owns_settings_secret_input(input) {
+        if !Self::owns_settings_input(input) {
             return false;
         }
-        if self.focused_settings_secret_input == Some(input) {
+        if input.is_ai_mcp() && self.mcp_add_dialog.is_none() {
+            return false;
+        }
+        if self.focused_settings_input == Some(input) {
             return true;
         }
 
-        self.clear_focused_settings_secret_input();
-        self.settings_secret_drafts
-            .insert(input, zeroize::Zeroizing::new(String::new()));
-        self.focused_settings_secret_input = Some(input);
+        self.clear_focused_settings_input();
+        if matches!(
+            input,
+            SettingsInput::AiProviderApiKey(_) | SettingsInput::AiAcpAgentAuthToken(_)
+        ) {
+            self.settings_secret_drafts
+                .insert(input, zeroize::Zeroizing::new(String::new()));
+        }
+        self.focused_settings_input = Some(input);
         cx.notify();
         true
     }
 
-    pub(in crate::workspace) fn blur_settings_secret_input(
-        &mut self,
-        cx: &mut Context<Self>,
-    ) -> bool {
-        let changed = self.clear_focused_settings_secret_input();
+    pub(in crate::workspace) fn blur_settings_input(&mut self, cx: &mut Context<Self>) -> bool {
+        let changed = self.clear_focused_settings_input();
         if changed {
             cx.notify();
         }
         changed
     }
 
-    pub(in crate::workspace) fn replace_settings_secret_input(
+    pub(in crate::workspace) fn replace_settings_input(
         &mut self,
         input: SettingsInput,
         replacement_range: Option<std::ops::Range<usize>>,
         text: &str,
         cx: &mut Context<Self>,
     ) -> bool {
-        if self.focused_settings_secret_input != Some(input) {
+        if self.focused_settings_input != Some(input) {
             return false;
         }
-        let Some(draft) = self.settings_secret_drafts.get_mut(&input) else {
-            return false;
+        let value = if let Some(draft) = self.settings_secret_drafts.get_mut(&input) {
+            &mut **draft
+        } else {
+            let Some(draft) = self.mcp_add_dialog.as_mut() else {
+                return false;
+            };
+            let Some(value) = mcp_draft_input_value_mut(draft, input) else {
+                return false;
+            };
+            value
         };
-        replace_utf16(draft, replacement_range, text);
+        replace_utf16(value, replacement_range, text);
         cx.notify();
         true
     }
 
-    pub(in crate::workspace) fn pop_settings_secret_input(
+    pub(in crate::workspace) fn pop_settings_input(
         &mut self,
         input: SettingsInput,
         cx: &mut Context<Self>,
     ) -> bool {
-        if self.focused_settings_secret_input != Some(input) {
+        if self.focused_settings_input != Some(input) {
             return false;
         }
-        let changed = self
-            .settings_secret_drafts
-            .get_mut(&input)
-            .is_some_and(|draft| draft.pop().is_some());
+        let changed = if let Some(draft) = self.settings_secret_drafts.get_mut(&input) {
+            draft.pop().is_some()
+        } else {
+            self.mcp_add_dialog
+                .as_mut()
+                .and_then(|draft| mcp_draft_input_value_mut(draft, input))
+                .is_some_and(|value| value.pop().is_some())
+        };
         if changed {
             cx.notify();
         }
@@ -452,19 +502,20 @@ impl AiWorkspaceEntity {
     }
 
     fn take_settings_secret(&mut self, input: SettingsInput) -> Option<zeroize::Zeroizing<String>> {
-        if self.focused_settings_secret_input != Some(input) {
+        if self.focused_settings_input != Some(input) {
             return None;
         }
-        self.focused_settings_secret_input = None;
+        self.focused_settings_input = None;
         let secret = self.settings_secret_drafts.remove(&input)?;
         (!secret.trim().is_empty()).then_some(secret)
     }
 
-    fn clear_focused_settings_secret_input(&mut self) -> bool {
-        let Some(input) = self.focused_settings_secret_input.take() else {
+    fn clear_focused_settings_input(&mut self) -> bool {
+        let Some(input) = self.focused_settings_input.take() else {
             return false;
         };
-        // Dropping the Zeroizing owner clears the only AI settings draft copy.
+        // Provider and ACP drafts have no second owner; MCP values remain in
+        // the zeroizing dialog draft when their input merely loses focus.
         self.settings_secret_drafts.remove(&input);
         true
     }
@@ -959,6 +1010,389 @@ impl AiWorkspaceEntity {
         });
         self.acp_token_operation_tasks
             .insert(agent_id, operation_task);
+        true
+    }
+
+    pub(in crate::workspace) fn mcp_dialog_is_open(&self) -> bool {
+        self.mcp_add_dialog.is_some()
+    }
+
+    pub(in crate::workspace) fn mcp_draft_is_valid(&self, settings: &PersistedSettings) -> bool {
+        self.mcp_add_dialog
+            .as_ref()
+            .is_some_and(|draft| ai_mcp_draft_valid(draft, settings))
+    }
+
+    pub(in crate::workspace) fn mcp_transport(&self) -> Option<oxideterm_ai::McpTransport> {
+        self.mcp_add_dialog.as_ref().map(|draft| draft.transport)
+    }
+
+    pub(in crate::workspace) fn mcp_auth_mode(&self) -> Option<oxideterm_ai::McpAuthHeaderMode> {
+        self.mcp_add_dialog
+            .as_ref()
+            .map(|draft| draft.auth_header_mode)
+    }
+
+    pub(in crate::workspace) fn mcp_auth_token_visible(&self) -> bool {
+        self.mcp_add_dialog
+            .as_ref()
+            .is_some_and(|draft| draft.show_auth_token)
+    }
+
+    pub(in crate::workspace) fn mcp_retry_enabled(&self) -> bool {
+        self.mcp_add_dialog
+            .as_ref()
+            .is_some_and(|draft| draft.retry_on_disconnect)
+    }
+
+    pub(in crate::workspace) fn mcp_dialog_presence(
+        &self,
+    ) -> oxideterm_gpui_ui::motion::ExitPresence {
+        self.mcp_dialog_presence
+    }
+
+    pub(in crate::workspace) fn open_mcp_add_dialog(&mut self, cx: &mut Context<Self>) -> bool {
+        if self.mcp_save_task.is_some() {
+            return false;
+        }
+        self.mcp_dialog_exit_task = None;
+        self.clear_focused_settings_input();
+        self.mcp_dialog_presence.reopen();
+        self.mcp_add_dialog = Some(AiMcpServerDraft::default());
+        cx.notify();
+        true
+    }
+
+    pub(in crate::workspace) fn set_mcp_transport(
+        &mut self,
+        transport: oxideterm_ai::McpTransport,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(draft) = self.mcp_add_dialog.as_mut() {
+            draft.transport = transport;
+            cx.notify();
+        }
+    }
+
+    pub(in crate::workspace) fn set_mcp_auth_mode(
+        &mut self,
+        mode: oxideterm_ai::McpAuthHeaderMode,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(draft) = self.mcp_add_dialog.as_mut() {
+            draft.auth_header_mode = mode;
+            cx.notify();
+        }
+    }
+
+    pub(in crate::workspace) fn toggle_mcp_auth_token_visibility(
+        &mut self,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(draft) = self.mcp_add_dialog.as_mut() {
+            draft.show_auth_token = !draft.show_auth_token;
+            cx.notify();
+        }
+    }
+
+    pub(in crate::workspace) fn toggle_mcp_retry(&mut self, cx: &mut Context<Self>) {
+        if let Some(draft) = self.mcp_add_dialog.as_mut() {
+            draft.retry_on_disconnect = !draft.retry_on_disconnect;
+            cx.notify();
+        }
+    }
+
+    pub(in crate::workspace) fn mcp_record_len(&self, env: bool) -> usize {
+        self.mcp_add_dialog
+            .as_ref()
+            .map(|draft| {
+                if env {
+                    draft.env.len()
+                } else {
+                    draft.headers.len()
+                }
+            })
+            .unwrap_or(0)
+    }
+
+    pub(in crate::workspace) fn add_mcp_record_entry(&mut self, env: bool, cx: &mut Context<Self>) {
+        let Some(draft) = self.mcp_add_dialog.as_mut() else {
+            return;
+        };
+        if env {
+            draft
+                .env
+                .push((format!("KEY_{}", draft.env.len() + 1), String::new()));
+        } else {
+            draft
+                .headers
+                .push((format!("HEADER_{}", draft.headers.len() + 1), String::new()));
+        }
+        cx.notify();
+    }
+
+    pub(in crate::workspace) fn remove_mcp_record_entry(
+        &mut self,
+        env: bool,
+        index: usize,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(draft) = self.mcp_add_dialog.as_mut() else {
+            return;
+        };
+        let removed = if env {
+            (index < draft.env.len()).then(|| draft.env.remove(index))
+        } else {
+            (index < draft.headers.len()).then(|| draft.headers.remove(index))
+        };
+        if removed.is_some() {
+            let focus_shifted = self
+                .focused_settings_input
+                .is_some_and(|input| match input {
+                    SettingsInput::AiMcpEnvKey(input_index)
+                    | SettingsInput::AiMcpEnvValue(input_index) => env && input_index >= index,
+                    SettingsInput::AiMcpHeaderKey(input_index)
+                    | SettingsInput::AiMcpHeaderValue(input_index) => !env && input_index >= index,
+                    _ => false,
+                });
+            if focus_shifted {
+                self.focused_settings_input = None;
+            }
+            cx.notify();
+        }
+    }
+
+    pub(in crate::workspace) fn begin_mcp_dialog_exit(
+        &mut self,
+        submit: bool,
+        delay: Duration,
+        configured_names: HashSet<String>,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if self.mcp_add_dialog.is_none() {
+            return false;
+        }
+        self.clear_focused_settings_input();
+        let Some(generation) = self.mcp_dialog_presence.begin_exit() else {
+            return false;
+        };
+        if delay.is_zero() {
+            self.finish_mcp_dialog_exit(generation, submit, configured_names, cx);
+            return true;
+        }
+
+        // The Entity retains exit completion so a settings visibility change
+        // cannot strand a secret-bearing dialog in its transitional phase.
+        self.mcp_dialog_exit_task = Some(cx.spawn(async move |entity, cx| {
+            Timer::after(delay).await;
+            let _ = entity.update(cx, |entity, cx| {
+                entity.mcp_dialog_exit_task = None;
+                entity.finish_mcp_dialog_exit(generation, submit, configured_names, cx);
+            });
+        }));
+        cx.notify();
+        true
+    }
+
+    fn finish_mcp_dialog_exit(
+        &mut self,
+        generation: u64,
+        submit: bool,
+        configured_names: HashSet<String>,
+        cx: &mut Context<Self>,
+    ) {
+        if !self.mcp_dialog_presence.finish_exit(generation) {
+            return;
+        }
+        self.mcp_dialog_presence.reopen();
+        if !submit {
+            // Dropping the draft zeroizes tokens, args, env, and headers.
+            self.mcp_add_dialog = None;
+            cx.notify();
+            return;
+        }
+        self.start_mcp_server_add(configured_names, cx);
+    }
+
+    fn start_mcp_server_add(&mut self, configured_names: HashSet<String>, cx: &mut Context<Self>) {
+        let Some(mut draft) = self.mcp_add_dialog.take() else {
+            return;
+        };
+        if !ai_mcp_draft_valid_for_names(&draft, &configured_names) {
+            self.mcp_add_dialog = Some(draft);
+            cx.notify();
+            return;
+        }
+
+        let server_id = format!("mcp-{}", uuid::Uuid::new_v4());
+        let should_store_auth_token = !draft.auth_token.is_empty()
+            && draft.auth_header_mode != oxideterm_ai::McpAuthHeaderMode::None;
+        if !should_store_auth_token {
+            let config = mcp_server_config_from_draft(draft, server_id);
+            self.credential_intents
+                .push_back(AiCredentialIntent::McpServerReady { config });
+            cx.emit(AiWorkspaceEvent::CredentialOperationReady);
+            cx.notify();
+            return;
+        }
+
+        let token = take_mcp_auth_token(&mut draft);
+        let registry = self.mcp_registry.clone();
+        let task_runtime = self.task_runtime.clone();
+        let keychain_server_id = server_id.clone();
+        let operation = async move {
+            task_runtime
+                .spawn_blocking(move || registry.store_auth_token(&keychain_server_id, token))
+                .await
+                .is_ok_and(|result| result.is_ok())
+        };
+        self.start_mcp_token_save(draft, server_id, operation, cx);
+    }
+
+    fn start_mcp_token_save(
+        &mut self,
+        pending_draft: AiMcpServerDraft,
+        server_id: String,
+        operation: impl std::future::Future<Output = bool> + 'static,
+        cx: &mut Context<Self>,
+    ) {
+        self.mcp_save_task = Some(cx.spawn(async move |entity, cx| {
+            let stored = operation.await;
+            let _ = entity.update(cx, |entity, cx| {
+                entity.mcp_save_task = None;
+                if stored {
+                    // Build the persisted value only after the keychain write
+                    // succeeds, avoiding an async second copy of env/header data.
+                    let config = mcp_server_config_from_draft(pending_draft, server_id);
+                    entity
+                        .credential_intents
+                        .push_back(AiCredentialIntent::McpServerReady { config });
+                } else {
+                    // The token was consumed by the failed keychain boundary;
+                    // restoring the remaining draft requires explicit re-entry.
+                    entity.mcp_add_dialog = Some(pending_draft);
+                    entity.mcp_dialog_presence.reopen();
+                    entity
+                        .credential_intents
+                        .push_back(AiCredentialIntent::Failed(
+                            AiCredentialFailure::SaveMcpToken,
+                        ));
+                }
+                cx.emit(AiWorkspaceEvent::CredentialOperationReady);
+                cx.notify();
+            });
+        }));
+    }
+
+    pub(in crate::workspace) fn request_mcp_status_tick(
+        &mut self,
+        delay: Duration,
+        cx: &mut Context<Self>,
+    ) {
+        if self.mcp_status_tick_task.is_some() {
+            return;
+        }
+        self.mcp_status_tick_task = Some(cx.spawn(async move |entity, cx| {
+            Timer::after(delay).await;
+            let _ = entity.update(cx, |entity, cx| {
+                entity.mcp_status_tick_task = None;
+                cx.emit(AiWorkspaceEvent::McpRuntimeChanged);
+                cx.notify();
+            });
+        }));
+    }
+
+    pub(in crate::workspace) fn refresh_mcp_tools(
+        &mut self,
+        server_id: String,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let registry = self.mcp_registry.clone();
+        self.start_mcp_runtime_task(
+            server_id.clone(),
+            async move {
+                let _ = registry.refresh_tools(&server_id).await;
+                None
+            },
+            cx,
+        )
+    }
+
+    pub(in crate::workspace) fn set_mcp_server_connected(
+        &mut self,
+        config: oxideterm_ai::McpServerConfig,
+        connected: bool,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let server_id = config.id.clone();
+        let registry = self.mcp_registry.clone();
+        self.start_mcp_runtime_task(
+            server_id,
+            async move {
+                if connected {
+                    registry.disconnect_server(&config.id).await;
+                } else {
+                    registry.connect_config(config).await;
+                }
+                None
+            },
+            cx,
+        )
+    }
+
+    pub(in crate::workspace) fn remove_mcp_server(
+        &mut self,
+        server_id: String,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let registry = self.mcp_registry.clone();
+        let task_runtime = self.task_runtime.clone();
+        self.start_mcp_runtime_task(
+            server_id.clone(),
+            async move {
+                registry.disconnect_server(&server_id).await;
+                let delete_registry = registry.clone();
+                let server_id_for_delete = server_id.clone();
+                let _ = task_runtime
+                    .spawn_blocking(move || {
+                        delete_registry.delete_auth_token(&server_id_for_delete)
+                    })
+                    .await;
+                Some(server_id)
+            },
+            cx,
+        )
+    }
+
+    fn start_mcp_runtime_task(
+        &mut self,
+        task_key: String,
+        operation: impl std::future::Future<Output = Option<String>> + 'static,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if self.mcp_runtime_tasks.contains_key(&task_key) {
+            return false;
+        }
+        // Retaining one task per server keeps runtime actions alive when the
+        // settings page becomes hidden and rejects duplicate user actions.
+        let completion_key = task_key.clone();
+        self.mcp_runtime_tasks.insert(
+            task_key,
+            cx.spawn(async move |entity, cx| {
+                let removed_server_id = operation.await;
+                let _ = entity.update(cx, |entity, cx| {
+                    entity.mcp_runtime_tasks.remove(&completion_key);
+                    if let Some(server_id) = removed_server_id {
+                        entity
+                            .credential_intents
+                            .push_back(AiCredentialIntent::McpServerRemoved { server_id });
+                        cx.emit(AiWorkspaceEvent::CredentialOperationReady);
+                    }
+                    cx.emit(AiWorkspaceEvent::McpRuntimeChanged);
+                    cx.notify();
+                });
+            }),
+        );
         true
     }
 
@@ -2162,6 +2596,126 @@ impl AiWorkspaceEntity {
     }
 }
 
+fn mcp_draft_input_value_mut(
+    draft: &mut AiMcpServerDraft,
+    input: SettingsInput,
+) -> Option<&mut String> {
+    match input {
+        SettingsInput::AiMcpName => Some(&mut draft.name),
+        SettingsInput::AiMcpCommand => Some(&mut draft.command),
+        SettingsInput::AiMcpArgs => Some(&mut draft.args),
+        SettingsInput::AiMcpUrl => Some(&mut draft.url),
+        SettingsInput::AiMcpAuthHeaderName => Some(&mut draft.auth_header_name),
+        SettingsInput::AiMcpAuthToken => Some(&mut draft.auth_token),
+        SettingsInput::AiMcpEnvKey(index) => draft.env.get_mut(index).map(|(key, _)| key),
+        SettingsInput::AiMcpEnvValue(index) => draft.env.get_mut(index).map(|(_, value)| value),
+        SettingsInput::AiMcpHeaderKey(index) => draft.headers.get_mut(index).map(|(key, _)| key),
+        SettingsInput::AiMcpHeaderValue(index) => {
+            draft.headers.get_mut(index).map(|(_, value)| value)
+        }
+        _ => None,
+    }
+}
+
+fn take_mcp_auth_token(draft: &mut AiMcpServerDraft) -> zeroize::Zeroizing<String> {
+    // Move the draft allocation into the keychain boundary without creating
+    // an intermediate token copy.
+    zeroize::Zeroizing::new(std::mem::take(&mut draft.auth_token))
+}
+
+fn mcp_server_config_from_draft(
+    mut draft: AiMcpServerDraft,
+    server_id: String,
+) -> serde_json::Value {
+    let mut object = serde_json::Map::new();
+    object.insert("id".to_string(), serde_json::Value::String(server_id));
+    object.insert(
+        "name".to_string(),
+        serde_json::Value::String(take_trimmed_mcp_value(&mut draft.name)),
+    );
+    object.insert(
+        "transport".to_string(),
+        serde_json::json!(ai_mcp_transport_value(draft.transport)),
+    );
+    let url = take_trimmed_mcp_value(&mut draft.url);
+    if !url.is_empty() {
+        object.insert("url".to_string(), serde_json::Value::String(url));
+    }
+    let command = take_trimmed_mcp_value(&mut draft.command);
+    if !command.is_empty() {
+        object.insert("command".to_string(), serde_json::Value::String(command));
+    }
+    let args_source = zeroize::Zeroizing::new(std::mem::take(&mut draft.args));
+    let args = args_source
+        .split_whitespace()
+        .map(|argument| serde_json::Value::String(argument.to_string()))
+        .collect::<Vec<_>>();
+    if !args.is_empty() {
+        object.insert("args".to_string(), serde_json::Value::Array(args));
+    }
+    if let Some(env) = take_mcp_record_value(&mut draft.env) {
+        object.insert("env".to_string(), env);
+    }
+    let auth_header_name = take_trimmed_mcp_value(&mut draft.auth_header_name);
+    if !auth_header_name.is_empty() && auth_header_name != "Authorization" {
+        object.insert(
+            "authHeaderName".to_string(),
+            serde_json::Value::String(auth_header_name),
+        );
+    }
+    if draft.auth_header_mode != oxideterm_ai::McpAuthHeaderMode::Bearer {
+        object.insert(
+            "authHeaderMode".to_string(),
+            serde_json::json!(ai_mcp_auth_mode_value(draft.auth_header_mode)),
+        );
+    }
+    if let Some(headers) = take_mcp_record_value(&mut draft.headers) {
+        object.insert("headers".to_string(), headers);
+    }
+    object.insert("enabled".to_string(), serde_json::json!(true));
+    if draft.retry_on_disconnect {
+        object.insert("retryOnDisconnect".to_string(), serde_json::json!(true));
+    }
+    // The consumed draft is zeroized as soon as the required persistence
+    // representation has been built.
+    serde_json::Value::Object(object)
+}
+
+fn take_trimmed_mcp_value(value: &mut String) -> String {
+    let mut owned_value = std::mem::take(value);
+    let trimmed_range = {
+        let trimmed = owned_value.trim();
+        let start = trimmed.as_ptr() as usize - owned_value.as_ptr() as usize;
+        start..start + trimmed.len()
+    };
+    owned_value.truncate(trimmed_range.end);
+    owned_value.drain(..trimmed_range.start);
+    owned_value
+}
+
+fn take_mcp_record_value(entries: &mut Vec<(String, String)>) -> Option<serde_json::Value> {
+    let mut object = serde_json::Map::new();
+    for (mut key, mut value) in std::mem::take(entries) {
+        key = take_trimmed_mcp_value(&mut key);
+        if key.is_empty() {
+            zeroize::Zeroize::zeroize(&mut value);
+            continue;
+        }
+        if let Some(previous_value) = object.get_mut(&key) {
+            // Replacing a duplicate key must zeroize the superseded value
+            // instead of relying on serde_json's ordinary String drop.
+            if let serde_json::Value::String(previous_value) = previous_value {
+                zeroize::Zeroize::zeroize(previous_value);
+            }
+            *previous_value = serde_json::Value::String(value);
+            zeroize::Zeroize::zeroize(&mut key);
+        } else {
+            object.insert(key, serde_json::Value::String(value));
+        }
+    }
+    (!object.is_empty()).then(|| serde_json::Value::Object(object))
+}
+
 fn ai_acp_probe_error_result(kind: &'static str) -> AiAcpAgentProbeResult {
     // Only stable categories cross the worker boundary; process errors may
     // include args, env values, or local authentication material.
@@ -2252,7 +2806,6 @@ pub(super) struct AiModelWorkspaceState {
     pub(super) selector_expanded_providers: HashSet<String>,
     pub(super) selector_highlighted_model: Option<(String, String)>,
     pub(super) selector_status_signature: u64,
-    pub(super) mcp_add_dialog: Option<AiMcpServerDraft>,
     pub(super) key_store: oxideterm_ai::AiProviderKeyStore,
 }
 
@@ -2357,7 +2910,6 @@ impl AiModelWorkspaceState {
             selector_expanded_providers: HashSet::new(),
             selector_highlighted_model: None,
             selector_status_signature: 0,
-            mcp_add_dialog: None,
             key_store,
         }
     }
@@ -2392,10 +2944,10 @@ mod entity_tests {
         });
         let input = SettingsInput::AiProviderApiKey(3);
         let draft_allocation = entity.update(cx, |entity, cx| {
-            assert!(entity.focus_settings_secret_input(input, cx));
-            assert!(entity.replace_settings_secret_input(input, None, "test-secret", cx));
+            assert!(entity.focus_settings_input(input, cx));
+            assert!(entity.replace_settings_input(input, None, "test-secret", cx));
             entity
-                .settings_secret_input_value(input)
+                .settings_input_value(input)
                 .expect("provider draft")
                 .as_ptr()
         });
@@ -2405,8 +2957,8 @@ mod entity_tests {
         assert_eq!(secret.as_ptr(), draft_allocation);
         cx.read(|cx| {
             let entity = entity.read(cx);
-            assert_eq!(entity.focused_settings_secret_input(), None);
-            assert!(entity.settings_secret_input_value(input).is_none());
+            assert_eq!(entity.focused_settings_input(), None);
+            assert!(entity.settings_input_value(input).is_none());
         });
 
         entity.update(cx, |entity, cx| {
@@ -2479,10 +3031,10 @@ mod entity_tests {
         });
         let input = SettingsInput::AiAcpAgentAuthToken(2);
         let draft_allocation = entity.update(cx, |entity, cx| {
-            assert!(entity.focus_settings_secret_input(input, cx));
-            assert!(entity.replace_settings_secret_input(input, None, "test-token", cx));
+            assert!(entity.focus_settings_input(input, cx));
+            assert!(entity.replace_settings_input(input, None, "test-token", cx));
             entity
-                .settings_secret_input_value(input)
+                .settings_input_value(input)
                 .expect("ACP token draft")
                 .as_ptr()
         });
@@ -2513,6 +3065,156 @@ mod entity_tests {
                 AiCredentialIntent::AcpTokenStored { agent_id }
                     if agent_id == "agent-test"
             ));
+        });
+    }
+
+    #[gpui::test]
+    fn mcp_dialog_inputs_exit_and_submission_are_entity_owned(cx: &mut TestAppContext) {
+        let entity = cx.new(|cx| {
+            AiWorkspaceEntity::new(test_runtime(), oxideterm_ai::AiProviderKeyStore::new(), cx)
+        });
+        entity.update(cx, |entity, cx| {
+            assert!(entity.open_mcp_add_dialog(cx));
+            assert!(entity.focus_settings_input(SettingsInput::AiMcpName, cx));
+            assert!(entity.replace_settings_input(
+                SettingsInput::AiMcpName,
+                None,
+                "server-test",
+                cx,
+            ));
+            assert!(entity.begin_mcp_dialog_exit(
+                false,
+                Duration::from_millis(10),
+                HashSet::new(),
+                cx,
+            ));
+            assert!(entity.mcp_dialog_exit_task.is_some());
+
+            // Reopening invalidates the retained exit task and zeroizes the
+            // superseded draft before installing a fresh owner.
+            assert!(entity.open_mcp_add_dialog(cx));
+            assert!(entity.mcp_dialog_exit_task.is_none());
+            assert_eq!(
+                entity.settings_input_value(SettingsInput::AiMcpName),
+                Some("")
+            );
+            assert!(entity.focus_settings_input(SettingsInput::AiMcpName, cx));
+            assert!(entity.replace_settings_input(
+                SettingsInput::AiMcpName,
+                None,
+                "server-ready",
+                cx,
+            ));
+            assert!(entity.begin_mcp_dialog_exit(true, Duration::ZERO, HashSet::new(), cx,));
+            assert!(entity.mcp_add_dialog.is_none());
+            let intent = entity
+                .take_credential_intents()
+                .pop_front()
+                .expect("MCP config completion intent");
+            assert!(matches!(
+                intent,
+                AiCredentialIntent::McpServerReady { config }
+                    if config.get("name").and_then(serde_json::Value::as_str)
+                        == Some("server-ready")
+            ));
+        });
+    }
+
+    #[gpui::test]
+    fn mcp_token_moves_once_and_failure_restores_only_non_token_draft(cx: &mut TestAppContext) {
+        let entity = cx.new(|cx| {
+            AiWorkspaceEntity::new(test_runtime(), oxideterm_ai::AiProviderKeyStore::new(), cx)
+        });
+        let mut restore_draft = AiMcpServerDraft::default();
+        restore_draft.name = "server-test".to_string();
+        restore_draft.auth_token = "test-token".to_string();
+        let token_allocation = restore_draft.auth_token.as_ptr();
+        let token = take_mcp_auth_token(&mut restore_draft);
+        assert_eq!(token.as_ptr(), token_allocation);
+        assert!(restore_draft.auth_token.is_empty());
+        drop(token);
+
+        entity.update(cx, |entity, cx| {
+            entity.start_mcp_token_save(
+                restore_draft,
+                "mcp-test".to_string(),
+                std::future::ready(false),
+                cx,
+            );
+            assert!(entity.mcp_save_task.is_some());
+        });
+        cx.run_until_parked();
+
+        entity.update(cx, |entity, _cx| {
+            assert!(entity.mcp_save_task.is_none());
+            assert!(
+                entity
+                    .mcp_add_dialog
+                    .as_ref()
+                    .is_some_and(|draft| draft.auth_token.is_empty())
+            );
+            let intent = entity
+                .take_credential_intents()
+                .pop_front()
+                .expect("MCP failure intent");
+            assert!(matches!(
+                intent,
+                AiCredentialIntent::Failed(AiCredentialFailure::SaveMcpToken)
+            ));
+        });
+    }
+
+    #[test]
+    fn mcp_config_consumes_sensitive_record_allocations() {
+        let mut draft = AiMcpServerDraft::default();
+        draft.name = "server-test".to_string();
+        draft
+            .env
+            .push(("TOKEN".to_string(), "sensitive-value".to_string()));
+        let sensitive_allocation = draft.env[0].1.as_ptr();
+
+        let config = mcp_server_config_from_draft(draft, "mcp-test".to_string());
+
+        let persisted_value = config
+            .get("env")
+            .and_then(|env| env.get("TOKEN"))
+            .and_then(serde_json::Value::as_str)
+            .expect("persisted MCP environment value");
+        assert_eq!(persisted_value.as_ptr(), sensitive_allocation);
+    }
+
+    #[gpui::test]
+    fn mcp_runtime_task_is_entity_retained_and_delivers_once(cx: &mut TestAppContext) {
+        let entity = cx.new(|cx| {
+            AiWorkspaceEntity::new(test_runtime(), oxideterm_ai::AiProviderKeyStore::new(), cx)
+        });
+        entity.update(cx, |entity, cx| {
+            assert!(entity.start_mcp_runtime_task(
+                "server-test".to_string(),
+                std::future::ready(Some("server-test".to_string())),
+                cx,
+            ));
+            assert!(entity.mcp_runtime_tasks.contains_key("server-test"));
+            assert!(!entity.start_mcp_runtime_task(
+                "server-test".to_string(),
+                std::future::ready(None),
+                cx,
+            ));
+        });
+        cx.run_until_parked();
+
+        entity.update(cx, |entity, _cx| {
+            assert!(!entity.mcp_runtime_tasks.contains_key("server-test"));
+            let intent = entity
+                .take_credential_intents()
+                .pop_front()
+                .expect("MCP removal intent");
+            assert!(matches!(
+                intent,
+                AiCredentialIntent::McpServerRemoved { server_id }
+                    if server_id == "server-test"
+            ));
+            assert!(entity.take_credential_intents().is_empty());
         });
     }
 

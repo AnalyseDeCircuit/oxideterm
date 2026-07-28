@@ -1160,11 +1160,9 @@ impl WorkspaceApp {
             }
             (SettingsTab::Ai, SettingsSelect::AiMcpTransport) => {
                 let current = self
-                    .ai
-                    .models
-                    .mcp_add_dialog
-                    .as_ref()
-                    .map(|draft| draft.transport)
+                    .ai_entity
+                    .read(cx)
+                    .mcp_transport()
                     .unwrap_or(oxideterm_ai::McpTransport::Stdio);
                 let mut popup = select_overlay_popup(&self.tokens, width.max(220.0));
                 for (transport, label) in [
@@ -1181,11 +1179,10 @@ impl WorkspaceApp {
                         false,
                         cx.listener(move |this, _event, _window, cx| {
                             this.close_settings_select();
-                            if let Some(draft) = this.ai.models.mcp_add_dialog.as_mut() {
-                                draft.transport = transport;
-                            }
+                            this.ai_entity.update(cx, |ai, cx| {
+                                ai.set_mcp_transport(transport, cx);
+                            });
                             cx.stop_propagation();
-                            cx.notify();
                         }),
                     ));
                 }
@@ -1193,11 +1190,9 @@ impl WorkspaceApp {
             }
             (SettingsTab::Ai, SettingsSelect::AiMcpAuthMode) => {
                 let current = self
-                    .ai
-                    .models
-                    .mcp_add_dialog
-                    .as_ref()
-                    .map(|draft| draft.auth_header_mode)
+                    .ai_entity
+                    .read(cx)
+                    .mcp_auth_mode()
                     .unwrap_or(oxideterm_ai::McpAuthHeaderMode::Bearer);
                 let mut popup = select_overlay_popup(&self.tokens, width.max(220.0));
                 for (mode, label) in [
@@ -1220,11 +1215,10 @@ impl WorkspaceApp {
                         false,
                         cx.listener(move |this, _event, _window, cx| {
                             this.close_settings_select();
-                            if let Some(draft) = this.ai.models.mcp_add_dialog.as_mut() {
-                                draft.auth_header_mode = mode;
-                            }
+                            this.ai_entity.update(cx, |ai, cx| {
+                                ai.set_mcp_auth_mode(mode, cx);
+                            });
                             cx.stop_propagation();
-                            cx.notify();
                         }),
                     ));
                 }

@@ -860,35 +860,46 @@ pub fn ai_mcp_configs(settings: &PersistedSettings) -> Vec<oxideterm_ai::McpServ
 }
 
 pub fn ai_mcp_draft_valid(draft: &AiMcpServerDraft, settings: &PersistedSettings) -> bool {
+    let configured_names = ai_mcp_configs(settings)
+        .into_iter()
+        .map(|server| server.name)
+        .collect();
+    ai_mcp_draft_valid_for_names(draft, &configured_names)
+}
+
+pub fn ai_mcp_draft_valid_for_names(
+    draft: &AiMcpServerDraft,
+    configured_names: &HashSet<String>,
+) -> bool {
     let name = draft.name.trim();
     !name.is_empty()
         && name
             .chars()
             .all(|ch| ch.is_ascii_alphanumeric() || ch == '-')
-        && !ai_mcp_configs(settings)
-            .iter()
-            .any(|server| server.name == name)
+        && !configured_names.contains(name)
 }
 
 pub fn ai_mcp_draft_input_value(
     draft: Option<&AiMcpServerDraft>,
     input: SettingsInput,
-) -> Option<String> {
+) -> Option<&str> {
     let draft = draft?;
     match input {
-        SettingsInput::AiMcpName => Some(draft.name.clone()),
-        SettingsInput::AiMcpCommand => Some(draft.command.clone()),
-        SettingsInput::AiMcpArgs => Some(draft.args.clone()),
-        SettingsInput::AiMcpUrl => Some(draft.url.clone()),
-        SettingsInput::AiMcpAuthHeaderName => Some(draft.auth_header_name.clone()),
-        SettingsInput::AiMcpAuthToken => Some(draft.auth_token.clone()),
-        SettingsInput::AiMcpEnvKey(index) => draft.env.get(index).map(|(key, _)| key.clone()),
-        SettingsInput::AiMcpEnvValue(index) => draft.env.get(index).map(|(_, value)| value.clone()),
+        SettingsInput::AiMcpName => Some(&draft.name),
+        SettingsInput::AiMcpCommand => Some(&draft.command),
+        SettingsInput::AiMcpArgs => Some(&draft.args),
+        SettingsInput::AiMcpUrl => Some(&draft.url),
+        SettingsInput::AiMcpAuthHeaderName => Some(&draft.auth_header_name),
+        SettingsInput::AiMcpAuthToken => Some(&draft.auth_token),
+        SettingsInput::AiMcpEnvKey(index) => draft.env.get(index).map(|(key, _)| key.as_str()),
+        SettingsInput::AiMcpEnvValue(index) => {
+            draft.env.get(index).map(|(_, value)| value.as_str())
+        }
         SettingsInput::AiMcpHeaderKey(index) => {
-            draft.headers.get(index).map(|(key, _)| key.clone())
+            draft.headers.get(index).map(|(key, _)| key.as_str())
         }
         SettingsInput::AiMcpHeaderValue(index) => {
-            draft.headers.get(index).map(|(_, value)| value.clone())
+            draft.headers.get(index).map(|(_, value)| value.as_str())
         }
         _ => None,
     }

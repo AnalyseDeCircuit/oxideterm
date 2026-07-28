@@ -650,7 +650,7 @@ impl WorkspaceApp {
             return Some(WorkspaceImeTarget::Settings(input));
         }
 
-        if let Some(input) = self.ai_entity.read(cx).focused_settings_secret_input() {
+        if let Some(input) = self.ai_entity.read(cx).focused_settings_input() {
             return Some(WorkspaceImeTarget::Settings(input));
         }
 
@@ -1546,12 +1546,12 @@ impl WorkspaceApp {
                         .read(cx)
                         .settings_entity_input_value(input)
                         .map(str::to_owned)
-                } else if self.ai_entity.read(cx).focused_settings_secret_input() == Some(input) {
+                } else if self.ai_entity.read(cx).focused_settings_input() == Some(input) {
                     // GPUI's InputHandler requires an owned frame snapshot.
                     // The Entity remains the sole persistent owner of the draft.
                     self.ai_entity
                         .read(cx)
-                        .settings_secret_input_value(input)
+                        .settings_input_value(input)
                         .map(str::to_owned)
                 } else if self.focused_settings_input == Some(input) {
                     Some(self.settings_input_draft.clone())
@@ -2411,9 +2411,9 @@ impl WorkspaceApp {
                     self.settings_workspace.update(cx, |settings, cx| {
                         settings.replace_settings_entity_input(input, replacement_range, text, cx);
                     });
-                } else if self.ai_entity.read(cx).focused_settings_secret_input() == Some(input) {
+                } else if self.ai_entity.read(cx).focused_settings_input() == Some(input) {
                     self.ai_entity.update(cx, |ai, cx| {
-                        ai.replace_settings_secret_input(input, replacement_range, text, cx);
+                        ai.replace_settings_input(input, replacement_range, text, cx);
                     });
                 } else if self.focused_settings_input == Some(input) {
                     replace_utf16(&mut self.settings_input_draft, replacement_range, text);

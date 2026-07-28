@@ -129,10 +129,28 @@ impl WorkspaceApp {
                                 cx,
                             );
                         }
+                        ai_state::AiCredentialIntent::McpServerReady { config } => {
+                            self.edit_settings(
+                                move |settings| settings.ai.mcp_servers.push(config),
+                                cx,
+                            );
+                        }
+                        ai_state::AiCredentialIntent::McpServerRemoved { server_id } => {
+                            self.edit_settings(
+                                move |settings| {
+                                    settings.ai.mcp_servers.retain(|value| {
+                                        value.get("id").and_then(serde_json::Value::as_str)
+                                            != Some(server_id.as_str())
+                                    });
+                                },
+                                cx,
+                            );
+                        }
                         ai_state::AiCredentialIntent::Failed(failure) => {
                             let message_key = match failure {
                                 ai_state::AiCredentialFailure::SaveProviderKey
-                                | ai_state::AiCredentialFailure::SaveAcpToken => {
+                                | ai_state::AiCredentialFailure::SaveAcpToken
+                                | ai_state::AiCredentialFailure::SaveMcpToken => {
                                     "settings_view.ai.save_failed"
                                 }
                                 ai_state::AiCredentialFailure::RemoveProviderKey
@@ -173,6 +191,7 @@ impl WorkspaceApp {
                 }
                 cx.notify();
             }
+            ai_state::AiWorkspaceEvent::McpRuntimeChanged => cx.notify(),
             ai_state::AiWorkspaceEvent::ModelRefreshDeliveryReady => {
                 let intents = self
                     .ai_entity

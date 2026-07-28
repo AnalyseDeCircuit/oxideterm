@@ -34,11 +34,9 @@ impl WorkspaceApp {
                 && (snapshot.status == "connecting"
                     || (snapshot.status == "error" && snapshot.config.retry_on_disconnect))
         }) {
-            cx.spawn(async move |weak, cx| {
-                Timer::after(Duration::from_millis(500)).await;
-                let _ = weak.update(cx, |_this, cx| cx.notify());
-            })
-            .detach();
+            self.ai_entity.update(cx, |ai, cx| {
+                ai.request_mcp_status_tick(Duration::from_millis(500), cx);
+            });
         }
 
         let list = if configs.is_empty() {
@@ -120,9 +118,9 @@ impl WorkspaceApp {
                                 ..ToolbarButtonOptions::default()
                             },
                             cx.listener(|this, _event, _window, cx| {
-                                this.ai_mcp_dialog_presence.reopen();
-                                this.ai.models.mcp_add_dialog = Some(AiMcpServerDraft::default());
-                                this.focused_settings_input = None;
+                                this.ai_entity.update(cx, |ai, cx| {
+                                    ai.open_mcp_add_dialog(cx);
+                                });
                                 this.close_settings_select();
                                 this.clear_standard_confirm_focus();
                                 cx.stop_propagation();
@@ -264,14 +262,9 @@ impl WorkspaceApp {
                                     rgb(self.tokens.ui.text_muted),
                                     false,
                                     move |this, _event, _window, cx| {
-                                        let registry =
-                                            this.ai_entity.read(cx).mcp_registry().clone();
-                                        let server_id = refresh_id.clone();
-                                        cx.spawn(async move |weak, cx| {
-                                            let _ = registry.refresh_tools(&server_id).await;
-                                            let _ = weak.update(cx, |_this, cx| cx.notify());
-                                        })
-                                        .detach();
+                                        this.ai_entity.update(cx, |ai, cx| {
+                                            ai.refresh_mcp_tools(refresh_id.clone(), cx);
+                                        });
                                         cx.stop_propagation();
                                     },
                                     cx,
@@ -283,34 +276,9 @@ impl WorkspaceApp {
                                 rgb(self.tokens.ui.error),
                                 false,
                                 move |this, _event, _window, cx| {
-                                    let registry = this.ai_entity.read(cx).mcp_registry().clone();
-                                    let runtime = this.forwarding_runtime.clone();
-                                    let server_id = remove_id.clone();
-                                    cx.spawn(async move |weak, cx| {
-                                        registry.disconnect_server(&server_id).await;
-                                        let delete_registry = registry.clone();
-                                        let server_id_for_delete = server_id.clone();
-                                        let _ = runtime
-                                            .spawn_blocking(move || {
-                                                delete_registry
-                                                    .delete_auth_token(&server_id_for_delete)
-                                            })
-                                            .await;
-                                        let _ = weak.update(cx, |this, cx| {
-                                            this.edit_settings(
-                                                |settings| {
-                                                    settings.ai.mcp_servers.retain(|value| {
-                                                        value
-                                                            .get("id")
-                                                            .and_then(serde_json::Value::as_str)
-                                                            != Some(server_id.as_str())
-                                                    });
-                                                },
-                                                cx,
-                                            );
-                                        });
-                                    })
-                                    .detach();
+                                    this.ai_entity.update(cx, |ai, cx| {
+                                        ai.remove_mcp_server(remove_id.clone(), cx);
+                                    });
                                     cx.stop_propagation();
                                 },
                                 cx,
@@ -460,17 +428,9 @@ impl WorkspaceApp {
             Some(icon),
             options,
             cx.listener(move |this, _event, _window, cx| {
-                let registry = this.ai_entity.read(cx).mcp_registry().clone();
-                let config = config.clone();
-                cx.spawn(async move |weak, cx| {
-                    if connected {
-                        registry.disconnect_server(&config.id).await;
-                    } else {
-                        registry.connect_config(config).await;
-                    }
-                    let _ = weak.update(cx, |_this, cx| cx.notify());
-                })
-                .detach();
+                this.ai_entity.update(cx, |ai, cx| {
+                    ai.set_mcp_server_connected(config.clone(), connected, cx);
+                });
                 cx.stop_propagation();
             }),
         )
@@ -563,10 +523,24 @@ impl WorkspaceApp {
         &self,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
-        let draft = self.ai.models.mcp_add_dialog.as_ref()?;
-        let can_add = ai_mcp_draft_valid(draft, self.settings_store.settings());
-        let transport_label = ai_mcp_transport_label(draft.transport);
-        let auth_mode_label = match draft.auth_header_mode {
+        let (can_add, transport, auth_header_mode, dialog_presence) = {
+            let ai_workspace = self.ai_entity.read(cx);
+            if !ai_workspace.mcp_dialog_is_open() {
+                return None;
+            }
+            (
+                ai_workspace.mcp_draft_is_valid(self.settings_store.settings()),
+                ai_workspace
+                    .mcp_transport()
+                    .unwrap_or(oxideterm_ai::McpTransport::Stdio),
+                ai_workspace
+                    .mcp_auth_mode()
+                    .unwrap_or(oxideterm_ai::McpAuthHeaderMode::Bearer),
+                ai_workspace.mcp_dialog_presence(),
+            )
+        };
+        let transport_label = ai_mcp_transport_label(transport);
+        let auth_mode_label = match auth_header_mode {
             oxideterm_ai::McpAuthHeaderMode::Bearer => {
                 self.i18n.t("settings_view.mcp.auth_header_mode_bearer")
             }
@@ -634,7 +608,7 @@ impl WorkspaceApp {
                         transport_label,
                         cx,
                     ))
-                    .children(self.ai_mcp_transport_fields(draft, auth_mode_label, cx)),
+                    .children(self.ai_mcp_transport_fields(transport, auth_mode_label, cx)),
             )
             .child(
                 dialog_footer(&self.tokens)
@@ -664,7 +638,7 @@ impl WorkspaceApp {
             "ai-mcp-dialog-form",
             backdrop,
             form,
-            self.ai_mcp_dialog_presence,
+            dialog_presence,
         ))
     }
 
@@ -673,11 +647,17 @@ impl WorkspaceApp {
         event: &KeyDownEvent,
         cx: &mut Context<Self>,
     ) -> bool {
-        let Some(draft) = self.ai.models.mcp_add_dialog.as_ref() else {
-            return false;
+        let can_add = {
+            let ai_workspace = self.ai_entity.read(cx);
+            if !ai_workspace.mcp_dialog_is_open() {
+                return false;
+            }
+            ai_workspace.mcp_draft_is_valid(self.settings_store.settings())
         };
-        let can_add = ai_mcp_draft_valid(draft, self.settings_store.settings());
-        if self.open_settings_select.is_some() || self.focused_settings_input.is_some() {
+        if self.open_settings_select.is_some()
+            || self.focused_settings_input.is_some()
+            || self.ai_entity.read(cx).focused_settings_input().is_some()
+        {
             return false;
         }
 
@@ -710,11 +690,11 @@ impl WorkspaceApp {
 
     pub(in crate::workspace) fn ai_mcp_transport_fields(
         &self,
-        draft: &AiMcpServerDraft,
+        transport: oxideterm_ai::McpTransport,
         auth_mode_label: String,
         cx: &mut Context<Self>,
     ) -> Vec<AnyElement> {
-        if draft.transport == oxideterm_ai::McpTransport::Stdio {
+        if transport == oxideterm_ai::McpTransport::Stdio {
             return vec![
                 self.ai_mcp_labeled_input(
                     "settings_view.mcp.command",
@@ -727,7 +707,7 @@ impl WorkspaceApp {
                     self.i18n.t("settings_view.mcp.args"),
                     String::new(),
                     "--flag value".to_string(),
-                    self.current_settings_input_value(SettingsInput::AiMcpArgs, cx),
+                    String::new(),
                     AI_MCP_ARGS_TEXTAREA_MIN_H,
                     cx,
                 ),
@@ -767,25 +747,19 @@ impl WorkspaceApp {
     pub(in crate::workspace) fn ai_mcp_text_input_control(
         &self,
         input: SettingsInput,
-        value: String,
         placeholder: String,
         secret: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let focused = self.focused_settings_input == Some(input);
-        let display_value = if focused {
-            self.settings_input_draft.as_str()
-        } else {
-            value.as_str()
-        };
         let target = WorkspaceImeTarget::Settings(input);
         let workspace = cx.entity();
-        text_input_anchor_probe(
-            target.anchor_id(),
+        let input_control = {
+            let ai_workspace = self.ai_entity.read(cx);
+            let focused = ai_workspace.focused_settings_input() == Some(input);
             text_input(
                 &self.tokens,
                 TextInputView {
-                    value: display_value,
+                    value: ai_workspace.settings_input_value(input).unwrap_or_default(),
                     placeholder,
                     focused,
                     caret_visible: self.new_connection_caret_visible,
@@ -795,25 +769,28 @@ impl WorkspaceApp {
                     marked_text: self.marked_text_for_target(target, cx),
                 },
             )
-            .w_full()
-            .min_w(px(0.0))
-            .cursor(CursorStyle::IBeam)
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(move |this, event: &gpui::MouseDownEvent, window, cx| {
-                    let current = this.current_settings_input_value(input, cx);
-                    this.focus_settings_input(input, current, cx);
-                    this.ime_marked_text = None;
-                    window.focus(&this.focus_handle, cx);
-                    this.begin_ime_selection_from_mouse_down(target, event, window, cx);
-                    cx.stop_propagation();
-                }),
-            )
-            .on_mouse_move(cx.listener(
-                |this, event: &gpui::MouseMoveEvent, window, cx| {
-                    this.update_ime_selection_drag_from_mouse_move(event, window, cx);
-                },
-            )),
+        };
+        text_input_anchor_probe(
+            target.anchor_id(),
+            input_control
+                .w_full()
+                .min_w(px(0.0))
+                .cursor(CursorStyle::IBeam)
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(move |this, event: &gpui::MouseDownEvent, window, cx| {
+                        this.focus_settings_input(input, String::new(), cx);
+                        this.ime_marked_text = None;
+                        window.focus(&this.focus_handle, cx);
+                        this.begin_ime_selection_from_mouse_down(target, event, window, cx);
+                        cx.stop_propagation();
+                    }),
+                )
+                .on_mouse_move(
+                    cx.listener(|this, event: &gpui::MouseMoveEvent, window, cx| {
+                        this.update_ime_selection_drag_from_mouse_move(event, window, cx);
+                    }),
+                ),
             move |anchor, _window, cx| {
                 let _ = workspace.update(cx, |this, cx| {
                     this.update_text_input_anchor(anchor, cx);
@@ -846,13 +823,7 @@ impl WorkspaceApp {
                         cx,
                     )),
             )
-            .child(self.ai_mcp_text_input_control(
-                input,
-                self.current_settings_input_value(input, cx),
-                placeholder,
-                false,
-                cx,
-            ))
+            .child(self.ai_mcp_text_input_control(input, placeholder, false, cx))
             .into_any_element()
     }
 
@@ -888,14 +859,7 @@ impl WorkspaceApp {
         env: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let draft = self.ai.models.mcp_add_dialog.as_ref();
-        let entries = if env {
-            draft.map(|draft| draft.env.as_slice()).unwrap_or_default()
-        } else {
-            draft
-                .map(|draft| draft.headers.as_slice())
-                .unwrap_or_default()
-        };
+        let entry_count = self.ai_entity.read(cx).mcp_record_len(env);
         let title = if env {
             self.i18n.t("settings_view.mcp.env_vars")
         } else {
@@ -907,7 +871,7 @@ impl WorkspaceApp {
             self.i18n.t("settings_view.mcp.add_header")
         };
         let mut rows = div().flex().flex_col().gap(px(AI_MCP_FIELD_GAP));
-        for (index, _) in entries.iter().enumerate() {
+        for index in 0..entry_count {
             let key_input = if env {
                 SettingsInput::AiMcpEnvKey(index)
             } else {
@@ -928,7 +892,6 @@ impl WorkspaceApp {
                             .min_w(px(0.0))
                             .child(self.ai_mcp_text_input_control(
                                 key_input,
-                                self.current_settings_input_value(key_input, cx),
                                 if env {
                                     self.i18n.t("settings_view.mcp.env_key_placeholder")
                                 } else {
@@ -944,7 +907,6 @@ impl WorkspaceApp {
                             .min_w(px(0.0))
                             .child(self.ai_mcp_text_input_control(
                                 value_input,
-                                self.current_settings_input_value(value_input, cx),
                                 if env {
                                     self.i18n.t("settings_view.mcp.env_value_placeholder")
                                 } else {
@@ -958,17 +920,10 @@ impl WorkspaceApp {
                         LucideIcon::Trash2,
                         false,
                         move |this, _event, _window, cx| {
-                            if let Some(draft) = this.ai.models.mcp_add_dialog.as_mut() {
-                                if env {
-                                    if index < draft.env.len() {
-                                        draft.env.remove(index);
-                                    }
-                                } else if index < draft.headers.len() {
-                                    draft.headers.remove(index);
-                                }
-                            }
+                            this.ai_entity.update(cx, |ai, cx| {
+                                ai.remove_mcp_record_entry(env, index, cx);
+                            });
                             cx.stop_propagation();
-                            cx.notify();
                         },
                         cx,
                     )),
@@ -992,19 +947,10 @@ impl WorkspaceApp {
                 ..ToolbarButtonOptions::default()
             },
             cx.listener(move |this, _event, _window, cx| {
-                if let Some(draft) = this.ai.models.mcp_add_dialog.as_mut() {
-                    if env {
-                        draft
-                            .env
-                            .push((format!("KEY_{}", draft.env.len() + 1), String::new()));
-                    } else {
-                        draft
-                            .headers
-                            .push((format!("HEADER_{}", draft.headers.len() + 1), String::new()));
-                    }
-                }
+                this.ai_entity.update(cx, |ai, cx| {
+                    ai.add_mcp_record_entry(env, cx);
+                });
                 cx.stop_propagation();
-                cx.notify();
             }),
         ));
         div()
@@ -1033,12 +979,7 @@ impl WorkspaceApp {
         &self,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let secret = !self
-            .ai
-            .models
-            .mcp_add_dialog
-            .as_ref()
-            .is_some_and(|draft| draft.show_auth_token);
+        let secret = !self.ai_entity.read(cx).mcp_auth_token_visible();
         let input = SettingsInput::AiMcpAuthToken;
         div()
             .flex()
@@ -1060,7 +1001,6 @@ impl WorkspaceApp {
                             .min_w(px(0.0))
                             .child(self.ai_mcp_text_input_control(
                                 input,
-                                self.current_settings_input_value(input, cx),
                                 self.i18n.t("settings_view.mcp.auth_token_placeholder"),
                                 secret,
                                 cx,
@@ -1074,11 +1014,10 @@ impl WorkspaceApp {
                         },
                         false,
                         |this, _event, _window, cx| {
-                            if let Some(draft) = this.ai.models.mcp_add_dialog.as_mut() {
-                                draft.show_auth_token = !draft.show_auth_token;
-                            }
+                            this.ai_entity.update(cx, |ai, cx| {
+                                ai.toggle_mcp_auth_token_visibility(cx);
+                            });
                             cx.stop_propagation();
-                            cx.notify();
                         },
                         cx,
                     )),
@@ -1087,12 +1026,7 @@ impl WorkspaceApp {
     }
 
     pub(in crate::workspace) fn ai_mcp_retry_row(&self, cx: &mut Context<Self>) -> AnyElement {
-        let checked = self
-            .ai
-            .models
-            .mcp_add_dialog
-            .as_ref()
-            .is_some_and(|draft| draft.retry_on_disconnect);
+        let checked = self.ai_entity.read(cx).mcp_retry_enabled();
         div()
             .flex()
             .items_center()
@@ -1109,11 +1043,10 @@ impl WorkspaceApp {
                     .on_mouse_down(
                         MouseButton::Left,
                         cx.listener(move |this, _event, _window, cx| {
-                            if let Some(draft) = this.ai.models.mcp_add_dialog.as_mut() {
-                                draft.retry_on_disconnect = !checked;
-                            }
+                            this.ai_entity.update(cx, |ai, cx| {
+                                ai.toggle_mcp_retry(cx);
+                            });
                             cx.stop_propagation();
-                            cx.notify();
                         }),
                     )
                     .into_any_element(),
@@ -1121,189 +1054,37 @@ impl WorkspaceApp {
             .into_any_element()
     }
 
-    pub(in crate::workspace) fn add_ai_mcp_server_from_draft(&mut self, cx: &mut Context<Self>) {
-        let Some(mut draft) = self.ai.models.mcp_add_dialog.take() else {
-            return;
-        };
-        if !ai_mcp_draft_valid(&draft, self.settings_store.settings()) {
-            self.ai.models.mcp_add_dialog = Some(draft);
-            cx.notify();
-            return;
-        }
-        let id = format!("mcp-{}", uuid::Uuid::new_v4());
-        let transport = draft.transport;
-        let mut object = serde_json::Map::new();
-        object.insert("id".to_string(), serde_json::json!(id));
-        object.insert("name".to_string(), serde_json::json!(draft.name.trim()));
-        object.insert(
-            "transport".to_string(),
-            serde_json::json!(ai_mcp_transport_value(transport)),
-        );
-        if !draft.url.trim().is_empty() {
-            object.insert("url".to_string(), serde_json::json!(draft.url.trim()));
-        }
-        if !draft.command.trim().is_empty() {
-            object.insert(
-                "command".to_string(),
-                serde_json::json!(draft.command.trim()),
-            );
-        }
-        let args = ai_mcp_split_args(&draft.args);
-        if !args.is_empty() {
-            object.insert("args".to_string(), serde_json::json!(args));
-        }
-        if let Some(env) = ai_mcp_clean_record(&draft.env) {
-            object.insert("env".to_string(), env);
-        }
-        let auth_header_name = draft.auth_header_name.trim();
-        if !auth_header_name.is_empty() && auth_header_name != "Authorization" {
-            object.insert(
-                "authHeaderName".to_string(),
-                serde_json::json!(auth_header_name),
-            );
-        }
-        if draft.auth_header_mode != oxideterm_ai::McpAuthHeaderMode::Bearer {
-            object.insert(
-                "authHeaderMode".to_string(),
-                serde_json::json!(ai_mcp_auth_mode_value(draft.auth_header_mode)),
-            );
-        }
-        if let Some(headers) = ai_mcp_clean_record(&draft.headers) {
-            object.insert("headers".to_string(), headers);
-        }
-        object.insert("enabled".to_string(), serde_json::json!(true));
-        if draft.retry_on_disconnect {
-            object.insert(
-                "retryOnDisconnect".to_string(),
-                serde_json::json!(draft.retry_on_disconnect),
-            );
-        }
-        let config = serde_json::Value::Object(object);
-        let should_store_auth_token = !draft.auth_token.is_empty()
-            && draft.auth_header_mode != oxideterm_ai::McpAuthHeaderMode::None;
-        if should_store_auth_token {
-            let registry = self.ai_entity.read(cx).mcp_registry().clone();
-            let runtime = self.forwarding_runtime.clone();
-            let mut restore_draft = draft;
-            // Move the only token buffer into the keychain task. On failure the
-            // same zeroizing draft is restored without a token, so retrying
-            // requires explicit re-entry instead of retaining a secret copy.
-            let token = zeroize::Zeroizing::new(std::mem::take(&mut restore_draft.auth_token));
-            cx.spawn(async move |weak, cx| {
-                let stored = runtime
-                    .spawn_blocking(move || registry.store_auth_token(&id, token))
-                    .await
-                    .is_ok_and(|result| result.is_ok());
-                let _ = weak.update(cx, |this, cx| {
-                    if stored {
-                        this.focused_settings_input = None;
-                        this.settings_input_draft.clear();
-                        this.close_settings_select();
-                        this.edit_settings(
-                            move |settings| {
-                                settings.ai.mcp_servers.push(config);
-                            },
-                            cx,
-                        );
-                    } else {
-                        this.push_ai_settings_toast(
-                            this.ai_i18n_error("settings_view.ai.save_failed", "keychain"),
-                            TerminalNoticeVariant::Error,
-                        );
-                        this.ai_mcp_dialog_presence.reopen();
-                        this.ai.models.mcp_add_dialog = Some(restore_draft);
-                        cx.notify();
-                    }
-                });
-            })
-            .detach();
-            cx.notify();
-            return;
-        }
-
-        zeroize::Zeroize::zeroize(&mut draft.auth_token);
-        self.focused_settings_input = None;
-        self.settings_input_draft.clear();
-        self.close_settings_select();
-        self.clear_standard_confirm_focus();
-        self.edit_settings(
-            move |settings| {
-                settings.ai.mcp_servers.push(config);
-            },
-            cx,
-        );
-    }
-
     pub(in crate::workspace) fn close_ai_mcp_add_dialog(&mut self, cx: &mut Context<Self>) {
-        self.focused_settings_input = None;
-        self.settings_input_draft.clear();
         self.close_settings_select();
         self.clear_standard_confirm_focus();
-        let Some(generation) = self.ai_mcp_dialog_presence.begin_exit() else {
-            return;
-        };
+        self.ime_marked_text = None;
+        self.clear_ime_selection();
         let delay = oxideterm_gpui_ui::motion::duration(
             &self.tokens,
             oxideterm_gpui_ui::motion::MotionDuration::Overlay,
         );
-        if delay.is_zero() {
-            self.finish_ai_mcp_dialog_exit(generation, false, cx);
-            cx.notify();
-            return;
-        }
-        cx.spawn(async move |weak, cx| {
-            gpui::Timer::after(delay).await;
-            let _ = weak.update(cx, |this, cx| {
-                if this.finish_ai_mcp_dialog_exit(generation, false, cx) {
-                    cx.notify();
-                }
-            });
-        })
-        .detach();
+        self.ai_entity.update(cx, |ai, cx| {
+            ai.begin_mcp_dialog_exit(false, delay, HashSet::new(), cx);
+        });
         cx.notify();
     }
 
     pub(in crate::workspace) fn submit_ai_mcp_add_dialog(&mut self, cx: &mut Context<Self>) {
-        let Some(generation) = self.ai_mcp_dialog_presence.begin_exit() else {
-            return;
-        };
+        self.close_settings_select();
+        self.clear_standard_confirm_focus();
+        self.ime_marked_text = None;
+        self.clear_ime_selection();
         let delay = oxideterm_gpui_ui::motion::duration(
             &self.tokens,
             oxideterm_gpui_ui::motion::MotionDuration::Overlay,
         );
-        if delay.is_zero() {
-            self.finish_ai_mcp_dialog_exit(generation, true, cx);
-            cx.notify();
-            return;
-        }
-        cx.spawn(async move |weak, cx| {
-            gpui::Timer::after(delay).await;
-            let _ = weak.update(cx, |this, cx| {
-                if this.finish_ai_mcp_dialog_exit(generation, true, cx) {
-                    cx.notify();
-                }
-            });
-        })
-        .detach();
+        let configured_names = ai_mcp_configs(self.settings_store.settings())
+            .into_iter()
+            .map(|config| config.name)
+            .collect();
+        self.ai_entity.update(cx, |ai, cx| {
+            ai.begin_mcp_dialog_exit(true, delay, configured_names, cx);
+        });
         cx.notify();
-    }
-
-    fn finish_ai_mcp_dialog_exit(
-        &mut self,
-        generation: u64,
-        submit: bool,
-        cx: &mut Context<Self>,
-    ) -> bool {
-        if !self.ai_mcp_dialog_presence.finish_exit(generation) {
-            return false;
-        }
-        self.ai_mcp_dialog_presence.reopen();
-        if submit {
-            self.add_ai_mcp_server_from_draft(cx);
-        } else if let Some(draft) = self.ai.models.mcp_add_dialog.take() {
-            // Closing drops and zeroizes the final secret-bearing draft.
-            drop(draft);
-        }
-        true
     }
 }
