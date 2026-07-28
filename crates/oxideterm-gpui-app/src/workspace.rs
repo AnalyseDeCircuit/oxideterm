@@ -94,9 +94,9 @@ use gpui::{
     FollowMode, Image, ImageFormat, IntoElement, KeyDownEvent, KeyUpEvent, ListAlignment,
     ListState, ModifiersChangedEvent, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent,
     ObjectFit, ParentElement, PathPromptOptions, Pixels, Point, Render, RenderImage, Rgba,
-    ScrollHandle, ScrollWheelEvent, SharedString, Styled, StyledImage, Subscription, TextLayout,
-    Timer, UniformListScrollHandle, WeakEntity, Window, anchored, canvas, deferred, div,
-    prelude::*, px, relative, rgb, rgba, svg,
+    ScrollHandle, ScrollWheelEvent, SharedString, Styled, StyledImage, Subscription, Task,
+    TextLayout, Timer, UniformListScrollHandle, WeakEntity, Window, anchored, canvas, deferred,
+    div, prelude::*, px, relative, rgb, rgba, svg,
 };
 use oxideterm_connection_monitor::{
     CompactMonitorRow, ConnectionPoolEntryState, ConnectionPoolEntrySummary,
@@ -706,7 +706,6 @@ pub(crate) struct WorkspaceApp {
     settings_workspace: Entity<settings::SettingsWorkspaceEntity>,
     _settings_workspace_observation: Subscription,
     _settings_workspace_subscription: Subscription,
-    settings_navigation_draft: Option<SettingsNavigationLayout>,
     segmented_control_user_motion: selection_motion::UserSegmentedControlMotionState,
     help_legal_notice_presence: oxideterm_gpui_ui::motion::ExitPresence,
     // Prompt and memory documents are edited outside the virtual settings list.
@@ -831,6 +830,7 @@ pub(crate) struct WorkspaceApp {
     vibrancy_support: VibrancySupport,
     applied_window_opacity: f32,
     background_image_cache: BackgroundImageRenderCache,
+    background_cache_poll_task: Option<Task<()>>,
     app_lock: app_lock::AppLockState,
     settings_store: SettingsStore,
     connection_store: ConnectionStore,

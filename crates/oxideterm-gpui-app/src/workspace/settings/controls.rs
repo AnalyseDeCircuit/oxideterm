@@ -14,8 +14,9 @@ impl WorkspaceApp {
         let width =
             f32::from(anchor.bounds.size.width).max(self.tokens.metrics.ui_select_min_width);
         let settings = self.settings_store.settings();
+        let active_tab = self.settings_workspace.read(cx).route_snapshot().active_tab;
 
-        let popup = match (self.settings_page.active_tab, open_select) {
+        let popup = match (active_tab, open_select) {
             (SettingsTab::General, SettingsSelect::Language) => {
                 let mut popup = select_overlay_popup(&self.tokens, width);
                 for language in language_options() {

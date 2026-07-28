@@ -51,30 +51,25 @@ impl Render for SettingsNavigationDrag {
 
 impl WorkspaceApp {
     pub(in crate::workspace) fn open_settings_navigation_editor(&mut self, cx: &mut Context<Self>) {
-        self.settings_navigation_draft = Some(SettingsNavigationLayout::from_persisted_groups(
-            &self.settings_store.settings().settings_navigation.groups,
-        ));
-        cx.notify();
+        let persisted_groups = &self.settings_store.settings().settings_navigation.groups;
+        self.settings_workspace.update(cx, |settings, cx| {
+            settings.open_navigation_editor(persisted_groups, cx);
+        });
     }
 
     fn close_settings_navigation_editor(&mut self, cx: &mut Context<Self>) {
-        self.settings_navigation_draft = None;
+        self.settings_workspace
+            .update(cx, SettingsWorkspaceEntity::close_navigation_editor);
         self.clear_standard_confirm_focus();
         cx.notify();
     }
 
     fn save_settings_navigation_editor(&mut self, cx: &mut Context<Self>) {
-        let Some(layout) = self.settings_navigation_draft.take() else {
+        let Some(persisted_groups) = self.settings_workspace.update(cx, |settings, cx| {
+            settings.take_navigation_editor_persisted_groups(cx)
+        }) else {
             return;
         };
-        // An empty persisted value means "follow the current product default".
-        let serialized_groups = layout.to_persisted_groups();
-        let persisted_groups =
-            if serialized_groups == SettingsNavigationLayout::default().to_persisted_groups() {
-                Vec::new()
-            } else {
-                serialized_groups
-            };
         self.edit_settings(
             move |settings| settings.settings_navigation.groups = persisted_groups,
             cx,
@@ -104,21 +99,23 @@ impl WorkspaceApp {
         }
     }
 
-    fn apply_settings_navigation_drop_on_group(
-        layout: &mut SettingsNavigationLayout,
+    fn settings_navigation_drop_action(
         drag: &SettingsNavigationDrag,
         group_index: usize,
         at_start: bool,
-    ) {
+    ) -> SettingsNavigationDraftAction {
         match drag.kind {
             SettingsNavigationDragKind::Page(tab) if at_start => {
-                layout.move_tab_to_group_start(tab, group_index);
+                SettingsNavigationDraftAction::MoveTabToGroupStart { tab, group_index }
             }
             SettingsNavigationDragKind::Page(tab) => {
-                layout.move_tab_to_group_end(tab, group_index);
+                SettingsNavigationDraftAction::MoveTabToGroupEnd { tab, group_index }
             }
-            SettingsNavigationDragKind::Group(source_group) => {
-                layout.move_group_to_position(source_group, group_index);
+            SettingsNavigationDragKind::Group(source_index) => {
+                SettingsNavigationDraftAction::MoveGroupToPosition {
+                    source_index,
+                    target_index: group_index,
+                }
             }
         }
     }
@@ -190,10 +187,16 @@ impl WorkspaceApp {
             })
             .on_drop(
                 cx.listener(move |this, drag: &SettingsNavigationDrag, _window, cx| {
-                    if let SettingsNavigationDragKind::Page(source_tab) = drag.kind
-                        && let Some(layout) = this.settings_navigation_draft.as_mut()
-                    {
-                        layout.move_tab_to_position(source_tab, tab);
+                    if let SettingsNavigationDragKind::Page(source_tab) = drag.kind {
+                        this.settings_workspace.update(cx, |settings, cx| {
+                            settings.apply_navigation_draft_action(
+                                SettingsNavigationDraftAction::MoveTabBefore {
+                                    tab: source_tab,
+                                    target: tab,
+                                },
+                                cx,
+                            );
+                        });
                     }
                     cx.stop_propagation();
                     cx.notify();
@@ -259,14 +262,10 @@ impl WorkspaceApp {
             })
             .on_drop(
                 cx.listener(move |this, drag: &SettingsNavigationDrag, _window, cx| {
-                    if let Some(layout) = this.settings_navigation_draft.as_mut() {
-                        Self::apply_settings_navigation_drop_on_group(
-                            layout,
-                            drag,
-                            group_index,
-                            false,
-                        );
-                    }
+                    let action = Self::settings_navigation_drop_action(drag, group_index, false);
+                    this.settings_workspace.update(cx, |settings, cx| {
+                        settings.apply_navigation_draft_action(action, cx);
+                    });
                     cx.stop_propagation();
                     cx.notify();
                 }),
@@ -313,9 +312,12 @@ impl WorkspaceApp {
                 "settings-navigation-remove-group",
                 true,
                 cx.listener(move |this, _event, _window, cx| {
-                    if let Some(layout) = this.settings_navigation_draft.as_mut() {
-                        layout.remove_empty_group(group_index);
-                    }
+                    this.settings_workspace.update(cx, |settings, cx| {
+                        settings.apply_navigation_draft_action(
+                            SettingsNavigationDraftAction::RemoveEmptyGroup { group_index },
+                            cx,
+                        );
+                    });
                     cx.stop_propagation();
                     cx.notify();
                 }),
@@ -347,14 +349,11 @@ impl WorkspaceApp {
                     .can_drop(|drag, _window, _cx| drag.is::<SettingsNavigationDrag>())
                     .on_drop(cx.listener(
                         move |this, drag: &SettingsNavigationDrag, _window, cx| {
-                            if let Some(layout) = this.settings_navigation_draft.as_mut() {
-                                Self::apply_settings_navigation_drop_on_group(
-                                    layout,
-                                    drag,
-                                    group_index,
-                                    true,
-                                );
-                            }
+                            let action =
+                                Self::settings_navigation_drop_action(drag, group_index, true);
+                            this.settings_workspace.update(cx, |settings, cx| {
+                                settings.apply_navigation_draft_action(action, cx);
+                            });
                             cx.stop_propagation();
                             cx.notify();
                         },
@@ -381,7 +380,10 @@ impl WorkspaceApp {
         &self,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
-        let layout = self.settings_navigation_draft.as_ref()?.clone();
+        let layout = self
+            .settings_workspace
+            .read(cx)
+            .navigation_draft_snapshot()?;
         let backdrop = dismissible_dialog_backdrop().on_mouse_down(
             MouseButton::Left,
             cx.listener(|this, _event, _window, cx| {
@@ -424,17 +426,17 @@ impl WorkspaceApp {
                 .can_drop(|drag, _window, _cx| drag.is::<SettingsNavigationDrag>())
                 .on_drop(
                     cx.listener(|this, drag: &SettingsNavigationDrag, _window, cx| {
-                        if let Some(layout) = this.settings_navigation_draft.as_mut() {
-                            match drag.kind {
-                                SettingsNavigationDragKind::Page(tab) => {
-                                    layout.add_group();
-                                    layout.move_tab_to_group_end(tab, layout.group_count() - 1);
-                                }
-                                SettingsNavigationDragKind::Group(source_group) => {
-                                    layout.move_group_to_end(source_group);
-                                }
+                        let action = match drag.kind {
+                            SettingsNavigationDragKind::Page(tab) => {
+                                SettingsNavigationDraftAction::AddGroupWithTab(tab)
                             }
-                        }
+                            SettingsNavigationDragKind::Group(source_index) => {
+                                SettingsNavigationDraftAction::MoveGroupToEnd { source_index }
+                            }
+                        };
+                        this.settings_workspace.update(cx, |settings, cx| {
+                            settings.apply_navigation_draft_action(action, cx);
+                        });
                         cx.stop_propagation();
                         cx.notify();
                     }),
@@ -442,9 +444,12 @@ impl WorkspaceApp {
                 .on_mouse_down(
                     MouseButton::Left,
                     cx.listener(|this, _event, _window, cx| {
-                        if let Some(layout) = this.settings_navigation_draft.as_mut() {
-                            layout.add_group();
-                        }
+                        this.settings_workspace.update(cx, |settings, cx| {
+                            settings.apply_navigation_draft_action(
+                                SettingsNavigationDraftAction::AddGroup,
+                                cx,
+                            );
+                        });
                         cx.stop_propagation();
                         cx.notify();
                     }),
@@ -511,8 +516,12 @@ impl WorkspaceApp {
                                     ..ToolbarButtonOptions::default()
                                 },
                                 cx.listener(|this, _event, _window, cx| {
-                                    this.settings_navigation_draft =
-                                        Some(SettingsNavigationLayout::default());
+                                    this.settings_workspace.update(cx, |settings, cx| {
+                                        settings.apply_navigation_draft_action(
+                                            SettingsNavigationDraftAction::RestoreDefault,
+                                            cx,
+                                        );
+                                    });
                                     cx.stop_propagation();
                                     cx.notify();
                                 }),

@@ -194,7 +194,8 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.settings_page.set_active_tab(SettingsTab::Ai);
+        self.settings_workspace
+            .update(cx, |settings, cx| settings.set_active_tab(SettingsTab::Ai, cx));
         self.open_settings(window, cx);
     }
 }

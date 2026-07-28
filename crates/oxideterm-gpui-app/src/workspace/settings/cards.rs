@@ -475,18 +475,19 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let pages = TerminalSettingsPage::all();
+        let route = self.settings_workspace.read(cx).route_snapshot();
         let active_index = pages
             .iter()
-            .position(|page| *page == self.settings_page.terminal_page)
+            .position(|page| *page == route.terminal_page)
             .unwrap_or(0);
         let previous_index = pages
             .iter()
-            .position(|page| *page == self.settings_page.previous_terminal_page)
+            .position(|page| *page == route.previous_terminal_page)
             .unwrap_or(active_index);
         let mut items = Vec::with_capacity(pages.len());
         for (page_index, page) in pages.iter().enumerate() {
             let page_id = *page;
-            let active = self.settings_page.terminal_page == page_id;
+            let active = route.terminal_page == page_id;
             let item = oxideterm_gpui_ui::segmented_control_item(
                 &self.tokens,
                 self.i18n.t(page_id.label_key()),
@@ -495,8 +496,10 @@ impl WorkspaceApp {
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |this, _event, _window, cx| {
-                    if this.settings_page.terminal_page != page_id {
-                        this.settings_page.set_terminal_page(page_id);
+                    let changed = this
+                        .settings_workspace
+                        .update(cx, |settings, cx| settings.set_terminal_page(page_id, cx));
+                    if changed {
                         this.begin_user_segmented_control_transition(
                             selection_motion::TERMINAL_SETTINGS_SWITCHER_ID,
                             page_index,
@@ -528,18 +531,19 @@ impl WorkspaceApp {
 
     pub(in crate::workspace) fn ai_page_switcher(&self, cx: &mut Context<Self>) -> AnyElement {
         let pages = AiSettingsPage::all();
+        let route = self.settings_workspace.read(cx).route_snapshot();
         let active_index = pages
             .iter()
-            .position(|page| *page == self.settings_page.ai_page)
+            .position(|page| *page == route.ai_page)
             .unwrap_or(0);
         let previous_index = pages
             .iter()
-            .position(|page| *page == self.settings_page.previous_ai_page)
+            .position(|page| *page == route.previous_ai_page)
             .unwrap_or(active_index);
         let mut items = Vec::with_capacity(pages.len());
         for (page_index, page) in pages.iter().enumerate() {
             let page_id = *page;
-            let active = self.settings_page.ai_page == page_id;
+            let active = route.ai_page == page_id;
             let item = oxideterm_gpui_ui::segmented_control_item(
                 &self.tokens,
                 self.i18n.t(page_id.label_key()),
@@ -548,8 +552,10 @@ impl WorkspaceApp {
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |this, _event, _window, cx| {
-                    if this.settings_page.ai_page != page_id {
-                        this.settings_page.set_ai_page(page_id);
+                    let changed = this
+                        .settings_workspace
+                        .update(cx, |settings, cx| settings.set_ai_page(page_id, cx));
+                    if changed {
                         this.begin_user_segmented_control_transition(
                             selection_motion::AI_SETTINGS_SWITCHER_ID,
                             page_index,

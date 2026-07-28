@@ -123,15 +123,15 @@ impl WorkspaceApp {
     }
 
     pub(in crate::workspace) fn schedule_background_cache_poll(&mut self, cx: &mut Context<Self>) {
-        if self.settings_page.background_cache_poll_scheduled {
+        if self.background_cache_poll_task.is_some() {
             return;
         }
-        self.settings_page.set_background_cache_poll_scheduled(true);
-        cx.spawn(async move |weak, cx| {
+        // The render-cache owner retains the one-shot so dropping the workspace
+        // also cancels polling for cache entries that can no longer be painted.
+        self.background_cache_poll_task = Some(cx.spawn(async move |weak, cx| {
             Timer::after(Duration::from_millis(16)).await;
             let _ = weak.update(cx, |this, cx| {
-                this.settings_page
-                    .set_background_cache_poll_scheduled(false);
+                this.background_cache_poll_task = None;
                 if this.background_image_cache.drain_completed() {
                     this.drop_workspace_background_retired_images(None, cx);
                     cx.notify();
@@ -140,8 +140,7 @@ impl WorkspaceApp {
                     this.schedule_background_cache_poll(cx);
                 }
             });
-        })
-        .detach();
+        }));
     }
 
     pub(in crate::workspace) fn drop_workspace_background_retired_images(

@@ -240,7 +240,9 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) {
         self.complete_onboarding(cx);
-        self.settings_page.set_active_tab(SettingsTab::General);
+        self.settings_workspace.update(cx, |settings, cx| {
+            settings.set_active_tab(SettingsTab::General, cx)
+        });
         self.open_settings(window, cx);
     }
 }

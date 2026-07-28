@@ -1693,16 +1693,18 @@ impl WorkspaceApp {
         {
             Ok(next_settings) => {
                 self.edit_settings(|settings| *settings = next_settings, cx);
-                if let Some(tab) =
-                    oxideterm_gpui_settings_view::settings_tab_from_ai_section(section)
-                {
-                    self.settings_page.set_active_tab(tab);
-                }
-                if let Some(page) =
-                    oxideterm_gpui_settings_view::terminal_settings_page_from_ai_section(section)
-                {
-                    self.settings_page.set_terminal_page(page);
-                }
+                let target_tab =
+                    oxideterm_gpui_settings_view::settings_tab_from_ai_section(section);
+                let target_terminal_page =
+                    oxideterm_gpui_settings_view::terminal_settings_page_from_ai_section(section);
+                self.settings_workspace.update(cx, |settings, cx| {
+                    if let Some(tab) = target_tab {
+                        settings.set_active_tab(tab, cx);
+                    }
+                    if let Some(page) = target_terminal_page {
+                        settings.set_terminal_page(page, cx);
+                    }
+                });
                 self.open_settings_tab(window, cx);
                 snapshot
                     .ok(
@@ -1927,18 +1929,20 @@ impl WorkspaceApp {
             },
             "settings" => {
                 if let Some(section) = args.get("section").and_then(serde_json::Value::as_str) {
-                    if let Some(tab) =
-                        oxideterm_gpui_settings_view::settings_tab_from_ai_section(section)
-                    {
-                        self.settings_page.set_active_tab(tab);
-                    }
-                    if let Some(page) =
+                    let target_tab =
+                        oxideterm_gpui_settings_view::settings_tab_from_ai_section(section);
+                    let target_terminal_page =
                         oxideterm_gpui_settings_view::terminal_settings_page_from_ai_section(
                             section,
-                        )
-                    {
-                        self.settings_page.set_terminal_page(page);
-                    }
+                        );
+                    self.settings_workspace.update(cx, |settings, cx| {
+                        if let Some(tab) = target_tab {
+                            settings.set_active_tab(tab, cx);
+                        }
+                        if let Some(page) = target_terminal_page {
+                            settings.set_terminal_page(page, cx);
+                        }
+                    });
                 }
                 self.open_settings_tab(window, cx);
                 snapshot

@@ -843,7 +843,12 @@ impl WorkspaceApp {
             return self.terminal_page_switcher(cx);
         }
 
-        match (self.settings_page.terminal_page, section_index - 1) {
+        let terminal_page = self
+            .settings_workspace
+            .read(cx)
+            .route_snapshot()
+            .terminal_page;
+        match (terminal_page, section_index - 1) {
             (TerminalSettingsPage::Display, 0) => {
                 let mut rows = vec![self.select_setting_row(
                     "settings_view.terminal.font_family",

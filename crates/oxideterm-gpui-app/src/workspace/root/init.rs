@@ -554,7 +554,6 @@ impl WorkspaceApp {
             settings_workspace,
             _settings_workspace_observation: settings_workspace_observation,
             _settings_workspace_subscription: settings_workspace_subscription,
-            settings_navigation_draft: None,
             segmented_control_user_motion:
                 selection_motion::UserSegmentedControlMotionState::default(),
             help_legal_notice_presence: oxideterm_gpui_ui::motion::ExitPresence::visible(),
@@ -732,6 +731,7 @@ impl WorkspaceApp {
             vibrancy_support: initial_vibrancy_support,
             applied_window_opacity: initial_window_opacity,
             background_image_cache,
+            background_cache_poll_task: None,
             app_lock,
             settings_store,
             connection_store,

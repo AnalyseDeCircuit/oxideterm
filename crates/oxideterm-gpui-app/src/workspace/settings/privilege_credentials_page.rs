@@ -204,7 +204,9 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.settings_page.set_active_tab(SettingsTab::Privilege);
+        self.settings_workspace.update(cx, |settings, cx| {
+            settings.set_active_tab(SettingsTab::Privilege, cx);
+        });
         if let Some(scope_id) = scope_id {
             self.set_settings_privilege_scope(scope_id, cx);
         }

@@ -464,7 +464,8 @@ impl Render for WorkspaceApp {
                     .keybinding_recording_action_id()
                     .is_some()
                     && this.active_surface == ActiveSurface::Settings
-                    && this.settings_page.active_tab == SettingsTab::Keybindings
+                    && this.settings_workspace.read(cx).route_snapshot().active_tab
+                        == SettingsTab::Keybindings
                 {
                     this.handle_keybinding_recording_key(event, window, cx);
                     window.prevent_default();

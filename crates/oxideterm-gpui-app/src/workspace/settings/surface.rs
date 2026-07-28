@@ -55,7 +55,9 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.settings_page.set_active_tab(SettingsTab::Connections);
+        self.settings_workspace.update(cx, |settings, cx| {
+            settings.set_active_tab(SettingsTab::Connections, cx);
+        });
         self.close_settings_select();
         self.focused_settings_input = None;
         self.settings_slider_drag = None;
@@ -82,7 +84,8 @@ impl WorkspaceApp {
             .is_some_and(|tab| tab.kind == TabKind::Settings);
         self.active_surface = ActiveSurface::Terminal;
         self.close_settings_select();
-        self.settings_navigation_draft = None;
+        self.settings_workspace
+            .update(cx, SettingsWorkspaceEntity::close_navigation_editor);
         self.focused_settings_input = None;
         self.settings_slider_drag = None;
         if close_active_settings_tab {
@@ -133,8 +136,9 @@ impl WorkspaceApp {
         self.sync_settings_section_list_state(cx);
         let state = self.settings_section_list_state.clone();
         let workspace = cx.entity();
-        let spec = self.settings_section_list_spec();
-        let transition_id = format!("settings-page-{:?}", self.settings_page.active_tab);
+        let spec = self.settings_section_list_spec(cx);
+        let active_tab = self.settings_workspace.read(cx).route_snapshot().active_tab;
+        let transition_id = format!("settings-page-{active_tab:?}");
         // All settings pages now share the same variable-height section list.
         // This matches the browser/TanStack virtualizer direction and avoids
         // keeping a full flex tree mounted just because a tab is inside Settings.
@@ -176,15 +180,16 @@ impl WorkspaceApp {
         index: usize,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        if self.settings_page.active_tab == SettingsTab::Ai {
+        let active_tab = self.settings_workspace.read(cx).route_snapshot().active_tab;
+        if active_tab == SettingsTab::Ai {
             return self.render_settings_ai_section_item(index, cx);
         }
 
         let section_index = index.saturating_sub(SETTINGS_SECTION_HEADER_ITEM_COUNT);
         let child = if index == 0 {
-            self.render_settings_virtual_header(self.settings_page.active_tab, cx)
+            self.render_settings_virtual_header(active_tab, cx)
         } else {
-            self.render_settings_tab_section(self.settings_page.active_tab, section_index, cx)
+            self.render_settings_tab_section(active_tab, section_index, cx)
         };
 
         self.wrap_settings_section_list_item(index, child, cx)
@@ -214,7 +219,8 @@ impl WorkspaceApp {
         }
 
         let page_section_index = section_index - 1;
-        match (self.settings_page.ai_page, page_section_index) {
+        let ai_page = self.settings_workspace.read(cx).route_snapshot().ai_page;
+        match (ai_page, page_section_index) {
             (AiSettingsPage::General, 0) => {
                 let settings = self.settings_store.settings();
                 self.ai_general_settings_card(settings, cx)
@@ -346,8 +352,8 @@ impl WorkspaceApp {
     }
 
     pub(in crate::workspace) fn sync_settings_section_list_state(&mut self, cx: &App) {
-        let spec = self.settings_section_list_spec();
-        let identity = self.settings_section_list_identity();
+        let spec = self.settings_section_list_spec(cx);
+        let identity = self.settings_section_list_identity(cx);
         let signatures = self.settings_section_list_signatures(cx);
         sync_tauri_variable_list_state_by_signatures(
             &self.settings_section_list_state,
@@ -358,8 +364,11 @@ impl WorkspaceApp {
         );
     }
 
-    pub(in crate::workspace) fn settings_section_list_spec(&self) -> TauriVirtualListSpec {
-        if self.settings_page.active_tab == SettingsTab::Ai {
+    pub(in crate::workspace) fn settings_section_list_spec(
+        &self,
+        cx: &App,
+    ) -> TauriVirtualListSpec {
+        if self.settings_workspace.read(cx).route_snapshot().active_tab == SettingsTab::Ai {
             TauriVirtualListSpec::new(
                 px(AI_SETTINGS_SECTION_ESTIMATED_HEIGHT),
                 SETTINGS_SECTION_LIST_OVERSCAN,
@@ -372,14 +381,11 @@ impl WorkspaceApp {
         }
     }
 
-    pub(in crate::workspace) fn settings_section_list_identity(&self) -> String {
+    pub(in crate::workspace) fn settings_section_list_identity(&self, cx: &App) -> String {
         // Nested settings pages own distinct row sets. Keybinding filtering is
         // handled by per-row signatures so its toolbar can retain animation state.
-        settings_model_section_list_identity(
-            self.settings_page.active_tab,
-            self.settings_page.terminal_page,
-            self.settings_page.ai_page,
-        )
+        let route = self.settings_workspace.read(cx).route_snapshot();
+        settings_model_section_list_identity(route.active_tab, route.terminal_page, route.ai_page)
     }
 
     pub(in crate::workspace) fn settings_section_list_signatures(&self, cx: &App) -> Vec<u64> {
@@ -393,11 +399,12 @@ impl WorkspaceApp {
         // GPUI caches variable-row measurements. Hash only states that can
         // change section height so ListState remeasures affected rows without
         // serializing the entire settings file on every scroll render.
-        format!("{:?}", self.settings_page.active_tab).hash(&mut hasher);
+        let route = self.settings_workspace.read(cx).route_snapshot();
+        format!("{:?}", route.active_tab).hash(&mut hasher);
         index.hash(&mut hasher);
         let settings = self.settings_store.settings();
 
-        match self.settings_page.active_tab {
+        match route.active_tab {
             SettingsTab::General => {
                 let launch_at_login = self.settings_workspace.read(cx).launch_at_login_snapshot();
                 launch_at_login.enabled.hash(&mut hasher);
@@ -425,11 +432,8 @@ impl WorkspaceApp {
                 }
             }
             SettingsTab::Terminal => {
-                format!("{:?}", self.settings_page.terminal_page).hash(&mut hasher);
-                if settings_terminal_focus_handoff_list_item(
-                    self.settings_page.terminal_page,
-                    index,
-                ) {
+                format!("{:?}", route.terminal_page).hash(&mut hasher);
+                if settings_terminal_focus_handoff_list_item(route.terminal_page, index) {
                     // Selected chips can change width and wrap this card, but
                     // they must not invalidate measurements for every terminal row.
                     settings
@@ -438,7 +442,7 @@ impl WorkspaceApp {
                         .focus_handoff_commands
                         .hash(&mut hasher);
                 }
-                if self.settings_page.terminal_page == TerminalSettingsPage::Local {
+                if route.terminal_page == TerminalSettingsPage::Local {
                     settings.local_terminal.oh_my_posh_enabled.hash(&mut hasher);
                     settings.local_terminal.default_shell_id.hash(&mut hasher);
                     self.local_shells.len().hash(&mut hasher);
@@ -525,10 +529,10 @@ impl WorkspaceApp {
                 }
             }
             SettingsTab::Ai => {
-                format!("{:?}", self.settings_page.ai_page).hash(&mut hasher);
+                format!("{:?}", route.ai_page).hash(&mut hasher);
                 // Hash expansion state only into the virtual row whose height
                 // can change. The compact prompt and memory cards stay stable.
-                match (self.settings_page.ai_page, index) {
+                match (route.ai_page, index) {
                     (AiSettingsPage::Providers, 2) => {
                         settings.ai.providers.len().hash(&mut hasher);
                         self.ai_entity
@@ -581,25 +585,23 @@ impl WorkspaceApp {
     }
 
     pub(in crate::workspace) fn settings_section_list_item_count(&self, cx: &App) -> usize {
-        settings_model_section_list_item_count(
-            self.settings_page.active_tab,
-            self.settings_dynamic_section_counts(cx),
-        )
+        let active_tab = self.settings_workspace.read(cx).route_snapshot().active_tab;
+        settings_model_section_list_item_count(active_tab, self.settings_dynamic_section_counts(cx))
     }
 
     pub(in crate::workspace) fn settings_dynamic_section_counts(
         &self,
         cx: &App,
     ) -> SettingsDynamicSectionCounts {
-        let knowledge_has_selected_collection =
-            if self.settings_page.active_tab == SettingsTab::Knowledge {
-                self.knowledge_has_selected_collection(cx)
-            } else {
-                false
-            };
+        let route = self.settings_workspace.read(cx).route_snapshot();
+        let knowledge_has_selected_collection = if route.active_tab == SettingsTab::Knowledge {
+            self.knowledge_has_selected_collection(cx)
+        } else {
+            false
+        };
         SettingsDynamicSectionCounts {
-            terminal_page: self.settings_page.terminal_page,
-            ai_page: self.settings_page.ai_page,
+            terminal_page: route.terminal_page,
+            ai_page: route.ai_page,
             visible_keybinding_scope_count: self.visible_keybinding_scope_count(cx),
             knowledge_has_error: self.ai_entity.read(cx).knowledge_error().is_some(),
             knowledge_has_selected_collection,
@@ -798,7 +800,7 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
-        let active = self.settings_page.active_tab == tab;
+        let active = self.settings_workspace.read(cx).route_snapshot().active_tab == tab;
         let nav_item_index = settings_nav_item_index(navigation_groups, tab);
         let navigation_groups_for_click = navigation_groups.to_vec();
         let selection_transition = active.then_some(()).and_then(|()| {
@@ -904,11 +906,10 @@ impl WorkspaceApp {
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |this, _event, _window, cx| {
-                    if this.settings_page.active_tab != tab
-                        && let Some(source_index) = settings_nav_item_index(
-                            &navigation_groups_for_click,
-                            this.settings_page.active_tab,
-                        )
+                    let active_tab = this.settings_workspace.read(cx).route_snapshot().active_tab;
+                    if active_tab != tab
+                        && let Some(source_index) =
+                            settings_nav_item_index(&navigation_groups_for_click, active_tab)
                         && let Some(target_index) =
                             settings_nav_item_index(&navigation_groups_for_click, tab)
                     {
@@ -924,7 +925,8 @@ impl WorkspaceApp {
                             cx,
                         );
                     }
-                    this.settings_page.set_active_tab(tab);
+                    this.settings_workspace
+                        .update(cx, |settings, cx| settings.set_active_tab(tab, cx));
                     this.close_settings_select();
                     this.focused_settings_input = None;
                     this.settings_slider_drag = None;
