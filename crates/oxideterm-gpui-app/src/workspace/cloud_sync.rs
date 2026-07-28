@@ -1,4 +1,4 @@
-use std::{cell::Cell, collections::VecDeque};
+use std::{cell::Cell, collections::VecDeque, sync::Arc};
 
 use crate::workspace::ime::WorkspaceImeTarget;
 use chrono::Utc;
@@ -14,10 +14,7 @@ use oxideterm_cloud_sync::{
     progress::CloudSyncProgress,
     secrets::{CloudSyncKeychainSecretProvider, backend_uses_auth_mode},
     service::{CloudSyncLocalSnapshot, build_local_snapshot},
-    state::{
-        CloudSyncHistoryEntry, CloudSyncHistorySummary, CloudSyncPersistedState,
-        CloudSyncRollbackBackup,
-    },
+    state::{CloudSyncHistoryEntry, CloudSyncHistorySummary, CloudSyncPersistedState},
 };
 use oxideterm_gpui_cloud_sync::{
     CLOUD_SYNC_FIELD_REDACTED_VALUE, CLOUD_SYNC_GUIDE_STEP_KEYS, CloudSyncApplyOutcome,
@@ -107,6 +104,15 @@ pub(super) struct CloudSyncLocalSnapshotCache {
 pub(super) struct CloudSyncUploadDiffCache {
     generation: u64,
     items: Vec<CloudSyncSectionDiffItem>,
+}
+
+/// Frame-scoped, read-only UI dependencies shared by Cloud Sync virtual rows.
+#[derive(Clone)]
+pub(super) struct CloudSyncListRenderProjection {
+    pub(super) tokens: ThemeTokens,
+    pub(super) i18n: I18n,
+    pub(super) selectable_text: crate::workspace::selectable_text::SelectableTextRenderState,
+    pub(super) has_background: bool,
 }
 
 /// Owns the persisted service and asynchronous operation lifecycle for Cloud Sync.
@@ -251,6 +257,16 @@ pub(super) enum CloudSyncWorkspaceEvent {
     AutoUploadDue { generation: u64 },
     DirtyRefreshDue { generation: u64 },
     ConfirmExitFinished { presence_generation: u64 },
+    UiIntent(CloudSyncUiIntent),
+}
+
+/// Typed, non-secret actions crossing from Entity-owned virtual rows to root adapters.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum CloudSyncUiIntent {
+    ClearRollbackBackups,
+    RestoreRollbackBackup { signature: u64 },
+    DeleteRollbackBackup { signature: u64 },
+    ClearHistory,
 }
 
 /// Groups the Cloud Sync controller lifecycle and its ephemeral GPUI view state.

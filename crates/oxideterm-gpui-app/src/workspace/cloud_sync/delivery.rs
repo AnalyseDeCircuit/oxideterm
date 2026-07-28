@@ -761,6 +761,50 @@ impl WorkspaceApp {
                     }
                 });
             }
+            CloudSyncWorkspaceEvent::UiIntent(intent) => {
+                self.handle_cloud_sync_ui_intent(intent, cx);
+            }
+        }
+    }
+
+    fn handle_cloud_sync_ui_intent(&mut self, intent: CloudSyncUiIntent, cx: &mut Context<Self>) {
+        match intent {
+            CloudSyncUiIntent::ClearRollbackBackups => {
+                self.open_cloud_sync_clear_backups_confirm(cx);
+            }
+            CloudSyncUiIntent::RestoreRollbackBackup { signature } => {
+                let backup = self
+                    .cloud_sync
+                    .read(cx)
+                    .controller
+                    .store
+                    .state()
+                    .rollback_backups
+                    .iter()
+                    .find(|backup| cloud_sync_rollback_backup_signature(backup) == signature)
+                    .map(|backup| (backup.id.clone(), backup.created_at.clone()));
+                if let Some(backup) = backup {
+                    self.open_cloud_sync_restore_confirm(Some(backup), cx);
+                }
+            }
+            CloudSyncUiIntent::DeleteRollbackBackup { signature } => {
+                let backup = self
+                    .cloud_sync
+                    .read(cx)
+                    .controller
+                    .store
+                    .state()
+                    .rollback_backups
+                    .iter()
+                    .find(|backup| cloud_sync_rollback_backup_signature(backup) == signature)
+                    .map(|backup| (backup.id.clone(), backup.created_at.clone()));
+                if let Some((id, created_at)) = backup {
+                    self.open_cloud_sync_delete_backup_confirm(id, created_at, cx);
+                }
+            }
+            CloudSyncUiIntent::ClearHistory => {
+                self.open_cloud_sync_clear_history_confirm(cx);
+            }
         }
     }
 

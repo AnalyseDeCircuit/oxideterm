@@ -272,17 +272,12 @@ impl WorkspaceApp {
             }
             CloudSyncSection::Rollback => match active_tab {
                 CloudSyncTab::Overview => self.render_cloud_sync_recent_rollback_backups(busy, cx),
-                CloudSyncTab::History => {
-                    // History list setup mutates list state, so keep its snapshot local
-                    // instead of cloning persisted data for every Cloud Sync row.
-                    self.render_cloud_sync_rollback_backups(&state, busy, cx)
-                }
+                CloudSyncTab::History => self.render_cloud_sync_rollback_backups(busy, cx),
                 CloudSyncTab::Configure => div().into_any_element(),
             },
             CloudSyncSection::History => {
                 if active_tab == CloudSyncTab::History {
-                    // The mutable nested list renderer requires an owned snapshot.
-                    self.render_cloud_sync_history(&state, cx)
+                    self.render_cloud_sync_history(cx)
                 } else {
                     div().into_any_element()
                 }
