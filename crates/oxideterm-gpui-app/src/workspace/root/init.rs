@@ -763,7 +763,6 @@ impl WorkspaceApp {
                 if cx
                     .update_window(window_handle, |_, _window, cx| {
                         weak.update(cx, |workspace, cx| {
-                            workspace.maybe_refresh_connection_monitor(cx);
                             workspace.maybe_refresh_active_terminal_git(cx);
                             workspace.maybe_refresh_active_terminal_project(cx);
                             if workspace.any_terminal_recording_active(cx) {

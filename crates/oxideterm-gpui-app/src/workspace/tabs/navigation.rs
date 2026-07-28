@@ -878,6 +878,7 @@ impl WorkspaceApp {
         let tab = self.tabs.remove(index);
         self.detached_tabs.remove(&tab.id);
         self.detached_tab_windows.remove(&tab.id);
+        self.sync_host_tools_lifecycle(false, cx);
         if self
             .main_window_tabs
             .context_menu

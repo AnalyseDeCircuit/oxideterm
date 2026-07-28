@@ -16,6 +16,43 @@ fn host_tools_visibility(
 }
 
 impl HostToolsEntity {
+    pub(super) fn schedule_lifecycle_refresh(&mut self, cx: &mut Context<Self>) {
+        // Pool/topology freshness belongs to Host Tools and stops with the Entity.
+        self.lifecycle_refresh_task = Some(cx.spawn(async move |host_tools, cx| {
+            loop {
+                Timer::after(MONITOR_POOL_REFRESH_INTERVAL).await;
+                let should_continue = host_tools
+                    .update(cx, |host_tools, cx| {
+                        host_tools.refresh_lifecycle_tick(cx);
+                        true
+                    })
+                    .unwrap_or(false);
+                if !should_continue {
+                    break;
+                }
+            }
+        }));
+    }
+
+    pub(super) fn refresh_lifecycle_tick(&mut self, cx: &mut Context<Self>) {
+        let Some(runtime) = self.lifecycle_runtime.clone() else {
+            return;
+        };
+        if !self.visibility.is_visible() {
+            // Hidden pages keep shared nodes and long-running work, but do not
+            // sample or repaint page-only snapshots.
+            return;
+        }
+        self.update_lifecycle(
+            self.visibility,
+            self.monitoring.clone(),
+            self.sampling_config,
+            runtime,
+            false,
+            cx,
+        );
+    }
+
     pub(in crate::workspace) fn set_messages(&mut self, messages: HostToolsMessages) {
         self.messages = Some(messages);
     }
@@ -212,17 +249,10 @@ impl WorkspaceApp {
         self.open_connection_runtime_tab(ConnectionRuntimeSection::Topology, window, cx);
     }
 
-    pub(in crate::workspace) fn maybe_refresh_connection_monitor(
-        &mut self,
-        cx: &mut Context<Self>,
-    ) {
-        self.sync_host_tools_lifecycle(false, cx);
-    }
-
     pub(in crate::workspace) fn sync_host_tools_lifecycle(
         &mut self,
         force_pool_refresh: bool,
-        cx: &mut Context<Self>,
+        cx: &mut App,
     ) {
         let visibility = self.host_tools_visibility();
         let monitoring = self.settings_store.settings().host_tools.clone();

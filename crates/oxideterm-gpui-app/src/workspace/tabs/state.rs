@@ -22,10 +22,15 @@ impl WorkspaceApp {
         active_tab_id: Option<TabId>,
         cx: &mut App,
     ) {
+        let active_tab_changed = self.main_window_tabs.active_tab_id != active_tab_id;
         self.main_window_tabs.active_tab_id = active_tab_id;
         self.tab_host.update(cx, |tab_host, _| {
             tab_host.observe_active_tab(active_tab_id);
         });
+        if active_tab_changed {
+            // Host Tools owns its timer; root only pushes mount visibility changes.
+            self.sync_host_tools_lifecycle(false, cx);
+        }
     }
 
     pub(in crate::workspace) fn active_tab_index(&self) -> Option<usize> {

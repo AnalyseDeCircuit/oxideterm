@@ -1,5 +1,6 @@
 use super::*;
 
+use gpui::Task;
 use oxideterm_connection_monitor::ResourceSampler;
 use oxideterm_editor_core::utf16::replace_utf16;
 use oxideterm_topology::ConnectionTopologySnapshot;
@@ -58,6 +59,7 @@ pub(in crate::workspace) struct HostToolsEntity {
     // remain owned by SettingsStore and are applied back through lifecycle.
     pub(super) monitoring: oxideterm_settings::HostToolsSettings,
     pub(super) messages: Option<HostToolsMessages>,
+    pub(super) lifecycle_refresh_task: Option<Task<()>>,
     pool_stats: Option<ConnectionPoolMonitorStats>,
     pool_summaries: Vec<ConnectionPoolEntrySummary>,
     topology_snapshot: Option<ConnectionTopologySnapshot>,
@@ -92,7 +94,7 @@ impl HostToolsEntity {
             crate::workspace::delivery::ActiveDeliverySender::channel_with_wake(
                 reliable_delivery_wake.clone(),
             );
-        let entity = Self {
+        let mut entity = Self {
             ssh_registry,
             profiler_registry: ProfilerRegistry::new(),
             profiler_update_tx,
@@ -127,6 +129,7 @@ impl HostToolsEntity {
             sampling_config: oxideterm_connection_monitor::ResourceSamplingConfig::default(),
             monitoring: oxideterm_settings::HostToolsSettings::default(),
             messages: None,
+            lifecycle_refresh_task: None,
             pool_stats: None,
             pool_summaries: Vec::new(),
             topology_snapshot: None,
@@ -167,6 +170,7 @@ impl HostToolsEntity {
             cx,
         );
         entity.schedule_reliable_delivery(cx);
+        entity.schedule_lifecycle_refresh(cx);
         entity
     }
 
@@ -1398,6 +1402,28 @@ mod tests {
         // Sampling and hidden-page transitions must not consume or release the node owner.
         assert_eq!(handle.info().ref_count, 1);
         assert_eq!(handle.info().consumers, vec![node_consumer]);
+    }
+
+    #[gpui::test]
+    fn lifecycle_tick_samples_only_visible_host_tools(cx: &mut TestAppContext) {
+        let runtime = tokio::runtime::Runtime::new().expect("create test runtime");
+        let registry = SshConnectionRegistry::default();
+        let (profiler_update_tx, profiler_update_rx) = tokio::sync::mpsc::unbounded_channel();
+        let entity =
+            cx.new(|cx| HostToolsEntity::new(profiler_update_tx, profiler_update_rx, registry, cx));
+
+        entity.update(cx, |entity, cx| {
+            assert!(entity.lifecycle_refresh_task.is_some());
+            entity.lifecycle_runtime = Some(runtime.handle().clone());
+            entity.last_pool_refresh = None;
+            entity.visibility = HostToolsVisibility::Hidden;
+            entity.refresh_lifecycle_tick(cx);
+            assert!(entity.last_pool_refresh.is_none());
+
+            entity.visibility = HostToolsVisibility::VisibleMainTab;
+            entity.refresh_lifecycle_tick(cx);
+            assert!(entity.last_pool_refresh.is_some());
+        });
     }
 
     #[gpui::test]
