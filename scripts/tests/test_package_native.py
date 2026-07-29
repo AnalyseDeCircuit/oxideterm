@@ -96,6 +96,26 @@ class WindowsInstallerScriptTests(unittest.TestCase):
 
         self.assertEqual(script.count(display_icon_entry), 2)
 
+    def test_modern_ui_uses_the_application_icon(self) -> None:
+        icon_path = Path(r"C:\icons\icon.ico")
+        script = package_native.windows_installer_script(
+            binary=Path("oxideterm-native.exe"),
+            version="1.2.0-gpui-preview.2",
+            identity=self.identity(),
+            installer_root=Path(r"C:\dist\nsis-windows_x64"),
+            installer_path=Path(r"C:\dist\OxideTerm_setup.exe"),
+            icon_path=icon_path,
+        )
+        resolved_icon = package_native.nsis_path(icon_path)
+        installer_icon = f'!define MUI_ICON "{resolved_icon}"'
+        uninstaller_icon = f'!define MUI_UNICON "{resolved_icon}"'
+
+        self.assertIn(installer_icon, script)
+        self.assertIn(uninstaller_icon, script)
+        self.assertLess(script.index(installer_icon), script.index("!include MUI2.nsh"))
+        self.assertNotIn('\nIcon "', script)
+        self.assertNotIn("\nUninstallIcon ", script)
+
     def test_stable_installer_detects_tauri_current_user_install(self) -> None:
         identity = package_native.release_identity("v2.0.0", "2.0.0")
         script = package_native.windows_installer_script(

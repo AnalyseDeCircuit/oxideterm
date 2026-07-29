@@ -115,6 +115,9 @@
   "common": {
     "enabled": "Ativado",
     "disabled": "Desativado",
+    "status": {
+      "error": "Erro"
+    },
     "confirm": {
       "disconnect_node": "Tem certeza de que deseja desconectar \"{{name}}\" e todos os seus nós filhos?"
     },

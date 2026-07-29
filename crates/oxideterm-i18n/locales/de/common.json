@@ -115,6 +115,9 @@
   "common": {
     "enabled": "Aktiviert",
     "disabled": "Deaktiviert",
+    "status": {
+      "error": "Fehler"
+    },
     "confirm": {
       "disconnect_node": "Möchten Sie wirklich \"{{name}}\" und alle untergeordneten Knoten trennen?"
     },

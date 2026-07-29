@@ -216,6 +216,11 @@ struct ReconnectRequeueState {
     generation: u64,
 }
 
+struct ScheduledReconnectTask {
+    node_id: Option<NodeId>,
+    task: Task<()>,
+}
+
 #[derive(Debug)]
 pub(in crate::workspace) struct ConnectionChainStep {
     pub(in crate::workspace) node_id: NodeId,
@@ -257,10 +262,14 @@ pub(in crate::workspace) struct WorkspaceRuntimeEntity {
     reconnect_enabled: bool,
     pending_reconnect_node_ids: HashSet<NodeId>,
     reconnect_debounce_generation: u64,
+    reconnect_debounce_task: Option<Task<()>>,
     reconnect_pipeline_active_node: Option<NodeId>,
     reconnect_requeue_states: HashMap<NodeId, ReconnectRequeueState>,
+    reconnect_requeue_tasks: HashMap<NodeId, Task<()>>,
     pending_reconnect_cascade_nodes: VecDeque<NodeId>,
     reconnect_cascade_generation: u64,
+    reconnect_cascade_task: Option<Task<()>>,
+    reconnect_schedule_tasks: Vec<ScheduledReconnectTask>,
     // Restore bookkeeping survives page changes and is cancelled only by node lifecycle actions.
     pending_reconnect_transfer_resumes: HashMap<NodeId, HashSet<String>>,
     reconnect_transfer_resume_successes: HashMap<NodeId, usize>,
@@ -277,6 +286,7 @@ pub(in crate::workspace) struct WorkspaceRuntimeEntity {
     ssh_active_probe_in_flight: bool,
     active_probe_task: Option<tokio::task::AbortHandle>,
     active_probe_timer_generation: u64,
+    active_probe_timer_task: Option<Task<()>>,
     reconnect_grace_probe_tasks: HashMap<NodeId, (String, tokio::task::AbortHandle)>,
     remote_shell_integration: settings::RemoteShellIntegrationRuntimeState,
     remote_shell_gate_tasks: HashMap<NodeId, (u64, tokio::task::AbortHandle)>,
@@ -352,10 +362,14 @@ impl WorkspaceRuntimeEntity {
             reconnect_enabled,
             pending_reconnect_node_ids: HashSet::new(),
             reconnect_debounce_generation: 0,
+            reconnect_debounce_task: None,
             reconnect_pipeline_active_node: None,
             reconnect_requeue_states: HashMap::new(),
+            reconnect_requeue_tasks: HashMap::new(),
             pending_reconnect_cascade_nodes: VecDeque::new(),
             reconnect_cascade_generation: 0,
+            reconnect_cascade_task: None,
+            reconnect_schedule_tasks: Vec::new(),
             pending_reconnect_transfer_resumes: HashMap::new(),
             reconnect_transfer_resume_successes: HashMap::new(),
             pending_ide_restore_transfer_counts: HashMap::new(),
@@ -374,6 +388,7 @@ impl WorkspaceRuntimeEntity {
             ssh_active_probe_in_flight: false,
             active_probe_task: None,
             active_probe_timer_generation: 0,
+            active_probe_timer_task: None,
             reconnect_grace_probe_tasks: HashMap::new(),
             remote_shell_integration: settings::RemoteShellIntegrationRuntimeState::default(),
             remote_shell_gate_tasks: HashMap::new(),
@@ -396,6 +411,7 @@ impl WorkspaceRuntimeEntity {
             self.pending_reconnect_node_ids.clear();
             // Invalidate timers scheduled under the previous settings.
             self.reconnect_debounce_generation = self.reconnect_debounce_generation.wrapping_add(1);
+            self.reconnect_debounce_task = None;
         }
         self.reconnect_orchestrator
             .configure(reconnect_timing, reconnect_max_attempts);
@@ -1036,11 +1052,17 @@ impl WorkspaceRuntimeEntity {
         }
         self.remote_shell_integration.cancel_terminal_gates();
         self.reconnect_debounce_generation = self.reconnect_debounce_generation.wrapping_add(1);
+        // Runtime shutdown owns cancellation of the pending foreground debounce timer.
+        self.reconnect_debounce_task = None;
         self.reconnect_cascade_generation = self.reconnect_cascade_generation.wrapping_add(1);
         self.active_probe_timer_generation = self.active_probe_timer_generation.wrapping_add(1);
+        self.active_probe_timer_task = None;
         self.pending_reconnect_node_ids.clear();
         self.pending_reconnect_cascade_nodes.clear();
         self.reconnect_requeue_states.clear();
+        self.reconnect_requeue_tasks.clear();
+        self.reconnect_cascade_task = None;
+        self.reconnect_schedule_tasks.clear();
         self.reconnect_pipeline_active_node = None;
         self.active_connection_chain = None;
         self.connecting_node_locks.clear();
@@ -1976,13 +1998,14 @@ impl WorkspaceRuntimeEntity {
         self.pending_reconnect_node_ids.insert(node_id);
         self.reconnect_debounce_generation = self.reconnect_debounce_generation.wrapping_add(1);
         let generation = self.reconnect_debounce_generation;
-        cx.spawn(async move |entity, cx| {
+        // Retaining the latest debounce task cancels superseded timers and
+        // prevents their async wake from escaping the runtime entity lifetime.
+        self.reconnect_debounce_task = Some(cx.spawn(async move |entity, cx| {
             Timer::after(RECONNECT_DEBOUNCE_DELAY).await;
             let _ = entity.update(cx, |entity, cx| {
                 entity.flush_reconnect_roots(generation, cx);
             });
-        })
-        .detach();
+        }));
     }
 
     pub(in crate::workspace) fn cancel_queued_reconnects(&mut self, node_ids: &[NodeId]) {
@@ -2022,12 +2045,13 @@ impl WorkspaceRuntimeEntity {
                 });
             if requeue_state.attempt > RECONNECT_MAX_REQUEUE {
                 self.reconnect_requeue_states.remove(node_id);
+                self.reconnect_requeue_tasks.remove(node_id);
                 return ReconnectPipelineClaim::Exhausted;
             }
             let generation = requeue_state.generation;
             let retry_node_id = node_id.clone();
             let retry_delay = self.reconnect_orchestrator.retry_delay_for_attempt(1);
-            cx.spawn(async move |entity, cx| {
+            let task = cx.spawn(async move |entity, cx| {
                 Timer::after(retry_delay).await;
                 let _ = entity.update(cx, |entity, cx| {
                     let retry_is_current = entity
@@ -2044,13 +2068,16 @@ impl WorkspaceRuntimeEntity {
                         );
                     }
                 });
-            })
-            .detach();
+            });
+            // Each node owns at most one delayed requeue; replacement cancels
+            // the previous timer instead of leaving a stale async wake behind.
+            self.reconnect_requeue_tasks.insert(node_id.clone(), task);
             return ReconnectPipelineClaim::Requeued;
         }
 
         self.reconnect_pipeline_active_node = Some(node_id.clone());
         self.reconnect_requeue_states.remove(node_id);
+        self.reconnect_requeue_tasks.remove(node_id);
         ReconnectPipelineClaim::Acquired
     }
 
@@ -2063,10 +2090,12 @@ impl WorkspaceRuntimeEntity {
             self.reconnect_pipeline_active_node = None;
         }
         self.reconnect_requeue_states.remove(node_id);
+        self.reconnect_requeue_tasks.remove(node_id);
     }
 
     pub(in crate::workspace) fn cancel_reconnect_retry(&mut self, node_id: &NodeId) {
         self.reconnect_requeue_states.remove(node_id);
+        self.reconnect_requeue_tasks.remove(node_id);
         self.cancel_node_transport_attempt(node_id);
     }
 
@@ -2076,12 +2105,14 @@ impl WorkspaceRuntimeEntity {
     ) {
         self.pending_reconnect_cascade_nodes = node_ids.into_iter().collect();
         self.reconnect_cascade_generation = self.reconnect_cascade_generation.wrapping_add(1);
+        self.reconnect_cascade_task = None;
     }
 
     pub(in crate::workspace) fn clear_reconnect_cascade(&mut self) {
         self.pending_reconnect_cascade_nodes.clear();
         // Invalidate a delayed continuation when its owning cascade is cleared.
         self.reconnect_cascade_generation = self.reconnect_cascade_generation.wrapping_add(1);
+        self.reconnect_cascade_task = None;
     }
 
     pub(in crate::workspace) fn schedule_next_reconnect_cascade(
@@ -2094,7 +2125,7 @@ impl WorkspaceRuntimeEntity {
         }
         self.reconnect_cascade_generation = self.reconnect_cascade_generation.wrapping_add(1);
         let generation = self.reconnect_cascade_generation;
-        cx.spawn(async move |entity, cx| {
+        self.reconnect_cascade_task = Some(cx.spawn(async move |entity, cx| {
             Timer::after(delay).await;
             let _ = entity.update(cx, |entity, cx| {
                 if entity.reconnect_cascade_generation == generation
@@ -2106,8 +2137,7 @@ impl WorkspaceRuntimeEntity {
                     );
                 }
             });
-        })
-        .detach();
+        }));
     }
 
     pub(in crate::workspace) fn take_next_reconnect_cascade_node(&mut self) -> Option<NodeId> {
@@ -2115,18 +2145,23 @@ impl WorkspaceRuntimeEntity {
     }
 
     pub(in crate::workspace) fn schedule_reconnect_action(
-        &self,
+        &mut self,
         action: ReconnectScheduleAction,
         delay: Duration,
         cx: &mut Context<Self>,
     ) {
-        cx.spawn(async move |entity, cx| {
+        self.reconnect_schedule_tasks
+            .retain(|scheduled| !scheduled.task.is_ready());
+        let node_id = reconnect_schedule_action_node_id(&action);
+        let task = cx.spawn(async move |entity, cx| {
             Timer::after(delay).await;
             let _ = entity.update(cx, |entity, cx| {
                 entity.push_reconnect_schedule_action(action, cx);
             });
-        })
-        .detach();
+        });
+        // Delayed actions remain cancellable by node and runtime shutdown.
+        self.reconnect_schedule_tasks
+            .push(ScheduledReconnectTask { node_id, task });
     }
 
     pub(in crate::workspace) fn begin_reconnect_transfer_resumes(
@@ -2265,8 +2300,16 @@ impl WorkspaceRuntimeEntity {
     fn cancel_reconnect_scheduler_nodes(&mut self, node_ids: &[NodeId]) {
         self.reconnect_requeue_states
             .retain(|node_id, _| !node_ids.contains(node_id));
+        self.reconnect_requeue_tasks
+            .retain(|node_id, _| !node_ids.contains(node_id));
         self.pending_reconnect_cascade_nodes
             .retain(|node_id| !node_ids.contains(node_id));
+        self.reconnect_schedule_tasks.retain(|scheduled| {
+            scheduled
+                .node_id
+                .as_ref()
+                .is_none_or(|node_id| !node_ids.contains(node_id))
+        });
         self.runtime_effects
             .retain(|effect| !runtime_effect_is_reconnect_schedule_for_nodes(effect, node_ids));
         if self
@@ -2277,6 +2320,7 @@ impl WorkspaceRuntimeEntity {
             self.reconnect_pipeline_active_node = None;
         }
         self.reconnect_cascade_generation = self.reconnect_cascade_generation.wrapping_add(1);
+        self.reconnect_cascade_task = None;
     }
 
     fn push_reconnect_schedule_action(
@@ -2400,15 +2444,17 @@ impl WorkspaceRuntimeEntity {
     fn schedule_active_probe_after(&mut self, delay: Duration, cx: &mut Context<Self>) {
         self.active_probe_timer_generation = self.active_probe_timer_generation.wrapping_add(1);
         let generation = self.active_probe_timer_generation;
-        cx.spawn(async move |entity, cx| {
+        // Only the runtime entity owns the keepalive timer. Replacing or
+        // releasing the entity must cancel the previous async wake.
+        self.active_probe_timer_task = Some(cx.spawn(async move |entity, cx| {
             Timer::after(delay).await;
             let _ = entity.update(cx, |entity, cx| {
                 if entity.active_probe_timer_generation == generation {
+                    entity.active_probe_timer_task = None;
                     entity.start_active_ssh_probe(cx);
                 }
             });
-        })
-        .detach();
+        }));
     }
 
     fn start_active_ssh_probe(&mut self, cx: &mut Context<Self>) {
@@ -2895,6 +2941,16 @@ fn runtime_effect_is_reconnect_schedule_for_nodes(
             node_ids.contains(node_id)
         }
         _ => false,
+    }
+}
+
+fn reconnect_schedule_action_node_id(action: &ReconnectScheduleAction) -> Option<NodeId> {
+    match action {
+        ReconnectScheduleAction::ContinueConnectionChain { node_id }
+        | ReconnectScheduleAction::StartReconnectPipeline { node_id, .. }
+        | ReconnectScheduleAction::RetryNodeConnect { node_id, .. }
+        | ReconnectScheduleAction::CleanupReconnectJob { node_id, .. } => Some(node_id.clone()),
+        ReconnectScheduleAction::ContinueReconnectCascade => None,
     }
 }
 
@@ -3626,12 +3682,14 @@ mod tests {
                 node_id.clone(),
                 ("grace-job".to_string(), grace_probe_task.abort_handle()),
             );
+            assert!(entity.active_probe_timer_task.is_some());
             entity.shutdown_workspace_runtime();
             entity.shutdown_workspace_runtime();
             assert_eq!(entity.lifecycle, WorkspaceRuntimeLifecycle::Stopped);
             assert!(entity.terminal_ssh_nodes.is_empty());
             assert!(entity.pending_ssh_terminal_opens.is_empty());
             assert!(entity.active_probe_task.is_none());
+            assert!(entity.active_probe_timer_task.is_none());
             assert!(!entity.ssh_active_probe_in_flight);
             assert!(entity.reconnect_grace_probe_tasks.is_empty());
         });
@@ -4353,10 +4411,12 @@ mod tests {
             entity.queue_reconnect_root(NodeId::new("node-a"), cx);
             let scheduled_generation = entity.reconnect_debounce_generation;
             assert!(!entity.pending_reconnect_node_ids.is_empty());
+            assert!(entity.reconnect_debounce_task.is_some());
 
             entity.configure_reconnect(false, ReconnectTiming::default(), 3, cx);
 
             assert!(entity.pending_reconnect_node_ids.is_empty());
+            assert!(entity.reconnect_debounce_task.is_none());
             assert!(entity.reconnect_debounce_generation > scheduled_generation);
         });
     }
@@ -4383,6 +4443,11 @@ mod tests {
                 ),
                 ReconnectPipelineClaim::Requeued
             );
+            assert!(
+                entity
+                    .reconnect_requeue_tasks
+                    .contains_key(&waiting_node_id)
+            );
             entity
                 .reconnect_requeue_states
                 .get_mut(&waiting_node_id)
@@ -4399,6 +4464,11 @@ mod tests {
             assert!(
                 !entity
                     .reconnect_requeue_states
+                    .contains_key(&waiting_node_id)
+            );
+            assert!(
+                !entity
+                    .reconnect_requeue_tasks
                     .contains_key(&waiting_node_id)
             );
 

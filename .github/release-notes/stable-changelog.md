@@ -3,6 +3,32 @@
 Stable releases are listed newest first. The release workflow uses each versioned
 section as the detailed changelog attached to the corresponding GitHub Release.
 
+## 2.0.13
+
+OxideTerm 2.0.13 introduces an advanced terminal command sender, completes portable-mode updates and storage, and substantially strengthens native workspace ownership while resolving important Windows, remote-desktop, font, and AI compatibility issues.
+
+### ✨ Highlights
+
+- Added a unified terminal command sender with compact and expanded layouts, multiline text and hexadecimal input, line or character pacing, configurable intervals and repeat counts, multiple sender documents, progress and cancellation, and current, all, or explicitly selected terminal targets.
+- Added per-connection terminal behavior overrides for text encoding and Backspace and Delete sequences, with persistence, import, cloud synchronization, and editing support while retaining application defaults when no override is selected.
+- Enabled automatic updates for portable Windows builds and completed portable initialization for application data, secrets, plugins, logs, update staging, and runtime paths without writing those resources into installed-mode locations.
+- Reworked native workspace ownership across terminals, tabs, settings, Host Tools, plugins, forwarding, AI, remote desktop, connection monitoring, and updates so background work is actively delivered and cancelled by its owning GPUI entity instead of being polled from the root renderer.
+
+### 🛠️ Fixes
+
+- Fixed Windows Server 2022 RDP sessions that failed while decoding valid single-color ClearCodec RLEX regions, and preserved the original protocol error instead of replacing it with a later closed-pipe message.
+- Fixed Windows local file navigation when switching drives and kept keyboard path-completion selection visible as it moves beyond the current popup viewport.
+- Corrected bundled JetBrains Mono family resolution and glyph metrics across native text backends, preventing abnormal terminal spacing when the built-in font is selected.
+- Preserved Gemini signed tool-call parts across streaming and continuation turns, preventing valid tool workflows from losing provider-required metadata.
+- Added AI conversation renaming, Enter-to-confirm editing, dated conversation and message timestamps, and multiline editing for memory and system prompts.
+- Restored toggle behavior for active sidebar sections, preserved the previous sidebar state when opening Settings, centered compact command input, and moved the terminal performance overlay to the upper-right corner.
+- Applied the OxideTerm application icon to the Windows installer and uninstaller interfaces as well as installed-app registration.
+
+### 🧰 Release Maintenance
+
+- Made terminal playback, SSH keepalive, and reconnect timers explicitly owned and cancelled by their GPUI entities, eliminating timing-dependent cross-test scheduler failures seen in parallel CI.
+- Added the missing localized generic error status used by remote Shell integration and expanded packaging regression coverage for Windows installer icons and portable updates.
+
 ## 2.0.12
 
 OxideTerm 2.0.12 substantially expands native remote desktop and SSH Agent workflows, adds richer asset and first-run appearance controls, and fixes several terminal, connection, and cloud-sync interactions.

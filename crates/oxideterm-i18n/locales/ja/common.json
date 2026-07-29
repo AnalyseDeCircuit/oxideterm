@@ -115,6 +115,9 @@
   "common": {
     "enabled": "有効",
     "disabled": "無効",
+    "status": {
+      "error": "エラー"
+    },
     "confirm": {
       "disconnect_node": "\"{{name}}\" とそのすべての子ノードを切断してもよろしいですか？"
     },

@@ -1052,9 +1052,15 @@ def windows_installer_script(
         rf'"DisplayIcon" "$\"$INSTDIR\{binary.name}$\",0"'
     )
 
+    # Modern UI replaces the compiler-level Icon directives with its own
+    # interface settings, which must be defined before MUI2.nsh is included.
+    modern_ui_icon = nsis_path(icon_path)
+
     return f"""
 Unicode true
 RequestExecutionLevel user
+!define MUI_ICON "{modern_ui_icon}"
+!define MUI_UNICON "{modern_ui_icon}"
 !include MUI2.nsh
 !include FileFunc.nsh
 !include LogicLib.nsh
@@ -1063,8 +1069,6 @@ Name "{identity.app_name}"
 OutFile "{nsis_path(installer_path)}"
 InstallDir "{identity.windows_install_dir}"
 InstallDirRegKey HKCU "Software\\{identity.windows_registry_key}" "InstallDir"
-Icon "{nsis_path(icon_path)}"
-UninstallIcon "{nsis_path(icon_path)}"
 BrandingText "{identity.app_name}"
 VIProductVersion "{windows_numeric_version(version)}"
 VIAddVersionKey /LANG=1033 "ProductVersion" "{nsis_string(version)}"

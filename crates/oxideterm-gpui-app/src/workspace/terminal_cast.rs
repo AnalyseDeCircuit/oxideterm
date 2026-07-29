@@ -132,6 +132,7 @@ impl WorkspaceTerminalEntity {
     ) {
         self.cast_tick_generation = self.cast_tick_generation.saturating_add(1);
         self.cast_tick_scheduled = false;
+        self.cast_tick_task = None;
         self.cast_seek_dragging = false;
         self.cast_player = Some(player);
         self.rebuild_cast_playback(cx);
@@ -142,6 +143,8 @@ impl WorkspaceTerminalEntity {
         if was_open {
             self.cast_tick_generation = self.cast_tick_generation.saturating_add(1);
             self.cast_tick_scheduled = false;
+            // The entity owns the timer so closing playback cancels its async wake.
+            self.cast_tick_task = None;
             self.cast_seek_dragging = false;
         }
         was_open
@@ -285,25 +288,34 @@ impl WorkspaceTerminalEntity {
         }
         self.cast_tick_scheduled = true;
         let generation = self.cast_tick_generation;
-        cx.spawn(async move |terminal, cx| {
-            Timer::after(Duration::from_millis(33)).await;
-            let _ = terminal.update(cx, |terminal, cx| {
-                if terminal.cast_tick_generation != generation {
-                    return;
+        // Retain the task on the entity so teardown cancels a pending timer
+        // before another GPUI test or workspace can install its scheduler.
+        self.cast_tick_task = Some(cx.spawn(async move |terminal, cx| {
+            loop {
+                Timer::after(Duration::from_millis(33)).await;
+                let should_continue = terminal
+                    .update(cx, |terminal, cx| {
+                        if terminal.cast_tick_generation != generation {
+                            terminal.cast_tick_scheduled = false;
+                            return false;
+                        }
+                        let should_continue = terminal.cast_player.as_mut().is_some_and(|player| {
+                            player.advance_to_now();
+                            player.playback.playing()
+                        });
+                        terminal.feed_due_cast_events(cx);
+                        if !should_continue {
+                            terminal.cast_tick_scheduled = false;
+                        }
+                        cx.notify();
+                        should_continue
+                    })
+                    .unwrap_or(false);
+                if !should_continue {
+                    break;
                 }
-                terminal.cast_tick_scheduled = false;
-                let should_schedule = terminal.cast_player.as_mut().is_some_and(|player| {
-                    player.advance_to_now();
-                    player.playback.playing()
-                });
-                terminal.feed_due_cast_events(cx);
-                if should_schedule {
-                    terminal.schedule_cast_tick(cx);
-                }
-                cx.notify();
-            });
-        })
-        .detach();
+            }
+        }));
     }
 
     fn rebuild_cast_playback(&mut self, cx: &mut Context<Self>) {
@@ -543,6 +555,7 @@ mod tests {
             assert_eq!(snapshot.search_results.len(), 1);
             assert!(terminal.cast_seek_dragging);
             assert!(terminal.cast_tick_scheduled);
+            assert!(terminal.cast_tick_task.is_some());
             terminal.cast_tick_generation
         });
 
@@ -553,6 +566,7 @@ mod tests {
             assert!(terminal.cast_player.is_none());
             assert!(!terminal.cast_seek_dragging);
             assert!(!terminal.cast_tick_scheduled);
+            assert!(terminal.cast_tick_task.is_none());
             assert!(terminal.cast_tick_generation > active_generation);
         });
     }

@@ -115,6 +115,9 @@
   "common": {
     "enabled": "활성화됨",
     "disabled": "비활성화됨",
+    "status": {
+      "error": "오류"
+    },
     "confirm": {
       "disconnect_node": "\"{{name}}\" 및 모든 하위 노드의 연결을 해제하시겠습니까?"
     },
