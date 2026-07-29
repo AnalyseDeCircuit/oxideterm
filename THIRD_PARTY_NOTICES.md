@@ -2,13 +2,7 @@
 
 This file lists third-party Rust crates and detected licenses, including transitive dependencies.
 It is generated from `cargo deny list -f json -l crate`.
-Generated: 2026-07-26T08:58:23.727433Z
-
-## Theme Acknowledgments
-
-Built-in color schemes are derived from:
-- Solarized (MIT) — Copyright (c) 2011 Ethan Schoonover
-- VS Code Light/Dark (MIT) — Copyright (c) 2015 Microsoft Corporation
+Generated: 2026-07-26T17:46:54.928663Z
 
 ## Summary
 
