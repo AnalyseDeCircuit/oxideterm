@@ -77,7 +77,7 @@ impl HostToolsEntity {
                     .child(self.render_connection_switcher(
                         &connections,
                         selected_id,
-                        !self.schedule_snapshot_polling(),
+                        !self.schedule_snapshot_in_flight(),
                         tokens,
                         mono_font_family.clone(),
                         selectable_text,
@@ -96,7 +96,7 @@ impl HostToolsEntity {
             )
             .child(self.render_host_schedule_list(
                 rows,
-                self.schedule_snapshot_polling(),
+                self.schedule_snapshot_in_flight(),
                 status,
                 selected_id,
                 sidebar_width,
@@ -350,7 +350,7 @@ impl HostToolsEntity {
                         rgb(theme.text),
                         oxideterm_gpui_ui::button::IconButtonOptions {
                             size: 24.0,
-                            disabled: self.schedule_snapshot_polling(),
+                            disabled: self.schedule_snapshot_in_flight(),
                             has_background: true,
                             background: Some(rgb(theme.bg_hover)),
                             hover_background: Some(rgb(theme.bg_panel)),
@@ -1393,7 +1393,7 @@ impl HostToolsEntity {
             .cloned()
     }
 
-    pub(super) fn schedule_snapshot_polling(&self) -> bool {
+    pub(super) fn schedule_snapshot_in_flight(&self) -> bool {
         self.host_schedules.snapshot_in_flight
     }
 

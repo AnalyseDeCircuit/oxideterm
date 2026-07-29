@@ -1942,12 +1942,12 @@ mod tests {
                 },
                 runtime: runtime.handle().clone(),
             });
-            entity.host_services.snapshot_polling = true;
+            entity.host_services.snapshot_in_flight = true;
             assert!(entity.select_sidebar_tool(ContextSidebarTool::Monitor, cx));
             assert!(entity.host_services.pending_confirm.is_none());
             // Leaving Services drops only its queued refresh; an in-flight capture may finish.
             assert!(entity.host_services.snapshot_pending.is_none());
-            assert!(entity.host_services.snapshot_polling);
+            assert!(entity.host_services.snapshot_in_flight);
 
             entity.active_tool = ContextSidebarTool::Tmux;
             entity.host_tmux.pending_confirm =
@@ -2297,7 +2297,7 @@ mod tests {
         };
         let sender = entity.update(cx, |entity, _cx| {
             entity.host_services.snapshot_running = Some(snapshot_request.clone());
-            entity.host_services.snapshot_polling = true;
+            entity.host_services.snapshot_in_flight = true;
             entity.host_services.logs_dialog = Some(HostServiceLogsDialog {
                 request: logs_request.clone(),
                 output: None,
@@ -2337,7 +2337,7 @@ mod tests {
         cx.run_until_parked();
 
         entity.read_with(cx, |entity, _cx| {
-            assert!(!entity.host_services.snapshot_polling);
+            assert!(!entity.host_services.snapshot_in_flight);
             let snapshot = entity.host_services.snapshot.as_ref().unwrap();
             assert_eq!(
                 snapshot.status,
@@ -2440,7 +2440,7 @@ mod tests {
         };
         let sender = entity.update(cx, |entity, _cx| {
             entity.host_tmux.snapshot_running = Some(snapshot_request.clone());
-            entity.host_tmux.snapshot_polling = true;
+            entity.host_tmux.snapshot_in_flight = true;
             entity.reliable_delivery_tx.clone()
         });
         let secret_marker = "Authorization: should-not-reach-tmux-state";
@@ -2461,7 +2461,7 @@ mod tests {
         cx.run_until_parked();
 
         entity.read_with(cx, |entity, _cx| {
-            assert!(!entity.host_tmux.snapshot_polling);
+            assert!(!entity.host_tmux.snapshot_in_flight);
             assert_eq!(
                 entity.host_tmux.snapshot.as_ref().unwrap().status,
                 ResourceTmuxStatus::Error {

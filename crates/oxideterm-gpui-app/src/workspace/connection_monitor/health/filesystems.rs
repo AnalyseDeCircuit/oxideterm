@@ -69,7 +69,7 @@ impl HostToolsEntity {
                     .child(self.render_connection_switcher(
                         &connections,
                         selected_id,
-                        !self.filesystem_snapshot_polling(),
+                        !self.filesystem_snapshot_in_flight(),
                         tokens,
                         mono_font_family.clone(),
                         selectable_text,
@@ -88,7 +88,7 @@ impl HostToolsEntity {
             )
             .child(self.render_host_filesystem_list(
                 rows,
-                self.filesystem_snapshot_polling(),
+                self.filesystem_snapshot_in_flight(),
                 status,
                 selected_id,
                 sidebar_width,
@@ -281,7 +281,7 @@ impl HostToolsEntity {
                         rgb(theme.text),
                         oxideterm_gpui_ui::button::IconButtonOptions {
                             size: 24.0,
-                            disabled: self.filesystem_snapshot_polling(),
+                            disabled: self.filesystem_snapshot_in_flight(),
                             has_background: true,
                             background: Some(rgb(theme.bg_hover)),
                             hover_background: Some(rgb(theme.bg_panel)),
@@ -977,7 +977,7 @@ impl HostToolsEntity {
         })
     }
 
-    pub(super) fn filesystem_snapshot_polling(&self) -> bool {
+    pub(super) fn filesystem_snapshot_in_flight(&self) -> bool {
         self.host_filesystems.snapshot_in_flight
     }
 

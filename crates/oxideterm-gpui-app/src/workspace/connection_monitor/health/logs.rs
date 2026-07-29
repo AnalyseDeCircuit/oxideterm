@@ -92,7 +92,7 @@ impl HostToolsEntity {
                     .child(self.render_connection_switcher(
                         &connections,
                         selected_id,
-                        !self.log_snapshot_polling(),
+                        !self.log_snapshot_in_flight(),
                         tokens,
                         mono_font_family.clone(),
                         selectable_text,
@@ -111,7 +111,7 @@ impl HostToolsEntity {
             )
             .child(self.render_host_log_list(
                 rows,
-                self.log_snapshot_polling(),
+                self.log_snapshot_in_flight(),
                 status,
                 tokens,
                 i18n,
@@ -274,7 +274,7 @@ impl HostToolsEntity {
                         rgb(theme.text),
                         oxideterm_gpui_ui::button::IconButtonOptions {
                             size: 24.0,
-                            disabled: self.log_snapshot_polling(),
+                            disabled: self.log_snapshot_in_flight(),
                             has_background: true,
                             background: Some(rgb(theme.bg_hover)),
                             hover_background: Some(rgb(theme.bg_panel)),
@@ -768,7 +768,7 @@ impl HostToolsEntity {
         self.host_logs.preset
     }
 
-    pub(super) fn log_snapshot_polling(&self) -> bool {
+    pub(super) fn log_snapshot_in_flight(&self) -> bool {
         self.host_logs.snapshot_in_flight
     }
 

@@ -45,7 +45,7 @@ impl HostToolsEntity {
             .map(|snapshot| snapshot.status.clone())
             .unwrap_or_default();
         self.sync_host_package_list_state(&rows, selected_id);
-        let snapshot_polling = self.package_snapshot_polling();
+        let snapshot_in_flight = self.package_snapshot_in_flight();
 
         div()
             .id("host-packages-panel")
@@ -72,7 +72,7 @@ impl HostToolsEntity {
                     .child(self.render_connection_switcher(
                         &connections,
                         selected_id,
-                        !snapshot_polling,
+                        !snapshot_in_flight,
                         tokens,
                         mono_font_family.clone(),
                         selectable_text,
@@ -91,7 +91,7 @@ impl HostToolsEntity {
             )
             .child(self.render_host_package_list(
                 rows,
-                snapshot_polling,
+                snapshot_in_flight,
                 status,
                 selected_id,
                 sidebar_width,
@@ -265,7 +265,7 @@ impl HostToolsEntity {
                 rgb(theme.text),
                 oxideterm_gpui_ui::button::IconButtonOptions {
                     size: 24.0,
-                    disabled: self.package_snapshot_polling(),
+                    disabled: self.package_snapshot_in_flight(),
                     has_background: true,
                     background: Some(rgb(theme.bg_hover)),
                     hover_background: Some(rgb(theme.bg_panel)),
@@ -921,7 +921,7 @@ impl HostToolsEntity {
             .filter(|_| self.host_packages.snapshot_connection_id.as_deref() == Some(connection_id))
     }
 
-    pub(super) fn package_snapshot_polling(&self) -> bool {
+    pub(super) fn package_snapshot_in_flight(&self) -> bool {
         self.host_packages.snapshot_in_flight
     }
 
@@ -1243,7 +1243,7 @@ mod tests {
         entity.update(cx, |host_tools, cx| {
             assert!(host_tools.select_package_filter(PackageFilter::Upgradable, cx));
             host_tools.toggle_package_expanded(2, cx);
-            assert!(!host_tools.package_snapshot_polling());
+            assert!(!host_tools.package_snapshot_in_flight());
             assert!(host_tools.host_packages.running.is_none());
         });
     }

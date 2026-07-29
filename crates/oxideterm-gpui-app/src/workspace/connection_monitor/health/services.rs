@@ -466,7 +466,7 @@ impl HostToolsEntity {
             .map(|snapshot| snapshot.status.clone())
             .unwrap_or_default();
         self.sync_host_service_list_state(&rows, selected_id);
-        let snapshot_polling = self.service_snapshot_polling();
+        let snapshot_in_flight = self.service_snapshot_in_flight();
 
         div()
             .id("host-services-panel")
@@ -493,7 +493,7 @@ impl HostToolsEntity {
                     .child(self.render_connection_switcher(
                         &connections,
                         selected_id,
-                        !snapshot_polling,
+                        !snapshot_in_flight,
                         tokens,
                         mono_font_family.clone(),
                         selectable_text,
@@ -511,7 +511,7 @@ impl HostToolsEntity {
             )
             .child(self.render_host_service_list(
                 rows,
-                snapshot_polling,
+                snapshot_in_flight,
                 service_status,
                 selected_id,
                 follow_terminal_available,
@@ -620,7 +620,7 @@ impl HostToolsEntity {
                     background: Some(rgb(theme.bg_hover)),
                     hover_background: Some(rgb(theme.bg_panel)),
                     idle_opacity: 1.0,
-                    disabled: self.service_snapshot_polling(),
+                    disabled: self.service_snapshot_in_flight(),
                     ..oxideterm_gpui_ui::button::IconButtonOptions::compact(24.0)
                 },
                 i18n.t("sidebar.host_services.actions.refresh"),
@@ -1375,8 +1375,8 @@ impl HostToolsEntity {
             .flatten()
     }
 
-    pub(super) fn service_snapshot_polling(&self) -> bool {
-        self.host_services.snapshot_polling
+    pub(super) fn service_snapshot_in_flight(&self) -> bool {
+        self.host_services.snapshot_in_flight
     }
 
     pub(in crate::workspace::connection_monitor) fn pause_service_refreshes(&mut self) {
@@ -1433,7 +1433,7 @@ impl HostToolsEntity {
             connection_fallback,
             failure_fallback,
         };
-        if self.host_services.snapshot_polling {
+        if self.host_services.snapshot_in_flight {
             // Keep only the newest selection or post-action refresh while the
             // current bounded snapshot command completes.
             self.host_services.snapshot_pending =
@@ -1468,7 +1468,7 @@ impl HostToolsEntity {
         }
         self.host_services.snapshot_connection_id = Some(request.connection_id.clone());
         self.host_services.snapshot_running = Some(request.clone());
-        self.host_services.snapshot_polling = true;
+        self.host_services.snapshot_in_flight = true;
         let spawned = self.spawn_service_snapshot_capture(
             command.command,
             request.clone(),
@@ -1478,7 +1478,7 @@ impl HostToolsEntity {
         );
         if !spawned {
             self.host_services.snapshot_running = None;
-            self.host_services.snapshot_polling = false;
+            self.host_services.snapshot_in_flight = false;
             self.host_services.snapshot = Some(ResourceServiceSnapshot {
                 status: ResourceServiceStatus::Error {
                     message: request.connection_fallback,
@@ -1497,7 +1497,7 @@ impl HostToolsEntity {
         if self.host_services.snapshot_running.as_ref() != Some(&delivery.request) {
             return;
         }
-        self.host_services.snapshot_polling = false;
+        self.host_services.snapshot_in_flight = false;
         self.host_services.snapshot_running = None;
         let snapshot = match delivery.result {
             Ok(mut output) if output.exit_code.unwrap_or(0) == 0 => {

@@ -346,7 +346,7 @@ impl HostToolsEntity {
                     .child(self.render_connection_switcher(
                         &connections,
                         selected_id,
-                        !self.tmux_snapshot_polling(),
+                        !self.tmux_snapshot_in_flight(),
                         tokens,
                         mono_font_family.clone(),
                         selectable_text,
@@ -365,7 +365,7 @@ impl HostToolsEntity {
             .child(self.render_host_tmux_list(
                 rows,
                 snapshot,
-                self.tmux_snapshot_polling(),
+                self.tmux_snapshot_in_flight(),
                 status,
                 selected_id,
                 sidebar_width,
@@ -511,7 +511,7 @@ impl HostToolsEntity {
                         rgb(theme.text),
                         oxideterm_gpui_ui::button::IconButtonOptions {
                             size: 24.0,
-                            disabled: self.tmux_snapshot_polling(),
+                            disabled: self.tmux_snapshot_in_flight(),
                             has_background: true,
                             background: Some(rgb(theme.bg_hover)),
                             hover_background: Some(rgb(theme.bg_panel)),
@@ -1668,8 +1668,8 @@ impl HostToolsEntity {
             .flatten()
     }
 
-    pub(super) fn tmux_snapshot_polling(&self) -> bool {
-        self.host_tmux.snapshot_polling
+    pub(super) fn tmux_snapshot_in_flight(&self) -> bool {
+        self.host_tmux.snapshot_in_flight
     }
 
     pub(super) fn tmux_action_running_for(&self, session_id: &str) -> bool {
@@ -1711,7 +1711,7 @@ impl HostToolsEntity {
         runtime: tokio::runtime::Handle,
         cx: &mut Context<Self>,
     ) -> Vec<HostToolsNotice> {
-        if self.host_tmux.snapshot_polling {
+        if self.host_tmux.snapshot_in_flight {
             return if feedback.should_toast() {
                 vec![HostToolsNotice::TmuxSnapshotAlreadyRunning]
             } else {
@@ -1735,7 +1735,7 @@ impl HostToolsEntity {
         };
         self.host_tmux.snapshot_connection_id = Some(connection_id);
         self.host_tmux.snapshot_running = Some(request.clone());
-        self.host_tmux.snapshot_polling = true;
+        self.host_tmux.snapshot_in_flight = true;
         self.host_tmux.last_error = None;
         let spawned = self.spawn_tmux_snapshot_capture(
             command.command,
@@ -1746,7 +1746,7 @@ impl HostToolsEntity {
         );
         if !spawned {
             self.host_tmux.snapshot_running = None;
-            self.host_tmux.snapshot_polling = false;
+            self.host_tmux.snapshot_in_flight = false;
             return if feedback.should_toast() {
                 vec![HostToolsNotice::TmuxConnectionMissing]
             } else {
@@ -1766,7 +1766,7 @@ impl HostToolsEntity {
             return;
         }
         let feedback = delivery.request.feedback;
-        self.host_tmux.snapshot_polling = false;
+        self.host_tmux.snapshot_in_flight = false;
         self.host_tmux.snapshot_running = None;
         let (snapshot, notice) = match delivery.result {
             Ok(mut output) => {
