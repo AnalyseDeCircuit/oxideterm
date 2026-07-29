@@ -52,9 +52,6 @@ impl WorkspaceApp {
         self.close_terminal_quick_commands_popover(cx);
         self.close_terminal_cwd_picker(cx);
         self.close_terminal_git_branch_picker(cx);
-        self.terminal_command_suggestions_open = false;
-        self.terminal_command_suggestion_highlighted = None;
-        self.terminal_command_bar_focused = false;
         self.terminal
             .update(cx, |terminal, _cx| terminal.open_project_panel(&key));
         cx.notify();

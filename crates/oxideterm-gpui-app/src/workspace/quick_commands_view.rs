@@ -17,8 +17,8 @@ use oxideterm_gpui_ui::{
     text_input::{TextInputView, text_input, text_input_anchor_probe},
 };
 use oxideterm_quick_commands::{
-    QuickCommandRisk, classify_command_risk, quick_command_category_draft_can_save,
-    quick_command_draft_can_save,
+    QuickCommandRisk, classify_command_risk, match_quick_command_host_pattern,
+    quick_command_category_draft_can_save, quick_command_draft_can_save,
 };
 use zeroize::Zeroizing;
 
@@ -283,6 +283,25 @@ struct QuickCommandsRenderSnapshot {
 impl TerminalQuickCommandsState {
     fn visible_commands_for_targets(&self, target_fields: &[String]) -> Vec<QuickCommand> {
         self.store.visible_commands_for_targets(target_fields)
+    }
+
+    pub(in crate::workspace) fn quick_bar_snapshot(
+        &self,
+        target_fields: &[String],
+    ) -> (Vec<QuickCommandCategory>, Vec<QuickCommand>) {
+        // QuickBar is a read-only projection of the existing persisted store.
+        // Preserve category and command order instead of creating a second model.
+        (
+            self.store.categories.clone(),
+            self.store
+                .commands
+                .iter()
+                .filter(|command| {
+                    match_quick_command_host_pattern(command.host_pattern.as_deref(), target_fields)
+                })
+                .cloned()
+                .collect(),
+        )
     }
 
     pub(in crate::workspace) fn is_open(&self) -> bool {
@@ -703,10 +722,7 @@ impl WorkspaceApp {
                 .quick_commands
                 .prepare_insertion(command, keep_open)
         });
-        // The command draft remains a window/IME adapter until the command-bar
-        // state moves as the next terminal slice.
-        self.terminal_command_bar_draft = command;
-        self.terminal_command_bar_focused = true;
+        self.replace_terminal_command_sender_text(command, cx);
     }
 
     pub(in crate::workspace) fn handle_quick_commands_key(
@@ -729,7 +745,6 @@ impl WorkspaceApp {
                     // Tauri keeps Escape as the browser-like popover dismissal
                     // path for the Command Bar quick commands surface.
                     self.close_terminal_quick_commands_popover(cx);
-                    self.terminal_command_bar_focused = true;
                     self.ime_marked_text = None;
                     cx.notify();
                     return;
@@ -775,8 +790,7 @@ impl WorkspaceApp {
                             .prepare_highlighted_insertion(&target_fields)
                     });
                     if let Some(command) = command {
-                        self.terminal_command_bar_draft = command;
-                        self.terminal_command_bar_focused = true;
+                        self.replace_terminal_command_sender_text(command, cx);
                         cx.notify();
                     }
                     return;

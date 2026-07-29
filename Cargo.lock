@@ -8264,6 +8264,7 @@ dependencies = [
  "tempfile",
  "tokio",
  "tracing",
+ "unicode-segmentation",
  "windows 0.61.3",
  "zeroize",
 ]

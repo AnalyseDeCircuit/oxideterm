@@ -1,3 +1,8 @@
+// The legacy input owner is retired. Keep its data providers available for the
+// custom-spec settings surface and a sender-editor completion adapter without
+// retaining the old draft, focus, IME, or rendering state.
+#![allow(dead_code, unused_imports)]
+
 use super::actions::classify_command_risk;
 use super::quick_commands::match_quick_command_host_pattern;
 use super::*;
@@ -11,7 +16,6 @@ mod fig_specs;
 mod history_provider;
 mod path_provider;
 mod quick_command_provider;
-mod render;
 mod types;
 
 pub(self) use common::{

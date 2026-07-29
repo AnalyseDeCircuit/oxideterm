@@ -52,6 +52,7 @@ mod sidebar;
 mod tabs;
 mod terminal_cast;
 mod terminal_command_bar;
+mod terminal_command_sender;
 mod terminal_context_actions;
 mod terminal_cwd;
 mod terminal_entity;
@@ -674,11 +675,8 @@ pub(crate) struct WorkspaceApp {
     tab_host: Entity<tabs::WorkspaceTabHostEntity>,
     _tab_host_subscription: Subscription,
     search: SearchBarState,
-    terminal_command_bar_focused: bool,
-    terminal_command_input_collapsed: bool,
-    terminal_command_bar_draft: String,
-    terminal_command_suggestions_open: bool,
-    terminal_command_suggestion_highlighted: Option<usize>,
+    terminal_command_sender: Entity<terminal_command_sender::TerminalCommandSenderEntity>,
+    _terminal_command_sender_observation: Subscription,
     detached_local_terminals: HashMap<TerminalSessionId, DetachedLocalTerminalSession>,
     detached_local_terminal_order: Vec<TerminalSessionId>,
     serial_terminal_configs: HashMap<TerminalSessionId, SerialSessionConfig>,
@@ -895,6 +893,8 @@ impl WorkspaceApp {
     }
 }
 
+// Completion providers remain data-only while the sender editor owns input.
+#[allow(dead_code)]
 #[derive(Clone, Debug)]
 struct TerminalCommandSuggestion {
     kind: TerminalCommandSuggestionKind,
@@ -910,6 +910,7 @@ struct TerminalCommandSuggestion {
     inline_safe: bool,
 }
 
+#[allow(dead_code)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum TerminalCommandSuggestionKind {
     History,

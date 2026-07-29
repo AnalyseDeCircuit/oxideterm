@@ -206,7 +206,7 @@ impl WorkspaceApp {
                 (TabKind::RemoteDesktop, _) => {
                     self.render_remote_desktop_surface(*tab_id, window, cx)
                 }
-                (_, Some(root_pane)) => self.render_terminal_surface(root_pane, cx),
+                (_, Some(root_pane)) => self.render_terminal_surface(root_pane, window, cx),
                 _ => self.render_empty_workspace(cx),
             }
         } else {
@@ -410,11 +410,12 @@ impl WorkspaceApp {
                 } else if this.handle_privilege_prompt_helper_key(event, window, cx) {
                     window.prevent_default();
                     cx.stop_propagation();
-                } else if this.terminal_command_bar_focused
-                    && this.handle_terminal_command_bar_key(event, window, cx)
-                {
+                } else if this.handle_compact_terminal_command_sender_key(event, window, cx) {
                     window.prevent_default();
                     cx.stop_propagation();
+                } else if this.terminal_command_sender_editor_focused(window, cx) {
+                    // The editor owns its complete key model, including Tab and
+                    // navigation keys that otherwise fall through to the pane.
                 } else if this.forward_remote_desktop_key_from_capture(event, cx) {
                     window.prevent_default();
                     cx.stop_propagation();
@@ -510,6 +511,7 @@ impl WorkspaceApp {
                 this.update_ai_sidebar_resize(event, window, cx);
                 this.update_sftp_pane_resize(event, window, cx);
                 this.update_sftp_queue_resize(event, window, cx);
+                this.update_terminal_command_sender_resize(event, window, cx);
                 this.update_split_drag(event, window, cx);
                 this.update_settings_slider_drag(event, cx);
                 this.update_terminal_cast_seek_drag(event, cx);
@@ -1139,9 +1141,10 @@ impl WorkspaceApp {
             Some(browser_behavior::BrowserPointerCaptureOwner::HostToolsTabScrollbar) => {
                 CursorStyle::ClosedHand
             }
-            Some(browser_behavior::BrowserPointerCaptureOwner::SftpQueueResize) => {
-                CursorStyle::ResizeRow
-            }
+            Some(
+                browser_behavior::BrowserPointerCaptureOwner::SftpQueueResize
+                | browser_behavior::BrowserPointerCaptureOwner::TerminalCommandSenderResize,
+            ) => CursorStyle::ResizeRow,
             _ => CursorStyle::ResizeColumn,
         };
         div()
@@ -1161,6 +1164,7 @@ impl WorkspaceApp {
                 this.update_ai_sidebar_resize(event, window, cx);
                 this.update_sftp_pane_resize(event, window, cx);
                 this.update_sftp_queue_resize(event, window, cx);
+                this.update_terminal_command_sender_resize(event, window, cx);
                 this.update_host_tools_tab_scrollbar_drag(event, cx);
                 cx.stop_propagation();
             }))
@@ -1186,6 +1190,7 @@ impl WorkspaceApp {
         self.finish_ai_sidebar_resize(cx);
         self.finish_sftp_pane_resize(cx);
         self.finish_sftp_queue_resize(cx);
+        self.finish_terminal_command_sender_resize(cx);
         self.finish_split_drag(cx);
         self.finish_settings_slider_drag(cx);
         self.finish_terminal_cast_seek_drag(cx);
@@ -1348,11 +1353,7 @@ impl WorkspaceApp {
                 if let Some(command) = request.take() {
                     // The Entity owns generation and completion; the root only
                     // installs the one-shot result into its current input owner.
-                    self.terminal_command_input_collapsed = false;
-                    self.terminal_command_bar_focused = true;
-                    self.terminal_command_bar_draft = command;
-                    self.terminal_command_suggestions_open = false;
-                    self.terminal_command_suggestion_highlighted = None;
+                    self.replace_terminal_command_sender_text(command, cx);
                     self.ime_marked_text = None;
                     self.clear_ime_selection();
                     cx.notify();

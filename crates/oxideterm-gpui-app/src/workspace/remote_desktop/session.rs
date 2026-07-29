@@ -828,19 +828,6 @@ impl WorkspaceApp {
         self.clear_ai_sidebar_keyboard_focus(cx);
         changed |= ai_focus_changed;
 
-        if self.terminal_command_bar_focused
-            || self.terminal_command_suggestions_open
-            || self.terminal_command_suggestion_highlighted.is_some()
-        {
-            // Remote desktop clicks are a keyboard ownership boundary. Clear
-            // Workspace-local text owners so Enter and IME control keys route
-            // to the helper after the surface gains focus.
-            self.terminal_command_bar_focused = false;
-            self.terminal_command_suggestions_open = false;
-            self.terminal_command_suggestion_highlighted = None;
-            changed = true;
-        }
-
         if let Some(tab_id) = self.active_remote_desktop_tab_id(cx) {
             self.sync_remote_desktop_lock_keys(tab_id, window.capslock(), cx);
         }

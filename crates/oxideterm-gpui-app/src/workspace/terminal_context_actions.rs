@@ -44,10 +44,9 @@ impl WorkspaceApp {
                     self.close_terminal_ai_inline_panel(window, cx);
                 }
                 self.close_terminal_command_overlays(cx);
-                self.terminal_command_bar_draft = command;
-                self.terminal_command_bar_focused = true;
+                let sender_id = self.replace_terminal_command_sender_text(command, cx);
                 self.ime_marked_text = None;
-                window.focus(&self.focus_handle, cx);
+                self.focus_terminal_command_sender_editor(sender_id, window, cx);
                 cx.notify();
                 true
             }

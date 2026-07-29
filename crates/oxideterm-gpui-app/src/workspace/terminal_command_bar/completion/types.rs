@@ -35,7 +35,7 @@ pub(super) enum TerminalCommandContextType {
 }
 
 #[derive(Clone, Debug)]
-pub(super) struct TerminalCommandContext {
+pub(in crate::workspace) struct TerminalCommandContext {
     pub(super) pane_id: Option<PaneId>,
     pub(super) session_id: Option<TerminalSessionId>,
     pub(super) tab_id: Option<TabId>,
@@ -65,7 +65,7 @@ impl TerminalCommandContext {
             .unwrap_or_default()
     }
 
-    pub(super) fn target_fields(&self) -> Vec<String> {
+    pub(in crate::workspace) fn target_fields(&self) -> Vec<String> {
         let mut fields = vec![self.target_label.clone()];
         if let Some(cwd_host) = &self.cwd_host {
             fields.push(cwd_host.clone());

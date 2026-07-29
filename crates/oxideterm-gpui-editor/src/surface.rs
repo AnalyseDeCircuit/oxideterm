@@ -41,6 +41,26 @@ pub type SaveCallback =
 pub type ModifiedWordClickCallback =
     Box<dyn FnMut(String, &mut Window, &mut Context<TextEditorView>) -> Result<(), String>>;
 
+/// Controls whether the editor owns a full document surface or sits inside an
+/// existing input row whose surrounding component already provides chrome.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum EditorPresentation {
+    #[default]
+    Document,
+    Inline,
+}
+
+fn content_padding_x_for_presentation(
+    presentation: EditorPresentation,
+    document_content_padding_x: f32,
+) -> f32 {
+    match presentation {
+        EditorPresentation::Document => document_content_padding_x,
+        // The surrounding input row owns the horizontal inset in inline mode.
+        EditorPresentation::Inline => 0.0,
+    }
+}
+
 type BoundsCallback = Box<dyn FnOnce(Bounds<Pixels>, &mut Window, &mut App)>;
 
 struct EditorBoundsProbe {
@@ -281,6 +301,7 @@ pub struct TextEditorView {
     highlight_chunk_cache: RefCell<HighlightChunkCache>,
     selection_drag: Option<SelectionDrag>,
     transparent_background: bool,
+    presentation: EditorPresentation,
     context_menu: Option<EditorContextMenu>,
     context_menu_labels: EditorContextMenuLabels,
 }
@@ -321,6 +342,7 @@ impl TextEditorView {
             highlight_chunk_cache: RefCell::new(HighlightChunkCache::default()),
             selection_drag: None,
             transparent_background: false,
+            presentation: EditorPresentation::Document,
             context_menu: None,
             context_menu_labels: EditorContextMenuLabels::default(),
         }
@@ -378,6 +400,16 @@ impl TextEditorView {
         }
     }
 
+    pub fn move_cursor_to_document_end(&mut self, cx: &mut Context<Self>) {
+        // External draft insertion should leave the next typed character after
+        // the inserted content instead of at the beginning of the document.
+        self.cursor
+            .set_selection(Selection::caret(BufferOffset(self.buffer.len())));
+        self.secondary_selections.clear();
+        self.marked_text = None;
+        cx.notify();
+    }
+
     pub fn set_read_only(&mut self, read_only: bool) {
         self.read_only = read_only;
     }
@@ -392,6 +424,27 @@ impl TextEditorView {
 
     pub fn set_context_menu_labels(&mut self, labels: EditorContextMenuLabels) {
         self.context_menu_labels = labels;
+    }
+
+    pub fn set_presentation(&mut self, presentation: EditorPresentation, cx: &mut Context<Self>) {
+        if self.presentation == presentation {
+            return;
+        }
+        // Inline mode removes only visual chrome. Buffer, cursor, undo, IME,
+        // and selection ownership remain on this editor instance.
+        self.presentation = presentation;
+        self.display_rows_cache.borrow_mut().take();
+        self.viewport
+            .clamp(self.document_row_count(), self.metrics.line_height);
+        cx.notify();
+    }
+
+    pub fn set_placeholder(&mut self, placeholder: Option<String>, cx: &mut Context<Self>) {
+        if self.settings.placeholder == placeholder {
+            return;
+        }
+        self.settings.placeholder = placeholder;
+        cx.notify();
     }
 
     pub fn set_settings(&mut self, settings: EditorSettings, cx: &mut Context<Self>) {
@@ -412,7 +465,30 @@ impl TextEditorView {
         background_active: bool,
         cx: &mut Context<Self>,
     ) {
+        self.apply_runtime_settings(
+            tokens,
+            tokens.metrics.markdown_code_font_family.to_string(),
+            font_size,
+            line_height,
+            word_wrap,
+            background_active,
+            cx,
+        );
+    }
+
+    pub fn apply_runtime_settings(
+        &mut self,
+        tokens: &ThemeTokens,
+        font_family: String,
+        font_size: f32,
+        line_height: f32,
+        word_wrap: bool,
+        background_active: bool,
+        cx: &mut Context<Self>,
+    ) {
         self.appearance = EditorAppearance::from_theme(tokens);
+        // Embedded editors can follow the typography of their owning surface.
+        self.appearance.font_family = font_family;
         self.metrics =
             EditorMetrics::from_theme_with_editor_typography(tokens, font_size, line_height);
         self.transparent_background = background_active;
@@ -876,6 +952,18 @@ impl TextEditorView {
         }
     }
 
+    pub(super) fn visible_gutter_width(&self) -> f32 {
+        if self.presentation == EditorPresentation::Inline {
+            0.0
+        } else {
+            self.metrics.gutter_width
+        }
+    }
+
+    pub(super) fn visible_content_padding_x(&self) -> f32 {
+        content_padding_x_for_presentation(self.presentation, self.metrics.content_padding_x)
+    }
+
     fn offset_for_window_point(
         &self,
         point: Point<Pixels>,
@@ -891,8 +979,8 @@ impl TextEditorView {
                 .content_bounds
                 .map(|bounds| f32::from(bounds.origin.x))
                 .unwrap_or_default()
-            - self.metrics.gutter_width
-            - self.metrics.content_padding_x
+            - self.visible_gutter_width()
+            - self.visible_content_padding_x()
             + self.viewport.scroll_x_px;
         let local_byte =
             self.closest_grapheme_byte_for_x(segment_text, relative_x.max(0.0), window);
@@ -979,8 +1067,8 @@ impl TextEditorView {
             .map(|bounds| bounds.origin.x)
             .unwrap_or(px(0.0));
         let x = f32::from(x - content_origin_x)
-            - self.metrics.gutter_width
-            - self.metrics.content_padding_x
+            - self.visible_gutter_width()
+            - self.visible_content_padding_x()
             + self.viewport.scroll_x_px;
         // The Phase 2 surface is explicitly monospace. Rounding places clicks
         // on the nearest caret slot instead of always biasing to the left edge.
@@ -1022,9 +1110,11 @@ impl TextEditorView {
         Bounds {
             origin: bounds.origin
                 + point(
-                    px(self.metrics.gutter_width + self.metrics.content_padding_x
-                        - self.viewport.scroll_x_px
-                        + caret_x),
+                    px(
+                        self.visible_gutter_width() + self.visible_content_padding_x()
+                            - self.viewport.scroll_x_px
+                            + caret_x,
+                    ),
                     px(display_index as f32 * self.metrics.line_height
                         - self.vertical_scroll_y_px()),
                 ),
@@ -1125,7 +1215,8 @@ mod tests {
     use oxideterm_editor_syntax::BracketPair;
 
     use super::{
-        HighlightChunkCache, HighlightChunkCacheKey, LineChunkSpec, build_bracket_pair_index,
+        EditorPresentation, HighlightChunkCache, HighlightChunkCacheKey, LineChunkSpec,
+        build_bracket_pair_index, content_padding_x_for_presentation,
     };
 
     fn cache_key(line: usize) -> HighlightChunkCacheKey {
@@ -1189,5 +1280,17 @@ mod tests {
         let index = build_bracket_pair_index(&[first.clone(), second]);
 
         assert_eq!(index.get(&1), Some(&first));
+    }
+
+    #[test]
+    fn inline_presentation_delegates_horizontal_inset_to_its_owner() {
+        assert_eq!(
+            content_padding_x_for_presentation(EditorPresentation::Document, 8.0),
+            8.0
+        );
+        assert_eq!(
+            content_padding_x_for_presentation(EditorPresentation::Inline, 8.0),
+            0.0
+        );
     }
 }

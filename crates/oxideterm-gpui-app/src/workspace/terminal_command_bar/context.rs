@@ -218,11 +218,6 @@ impl WorkspaceApp {
 
     pub(super) fn render_terminal_cwd_picker(&self, cx: &mut Context<Self>) -> AnyElement {
         let left = self.terminal_cwd_picker_left();
-        let bottom = if self.terminal_command_input_collapsed {
-            32.0
-        } else {
-            64.0
-        };
         let mut panel = context_menu_pointer_event_boundary(
             command_panel(
                 &self.tokens,
@@ -232,7 +227,8 @@ impl WorkspaceApp {
                     .terminal_owned(),
             )
             .absolute()
-            .bottom(px(bottom))
+            // The retired command input no longer adds a second row below the toolbar.
+            .bottom(px(TERMINAL_COMMAND_TOOLBAR_HEIGHT))
             .left(px(left))
             .occlude()
             .text_size(px(12.0))
@@ -912,11 +908,6 @@ impl WorkspaceApp {
 
     pub(super) fn render_terminal_project_panel(&self, cx: &mut Context<Self>) -> AnyElement {
         let left = self.terminal_project_panel_left();
-        let bottom = if self.terminal_command_input_collapsed {
-            32.0
-        } else {
-            64.0
-        };
         let git_root_disagreement = self
             .active_terminal_project_snapshot(cx)
             .and_then(|project| {
@@ -934,7 +925,8 @@ impl WorkspaceApp {
                     .terminal_owned(),
             )
             .absolute()
-            .bottom(px(bottom))
+            // The retired command input no longer adds a second row below the toolbar.
+            .bottom(px(TERMINAL_COMMAND_TOOLBAR_HEIGHT))
             .left(px(left))
             .occlude()
             .text_size(px(12.0))

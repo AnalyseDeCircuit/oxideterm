@@ -94,8 +94,8 @@ impl TextEditorView {
         }
         let bounds = self.content_bounds?;
         let available_width = f32::from(bounds.size.width)
-            - self.metrics.gutter_width
-            - self.metrics.content_padding_x * 2.0;
+            - self.visible_gutter_width()
+            - self.visible_content_padding_x() * 2.0;
         let measured = (available_width / self.metrics.char_width).floor().max(8.0) as usize;
         Some(measured.min(self.settings.soft_wrap_column.max(8)))
     }

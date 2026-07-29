@@ -446,6 +446,8 @@
       "gpu_canvas_experiments_hint": "啟用實驗性 GPU 視覺化。不取代主終端機渲染器。",
       "quick_commands": "快捷命令",
       "quick_commands_hint": "在命令栏中显示内置快捷命令库。",
+      "quick_bar": "快捷命令列",
+      "quick_bar_hint": "在命令列上方以可選橫向工具列顯示已儲存的快捷命令。",
       "quick_commands_confirm": "执行快捷命令前确认",
       "quick_commands_confirm_hint": "通过 Run 按钮执行快捷命令前先询问确认。",
       "quick_commands_toast": "快捷命令提示",

@@ -446,6 +446,8 @@
       "gpu_canvas_experiments_hint": "Experimental GPU-backed visualizations. Does not replace the terminal renderer.",
       "quick_commands": "Quick Commands",
       "quick_commands_hint": "Show a built-in quick command library in the Command Bar.",
+      "quick_bar": "빠른 명령 모음",
+      "quick_bar_hint": "저장된 빠른 명령을 명령 모음 위의 선택적 가로 모음에 표시합니다.",
       "quick_commands_confirm": "Confirm Quick Command Run",
       "quick_commands_confirm_hint": "Ask before running a quick command from the Run button.",
       "quick_commands_toast": "Quick Command Toast",

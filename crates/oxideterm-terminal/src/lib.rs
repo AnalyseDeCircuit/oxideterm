@@ -28,6 +28,7 @@ use oxideterm_terminal_graphics::{
 
 mod backpressure;
 mod color;
+mod command_sender;
 mod data;
 mod editor_integration;
 mod local_graphics_event_loop;
@@ -42,6 +43,10 @@ mod shell_completion;
 mod shell_integration;
 
 pub use alacritty_terminal::term::TermMode;
+pub use command_sender::{
+    TerminalSenderFrame, TerminalSenderInputMode, TerminalSenderPacing, TerminalSenderPlan,
+    TerminalSenderPlanError, build_terminal_sender_plan,
+};
 pub use data::{
     GraphicsOptions, TerminalAttrs, TerminalCell, TerminalColor, TerminalCursorShape,
     TerminalImageAnimationState, TerminalImageData, TerminalImageFrame, TerminalImageId,

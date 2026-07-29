@@ -59,6 +59,8 @@ pub struct TerminalCommandBarSettings {
     pub show_current_directory: bool,
     pub smart_completion: bool,
     pub quick_commands_enabled: bool,
+    #[serde(default)]
+    pub quick_bar_enabled: bool,
     pub quick_commands_confirm_before_run: bool,
     pub quick_commands_show_toast: bool,
     pub focus_handoff_commands: Vec<String>,
@@ -104,6 +106,7 @@ impl Default for TerminalCommandBarSettings {
             show_current_directory: true,
             smart_completion: true,
             quick_commands_enabled: true,
+            quick_bar_enabled: false,
             quick_commands_confirm_before_run: false,
             quick_commands_show_toast: true,
             focus_handoff_commands: RECOMMENDED_FOCUS_HANDOFF_COMMANDS
@@ -535,5 +538,15 @@ mod tests {
         let settings: TerminalCommandBarSettings = serde_json::from_value(value).unwrap();
 
         assert!(settings.project_tasks);
+    }
+
+    #[test]
+    fn command_bar_settings_default_quick_bar_to_disabled_when_missing() {
+        let mut value = serde_json::to_value(TerminalCommandBarSettings::default()).unwrap();
+        value.as_object_mut().unwrap().remove("quickBarEnabled");
+
+        let settings: TerminalCommandBarSettings = serde_json::from_value(value).unwrap();
+
+        assert!(!settings.quick_bar_enabled);
     }
 }

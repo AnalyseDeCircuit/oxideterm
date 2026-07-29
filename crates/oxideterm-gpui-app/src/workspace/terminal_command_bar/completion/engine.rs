@@ -1,114 +1,6 @@
 use super::*;
 
 impl WorkspaceApp {
-    pub(in crate::workspace) fn terminal_command_bar_suggestions(
-        &self,
-        allow_empty_history: bool,
-        cx: &mut Context<Self>,
-    ) -> Vec<TerminalCommandSuggestion> {
-        let settings = self.settings_store.settings();
-        if !settings.terminal.command_bar.smart_completion {
-            return Vec::new();
-        }
-        let input = self.terminal_command_bar_draft.as_str();
-        let cursor_index = input.len();
-        let parsed = tokenize_terminal_command_line(input, cursor_index);
-        let context = self.terminal_command_context(cx);
-        let fig_specs = self.terminal_fig_specs();
-        let active_arg_type = active_fig_arg_type(&parsed, &fig_specs);
-
-        let mut suggestions =
-            self.terminal_command_history_suggestions(input, allow_empty_history, &context, cx);
-        if allow_empty_history || !parsed.reliable {
-            return normalize_terminal_command_suggestions(suggestions);
-        }
-        if input.trim().is_empty() {
-            return normalize_terminal_command_suggestions(suggestions);
-        }
-
-        suggestions.extend(self.terminal_command_quick_command_suggestions(input, &context, cx));
-        suggestions.extend(terminal_command_fig_suggestions(&parsed, &fig_specs));
-        suggestions.extend(self.terminal_command_path_suggestions(
-            &parsed,
-            active_arg_type,
-            &context,
-            cx,
-        ));
-        normalize_terminal_command_suggestions(suggestions)
-    }
-
-    pub(in crate::workspace) fn terminal_command_bar_visible_suggestions(
-        &self,
-        cx: &mut Context<Self>,
-    ) -> Vec<TerminalCommandSuggestion> {
-        let suggestions = self.terminal_command_bar_suggestions(false, cx);
-        if suggestions.is_empty() && self.terminal_command_suggestions_open {
-            self.terminal_command_bar_suggestions(true, cx)
-        } else {
-            suggestions
-        }
-    }
-
-    pub(in crate::workspace) fn accept_terminal_command_suggestion(
-        &mut self,
-        suggestion: &TerminalCommandSuggestion,
-        cx: &mut Context<Self>,
-    ) {
-        let input_len = self.terminal_command_bar_draft.len();
-        let start = suggestion.replacement.start.min(input_len);
-        let end = suggestion.replacement.end.min(input_len).max(start);
-        self.terminal_command_bar_draft
-            .replace_range(start..end, &suggestion.insert_text);
-        self.terminal_command_suggestions_open = false;
-        self.terminal_command_suggestion_highlighted = None;
-        self.ime_marked_text = None;
-        cx.notify();
-    }
-
-    pub(in crate::workspace) fn terminal_command_ghost_text(
-        &self,
-        suggestions: &[TerminalCommandSuggestion],
-    ) -> Option<String> {
-        self.terminal_command_inline_suggestion(suggestions)
-            .and_then(|(suggestion, current)| {
-                suggestion
-                    .insert_text
-                    .strip_prefix(current)
-                    .filter(|suffix| !suffix.is_empty())
-                    .map(ToString::to_string)
-            })
-    }
-
-    pub(in crate::workspace) fn terminal_command_inline_suggestion_for_accept(
-        &self,
-        suggestions: &[TerminalCommandSuggestion],
-    ) -> Option<TerminalCommandSuggestion> {
-        self.terminal_command_inline_suggestion(suggestions)
-            .map(|(suggestion, _)| suggestion.clone())
-    }
-
-    fn terminal_command_inline_suggestion<'a>(
-        &'a self,
-        suggestions: &'a [TerminalCommandSuggestion],
-    ) -> Option<(&'a TerminalCommandSuggestion, &'a str)> {
-        if self.terminal_command_bar_draft.contains('\n') {
-            return None;
-        }
-        suggestions
-            .iter()
-            .find(|candidate| candidate.inline_safe)
-            .and_then(|candidate| {
-                let input_len = self.terminal_command_bar_draft.len();
-                let start = candidate.replacement.start.min(input_len);
-                let end = candidate.replacement.end.min(input_len).max(start);
-                let current = &self.terminal_command_bar_draft[start..end];
-                candidate
-                    .insert_text
-                    .starts_with(current)
-                    .then_some((candidate, current))
-            })
-    }
-
     pub(in crate::workspace) fn terminal_command_active_target_label(
         &self,
         cx: &mut Context<Self>,
@@ -118,7 +10,10 @@ impl WorkspaceApp {
         self.terminal_command_context(cx).target_label
     }
 
-    fn terminal_command_context(&self, cx: &mut Context<Self>) -> TerminalCommandContext {
+    pub(in crate::workspace) fn terminal_command_context(
+        &self,
+        cx: &mut Context<Self>,
+    ) -> TerminalCommandContext {
         let pane_id = self.active_pane_id(cx);
         let tab_projection = self.active_tab(cx).map(|tab| {
             let session_id =

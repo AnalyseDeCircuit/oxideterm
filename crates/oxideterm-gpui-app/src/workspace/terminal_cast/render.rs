@@ -288,7 +288,6 @@ impl WorkspaceApp {
                                                 this.terminal.update(cx, |terminal, cx| {
                                                     terminal.toggle_cast_search(cx);
                                                 });
-                                                this.terminal_command_bar_focused = false;
                                                 this.ime_marked_text = None;
 window.focus(&this.focus_handle, cx);
                                                 cx.stop_propagation();
@@ -391,8 +390,6 @@ window.focus(&this.focus_handle, cx);
                                                                 this.terminal.update(cx, |terminal, _cx| {
                                                                     terminal.focus_cast_search();
                                                                 });
-                                                                this.terminal_command_bar_focused =
-                                                                    false;
                                                                 this.ime_marked_text = None;
 window.focus(&this.focus_handle, cx);
                                                                 this.begin_ime_selection_from_mouse_down(search_target, event, window, cx);

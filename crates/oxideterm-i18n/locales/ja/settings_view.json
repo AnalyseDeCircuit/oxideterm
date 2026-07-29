@@ -446,6 +446,8 @@
       "gpu_canvas_experiments_hint": "Experimental GPU-backed visualizations. Does not replace the terminal renderer.",
       "quick_commands": "Quick Commands",
       "quick_commands_hint": "Show a built-in quick command library in the Command Bar.",
+      "quick_bar": "クイックコマンドバー",
+      "quick_bar_hint": "保存したクイックコマンドをコマンドバー上部の任意の横向きバーに表示します。",
       "quick_commands_confirm": "Confirm Quick Command Run",
       "quick_commands_confirm_hint": "Ask before running a quick command from the Run button.",
       "quick_commands_toast": "Quick Command Toast",

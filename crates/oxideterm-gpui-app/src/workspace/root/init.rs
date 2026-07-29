@@ -496,6 +496,25 @@ impl WorkspaceApp {
         let command_palette =
             cx.new(|_| command_palette::CommandPaletteEntity::new(forwarding_runtime.clone()));
         let command_palette_observation = cx.observe(&command_palette, |_, _, cx| cx.notify());
+        let sender_context_menu_labels = oxideterm_gpui_editor::EditorContextMenuLabels {
+            copy: i18n.t("menu.copy"),
+            cut: i18n.t("fileManager.cut"),
+            paste: i18n.t("menu.paste"),
+            select_all: i18n.t("fileManager.selectAll"),
+        };
+        let compact_sender_placeholder = i18n.t("terminal.command_bar.command_placeholder");
+        let expanded_sender_placeholder = i18n.t("terminal.sender.placeholder");
+        let terminal_command_sender = cx.new(|cx| {
+            terminal_command_sender::TerminalCommandSenderEntity::new(
+                tokens,
+                compact_sender_placeholder,
+                expanded_sender_placeholder,
+                sender_context_menu_labels,
+                cx,
+            )
+        });
+        let terminal_command_sender_observation =
+            cx.observe(&terminal_command_sender, |_, _, cx| cx.notify());
         let ide_workspace = cx.new({
             let fs = ai_entity.read(cx).agent_fs().clone();
             let backend_runtime = forwarding_runtime.clone();
@@ -519,11 +538,8 @@ impl WorkspaceApp {
             tab_host,
             _tab_host_subscription: tab_host_subscription,
             search: SearchBarState::default(),
-            terminal_command_bar_focused: false,
-            terminal_command_input_collapsed: false,
-            terminal_command_bar_draft: String::new(),
-            terminal_command_suggestions_open: false,
-            terminal_command_suggestion_highlighted: None,
+            terminal_command_sender,
+            _terminal_command_sender_observation: terminal_command_sender_observation,
             detached_local_terminals: HashMap::new(),
             detached_local_terminal_order: Vec::new(),
             serial_terminal_configs: HashMap::new(),
@@ -747,6 +763,7 @@ impl WorkspaceApp {
         workspace.bootstrap_cloud_sync_controller(cx);
         workspace.sync_ssh_config_sync_service();
         workspace.restore_session_tree_snapshot();
+        workspace.sync_terminal_command_sender_appearance(cx);
         workspace.sync_active_terminal_metadata_context(cx);
         workspace.sync_active_terminal_recording_elapsed_tick(cx);
         workspace.sync_active_privilege_prompt_inline_hint(cx);

@@ -1419,6 +1419,81 @@ impl TerminalPane {
         self.send_text(&input, cx);
     }
 
+    pub fn send_command_sender_line(&mut self, line: &str, cx: &mut Context<Self>) -> bool {
+        let mut input = zeroize::Zeroizing::new(line.replace("\r\n", "\r").replace('\n', "\r"));
+        input.push('\r');
+        self.send_command_sender_text(&input, cx)
+    }
+
+    pub fn send_command_sender_text_chunk(&mut self, text: &str, cx: &mut Context<Self>) -> bool {
+        if text.is_empty() {
+            return false;
+        }
+        self.send_command_sender_text(text, cx)
+    }
+
+    pub fn send_command_sender_raw_bytes(&mut self, bytes: &[u8], cx: &mut Context<Self>) -> bool {
+        if bytes.is_empty() || !self.terminal_accepts_input() {
+            return false;
+        }
+        let Some(bytes) = self.apply_plugin_input_interceptor(bytes) else {
+            return false;
+        };
+        let bytes = zeroize::Zeroizing::new(bytes);
+        // Hex input is an opaque protocol payload. Recheck lifecycle after the
+        // plugin hook, then bypass text recording and command observation.
+        let write_result = {
+            let mut terminal = self.terminal.lock();
+            if self.input_locked || self.terminal_exited || !terminal.is_interactive() {
+                return false;
+            }
+            terminal.write_protocol_bytes(&bytes)
+        };
+        if write_result.is_err() {
+            return false;
+        }
+        self.last_terminal_input = Instant::now();
+        self.reset_cursor_blink();
+        self.restore_live_output_after_user_input();
+        cx.notify();
+        true
+    }
+
+    fn send_command_sender_text(&mut self, text: &str, cx: &mut Context<Self>) -> bool {
+        if text.is_empty() || !self.terminal_accepts_input() {
+            return false;
+        }
+        let Some(bytes) = self.apply_plugin_input_interceptor(text.as_bytes()) else {
+            return false;
+        };
+        let bytes = zeroize::Zeroizing::new(bytes);
+        // The plugin can run arbitrary code, so the lifecycle check and write
+        // must share the same terminal-session lock after interception.
+        let write_result = {
+            let mut terminal = self.terminal.lock();
+            if self.input_locked || self.terminal_exited || !terminal.is_interactive() {
+                return false;
+            }
+            match std::str::from_utf8(&bytes) {
+                Ok(text) => terminal.write_text(text),
+                Err(_) => terminal.write_protocol_bytes(&bytes),
+            }
+        };
+        if write_result.is_err() {
+            return false;
+        }
+
+        // Scheduled input does not prove that the remote prompt accepted or
+        // began a command. Keep it out of marks, AI facts, autosuggest, history,
+        // and asciicast input; only update the privilege prompt state safely.
+        self.observe_privilege_input("command-sender-text", &bytes, Instant::now(), cx);
+        self.last_terminal_input = Instant::now();
+        self.reset_cursor_blink();
+        self.restore_live_output_after_user_input();
+        cx.notify();
+        true
+    }
+
     pub fn send_internal_control_command_line(
         &mut self,
         command: &str,

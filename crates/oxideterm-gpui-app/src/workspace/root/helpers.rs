@@ -974,11 +974,6 @@ impl WorkspaceApp {
             self.close_terminal_quick_commands_popover(cx);
             changed = true;
         }
-        if self.terminal_command_suggestions_open {
-            self.terminal_command_suggestions_open = false;
-            self.terminal_command_suggestion_highlighted = None;
-            changed = true;
-        }
         if self.has_ai_sidebar_floating_overlay(cx) {
             self.close_ai_sidebar_popovers(cx);
             changed = true;

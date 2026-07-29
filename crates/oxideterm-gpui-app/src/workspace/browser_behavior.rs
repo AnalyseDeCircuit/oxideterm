@@ -438,6 +438,7 @@ pub(crate) enum BrowserPointerCaptureOwner {
     AiSidebarResize,
     SftpPaneResize,
     SftpQueueResize,
+    TerminalCommandSenderResize,
     PaneSplitter,
     SettingsSlider,
     TerminalCastSeekbar,
@@ -459,6 +460,7 @@ struct BrowserPointerCaptureState {
     ai_sidebar_resizing: bool,
     sftp_pane_resizing: bool,
     sftp_queue_resizing: bool,
+    terminal_command_sender_resizing: bool,
     pane_splitter_dragging: bool,
     settings_slider_dragging: bool,
     terminal_cast_seekbar_dragging: bool,
@@ -515,6 +517,7 @@ pub(crate) fn pointer_capture_needs_workspace_overlay(owner: BrowserPointerCaptu
             | BrowserPointerCaptureOwner::AiSidebarResize
             | BrowserPointerCaptureOwner::SftpPaneResize
             | BrowserPointerCaptureOwner::SftpQueueResize
+            | BrowserPointerCaptureOwner::TerminalCommandSenderResize
             | BrowserPointerCaptureOwner::HostToolsTabScrollbar
     )
 }
@@ -531,6 +534,7 @@ impl WorkspaceApp {
             ai_sidebar_resizing: self.ai_entity.read(cx).chat_ui().sidebar_resizing,
             sftp_pane_resizing: sftp.pane_resize_active(),
             sftp_queue_resizing: sftp.queue_resize_active(),
+            terminal_command_sender_resizing: self.terminal_command_sender.read(cx).is_resizing(),
             pane_splitter_dragging: self.split_drag.is_some(),
             settings_slider_dragging: self.settings_slider_drag.is_some(),
             terminal_cast_seekbar_dragging: self.terminal.read(cx).cast_seek_dragging(),
@@ -556,6 +560,8 @@ fn resolve_browser_pointer_capture_owner(
         Some(BrowserPointerCaptureOwner::SftpPaneResize)
     } else if state.sftp_queue_resizing {
         Some(BrowserPointerCaptureOwner::SftpQueueResize)
+    } else if state.terminal_command_sender_resizing {
+        Some(BrowserPointerCaptureOwner::TerminalCommandSenderResize)
     } else if state.pane_splitter_dragging {
         Some(BrowserPointerCaptureOwner::PaneSplitter)
     } else if state.settings_slider_dragging {
@@ -665,6 +671,9 @@ mod tests {
             BrowserPointerCaptureOwner::SftpQueueResize
         ));
         assert!(pointer_capture_needs_workspace_overlay(
+            BrowserPointerCaptureOwner::TerminalCommandSenderResize
+        ));
+        assert!(pointer_capture_needs_workspace_overlay(
             BrowserPointerCaptureOwner::HostToolsTabScrollbar
         ));
         assert!(!pointer_capture_needs_workspace_overlay(
@@ -673,6 +682,19 @@ mod tests {
         assert!(!pointer_capture_needs_workspace_overlay(
             BrowserPointerCaptureOwner::SftpFileDrag
         ));
+    }
+
+    #[test]
+    fn pointer_capture_reports_terminal_sender_resize_owner() {
+        let state = BrowserPointerCaptureState {
+            terminal_command_sender_resizing: true,
+            ..BrowserPointerCaptureState::default()
+        };
+
+        assert_eq!(
+            resolve_browser_pointer_capture_owner(state),
+            Some(BrowserPointerCaptureOwner::TerminalCommandSenderResize)
+        );
     }
 
     #[test]

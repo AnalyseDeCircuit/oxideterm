@@ -446,6 +446,8 @@
       "gpu_canvas_experiments_hint": "Experimental GPU-backed visualizations. Does not replace the terminal renderer.",
       "quick_commands": "Quick Commands",
       "quick_commands_hint": "Show a built-in quick command library in the Command Bar.",
+      "quick_bar": "Barra de comandos rápidos",
+      "quick_bar_hint": "Muestra los comandos rápidos guardados en una barra horizontal opcional sobre la barra de comandos.",
       "quick_commands_confirm": "Confirm Quick Command Run",
       "quick_commands_confirm_hint": "Ask before running a quick command from the Run button.",
       "quick_commands_toast": "Quick Command Toast",

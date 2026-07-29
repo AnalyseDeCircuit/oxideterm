@@ -1046,6 +1046,14 @@ impl WorkspaceApp {
                     ),
                     self.card_separator(),
                     self.bool_row(
+                        "settings_view.terminal.quick_bar",
+                        "settings_view.terminal.quick_bar_hint",
+                        settings.terminal.command_bar.quick_bar_enabled,
+                        set_quick_bar_enabled,
+                        cx,
+                    ),
+                    self.card_separator(),
+                    self.bool_row(
                         "settings_view.terminal.quick_commands_confirm",
                         "settings_view.terminal.quick_commands_confirm_hint",
                         settings

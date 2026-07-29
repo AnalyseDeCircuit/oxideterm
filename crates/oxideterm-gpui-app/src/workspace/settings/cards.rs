@@ -906,11 +906,6 @@ impl WorkspaceApp {
             self.close_new_connection_select(cx);
             changed = true;
         }
-        if self.terminal_command_bar_focused {
-            self.terminal_command_bar_focused = false;
-            self.ime_marked_text = None;
-            changed = true;
-        }
         if self
             .terminal
             .update(cx, |terminal, _cx| terminal.blur_cast_search())

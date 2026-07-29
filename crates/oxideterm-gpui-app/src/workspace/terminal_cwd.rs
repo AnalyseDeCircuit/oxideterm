@@ -858,9 +858,6 @@ impl WorkspaceApp {
         self.close_terminal_quick_commands_popover(cx);
         self.close_terminal_git_branch_picker(cx);
         self.close_terminal_project_panel(cx);
-        self.terminal_command_suggestions_open = false;
-        self.terminal_command_suggestion_highlighted = None;
-        self.terminal_command_bar_focused = false;
         self.ime_marked_text = None;
         self.clear_ime_selection();
         cx.notify();
@@ -980,20 +977,9 @@ impl WorkspaceApp {
             return;
         };
 
-        // File rows should help compose the command bar, not run shell input or
-        // change cwd. Preserve any draft command and append a shell-safe path.
-        if self
-            .terminal_command_bar_draft
-            .chars()
-            .next_back()
-            .is_some_and(|last| !last.is_whitespace())
-        {
-            self.terminal_command_bar_draft.push(' ');
-        }
-        self.terminal_command_bar_draft.push_str(&argument);
-        self.terminal_command_bar_focused = true;
-        self.terminal_command_suggestions_open = false;
-        self.terminal_command_suggestion_highlighted = None;
+        // File rows compose the active sender draft without running shell input
+        // or changing the current directory.
+        self.append_terminal_command_sender_text(&argument, true, cx);
         self.close_terminal_cwd_picker(cx);
         cx.notify();
     }

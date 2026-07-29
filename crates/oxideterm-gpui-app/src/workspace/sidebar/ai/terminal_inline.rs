@@ -45,7 +45,6 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) {
         self.search.visible = false;
-        self.terminal_command_bar_focused = false;
         self.close_terminal_command_overlays(cx);
         self.close_ai_model_selector(cx);
 

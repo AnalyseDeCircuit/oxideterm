@@ -110,7 +110,6 @@ pub(super) enum WorkspaceImeTarget {
     CommandPalette,
     ShortcutsModalSearch,
     Search,
-    TerminalCommandBar,
     TerminalCwdSearch,
     TerminalGitBranchSearch,
     TerminalProjectSearch,
@@ -468,7 +467,6 @@ impl WorkspaceImeTarget {
             Self::CommandPalette => 4,
             Self::ShortcutsModalSearch => 5,
             Self::Search => 1,
-            Self::TerminalCommandBar => 2,
             Self::TerminalCwdSearch => 18,
             Self::TerminalGitBranchSearch => 17,
             Self::TerminalProjectSearch => 19,
@@ -1064,10 +1062,6 @@ impl WorkspaceApp {
             return Some(WorkspaceImeTarget::PluginControl { key, secret });
         }
 
-        if self.terminal_command_bar_focused && terminal_tab_visible {
-            return Some(WorkspaceImeTarget::TerminalCommandBar);
-        }
-
         if terminal_tab_visible && self.terminal.read(cx).cast_search_focused() {
             return Some(WorkspaceImeTarget::TerminalCastSearch);
         }
@@ -1465,9 +1459,7 @@ impl WorkspaceApp {
         line_count: usize,
     ) -> Pixels {
         match target {
-            WorkspaceImeTarget::TerminalCommandBar
-            | WorkspaceImeTarget::AiChatInput
-            | WorkspaceImeTarget::AiMessageEdit => px(20.0),
+            WorkspaceImeTarget::AiChatInput | WorkspaceImeTarget::AiMessageEdit => px(20.0),
             WorkspaceImeTarget::Settings(input) if input.accepts_newline() => {
                 // Tauri textareas hit-test by their visual line box. Settings
                 // multiline fields are hand-rendered in GPUI, so keep the IME
@@ -1484,8 +1476,7 @@ impl WorkspaceApp {
 
     fn ime_target_horizontal_padding(target: WorkspaceImeTarget, control_padding_x: f32) -> Pixels {
         match target {
-            WorkspaceImeTarget::TerminalCommandBar
-            | WorkspaceImeTarget::AiChatInput
+            WorkspaceImeTarget::AiChatInput
             | WorkspaceImeTarget::AiMessageEdit
             | WorkspaceImeTarget::Sftp(_)
             | WorkspaceImeTarget::ReadOnlyText(_) => {
@@ -1660,8 +1651,7 @@ impl WorkspaceApp {
 
     fn ime_target_font_family(&self, target: WorkspaceImeTarget) -> SharedString {
         match target {
-            WorkspaceImeTarget::TerminalCommandBar
-            | WorkspaceImeTarget::Settings(
+            WorkspaceImeTarget::Settings(
                 SettingsInput::TerminalCommandBarFocusHandoff
                 | SettingsInput::TerminalCommandSpecsJson
                 | SettingsInput::AiMcpArgs
@@ -1688,9 +1678,6 @@ impl WorkspaceApp {
             }
             WorkspaceImeTarget::ShortcutsModalSearch => Some(self.shortcuts_modal.query.clone()),
             WorkspaceImeTarget::Search => Some(self.search.query.clone()),
-            WorkspaceImeTarget::TerminalCommandBar => self
-                .terminal_command_bar_focused
-                .then(|| self.terminal_command_bar_draft.clone()),
             WorkspaceImeTarget::TerminalCwdSearch => {
                 let terminal = self.terminal.read(cx);
                 terminal
@@ -2036,23 +2023,6 @@ impl WorkspaceApp {
             // The owning surface accepts the key after the shared text-input handler declines it.
             return false;
         }
-        if target == WorkspaceImeTarget::TerminalCommandBar
-            && self.terminal_command_bar_should_accept_inline_suggestion(keystroke, cx)
-        {
-            return false;
-        }
-        if target == WorkspaceImeTarget::TerminalCommandBar
-            && matches!(
-                keystroke.key.as_str(),
-                "up" | "arrowup" | "down" | "arrowdown"
-            )
-            && (!self.terminal_command_bar_draft.contains('\n')
-                || self.terminal_command_suggestions_open)
-        {
-            // Single-line command input keeps Up/Down for command suggestions;
-            // multiline drafts borrow the shared textarea navigation instead.
-            return false;
-        }
         if target == WorkspaceImeTarget::CommandPalette
             && matches!(
                 keystroke.key.as_str(),
@@ -2133,9 +2103,7 @@ impl WorkspaceApp {
         }
         if matches!(
             target,
-            WorkspaceImeTarget::AiChatInput
-                | WorkspaceImeTarget::AiMessageEdit
-                | WorkspaceImeTarget::TerminalCommandBar
+            WorkspaceImeTarget::AiChatInput | WorkspaceImeTarget::AiMessageEdit
         ) && !keystroke.modifiers.shift
         {
             return false;
@@ -2437,22 +2405,6 @@ impl WorkspaceApp {
         }
     }
 
-    fn terminal_command_bar_should_accept_inline_suggestion(
-        &self,
-        keystroke: &Keystroke,
-        cx: &mut Context<Self>,
-    ) -> bool {
-        matches!(keystroke.key.as_str(), "right" | "arrowright")
-            && !keystroke.modifiers.shift
-            && !keystroke.modifiers.platform
-            && !keystroke.modifiers.alt
-            && !keystroke.modifiers.control
-            && self
-                .terminal_command_bar_visible_suggestions(cx)
-                .iter()
-                .any(|candidate| candidate.inline_safe)
-    }
-
     fn replace_host_tools_text_input(
         &mut self,
         input: HostToolsTextInput,
@@ -2494,19 +2446,6 @@ impl WorkspaceApp {
             WorkspaceImeTarget::Search => {
                 replace_utf16(&mut self.search.query, replacement_range, text);
                 self.update_search_query(cx);
-            }
-            WorkspaceImeTarget::TerminalCommandBar => {
-                if self.terminal_command_bar_focused {
-                    replace_utf16(
-                        &mut self.terminal_command_bar_draft,
-                        replacement_range,
-                        text,
-                    );
-                    self.terminal_command_suggestions_open = false;
-                    self.terminal_command_suggestion_highlighted = None;
-                    self.show_active_input_caret(cx);
-                    cx.notify();
-                }
             }
             WorkspaceImeTarget::TerminalCwdSearch => {
                 if self.terminal.update(cx, |terminal, _cx| {
@@ -2966,7 +2905,6 @@ fn normalize_clipboard_text_for_ime_target(target: WorkspaceImeTarget, text: &st
 fn ime_target_accepts_newline(target: WorkspaceImeTarget) -> bool {
     match target {
         WorkspaceImeTarget::ReadOnlyText(_) => true,
-        WorkspaceImeTarget::TerminalCommandBar => true,
         WorkspaceImeTarget::Settings(input) => input.accepts_newline(),
         WorkspaceImeTarget::AiChatInput | WorkspaceImeTarget::AiMessageEdit => true,
         WorkspaceImeTarget::SessionManager(SessionManagerInput::OxideExportDescription) => true,
@@ -3228,11 +3166,10 @@ mod tests {
         WorkspaceCaretState, WorkspaceCaretVisibility, WorkspaceImeMarkedText, WorkspaceImeTarget,
         active_ime_should_defer_input_key, collapsed_copy_shortcut_is_owned_by_target,
         control_k_delete_end, copy_shortcut_owner_for_target,
-        effective_platform_text_replacement_range, ime_target_accepts_newline,
-        ime_target_is_secret, ime_target_should_blink_caret, ime_text_snapshot,
-        keystroke_commits_platform_text, keystroke_uses_text_edit_modifier,
-        line_end_for_utf16_offset, line_range_for_utf16_offset, line_start_for_utf16_offset,
-        next_utf16_boundary, next_word_boundary, normalize_clipboard_text_for_ime_target,
+        effective_platform_text_replacement_range, ime_target_is_secret,
+        ime_target_should_blink_caret, ime_text_snapshot, keystroke_commits_platform_text,
+        keystroke_uses_text_edit_modifier, line_end_for_utf16_offset, line_range_for_utf16_offset,
+        line_start_for_utf16_offset, next_utf16_boundary, next_word_boundary,
         path_completion_owns_vertical_navigation, platform_text_commit_is_duplicate,
         previous_utf16_boundary, previous_word_boundary, secret_ime_proxy,
         soft_wrapped_line_ranges_utf16, transpose_text_at_utf16_offset,
@@ -3402,17 +3339,6 @@ mod tests {
     }
 
     #[test]
-    fn terminal_command_bar_preserves_multiline_clipboard_text() {
-        let target = WorkspaceImeTarget::TerminalCommandBar;
-
-        assert!(ime_target_accepts_newline(target));
-        assert_eq!(
-            normalize_clipboard_text_for_ime_target(target, "printf one\r\nprintf two"),
-            "printf one\nprintf two"
-        );
-    }
-
-    #[test]
     fn editable_ime_targets_drive_the_shared_caret_blink_timer() {
         assert!(ime_target_should_blink_caret(
             WorkspaceImeTarget::AiChatInput
@@ -3471,13 +3397,6 @@ mod tests {
 
     #[test]
     fn self_padded_text_targets_do_not_shift_hit_testing() {
-        assert_eq!(
-            WorkspaceApp::ime_target_horizontal_padding(
-                WorkspaceImeTarget::TerminalCommandBar,
-                12.0,
-            ),
-            px(0.0)
-        );
         assert_eq!(
             WorkspaceApp::ime_target_horizontal_padding(WorkspaceImeTarget::AiChatInput, 12.0),
             px(0.0)

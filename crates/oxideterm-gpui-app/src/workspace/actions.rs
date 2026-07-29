@@ -44,19 +44,6 @@ impl SearchBarState {
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum TerminalCommandEnterAction {
-    SubmitDraft,
-    SubmitSuggestion(usize),
-    AcceptSuggestion(usize),
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum TerminalCommandSuggestionDirection {
-    Up,
-    Down,
-}
-
 fn terminal_tab_capture_keystroke(keystroke: &gpui::Keystroke) -> bool {
     let modifiers = keystroke.modifiers;
     // Plain Tab and Shift+Tab are terminal protocol keys, but some platforms
@@ -68,13 +55,11 @@ fn terminal_tab_capture_keystroke(keystroke: &gpui::Keystroke) -> bool {
 fn terminal_tab_capture_blocked_by_workspace_ui(
     active_ime_target: bool,
     quick_commands_open: bool,
-    command_suggestions_open: bool,
 ) -> bool {
-    // Text inputs, command palettes, terminal command popovers, and quick
-    // commands own Tab semantics while they are active. The terminal fallback is
-    // only for the platform focus-traversal path that would otherwise swallow a
-    // real terminal Tab.
-    active_ime_target || quick_commands_open || command_suggestions_open
+    // Text inputs, command palettes, and quick commands own Tab semantics while
+    // they are active. The terminal fallback only handles the platform
+    // focus-traversal path that would otherwise swallow a real terminal Tab.
+    active_ime_target || quick_commands_open
 }
 
 impl WorkspaceApp {
@@ -155,9 +140,6 @@ impl WorkspaceApp {
     }
     pub(super) fn open_search(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.search.visible = true;
-        self.terminal_command_bar_focused = false;
-        self.terminal_command_suggestions_open = false;
-        self.terminal_command_suggestion_highlighted = None;
         self.close_terminal_quick_commands_popover(cx);
         window.focus(&self.focus_handle, cx);
         if let Some(pane) = self.active_pane(cx) {
@@ -502,13 +484,6 @@ impl WorkspaceApp {
             return true;
         }
 
-        if self.terminal_command_suggestions_open {
-            self.terminal_command_suggestions_open = false;
-            self.terminal_command_suggestion_highlighted = None;
-            cx.notify();
-            return true;
-        }
-
         false
     }
 
@@ -552,8 +527,6 @@ impl WorkspaceApp {
             self.close_terminal_cwd_picker(cx);
             self.close_terminal_git_branch_picker(cx);
             self.close_terminal_project_panel(cx);
-            self.terminal_command_suggestions_open = false;
-            self.terminal_command_suggestion_highlighted = None;
             self.terminal.update(cx, |terminal, _cx| {
                 terminal.set_broadcast_menu_open(true);
             });
@@ -566,6 +539,10 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if self.terminal_command_sender_editor_focused(window, cx) {
+            // Child editor handlers own the bubble path while focused.
+            return;
+        }
         if active_ime_should_defer_input_key(
             self.active_ime_target(cx).is_some(),
             self.ime_marked_text.is_some(),
@@ -764,12 +741,6 @@ impl WorkspaceApp {
             return;
         }
 
-        if self.terminal_command_bar_focused
-            && self.handle_terminal_command_bar_key(event, window, cx)
-        {
-            return;
-        }
-
         let close_panel_shortcut = crate::keybindings::keystroke_matches_action(
             &event.keystroke,
             "terminal.closePanel",
@@ -825,7 +796,6 @@ impl WorkspaceApp {
         if terminal_tab_capture_blocked_by_workspace_ui(
             self.active_ime_target(cx).is_some(),
             self.terminal.read(cx).quick_commands.is_open(),
-            self.terminal_command_suggestions_open,
         ) {
             return false;
         }
@@ -1554,173 +1524,6 @@ impl WorkspaceApp {
         });
     }
 
-    pub(super) fn handle_terminal_command_bar_key(
-        &mut self,
-        event: &KeyDownEvent,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> bool {
-        let key = event.keystroke.key.as_str();
-        let modifiers = event.keystroke.modifiers;
-        if modifiers.platform {
-            return false;
-        }
-
-        match key {
-            "escape" => {
-                if self.close_terminal_command_overlays(cx) {
-                    return true;
-                }
-                self.terminal_command_bar_focused = false;
-                self.close_terminal_quick_commands_popover(cx);
-                self.ime_marked_text = None;
-                self.focus_active_pane(window, cx);
-                cx.notify();
-                true
-            }
-            "tab" => {
-                if self.terminal_command_suggestions_open {
-                    let suggestions = self.terminal_command_bar_visible_suggestions(cx);
-                    let index = self.terminal_command_suggestion_highlighted.unwrap_or(0);
-                    if let Some(suggestion) = suggestions.get(index) {
-                        self.accept_terminal_command_suggestion(suggestion, cx);
-                        return true;
-                    }
-                }
-                false
-            }
-            "right" => {
-                let suggestions = self.terminal_command_bar_visible_suggestions(cx);
-                if let Some(suggestion) =
-                    self.terminal_command_inline_suggestion_for_accept(&suggestions)
-                {
-                    self.accept_terminal_command_suggestion(&suggestion, cx);
-                    return true;
-                }
-                false
-            }
-            "down" => {
-                let mut suggestions = self.terminal_command_bar_suggestions(false, cx);
-                if suggestions.is_empty() {
-                    suggestions = self.terminal_command_bar_suggestions(true, cx);
-                }
-                if !suggestions.is_empty() {
-                    self.terminal_command_suggestions_open = true;
-                    self.terminal_command_suggestion_highlighted =
-                        terminal_command_next_suggestion_index(
-                            suggestions.len(),
-                            true,
-                            self.terminal_command_suggestion_highlighted,
-                            TerminalCommandSuggestionDirection::Down,
-                        );
-                    cx.notify();
-                    return true;
-                }
-                false
-            }
-            "up" => {
-                let mut suggestions = self.terminal_command_bar_suggestions(false, cx);
-                if suggestions.is_empty() {
-                    suggestions = self.terminal_command_bar_suggestions(true, cx);
-                }
-                if !suggestions.is_empty() {
-                    self.terminal_command_suggestions_open = true;
-                    self.terminal_command_suggestion_highlighted =
-                        terminal_command_next_suggestion_index(
-                            suggestions.len(),
-                            true,
-                            self.terminal_command_suggestion_highlighted,
-                            TerminalCommandSuggestionDirection::Up,
-                        );
-                    cx.notify();
-                    return true;
-                }
-                false
-            }
-            "enter" if modifiers.shift || modifiers.alt => {
-                self.terminal_command_bar_draft.push('\n');
-                self.terminal_command_suggestions_open = false;
-                self.terminal_command_suggestion_highlighted = None;
-                self.ime_marked_text = None;
-                cx.notify();
-                true
-            }
-            "enter" => {
-                let suggestions = self.terminal_command_bar_visible_suggestions(cx);
-                match terminal_command_enter_action(
-                    self.terminal_command_suggestions_open,
-                    self.terminal_command_suggestion_highlighted,
-                    &suggestions,
-                ) {
-                    TerminalCommandEnterAction::AcceptSuggestion(index) => {
-                        if let Some(suggestion) = suggestions.get(index) {
-                            self.accept_terminal_command_suggestion(suggestion, cx);
-                            return true;
-                        }
-                    }
-                    TerminalCommandEnterAction::SubmitSuggestion(index) => {
-                        if let Some(suggestion) = suggestions.get(index) {
-                            self.accept_terminal_command_suggestion(suggestion, cx);
-                        }
-                    }
-                    TerminalCommandEnterAction::SubmitDraft => {
-                        self.terminal_command_suggestions_open = false;
-                        self.terminal_command_suggestion_highlighted = None;
-                    }
-                }
-                if self.terminal_command_bar_draft.trim().is_empty() {
-                    // A stale command-bar focus flag must not swallow Enter
-                    // when there is no command to submit.
-                    return false;
-                }
-                self.terminal_command_suggestions_open = false;
-                self.terminal_command_suggestion_highlighted = None;
-                self.submit_terminal_command_bar(window, cx);
-                true
-            }
-            "space" | " "
-                if terminal_command_bar_space_inserts_literal(
-                    modifiers.platform,
-                    modifiers.control,
-                    modifiers.alt,
-                ) =>
-            {
-                // Some GPUI platforms deliver Space without key_char, so the
-                // platform text path cannot mutate the textarea-like command
-                // draft. Preserve Tauri textarea semantics by inserting the
-                // literal space through the shared IME replacement path.
-                let target = WorkspaceImeTarget::TerminalCommandBar;
-                let replacement_range = self.ime_selection_range_for_target(target, cx);
-                let caret = replacement_range
-                    .as_ref()
-                    .map(|range| range.start + " ".encode_utf16().count());
-                self.clear_ime_selection();
-                self.replace_ime_target_text(target, replacement_range, " ", cx);
-                if let Some(caret) = caret {
-                    self.set_ime_selection_from_anchor(target, caret, caret);
-                }
-                true
-            }
-            "backspace" => {
-                let changed = self.terminal_command_bar_draft.pop().is_some()
-                    || self.terminal_command_suggestions_open
-                    || self
-                        .terminal_command_suggestion_highlighted
-                        .take()
-                        .is_some()
-                    || self.ime_marked_text.take().is_some();
-                self.terminal_command_suggestions_open = false;
-                if changed {
-                    // Backspace with an empty command and no open suggestions
-                    // leaves the command bar visually unchanged.
-                    cx.notify();
-                }
-                changed
-            }
-            _ => false,
-        }
-    }
-
     pub(super) fn handle_terminal_cast_search_key(
         &mut self,
         event: &KeyDownEvent,
@@ -1749,22 +1552,6 @@ impl WorkspaceApp {
         }
     }
 
-    pub(super) fn submit_terminal_command_bar(
-        &mut self,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        let command = self.terminal_command_bar_draft.trim().to_string();
-        if command.is_empty() {
-            return;
-        }
-
-        self.submit_terminal_command_line(&command, window, cx);
-        self.terminal_command_bar_draft.clear();
-        self.ime_marked_text = None;
-        cx.notify();
-    }
-
     fn submit_terminal_command_line(
         &mut self,
         command: &str,
@@ -1784,7 +1571,6 @@ impl WorkspaceApp {
         }
 
         if self.terminal_command_should_handoff_focus(command) {
-            self.terminal_command_bar_focused = false;
             self.focus_active_pane(window, cx);
         }
         true
@@ -1836,7 +1622,6 @@ impl WorkspaceApp {
             );
         }
         self.finish_terminal_quick_command_execution(cx);
-        self.terminal_command_bar_draft.clear();
         self.ime_marked_text = None;
         cx.notify();
     }
@@ -2259,7 +2044,6 @@ impl WorkspaceApp {
                             .on_mouse_down(
                                 MouseButton::Left,
                                 cx.listener(|this, event, window, cx| {
-                                    this.terminal_command_bar_focused = false;
                                     this.ime_marked_text = None;
                                     window.focus(&this.focus_handle, cx);
                                     this.begin_ime_selection_from_mouse_down(
@@ -2418,51 +2202,6 @@ fn terminal_command_executable(command: &str) -> Option<String> {
     None
 }
 
-fn terminal_command_enter_action(
-    suggestions_open: bool,
-    highlighted: Option<usize>,
-    suggestions: &[TerminalCommandSuggestion],
-) -> TerminalCommandEnterAction {
-    let Some(index) = highlighted else {
-        return TerminalCommandEnterAction::SubmitDraft;
-    };
-    if !suggestions_open {
-        return TerminalCommandEnterAction::SubmitDraft;
-    }
-    let Some(suggestion) = suggestions.get(index) else {
-        return TerminalCommandEnterAction::SubmitDraft;
-    };
-    if suggestion.executable {
-        TerminalCommandEnterAction::SubmitSuggestion(index)
-    } else {
-        TerminalCommandEnterAction::AcceptSuggestion(index)
-    }
-}
-
-fn terminal_command_next_suggestion_index(
-    suggestions_len: usize,
-    suggestions_open: bool,
-    highlighted: Option<usize>,
-    direction: TerminalCommandSuggestionDirection,
-) -> Option<usize> {
-    if suggestions_len == 0 {
-        return None;
-    }
-    let last = suggestions_len.saturating_sub(1);
-    Some(match (direction, suggestions_open, highlighted) {
-        (TerminalCommandSuggestionDirection::Down, true, Some(index)) => {
-            index.saturating_add(1).min(last)
-        }
-        (TerminalCommandSuggestionDirection::Down, _, _) => 0,
-        (TerminalCommandSuggestionDirection::Up, true, Some(index)) => index.saturating_sub(1),
-        (TerminalCommandSuggestionDirection::Up, _, _) => last,
-    })
-}
-
-fn terminal_command_bar_space_inserts_literal(platform: bool, control: bool, alt: bool) -> bool {
-    !platform && !control && !alt
-}
-
 fn shell_words(segment: &str) -> Vec<String> {
     let mut words = Vec::new();
     let mut current = String::new();
@@ -2523,22 +2262,6 @@ mod terminal_command_bar_behavior_tests {
         }
     }
 
-    fn suggestion(executable: bool) -> TerminalCommandSuggestion {
-        TerminalCommandSuggestion {
-            kind: TerminalCommandSuggestionKind::History,
-            label: "ls -la".to_string(),
-            insert_text: "ls -la".to_string(),
-            description: None,
-            executable,
-            replacement: 0..2,
-            group_label_key: "terminal.command_bar.group_history",
-            source_label_key: "terminal.command_bar.source_history",
-            score: 1.0,
-            risk: None,
-            inline_safe: true,
-        }
-    }
-
     #[test]
     fn terminal_tab_capture_matches_terminal_tab_chords_only() {
         assert!(terminal_tab_capture_keystroke(&tab_keystroke_with(
@@ -2577,100 +2300,9 @@ mod terminal_command_bar_behavior_tests {
 
     #[test]
     fn terminal_tab_capture_defers_to_workspace_text_ui() {
-        assert!(!terminal_tab_capture_blocked_by_workspace_ui(
-            false, false, false
-        ));
-        assert!(terminal_tab_capture_blocked_by_workspace_ui(
-            true, false, false
-        ));
-        assert!(terminal_tab_capture_blocked_by_workspace_ui(
-            false, true, false
-        ));
-        assert!(terminal_tab_capture_blocked_by_workspace_ui(
-            false, false, true
-        ));
-    }
-
-    #[test]
-    fn command_bar_enter_matches_tauri_unselected_popup_semantics() {
-        let suggestions = vec![suggestion(true)];
-
-        assert_eq!(
-            terminal_command_enter_action(true, None, &suggestions),
-            TerminalCommandEnterAction::SubmitDraft
-        );
-        assert_eq!(
-            terminal_command_enter_action(false, Some(0), &suggestions),
-            TerminalCommandEnterAction::SubmitDraft
-        );
-    }
-
-    #[test]
-    fn command_bar_enter_submits_only_highlighted_executable_suggestion() {
-        assert_eq!(
-            terminal_command_enter_action(true, Some(0), &[suggestion(true)]),
-            TerminalCommandEnterAction::SubmitSuggestion(0)
-        );
-        assert_eq!(
-            terminal_command_enter_action(true, Some(0), &[suggestion(false)]),
-            TerminalCommandEnterAction::AcceptSuggestion(0)
-        );
-    }
-
-    #[test]
-    fn command_bar_arrow_navigation_matches_tauri_highlight_rules() {
-        assert_eq!(
-            terminal_command_next_suggestion_index(
-                2,
-                false,
-                None,
-                TerminalCommandSuggestionDirection::Down
-            ),
-            Some(0)
-        );
-        assert_eq!(
-            terminal_command_next_suggestion_index(
-                2,
-                true,
-                Some(0),
-                TerminalCommandSuggestionDirection::Down
-            ),
-            Some(1)
-        );
-        assert_eq!(
-            terminal_command_next_suggestion_index(
-                2,
-                false,
-                None,
-                TerminalCommandSuggestionDirection::Up
-            ),
-            Some(1)
-        );
-        assert_eq!(
-            terminal_command_next_suggestion_index(
-                2,
-                true,
-                Some(1),
-                TerminalCommandSuggestionDirection::Up
-            ),
-            Some(0)
-        );
-    }
-
-    #[test]
-    fn command_bar_plain_space_is_literal_text() {
-        assert!(terminal_command_bar_space_inserts_literal(
-            false, false, false
-        ));
-        assert!(!terminal_command_bar_space_inserts_literal(
-            true, false, false
-        ));
-        assert!(!terminal_command_bar_space_inserts_literal(
-            false, true, false
-        ));
-        assert!(!terminal_command_bar_space_inserts_literal(
-            false, false, true
-        ));
+        assert!(!terminal_tab_capture_blocked_by_workspace_ui(false, false));
+        assert!(terminal_tab_capture_blocked_by_workspace_ui(true, false));
+        assert!(terminal_tab_capture_blocked_by_workspace_ui(false, true));
     }
 
     #[test]

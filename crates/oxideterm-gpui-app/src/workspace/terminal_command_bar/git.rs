@@ -6,11 +6,6 @@ use super::*;
 impl WorkspaceApp {
     pub(super) fn render_terminal_git_branch_picker(&self, cx: &mut Context<Self>) -> AnyElement {
         let left = self.terminal_git_branch_picker_left();
-        let bottom = if self.terminal_command_input_collapsed {
-            32.0
-        } else {
-            64.0
-        };
         let snapshot = self.active_terminal_git_snapshot(cx);
         let operation = snapshot
             .as_ref()
@@ -29,7 +24,8 @@ impl WorkspaceApp {
                     .terminal_owned(),
             )
             .absolute()
-            .bottom(px(bottom))
+            // The retired command input no longer adds a second row below the toolbar.
+            .bottom(px(TERMINAL_COMMAND_TOOLBAR_HEIGHT))
             .left(px(left))
             .occlude()
             .text_size(px(12.0))
