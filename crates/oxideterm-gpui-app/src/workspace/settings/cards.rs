@@ -590,55 +590,15 @@ impl WorkspaceApp {
         anchor: OverlayAnchor,
         cx: &mut Context<Self>,
     ) {
+        // Resolve new-connection anchors through their canonical mapping so a
+        // newly added select cannot silently lose its root-mounted overlay.
         let should_notify = self
             .open_settings_select
             .is_some_and(|select| select.anchor_id() == anchor.id)
-            || matches!(
-                (self.connection_form_state(cx).open_select, anchor.id),
-                (
-                    Some(NewConnectionSelect::Group),
-                    SelectAnchorId::NewConnectionGroup
-                ) | (
-                    Some(NewConnectionSelect::KeyAuthSource),
-                    SelectAnchorId::NewConnectionKeyAuthSource
-                ) | (
-                    Some(NewConnectionSelect::ManagedKey),
-                    SelectAnchorId::NewConnectionManagedKey
-                ) | (
-                    Some(NewConnectionSelect::JumpSavedConnection),
-                    SelectAnchorId::NewConnectionJumpSavedConnection
-                ) | (
-                    Some(NewConnectionSelect::JumpKeyAuthSource),
-                    SelectAnchorId::NewConnectionJumpKeyAuthSource
-                ) | (
-                    Some(NewConnectionSelect::JumpManagedKey),
-                    SelectAnchorId::NewConnectionJumpManagedKey
-                ) | (
-                    Some(NewConnectionSelect::UpstreamProxyPolicy),
-                    SelectAnchorId::NewConnectionUpstreamProxyPolicy
-                ) | (
-                    Some(NewConnectionSelect::UpstreamProxyProtocol),
-                    SelectAnchorId::NewConnectionUpstreamProxyProtocol
-                ) | (
-                    Some(NewConnectionSelect::UpstreamProxyAuth),
-                    SelectAnchorId::NewConnectionUpstreamProxyAuth
-                ) | (
-                    Some(NewConnectionSelect::SerialPort),
-                    SelectAnchorId::NewConnectionSerialPort
-                ) | (
-                    Some(NewConnectionSelect::SerialDataBits),
-                    SelectAnchorId::NewConnectionSerialDataBits
-                ) | (
-                    Some(NewConnectionSelect::SerialStopBits),
-                    SelectAnchorId::NewConnectionSerialStopBits
-                ) | (
-                    Some(NewConnectionSelect::SerialParity),
-                    SelectAnchorId::NewConnectionSerialParity
-                ) | (
-                    Some(NewConnectionSelect::SerialFlowControl),
-                    SelectAnchorId::NewConnectionSerialFlowControl
-                )
-            )
+            || self
+                .connection_form_state(cx)
+                .open_select
+                .is_some_and(|select| Self::new_connection_select_anchor_id(select) == anchor.id)
             || matches!(
                 (self.cloud_sync.read(cx).view.open_select, anchor.id),
                 (

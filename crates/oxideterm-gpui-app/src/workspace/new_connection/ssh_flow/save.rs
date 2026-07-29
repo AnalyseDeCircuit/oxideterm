@@ -225,7 +225,21 @@ impl WorkspaceApp {
                     });
                 }
             }
-            self.start_new_connection_flow(SshConnectionIntent::DrillDown(parent_id), window, cx);
+            let terminal_options = self
+                .connection_form_state(cx)
+                .form
+                .as_ref()
+                .map(|form| form.terminal)
+                .unwrap_or_default();
+            self.start_new_connection_flow(
+                SshConnectionIntent::DrillDown {
+                    parent_id,
+                    saved_connection_id: None,
+                    terminal_options,
+                },
+                window,
+                cx,
+            );
             return;
         }
         match mode {
@@ -245,7 +259,17 @@ impl WorkspaceApp {
                             form.save_connection = false;
                         }
                     });
-                    self.start_new_connection_flow(SshConnectionIntent::Connect, window, cx);
+                    let terminal_options = self
+                        .connection_form_state(cx)
+                        .form
+                        .as_ref()
+                        .map(|form| form.terminal)
+                        .unwrap_or_default();
+                    self.start_new_connection_flow(
+                        SshConnectionIntent::Connect(terminal_options),
+                        window,
+                        cx,
+                    );
                 }
                 NewConnectionSubmitAction::Save => {
                     self.save_new_connection_without_connecting(None, window, cx);
@@ -369,9 +393,13 @@ impl WorkspaceApp {
                     config.proxy_chain = None;
                 }
             }
-            SshConnectionIntent::DrillDown(parent_id)
+            SshConnectionIntent::DrillDown {
+                parent_id,
+                saved_connection_id: Some(connection.id.clone()),
+                terminal_options: connection.options.terminal,
+            }
         } else {
-            SshConnectionIntent::Connect
+            SshConnectionIntent::ConnectSaved(connection.id.clone())
         };
         self.update_connection_form_state(cx, |state| {
             if let Some(form) = state.form.as_mut() {
@@ -583,7 +611,7 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some((config, mut save_request)) =
+        let Some((config, terminal_options, mut save_request)) =
             self.with_connection_form_mut(cx, |this, form, cx| {
                 let form = form?;
                 let host = form.host.trim().to_string();
@@ -608,12 +636,14 @@ impl WorkspaceApp {
                     icon_background_color: asset_color_from_form(&form.icon_background_color),
                     host: host.clone(),
                     port,
+                    terminal: form.terminal,
                     connect_on_open: None,
                 });
                 let config = TelnetSessionConfig { host, port };
+                let terminal_options = form.terminal;
                 form.pending = true;
                 form.error = None;
-                Some((config, save_request))
+                Some((config, terminal_options, save_request))
             })
         else {
             return;
@@ -666,7 +696,7 @@ impl WorkspaceApp {
 
         // Telnet is opened as a native local terminal transport. It does not
         // create an SSH node, so SSH-only saved-connection/test flows stay out.
-        match self.create_telnet_terminal_tab(config, window, cx) {
+        match self.create_telnet_terminal_tab(config, terminal_options, window, cx) {
             Ok(_) => {
                 if let Some(request) = save_request {
                     match self.connection_store.upsert_telnet_profile(request) {
@@ -932,18 +962,12 @@ impl WorkspaceApp {
             cx.notify();
             return;
         }
-        if let SshConnectionIntent::DrillDown(parent_id) = intent {
+        if matches!(&intent, SshConnectionIntent::DrillDown { .. }) {
             // Tauri DrillDownDialog calls tree_drill_down and then
             // connect_tree_node; it does not run a local direct host-key
             // preflight because the child may only be reachable through the
             // parent tunnel. Native keeps that node-only path here.
-            self.continue_verified_ssh_flow(
-                config,
-                title,
-                SshConnectionIntent::DrillDown(parent_id),
-                window,
-                cx,
-            );
+            self.continue_verified_ssh_flow(config, title, intent, window, cx);
             return;
         }
         self.update_connection_form_state(cx, |state| {
@@ -1199,6 +1223,7 @@ impl WorkspaceApp {
                 match self.connection_store.upsert(request) {
                     Ok(_) => {
                         self.sync_saved_connection_node_title(&id);
+                        self.apply_saved_connection_terminal_preferences(&id, cx);
                         let connect_after_save_node_id =
                             self.update_connection_form_state(cx, |state| {
                                 let node_id = state

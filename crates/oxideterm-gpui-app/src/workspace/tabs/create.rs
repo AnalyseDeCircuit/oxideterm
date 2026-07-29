@@ -1,4 +1,5 @@
 use super::*;
+use crate::workspace::root::init::terminal_preference_overrides;
 
 fn attach_saved_owner_to_reused_ssh_node(
     node: &mut WorkspaceSshNode,
@@ -109,19 +110,23 @@ impl WorkspaceApp {
     pub(in crate::workspace) fn create_telnet_terminal_tab(
         &mut self,
         config: TelnetSessionConfig,
+        terminal_options: ConnectionTerminalOptions,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Result<TerminalSessionId> {
         let tab_id = self.alloc_tab_id(cx);
         let pane_id = self.alloc_pane_id(cx);
         let session_id = self.alloc_session_id(cx);
-        let preferences =
+        let preference_overrides = terminal_preference_overrides(terminal_options);
+        let mut preferences =
             self.prepare_terminal_preferences_for_tab_kind(&TabKind::LocalTerminal, cx);
+        preference_overrides.apply_to(&mut preferences);
         let title = format!("Telnet {}", config.endpoint_label());
         let pane_config = config;
         let pane = cx.new(|cx| {
             TerminalPane::new_telnet_with_preferences(pane_config, preferences, window, cx)
                 .expect("failed to initialize Telnet terminal pane")
+                .with_preference_overrides(preference_overrides)
         });
 
         // Telnet is a local transport in the plugin API: it owns no SSH node,
@@ -673,6 +678,7 @@ impl WorkspaceApp {
                         username: snapshot.username,
                     },
                     title,
+                    terminal_options: ConnectionTerminalOptions::default(),
                     terminal_ids: Vec::new(),
                     readiness: NodeReadiness::Disconnected,
                 },
@@ -722,7 +728,10 @@ impl WorkspaceApp {
         // Tauri remounts terminal tabs by replacing the old session id in the
         // pane tree after reconnect. The new GPUI pane is only a consumer of
         // the node-owned SSH connection; node liveness stays with NodeRouter.
-        let preferences = self.prepare_terminal_preferences_for_tab_kind(&TabKind::SshTerminal, cx);
+        let preference_overrides = self.terminal_preference_overrides_for_ssh_node(node_id);
+        let mut preferences =
+            self.prepare_terminal_preferences_for_tab_kind(&TabKind::SshTerminal, cx);
+        preference_overrides.apply_to(&mut preferences);
         let consumer = ConnectionConsumer::Terminal(session_id.0.to_string());
         // Opening another terminal for an already-connected node mirrors
         // Tauri's createTerminalForNode(nodeId) path: no post-connect command
@@ -743,6 +752,7 @@ impl WorkspaceApp {
         let pane = cx.new(|cx| {
             TerminalPane::from_shared_session(shared_session, preferences, window, cx)
                 .expect("failed to remount ssh terminal pane")
+                .with_preference_overrides(preference_overrides)
         });
         self.register_terminal_pane(pane_id, session_id, pane, window, cx);
         self.refresh_native_plugin_terminal_hooks(cx);
@@ -906,7 +916,14 @@ impl WorkspaceApp {
                 .clone()
                 .or_else(|| saved_connection_id.clone())
                 .map(SshConnectionIntent::ConnectSaved)
-                .unwrap_or(SshConnectionIntent::Connect);
+                .unwrap_or_else(|| {
+                    let terminal_options = self
+                        .ssh_nodes
+                        .get(&node_id)
+                        .map(|node| node.terminal_options)
+                        .unwrap_or_default();
+                    SshConnectionIntent::Connect(terminal_options)
+                });
             if self.start_existing_session_tree_connect(
                 node_id.clone(),
                 title.clone(),

@@ -655,7 +655,12 @@ impl WorkspaceApp {
         };
 
         match run.intent {
-            SshConnectionIntent::Connect => {
+            SshConnectionIntent::Connect(terminal_options) => {
+                if let Some(node) = self.ssh_nodes.get_mut(&target_node_id) {
+                    // Manual connections have no saved record, so the runtime node
+                    // retains their terminal behavior until all panes are closed.
+                    node.terminal_options = terminal_options;
+                }
                 self.update_connection_form_state(cx, ConnectionFormState::clear);
                 let post_connect_command = target_config.post_connect_command.clone();
                 let _ = self.queue_ssh_terminal_tab_for_node_with_mark_used(
@@ -671,11 +676,7 @@ impl WorkspaceApp {
                 );
             }
             SshConnectionIntent::ConnectSaved(id) => {
-                if self
-                    .connection_form_state(cx)
-                    .saved_connection_prompt_action
-                    .is_some()
-                {
+                if self.connection_form_state(cx).form.is_some() {
                     self.update_connection_form_state(cx, ConnectionFormState::clear);
                 }
                 self.session_manager.update(cx, |session_manager, cx| {
@@ -694,7 +695,7 @@ impl WorkspaceApp {
                     cx,
                 );
             }
-            SshConnectionIntent::Test | SshConnectionIntent::DrillDown(_) => {}
+            SshConnectionIntent::Test | SshConnectionIntent::DrillDown { .. } => {}
         }
     }
 
@@ -911,7 +912,7 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) {
         match intent {
-            SshConnectionIntent::Connect => {
+            SshConnectionIntent::Connect(terminal_options) => {
                 self.update_connection_form_state(cx, ConnectionFormState::clear);
                 self.connection_flow.update(cx, |connection_flow, cx| {
                     connection_flow.clear_host_key_challenge(cx);
@@ -925,6 +926,9 @@ impl WorkspaceApp {
                     let expansion_id = format!("manual-{}", self.next_ssh_node_id);
                     match self.expand_saved_connection_tree(&expansion_id, config, title.clone()) {
                         Ok(expansion) => {
+                            if let Some(node) = self.ssh_nodes.get_mut(&expansion.target_node_id) {
+                                node.terminal_options = terminal_options;
+                            }
                             if let Some(target_config) = self
                                 .node_router
                                 .node_runtime_snapshot(&expansion.target_node_id)
@@ -955,6 +959,9 @@ impl WorkspaceApp {
                     return;
                 }
                 let node_id = self.materialize_ssh_root_node(config.clone(), title.clone(), None);
+                if let Some(node) = self.ssh_nodes.get_mut(&node_id) {
+                    node.terminal_options = terminal_options;
+                }
                 let post_connect_command = config.post_connect_command.clone();
                 let _ = self.queue_ssh_terminal_tab_for_node_with_mark_used(
                     node_id,
@@ -972,11 +979,7 @@ impl WorkspaceApp {
                 self.connection_flow.update(cx, |connection_flow, cx| {
                     connection_flow.clear_host_key_challenge(cx);
                 });
-                if self
-                    .connection_form_state(cx)
-                    .saved_connection_prompt_action
-                    .is_some()
-                {
+                if self.connection_form_state(cx).form.is_some() {
                     self.update_connection_form_state(cx, ConnectionFormState::clear);
                 }
                 self.session_manager.update(cx, |session_manager, cx| {
@@ -984,7 +987,11 @@ impl WorkspaceApp {
                 });
                 let _ = self.open_or_create_saved_ssh_terminal_tab(id, config, title, window, cx);
             }
-            SshConnectionIntent::DrillDown(parent_id) => {
+            SshConnectionIntent::DrillDown {
+                parent_id,
+                saved_connection_id,
+                terminal_options,
+            } => {
                 self.connection_flow.update(cx, |connection_flow, cx| {
                     connection_flow.clear_host_key_challenge(cx);
                 });
@@ -1012,16 +1019,19 @@ impl WorkspaceApp {
                         return;
                     }
                 };
-                self.ssh_nodes.insert(
-                    child_id.clone(),
-                    crate::workspace::WorkspaceSshNode::new(
-                        None,
-                        &config,
-                        title,
-                        Vec::new(),
-                        NodeReadiness::Connecting,
-                    ),
+                let mut child_node = crate::workspace::WorkspaceSshNode::new(
+                    saved_connection_id.clone(),
+                    &config,
+                    title,
+                    Vec::new(),
+                    NodeReadiness::Connecting,
                 );
+                child_node.terminal_options = terminal_options;
+                self.ssh_nodes.insert(child_id.clone(), child_node);
+                if let Some(saved_connection_id) = saved_connection_id {
+                    self.saved_ssh_nodes
+                        .insert(saved_connection_id, child_id.clone());
+                }
                 self.expanded_ssh_nodes.insert(parent_id);
                 self.expanded_ssh_nodes.insert(child_id.clone());
                 self.active_ssh_node_id = Some(child_id.clone());

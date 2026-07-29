@@ -24,6 +24,8 @@ pub(in crate::workspace) struct WorkspaceSshNode {
     pub(in crate::workspace) saved_connection_id: Option<String>,
     pub(in crate::workspace) endpoint: WorkspaceSshNodeEndpoint,
     pub(in crate::workspace) title: String,
+    /// Retains terminal-only overrides for manual connections that have no saved owner.
+    pub(in crate::workspace) terminal_options: ConnectionTerminalOptions,
     pub(in crate::workspace) terminal_ids: Vec<TerminalSessionId>,
     pub(in crate::workspace) readiness: NodeReadiness,
 }
@@ -40,6 +42,7 @@ impl WorkspaceSshNode {
             saved_connection_id,
             endpoint: WorkspaceSshNodeEndpoint::from_config(config),
             title,
+            terminal_options: ConnectionTerminalOptions::default(),
             terminal_ids,
             readiness,
         }

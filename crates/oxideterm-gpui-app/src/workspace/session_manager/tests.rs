@@ -663,10 +663,28 @@ pub(super) fn edit_properties_preserves_legacy_ssh_compatibility() {
 
     // Editing and saving an existing connection must round-trip its transport policy.
     let mut form = form_from_saved_connection(&saved_connection, None);
-    let request = save_request_from_form(&mut form, Some(saved_connection.id)).unwrap();
+    let request = save_request_from_form(&mut form, Some(saved_connection.id.clone())).unwrap();
 
     assert!(form.legacy_ssh_compatibility);
     assert!(request.legacy_ssh_compatibility);
+}
+
+#[test]
+pub(super) fn edit_properties_round_trips_host_terminal_overrides() {
+    let mut saved_connection = saved_connection_fixture(SavedAuth::Agent);
+    saved_connection.options.terminal = ConnectionTerminalOptions {
+        encoding: Some(oxideterm_connections::ConnectionTerminalEncoding::Gb18030),
+        backspace_sequence: Some(
+            oxideterm_connections::ConnectionTerminalBackspaceSequence::ControlH,
+        ),
+        delete_sequence: Some(oxideterm_connections::ConnectionTerminalDeleteSequence::Delete),
+    };
+
+    let mut form = form_from_saved_connection(&saved_connection, None);
+    let request = save_request_from_form(&mut form, Some(saved_connection.id.clone())).unwrap();
+
+    assert_eq!(form.terminal, saved_connection.options.terminal);
+    assert_eq!(request.terminal, saved_connection.options.terminal);
 }
 
 #[test]

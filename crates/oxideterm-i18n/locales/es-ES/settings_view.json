@@ -265,9 +265,9 @@
       "selection_requires_shift_hint": "Cuando está habilitado, un arrastre normal mantiene intacta la interacción del terminal y solo Mayús + arrastrar inicia una selección de texto",
       "free_type_mode": "Modo de entrada libre",
       "backspace_sequence": "Tecla Retroceso",
-      "backspace_sequence_hint": "Elige qué envía Retroceso a las aplicaciones de terminal antiguas. El valor predeterminado es DEL (0x7F)",
+      "backspace_sequence_hint": "Valor predeterminado de la aplicación para Retroceso. Los hosts guardados pueden sobrescribirlo.",
       "delete_sequence": "Tecla Suprimir",
-      "delete_sequence_hint": "Elige qué envía Suprimir a las aplicaciones de terminal antiguas. El valor predeterminado es CSI 3~",
+      "delete_sequence_hint": "Valor predeterminado de la aplicación para Suprimir. Los hosts guardados pueden sobrescribirlo.",
       "free_type_mode_hint": "Edita el comando activo del shell con el ratón: haz clic para mover el cursor, haz doble clic dentro de paréntesis emparejados para seleccionar su contenido, arrastra el texto seleccionado para moverlo, arrastra con Ctrl para copiarlo o con Alt para reemplazar el comando. Vim, Neovim y Emacs a pantalla completa requieren cargar explícitamente el adaptador de OxideTerm; las demás aplicaciones de pantalla completa y seguimiento del ratón conservan el control",
       "in_band_transfer": {
         "title": "Transferencia de archivos en banda",
@@ -417,7 +417,7 @@
         }
       },
       "encoding": "Terminal Encoding",
-      "encoding_hint": "Text encoding for terminal input/output. Keep UTF-8 unless the remote host uses a legacy locale.",
+      "encoding_hint": "Valor predeterminado para terminales locales y hosts sin ajuste propio. Cada host guardado puede elegir su codificación.",
       "autosuggest_local_history": "Barra de comandos: historial del shell local",
       "autosuggest_local_history_hint": "Usa el historial local de zsh/bash/fish como fuente del panel de historial de la barra de comandos. No activa ghost text dentro del terminal.",
       "command_bar": "Command Bar",

@@ -265,9 +265,9 @@
       "selection_requires_shift_hint": "Quando è abilitato, il trascinamento normale mantiene intatta l'interazione del terminale e solo Shift + trascinamento avvia una selezione di testo",
       "free_type_mode": "Modalità di input libero",
       "backspace_sequence": "Tasto Backspace",
-      "backspace_sequence_hint": "Scegli cosa invia Backspace alle applicazioni terminale legacy. Il valore predefinito è DEL (0x7F)",
+      "backspace_sequence_hint": "Valore predefinito dell’applicazione per Backspace. Gli host salvati possono sostituirlo.",
       "delete_sequence": "Tasto Canc",
-      "delete_sequence_hint": "Scegli cosa invia Canc alle applicazioni terminale legacy. Il valore predefinito è CSI 3~",
+      "delete_sequence_hint": "Valore predefinito dell’applicazione per Canc. Gli host salvati possono sostituirlo.",
       "free_type_mode_hint": "Modifica il comando shell attivo con il mouse: fai clic per spostare il cursore, fai doppio clic tra parentesi corrispondenti per selezionarne il contenuto, trascina il testo selezionato per spostarlo, tieni premuto Ctrl per copiarlo o Alt per sostituire il comando. Vim, Neovim ed Emacs a schermo intero richiedono il caricamento esplicito dell’adattatore OxideTerm; le altre app a schermo intero o con tracciamento del mouse mantengono il controllo",
       "in_band_transfer": {
         "title": "Trasferimento file in-band",
@@ -417,7 +417,7 @@
         }
       },
       "encoding": "Terminal Encoding",
-      "encoding_hint": "Text encoding for terminal input/output. Keep UTF-8 unless the remote host uses a legacy locale.",
+      "encoding_hint": "Valore predefinito per terminali locali e host senza override. Ogni host salvato può scegliere la propria codifica.",
       "autosuggest_local_history": "Barra comandi: cronologia shell locale",
       "autosuggest_local_history_hint": "Usa la cronologia locale zsh/bash/fish come sorgente del pannello cronologia della barra comandi. Non abilita ghost text nel terminale.",
       "command_bar": "Command Bar",

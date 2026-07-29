@@ -1,5 +1,5 @@
 use super::*;
-use gpui::{Animation, AnimationExt};
+use gpui::{Animation, AnimationExt, App};
 use oxideterm_settings_model::parse_rgb24_hex;
 
 const NEW_CONNECTION_TRANSPORT_ROW_HEIGHT: f32 = 36.0;
@@ -147,7 +147,7 @@ fn connection_secret_field_value(
 }
 
 impl WorkspaceApp {
-    pub(super) fn new_connection_select_anchor_id(
+    pub(in crate::workspace) fn new_connection_select_anchor_id(
         select_id: NewConnectionSelect,
     ) -> SelectAnchorId {
         match select_id {
@@ -177,6 +177,13 @@ impl WorkspaceApp {
             NewConnectionSelect::SerialFlowControl => {
                 SelectAnchorId::NewConnectionSerialFlowControl
             }
+            NewConnectionSelect::TerminalEncoding => SelectAnchorId::NewConnectionTerminalEncoding,
+            NewConnectionSelect::TerminalBackspaceSequence => {
+                SelectAnchorId::NewConnectionTerminalBackspaceSequence
+            }
+            NewConnectionSelect::TerminalDeleteSequence => {
+                SelectAnchorId::NewConnectionTerminalDeleteSequence
+            }
         }
     }
 
@@ -204,6 +211,27 @@ impl WorkspaceApp {
         )
     }
 
+    fn track_new_connection_select_anchor(
+        &self,
+        select_id: NewConnectionSelect,
+        trigger: impl IntoElement,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let anchor_id = Self::new_connection_select_anchor_id(select_id);
+        let anchors = self.connection_flow.read(cx).select_anchor_store();
+        let notify_on_change = self.connection_form_state(cx).open_select == Some(select_id);
+        let workspace = cx.entity();
+        select_anchor_probe(anchor_id, trigger, move |anchor, _window, cx| {
+            // Closed triggers only update layout-owned storage. An open popup
+            // needs one follow-up root render because its portal position was
+            // resolved before this frame's prepaint reported the new bounds.
+            if anchors.update(anchor) && notify_on_change {
+                let _ = workspace.update(cx, |_this, cx| cx.notify());
+            }
+        })
+        .into_any_element()
+    }
+
     fn open_new_connection_select_from_pointer(
         &mut self,
         select_id: NewConnectionSelect,
@@ -226,38 +254,10 @@ impl WorkspaceApp {
         self.update_connection_form_state(cx, ConnectionFormState::close_select);
     }
 
-    pub(super) fn clear_new_connection_select_anchor(&mut self) {
-        // The group select overlay is anchored inside the new-connection scroll
-        // body. Drop its cached bounds when the body scrolls so a reopened
-        // overlay cannot reuse pre-scroll coordinates.
-        self.select_anchors
-            .remove(&SelectAnchorId::NewConnectionGroup);
-        self.select_anchors
-            .remove(&SelectAnchorId::NewConnectionKeyAuthSource);
-        self.select_anchors
-            .remove(&SelectAnchorId::NewConnectionManagedKey);
-        self.select_anchors
-            .remove(&SelectAnchorId::NewConnectionJumpSavedConnection);
-        self.select_anchors
-            .remove(&SelectAnchorId::NewConnectionJumpKeyAuthSource);
-        self.select_anchors
-            .remove(&SelectAnchorId::NewConnectionJumpManagedKey);
-        self.select_anchors
-            .remove(&SelectAnchorId::NewConnectionUpstreamProxyPolicy);
-        self.select_anchors
-            .remove(&SelectAnchorId::NewConnectionUpstreamProxyProtocol);
-        self.select_anchors
-            .remove(&SelectAnchorId::NewConnectionUpstreamProxyAuth);
-        self.select_anchors
-            .remove(&SelectAnchorId::NewConnectionSerialPort);
-        self.select_anchors
-            .remove(&SelectAnchorId::NewConnectionSerialDataBits);
-        self.select_anchors
-            .remove(&SelectAnchorId::NewConnectionSerialStopBits);
-        self.select_anchors
-            .remove(&SelectAnchorId::NewConnectionSerialParity);
-        self.select_anchors
-            .remove(&SelectAnchorId::NewConnectionSerialFlowControl);
+    pub(super) fn clear_new_connection_select_anchor(&mut self, cx: &App) {
+        // Every entry in this store belongs to the moving form viewport, so a
+        // scroll can invalidate the entire set without enumerating anchor IDs.
+        self.connection_flow.read(cx).select_anchor_store().clear();
     }
 
     pub(super) fn render_connection_hint(&self, text: String) -> AnyElement {
@@ -567,8 +567,6 @@ impl WorkspaceApp {
         } else {
             value.trim().to_string()
         };
-        let anchor_id = SelectAnchorId::NewConnectionGroup;
-        let workspace = cx.entity();
         let trigger = self
             .new_connection_select_trigger(
                 NewConnectionSelect::Group,
@@ -598,11 +596,7 @@ impl WorkspaceApp {
         form_field(
             &self.tokens,
             label,
-            select_anchor_probe(anchor_id, trigger, move |anchor, _window, cx| {
-                let _ = workspace.update(cx, |this, cx| {
-                    this.update_select_anchor(anchor, cx);
-                });
-            }),
+            self.track_new_connection_select_anchor(NewConnectionSelect::Group, trigger, cx),
         )
     }
 
@@ -640,12 +634,6 @@ impl WorkspaceApp {
         } else {
             NewConnectionSelect::ManagedKey
         };
-        let anchor_id = if jump_form {
-            SelectAnchorId::NewConnectionJumpManagedKey
-        } else {
-            SelectAnchorId::NewConnectionManagedKey
-        };
-        let workspace = cx.entity();
         let trigger = self
             .new_connection_select_trigger(
                 select_id,
@@ -679,11 +667,7 @@ impl WorkspaceApp {
         form_field(
             &self.tokens,
             label,
-            select_anchor_probe(anchor_id, trigger, move |anchor, _window, cx| {
-                let _ = workspace.update(cx, |this, cx| {
-                    this.update_select_anchor(anchor, cx);
-                });
-            }),
+            self.track_new_connection_select_anchor(select_id, trigger, cx),
         )
         .into_any_element()
     }
@@ -708,7 +692,6 @@ impl WorkspaceApp {
                 })
                 .unwrap_or_else(|| selected_id.to_string())
         };
-        let workspace = cx.entity();
         let trigger = self
             .new_connection_select_trigger(
                 NewConnectionSelect::JumpSavedConnection,
@@ -741,14 +724,10 @@ impl WorkspaceApp {
         form_field(
             &self.tokens,
             self.i18n.t("ssh.form.proxy_jump_saved_connection"),
-            select_anchor_probe(
-                SelectAnchorId::NewConnectionJumpSavedConnection,
+            self.track_new_connection_select_anchor(
+                NewConnectionSelect::JumpSavedConnection,
                 trigger,
-                move |anchor, _window, cx| {
-                    let _ = workspace.update(cx, |this, cx| {
-                        this.update_select_anchor(anchor, cx);
-                    });
-                },
+                cx,
             ),
         )
         .into_any_element()
@@ -785,7 +764,10 @@ impl WorkspaceApp {
                     | NewConnectionSelect::SerialDataBits
                     | NewConnectionSelect::SerialStopBits
                     | NewConnectionSelect::SerialParity
-                    | NewConnectionSelect::SerialFlowControl => return,
+                    | NewConnectionSelect::SerialFlowControl
+                    | NewConnectionSelect::TerminalEncoding
+                    | NewConnectionSelect::TerminalBackspaceSequence
+                    | NewConnectionSelect::TerminalDeleteSequence => return,
                 }
                 form.field_focused = false;
                 form.selected_field = None;
@@ -980,7 +962,7 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let target = WorkspaceImeTarget::NewConnection(field);
-        let workspace = cx.entity();
+        let anchors = self.text_input_anchors.clone();
         text_input_anchor_probe(
             target.anchor_id(),
             input
@@ -1008,10 +990,11 @@ impl WorkspaceApp {
                         this.update_ime_selection_drag_from_mouse_move(event, window, cx);
                     }),
                 ),
-            move |anchor, _window, cx| {
-                let _ = workspace.update(cx, |this, cx| {
-                    this.update_text_input_anchor(anchor, cx);
-                });
+            move |anchor, _window, _cx| {
+                // Text geometry is layout-only state. Writing the shared store
+                // directly avoids re-entering WorkspaceApp once per input on
+                // every frame of an inertial form scroll.
+                anchors.update(anchor);
             },
         )
         .into_any_element()
@@ -1271,8 +1254,6 @@ impl WorkspaceApp {
         } else {
             NewConnectionSelect::KeyAuthSource
         };
-        let anchor_id = Self::new_connection_select_anchor_id(select_id);
-        let workspace = cx.entity();
         let trigger = self
             .new_connection_select_trigger(
                 select_id,
@@ -1302,11 +1283,7 @@ impl WorkspaceApp {
         form_field(
             &self.tokens,
             self.i18n.t("ssh.auth.key_source"),
-            select_anchor_probe(anchor_id, trigger, move |anchor, _window, cx| {
-                let _ = workspace.update(cx, |this, cx| {
-                    this.update_select_anchor(anchor, cx);
-                });
-            }),
+            self.track_new_connection_select_anchor(select_id, trigger, cx),
         )
         .into_any_element()
     }
@@ -2287,7 +2264,9 @@ impl WorkspaceApp {
                     .rounded(px(self.tokens.radii.lg))
                     .border_1()
                     .border_color(rgb(self.tokens.ui.border))
-                    .bg(rgba((self.tokens.ui.bg << 8) | TAURI_SERIAL_PANEL_BG_ALPHA))
+                    .bg(rgba(
+                        (self.tokens.ui.bg << 8) | TAURI_CONNECTION_PANEL_BG_ALPHA,
+                    ))
                     .p(px(self.tokens.spacing.three))
                     .child(
                         div()
@@ -2345,6 +2324,7 @@ impl WorkspaceApp {
                     cx,
                 ),
             )
+            .child(self.render_connection_terminal_options(cx))
             .into_any_element()
     }
 
@@ -2410,7 +2390,9 @@ impl WorkspaceApp {
                     .rounded(px(self.tokens.radii.lg))
                     .border_1()
                     .border_color(rgb(self.tokens.ui.border))
-                    .bg(rgba((self.tokens.ui.bg << 8) | TAURI_SERIAL_PANEL_BG_ALPHA))
+                    .bg(rgba(
+                        (self.tokens.ui.bg << 8) | TAURI_CONNECTION_PANEL_BG_ALPHA,
+                    ))
                     .p(px(self.tokens.spacing.three))
                     .child(
                         div()
@@ -2602,8 +2584,6 @@ impl WorkspaceApp {
         disabled: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let anchor_id = Self::new_connection_select_anchor_id(select_id);
-        let workspace = cx.entity();
         let trigger = self
             .new_connection_select_trigger(select_id, value, placeholder, disabled, cx)
             .when(!disabled, |trigger| {
@@ -2625,12 +2605,180 @@ impl WorkspaceApp {
                 )
             });
 
-        select_anchor_probe(anchor_id, trigger, move |anchor, _window, cx| {
-            let _ = workspace.update(cx, |this, cx| {
-                this.update_select_anchor(anchor, cx);
-            });
-        })
-        .into_any_element()
+        self.track_new_connection_select_anchor(select_id, trigger, cx)
+    }
+
+    pub(super) fn render_connection_terminal_options(&self, cx: &mut Context<Self>) -> AnyElement {
+        // Saved host controls are optional overrides so application defaults
+        // continue to govern legacy records and temporary local terminals.
+        let Some(terminal) = self
+            .connection_form_state(cx)
+            .form
+            .as_ref()
+            .map(|form| form.terminal)
+        else {
+            return div().into_any_element();
+        };
+        let application_defaults = &self.settings_store.settings().terminal;
+        let default_encoding = terminal_encoding_label(application_defaults.terminal_encoding);
+        let default_backspace =
+            terminal_backspace_sequence_label(application_defaults.backspace_sequence);
+        let default_delete = terminal_delete_sequence_label(application_defaults.delete_sequence);
+        let inherited_label = |value: &str| {
+            self.i18n
+                .t("ssh.form.terminal_use_application_default")
+                .replace("{{value}}", value)
+        };
+        let encoding_label = terminal
+            .encoding
+            .map(connection_terminal_encoding_label)
+            .map(str::to_string)
+            .unwrap_or_else(|| inherited_label(&default_encoding));
+        let backspace_label = terminal
+            .backspace_sequence
+            .map(connection_terminal_backspace_sequence_label)
+            .map(str::to_string)
+            .unwrap_or_else(|| inherited_label(default_backspace));
+        let delete_label = terminal
+            .delete_sequence
+            .map(connection_terminal_delete_sequence_label)
+            .map(str::to_string)
+            .unwrap_or_else(|| inherited_label(default_delete));
+
+        div()
+            .flex()
+            .flex_col()
+            .gap(px(self.tokens.spacing.three))
+            .border_t_1()
+            .border_color(rgb(self.tokens.ui.border))
+            .pt(px(self.tokens.spacing.three))
+            .child(
+                div()
+                    .flex()
+                    .flex_wrap()
+                    .items_baseline()
+                    .gap(px(self.tokens.spacing.two))
+                    .child(
+                        div()
+                            .text_size(px(self.tokens.metrics.ui_text_sm))
+                            .font_weight(gpui::FontWeight::MEDIUM)
+                            .text_color(rgb(self.tokens.ui.text))
+                            .child(self.i18n.t("ssh.form.terminal_options")),
+                    )
+                    .child(
+                        div()
+                            .text_size(px(self.tokens.metrics.ui_text_xs))
+                            .text_color(rgb(self.tokens.ui.text_muted))
+                            .child(self.i18n.t("ssh.form.terminal_options_hint")),
+                    ),
+            )
+            .child(
+                div()
+                    .flex()
+                    .flex_row()
+                    .flex_wrap()
+                    .gap(px(self.tokens.spacing.three))
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w(px(CONNECTION_TERMINAL_CONTROL_MIN_WIDTH))
+                            .child(form_field(
+                                &self.tokens,
+                                self.i18n.t("settings_view.terminal.encoding"),
+                                self.render_new_connection_select_control(
+                                    NewConnectionSelect::TerminalEncoding,
+                                    encoding_label,
+                                    false,
+                                    false,
+                                    cx,
+                                ),
+                            )),
+                    )
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w(px(CONNECTION_TERMINAL_CONTROL_MIN_WIDTH))
+                            .child(form_field(
+                                &self.tokens,
+                                self.i18n.t("settings_view.terminal.backspace_sequence"),
+                                self.render_new_connection_select_control(
+                                    NewConnectionSelect::TerminalBackspaceSequence,
+                                    backspace_label,
+                                    false,
+                                    false,
+                                    cx,
+                                ),
+                            )),
+                    )
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w(px(CONNECTION_TERMINAL_CONTROL_MIN_WIDTH))
+                            .child(form_field(
+                                &self.tokens,
+                                self.i18n.t("settings_view.terminal.delete_sequence"),
+                                self.render_new_connection_select_control(
+                                    NewConnectionSelect::TerminalDeleteSequence,
+                                    delete_label,
+                                    false,
+                                    false,
+                                    cx,
+                                ),
+                            )),
+                    ),
+            )
+            .into_any_element()
+    }
+
+    pub(super) fn set_new_connection_terminal_encoding(
+        &mut self,
+        encoding: Option<ConnectionTerminalEncoding>,
+        cx: &mut Context<Self>,
+    ) {
+        self.update_connection_form_state(cx, |state| {
+            if let Some(form) = state.form.as_mut() {
+                form.terminal.encoding = encoding;
+                form.field_focused = false;
+                clear_connection_selection(form);
+                form.error = None;
+            }
+        });
+        self.ime_marked_text = None;
+        cx.notify();
+    }
+
+    pub(super) fn set_new_connection_terminal_backspace_sequence(
+        &mut self,
+        sequence: Option<ConnectionTerminalBackspaceSequence>,
+        cx: &mut Context<Self>,
+    ) {
+        self.update_connection_form_state(cx, |state| {
+            if let Some(form) = state.form.as_mut() {
+                form.terminal.backspace_sequence = sequence;
+                form.field_focused = false;
+                clear_connection_selection(form);
+                form.error = None;
+            }
+        });
+        self.ime_marked_text = None;
+        cx.notify();
+    }
+
+    pub(super) fn set_new_connection_terminal_delete_sequence(
+        &mut self,
+        sequence: Option<ConnectionTerminalDeleteSequence>,
+        cx: &mut Context<Self>,
+    ) {
+        self.update_connection_form_state(cx, |state| {
+            if let Some(form) = state.form.as_mut() {
+                form.terminal.delete_sequence = sequence;
+                form.field_focused = false;
+                clear_connection_selection(form);
+                form.error = None;
+            }
+        });
+        self.ime_marked_text = None;
+        cx.notify();
     }
 
     fn render_serial_u8_select(
@@ -3129,6 +3277,30 @@ mod tests {
             new_connection_transport_index(NewConnectionTransport::WslGraphics),
             5,
         );
+    }
+
+    #[test]
+    fn terminal_selects_map_to_their_tracked_overlay_anchors() {
+        for (select, anchor_id) in [
+            (
+                NewConnectionSelect::TerminalEncoding,
+                SelectAnchorId::NewConnectionTerminalEncoding,
+            ),
+            (
+                NewConnectionSelect::TerminalBackspaceSequence,
+                SelectAnchorId::NewConnectionTerminalBackspaceSequence,
+            ),
+            (
+                NewConnectionSelect::TerminalDeleteSequence,
+                SelectAnchorId::NewConnectionTerminalDeleteSequence,
+            ),
+        ] {
+            assert_eq!(
+                WorkspaceApp::new_connection_select_anchor_id(select),
+                anchor_id
+            );
+            assert!(anchor_id.is_new_connection_select_trigger());
+        }
     }
 
     #[test]

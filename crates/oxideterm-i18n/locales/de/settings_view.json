@@ -265,9 +265,9 @@
       "selection_requires_shift_hint": "Wenn aktiviert, bleibt die Terminalinteraktion bei normalem Ziehen erhalten und nur Shift + Ziehen startet eine Textauswahl",
       "free_type_mode": "Freier Eingabemodus",
       "backspace_sequence": "Rücktaste",
-      "backspace_sequence_hint": "Legt fest, was die Rücktaste an ältere Terminalprogramme sendet. Standard ist DEL (0x7F)",
+      "backspace_sequence_hint": "Anwendungsstandard für die Rückschrittfolge. Gespeicherte Hosts können ihn überschreiben.",
       "delete_sequence": "Entfernen-Taste",
-      "delete_sequence_hint": "Legt fest, was die Entfernen-Taste an ältere Terminalprogramme sendet. Standard ist CSI 3~",
+      "delete_sequence_hint": "Anwendungsstandard für die Entf-Tastenfolge. Gespeicherte Hosts können ihn überschreiben.",
       "free_type_mode_hint": "Den aktiven Shell-Befehl mit der Maus bearbeiten: klicken, um den Cursor zu bewegen, zwischen passenden Klammern doppelklicken, um den Inhalt auszuwählen, ausgewählten Befehlstext zum Verschieben ziehen, mit Strg ziehen, um ihn zu kopieren, oder mit Alt ziehen, um den Befehl zu ersetzen. Vim, Neovim und Emacs im Vollbild benötigen den ausdrücklich geladenen OxideTerm-Adapter; andere Vollbild- und Mausverfolgungs-Apps behalten die Kontrolle",
       "in_band_transfer": {
         "title": "In-Band-Dateiübertragung",
@@ -417,7 +417,7 @@
         }
       },
       "encoding": "Terminal Encoding",
-      "encoding_hint": "Text encoding for terminal input/output. Keep UTF-8 unless the remote host uses a legacy locale.",
+      "encoding_hint": "Anwendungsstandard für lokale Terminals und Hosts ohne Überschreibung. Gespeicherte Hosts können eine eigene Kodierung wählen.",
       "autosuggest_local_history": "Befehlsleiste: lokale Shell-Historie",
       "autosuggest_local_history_hint": "Verwendet lokale zsh/bash/fish-Historie als Quelle für das Verlaufspanel der Befehlsleiste. Aktiviert keinen Ghost Text im Terminal.",
       "command_bar": "Command Bar",

@@ -761,6 +761,7 @@ impl WorkspaceApp {
                     username: snapshot.username,
                 },
                 title,
+                terminal_options: ConnectionTerminalOptions::default(),
                 terminal_ids: Vec::new(),
                 readiness: snapshot.readiness,
             },

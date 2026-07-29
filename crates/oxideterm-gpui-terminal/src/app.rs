@@ -256,6 +256,7 @@ pub struct TerminalPane {
     serial_reconnect_config: Option<SerialSessionConfig>,
     serial_port_available: Option<bool>,
     focus_handle: FocusHandle,
+    preference_overrides: TerminalUiPreferenceOverrides,
     preferences: TerminalUiPreferences,
     settings: TerminalUiSettings,
     theme: TerminalUiTheme,
@@ -639,6 +640,7 @@ impl TerminalPane {
             serial_reconnect_config: None,
             serial_port_available: None,
             focus_handle,
+            preference_overrides: TerminalUiPreferenceOverrides::default(),
             preferences: preferences.clone(),
             settings: TerminalUiSettings::from_preferences(&preferences),
             theme: preferences.theme.clone(),
@@ -1032,6 +1034,8 @@ impl TerminalPane {
     }
 
     pub fn set_preferences(&mut self, preferences: TerminalUiPreferences, cx: &mut Context<Self>) {
+        let mut preferences = preferences;
+        self.preference_overrides.apply_to(&mut preferences);
         if self.preferences.terminal_encoding != preferences.terminal_encoding {
             self.terminal
                 .lock()
@@ -1069,6 +1073,28 @@ impl TerminalPane {
         self.pending_pty_resize = None;
         self.reset_cursor_blink();
         cx.notify();
+    }
+
+    pub fn with_preference_overrides(
+        mut self,
+        preference_overrides: TerminalUiPreferenceOverrides,
+    ) -> Self {
+        // Callers apply these overrides before constructing the backend. The
+        // pane retains them only to preserve host behavior on later refreshes.
+        self.preference_overrides = preference_overrides;
+        self
+    }
+
+    pub fn set_preference_overrides(
+        &mut self,
+        preference_overrides: TerminalUiPreferenceOverrides,
+        application_preferences: TerminalUiPreferences,
+        cx: &mut Context<Self>,
+    ) {
+        // A saved host edit changes only this session-owned protocol behavior;
+        // all unrelated visual preferences continue to come from the app.
+        self.preference_overrides = preference_overrides;
+        self.set_preferences(application_preferences, cx);
     }
 
     pub fn focus(&self, window: &mut Window, cx: &mut App) {

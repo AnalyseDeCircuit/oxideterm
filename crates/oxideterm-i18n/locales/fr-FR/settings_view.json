@@ -265,9 +265,9 @@
       "selection_requires_shift_hint": "Lorsqu'elle est activée, un glisser simple préserve l'interaction du terminal et seul Maj + glisser démarre une sélection de texte",
       "free_type_mode": "Mode de saisie libre",
       "backspace_sequence": "Touche Retour arrière",
-      "backspace_sequence_hint": "Choisissez ce que Retour arrière envoie aux anciennes applications de terminal. La valeur par défaut est DEL (0x7F)",
+      "backspace_sequence_hint": "Valeur par défaut de l’application pour Retour arrière. Les hôtes enregistrés peuvent la remplacer.",
       "delete_sequence": "Touche Suppr",
-      "delete_sequence_hint": "Choisissez ce que Suppr envoie aux anciennes applications de terminal. La valeur par défaut est CSI 3~",
+      "delete_sequence_hint": "Valeur par défaut de l’application pour Suppr. Les hôtes enregistrés peuvent la remplacer.",
       "free_type_mode_hint": "Modifiez la commande shell active avec la souris : cliquez pour déplacer le curseur, double-cliquez entre des parenthèses appariées pour sélectionner leur contenu, faites glisser le texte sélectionné pour le déplacer, maintenez Ctrl pour le copier ou Alt pour remplacer la commande. Vim, Neovim et Emacs en plein écran nécessitent le chargement explicite de l’adaptateur OxideTerm ; les autres applications plein écran ou avec suivi de souris gardent le contrôle",
       "in_band_transfer": {
         "title": "Transfert de fichiers in-band",
@@ -417,7 +417,7 @@
         }
       },
       "encoding": "Terminal Encoding",
-      "encoding_hint": "Text encoding for terminal input/output. Keep UTF-8 unless the remote host uses a legacy locale.",
+      "encoding_hint": "Valeur par défaut pour les terminaux locaux et les hôtes sans remplacement. Chaque hôte enregistré peut choisir son encodage.",
       "autosuggest_local_history": "Barre de commande : historique shell local",
       "autosuggest_local_history_hint": "Utilise l’historique zsh/bash/fish local comme source du panneau d’historique de la barre de commande. N’active pas le ghost text dans le terminal.",
       "command_bar": "Barre de commande",

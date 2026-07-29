@@ -265,9 +265,9 @@
       "selection_requires_shift_hint": "Khi bật, thao tác kéo thông thường vẫn giữ nguyên tương tác với terminal và chỉ Shift + kéo mới bắt đầu chọn văn bản",
       "free_type_mode": "Chế độ nhập tự do",
       "backspace_sequence": "Phím Backspace",
-      "backspace_sequence_hint": "Chọn chuỗi mà Backspace gửi đến các ứng dụng terminal cũ. Mặc định là DEL (0x7F)",
+      "backspace_sequence_hint": "Mặc định ứng dụng cho chuỗi Backspace. Máy chủ đã lưu có thể ghi đè.",
       "delete_sequence": "Phím Delete",
-      "delete_sequence_hint": "Chọn chuỗi mà Delete gửi đến các ứng dụng terminal cũ. Mặc định là CSI 3~",
+      "delete_sequence_hint": "Mặc định ứng dụng cho chuỗi Delete. Máy chủ đã lưu có thể ghi đè.",
       "free_type_mode_hint": "Chỉnh sửa lệnh shell đang hoạt động bằng chuột: nhấp để di chuyển con trỏ, nhấp đúp bên trong cặp ngoặc khớp để chọn nội dung, kéo văn bản lệnh đã chọn để di chuyển, giữ Ctrl khi kéo để sao chép hoặc giữ Alt để thay thế lệnh. Vim, Neovim và Emacs toàn màn hình cần nạp rõ ràng bộ điều hợp OxideTerm; các ứng dụng toàn màn hình hoặc theo dõi chuột khác vẫn tự xử lý đầu vào",
       "in_band_transfer": {
         "title": "Truyền tệp trong băng",
@@ -417,7 +417,7 @@
         }
       },
       "encoding": "Terminal Encoding",
-      "encoding_hint": "Text encoding for terminal input/output. Keep UTF-8 unless the remote host uses a legacy locale.",
+      "encoding_hint": "Mặc định cho terminal cục bộ và máy chủ không có ghi đè. Mỗi máy chủ đã lưu có thể chọn mã hóa riêng.",
       "autosuggest_local_history": "Thanh lệnh: lịch sử Shell cục bộ",
       "autosuggest_local_history_hint": "Dùng lịch sử zsh/bash/fish cục bộ làm nguồn cho bảng lịch sử của thanh lệnh. Không bật ghost text trong terminal.",
       "command_bar": "Command Bar",

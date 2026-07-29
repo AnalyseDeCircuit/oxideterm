@@ -1,11 +1,18 @@
 // Copyright (C) 2026 AnalyseDeCircuit
 // SPDX-License-Identifier: GPL-3.0-only
 
-use std::{collections::VecDeque, ops::Range, time::Duration};
+use std::{
+    cell::RefCell,
+    collections::{HashMap, VecDeque},
+    ops::Range,
+    rc::Rc,
+    time::Duration,
+};
 
 use gpui::{Context, EventEmitter, Task, Timer};
 use oxideterm_connections::{SaveConnectionRequest, SecretString};
 use oxideterm_editor_core::utf16::replace_utf16;
+use oxideterm_gpui_ui::select::{OverlayAnchor, SelectAnchorId};
 use oxideterm_ssh::{
     HostKeyStatus, KeyboardInteractivePromptRequest, KeyboardInteractiveResponses,
     NativeSessionTreeConnectAction, NativeSessionTreeConnectPlan, SshPromptError,
@@ -44,9 +51,34 @@ pub(in crate::workspace) struct HostKeyDialogSnapshot {
     pub(in crate::workspace) status: HostKeyStatus,
 }
 
+/// Shares layout-only select anchors without routing every prepaint through WorkspaceApp.
+#[derive(Clone, Default)]
+pub(in crate::workspace) struct ConnectionSelectAnchorStore {
+    anchors: Rc<RefCell<HashMap<SelectAnchorId, OverlayAnchor>>>,
+}
+
+impl ConnectionSelectAnchorStore {
+    pub(in crate::workspace) fn get(&self, id: SelectAnchorId) -> Option<OverlayAnchor> {
+        self.anchors.borrow().get(&id).copied()
+    }
+
+    pub(in crate::workspace) fn update(&self, anchor: OverlayAnchor) -> bool {
+        if self.get(anchor.id) == Some(anchor) {
+            return false;
+        }
+        self.anchors.borrow_mut().insert(anchor.id, anchor);
+        true
+    }
+
+    pub(in crate::workspace) fn clear(&self) {
+        self.anchors.borrow_mut().clear();
+    }
+}
+
 /// Owns connection-flow state that must survive independently of root rendering.
 pub(in crate::workspace) struct ConnectionFlowEntity {
     pub(in crate::workspace) form: ConnectionFormState,
+    select_anchors: ConnectionSelectAnchorStore,
     ssh_worker_tx: delivery::ActiveDeliverySender<SshConnectionWorkerResult>,
     ssh_worker_rx: std::sync::mpsc::Receiver<SshConnectionWorkerResult>,
     ssh_worker_results: VecDeque<SshConnectionWorkerResult>,
@@ -122,6 +154,7 @@ impl ConnectionFlowEntity {
 
         Self {
             form: ConnectionFormState::new(),
+            select_anchors: ConnectionSelectAnchorStore::default(),
             ssh_worker_tx,
             ssh_worker_rx,
             ssh_worker_results: VecDeque::new(),
@@ -146,6 +179,10 @@ impl ConnectionFlowEntity {
     ) -> delivery::ActiveDeliverySender<SshConnectionWorkerResult> {
         // Worker tasks receive only a shallow delivery endpoint.
         self.ssh_worker_tx.clone()
+    }
+
+    pub(in crate::workspace) fn select_anchor_store(&self) -> ConnectionSelectAnchorStore {
+        self.select_anchors.clone()
     }
 
     pub(in crate::workspace) fn take_worker_results(
@@ -913,7 +950,12 @@ mod tests {
     };
     use tokio::sync::oneshot;
 
-    use super::{ConnectionFlowEntity, ConnectionFlowEvent, NativeProxyConnectRun};
+    use oxideterm_gpui_ui::select::{OverlayAnchor, SelectAnchorId};
+
+    use super::{
+        ConnectionFlowEntity, ConnectionFlowEvent, ConnectionSelectAnchorStore,
+        NativeProxyConnectRun,
+    };
     use crate::workspace::new_connection::{
         HostKeyChallenge, NewConnectionField, NewConnectionForm, NewConnectionProxyHop,
         SavedConnectionPromptAction, SshConnectionIntent, SshConnectionWorkerResult,
@@ -933,6 +975,22 @@ mod tests {
             host: "example.test".to_string(),
             port: 22,
         }
+    }
+
+    #[test]
+    fn connection_select_anchor_store_skips_unchanged_layout_and_clears_as_one_owner() {
+        let store = ConnectionSelectAnchorStore::default();
+        let anchor = OverlayAnchor {
+            id: SelectAnchorId::NewConnectionGroup,
+            bounds: Default::default(),
+        };
+
+        assert!(store.update(anchor));
+        assert!(!store.update(anchor));
+        assert_eq!(store.get(anchor.id), Some(anchor));
+
+        store.clear();
+        assert_eq!(store.get(anchor.id), None);
     }
 
     fn keyboard_interactive_request(flow_id: &str) -> KeyboardInteractivePromptRequest {
@@ -965,7 +1023,7 @@ mod tests {
                 current_index: 0,
             },
             title: "Target".to_string(),
-            intent: SshConnectionIntent::Connect,
+            intent: SshConnectionIntent::Connect(Default::default()),
             save_after_open: None,
             upstream_proxy: None,
         }

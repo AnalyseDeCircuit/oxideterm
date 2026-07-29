@@ -18,7 +18,9 @@ pub use proxy::{
 };
 pub use runtime_settings::{
     reconnect_max_attempts_from_settings, reconnect_timing_from_settings,
-    sftp_runtime_settings_from_settings, terminal_encoding_from_settings,
+    sftp_runtime_settings_from_settings, terminal_backspace_sequence_from_connection,
+    terminal_delete_sequence_from_connection, terminal_encoding_from_connection,
+    terminal_encoding_from_settings,
 };
 pub use ssh::{
     proxy_chain_config_from_saved_connection, ssh_config_for_saved_connection_hop,

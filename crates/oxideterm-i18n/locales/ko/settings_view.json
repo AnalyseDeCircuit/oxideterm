@@ -265,9 +265,9 @@
       "selection_requires_shift_hint": "활성화하면 일반 드래그는 터미널 상호작용을 유지하고, Shift + 드래그로만 텍스트 선택이 시작됩니다",
       "free_type_mode": "자유 입력 모드",
       "backspace_sequence": "Backspace 키",
-      "backspace_sequence_hint": "기존 터미널 앱에 Backspace 키가 보낼 시퀀스를 선택합니다. 기본값은 DEL (0x7F)입니다",
+      "backspace_sequence_hint": "Backspace 시퀀스의 앱 기본값입니다. 저장된 호스트별로 재정의할 수 있습니다.",
       "delete_sequence": "Delete 키",
-      "delete_sequence_hint": "기존 터미널 앱에 Delete 키가 보낼 시퀀스를 선택합니다. 기본값은 CSI 3~입니다",
+      "delete_sequence_hint": "Delete 시퀀스의 앱 기본값입니다. 저장된 호스트별로 재정의할 수 있습니다.",
       "free_type_mode_hint": "활성 셸 명령을 마우스로 편집합니다. 클릭하여 커서를 이동하고, 짝이 맞는 괄호 안을 두 번 클릭하여 내용을 선택할 수 있습니다. 선택한 명령 텍스트는 끌어서 이동하고, Ctrl을 누른 채 끌어서 복사하거나 Alt를 누른 채 끌어서 현재 명령을 바꿀 수 있습니다. 전체 화면 Vim, Neovim, Emacs는 OxideTerm 어댑터를 명시적으로 불러와야 하며, 다른 전체 화면 및 마우스 추적 앱은 계속 입력을 직접 처리합니다",
       "in_band_transfer": {
         "title": "인밴드 파일 전송",
@@ -417,7 +417,7 @@
         }
       },
       "encoding": "Terminal Encoding",
-      "encoding_hint": "Text encoding for terminal input/output. Keep UTF-8 unless the remote host uses a legacy locale.",
+      "encoding_hint": "로컬 터미널과 별도 설정이 없는 호스트의 앱 기본값입니다. 저장된 호스트마다 인코딩을 선택할 수 있습니다.",
       "autosuggest_local_history": "Command Bar: 로컬 Shell 기록",
       "autosuggest_local_history_hint": "로컬 zsh/bash/fish 기록을 Command Bar 기록 패널의 소스로 사용합니다. 터미널 내부 ghost text를 켜지는 않습니다.",
       "command_bar": "Command Bar",

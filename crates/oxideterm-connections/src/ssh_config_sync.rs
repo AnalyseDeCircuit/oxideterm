@@ -214,7 +214,7 @@ fn auth_source_matches(existing: &SavedAuth, resolved: &SavedAuth) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{SaveConnectionRequest, SavedUpstreamProxyPolicy};
+    use crate::{ConnectionTerminalOptions, SaveConnectionRequest, SavedUpstreamProxyPolicy};
     use uuid::Uuid;
 
     fn temp_path(name: &str) -> PathBuf {
@@ -319,6 +319,7 @@ mod tests {
                 agent_forwarding_socket: None,
                 legacy_ssh_compatibility: false,
                 post_connect_command: None,
+                terminal: ConnectionTerminalOptions::default(),
             })
             .unwrap();
 

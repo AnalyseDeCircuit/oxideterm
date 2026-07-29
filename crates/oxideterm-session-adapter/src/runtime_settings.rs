@@ -5,7 +5,14 @@
 
 use std::time::Duration;
 
-use oxideterm_settings::{PersistedSettings, TerminalEncoding as SettingsTerminalEncoding};
+use oxideterm_connections::{
+    ConnectionTerminalBackspaceSequence, ConnectionTerminalDeleteSequence,
+    ConnectionTerminalEncoding,
+};
+use oxideterm_settings::{
+    PersistedSettings, TerminalBackspaceSequence, TerminalDeleteSequence,
+    TerminalEncoding as SettingsTerminalEncoding,
+};
 use oxideterm_sftp::SftpTransferRuntimeSettings;
 use oxideterm_ssh::ReconnectTiming;
 use oxideterm_terminal::TerminalEncoding;
@@ -46,5 +53,37 @@ pub fn terminal_encoding_from_settings(encoding: SettingsTerminalEncoding) -> Te
         SettingsTerminalEncoding::EucJp => TerminalEncoding::EucJp,
         SettingsTerminalEncoding::EucKr => TerminalEncoding::EucKr,
         SettingsTerminalEncoding::Windows1252 => TerminalEncoding::Windows1252,
+    }
+}
+
+pub fn terminal_encoding_from_connection(encoding: ConnectionTerminalEncoding) -> TerminalEncoding {
+    match encoding {
+        ConnectionTerminalEncoding::Utf8 => TerminalEncoding::Utf8,
+        ConnectionTerminalEncoding::Gbk => TerminalEncoding::Gbk,
+        ConnectionTerminalEncoding::Gb18030 => TerminalEncoding::Gb18030,
+        ConnectionTerminalEncoding::Big5 => TerminalEncoding::Big5,
+        ConnectionTerminalEncoding::ShiftJis => TerminalEncoding::ShiftJis,
+        ConnectionTerminalEncoding::EucJp => TerminalEncoding::EucJp,
+        ConnectionTerminalEncoding::EucKr => TerminalEncoding::EucKr,
+        ConnectionTerminalEncoding::Windows1252 => TerminalEncoding::Windows1252,
+    }
+}
+
+pub fn terminal_backspace_sequence_from_connection(
+    sequence: ConnectionTerminalBackspaceSequence,
+) -> TerminalBackspaceSequence {
+    match sequence {
+        ConnectionTerminalBackspaceSequence::Delete => TerminalBackspaceSequence::Delete,
+        ConnectionTerminalBackspaceSequence::ControlH => TerminalBackspaceSequence::ControlH,
+    }
+}
+
+pub fn terminal_delete_sequence_from_connection(
+    sequence: ConnectionTerminalDeleteSequence,
+) -> TerminalDeleteSequence {
+    match sequence {
+        ConnectionTerminalDeleteSequence::Csi3Tilde => TerminalDeleteSequence::Csi3Tilde,
+        ConnectionTerminalDeleteSequence::Delete => TerminalDeleteSequence::Delete,
+        ConnectionTerminalDeleteSequence::ControlH => TerminalDeleteSequence::ControlH,
     }
 }

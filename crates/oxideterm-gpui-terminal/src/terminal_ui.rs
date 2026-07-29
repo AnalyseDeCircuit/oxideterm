@@ -100,6 +100,30 @@ pub struct TerminalUiPreferences {
     pub trzsz_policy: Option<TrzszTransferPolicy>,
 }
 
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct TerminalUiPreferenceOverrides {
+    pub terminal_encoding: Option<TerminalEncoding>,
+    pub backspace_sequence: Option<TerminalBackspaceSequence>,
+    pub delete_sequence: Option<TerminalDeleteSequence>,
+}
+
+impl TerminalUiPreferenceOverrides {
+    pub fn apply_to(self, preferences: &mut TerminalUiPreferences) {
+        // These protocol-facing values belong to the terminal session. Apply
+        // them after application defaults so later settings refreshes cannot
+        // erase a saved host's explicit behavior.
+        if let Some(terminal_encoding) = self.terminal_encoding {
+            preferences.terminal_encoding = terminal_encoding;
+        }
+        if let Some(backspace_sequence) = self.backspace_sequence {
+            preferences.backspace_sequence = backspace_sequence;
+        }
+        if let Some(delete_sequence) = self.delete_sequence {
+            preferences.delete_sequence = delete_sequence;
+        }
+    }
+}
+
 impl Default for TerminalUiPreferences {
     fn default() -> Self {
         Self {
@@ -780,5 +804,45 @@ pub(crate) fn terminal_font_features(font_ligatures: bool) -> FontFeatures {
         FontFeatures::default()
     } else {
         FontFeatures::disable_ligatures()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn host_overrides_replace_only_terminal_protocol_defaults() {
+        let mut preferences = TerminalUiPreferences::default();
+        let original_font_family = preferences.font_family.clone();
+
+        TerminalUiPreferenceOverrides {
+            terminal_encoding: Some(TerminalEncoding::Gb18030),
+            backspace_sequence: Some(TerminalBackspaceSequence::ControlH),
+            delete_sequence: Some(TerminalDeleteSequence::Delete),
+        }
+        .apply_to(&mut preferences);
+
+        assert_eq!(preferences.terminal_encoding, TerminalEncoding::Gb18030);
+        assert_eq!(
+            preferences.backspace_sequence,
+            TerminalBackspaceSequence::ControlH
+        );
+        assert_eq!(preferences.delete_sequence, TerminalDeleteSequence::Delete);
+        assert_eq!(preferences.font_family, original_font_family);
+    }
+
+    #[test]
+    fn empty_host_overrides_preserve_application_defaults() {
+        let mut preferences = TerminalUiPreferences::default();
+        let original_encoding = preferences.terminal_encoding;
+        let original_backspace = preferences.backspace_sequence;
+        let original_delete = preferences.delete_sequence;
+
+        TerminalUiPreferenceOverrides::default().apply_to(&mut preferences);
+
+        assert_eq!(preferences.terminal_encoding, original_encoding);
+        assert_eq!(preferences.backspace_sequence, original_backspace);
+        assert_eq!(preferences.delete_sequence, original_delete);
     }
 }

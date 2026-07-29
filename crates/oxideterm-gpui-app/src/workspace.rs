@@ -148,8 +148,8 @@ use oxideterm_connection_monitor::{
     visible_tmux_session_rows,
 };
 use oxideterm_connections::{
-    ConnectionStore, PrivilegeCredentialKind, SaveConnectionRequest, SavedPrivilegeCredential,
-    SshConfigSyncService,
+    ConnectionStore, ConnectionTerminalOptions, PrivilegeCredentialKind, SaveConnectionRequest,
+    SavedPrivilegeCredential, SshConfigSyncService,
 };
 use oxideterm_forwarding::{
     ForwardEventDeliverySender, ForwardStatus, ForwardingRegistry, SavedForwardStore,
@@ -166,8 +166,9 @@ use oxideterm_gpui_terminal::{
     TerminalInputInterceptor, TerminalInputInterceptorResult, TerminalModemLabels, TerminalNotice,
     TerminalNoticeVariant, TerminalOutputProcessor, TerminalPane, TerminalPaneEvent,
     TerminalPasteLabels, TerminalRecordingState, TerminalRecordingStatus, TerminalSearchStatus,
-    TerminalSerialControlLabels, TerminalTrzszLabels, TerminalUiPreferences, TerminalUiTheme,
-    TerminalWorkingDirectorySource, detect_custom_privilege_prompt, detect_privilege_prompt,
+    TerminalSerialControlLabels, TerminalTrzszLabels, TerminalUiPreferenceOverrides,
+    TerminalUiPreferences, TerminalUiTheme, TerminalWorkingDirectorySource,
+    detect_custom_privilege_prompt, detect_privilege_prompt,
 };
 use oxideterm_gpui_ui::scroll::ScrollableElement;
 use oxideterm_gpui_ui::{
@@ -199,7 +200,8 @@ use oxideterm_render_policy::{
 };
 use oxideterm_session_adapter::{
     reconnect_max_attempts_from_settings, reconnect_timing_from_settings,
-    sftp_runtime_settings_from_settings,
+    sftp_runtime_settings_from_settings, terminal_backspace_sequence_from_connection,
+    terminal_delete_sequence_from_connection, terminal_encoding_from_connection,
     terminal_encoding_from_settings as session_terminal_encoding,
 };
 use oxideterm_settings::{
@@ -261,8 +263,7 @@ use self::ime::{
 use self::launcher::{LauncherWorkspaceEntity, LauncherWorkspaceEvent};
 use self::new_connection::{
     ConnectionFlowEntity, ConnectionFlowEvent, NativeSshPromptHandler, NewConnectionField,
-    NewConnectionForm, NewConnectionSelect, SavedConnectionPromptAction, SshAuthTab,
-    SshConnectionIntent,
+    NewConnectionForm, SavedConnectionPromptAction, SshAuthTab, SshConnectionIntent,
 };
 use self::onboarding::OnboardingState;
 use self::overlay::{

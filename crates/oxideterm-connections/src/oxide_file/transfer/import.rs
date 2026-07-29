@@ -935,6 +935,10 @@ fn merge_options(
     existing.post_connect_command = imported
         .post_connect_command
         .or(existing.post_connect_command);
+    if !imported.terminal.inherits_application_defaults() {
+        // Explicit imported host overrides replace the destination defaults as one unit.
+        existing.terminal = imported.terminal;
+    }
     if imported_has_proxy_chain {
         existing.jump_host = None;
     }

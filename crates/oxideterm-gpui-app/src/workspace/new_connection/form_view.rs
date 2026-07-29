@@ -35,7 +35,13 @@ use crate::workspace::{
     session_icons::{SESSION_ICON_CHOICES, session_icon_from_id},
 };
 use gpui::Div;
-use oxideterm_connections::SavedUpstreamProxyProtocol;
+use oxideterm_connections::{
+    ConnectionTerminalBackspaceSequence, ConnectionTerminalDeleteSequence,
+    ConnectionTerminalEncoding, SavedUpstreamProxyProtocol,
+};
+use oxideterm_gpui_settings_view::{
+    terminal_backspace_sequence_label, terminal_delete_sequence_label, terminal_encoding_label,
+};
 use oxideterm_gpui_ui::{
     ButtonTone, CheckboxOptions, TextInputView, button,
     button::{
@@ -43,7 +49,7 @@ use oxideterm_gpui_ui::{
         ToolbarButtonOptions,
     },
     checkbox, checkbox_with, form_field,
-    modal::{dismissible_dialog_backdrop, popover_backdrop},
+    modal::{dialog_backdrop_color, dismissible_dialog_backdrop, modal_backdrop, popover_backdrop},
     modal_body, modal_container, modal_footer, modal_header, segmented_tab, segmented_tabs,
     select::{
         SelectAnchorId, select_anchor_probe, select_option, select_option_action,
@@ -81,8 +87,43 @@ const TAURI_PROXY_CHAIN_LINE_WIDTH: f32 = 32.0; // Tauri w-8
 const TAURI_PROXY_CHAIN_CONNECTOR_THICKNESS: f32 = 2.0; // Tauri w-0.5 h-0.5
 const TAURI_PROXY_CHAIN_CARD_PADDING: f32 = 12.0; // Tauri p-3
 const TAURI_SERIAL_GRID_GAP: f32 = 16.0; // Tauri serial grid gap-4
-const TAURI_SERIAL_PANEL_BG_ALPHA: u32 = 0x66; // Tauri serial bg-theme-bg/40
+const TAURI_CONNECTION_PANEL_BG_ALPHA: u32 = 0x66; // Tauri connection panel bg-theme-bg/40
 const NEW_CONNECTION_TYPE_SIDEBAR_WIDTH: f32 = 160.0;
+const CONNECTION_TERMINAL_CONTROL_MIN_WIDTH: f32 = 220.0;
+const CONNECTION_ICON_COLOR_CONTROL_MIN_WIDTH: f32 = 220.0;
+
+// Persistence enums stay independent from the settings crate while sharing user-facing labels.
+fn connection_terminal_encoding_label(encoding: ConnectionTerminalEncoding) -> &'static str {
+    match encoding {
+        ConnectionTerminalEncoding::Utf8 => "UTF-8",
+        ConnectionTerminalEncoding::Gbk => "GBK",
+        ConnectionTerminalEncoding::Gb18030 => "GB18030",
+        ConnectionTerminalEncoding::Big5 => "Big5",
+        ConnectionTerminalEncoding::ShiftJis => "Shift_JIS",
+        ConnectionTerminalEncoding::EucJp => "EUC-JP",
+        ConnectionTerminalEncoding::EucKr => "EUC-KR",
+        ConnectionTerminalEncoding::Windows1252 => "Windows-1252",
+    }
+}
+
+fn connection_terminal_backspace_sequence_label(
+    sequence: ConnectionTerminalBackspaceSequence,
+) -> &'static str {
+    match sequence {
+        ConnectionTerminalBackspaceSequence::Delete => "DEL (0x7F)",
+        ConnectionTerminalBackspaceSequence::ControlH => "Ctrl+H (0x08)",
+    }
+}
+
+fn connection_terminal_delete_sequence_label(
+    sequence: ConnectionTerminalDeleteSequence,
+) -> &'static str {
+    match sequence {
+        ConnectionTerminalDeleteSequence::Csi3Tilde => "CSI 3~",
+        ConnectionTerminalDeleteSequence::Delete => "DEL (0x7F)",
+        ConnectionTerminalDeleteSequence::ControlH => "Ctrl+H (0x08)",
+    }
+}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum ConnectionButtonAction {

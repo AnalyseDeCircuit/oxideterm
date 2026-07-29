@@ -227,7 +227,10 @@ impl WorkspaceApp {
         let primary_disabled = form.pending || !has_required_fields;
         let form_visible = self.connection_form_state(cx).presence.phase()
             == oxideterm_gpui_ui::motion::ExitPhase::Visible;
-        dismissible_dialog_backdrop()
+        // This is a long, continuously scrolling surface. A full-window
+        // backdrop filter would run GPU blur and composite passes for every
+        // scroll frame, so retain the dialog tint without the live blur.
+        modal_backdrop(dialog_backdrop_color())
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(|this, _event, window, cx| {
@@ -293,7 +296,7 @@ impl WorkspaceApp {
                                                 // ownership and the stale group-select bounds here.
                                                 if this.connection_form_state(cx).open_select.is_some() {
                                                     this.close_new_connection_select(cx);
-                                                    this.clear_new_connection_select_anchor();
+                                                    this.clear_new_connection_select_anchor(cx);
                                                     cx.notify();
                                                 }
                                             },
@@ -705,6 +708,9 @@ impl WorkspaceApp {
                                         cx,
                                     ))
                                 })
+                                .when(!prompt_mode && !drill_down_mode, |content| {
+                                    content.child(self.render_connection_terminal_options(cx))
+                                })
                                 .when(edit_properties_mode, |content| {
                                     content
                                         .child(self.render_connection_field(
@@ -893,21 +899,46 @@ impl WorkspaceApp {
                                             form.icon_picker_expanded,
                                             cx,
                                         ))
-                                        .child(self.render_edit_color_field(
-                                            self.i18n
-                                                .t("sessionManager.edit_properties.icon_color"),
-                                            &form.color,
-                                            NewConnectionField::Color,
-                                            cx,
-                                        ))
-                                        .child(self.render_edit_color_field(
-                                            self.i18n.t(
-                                                "sessionManager.edit_properties.icon_background_color",
-                                            ),
-                                            &form.icon_background_color,
-                                            NewConnectionField::IconBackgroundColor,
-                                            cx,
-                                        ))
+                                        .child(
+                                            // The two asset colors form one responsive pair:
+                                            // share a row when the modal has room and wrap together
+                                            // without compressing either input below a usable width.
+                                            div()
+                                                .flex()
+                                                .flex_row()
+                                                .flex_wrap()
+                                                .gap(px(self.tokens.spacing.three))
+                                                .child(
+                                                    div()
+                                                        .flex_1()
+                                                        .min_w(px(
+                                                            CONNECTION_ICON_COLOR_CONTROL_MIN_WIDTH,
+                                                        ))
+                                                        .child(self.render_edit_color_field(
+                                                            self.i18n.t(
+                                                                "sessionManager.edit_properties.icon_color",
+                                                            ),
+                                                            &form.color,
+                                                            NewConnectionField::Color,
+                                                            cx,
+                                                        )),
+                                                )
+                                                .child(
+                                                    div()
+                                                        .flex_1()
+                                                        .min_w(px(
+                                                            CONNECTION_ICON_COLOR_CONTROL_MIN_WIDTH,
+                                                        ))
+                                                        .child(self.render_edit_color_field(
+                                                            self.i18n.t(
+                                                                "sessionManager.edit_properties.icon_background_color",
+                                                            ),
+                                                            &form.icon_background_color,
+                                                            NewConnectionField::IconBackgroundColor,
+                                                            cx,
+                                                        )),
+                                                ),
+                                        )
                                     })
                                 ),
                         )

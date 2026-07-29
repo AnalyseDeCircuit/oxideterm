@@ -210,6 +210,7 @@ impl ConnectionStore {
         options.identity_agent = request.identity_agent;
         options.agent_forwarding_socket = request.agent_forwarding_socket;
         options.legacy_ssh_compatibility = request.legacy_ssh_compatibility;
+        options.terminal = request.terminal;
         let (auth, auth_secret) =
             self.materialize_auth_with_runtime_secret(request.auth, existing_auth.as_ref())?;
         let (proxy_chain, proxy_chain_secrets) =
@@ -573,6 +574,7 @@ impl ConnectionStore {
         profile.icon_background_color = normalize_optional_text(request.icon_background_color);
         profile.host = request.host.trim().to_string();
         profile.port = request.port;
+        profile.terminal = request.terminal;
         profile.connect_on_open = request.connect_on_open.unwrap_or(false);
         if !self
             .data

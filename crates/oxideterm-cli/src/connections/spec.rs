@@ -197,6 +197,9 @@ pub(super) fn connection_request_from_spec(
         post_connect_command: spec.post_connect_command.unwrap_or_else(|| {
             existing.and_then(|connection| connection.post_connect_command().map(ToOwned::to_owned))
         }),
+        terminal: existing
+            .map(|connection| connection.options.terminal)
+            .unwrap_or_default(),
     })
 }
 

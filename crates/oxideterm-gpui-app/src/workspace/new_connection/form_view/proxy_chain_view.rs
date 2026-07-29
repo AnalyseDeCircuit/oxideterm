@@ -49,7 +49,11 @@ impl WorkspaceApp {
         // no render-only payload is retained for an exit transition.
         let select_id = self.connection_form_state(cx).open_select?;
         let anchor_id = Self::new_connection_select_anchor_id(select_id);
-        let anchor = self.select_anchors.get(&anchor_id).copied()?;
+        let anchor = self
+            .connection_flow
+            .read(cx)
+            .select_anchor_store()
+            .get(anchor_id)?;
         let width =
             f32::from(anchor.bounds.size.width).max(self.tokens.metrics.ui_select_min_width);
         let viewport_height = f32::from(window.viewport_size().height);
@@ -318,6 +322,148 @@ impl WorkspaceApp {
                     ));
                 }
             }
+            NewConnectionSelect::TerminalEncoding => {
+                let selected = self
+                    .connection_form_state(cx)
+                    .form
+                    .as_ref()
+                    .and_then(|form| form.terminal.encoding);
+                let default_label = self
+                    .i18n
+                    .t("ssh.form.terminal_use_application_default")
+                    .replace(
+                        "{{value}}",
+                        &terminal_encoding_label(
+                            self.settings_store.settings().terminal.terminal_encoding,
+                        ),
+                    );
+                popup = popup.child(select_option_action(
+                    select_option(&self.tokens, default_label, selected.is_none()),
+                    false,
+                    false,
+                    cx.listener(|this, _event, _window, cx| {
+                        this.close_new_connection_select(cx);
+                        this.set_new_connection_terminal_encoding(None, cx);
+                        cx.stop_propagation();
+                    }),
+                ));
+                for encoding in [
+                    ConnectionTerminalEncoding::Utf8,
+                    ConnectionTerminalEncoding::Gbk,
+                    ConnectionTerminalEncoding::Gb18030,
+                    ConnectionTerminalEncoding::Big5,
+                    ConnectionTerminalEncoding::ShiftJis,
+                    ConnectionTerminalEncoding::EucJp,
+                    ConnectionTerminalEncoding::EucKr,
+                    ConnectionTerminalEncoding::Windows1252,
+                ] {
+                    popup = popup.child(select_option_action(
+                        select_option(
+                            &self.tokens,
+                            connection_terminal_encoding_label(encoding).to_string(),
+                            selected == Some(encoding),
+                        ),
+                        false,
+                        false,
+                        cx.listener(move |this, _event, _window, cx| {
+                            this.close_new_connection_select(cx);
+                            this.set_new_connection_terminal_encoding(Some(encoding), cx);
+                            cx.stop_propagation();
+                        }),
+                    ));
+                }
+            }
+            NewConnectionSelect::TerminalBackspaceSequence => {
+                let selected = self
+                    .connection_form_state(cx)
+                    .form
+                    .as_ref()
+                    .and_then(|form| form.terminal.backspace_sequence);
+                let default_label = self
+                    .i18n
+                    .t("ssh.form.terminal_use_application_default")
+                    .replace(
+                        "{{value}}",
+                        terminal_backspace_sequence_label(
+                            self.settings_store.settings().terminal.backspace_sequence,
+                        ),
+                    );
+                popup = popup.child(select_option_action(
+                    select_option(&self.tokens, default_label, selected.is_none()),
+                    false,
+                    false,
+                    cx.listener(|this, _event, _window, cx| {
+                        this.close_new_connection_select(cx);
+                        this.set_new_connection_terminal_backspace_sequence(None, cx);
+                        cx.stop_propagation();
+                    }),
+                ));
+                for sequence in [
+                    ConnectionTerminalBackspaceSequence::Delete,
+                    ConnectionTerminalBackspaceSequence::ControlH,
+                ] {
+                    popup = popup.child(select_option_action(
+                        select_option(
+                            &self.tokens,
+                            connection_terminal_backspace_sequence_label(sequence).to_string(),
+                            selected == Some(sequence),
+                        ),
+                        false,
+                        false,
+                        cx.listener(move |this, _event, _window, cx| {
+                            this.close_new_connection_select(cx);
+                            this.set_new_connection_terminal_backspace_sequence(Some(sequence), cx);
+                            cx.stop_propagation();
+                        }),
+                    ));
+                }
+            }
+            NewConnectionSelect::TerminalDeleteSequence => {
+                let selected = self
+                    .connection_form_state(cx)
+                    .form
+                    .as_ref()
+                    .and_then(|form| form.terminal.delete_sequence);
+                let default_label = self
+                    .i18n
+                    .t("ssh.form.terminal_use_application_default")
+                    .replace(
+                        "{{value}}",
+                        terminal_delete_sequence_label(
+                            self.settings_store.settings().terminal.delete_sequence,
+                        ),
+                    );
+                popup = popup.child(select_option_action(
+                    select_option(&self.tokens, default_label, selected.is_none()),
+                    false,
+                    false,
+                    cx.listener(|this, _event, _window, cx| {
+                        this.close_new_connection_select(cx);
+                        this.set_new_connection_terminal_delete_sequence(None, cx);
+                        cx.stop_propagation();
+                    }),
+                ));
+                for sequence in [
+                    ConnectionTerminalDeleteSequence::Csi3Tilde,
+                    ConnectionTerminalDeleteSequence::Delete,
+                    ConnectionTerminalDeleteSequence::ControlH,
+                ] {
+                    popup = popup.child(select_option_action(
+                        select_option(
+                            &self.tokens,
+                            connection_terminal_delete_sequence_label(sequence).to_string(),
+                            selected == Some(sequence),
+                        ),
+                        false,
+                        false,
+                        cx.listener(move |this, _event, _window, cx| {
+                            this.close_new_connection_select(cx);
+                            this.set_new_connection_terminal_delete_sequence(Some(sequence), cx);
+                            cx.stop_propagation();
+                        }),
+                    ));
+                }
+            }
             NewConnectionSelect::SerialPort => {
                 let selected_port = self
                     .connection_form_state(cx)
@@ -540,7 +686,7 @@ impl WorkspaceApp {
                                 // scrolling the modal body closes popup content tied to a moved trigger.
                                 if this.connection_form_state(cx).open_select.is_some() {
                                     this.close_new_connection_select(cx);
-                                    this.clear_new_connection_select_anchor();
+                                    this.clear_new_connection_select_anchor(cx);
                                     cx.notify();
                                 }
                             }))

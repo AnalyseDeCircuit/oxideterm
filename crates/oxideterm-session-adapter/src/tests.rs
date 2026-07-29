@@ -3,8 +3,9 @@
 
 use chrono::Utc;
 use oxideterm_connections::{
-    ConnectionOptions, ConnectionStore, SavedAuth, SavedConnection, SavedProxyHop,
-    SavedUpstreamProxyAuth, SavedUpstreamProxyConfig, SavedUpstreamProxyPolicy,
+    ConnectionOptions, ConnectionStore, ConnectionTerminalBackspaceSequence,
+    ConnectionTerminalDeleteSequence, ConnectionTerminalEncoding, SavedAuth, SavedConnection,
+    SavedProxyHop, SavedUpstreamProxyAuth, SavedUpstreamProxyConfig, SavedUpstreamProxyPolicy,
     SavedUpstreamProxyProtocol, SecretString,
 };
 use oxideterm_settings::{
@@ -16,7 +17,9 @@ use oxideterm_ssh::{AuthMethod, ProxyCommandConfig, UpstreamProxyAuth};
 use crate::ssh::proxy_command_runtime_policy;
 use crate::{
     reconnect_max_attempts_from_settings, reconnect_timing_from_settings,
-    sftp_runtime_settings_from_settings, terminal_encoding_from_settings,
+    sftp_runtime_settings_from_settings, terminal_backspace_sequence_from_connection,
+    terminal_delete_sequence_from_connection, terminal_encoding_from_connection,
+    terminal_encoding_from_settings,
 };
 use crate::{
     ssh_config_for_saved_connection_hop, ssh_config_from_saved_connection,
@@ -80,6 +83,22 @@ fn runtime_settings_conversion_clamps_persisted_values() {
     assert_eq!(
         terminal_encoding_from_settings(oxideterm_settings::TerminalEncoding::Gb18030),
         oxideterm_terminal::TerminalEncoding::Gb18030
+    );
+}
+
+#[test]
+fn saved_connection_terminal_options_map_to_runtime_sequences() {
+    assert_eq!(
+        terminal_encoding_from_connection(ConnectionTerminalEncoding::Windows1252),
+        oxideterm_terminal::TerminalEncoding::Windows1252
+    );
+    assert_eq!(
+        terminal_backspace_sequence_from_connection(ConnectionTerminalBackspaceSequence::ControlH),
+        oxideterm_settings::TerminalBackspaceSequence::ControlH
+    );
+    assert_eq!(
+        terminal_delete_sequence_from_connection(ConnectionTerminalDeleteSequence::Delete),
+        oxideterm_settings::TerminalDeleteSequence::Delete
     );
 }
 

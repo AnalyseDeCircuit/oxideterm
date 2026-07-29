@@ -539,7 +539,7 @@ impl WorkspaceApp {
             host: profile.host.clone(),
             port: profile.port,
         };
-        match self.create_telnet_terminal_tab(config, window, cx) {
+        match self.create_telnet_terminal_tab(config, profile.terminal, window, cx) {
             Ok(_) => {
                 let _ = self.connection_store.mark_telnet_profile_used(id);
             }

@@ -265,9 +265,9 @@
       "selection_requires_shift_hint": "啟用後，普通拖曳會優先保留終端互動；只有 Shift + 拖曳才會開始文字選取",
       "free_type_mode": "自由輸入模式",
       "backspace_sequence": "退格鍵",
-      "backspace_sequence_hint": "選擇退格鍵傳送給傳統終端程式的序列。預設為 DEL (0x7F)",
+      "backspace_sequence_hint": "退格鍵傳送序列的應用程式預設值；已儲存的主機可個別覆寫。",
       "delete_sequence": "刪除鍵",
-      "delete_sequence_hint": "選擇刪除鍵傳送給傳統終端程式的序列。預設為 CSI 3~",
+      "delete_sequence_hint": "刪除鍵傳送序列的應用程式預設值；已儲存的主機可個別覆寫。",
       "free_type_mode_hint": "在目前 Shell 指令中使用滑鼠編輯：點擊移動游標、在成對括號內雙擊以選取其中內容、拖曳已選指令文字以移動、按住 Ctrl 拖曳以複製，或按住 Alt 拖曳以取代目前指令。全螢幕 Vim、Neovim 與 Emacs 必須明確載入 OxideTerm 轉接器；其他全螢幕與滑鼠追蹤程式仍自行處理輸入",
       "in_band_transfer": {
         "title": "帶內檔案傳輸",
@@ -417,7 +417,7 @@
         }
       },
       "encoding": "Terminal Encoding",
-      "encoding_hint": "Text encoding for terminal input/output. Keep UTF-8 unless the remote host uses a legacy locale.",
+      "encoding_hint": "本機終端與未個別覆寫主機所用的應用程式預設值；已儲存的主機可選擇自己的編碼。",
       "autosuggest_local_history": "命令列：本機 Shell 歷史",
       "autosuggest_local_history_hint": "將本機 zsh/bash/fish 歷史作為命令列歷史面板來源。不會啟用終端內 ghost text。",
       "command_bar": "底部命令列",

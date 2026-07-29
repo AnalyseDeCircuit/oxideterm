@@ -265,9 +265,9 @@
       "selection_requires_shift_hint": "有効にすると、通常のドラッグは端末操作を維持し、Shift + ドラッグでのみテキスト選択を開始します",
       "free_type_mode": "自由入力モード",
       "backspace_sequence": "Backspace キー",
-      "backspace_sequence_hint": "従来の端末アプリへ Backspace キーが送るシーケンスを選択します。既定値は DEL (0x7F) です",
+      "backspace_sequence_hint": "Backspace シーケンスのアプリ既定値です。保存済みホストごとに上書きできます。",
       "delete_sequence": "Delete キー",
-      "delete_sequence_hint": "従来の端末アプリへ Delete キーが送るシーケンスを選択します。既定値は CSI 3~ です",
+      "delete_sequence_hint": "Delete シーケンスのアプリ既定値です。保存済みホストごとに上書きできます。",
       "free_type_mode_hint": "アクティブなシェルコマンドをマウスで編集します。クリックでカーソルを移動し、対応する括弧内をダブルクリックして内容を選択できます。選択したコマンド文字列はドラッグで移動、Ctrl+ドラッグでコピー、Alt+ドラッグで現在のコマンドを置換します。全画面の Vim、Neovim、Emacs では OxideTerm アダプターの明示的な読み込みが必要で、その他の全画面・マウス追跡アプリは入力を引き続き制御します",
       "in_band_transfer": {
         "title": "インバンドファイル転送",
@@ -417,7 +417,7 @@
         }
       },
       "encoding": "Terminal Encoding",
-      "encoding_hint": "Text encoding for terminal input/output. Keep UTF-8 unless the remote host uses a legacy locale.",
+      "encoding_hint": "ローカル端末と上書きのないホスト向けのアプリ既定値です。保存済みホストごとに文字コードを選べます。",
       "autosuggest_local_history": "Command Bar: ローカル Shell 履歴",
       "autosuggest_local_history_hint": "ローカル zsh/bash/fish 履歴を Command Bar の履歴パネルの候補元として使います。端末内 ghost text は有効にしません。",
       "command_bar": "Command Bar",

@@ -5,9 +5,9 @@ use std::{
 
 use gpui::{App, Context, Window};
 use oxideterm_connections::{
-    SaveConnectionRequest, SaveRemoteDesktopProfileRequest, SaveSerialProfileRequest,
-    SaveTelnetProfileRequest, SavedConnectionRuntimeSecrets, SavedUpstreamProxyProtocol,
-    SecretString, first_available_default_key_path,
+    ConnectionTerminalOptions, SaveConnectionRequest, SaveRemoteDesktopProfileRequest,
+    SaveSerialProfileRequest, SaveTelnetProfileRequest, SavedConnectionRuntimeSecrets,
+    SavedUpstreamProxyProtocol, SecretString, first_available_default_key_path,
 };
 use oxideterm_remote_desktop::{
     RemoteDesktopConnectionProfile, RemoteDesktopEndpoint, RemoteDesktopProtocol,
@@ -63,9 +63,13 @@ struct SavedConnectionRuntimeHandoff {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(in crate::workspace) enum SshConnectionIntent {
     Test,
-    Connect,
+    Connect(ConnectionTerminalOptions),
     ConnectSaved(String),
-    DrillDown(NodeId),
+    DrillDown {
+        parent_id: NodeId,
+        saved_connection_id: Option<String>,
+        terminal_options: ConnectionTerminalOptions,
+    },
 }
 
 pub(in crate::workspace) enum SshConnectionWorkerResult {

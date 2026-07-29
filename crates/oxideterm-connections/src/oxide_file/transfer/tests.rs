@@ -4,9 +4,9 @@ mod tests {
     use std::fs;
 
     use crate::{
-        PrivilegeCredentialKind, SavePrivilegeCredentialRequest, SaveRemoteDesktopProfileRequest,
-        SaveSerialProfileRequest, SavedUpstreamProxyProtocol, SerialFlowControl, SerialProfile,
-        SerialProfilesSyncSnapshot,
+        ConnectionTerminalOptions, PrivilegeCredentialKind, SavePrivilegeCredentialRequest,
+        SaveRemoteDesktopProfileRequest, SaveSerialProfileRequest, SavedUpstreamProxyProtocol,
+        SerialFlowControl, SerialProfile, SerialProfilesSyncSnapshot,
     };
     use oxideterm_remote_desktop::RemoteDesktopProtocol;
     use rand10::{rand_core::UnwrapErr, rngs::SysRng};
@@ -68,6 +68,7 @@ mod tests {
                 agent_forwarding_socket: None,
                 legacy_ssh_compatibility: false,
                 post_connect_command: None,
+                terminal: ConnectionTerminalOptions::default(),
             },
             created_at: Utc::now(),
             last_used_at: None,

@@ -34,11 +34,45 @@ mod tests {
             agent_forwarding_socket: None,
             legacy_ssh_compatibility: false,
             post_connect_command: None,
+            terminal: ConnectionTerminalOptions::default(),
         }
     }
 
     fn load_empty_store(name: &str) -> ConnectionStore {
         ConnectionStore::load(temp_store_path(name)).expect("store should load")
+    }
+
+    #[test]
+    fn terminal_options_round_trip_without_changing_legacy_defaults() {
+        let default_options = serde_json::to_value(ConnectionOptions::default()).unwrap();
+        assert!(default_options.get("terminal").is_none());
+
+        let options = ConnectionOptions {
+            terminal: ConnectionTerminalOptions {
+                encoding: Some(ConnectionTerminalEncoding::Utf8),
+                backspace_sequence: Some(ConnectionTerminalBackspaceSequence::ControlH),
+                delete_sequence: Some(ConnectionTerminalDeleteSequence::Delete),
+            },
+            ..ConnectionOptions::default()
+        };
+        let serialized = serde_json::to_value(&options).unwrap();
+        assert_eq!(serialized["terminal"]["encoding"], "utf-8");
+        assert_eq!(serialized["terminal"]["backspaceSequence"], "controlH");
+        assert_eq!(serialized["terminal"]["deleteSequence"], "delete");
+        assert_eq!(
+            serde_json::to_value(ConnectionTerminalEncoding::EucJp).unwrap(),
+            "euc-jp"
+        );
+        assert_eq!(
+            serde_json::to_value(ConnectionTerminalEncoding::Windows1252).unwrap(),
+            "windows-1252"
+        );
+
+        let decoded: ConnectionOptions = serde_json::from_value(serialized).unwrap();
+        assert_eq!(decoded.terminal, options.terminal);
+
+        let legacy: ConnectionOptions = serde_json::from_value(serde_json::json!({})).unwrap();
+        assert!(legacy.terminal.inherits_application_defaults());
     }
 
     #[test]
@@ -1602,6 +1636,7 @@ mod tests {
             agent_forwarding_socket: None,
             legacy_ssh_compatibility: true,
             post_connect_command: Some("uname -a".to_string()),
+            terminal: ConnectionTerminalOptions::default(),
         };
         source.save().unwrap();
 
@@ -1771,6 +1806,11 @@ mod tests {
             icon_background_color: Some("#052e16".to_string()),
             host: "192.168.1.1".to_string(),
             port: 23,
+            terminal: ConnectionTerminalOptions {
+                encoding: Some(ConnectionTerminalEncoding::Big5),
+                backspace_sequence: None,
+                delete_sequence: Some(ConnectionTerminalDeleteSequence::ControlH),
+            },
             connect_on_open: true,
             created_at: now,
             updated_at: now,
@@ -1786,6 +1826,10 @@ mod tests {
         assert_eq!(value["telnet_profiles"][0]["id"], "telnet-1");
         assert_eq!(value["telnet_profiles"][0]["icon"], "network");
         assert_eq!(value["telnet_profiles"][0]["color"], "#86efac");
+        assert_eq!(
+            value["telnet_profiles"][0]["terminal"]["encoding"],
+            "big5"
+        );
         assert_eq!(
             value["telnet_profiles"][0]["icon_background_color"],
             "#052e16"

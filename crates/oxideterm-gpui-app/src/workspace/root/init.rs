@@ -804,6 +804,67 @@ impl WorkspaceApp {
         self.terminal_preferences_for_background_key(key, cx)
     }
 
+    pub(in crate::workspace) fn terminal_preference_overrides_for_saved_connection(
+        &self,
+        saved_connection_id: Option<&str>,
+    ) -> TerminalUiPreferenceOverrides {
+        let Some(options) = saved_connection_id
+            .and_then(|saved_connection_id| self.connection_store.get(saved_connection_id))
+            .map(|connection| connection.options.terminal)
+        else {
+            return TerminalUiPreferenceOverrides::default();
+        };
+        terminal_preference_overrides(options)
+    }
+
+    pub(in crate::workspace) fn terminal_preference_overrides_for_ssh_node(
+        &self,
+        node_id: &NodeId,
+    ) -> TerminalUiPreferenceOverrides {
+        let Some(node) = self.ssh_nodes.get(node_id) else {
+            return TerminalUiPreferenceOverrides::default();
+        };
+        if let Some(saved_connection_id) = node.saved_connection_id.as_deref() {
+            return self
+                .terminal_preference_overrides_for_saved_connection(Some(saved_connection_id));
+        }
+        terminal_preference_overrides(node.terminal_options)
+    }
+
+    pub(in crate::workspace) fn apply_saved_connection_terminal_preferences(
+        &mut self,
+        saved_connection_id: &str,
+        cx: &mut Context<Self>,
+    ) {
+        let preference_overrides =
+            self.terminal_preference_overrides_for_saved_connection(Some(saved_connection_id));
+        let session_ids = self
+            .ssh_nodes
+            .values()
+            .filter(|node| node.saved_connection_id.as_deref() == Some(saved_connection_id))
+            .flat_map(|node| node.terminal_ids.iter().copied())
+            .collect::<Vec<_>>();
+        let panes = session_ids
+            .into_iter()
+            .filter_map(|session_id| {
+                let location = self.tab_host.read(cx).terminal_location(session_id)?;
+                let pane = self
+                    .tab_host
+                    .read(cx)
+                    .panes()
+                    .get(&location.pane_id)
+                    .cloned()?;
+                Some((location.pane_id, pane))
+            })
+            .collect::<Vec<_>>();
+        for (pane_id, pane) in panes {
+            let application_preferences = self.terminal_preferences_for_pane(pane_id, cx);
+            pane.update(cx, |pane, cx| {
+                pane.set_preference_overrides(preference_overrides, application_preferences, cx);
+            });
+        }
+    }
+
     pub(in crate::workspace) fn terminal_preferences_for_background_key(
         &self,
         background_key: &str,
@@ -1117,6 +1178,20 @@ impl WorkspaceApp {
             blur: terminal.background_blur.clamp(0, 20) as f32,
             fit: terminal_background_fit(terminal.background_fit),
         })
+    }
+}
+
+pub(in crate::workspace) fn terminal_preference_overrides(
+    options: ConnectionTerminalOptions,
+) -> TerminalUiPreferenceOverrides {
+    TerminalUiPreferenceOverrides {
+        terminal_encoding: options.encoding.map(terminal_encoding_from_connection),
+        backspace_sequence: options
+            .backspace_sequence
+            .map(terminal_backspace_sequence_from_connection),
+        delete_sequence: options
+            .delete_sequence
+            .map(terminal_delete_sequence_from_connection),
     }
 }
 

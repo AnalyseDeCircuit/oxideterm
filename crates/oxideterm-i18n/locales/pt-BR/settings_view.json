@@ -265,9 +265,9 @@
       "selection_requires_shift_hint": "Quando habilitado, o arrasto normal mantém a interação do terminal intacta e apenas Shift + arrastar inicia uma seleção de texto",
       "free_type_mode": "Modo de entrada livre",
       "backspace_sequence": "Tecla Backspace",
-      "backspace_sequence_hint": "Escolha o que Backspace envia a aplicativos de terminal antigos. O padrão é DEL (0x7F)",
+      "backspace_sequence_hint": "Padrão do aplicativo para Backspace. Hosts salvos podem substituí-lo.",
       "delete_sequence": "Tecla Delete",
-      "delete_sequence_hint": "Escolha o que Delete envia a aplicativos de terminal antigos. O padrão é CSI 3~",
+      "delete_sequence_hint": "Padrão do aplicativo para Delete. Hosts salvos podem substituí-lo.",
       "free_type_mode_hint": "Edite o comando ativo do shell com o mouse: clique para mover o cursor, clique duas vezes dentro de parênteses correspondentes para selecionar o conteúdo, arraste o texto selecionado para movê-lo, arraste com Ctrl para copiá-lo ou com Alt para substituir o comando. Vim, Neovim e Emacs em tela cheia exigem o carregamento explícito do adaptador OxideTerm; outros aplicativos em tela cheia ou com rastreamento de mouse mantêm o controle",
       "in_band_transfer": {
         "title": "Transferência de arquivos in-band",
@@ -417,7 +417,7 @@
         }
       },
       "encoding": "Terminal Encoding",
-      "encoding_hint": "Text encoding for terminal input/output. Keep UTF-8 unless the remote host uses a legacy locale.",
+      "encoding_hint": "Padrão para terminais locais e hosts sem substituição. Cada host salvo pode escolher sua codificação.",
       "autosuggest_local_history": "Barra de comandos: histórico do shell local",
       "autosuggest_local_history_hint": "Usa o histórico local zsh/bash/fish como fonte do painel de histórico da barra de comandos. Não ativa ghost text dentro do terminal.",
       "command_bar": "Command Bar",
