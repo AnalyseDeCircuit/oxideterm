@@ -1179,5 +1179,23 @@
     "vnc_continue_anyway": "Trotzdem fortfahren",
     "certificate_save_failed": "Der Zertifikat-Vertrauenseintrag konnte nicht gespeichert werden",
     "clipboard_file_failed": "Zwischenablagedateien konnten nicht empfangen werden"
+  },
+  "portable_bootstrap": {
+    "title": "Portabler Modus",
+    "setup_description": "Lege ein Passwort für den lokalen portablen Keystore fest. OxideTerm verwendet es beim Start, um gespeicherte Geheimnisse und verschlüsselte Konfigurationen zu entsperren.",
+    "unlock_description": "Gib dein portables Passwort ein, um gespeicherte Geheimnisse zu entsperren und zur vollständigen App fortzufahren.",
+    "data_dir_label": "Portables Datenverzeichnis",
+    "keystore_path_label": "Portabler Keystore",
+    "keystore_pending": "Der Keystore wird nach der Einrichtung erstellt",
+    "password_label": "Portables Passwort",
+    "password_placeholder": "Passwort eingeben",
+    "confirm_password_label": "Portables Passwort bestätigen",
+    "confirm_password_placeholder": "Passwort erneut eingeben",
+    "password_too_short": "Das Passwort muss mindestens 6 Zeichen lang sein",
+    "password_mismatch": "Die Passwörter stimmen nicht überein",
+    "setup_submit": "Erstellen und fortfahren",
+    "setup_pending": "Portabler Keystore wird erstellt...",
+    "unlock_submit": "Entsperren und fortfahren",
+    "unlock_pending": "Portable Daten werden entsperrt..."
   }
 }

@@ -1179,5 +1179,23 @@
     "vnc_continue_anyway": "Continue anyway",
     "certificate_save_failed": "Could not save the certificate trust record",
     "clipboard_file_failed": "Could not receive clipboard files"
+  },
+  "portable_bootstrap": {
+    "title": "Portable Mode",
+    "setup_description": "Set a password for the local portable keystore. OxideTerm will use it to unlock saved secrets and encrypted configuration on startup.",
+    "unlock_description": "Enter your portable password to unlock saved secrets and continue to the full app.",
+    "data_dir_label": "Portable data directory",
+    "keystore_path_label": "Portable keystore",
+    "keystore_pending": "Keystore will be created after setup",
+    "password_label": "Portable password",
+    "password_placeholder": "Enter a password",
+    "confirm_password_label": "Confirm portable password",
+    "confirm_password_placeholder": "Re-enter the password",
+    "password_too_short": "Password must be at least 6 characters long",
+    "password_mismatch": "Passwords do not match",
+    "setup_submit": "Create & continue",
+    "setup_pending": "Creating portable keystore...",
+    "unlock_submit": "Unlock & continue",
+    "unlock_pending": "Unlocking portable data..."
   }
 }

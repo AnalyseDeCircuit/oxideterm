@@ -1179,5 +1179,23 @@
     "vnc_continue_anyway": "仍然继续",
     "certificate_save_failed": "无法保存证书信任记录",
     "clipboard_file_failed": "无法接收剪贴板文件"
+  },
+  "portable_bootstrap": {
+    "title": "便携模式",
+    "setup_description": "为本地便携密钥库设置一个密码。OxideTerm 会在启动时用它解锁已保存的机密和加密配置。",
+    "unlock_description": "输入您的便携模式密码，以解锁已保存的机密并继续进入完整应用。",
+    "data_dir_label": "便携数据目录",
+    "keystore_path_label": "便携密钥库",
+    "keystore_pending": "完成设置后将创建密钥库",
+    "password_label": "便携模式密码",
+    "password_placeholder": "输入密码",
+    "confirm_password_label": "确认便携模式密码",
+    "confirm_password_placeholder": "再次输入密码",
+    "password_too_short": "密码长度至少需为 6 个字符",
+    "password_mismatch": "两次输入的密码不一致",
+    "setup_submit": "创建并继续",
+    "setup_pending": "正在创建便携密钥库...",
+    "unlock_submit": "解锁并继续",
+    "unlock_pending": "正在解锁便携数据..."
   }
 }

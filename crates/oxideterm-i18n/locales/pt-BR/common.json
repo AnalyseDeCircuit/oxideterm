@@ -1179,5 +1179,23 @@
     "vnc_continue_anyway": "Continuar mesmo assim",
     "certificate_save_failed": "Não foi possível salvar o registro de confiança do certificado",
     "clipboard_file_failed": "Não foi possível receber os arquivos da área de transferência"
+  },
+  "portable_bootstrap": {
+    "title": "Modo portátil",
+    "setup_description": "Defina uma senha para o cofre portátil local. O OxideTerm a usará na inicialização para desbloquear segredos salvos e configurações criptografadas.",
+    "unlock_description": "Digite sua senha portátil para desbloquear os segredos salvos e continuar para o aplicativo completo.",
+    "data_dir_label": "Diretório de dados portátil",
+    "keystore_path_label": "Cofre portátil",
+    "keystore_pending": "O cofre será criado após a configuração",
+    "password_label": "Senha portátil",
+    "password_placeholder": "Digite uma senha",
+    "confirm_password_label": "Confirmar senha portátil",
+    "confirm_password_placeholder": "Digite a senha novamente",
+    "password_too_short": "A senha deve ter pelo menos 6 caracteres",
+    "password_mismatch": "As senhas não coincidem",
+    "setup_submit": "Criar e continuar",
+    "setup_pending": "Criando o cofre portátil...",
+    "unlock_submit": "Desbloquear e continuar",
+    "unlock_pending": "Desbloqueando os dados portáteis..."
   }
 }

@@ -25,7 +25,20 @@ impl NativePluginRegistry {
         if !config_path.exists() {
             let _ = save_native_plugin_config(&config_path, &config);
         }
-        let (plugins, diagnostics) = discover_native_plugins_in_dir(&plugins_dir, &config);
+        // Discovery owns the plugin root contract. Creating it here keeps
+        // portable profiles, custom data directories, and older packages
+        // consistent before users install or manually copy their first plugin.
+        let (plugins, diagnostics) = match fs::create_dir_all(&plugins_dir) {
+            Ok(()) => discover_native_plugins_in_dir(&plugins_dir, &config),
+            Err(error) => (
+                Vec::new(),
+                vec![NativePluginDiagnostic {
+                    plugin_dir: plugins_dir,
+                    plugin_id: None,
+                    message: format!("Cannot create plugin directory: {error}"),
+                }],
+            ),
+        };
         let contributions = NativePluginContributionStore::from_plugins(&plugins);
         Self {
             plugins,

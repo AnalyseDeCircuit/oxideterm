@@ -1179,5 +1179,23 @@
     "vnc_continue_anyway": "Continuer quand même",
     "certificate_save_failed": "Impossible d’enregistrer la relation de confiance du certificat",
     "clipboard_file_failed": "Impossible de recevoir les fichiers du presse-papiers"
+  },
+  "portable_bootstrap": {
+    "title": "Mode portable",
+    "setup_description": "Définissez un mot de passe pour le coffre portable local. OxideTerm l'utilisera au démarrage pour déverrouiller les secrets enregistrés et la configuration chiffrée.",
+    "unlock_description": "Saisissez votre mot de passe portable pour déverrouiller les secrets enregistrés et continuer vers l'application complète.",
+    "data_dir_label": "Répertoire de données portable",
+    "keystore_path_label": "Coffre portable",
+    "keystore_pending": "Le coffre sera créé après la configuration",
+    "password_label": "Mot de passe portable",
+    "password_placeholder": "Saisissez un mot de passe",
+    "confirm_password_label": "Confirmer le mot de passe portable",
+    "confirm_password_placeholder": "Saisissez à nouveau le mot de passe",
+    "password_too_short": "Le mot de passe doit contenir au moins 6 caractères",
+    "password_mismatch": "Les mots de passe ne correspondent pas",
+    "setup_submit": "Créer et continuer",
+    "setup_pending": "Création du coffre portable...",
+    "unlock_submit": "Déverrouiller et continuer",
+    "unlock_pending": "Déverrouillage des données portables..."
   }
 }

@@ -1179,5 +1179,23 @@
     "vnc_continue_anyway": "仍要繼續",
     "certificate_save_failed": "無法儲存憑證信任記錄",
     "clipboard_file_failed": "無法接收剪貼簿檔案"
+  },
+  "portable_bootstrap": {
+    "title": "可攜模式",
+    "setup_description": "為本機可攜金鑰庫設定一組密碼。OxideTerm 會在啟動時用它解鎖已儲存的機密與加密設定。",
+    "unlock_description": "輸入您的可攜模式密碼，以解鎖已儲存的機密並繼續進入完整應用。",
+    "data_dir_label": "可攜資料目錄",
+    "keystore_path_label": "可攜金鑰庫",
+    "keystore_pending": "完成設定後將建立金鑰庫",
+    "password_label": "可攜模式密碼",
+    "password_placeholder": "輸入密碼",
+    "confirm_password_label": "確認可攜模式密碼",
+    "confirm_password_placeholder": "再次輸入密碼",
+    "password_too_short": "密碼長度至少需 6 個字元",
+    "password_mismatch": "兩次輸入的密碼不一致",
+    "setup_submit": "建立並繼續",
+    "setup_pending": "正在建立可攜金鑰庫...",
+    "unlock_submit": "解鎖並繼續",
+    "unlock_pending": "正在解鎖可攜資料..."
   }
 }

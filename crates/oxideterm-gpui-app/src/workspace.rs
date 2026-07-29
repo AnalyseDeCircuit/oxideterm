@@ -269,6 +269,7 @@ use self::overlay::{
     WorkspaceOverlayEntity, WorkspaceOverlayIntent,
 };
 use self::pane_tree::SplitDrag;
+pub(crate) use self::root::helpers::tokens_from_settings as portable_bootstrap_tokens_from_settings;
 use self::root::state::{ReconnectWorkerResult, WorkspaceSshNode, WorkspaceSshNodeEndpoint};
 use self::root::{background::*, helpers::*};
 use self::session_manager::{SessionManagerState, SessionManagerWorkspaceEvent};

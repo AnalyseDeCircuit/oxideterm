@@ -26,6 +26,7 @@ REQUIRED_DOCUMENTS = {
 LINUX_DEB_GRAPHICS_RECOMMENDS = {"libegl1", "libvulkan1"}
 LINUX_RPM_GRAPHICS_RECOMMENDS = {"libglvnd-egl", "vulkan-loader"}
 PACKAGE_VERSION_FILENAME = "VERSION"
+PORTABLE_PLUGINS_DIR = "data/plugins"
 
 
 def normalized_version(raw: str) -> str:
@@ -90,7 +91,12 @@ def archive_names(path: Path) -> set[str]:
 
 
 def require_archive_suffixes(names: set[str], suffixes: set[str], artifact: Path) -> None:
-    missing = [suffix for suffix in suffixes if not any(name.endswith(suffix) for name in names)]
+    normalized_names = {name.rstrip("/") for name in names}
+    missing = [
+        suffix
+        for suffix in suffixes
+        if not any(name.endswith(suffix) for name in normalized_names)
+    ]
     if missing:
         raise RuntimeError(f"{artifact.name} is missing archive entries: {', '.join(missing)}")
 
@@ -125,7 +131,13 @@ def verify_portable_archive(path: Path, target: str, expected_version: str) -> N
     executable = "oxideterm-native.exe" if "windows" in target else "oxideterm-native"
     require_archive_suffixes(
         archive_names(path),
-        REQUIRED_DOCUMENTS | {PACKAGE_VERSION_FILENAME, "portable", executable},
+        REQUIRED_DOCUMENTS
+        | {
+            PACKAGE_VERSION_FILENAME,
+            PORTABLE_PLUGINS_DIR,
+            "portable",
+            executable,
+        },
         path,
     )
     verify_embedded_version(path, PACKAGE_VERSION_FILENAME, expected_version)

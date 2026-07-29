@@ -83,7 +83,7 @@ pub(in crate::workspace) fn settings_language_from_locale(locale: Locale) -> Lan
     }
 }
 
-pub(in crate::workspace) fn tokens_from_settings(settings: &PersistedSettings) -> ThemeTokens {
+pub(crate) fn tokens_from_settings(settings: &PersistedSettings) -> ThemeTokens {
     let mut tokens = oxideterm_settings_model::custom_theme_tokens_from_settings(settings)
         .unwrap_or_else(|| ThemeTokens::from_builtin(theme_by_id(&settings.terminal.theme)));
     let radius = settings.appearance.border_radius as f32;

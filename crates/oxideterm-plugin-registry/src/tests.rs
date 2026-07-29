@@ -499,6 +499,21 @@ fn plugin_package_rejects_zip_slip_and_checksum_mismatch_without_replacing_exist
 }
 
 #[test]
+fn discovery_creates_missing_plugin_directory() {
+    let temp_dir = unique_temp_dir("plugin-discovery-directory");
+    let settings_path = temp_dir.join("settings.json");
+    let plugins_dir = native_plugins_dir(&settings_path);
+
+    assert!(!plugins_dir.exists());
+    let registry = NativePluginRegistry::discover(&settings_path);
+
+    assert!(registry.plugins().is_empty());
+    assert!(registry.diagnostics().is_empty());
+    assert!(plugins_dir.is_dir());
+    let _ = fs::remove_dir_all(temp_dir);
+}
+
+#[test]
 fn uninstall_plugin_removes_directory_contributions_and_optional_state() {
     let temp_dir = unique_temp_dir("plugin-uninstall");
     let settings_path = temp_dir.join("settings.json");

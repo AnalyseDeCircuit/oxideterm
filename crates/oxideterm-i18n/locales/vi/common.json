@@ -1179,5 +1179,23 @@
     "vnc_continue_anyway": "Vẫn tiếp tục",
     "certificate_save_failed": "Không thể lưu bản ghi tin cậy chứng chỉ",
     "clipboard_file_failed": "Không thể nhận tệp từ bảng nhớ tạm"
+  },
+  "portable_bootstrap": {
+    "title": "Chế độ portable",
+    "setup_description": "Đặt mật khẩu cho kho khóa portable cục bộ. OxideTerm sẽ dùng mật khẩu này khi khởi động để mở khóa các bí mật đã lưu và cấu hình được mã hóa.",
+    "unlock_description": "Nhập mật khẩu portable của bạn để mở khóa các bí mật đã lưu và tiếp tục vào ứng dụng đầy đủ.",
+    "data_dir_label": "Thư mục dữ liệu portable",
+    "keystore_path_label": "Kho khóa portable",
+    "keystore_pending": "Kho khóa sẽ được tạo sau khi thiết lập",
+    "password_label": "Mật khẩu portable",
+    "password_placeholder": "Nhập mật khẩu",
+    "confirm_password_label": "Xác nhận mật khẩu portable",
+    "confirm_password_placeholder": "Nhập lại mật khẩu",
+    "password_too_short": "Mật khẩu phải có ít nhất 6 ký tự",
+    "password_mismatch": "Mật khẩu không khớp",
+    "setup_submit": "Tạo và tiếp tục",
+    "setup_pending": "Đang tạo kho khóa portable...",
+    "unlock_submit": "Mở khóa và tiếp tục",
+    "unlock_pending": "Đang mở khóa dữ liệu portable..."
   }
 }

@@ -50,6 +50,8 @@ WINDOWS_UPDATE_HELPER_DIR = "tools"
 WINDOWS_UPDATE_STAGING_DIR = "install"
 WINDOWS_UPDATE_FLAG = "OXIDETERM_UPDATE"
 PORTABLE_MARKER_FILENAME = "portable"
+PORTABLE_DATA_DIR = "data"
+PORTABLE_PLUGINS_DIR = "plugins"
 PACKAGE_VERSION_FILENAME = "VERSION"
 LINUX_PACKAGE_KIND_FILENAME = "PACKAGE_KIND"
 THIRD_PARTY_LICENSE_DIR = ROOT_DIR / "licenses" / "third-party"
@@ -910,6 +912,9 @@ def create_portable_package(binary: Path, target: str, version: str, label: str)
     copy_release_documents(package_root)
     write_package_version(package_root, version)
     (package_root / PORTABLE_MARKER_FILENAME).touch()
+    # Ship the documented manual-install location and keep first launch
+    # predictable even before the runtime plugin registry initializes it.
+    (package_root / PORTABLE_DATA_DIR / PORTABLE_PLUGINS_DIR).mkdir(parents=True)
 
     if "apple-darwin" in target:
         # Standalone helpers are outside an app bundle, so each Mach-O file must

@@ -65,6 +65,7 @@ class PortableArchiveTests(unittest.TestCase):
             f"{root}/{executable}",
             f"{root}/portable",
             f"{root}/VERSION",
+            f"{root}/data/plugins/",
             *(f"{root}/{name}" for name in verify_native_package.REQUIRED_DOCUMENTS),
         ]
 
@@ -86,8 +87,11 @@ class PortableArchiveTests(unittest.TestCase):
                 if name.endswith("AGENT_THIRD_PARTY_NOTICES.md"):
                     continue
                 path = root / name
-                path.parent.mkdir(parents=True, exist_ok=True)
-                path.write_bytes(b"data")
+                if name.endswith("/"):
+                    path.mkdir(parents=True, exist_ok=True)
+                else:
+                    path.parent.mkdir(parents=True, exist_ok=True)
+                    path.write_bytes(b"data")
             archive_path = Path(directory) / "portable.tar.gz"
             with tarfile.open(archive_path, "w:gz") as archive:
                 archive.add(root / "OxideTerm", arcname="OxideTerm")
@@ -105,6 +109,23 @@ class PortableArchiveTests(unittest.TestCase):
                     archive.writestr(name, b"1.9.0\n" if name.endswith("VERSION") else b"data")
 
             with self.assertRaisesRegex(RuntimeError, "contains version"):
+                verify_native_package.verify_portable_archive(
+                    path, "x86_64-pc-windows-msvc", "2.0.0"
+                )
+
+    def test_portable_archive_rejects_missing_plugins_directory(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "portable.zip"
+            with zipfile.ZipFile(path, "w") as archive:
+                for name in self.required_entries("OxideTerm", "oxideterm-native.exe"):
+                    if name.endswith("/data/plugins/"):
+                        continue
+                    archive.writestr(
+                        name,
+                        b"2.0.0\n" if name.endswith("VERSION") else b"data",
+                    )
+
+            with self.assertRaisesRegex(RuntimeError, "data/plugins"):
                 verify_native_package.verify_portable_archive(
                     path, "x86_64-pc-windows-msvc", "2.0.0"
                 )

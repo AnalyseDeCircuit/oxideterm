@@ -1179,5 +1179,23 @@
     "vnc_continue_anyway": "続行する",
     "certificate_save_failed": "証明書の信頼情報を保存できませんでした",
     "clipboard_file_failed": "クリップボードのファイルを受信できませんでした"
+  },
+  "portable_bootstrap": {
+    "title": "ポータブルモード",
+    "setup_description": "ローカルのポータブルキーストア用のパスワードを設定します。OxideTerm は起動時にそれを使って保存済みの秘密情報と暗号化設定を解除します。",
+    "unlock_description": "ポータブルパスワードを入力して保存済みの秘密情報を解除し、本体アプリへ進んでください。",
+    "data_dir_label": "ポータブルデータディレクトリ",
+    "keystore_path_label": "ポータブルキーストア",
+    "keystore_pending": "セットアップ完了後にキーストアが作成されます",
+    "password_label": "ポータブルパスワード",
+    "password_placeholder": "パスワードを入力",
+    "confirm_password_label": "ポータブルパスワードを確認",
+    "confirm_password_placeholder": "もう一度パスワードを入力",
+    "password_too_short": "パスワードは 6 文字以上である必要があります",
+    "password_mismatch": "パスワードが一致しません",
+    "setup_submit": "作成して続行",
+    "setup_pending": "ポータブルキーストアを作成しています...",
+    "unlock_submit": "解除して続行",
+    "unlock_pending": "ポータブルデータを解除しています..."
   }
 }

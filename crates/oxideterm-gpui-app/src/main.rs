@@ -10,6 +10,7 @@ mod keybindings;
 mod logging;
 mod migration_snapshot;
 mod platform;
+mod portable_bootstrap;
 mod single_instance;
 mod workspace;
 
@@ -166,11 +167,14 @@ fn main() {
         // macOS keeps the application alive after closing the last window.
         // Reopening from the Dock should create a fresh workspace window
         // instead of leaving the app windowless.
-        if let Err(error) = open_main_workspace_window(
+        if let Err(error) = open_primary_window(
             cx,
             None,
             desktop_presence_menu_from_settings(),
             Some(reopen_single_instance_rx.clone()),
+            SettingsStore::load_default()
+                .map(|store| store.settings().clone())
+                .unwrap_or_default(),
         ) {
             eprintln!(
                 "OxideTerm could not reopen a native GPUI window: {error:#}\n\
@@ -205,26 +209,34 @@ fn main() {
         let desktop_presence_menu = desktop_presence_menu(&I18n::new(locale_from_settings(
             startup_settings.general.language,
         )));
-        if let Err(err) = open_main_workspace_window(
+        let workspace_opened = match open_primary_window(
             cx,
             ssh_launch,
             desktop_presence_menu,
             Some(single_instance_rx),
+            startup_settings.clone(),
         ) {
-            eprintln!(
-                "OxideTerm could not open a native GPUI window: {err:#}\n\
-                 GPUI 0.2.2 does not expose a CPU renderer fallback. \
-                 Try updating GPU drivers, disabling incompatible graphics layers, \
-                 or relaunching with OXIDETERM_RENDER_PROFILE=compatibility."
-            );
-            cx.quit();
-            return;
-        }
+            Ok(workspace_opened) => workspace_opened,
+            Err(err) => {
+                eprintln!(
+                    "OxideTerm could not open a native GPUI window: {err:#}\n\
+                     GPUI 0.2.2 does not expose a CPU renderer fallback. \
+                     Try updating GPU drivers, disabling incompatible graphics layers, \
+                     or relaunching with OXIDETERM_RENDER_PROFILE=compatibility."
+                );
+                cx.quit();
+                return;
+            }
+        };
 
         #[cfg(target_os = "windows")]
-        if let Err(error) = confirm_windows_update_after_initial_workspace() {
+        if workspace_opened
+            && let Err(error) = confirm_windows_update_after_initial_workspace()
+        {
             eprintln!("failed to confirm the applied Windows update: {error}");
         }
+        #[cfg(not(target_os = "windows"))]
+        let _ = workspace_opened;
     });
 }
 
@@ -295,6 +307,30 @@ fn open_main_workspace_window(
         cx.new(|cx| WorkspaceWindowShell::new(session, window, cx))
     })
     .map(|_| ())
+}
+
+fn open_primary_window(
+    cx: &mut App,
+    ssh_launch: Option<oxideterm_ssh_launch::TemporarySshLaunch>,
+    desktop_presence_menu: oxideterm_desktop_presence::DesktopPresenceMenu,
+    single_instance_rx: Option<single_instance::SingleInstanceReceiver>,
+    settings: oxideterm_settings::PersistedSettings,
+) -> anyhow::Result<bool> {
+    let portable_status = oxideterm_portable_runtime::portable_status_snapshot()?;
+    if portable_bootstrap::portable_startup_requires_bootstrap(portable_status.status) {
+        portable_bootstrap::open_portable_bootstrap_window(
+            cx,
+            portable_status,
+            settings,
+            ssh_launch,
+            desktop_presence_menu,
+            single_instance_rx,
+        )?;
+        return Ok(false);
+    }
+
+    open_main_workspace_window(cx, ssh_launch, desktop_presence_menu, single_instance_rx)?;
+    Ok(true)
 }
 
 fn ssh_launch_path_arg() -> Result<Option<PathBuf>, String> {
