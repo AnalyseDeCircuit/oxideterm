@@ -247,7 +247,7 @@ impl WorkspaceApp {
         name: &str,
         cx: &mut Context<Self>,
     ) {
-        let Some(tab_id) = self.main_window_tabs.active_tab_id else {
+        let Some(tab_id) = self.active_tab_id(cx) else {
             return;
         };
         let Some(node_id) = self.sftp_tab_nodes.get(&tab_id).cloned() else {
@@ -391,7 +391,7 @@ impl WorkspaceApp {
     }
 
     fn spawn_remote_sftp_preview(&self, path: String, generation: u64, cx: &App) {
-        let Some(tab_id) = self.main_window_tabs.active_tab_id else {
+        let Some(tab_id) = self.active_tab_id(cx) else {
             return;
         };
         let Some(node_id) = self.sftp_tab_nodes.get(&tab_id).cloned() else {
@@ -440,7 +440,7 @@ impl WorkspaceApp {
     }
 
     fn spawn_remote_sftp_preview_hex(&self, path: String, offset: u64, generation: u64, cx: &App) {
-        let Some(tab_id) = self.main_window_tabs.active_tab_id else {
+        let Some(tab_id) = self.active_tab_id(cx) else {
             return;
         };
         let Some(node_id) = self.sftp_tab_nodes.get(&tab_id).cloned() else {
@@ -469,8 +469,9 @@ impl WorkspaceApp {
         line_ending: TextLineEnding,
         generation: u64,
         tx: delivery::ActiveDeliverySender<SftpWorkerResult>,
+        cx: &App,
     ) -> bool {
-        let Some(tab_id) = self.main_window_tabs.active_tab_id else {
+        let Some(tab_id) = self.active_tab_id(cx) else {
             return false;
         };
         let Some(node_id) = self.sftp_tab_nodes.get(&tab_id).cloned() else {

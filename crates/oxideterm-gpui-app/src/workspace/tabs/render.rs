@@ -76,15 +76,47 @@ impl WorkspaceApp {
             }));
 
         let returning_placeholder = self.detached_tab_return_placeholder(cx);
-        let returning_tab =
-            returning_placeholder.and_then(|placeholder| self.tab_by_id(placeholder.tab_id));
+        let returning_tab = returning_placeholder.and_then(|placeholder| {
+            self.tab_by_id(placeholder.tab_id, cx).map(|tab| {
+                (
+                    tab.id,
+                    tab.kind.clone(),
+                    self.tab_display_title(tab),
+                    self.tab_visual_width(tab),
+                )
+            })
+        });
         let outside_main_tabs = self.tab_host.read(cx).outside_main_tab_ids();
+        let active_tab_id = self.active_tab_id(cx);
         let mut live_tabs = self
-            .tabs
+            .tabs(cx)
             .iter()
             .enumerate()
-            .filter(|(_, tab)| !outside_main_tabs.contains(&tab.id));
-        let live_tab_count = live_tabs.clone().count();
+            .filter(|(_, tab)| !outside_main_tabs.contains(&tab.id))
+            .map(|(tab_index, tab)| {
+                let tab_id = tab.id;
+                let tab_width = self.tab_visual_width(tab);
+                let reconnect_node_id = self.reconnect_node_id_for_tab(tab, cx);
+                let reconnect_job = reconnect_node_id.as_ref().and_then(|node_id| {
+                    self.workspace_runtime
+                        .read(cx)
+                        .reconnect_active_progress(node_id)
+                });
+                let icon = tab_kind_icon(self, &tab.kind, cx);
+                let tab_text = self.tab_display_title(tab);
+                (
+                    tab_index,
+                    tab_id,
+                    tab_width,
+                    reconnect_node_id,
+                    reconnect_job,
+                    icon,
+                    tab_text,
+                )
+            })
+            .collect::<Vec<_>>()
+            .into_iter();
+        let live_tab_count = live_tabs.len();
         let visual_tab_count = live_tab_count
             + self.main_window_tabs.exiting_tabs.len()
             + usize::from(returning_tab.is_some());
@@ -104,25 +136,30 @@ impl WorkspaceApp {
             if !placeholder_rendered
                 && returning_placeholder
                     .is_some_and(|placeholder| placeholder.visible_index == visible_tab_index)
-                && let Some(tab) = returning_tab
+                && let Some((tab_id, tab_kind, tab_title, tab_width)) = returning_tab.as_ref()
             {
                 scroll_viewport =
                     scroll_viewport.child(self.render_detached_return_tab_placeholder(
-                        tab,
-                        self.tab_visual_width(tab),
-                        cx,
+                        *tab_id, tab_kind, tab_title, *tab_width, cx,
                     ));
                 placeholder_rendered = true;
                 continue;
             }
-            let Some((tab_index, tab)) = live_tabs.next() else {
+            let Some((
+                tab_index,
+                tab_id,
+                tab_width,
+                reconnect_node_id,
+                reconnect_job,
+                icon,
+                tab_text,
+            )) = live_tabs.next()
+            else {
                 continue;
             };
             let current_visible_index = visible_tab_index;
             visible_tab_index += 1;
-            let tab_id = tab.id;
-            let tab_width = self.tab_visual_width(tab);
-            let active = Some(tab_id) == self.main_window_tabs.active_tab_id;
+            let active = Some(tab_id) == active_tab_id;
             let drag_state = self.main_window_tabs.drag.as_ref();
             let drag_active = drag_state.is_some_and(|drag| drag.active);
             let is_being_dragged = drag_state.is_some_and(|drag| drag.tab_id == tab_id);
@@ -135,15 +172,7 @@ impl WorkspaceApp {
                         drag.drop_target_index,
                     ) != drag.from_index
             });
-            let reconnect_node_id = self.reconnect_node_id_for_tab(tab, cx);
-            let reconnect_job = reconnect_node_id.as_ref().and_then(|node_id| {
-                self.workspace_runtime
-                    .read(cx)
-                    .reconnect_active_progress(node_id)
-            });
             let show_reconnect_progress = reconnect_job.is_some();
-            let icon = tab_kind_icon(self, &tab.kind, cx);
-            let tab_text = self.tab_display_title(tab);
             let tab_tooltip_label = tab_text.clone();
             let tab_tooltip_id = format!("workspace-tab-title-{}", tab_id.0);
             let middle_click_tooltip_id = tab_tooltip_id.clone();
@@ -340,7 +369,9 @@ impl WorkspaceApp {
 
     fn render_detached_return_tab_placeholder(
         &self,
-        tab: &Tab,
+        tab_id: TabId,
+        tab_kind: &TabKind,
+        tab_title: &str,
         tab_width: f32,
         cx: &Context<Self>,
     ) -> AnyElement {
@@ -359,7 +390,7 @@ impl WorkspaceApp {
             .bg(rgba((accent << 8) | 0x18))
             .text_color(rgba((theme.text << 8) | 0xcc))
             .child(Self::render_lucide_icon(
-                tab_kind_icon(self, &tab.kind, cx),
+                tab_kind_icon(self, tab_kind, cx),
                 self.tokens.metrics.tab_icon_size,
                 rgba((accent << 8) | 0xcc),
             ))
@@ -368,7 +399,7 @@ impl WorkspaceApp {
                     .flex_1()
                     .truncate()
                     .text_size(px(self.tokens.metrics.tab_font_size))
-                    .child(self.tab_display_title(tab)),
+                    .child(tab_title.to_string()),
             )
             .child(Self::render_lucide_icon(
                 LucideIcon::PanelLeft,
@@ -379,7 +410,7 @@ impl WorkspaceApp {
         // The placeholder participates in tab layout, so later tabs move out
         // of the future slot before the detached window is actually closed.
         div()
-            .id(("detached-tab-return-placeholder", tab.id.0))
+            .id(("detached-tab-return-placeholder", tab_id.0))
             .w(px(tab_width))
             .h_full()
             .flex_none()

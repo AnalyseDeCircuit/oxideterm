@@ -160,7 +160,7 @@ impl WorkspaceApp {
             });
         }
 
-        for tab in &self.tabs {
+        for tab in self.tabs(cx) {
             let mut refs = BTreeMap::new();
             refs.insert("tabId".to_string(), tab.id.0.to_string());
             if let Some(session_id) = tab.root_pane.as_ref().and_then(|root| {
@@ -180,7 +180,7 @@ impl WorkspaceApp {
                 } else {
                     tab.title.clone()
                 },
-                state: if Some(tab.id) == self.main_window_tabs.active_tab_id {
+                state: if Some(tab.id) == self.active_tab_id(cx) {
                     "connected"
                 } else {
                     "available"
@@ -292,7 +292,7 @@ impl WorkspaceApp {
         }
 
         let tab_host = self.tab_host.read(cx);
-        for tab in &self.tabs {
+        for tab in self.tabs(cx) {
             let Some(root) = tab.root_pane.as_ref() else {
                 continue;
             };
@@ -451,10 +451,8 @@ impl WorkspaceApp {
         let targets = deduped_targets;
 
         let settings = self.settings_store.settings();
-        let active_tab_ref = self
-            .main_window_tabs
-            .active_tab_id
-            .and_then(|active_tab_id| self.tabs.iter().find(|tab| tab.id == active_tab_id));
+        let active_tab_ref = self.active_tab_id(cx)
+            .and_then(|active_tab_id| self.tabs(cx).iter().find(|tab| tab.id == active_tab_id));
         let active_node_id = self
             .active_ssh_node_id
             .as_ref()
@@ -476,11 +474,9 @@ impl WorkspaceApp {
                     .and_then(|node| node.terminal_ids.first().copied())
                     .map(|session_id| session_id.0.to_string())
             });
-        let active_tab = self
-            .main_window_tabs
-            .active_tab_id
+        let active_tab = self.active_tab_id(cx)
             .and_then(|active_tab_id| {
-                self.tabs
+                self.tabs(cx)
                     .iter()
                     .find(|tab| tab.id == active_tab_id)
                     .map(|tab| {
@@ -551,12 +547,12 @@ impl WorkspaceApp {
         let health_state = serde_json::json!({
             "runtimeEpoch": runtime_epoch.as_str(),
             "tabs": {
-                "open": self.tabs.len(),
-                "activeTabId": self.main_window_tabs.active_tab_id.map(|id| id.0.to_string()),
+                "open": self.tabs(cx).len(),
+                "activeTabId": self.active_tab_id(cx).map(|id| id.0.to_string()),
             },
             "terminalRegistry": { "entries": self.tab_host.read(cx).panes().len() },
             "localTerminals": {
-                "count": self.visible_local_terminal_session_count() + self.detached_local_terminals.len(),
+                "count": self.visible_local_terminal_session_count(cx) + self.detached_local_terminals.len(),
             },
             "sshNodes": {
                 "total": self.ssh_nodes.len(),
@@ -577,9 +573,7 @@ impl WorkspaceApp {
             active_tab,
             active_node,
             active_session_id,
-            active_tab_id: self
-                .main_window_tabs
-                .active_tab_id
+            active_tab_id: self.active_tab_id(cx)
                 .map(|tab_id| tab_id.0.to_string()),
             active_node_id,
             memory: ai_memory_settings_json(
@@ -1829,9 +1823,7 @@ impl WorkspaceApp {
                 .with_target(requested_target.clone()));
         }
 
-        let active_tab_id = self
-            .main_window_tabs
-            .active_tab_id
+        let active_tab_id = self.active_tab_id(cx)
             .map(|tab_id| tab_id.0.to_string());
         let refreshed = self.ai_orchestrator_snapshot(cx);
         refreshed
@@ -1882,9 +1874,7 @@ impl WorkspaceApp {
         match surface {
             "local_terminal" | "terminal" => match self.create_local_terminal_tab(window, cx) {
                 Ok(()) => {
-                    let active_tab_id = self
-                        .main_window_tabs
-                        .active_tab_id
+                    let active_tab_id = self.active_tab_id(cx)
                         .map(|tab_id| tab_id.0.to_string());
                     let refreshed = self.ai_orchestrator_snapshot(cx);
                     let target = refreshed
@@ -2131,9 +2121,9 @@ impl WorkspaceApp {
         // model may target a non-active session from context, so make that tab
         // and pane visible before writing input or reading command output.
         self.set_main_window_active_tab(Some(tab_id), cx);
-        if let Some(tab) = self.tab_mut_by_id(tab_id) {
-            tab.active_pane_id = Some(pane_id);
-        }
+        self.tab_host.update(cx, |tab_host, _| {
+            tab_host.set_active_pane(Some(tab_id), pane_id);
+        });
         self.sync_active_tab_surface(cx);
         self.active_surface = ActiveSurface::Terminal;
         self.needs_active_pane_focus = true;

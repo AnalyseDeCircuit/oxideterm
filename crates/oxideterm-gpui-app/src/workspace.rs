@@ -36,6 +36,7 @@ mod root {
     pub(super) mod helpers;
     pub(super) mod host_tools;
     pub(super) mod init;
+    pub(super) mod modal_owner;
     pub(super) mod render;
     pub(super) mod state;
     #[cfg(test)]
@@ -60,6 +61,7 @@ mod version_migration;
 mod virtual_list;
 mod window_intent;
 mod window_registry;
+mod window_shell;
 
 use std::{
     cell::{Cell, RefCell},
@@ -94,8 +96,8 @@ use gpui::{
     ListState, ModifiersChangedEvent, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent,
     ObjectFit, ParentElement, PathPromptOptions, Pixels, Point, Render, RenderImage, Rgba,
     ScrollHandle, ScrollWheelEvent, SharedString, Styled, StyledImage, Subscription, Task,
-    TextLayout, Timer, UniformListScrollHandle, WeakEntity, Window, anchored, canvas, deferred,
-    div, prelude::*, px, relative, rgb, rgba, svg,
+    TextLayout, Timer, UniformListScrollHandle, Window, anchored, canvas, deferred, div,
+    prelude::*, px, relative, rgb, rgba, svg,
 };
 use oxideterm_connection_monitor::{
     CompactMonitorRow, ConnectionPoolEntryState, ConnectionPoolEntrySummary,
@@ -278,7 +280,7 @@ use self::sidebar::{
 };
 #[cfg(test)]
 use self::sidebar::{AiCompactionDeliveryKind, AiStreamDeliveryEvent};
-use self::tabs::TerminalLocation;
+use self::tabs::{TabRemovalTransition, TerminalLocation};
 use self::terminal_entity::{WorkspaceTerminalEntity, WorkspaceTerminalEvent};
 use self::window_intent::WorkspaceWindowIntentEntity;
 use crate::{
@@ -591,8 +593,6 @@ impl LocalTerminalCloseCheck {
 }
 
 struct WorkspaceWindowTabState {
-    active_tab_id: Option<TabId>,
-    active_tab_index_cache: Cell<Option<(TabId, usize)>>,
     drag: Option<TabDragState>,
     context_menu: Option<TabContextMenu>,
     exiting_tabs: Vec<ExitingTabVisual>,
@@ -641,8 +641,6 @@ struct DetachedTabReturnPlaceholder {
 impl WorkspaceWindowTabState {
     fn new() -> Self {
         Self {
-            active_tab_id: None,
-            active_tab_index_cache: Cell::new(None),
             drag: None,
             context_menu: None,
             exiting_tabs: Vec::new(),
@@ -665,7 +663,6 @@ pub(super) struct SelectableTextFragmentState {
 
 pub(crate) struct WorkspaceApp {
     focus_handle: FocusHandle,
-    tabs: Vec<Tab>,
     main_window_tabs: WorkspaceWindowTabState,
     detached_tab_return_drag: Option<DetachedTabReturnDrag>,
     detached_tab_return_handoff: Option<DetachedTabReturnHandoff>,
@@ -761,7 +758,6 @@ pub(crate) struct WorkspaceApp {
     _window_intent_subscription: Subscription,
     window_registry: window_registry::WorkspaceWindowRegistry,
     window_effect_delivery_scheduled: bool,
-    _main_window_release_subscription: Subscription,
     connection_flow: Entity<ConnectionFlowEntity>,
     _connection_flow_observation: Subscription,
     _connection_flow_subscription: Subscription,
@@ -777,7 +773,6 @@ pub(crate) struct WorkspaceApp {
     notification_sidebar_list_state: ListState,
     notification_sidebar_list_cache: RefCell<VirtualListSignatureCache>,
     event_log_sidebar_scroll_handle: UniformListScrollHandle,
-    terminal_endpoint_sessions: HashMap<TerminalSessionId, WorkspaceTerminalEndpointSession>,
     ssh_nodes: HashMap<NodeId, WorkspaceSshNode>,
     saved_ssh_nodes: HashMap<String, NodeId>,
     expanded_ssh_nodes: HashSet<NodeId>,
@@ -810,11 +805,7 @@ pub(crate) struct WorkspaceApp {
     detected_graphics: DetectedGraphics,
     render_profile_override: Option<RenderProfile>,
     render_policy: EffectiveRenderPolicy,
-    applied_vibrancy_mode: NativeVibrancyMode,
     vibrancy_support: VibrancySupport,
-    applied_window_opacity: f32,
-    background_image_cache: BackgroundImageRenderCache,
-    background_cache_poll_task: Option<Task<()>>,
     app_lock: app_lock::AppLockState,
     settings_store: SettingsStore,
     connection_store: ConnectionStore,
@@ -838,8 +829,13 @@ impl Drop for WorkspaceApp {
         // App Lock and Cloud Sync move the focused secret into this window IME
         // adapter, so window destruction must zeroize it even without a blur event.
         zeroize::Zeroize::zeroize(&mut self.settings_input_draft);
+        // WorkspaceApp owns the shared session runtime. Window, tab, and page
+        // release must not stop transfers or tunnels; final owner drop must.
+        self.shutdown_final_session_services();
     }
 }
+
+pub(crate) use window_shell::WorkspaceWindowShell;
 
 #[derive(Clone)]
 struct MermaidZoomState {
@@ -995,10 +991,6 @@ pub(crate) struct AiCliAgentSession {
     pub(crate) started_at: i64,
     pub(crate) updated_at: i64,
     pub(crate) runtime_epoch: String,
-}
-
-struct WorkspaceTerminalEndpointSession {
-    session: SharedTerminalSession,
 }
 
 #[derive(Clone)]

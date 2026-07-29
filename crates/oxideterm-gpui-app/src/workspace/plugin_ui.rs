@@ -231,7 +231,7 @@ impl WorkspaceApp {
             .contributions()
             .tab_contribution(plugin_id, tab_id)
             .ok_or_else(|| format!("Plugin tab \"{plugin_id}:{tab_id}\" is not declared"))?;
-        let existing_tab_id = self.tabs.iter().find_map(|tab| match &tab.kind {
+        let existing_tab_id = self.tabs(cx).iter().find_map(|tab| match &tab.kind {
             TabKind::Plugin {
                 plugin_id: existing_plugin_id,
                 tab_id: existing_tab_id,
@@ -242,17 +242,20 @@ impl WorkspaceApp {
             existing_tab_id
         } else {
             let tab_id_value = self.alloc_tab_id(cx);
-            self.tabs.push(Tab {
-                id: tab_id_value,
-                kind: TabKind::Plugin {
-                    plugin_id: plugin_id.to_string(),
-                    tab_id: tab_id.to_string(),
+            self.insert_tab(
+                Tab {
+                    id: tab_id_value,
+                    kind: TabKind::Plugin {
+                        plugin_id: plugin_id.to_string(),
+                        tab_id: tab_id.to_string(),
+                    },
+                    title: contribution.definition.title,
+                    title_source: TabTitleSource::Static,
+                    root_pane: None,
+                    active_pane_id: None,
                 },
-                title: contribution.definition.title,
-                title_source: TabTitleSource::Static,
-                root_pane: None,
-                active_pane_id: None,
-            });
+                cx,
+            );
             tab_id_value
         };
         if self.focus_detached_tab_window(tab_id_value, cx) {
@@ -1395,7 +1398,7 @@ impl WorkspaceApp {
             return false;
         };
         match context.surface_kind.as_str() {
-            "tab" => self.active_tab().is_some_and(|tab| {
+            "tab" => self.active_tab(cx).is_some_and(|tab| {
                 matches!(
                     &tab.kind,
                     TabKind::Plugin { plugin_id, tab_id }

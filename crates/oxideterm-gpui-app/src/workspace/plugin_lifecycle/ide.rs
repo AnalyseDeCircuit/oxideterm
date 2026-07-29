@@ -17,5 +17,5 @@ pub(super) fn native_plugin_ide_workspace_snapshot(
     workspace
         .ide_workspace
         .read(cx)
-        .plugin_snapshot(workspace.main_window_tabs.active_tab_id, cx)
+        .plugin_snapshot(workspace.active_tab_id(cx), cx)
 }

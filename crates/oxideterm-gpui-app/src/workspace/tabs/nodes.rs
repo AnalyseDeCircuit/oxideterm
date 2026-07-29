@@ -837,21 +837,15 @@ impl WorkspaceApp {
                 continue;
             };
 
-            let replaced = self
-                .tabs
-                .iter_mut()
-                .find(|tab| tab.id == tab_id)
-                .and_then(|tab| {
-                    let old = tab.root_pane.as_mut()?.replace_session(
-                        old_session_id,
-                        new_pane_id,
-                        new_session_id,
-                    )?;
-                    if tab.active_pane_id == Some(old_pane_id) {
-                        tab.active_pane_id = Some(new_pane_id);
-                    }
-                    Some(old)
-                });
+            let replaced = self.tab_host.update(cx, |tab_host, _| {
+                tab_host.replace_terminal_session(
+                    tab_id,
+                    old_session_id,
+                    old_pane_id,
+                    new_pane_id,
+                    new_session_id,
+                )
+            });
             if let Some(replaced_pane_id) = replaced {
                 if let Some(pane) = self.remove_terminal_pane(&replaced_pane_id, cx) {
                     let _ = pane.update(cx, |pane, _cx| pane.shutdown());

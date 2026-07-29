@@ -170,9 +170,9 @@ impl WorkspaceApp {
         let terminal_inline_surface = self.ai_entity.read(cx).terminal_inline_panel().open;
         let model_selector_surface = self.ai_sidebar_visible() || terminal_inline_surface;
         let main_settings_surface = self
-            .active_tab()
+            .active_tab(cx)
             .is_some_and(|tab| tab.kind == TabKind::Settings);
-        let detached_settings_surface = self.tabs.iter().any(|tab| {
+        let detached_settings_surface = self.tabs(cx).iter().any(|tab| {
             tab.kind == TabKind::Settings && self.tab_host.read(cx).is_outside_main_window(tab.id)
         });
         let settings_surface = !self.app_lock.locked

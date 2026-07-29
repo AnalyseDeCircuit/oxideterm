@@ -98,7 +98,7 @@ impl WorkspaceApp {
             cx.notify();
         });
 
-        if let Some(previous_tab_id) = self.main_window_tabs.active_tab_id {
+        if let Some(previous_tab_id) = self.active_tab_id(cx) {
             self.release_remote_desktop_inputs_for_tab(previous_tab_id, cx);
         }
         self.remote_desktop.update(cx, |remote_desktop, _cx| {
@@ -108,14 +108,17 @@ impl WorkspaceApp {
                 vec![session_subscription, session_observation],
             );
         });
-        self.tabs.push(Tab {
-            id: tab_id,
-            kind: TabKind::RemoteDesktop,
-            title,
-            title_source: TabTitleSource::Static,
-            root_pane: None,
-            active_pane_id: None,
-        });
+        self.insert_tab(
+            Tab {
+                id: tab_id,
+                kind: TabKind::RemoteDesktop,
+                title,
+                title_source: TabTitleSource::Static,
+                root_pane: None,
+                active_pane_id: None,
+            },
+            cx,
+        );
         self.set_main_window_active_tab(Some(tab_id), cx);
         self.active_surface = ActiveSurface::Terminal;
         self.needs_active_pane_focus = false;

@@ -20,7 +20,7 @@ use oxideterm_i18n::I18n;
 use oxideterm_settings::SettingsStore;
 
 use crate::assets::NativeAssets;
-use crate::workspace::{WorkspaceApp, locale_from_settings};
+use crate::workspace::{WorkspaceApp, WorkspaceWindowShell, locale_from_settings};
 
 // Tauri's `tauri.conf.json` opens the main window at 1200x800. Keeping the
 // native default the same preserves first-launch sidebar proportions.
@@ -273,7 +273,7 @@ fn open_main_workspace_window(
                 }
             };
 
-        let workspace = cx.new(|cx| {
+        let session = cx.new(|cx| {
             WorkspaceApp::new(window, cx, desktop_presence_rx, single_instance_rx).unwrap_or_else(
                 |err| {
                     panic!(
@@ -286,13 +286,13 @@ fn open_main_workspace_window(
             )
         });
         if let Some(launch) = ssh_launch
-            && let Err(error) = workspace.update(cx, |workspace, cx| {
-                workspace.open_temporary_ssh_launch(launch, cx)
+            && let Err(error) = session.update(cx, |session, cx| {
+                session.open_temporary_ssh_launch(launch, cx)
             })
         {
             eprintln!("failed to open temporary SSH launch: {error}");
         }
-        workspace
+        cx.new(|cx| WorkspaceWindowShell::new(session, window, cx))
     })
     .map(|_| ())
 }

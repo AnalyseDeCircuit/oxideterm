@@ -386,7 +386,7 @@ impl WorkspaceApp {
         event: &ModifiersChangedEvent,
         cx: &mut Context<Self>,
     ) -> bool {
-        let Some(tab_id) = self.active_remote_desktop_tab_id() else {
+        let Some(tab_id) = self.active_remote_desktop_tab_id(cx) else {
             return false;
         };
         self.sync_remote_desktop_modifiers(tab_id, event.modifiers, cx);
@@ -399,7 +399,7 @@ impl WorkspaceApp {
         event: &KeyDownEvent,
         cx: &mut Context<Self>,
     ) -> bool {
-        let Some(tab_id) = self.active_remote_desktop_tab_id() else {
+        let Some(tab_id) = self.active_remote_desktop_tab_id(cx) else {
             return false;
         };
         if remote_desktop_paste_shortcut(&event.keystroke) {
@@ -425,7 +425,7 @@ impl WorkspaceApp {
         event: &KeyUpEvent,
         cx: &mut Context<Self>,
     ) -> bool {
-        let Some(tab_id) = self.active_remote_desktop_tab_id() else {
+        let Some(tab_id) = self.active_remote_desktop_tab_id(cx) else {
             return false;
         };
         if remote_desktop_paste_shortcut(&event.keystroke)
@@ -447,18 +447,18 @@ impl WorkspaceApp {
         keystroke: &gpui::Keystroke,
         cx: &mut Context<Self>,
     ) -> bool {
-        let Some(tab_id) = self.active_remote_desktop_tab_id() else {
+        let Some(tab_id) = self.active_remote_desktop_tab_id(cx) else {
             return false;
         };
         self.release_remote_desktop_shortcut_modifiers(tab_id, keystroke, cx);
         self.copy_remote_desktop(cx)
     }
 
-    pub(in crate::workspace) fn copy_remote_desktop(&mut self, _cx: &mut Context<Self>) -> bool {
-        let Some(tab_id) = self.active_remote_desktop_tab_id() else {
+    pub(in crate::workspace) fn copy_remote_desktop(&mut self, cx: &mut Context<Self>) -> bool {
+        let Some(tab_id) = self.active_remote_desktop_tab_id(cx) else {
             return false;
         };
-        self.send_remote_desktop_control_shortcut(tab_id, "c", _cx);
+        self.send_remote_desktop_control_shortcut(tab_id, "c", cx);
         true
     }
 
@@ -467,7 +467,7 @@ impl WorkspaceApp {
         keystroke: &gpui::Keystroke,
         cx: &mut Context<Self>,
     ) -> bool {
-        let Some(tab_id) = self.active_remote_desktop_tab_id() else {
+        let Some(tab_id) = self.active_remote_desktop_tab_id(cx) else {
             return false;
         };
         self.release_remote_desktop_shortcut_modifiers(tab_id, keystroke, cx);
@@ -475,7 +475,7 @@ impl WorkspaceApp {
     }
 
     pub(in crate::workspace) fn paste_remote_desktop(&mut self, cx: &mut Context<Self>) -> bool {
-        let Some(tab_id) = self.active_remote_desktop_tab_id() else {
+        let Some(tab_id) = self.active_remote_desktop_tab_id(cx) else {
             return false;
         };
         let Some(item) = cx.read_from_clipboard() else {
@@ -511,8 +511,8 @@ impl WorkspaceApp {
         }
     }
 
-    pub(in crate::workspace) fn active_remote_desktop_tab_id(&self) -> Option<TabId> {
-        self.active_tab()
+    pub(in crate::workspace) fn active_remote_desktop_tab_id(&self, cx: &App) -> Option<TabId> {
+        self.active_tab(cx)
             .filter(|tab| tab.kind == TabKind::RemoteDesktop)
             .map(|tab| tab.id)
     }

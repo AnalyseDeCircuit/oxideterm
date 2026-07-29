@@ -65,14 +65,17 @@ impl WorkspaceApp {
             tab_id
         } else {
             let tab_id = self.alloc_tab_id(cx);
-            self.tabs.push(Tab {
-                id: tab_id,
-                kind: TabKind::Forwards,
-                title,
-                title_source: TabTitleSource::Static,
-                root_pane: None,
-                active_pane_id: None,
-            });
+            self.insert_tab(
+                Tab {
+                    id: tab_id,
+                    kind: TabKind::Forwards,
+                    title,
+                    title_source: TabTitleSource::Static,
+                    root_pane: None,
+                    active_pane_id: None,
+                },
+                cx,
+            );
             self.forwarding.update(cx, |forwarding, _cx| {
                 forwarding.map_tab_to_node(tab_id, node_id.clone(), _cx);
             });
@@ -98,7 +101,7 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let Some(tab_id) = self.main_window_tabs.active_tab_id else {
+        let Some(tab_id) = self.active_tab_id(cx) else {
             return self.render_empty_workspace(cx);
         };
         self.render_forwards_surface_for_tab(tab_id, window, cx)

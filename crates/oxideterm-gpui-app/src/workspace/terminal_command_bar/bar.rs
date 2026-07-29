@@ -148,9 +148,9 @@ impl WorkspaceApp {
         let project_snapshot = project_tasks_enabled
             .then(|| self.active_terminal_project_snapshot(cx))
             .flatten();
-        let active_pane_id = self.active_pane_id();
+        let active_pane_id = self.active_pane_id(cx);
         let is_local_terminal = self
-            .active_tab()
+            .active_tab(cx)
             .is_some_and(|tab| tab.kind == TabKind::LocalTerminal);
         let can_configure_remote_integration = self.active_ssh_terminal_node_id(cx).is_some();
         let remote_integration_pending = self.remote_shell_integration_pending(cx);
@@ -160,9 +160,9 @@ impl WorkspaceApp {
             .t("settings_view.connections.shell_integration.toolbar_action");
         let target_indicator_is_local =
             is_local_terminal && target_label == self.i18n.t("terminal.command_bar.local_shell");
-        let can_split = self.active_tab().is_some_and(|tab| {
+        let can_split = self.active_tab(cx).is_some_and(|tab| {
             tab.kind == TabKind::LocalTerminal
-                && !self.active_tab_has_serial_terminal()
+                && !self.active_tab_has_serial_terminal(cx)
                 && tab
                     .root_pane
                     .as_ref()
@@ -767,7 +767,7 @@ impl WorkspaceApp {
     ) -> AnyElement {
         let theme = self.tokens.ui;
         let entries = self.terminal_broadcast_entries(cx);
-        let active_pane_id = self.active_pane_id();
+        let active_pane_id = self.active_pane_id(cx);
         let selectable = entries
             .iter()
             .filter(|(pane_id, _, _)| Some(*pane_id) != active_pane_id)

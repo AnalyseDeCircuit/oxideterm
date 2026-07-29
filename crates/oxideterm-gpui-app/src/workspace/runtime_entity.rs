@@ -248,6 +248,7 @@ pub(in crate::workspace) struct WorkspaceRuntimeEntity {
     runtime_effect_delivery_pending: bool,
     lifecycle: WorkspaceRuntimeLifecycle,
     terminal_ssh_nodes: HashMap<TerminalSessionId, NodeId>,
+    terminal_endpoint_sessions: HashMap<TerminalSessionId, SharedTerminalSession>,
     pending_ssh_terminal_opens: VecDeque<PendingSshTerminalOpen>,
     node_transport_attempts: HashMap<NodeId, NodeTransportAttempt>,
     next_node_transport_attempt_id: u64,
@@ -342,6 +343,7 @@ impl WorkspaceRuntimeEntity {
             runtime_effect_delivery_pending: false,
             lifecycle: WorkspaceRuntimeLifecycle::Running,
             terminal_ssh_nodes: HashMap::new(),
+            terminal_endpoint_sessions: HashMap::new(),
             pending_ssh_terminal_opens: VecDeque::new(),
             node_transport_attempts: HashMap::new(),
             next_node_transport_attempt_id: 0,
@@ -418,12 +420,36 @@ impl WorkspaceRuntimeEntity {
         session_id: TerminalSessionId,
     ) -> Option<NodeId> {
         // Removing a terminal consumer never changes node or transport ownership.
+        self.terminal_endpoint_sessions.remove(&session_id);
         let node_id = self.terminal_ssh_nodes.remove(&session_id)?;
         let endpoint_session_id = session_id.0.to_string();
         let _ = self
             .node_router
             .unbind_terminal_session(&node_id, &endpoint_session_id);
         Some(node_id)
+    }
+
+    pub(in crate::workspace) fn retain_terminal_endpoint_session(
+        &mut self,
+        session_id: TerminalSessionId,
+        session: SharedTerminalSession,
+    ) -> bool {
+        if self.lifecycle != WorkspaceRuntimeLifecycle::Running
+            || !self.terminal_ssh_nodes.contains_key(&session_id)
+        {
+            return false;
+        }
+        // Runtime retains the shared terminal independently of any tab or
+        // native window mount until the terminal registration is removed.
+        self.terminal_endpoint_sessions.insert(session_id, session);
+        true
+    }
+
+    pub(in crate::workspace) fn terminal_session_lifecycles(&self) -> Vec<TerminalLifecycle> {
+        self.terminal_endpoint_sessions
+            .values()
+            .map(|session| session.lock().lifecycle())
+            .collect()
     }
 
     pub(in crate::workspace) fn bind_ssh_terminal_endpoint(
@@ -1039,6 +1065,7 @@ impl WorkspaceRuntimeEntity {
         self.runtime_effects.clear();
         self.runtime_effect_delivery_pending = false;
         self.pending_ssh_terminal_opens.clear();
+        self.terminal_endpoint_sessions.clear();
         self.terminal_ssh_nodes.clear();
 
         // Nodes are disconnected child-first so jump-host ancestors outlive
@@ -1097,6 +1124,10 @@ impl WorkspaceRuntimeEntity {
         &self,
     ) -> Option<settings::RemoteShellIntegrationConfirmSnapshot> {
         self.remote_shell_integration.confirm_snapshot()
+    }
+
+    pub(in crate::workspace) fn remote_shell_integration_confirm_open(&self) -> bool {
+        self.remote_shell_integration.confirm_open()
     }
 
     pub(in crate::workspace) fn remote_shell_integration_card_snapshot(
@@ -3418,7 +3449,18 @@ mod tests {
         node_router.emitter().subscribe(endpoint_event_tx);
 
         let session_id = TerminalSessionId(7);
+        let terminal_session: SharedTerminalSession = Arc::new(parking_lot::Mutex::new(
+            oxideterm_terminal::TerminalSession::recording_playback(
+                80,
+                24,
+                oxideterm_terminal::GraphicsOptions::default(),
+                1_000,
+            ),
+        ));
+        let terminal_session_weak = Arc::downgrade(&terminal_session);
         entity.update(cx, |entity, _cx| {
+            assert!(entity.register_ssh_terminal_session(session_id, node_id.clone()));
+            assert!(entity.retain_terminal_endpoint_session(session_id, terminal_session.clone()));
             entity.bind_ssh_terminal_endpoint(
                 &node_id,
                 TerminalEndpoint {
@@ -3427,12 +3469,23 @@ mod tests {
                     session_id: session_id.0.to_string(),
                 },
             );
-            assert!(entity.register_ssh_terminal_session(session_id, node_id.clone()));
+            assert_eq!(entity.terminal_session_lifecycles().len(), 1);
+        });
+        drop(terminal_session);
+        assert!(
+            terminal_session_weak.upgrade().is_some(),
+            "runtime must retain the terminal after its tab-side handoff"
+        );
+        entity.update(cx, |entity, _cx| {
             assert_eq!(
                 entity.unregister_ssh_terminal_session(session_id),
                 Some(node_id.clone())
             );
         });
+        assert!(
+            terminal_session_weak.upgrade().is_none(),
+            "terminal unregister must release the retained endpoint session"
+        );
         assert!(matches!(
             endpoint_event_rx.try_recv(),
             Ok(NodeStateEvent::TerminalEndpointChanged {

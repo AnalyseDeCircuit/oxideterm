@@ -950,7 +950,7 @@ window.focus(&this.focus_handle, cx);
         cx: &mut Context<Self>,
     ) -> bool {
         self.ai_active_terminal_context_available(cx)
-            || self.ai_active_tab_has_split_panes()
+            || self.ai_active_tab_has_split_panes(cx)
             || self.ai_has_ide_context(cx)
             || self.ai_has_sftp_context(cx)
     }
@@ -990,7 +990,7 @@ window.focus(&this.focus_handle, cx);
                 ),
             );
         }
-        if self.ai_active_tab_has_split_panes() && self.ai.chat.include_context {
+        if self.ai_active_tab_has_split_panes(cx) && self.ai.chat.include_context {
             chips = chips.child(
                 ai_context_chip(
                     &self.tokens,

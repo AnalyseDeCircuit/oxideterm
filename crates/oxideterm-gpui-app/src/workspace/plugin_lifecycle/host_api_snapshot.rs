@@ -120,7 +120,7 @@ pub(super) fn native_plugin_host_api_snapshot_from_workspace(
             "activeConnections": monitor_stats.active_connections,
             "totalSessions": monitor_stats.total_terminals,
         }),
-        layout: workspace.native_plugin_layout_snapshot(),
+        layout: workspace.native_plugin_layout_snapshot(cx),
         connections,
         saved_connections,
         connection_states,

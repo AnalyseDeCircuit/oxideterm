@@ -666,7 +666,7 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> QuickCommandsRenderSnapshot {
         let active_label = self
-            .active_tab()
+            .active_tab(cx)
             .map(|tab| self.tab_display_title(tab))
             .unwrap_or_default();
         self.terminal
@@ -718,7 +718,7 @@ impl WorkspaceApp {
             return;
         };
         let target_fields = [self
-            .active_tab()
+            .active_tab(cx)
             .map(|tab| self.tab_display_title(tab))
             .unwrap_or_default()];
         let key = event.keystroke.key.as_str();

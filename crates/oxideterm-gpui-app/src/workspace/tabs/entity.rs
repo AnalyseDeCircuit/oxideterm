@@ -8,6 +8,9 @@ const RECORDING_ELAPSED_TICK_INTERVAL: Duration = Duration::from_millis(530);
 
 /// Owns workspace-wide tab identity, terminal mounts, navigation, and close lifecycle.
 pub(in crate::workspace) struct WorkspaceTabHostEntity {
+    tabs: Vec<Tab>,
+    active_tab_id: Option<TabId>,
+    active_tab_index_cache: Cell<Option<(TabId, usize)>>,
     next_tab_id: u64,
     next_pane_id: u64,
     next_session_id: u64,
@@ -70,6 +73,29 @@ pub(in crate::workspace) struct TabMountCleanupPlan {
     pub(in crate::workspace) detached_window: Option<AnyWindowHandle>,
 }
 
+pub(in crate::workspace) struct TabRemovalTransition {
+    pub(in crate::workspace) tab: Tab,
+    pub(in crate::workspace) mount_cleanup: TabMountCleanupPlan,
+    pub(in crate::workspace) previous_active_tab_id: Option<TabId>,
+    pub(in crate::workspace) next_active_tab_id: Option<TabId>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(in crate::workspace) struct MainTabSelectionChange {
+    pub(in crate::workspace) previous: Option<TabId>,
+    pub(in crate::workspace) current: Option<TabId>,
+}
+
+pub(in crate::workspace) struct TabDetachTransition {
+    pub(in crate::workspace) mount_id: TabMountId,
+    pub(in crate::workspace) selection: MainTabSelectionChange,
+}
+
+pub(in crate::workspace) struct TabReturnTransition {
+    pub(in crate::workspace) cleanup: TabMountCleanupPlan,
+    pub(in crate::workspace) selection: MainTabSelectionChange,
+}
+
 #[derive(Clone, Copy)]
 struct TerminalPaneWindowAffinity {
     home: AnyWindowHandle,
@@ -119,6 +145,9 @@ pub(in crate::workspace) enum TabCloseConfirmKeyAction {
 impl WorkspaceTabHostEntity {
     pub(in crate::workspace) fn new() -> Self {
         Self {
+            tabs: Vec::new(),
+            active_tab_id: None,
+            active_tab_index_cache: Cell::new(None),
             next_tab_id: 1,
             next_pane_id: 1,
             next_session_id: 1,
@@ -144,6 +173,291 @@ impl WorkspaceTabHostEntity {
             recording_elapsed_generation: 0,
             recording_elapsed_task: None,
         }
+    }
+
+    pub(in crate::workspace) fn tabs(&self) -> &[Tab] {
+        &self.tabs
+    }
+
+    pub(in crate::workspace) fn active_tab_id(&self) -> Option<TabId> {
+        self.active_tab_id
+    }
+
+    pub(in crate::workspace) fn active_tab_index(&self) -> Option<usize> {
+        let active_tab_id = self.active_tab_id?;
+        if let Some((cached_tab_id, cached_index)) = self.active_tab_index_cache.get()
+            && cached_tab_id == active_tab_id
+            && self
+                .tabs
+                .get(cached_index)
+                .is_some_and(|tab| tab.id == active_tab_id)
+        {
+            return Some(cached_index);
+        }
+        let index = self.tabs.iter().position(|tab| tab.id == active_tab_id)?;
+        self.active_tab_index_cache
+            .set(Some((active_tab_id, index)));
+        Some(index)
+    }
+
+    pub(in crate::workspace) fn tab_index_by_id(&self, tab_id: TabId) -> Option<usize> {
+        self.tabs.iter().position(|tab| tab.id == tab_id)
+    }
+
+    pub(in crate::workspace) fn tab_by_id(&self, tab_id: TabId) -> Option<&Tab> {
+        self.tab_index_by_id(tab_id)
+            .and_then(|index| self.tabs.get(index))
+    }
+
+    fn tab_mut_by_id(&mut self, tab_id: TabId) -> Option<&mut Tab> {
+        let index = self.tab_index_by_id(tab_id)?;
+        self.tabs.get_mut(index)
+    }
+
+    pub(in crate::workspace) fn active_tab(&self) -> Option<&Tab> {
+        self.active_tab_index()
+            .and_then(|index| self.tabs.get(index))
+    }
+
+    fn active_tab_mut(&mut self) -> Option<&mut Tab> {
+        let index = self.active_tab_index()?;
+        self.tabs.get_mut(index)
+    }
+
+    /// Inserts a tab into the canonical collection and invalidates index projections.
+    pub(in crate::workspace) fn insert_tab(&mut self, tab: Tab) {
+        debug_assert!(
+            self.tab_by_id(tab.id).is_none(),
+            "tab identity must be unique inside one workspace"
+        );
+        self.tabs.push(tab);
+        self.active_tab_index_cache.set(None);
+    }
+
+    pub(in crate::workspace) fn insert_and_select_main_tab(&mut self, tab: Tab) -> Option<TabId> {
+        let tab_id = tab.id;
+        self.insert_tab(tab);
+        self.select_main_tab(Some(tab_id))
+    }
+
+    /// Removes one canonical tab and chooses the next main-window selection atomically.
+    pub(in crate::workspace) fn remove_tab_at(
+        &mut self,
+        index: usize,
+    ) -> Option<TabRemovalTransition> {
+        let previous_active_tab_id = self.active_tab_id;
+        let tab = self.tabs.get(index)?;
+        let removed_was_active = Some(tab.id) == previous_active_tab_id;
+        let tab = self.tabs.remove(index);
+        let mount_cleanup = self.close_tab_mount(tab.id);
+        let next_active_tab_id = if !removed_was_active
+            && previous_active_tab_id.is_some_and(|tab_id| {
+                self.tab_by_id(tab_id)
+                    .is_some_and(|tab| !self.is_outside_main_window(tab.id))
+            }) {
+            previous_active_tab_id
+        } else {
+            self.tabs
+                .iter()
+                .enumerate()
+                .skip(index.min(self.tabs.len().saturating_sub(1)))
+                .find(|(_, tab)| !self.is_outside_main_window(tab.id))
+                .or_else(|| {
+                    self.tabs
+                        .iter()
+                        .enumerate()
+                        .take(index)
+                        .rev()
+                        .find(|(_, tab)| !self.is_outside_main_window(tab.id))
+                })
+                .map(|(_, tab)| tab.id)
+        };
+        self.select_main_tab(next_active_tab_id);
+        Some(TabRemovalTransition {
+            tab,
+            mount_cleanup,
+            previous_active_tab_id,
+            next_active_tab_id,
+        })
+    }
+
+    /// Reorders a main-window tab among the visible main-window tabs.
+    pub(in crate::workspace) fn move_main_tab_to_visible_index(
+        &mut self,
+        tab_id: TabId,
+        target_visible_index: usize,
+    ) -> bool {
+        let Some(source_index) = self.tab_index_by_id(tab_id) else {
+            return false;
+        };
+        let visible_tab_ids = self
+            .tabs
+            .iter()
+            .filter(|tab| tab.id != tab_id && !self.is_outside_main_window(tab.id))
+            .map(|tab| tab.id)
+            .collect::<Vec<_>>();
+        let target_visible_index = target_visible_index.min(visible_tab_ids.len());
+        let anchor_tab_id = visible_tab_ids.get(target_visible_index).copied();
+        let trailing_tab_id = target_visible_index
+            .checked_sub(1)
+            .and_then(|index| visible_tab_ids.get(index).copied());
+
+        let moved_tab = self.tabs.remove(source_index);
+        let insertion_index = anchor_tab_id
+            .and_then(|anchor_id| self.tab_index_by_id(anchor_id))
+            .or_else(|| {
+                trailing_tab_id
+                    .and_then(|trailing_id| self.tab_index_by_id(trailing_id))
+                    .map(|index| index + 1)
+            })
+            .unwrap_or_else(|| source_index.min(self.tabs.len()))
+            .min(self.tabs.len());
+        let changed = insertion_index != source_index.min(self.tabs.len());
+        self.tabs.insert(insertion_index, moved_tab);
+        self.active_tab_index_cache.set(None);
+        changed
+    }
+
+    pub(in crate::workspace) fn set_active_pane(
+        &mut self,
+        tab_id: Option<TabId>,
+        pane_id: PaneId,
+    ) -> bool {
+        let tab = match tab_id {
+            Some(tab_id) => self.tab_mut_by_id(tab_id),
+            None => self.active_tab_mut(),
+        };
+        let Some(tab) = tab else {
+            return false;
+        };
+        if tab.active_pane_id == Some(pane_id) {
+            return false;
+        }
+        tab.active_pane_id = Some(pane_id);
+        true
+    }
+
+    pub(in crate::workspace) fn split_pane(
+        &mut self,
+        tab_id: TabId,
+        active_pane_id: PaneId,
+        group_id: PaneId,
+        direction: SplitDirection,
+        pane_id: PaneId,
+        session_id: TerminalSessionId,
+    ) -> bool {
+        let Some(tab) = self.tab_mut_by_id(tab_id) else {
+            return false;
+        };
+        let split = tab.root_pane.as_mut().is_some_and(|root_pane| {
+            root_pane.split_active(active_pane_id, group_id, direction, pane_id, session_id)
+        });
+        if split {
+            tab.active_pane_id = Some(pane_id);
+        }
+        split
+    }
+
+    pub(in crate::workspace) fn close_pane(
+        &mut self,
+        tab_id: TabId,
+        pane_id: PaneId,
+    ) -> Option<PaneId> {
+        let tab = self.tab_mut_by_id(tab_id)?;
+        let root_pane = tab.root_pane.as_mut()?;
+        let next_active_pane_id = root_pane.close_pane(pane_id)?;
+        if let Some(replacement) = root_pane.single_child_replacement() {
+            tab.root_pane = Some(replacement);
+        }
+        tab.active_pane_id = Some(next_active_pane_id);
+        Some(next_active_pane_id)
+    }
+
+    pub(in crate::workspace) fn reset_to_single_pane(
+        &mut self,
+        tab_id: TabId,
+        pane_id: PaneId,
+        session_id: TerminalSessionId,
+    ) -> bool {
+        let Some(tab) = self.tab_mut_by_id(tab_id) else {
+            return false;
+        };
+        tab.root_pane = Some(PaneNode::leaf(pane_id, session_id));
+        tab.active_pane_id = Some(pane_id);
+        true
+    }
+
+    pub(in crate::workspace) fn update_group_sizes(
+        &mut self,
+        tab_id: Option<TabId>,
+        group_id: PaneId,
+        sizes: &[f32],
+    ) -> bool {
+        let tab = match tab_id {
+            Some(tab_id) => self.tab_mut_by_id(tab_id),
+            None => self.active_tab_mut(),
+        };
+        tab.and_then(|tab| tab.root_pane.as_mut())
+            .is_some_and(|root_pane| root_pane.update_group_sizes(group_id, sizes))
+    }
+
+    pub(in crate::workspace) fn reset_group_sizes(
+        &mut self,
+        tab_id: Option<TabId>,
+        group_id: PaneId,
+    ) -> bool {
+        let tab = match tab_id {
+            Some(tab_id) => self.tab_mut_by_id(tab_id),
+            None => self.active_tab_mut(),
+        };
+        tab.and_then(|tab| tab.root_pane.as_mut())
+            .is_some_and(|root_pane| root_pane.reset_group_sizes(group_id))
+    }
+
+    pub(in crate::workspace) fn replace_terminal_session(
+        &mut self,
+        tab_id: TabId,
+        old_session_id: TerminalSessionId,
+        old_pane_id: PaneId,
+        new_pane_id: PaneId,
+        new_session_id: TerminalSessionId,
+    ) -> Option<PaneId> {
+        let tab = self.tab_mut_by_id(tab_id)?;
+        let replaced_pane_id =
+            tab.root_pane
+                .as_mut()?
+                .replace_session(old_session_id, new_pane_id, new_session_id)?;
+        if tab.active_pane_id == Some(old_pane_id) {
+            tab.active_pane_id = Some(new_pane_id);
+        }
+        Some(replaced_pane_id)
+    }
+
+    pub(in crate::workspace) fn sync_tab_titles(
+        &mut self,
+        mut title_for_key: impl FnMut(&'static str) -> String,
+    ) {
+        for tab in &mut self.tabs {
+            if let TabTitleSource::I18nKey(key) = tab.title_source {
+                tab.title = title_for_key(key);
+            }
+        }
+    }
+
+    /// Updates the canonical main-window selection and navigation history together.
+    pub(in crate::workspace) fn select_main_tab(
+        &mut self,
+        active_tab_id: Option<TabId>,
+    ) -> Option<TabId> {
+        debug_assert!(
+            active_tab_id.is_none_or(|tab_id| self.tab_by_id(tab_id).is_some()),
+            "main-window selection must reference a canonical tab"
+        );
+        let previous_active_tab_id = self.active_tab_id;
+        self.active_tab_id = active_tab_id;
+        self.active_tab_index_cache.set(None);
+        self.observe_active_tab(active_tab_id);
+        previous_active_tab_id
     }
 
     pub(in crate::workspace) fn alloc_tab_id(&mut self) -> TabId {
@@ -312,6 +626,25 @@ impl WorkspaceTabHostEntity {
         Some(mount_id)
     }
 
+    pub(in crate::workspace) fn begin_detach_from_main(
+        &mut self,
+        tab_id: TabId,
+    ) -> Option<TabDetachTransition> {
+        let tab_index = self.tab_index_by_id(tab_id)?;
+        let previous = self.active_tab_id;
+        let mount_id = self.begin_detach(tab_id)?;
+        let current = if previous == Some(tab_id) {
+            self.nearest_main_tab(tab_index)
+        } else {
+            previous
+        };
+        self.select_main_tab(current);
+        Some(TabDetachTransition {
+            mount_id,
+            selection: MainTabSelectionChange { previous, current },
+        })
+    }
+
     pub(in crate::workspace) fn commit_detach(
         &mut self,
         tab_id: TabId,
@@ -359,6 +692,20 @@ impl WorkspaceTabHostEntity {
         true
     }
 
+    pub(in crate::workspace) fn rollback_detach_to_main(
+        &mut self,
+        tab_id: TabId,
+        mount_id: TabMountId,
+    ) -> Option<MainTabSelectionChange> {
+        if !self.rollback_detach(tab_id, mount_id) {
+            return None;
+        }
+        let previous = self.active_tab_id;
+        let current = self.tab_by_id(tab_id).map(|tab| tab.id);
+        self.select_main_tab(current);
+        Some(MainTabSelectionChange { previous, current })
+    }
+
     pub(in crate::workspace) fn return_to_main(
         &mut self,
         tab_id: TabId,
@@ -376,6 +723,21 @@ impl WorkspaceTabHostEntity {
         })
     }
 
+    pub(in crate::workspace) fn return_to_main_and_select(
+        &mut self,
+        tab_id: TabId,
+        reason: TabMountCloseReason,
+    ) -> Option<TabReturnTransition> {
+        let cleanup = self.return_to_main(tab_id, reason)?;
+        let previous = self.active_tab_id;
+        let current = self.tab_by_id(tab_id).map(|tab| tab.id);
+        self.select_main_tab(current);
+        Some(TabReturnTransition {
+            cleanup,
+            selection: MainTabSelectionChange { previous, current },
+        })
+    }
+
     pub(in crate::workspace) fn release_detached_window(
         &mut self,
         tab_id: TabId,
@@ -389,6 +751,24 @@ impl WorkspaceTabHostEntity {
                 ..
             }) if current_mount_id == mount_id && current_window_id == window_id => {
                 self.return_to_main(tab_id, TabMountCloseReason::DetachedWindowReleased)
+            }
+            _ => None,
+        }
+    }
+
+    pub(in crate::workspace) fn release_detached_window_and_select(
+        &mut self,
+        tab_id: TabId,
+        mount_id: TabMountId,
+        window_id: gpui::WindowId,
+    ) -> Option<TabReturnTransition> {
+        match self.tab_mounts.get(&tab_id).copied() {
+            Some(TabMount::Detached {
+                mount_id: current_mount_id,
+                window_id: current_window_id,
+                ..
+            }) if current_mount_id == mount_id && current_window_id == window_id => {
+                self.return_to_main_and_select(tab_id, TabMountCloseReason::DetachedWindowReleased)
             }
             _ => None,
         }
@@ -435,6 +815,23 @@ impl WorkspaceTabHostEntity {
                 self.tab_mounts.get(&tab_id),
                 Some(TabMount::Detached { .. })
             )
+    }
+
+    fn nearest_main_tab(&self, index: usize) -> Option<TabId> {
+        self.tabs
+            .iter()
+            .enumerate()
+            .skip(index + 1)
+            .find(|(_, tab)| !self.is_outside_main_window(tab.id))
+            .or_else(|| {
+                self.tabs
+                    .iter()
+                    .enumerate()
+                    .take(index)
+                    .rev()
+                    .find(|(_, tab)| !self.is_outside_main_window(tab.id))
+            })
+            .map(|(_, tab)| tab.id)
     }
 
     pub(in crate::workspace) fn is_detached(&self, tab_id: TabId) -> bool {
@@ -618,6 +1015,14 @@ impl WorkspaceTabHostEntity {
         self.close_confirm.as_ref()
     }
 
+    pub(in crate::workspace) fn close_confirm_phase(
+        &self,
+    ) -> Option<oxideterm_gpui_ui::motion::ExitPhase> {
+        self.close_confirm
+            .as_ref()
+            .map(|_| self.close_confirm_presence.phase())
+    }
+
     pub(in crate::workspace) fn close_confirm_snapshot(&self) -> Option<TabCloseConfirmSnapshot> {
         self.close_confirm
             .as_ref()
@@ -747,6 +1152,17 @@ mod tests {
         }
     }
 
+    fn test_tab(tab_id: TabId, root_pane: Option<PaneNode>) -> Tab {
+        Tab {
+            id: tab_id,
+            kind: TabKind::LocalTerminal,
+            title: format!("tab-{}", tab_id.0),
+            title_source: TabTitleSource::Static,
+            active_pane_id: root_pane.as_ref().map(PaneNode::first_pane_id),
+            root_pane,
+        }
+    }
+
     struct TabHostEventRecorder {
         events: Vec<WorkspaceTabHostEvent>,
         _subscription: Option<Subscription>,
@@ -762,6 +1178,102 @@ mod tests {
         assert_eq!(tab_host.alloc_tab_id(), TabId(2));
         assert_eq!(tab_host.alloc_pane_id(), PaneId(2));
         assert_eq!(tab_host.alloc_session_id(), TerminalSessionId(2));
+    }
+
+    #[test]
+    fn canonical_tabs_keep_selection_reorder_and_removal_atomic() {
+        let mut tab_host = WorkspaceTabHostEntity::new();
+        let first = TabId(1);
+        let second = TabId(2);
+        let third = TabId(3);
+
+        // Collection changes and main-window selection share one write owner.
+        assert_eq!(
+            tab_host.insert_and_select_main_tab(test_tab(first, None)),
+            None
+        );
+        assert_eq!(
+            tab_host.insert_and_select_main_tab(test_tab(second, None)),
+            Some(first)
+        );
+        tab_host.insert_tab(test_tab(third, None));
+        assert_eq!(tab_host.active_tab_id(), Some(second));
+        assert!(tab_host.move_main_tab_to_visible_index(third, 0));
+        assert_eq!(
+            tab_host.tabs().iter().map(|tab| tab.id).collect::<Vec<_>>(),
+            vec![third, first, second]
+        );
+
+        let removed = tab_host
+            .remove_tab_at(2)
+            .expect("active tab removal transition");
+        assert_eq!(removed.tab.id, second);
+        assert_eq!(removed.previous_active_tab_id, Some(second));
+        assert_eq!(removed.next_active_tab_id, Some(first));
+        assert_eq!(removed.mount_cleanup.reason, TabMountCloseReason::TabClosed);
+        assert_eq!(tab_host.active_tab_id(), Some(first));
+        assert!(tab_host.tab_by_id(second).is_none());
+    }
+
+    #[test]
+    fn pane_tree_transitions_remain_inside_the_canonical_tab_owner() {
+        let mut tab_host = WorkspaceTabHostEntity::new();
+        let tab_id = TabId(1);
+        let first_pane = PaneId(1);
+        let first_session = TerminalSessionId(1);
+        let split_group = PaneId(3);
+        let second_pane = PaneId(2);
+        let second_session = TerminalSessionId(2);
+        tab_host.insert_and_select_main_tab(test_tab(
+            tab_id,
+            Some(PaneNode::leaf(first_pane, first_session)),
+        ));
+
+        // Split, focus, resize, close, and reconnect replacement mutate one tree.
+        assert!(tab_host.split_pane(
+            tab_id,
+            first_pane,
+            split_group,
+            SplitDirection::Horizontal,
+            second_pane,
+            second_session,
+        ));
+        assert_eq!(
+            tab_host.active_tab().and_then(|tab| tab.active_pane_id),
+            Some(second_pane)
+        );
+        assert_eq!(
+            tab_host
+                .active_tab()
+                .and_then(|tab| tab.root_pane.as_ref())
+                .map(PaneNode::pane_count),
+            Some(2)
+        );
+        assert!(tab_host.set_active_pane(Some(tab_id), first_pane));
+        assert!(tab_host.update_group_sizes(Some(tab_id), split_group, &[35.0, 65.0]));
+        assert!(tab_host.reset_group_sizes(Some(tab_id), split_group));
+        assert_eq!(tab_host.close_pane(tab_id, second_pane), Some(first_pane));
+
+        let replacement_pane = PaneId(4);
+        let replacement_session = TerminalSessionId(4);
+        assert_eq!(
+            tab_host.replace_terminal_session(
+                tab_id,
+                first_session,
+                first_pane,
+                replacement_pane,
+                replacement_session,
+            ),
+            Some(first_pane)
+        );
+        let tab = tab_host.active_tab().expect("active terminal tab");
+        assert_eq!(tab.active_pane_id, Some(replacement_pane));
+        assert_eq!(
+            tab.root_pane
+                .as_ref()
+                .and_then(|root| root.session_id_for_pane(replacement_pane)),
+            Some(replacement_session)
+        );
     }
 
     #[test]
@@ -1504,5 +2016,79 @@ mod tests {
                 detached_window
             );
         });
+    }
+
+    #[gpui::test]
+    fn detached_sftp_and_forward_mount_release_preserves_runtime_owners(cx: &mut TestAppContext) {
+        let sftp_window: AnyWindowHandle = cx.add_window(|_window, _cx| TabHostTestRoot).into();
+        let forwards_window: AnyWindowHandle = cx.add_window(|_window, _cx| TabHostTestRoot).into();
+        let tab_host = cx.new(|_| WorkspaceTabHostEntity::new());
+        let (sftp_tab_id, forwards_tab_id) = tab_host.update(cx, |tab_host, _cx| {
+            (tab_host.alloc_tab_id(), tab_host.alloc_tab_id())
+        });
+
+        let ssh_registry = SshConnectionRegistry::new(ConnectionPoolConfig::default());
+        let node_router = NodeRouter::new(ssh_registry.clone());
+        let node_id = NodeId::new("shared-runtime-node");
+        let config = SshConfig::default();
+        node_router.upsert_node(node_id.clone(), config.clone());
+        let node_consumer = ConnectionConsumer::NodeRouter(node_id.0.clone());
+        let node_handle = ssh_registry.acquire(config.clone(), node_consumer.clone());
+        node_router
+            .bind_connection(&node_id, node_handle.connection_id().to_string())
+            .expect("node binding");
+
+        let sftp_consumer = ConnectionConsumer::Sftp(node_id.0.clone());
+        let sftp_handle = ssh_registry.acquire(config.clone(), sftp_consumer.clone());
+        let forwarding_session = forwards::ForwardingRuntimeService::session_id_for_node(&node_id);
+        let forwarding_consumer = ConnectionConsumer::PortForward(forwarding_session.clone());
+        let forwarding_handle = ssh_registry.acquire(config, forwarding_consumer.clone());
+        let forwarding_registry = ForwardingRegistry::new();
+        forwarding_registry.register(forwarding_session.clone(), forwarding_handle.clone());
+
+        tab_host.update(cx, |tab_host, _cx| {
+            let sftp_mount = tab_host
+                .begin_detach(sftp_tab_id)
+                .expect("SFTP detach reservation");
+            assert!(tab_host.commit_detach(sftp_tab_id, sftp_mount, sftp_window));
+            let forwards_mount = tab_host
+                .begin_detach(forwards_tab_id)
+                .expect("forwards detach reservation");
+            assert!(tab_host.commit_detach(forwards_tab_id, forwards_mount, forwards_window));
+
+            assert!(
+                tab_host
+                    .release_detached_window(sftp_tab_id, sftp_mount, sftp_window.window_id(),)
+                    .is_some()
+            );
+            let forwards_cleanup = tab_host.close_tab_mount(forwards_tab_id);
+            assert_eq!(forwards_cleanup.detached_window, Some(forwards_window));
+        });
+
+        // Native mount cleanup does not own node, transfer, or tunnel teardown.
+        assert_eq!(
+            node_router.connection_id_for_node(&node_id).as_deref(),
+            Some(node_handle.connection_id())
+        );
+        let connection_info = ssh_registry
+            .get(node_handle.connection_id())
+            .expect("shared SSH connection remains registered")
+            .info();
+        assert!(connection_info.consumers.contains(&node_consumer));
+        assert!(connection_info.consumers.contains(&sftp_consumer));
+        assert!(connection_info.consumers.contains(&forwarding_consumer));
+        assert_eq!(sftp_handle.connection_id(), node_handle.connection_id());
+        assert_eq!(
+            forwarding_handle.connection_id(),
+            node_handle.connection_id()
+        );
+        assert_eq!(
+            forwarding_registry
+                .get(&forwarding_session)
+                .expect("forwarding manager survives UI mount release")
+                .ssh_connection_handle()
+                .connection_id(),
+            node_handle.connection_id()
+        );
     }
 }

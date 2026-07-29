@@ -85,14 +85,17 @@ impl WorkspaceApp {
 
         self.register_terminal_pane(pane_id, session_id, pane.clone(), window, cx);
         self.refresh_native_plugin_terminal_hooks(cx);
-        self.tabs.push(Tab {
-            id: tab_id,
-            kind: TabKind::LocalTerminal,
-            title,
-            title_source: TabTitleSource::Static,
-            root_pane: Some(PaneNode::leaf(pane_id, session_id)),
-            active_pane_id: Some(pane_id),
-        });
+        self.insert_tab(
+            Tab {
+                id: tab_id,
+                kind: TabKind::LocalTerminal,
+                title,
+                title_source: TabTitleSource::Static,
+                root_pane: Some(PaneNode::leaf(pane_id, session_id)),
+                active_pane_id: Some(pane_id),
+            },
+            cx,
+        );
         self.bind_terminal_location(tab_id, pane_id, session_id, cx);
         self.set_main_window_active_tab(Some(tab_id), cx);
         self.active_surface = ActiveSurface::Terminal;
@@ -125,14 +128,17 @@ impl WorkspaceApp {
         // but it still participates in the normal tab/pane/session registry.
         self.register_terminal_pane(pane_id, session_id, pane.clone(), window, cx);
         self.refresh_native_plugin_terminal_hooks(cx);
-        self.tabs.push(Tab {
-            id: tab_id,
-            kind: TabKind::LocalTerminal,
-            title,
-            title_source: TabTitleSource::Static,
-            root_pane: Some(PaneNode::leaf(pane_id, session_id)),
-            active_pane_id: Some(pane_id),
-        });
+        self.insert_tab(
+            Tab {
+                id: tab_id,
+                kind: TabKind::LocalTerminal,
+                title,
+                title_source: TabTitleSource::Static,
+                root_pane: Some(PaneNode::leaf(pane_id, session_id)),
+                active_pane_id: Some(pane_id),
+            },
+            cx,
+        );
         self.bind_terminal_location(tab_id, pane_id, session_id, cx);
         self.set_main_window_active_tab(Some(tab_id), cx);
         self.active_surface = ActiveSurface::Terminal;
@@ -166,14 +172,17 @@ impl WorkspaceApp {
         self.register_terminal_pane(pane_id, session_id, pane.clone(), window, cx);
         self.serial_terminal_configs.insert(session_id, config);
         self.refresh_native_plugin_terminal_hooks(cx);
-        self.tabs.push(Tab {
-            id: tab_id,
-            kind: TabKind::LocalTerminal,
-            title,
-            title_source: TabTitleSource::Static,
-            root_pane: Some(PaneNode::leaf(pane_id, session_id)),
-            active_pane_id: Some(pane_id),
-        });
+        self.insert_tab(
+            Tab {
+                id: tab_id,
+                kind: TabKind::LocalTerminal,
+                title,
+                title_source: TabTitleSource::Static,
+                root_pane: Some(PaneNode::leaf(pane_id, session_id)),
+                active_pane_id: Some(pane_id),
+            },
+            cx,
+        );
         self.bind_terminal_location(tab_id, pane_id, session_id, cx);
         self.set_main_window_active_tab(Some(tab_id), cx);
         self.active_surface = ActiveSurface::Terminal;
@@ -756,14 +765,17 @@ impl WorkspaceApp {
             window,
             cx,
         )?;
-        self.tabs.push(Tab {
-            id: tab_id,
-            kind: TabKind::SshTerminal,
-            title,
-            title_source: TabTitleSource::Static,
-            root_pane: Some(PaneNode::leaf(pane_id, session_id)),
-            active_pane_id: Some(pane_id),
-        });
+        self.insert_tab(
+            Tab {
+                id: tab_id,
+                kind: TabKind::SshTerminal,
+                title,
+                title_source: TabTitleSource::Static,
+                root_pane: Some(PaneNode::leaf(pane_id, session_id)),
+                active_pane_id: Some(pane_id),
+            },
+            cx,
+        );
         self.bind_terminal_location(tab_id, pane_id, session_id, cx);
         self.set_main_window_active_tab(Some(tab_id), cx);
         self.active_surface = ActiveSurface::Terminal;
@@ -985,8 +997,13 @@ impl WorkspaceApp {
             ws_token: zeroize::Zeroizing::new(format!("native-terminal-{}", session_id.0)),
             session_id: session_id.0.to_string(),
         };
-        self.terminal_endpoint_sessions
-            .insert(session_id, WorkspaceTerminalEndpointSession { session });
+        let retained = self.workspace_runtime.update(cx, |runtime, _cx| {
+            runtime.retain_terminal_endpoint_session(session_id, session)
+        });
+        debug_assert!(
+            retained,
+            "registered SSH terminal must retain its endpoint session"
+        );
         // Register every endpoint. NodeRouter keeps the first endpoint primary
         // and can elect another live endpoint when that terminal closes.
         self.workspace_runtime
@@ -1000,18 +1017,25 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let tab_id = if let Some(tab) = self.tabs.iter().find(|tab| tab.kind == TabKind::Settings) {
+        let tab_id = if let Some(tab) = self
+            .tabs(cx)
+            .iter()
+            .find(|tab| tab.kind == TabKind::Settings)
+        {
             tab.id
         } else {
             let tab_id = self.alloc_tab_id(cx);
-            self.tabs.push(Tab {
-                id: tab_id,
-                kind: TabKind::Settings,
-                title: self.i18n.t("settings_view.title"),
-                title_source: TabTitleSource::I18nKey("settings_view.title"),
-                root_pane: None,
-                active_pane_id: None,
-            });
+            self.insert_tab(
+                Tab {
+                    id: tab_id,
+                    kind: TabKind::Settings,
+                    title: self.i18n.t("settings_view.title"),
+                    title_source: TabTitleSource::I18nKey("settings_view.title"),
+                    root_pane: None,
+                    active_pane_id: None,
+                },
+                cx,
+            );
             tab_id
         };
         if self.focus_detached_tab_window(tab_id, cx) {

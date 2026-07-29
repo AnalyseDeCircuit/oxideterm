@@ -47,7 +47,7 @@ pub(super) fn native_plugin_pane_for_session(
     session_id: TerminalSessionId,
     cx: &App,
 ) -> Option<gpui::Entity<oxideterm_gpui_terminal::TerminalPane>> {
-    for tab in &workspace.tabs {
+    for tab in workspace.tabs(cx) {
         let Some(root) = tab.root_pane.as_ref() else {
             continue;
         };
@@ -67,14 +67,14 @@ pub(super) fn native_plugin_active_terminal_target(
     connection_states: &HashMap<String, Value>,
     cx: &App,
 ) -> Value {
-    let Some(session_id) = workspace.active_terminal_session_id() else {
+    let Some(session_id) = workspace.active_terminal_session_id(cx) else {
         return Value::Null;
     };
     if let Some(config) = workspace.serial_terminal_configs.get(&session_id) {
         return native_plugin_serial_terminal_target(session_id, config);
     }
     let terminal_type = workspace
-        .active_tab()
+        .active_tab(cx)
         .map(|tab| {
             if tab.kind == TabKind::LocalTerminal {
                 "local_terminal"

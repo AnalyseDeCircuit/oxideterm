@@ -17,21 +17,24 @@ impl WorkspaceApp {
         self.refresh_file_manager_drives(cx);
         let initial_path = self.active_local_terminal_cwd_path(cx);
         let tab_id = if let Some(tab) = self
-            .tabs
+            .tabs(cx)
             .iter()
             .find(|tab| tab.kind == TabKind::FileManager)
         {
             tab.id
         } else {
             let tab_id = self.alloc_tab_id(cx);
-            self.tabs.push(Tab {
-                id: tab_id,
-                kind: TabKind::FileManager,
-                title: self.i18n.t("fileManager.title"),
-                title_source: TabTitleSource::I18nKey("fileManager.title"),
-                root_pane: None,
-                active_pane_id: None,
-            });
+            self.insert_tab(
+                Tab {
+                    id: tab_id,
+                    kind: TabKind::FileManager,
+                    title: self.i18n.t("fileManager.title"),
+                    title_source: TabTitleSource::I18nKey("fileManager.title"),
+                    root_pane: None,
+                    active_pane_id: None,
+                },
+                cx,
+            );
             tab_id
         };
         if self.focus_detached_tab_window(tab_id, cx) {
@@ -1713,14 +1716,17 @@ impl WorkspaceApp {
         });
         self.register_terminal_pane(pane_id, session_id, pane.clone(), window, cx);
         self.refresh_native_plugin_terminal_hooks(cx);
-        self.tabs.push(Tab {
-            id: tab_id,
-            kind: TabKind::LocalTerminal,
-            title: self.local_terminal_tab_title(),
-            title_source: TabTitleSource::Static,
-            root_pane: Some(PaneNode::leaf(pane_id, session_id)),
-            active_pane_id: Some(pane_id),
-        });
+        self.insert_tab(
+            Tab {
+                id: tab_id,
+                kind: TabKind::LocalTerminal,
+                title: self.local_terminal_tab_title(),
+                title_source: TabTitleSource::Static,
+                root_pane: Some(PaneNode::leaf(pane_id, session_id)),
+                active_pane_id: Some(pane_id),
+            },
+            cx,
+        );
         self.bind_terminal_location(tab_id, pane_id, session_id, cx);
         self.set_main_window_active_tab(Some(tab_id), cx);
         self.active_surface = ActiveSurface::Terminal;

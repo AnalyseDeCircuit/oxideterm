@@ -587,10 +587,9 @@ impl WorkspaceApp {
 
     pub(super) fn run_connection_health_check_from_palette(&mut self, cx: &mut Context<Self>) {
         let lifecycles = self
-            .terminal_endpoint_sessions
-            .values()
-            .map(|endpoint_session| endpoint_session.session.lock().lifecycle())
-            .collect::<Vec<_>>();
+            .workspace_runtime
+            .read(cx)
+            .terminal_session_lifecycles();
         let (healthy, total) = command_palette_health_counts_from_lifecycles(lifecycles.iter());
         self.sync_host_tools_lifecycle(true, cx);
         self.push_command_palette_toast(
@@ -695,20 +694,20 @@ impl WorkspaceApp {
     fn close_active_tab_from_palette(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         // Tauri command-palette close actions call appStore.closeTab directly;
         // confirmations live in TabBar/global shortcut handlers, not here.
-        if let Some(tab_id) = self.main_window_tabs.active_tab_id {
+        if let Some(tab_id) = self.active_tab_id(cx) {
             self.close_tab_by_id(tab_id, window, cx);
         }
     }
 
     fn close_other_tabs_from_palette(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(active_tab_id) = self.main_window_tabs.active_tab_id else {
+        let Some(active_tab_id) = self.active_tab_id(cx) else {
             return;
         };
         // Tauri splits command-palette behavior from the global keybinding:
         // the shortcut closes an active split pane in terminal tabs, while the
         // palette command directly closes all tabs except the active tab.
         let tab_ids = self
-            .tabs
+            .tabs(cx)
             .iter()
             .filter(|tab| tab.id != active_tab_id)
             .map(|tab| tab.id)
@@ -719,7 +718,7 @@ impl WorkspaceApp {
     }
 
     fn close_all_tabs_from_palette(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let tab_ids = self.tabs.iter().map(|tab| tab.id).collect::<Vec<_>>();
+        let tab_ids = self.tabs(cx).iter().map(|tab| tab.id).collect::<Vec<_>>();
         for tab_id in tab_ids {
             self.close_tab_by_id(tab_id, window, cx);
         }
@@ -867,7 +866,7 @@ impl WorkspaceApp {
         }
 
         let command_items = self.command_palette_command_items();
-        let session_items = self.command_palette_session_items();
+        let session_items = self.command_palette_session_items(cx);
         let mut connection_items = self.command_palette_connection_items();
         connection_items.extend(self.command_palette_ssh_config_items(&ssh_config_hosts));
         let plugin_items = self.command_palette_plugin_items(cx);
@@ -998,8 +997,8 @@ impl WorkspaceApp {
         }
     }
 
-    fn command_palette_session_items(&self) -> Vec<PaletteItem> {
-        self.tabs
+    fn command_palette_session_items(&self, cx: &App) -> Vec<PaletteItem> {
+        self.tabs(cx)
             .iter()
             .map(|tab| {
                 let detail = match tab.kind {

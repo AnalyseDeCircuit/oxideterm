@@ -206,34 +206,34 @@ impl WorkspaceApp {
         let active = match section {
             SidebarSection::Terminal => false,
             SidebarSection::Runtime => self
-                .active_tab()
+                .active_tab(cx)
                 .is_some_and(|tab| tab.kind == TabKind::Runtime),
             SidebarSection::Activity => self
-                .active_tab()
+                .active_tab(cx)
                 .is_some_and(|tab| tab.kind == TabKind::ConnectionMonitor),
             SidebarSection::Network => {
-                self.active_tab()
+                self.active_tab(cx)
                     .is_some_and(|tab| tab.kind == TabKind::Runtime)
                     && self.host_tools.read(cx).active_runtime_section
                         == ConnectionRuntimeSection::Topology
             }
             SidebarSection::Files => self
-                .active_tab()
+                .active_tab(cx)
                 .is_some_and(|tab| tab.kind == TabKind::FileManager),
             SidebarSection::Monitor if cfg!(target_os = "macos") => self
-                .active_tab()
+                .active_tab(cx)
                 .is_some_and(|tab| tab.kind == TabKind::Launcher),
             SidebarSection::Notifications => self
-                .active_tab()
+                .active_tab(cx)
                 .is_some_and(|tab| tab.kind == TabKind::NotificationCenter),
             SidebarSection::Extensions => self
-                .active_tab()
+                .active_tab(cx)
                 .is_some_and(|tab| tab.kind == TabKind::PluginManager),
             SidebarSection::CloudSync => self
-                .active_tab()
+                .active_tab(cx)
                 .is_some_and(|tab| tab.kind == TabKind::CloudSync),
             SidebarSection::Settings => self
-                .active_tab()
+                .active_tab(cx)
                 .is_some_and(|tab| tab.kind == TabKind::Settings),
             SidebarSection::Assistant => self.ai_sidebar_visible(),
             SidebarSection::HostTools => {
@@ -258,7 +258,7 @@ impl WorkspaceApp {
             };
             notification_count.saturating_add(event_count)
         } else if section == SidebarSection::Workspace {
-            self.visible_local_terminal_session_count()
+            self.visible_local_terminal_session_count(cx)
                 .saturating_add(self.detached_local_terminals.len())
                 .min(u32::MAX as usize) as u32
         } else {

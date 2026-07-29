@@ -208,10 +208,10 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) {
         let requested_node_id = string_arg(&args, "nodeId").map(str::to_string);
-        let surface = self.ide_workspace.read(cx).surface_for_effect(
-            self.main_window_tabs.active_tab_id,
-            requested_node_id.as_deref(),
-        );
+        let surface = self
+            .ide_workspace
+            .read(cx)
+            .surface_for_effect(self.active_tab_id(cx), requested_node_id.as_deref());
         let Some(surface) = surface else {
             return;
         };

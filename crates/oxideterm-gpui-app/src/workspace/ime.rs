@@ -906,7 +906,7 @@ impl WorkspaceApp {
         }
 
         let settings_tab_visible = self
-            .active_tab()
+            .active_tab(cx)
             .is_some_and(|tab| tab.kind == oxideterm_workspace::TabKind::Settings);
         if settings_tab_visible {
             if let Some(input) = self
@@ -924,7 +924,7 @@ impl WorkspaceApp {
 
         let legacy_settings_input_visible = settings_tab_visible
             || self
-                .active_tab()
+                .active_tab(cx)
                 .is_some_and(|tab| tab.kind == oxideterm_workspace::TabKind::CloudSync);
         if legacy_settings_input_visible && let Some(input) = self.focused_settings_input {
             return Some(WorkspaceImeTarget::Settings(input));
@@ -956,7 +956,7 @@ impl WorkspaceApp {
             });
         }
 
-        let terminal_tab_visible = self.active_tab().is_some_and(is_terminal_tab);
+        let terminal_tab_visible = self.active_tab(cx).is_some_and(is_terminal_tab);
         if terminal_tab_visible {
             let quick_command_input = {
                 let quick_commands = &self.terminal.read(cx).quick_commands;
@@ -987,7 +987,7 @@ impl WorkspaceApp {
         }
 
         if self
-            .active_tab()
+            .active_tab(cx)
             .is_some_and(|tab| tab.kind == oxideterm_workspace::TabKind::Forwards)
             && let Some(input) = self.forwarding.read(cx).view().focused_input
         {
@@ -995,7 +995,7 @@ impl WorkspaceApp {
         }
 
         if self
-            .active_tab()
+            .active_tab(cx)
             .is_some_and(|tab| tab.kind == oxideterm_workspace::TabKind::FileManager)
             && let Some(input) = self.file_manager.read(cx).focused_input()
         {
@@ -1003,7 +1003,7 @@ impl WorkspaceApp {
         }
 
         if self
-            .active_tab()
+            .active_tab(cx)
             .is_some_and(|tab| tab.kind == oxideterm_workspace::TabKind::Launcher)
             && let Some(input) = self.launcher.read(cx).focused_input()
         {
@@ -1011,7 +1011,7 @@ impl WorkspaceApp {
         }
 
         if self
-            .active_tab()
+            .active_tab(cx)
             .is_some_and(|tab| tab.kind == oxideterm_workspace::TabKind::Graphics)
             && let Some(input) = self.graphics.read(cx).focused_input()
         {
@@ -1019,7 +1019,7 @@ impl WorkspaceApp {
         }
 
         if self
-            .active_tab()
+            .active_tab(cx)
             .is_some_and(|tab| tab.kind == oxideterm_workspace::TabKind::Sftp)
             && let Some(input) = self.sftp_view.read(cx).focused_input()
         {

@@ -52,7 +52,7 @@ impl WorkspaceApp {
                                 sftp.init_error = None;
                                 cx.notify();
                             });
-                            if let Some(tab_id) = this.main_window_tabs.active_tab_id
+                            if let Some(tab_id) = this.active_tab_id(cx)
                                 && let Some(node_id) = this.sftp_tab_nodes.get(&tab_id).cloned()
                             {
                                 // Retry asks the node owner to rebuild SFTP; SCP remains an

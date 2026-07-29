@@ -361,21 +361,24 @@ impl WorkspaceApp {
     ) {
         self.refresh_session_manager_ssh_config_hosts(cx);
         let tab_id = if let Some(tab) = self
-            .tabs
+            .tabs(cx)
             .iter()
             .find(|tab| tab.kind == TabKind::SessionManager)
         {
             tab.id
         } else {
             let tab_id = self.alloc_tab_id(cx);
-            self.tabs.push(Tab {
-                id: tab_id,
-                kind: TabKind::SessionManager,
-                title: self.i18n.t("sessionManager.title"),
-                title_source: TabTitleSource::I18nKey("sessionManager.title"),
-                root_pane: None,
-                active_pane_id: None,
-            });
+            self.insert_tab(
+                Tab {
+                    id: tab_id,
+                    kind: TabKind::SessionManager,
+                    title: self.i18n.t("sessionManager.title"),
+                    title_source: TabTitleSource::I18nKey("sessionManager.title"),
+                    root_pane: None,
+                    active_pane_id: None,
+                },
+                cx,
+            );
             tab_id
         };
         if self.focus_detached_tab_window(tab_id, cx) {

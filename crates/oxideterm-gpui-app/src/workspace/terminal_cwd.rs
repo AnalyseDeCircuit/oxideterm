@@ -772,12 +772,12 @@ impl WorkspaceApp {
         &self,
         cx: &App,
     ) -> Option<(CurrentDirectoryScope, PaneId)> {
-        let tab = self.active_tab()?;
+        let tab = self.active_tab(cx)?;
         let pane_id = tab.active_pane_id?;
         let scope = match tab.kind {
             TabKind::LocalTerminal => CurrentDirectoryScope::Local,
             TabKind::SshTerminal => {
-                let session_id = self.active_terminal_session_id()?;
+                let session_id = self.active_terminal_session_id(cx)?;
                 let node_id = self
                     .workspace_runtime
                     .read(cx)
@@ -929,7 +929,7 @@ impl WorkspaceApp {
         let Some(command) = current_directory_cd_command(&path) else {
             return;
         };
-        let Some(pane_id) = self.active_pane_id() else {
+        let Some(pane_id) = self.active_pane_id(cx) else {
             self.terminal.update(cx, |terminal, _cx| {
                 terminal.set_cwd_error(TerminalCwdError::Unavailable);
             });

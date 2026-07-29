@@ -682,18 +682,25 @@ impl LauncherWorkspaceEntity {
 
 impl WorkspaceApp {
     pub(super) fn open_launcher_tab(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let tab_id = if let Some(tab) = self.tabs.iter().find(|tab| tab.kind == TabKind::Launcher) {
+        let tab_id = if let Some(tab) = self
+            .tabs(cx)
+            .iter()
+            .find(|tab| tab.kind == TabKind::Launcher)
+        {
             tab.id
         } else {
             let tab_id = self.alloc_tab_id(cx);
-            self.tabs.push(Tab {
-                id: tab_id,
-                kind: TabKind::Launcher,
-                title: self.i18n.t("launcher.tabTitle"),
-                title_source: TabTitleSource::I18nKey("launcher.tabTitle"),
-                root_pane: None,
-                active_pane_id: None,
-            });
+            self.insert_tab(
+                Tab {
+                    id: tab_id,
+                    kind: TabKind::Launcher,
+                    title: self.i18n.t("launcher.tabTitle"),
+                    title_source: TabTitleSource::I18nKey("launcher.tabTitle"),
+                    root_pane: None,
+                    active_pane_id: None,
+                },
+                cx,
+            );
             tab_id
         };
         if self.focus_detached_tab_window(tab_id, cx) {

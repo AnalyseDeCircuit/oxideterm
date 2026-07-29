@@ -53,17 +53,17 @@ impl WorkspaceApp {
                 self.queue_auto_close_terminal_session(session_id, cx);
             }
             TerminalPaneEvent::CurrentDirectoryChanged => {
-                if self.active_pane_id() == Some(pane_id) {
+                if self.active_pane_id(cx) == Some(pane_id) {
                     self.sync_active_terminal_metadata_context(cx);
                 }
             }
             TerminalPaneEvent::RecordingStatusChanged => {
-                if self.active_pane_id() == Some(pane_id) {
+                if self.active_pane_id(cx) == Some(pane_id) {
                     self.sync_active_terminal_recording_elapsed_tick(cx);
                 }
             }
             TerminalPaneEvent::PrivilegePromptStateChanged => {
-                if self.active_pane_id() == Some(pane_id)
+                if self.active_pane_id(cx) == Some(pane_id)
                     && self.sync_active_privilege_prompt_inline_hint(cx)
                 {
                     cx.notify();
@@ -96,7 +96,7 @@ impl WorkspaceApp {
         cx.spawn(async move |weak, cx| {
             let _ = cx.update_window(window_handle, |_, window, cx| {
                 weak.update(cx, |workspace, cx| {
-                    if workspace.active_pane_id() != Some(pane_id) {
+                    if workspace.active_pane_id(cx) != Some(pane_id) {
                         // A request cannot follow focus into another pane.
                         if let Some(pane) =
                             workspace.tab_host.read(cx).panes().get(&pane_id).cloned()
@@ -150,7 +150,7 @@ impl WorkspaceApp {
         let _ = (session_id, cx);
         #[cfg(debug_assertions)]
         if let Some(location) = self.tab_host.read(cx).terminal_location(session_id) {
-            let tree_location = self.tab_by_id(location.tab_id).and_then(|tab| {
+            let tree_location = self.tab_by_id(location.tab_id, cx).and_then(|tab| {
                 tab.root_pane
                     .as_ref()
                     .and_then(|root| root.pane_id_for_session(session_id))
@@ -224,8 +224,8 @@ impl WorkspaceApp {
         }
     }
 
-    pub(super) fn active_tab_has_serial_terminal(&self) -> bool {
-        let Some(tab) = self.active_tab() else {
+    pub(super) fn active_tab_has_serial_terminal(&self, cx: &App) -> bool {
+        let Some(tab) = self.active_tab(cx) else {
             return false;
         };
         let Some(root_pane) = tab.root_pane.as_ref() else {
@@ -245,32 +245,32 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(active_index) = self.active_tab_index() else {
+        let Some((tab_id, active_pane_id, pane_count, tab_kind)) =
+            self.active_tab(cx).and_then(|tab| {
+                Some((
+                    tab.id,
+                    tab.active_pane_id?,
+                    tab.root_pane.as_ref()?.pane_count(),
+                    tab.kind.clone(),
+                ))
+            })
+        else {
             return;
         };
-        let Some(active_pane_id) = self.tabs[active_index].active_pane_id else {
-            return;
-        };
-        let tab_id = self.tabs[active_index].id;
-        if self.tabs[active_index]
-            .root_pane
-            .as_ref()
-            .is_none_or(|root_pane| root_pane.pane_count() >= MAX_PANES_PER_TAB)
-        {
+        if pane_count >= MAX_PANES_PER_TAB {
             return;
         }
 
-        if self.tabs[active_index].kind == TabKind::SshTerminal {
+        if tab_kind == TabKind::SshTerminal {
             return;
         }
-        if self.active_tab_has_serial_terminal() {
+        if self.active_tab_has_serial_terminal(cx) {
             return;
         }
 
         let group_id = self.alloc_pane_id(cx);
         let pane_id = self.alloc_pane_id(cx);
         let session_id = self.alloc_session_id(cx);
-        let tab_kind = self.tabs[active_index].kind.clone();
         let preferences = self.prepare_terminal_preferences_for_tab_kind(&tab_kind, cx);
         let local_config =
             (tab_kind == TabKind::LocalTerminal).then(|| self.local_terminal_config());
@@ -284,11 +284,16 @@ impl WorkspaceApp {
             }
         });
 
-        let tab = &mut self.tabs[active_index];
-        if tab.root_pane.as_mut().is_some_and(|root_pane| {
-            root_pane.split_active(active_pane_id, group_id, direction, pane_id, session_id)
+        if self.tab_host.update(cx, |tab_host, _| {
+            tab_host.split_pane(
+                tab_id,
+                active_pane_id,
+                group_id,
+                direction,
+                pane_id,
+                session_id,
+            )
         }) {
-            tab.active_pane_id = Some(pane_id);
             self.register_terminal_pane(pane_id, session_id, pane.clone(), window, cx);
             self.bind_terminal_location(tab_id, pane_id, session_id, cx);
             self.needs_active_pane_focus = true;
@@ -300,25 +305,25 @@ impl WorkspaceApp {
     }
 
     pub(super) fn close_active_pane(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(active_index) = self.active_tab_index() else {
+        let Some((tab_id, active_pane_id, pane_count, session_id)) =
+            self.active_tab(cx).and_then(|tab| {
+                let active_pane_id = tab.active_pane_id?;
+                let root_pane = tab.root_pane.as_ref()?;
+                Some((
+                    tab.id,
+                    active_pane_id,
+                    root_pane.pane_count(),
+                    root_pane.session_id_for_pane(active_pane_id),
+                ))
+            })
+        else {
             return;
         };
-        let Some(active_pane_id) = self.tabs[active_index].active_pane_id else {
-            return;
-        };
-        if self.tabs[active_index]
-            .root_pane
-            .as_ref()
-            .is_none_or(|root_pane| root_pane.pane_count() <= 1)
-        {
+        if pane_count <= 1 {
             return;
         }
 
-        if let Some(session_id) = self.tabs[active_index]
-            .root_pane
-            .as_ref()
-            .and_then(|root_pane| root_pane.session_id_for_pane(active_pane_id))
-        {
+        if let Some(session_id) = session_id {
             self.serial_terminal_configs.remove(&session_id);
             self.unregister_ssh_terminal_session(session_id, cx);
         }
@@ -327,15 +332,13 @@ impl WorkspaceApp {
             let _ = pane.update(cx, |pane, _cx| pane.shutdown());
         }
 
-        let tab = &mut self.tabs[active_index];
-        let Some(root_pane) = tab.root_pane.as_mut() else {
-            return;
-        };
-        if let Some(next_active) = root_pane.close_pane(active_pane_id) {
-            if let Some(replacement) = root_pane.single_child_replacement() {
-                tab.root_pane = Some(replacement);
-            }
-            tab.active_pane_id = Some(next_active);
+        if self
+            .tab_host
+            .update(cx, |tab_host, _| {
+                tab_host.close_pane(tab_id, active_pane_id)
+            })
+            .is_some()
+        {
             self.needs_active_pane_focus = true;
             self.focus_active_pane(window, cx);
             cx.notify();
@@ -347,13 +350,10 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(active_index) = self.active_tab_index() else {
-            return;
-        };
-        let Some(active_pane_id) = self.tabs[active_index].active_pane_id else {
-            return;
-        };
-        let Some(root_pane) = self.tabs[active_index].root_pane.as_ref().cloned() else {
+        let Some((tab_id, active_pane_id, root_pane)) = self
+            .active_tab(cx)
+            .and_then(|tab| Some((tab.id, tab.active_pane_id?, tab.root_pane.as_ref()?.clone())))
+        else {
             return;
         };
         if root_pane.pane_count() <= 1 {
@@ -384,9 +384,9 @@ impl WorkspaceApp {
             }
         }
 
-        let tab = &mut self.tabs[active_index];
-        tab.root_pane = Some(PaneNode::leaf(active_pane_id, active_session_id));
-        tab.active_pane_id = Some(active_pane_id);
+        self.tab_host.update(cx, |tab_host, _| {
+            tab_host.reset_to_single_pane(tab_id, active_pane_id, active_session_id);
+        });
         self.needs_active_pane_focus = true;
         self.focus_active_pane(window, cx);
         cx.notify();
@@ -438,19 +438,9 @@ impl WorkspaceApp {
             }
         };
         let next_sizes = adjusted_split_sizes(&drag.start_sizes, drag.handle_index, delta_fraction);
-        let updated = if let Some(tab_id) = drag.tab_id {
-            self.tab_mut_by_id(tab_id).is_some_and(|tab| {
-                tab.root_pane.as_mut().is_some_and(|root_pane| {
-                    root_pane.update_group_sizes(drag.group_id, &next_sizes)
-                })
-            })
-        } else {
-            self.active_tab_mut().is_some_and(|tab| {
-                tab.root_pane.as_mut().is_some_and(|root_pane| {
-                    root_pane.update_group_sizes(drag.group_id, &next_sizes)
-                })
-            })
-        };
+        let updated = self.tab_host.update(cx, |tab_host, _| {
+            tab_host.update_group_sizes(drag.tab_id, drag.group_id, &next_sizes)
+        });
         if updated {
             cx.notify();
         }
@@ -468,26 +458,16 @@ impl WorkspaceApp {
         group_id: PaneId,
         cx: &mut Context<Self>,
     ) {
-        let updated = if let Some(tab_id) = tab_id {
-            self.tab_mut_by_id(tab_id).is_some_and(|tab| {
-                tab.root_pane
-                    .as_mut()
-                    .is_some_and(|root_pane| root_pane.reset_group_sizes(group_id))
-            })
-        } else {
-            self.active_tab_mut().is_some_and(|tab| {
-                tab.root_pane
-                    .as_mut()
-                    .is_some_and(|root_pane| root_pane.reset_group_sizes(group_id))
-            })
-        };
+        let updated = self.tab_host.update(cx, |tab_host, _| {
+            tab_host.reset_group_sizes(tab_id, group_id)
+        });
         if updated {
             cx.notify();
         }
     }
 
     pub(super) fn render_pane_tree(&self, node: &PaneNode, cx: &mut Context<Self>) -> AnyElement {
-        self.render_pane_tree_for_tab(self.main_window_tabs.active_tab_id, node, cx)
+        self.render_pane_tree_for_tab(self.active_tab_id(cx), node, cx)
     }
 
     pub(super) fn render_pane_tree_for_tab(
@@ -497,14 +477,14 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let active_pane_id = tab_id
-            .and_then(|tab_id| self.tab_by_id(tab_id))
+            .and_then(|tab_id| self.tab_by_id(tab_id, cx))
             .and_then(|tab| tab.active_pane_id);
         let has_split_panes = if let Some(tab_id) = tab_id {
-            self.tab_by_id(tab_id)
+            self.tab_by_id(tab_id, cx)
                 .and_then(|tab| tab.root_pane.as_ref())
                 .is_some_and(|root_pane| root_pane.pane_count() > 1)
         } else {
-            self.active_tab()
+            self.active_tab(cx)
                 .and_then(|tab| tab.root_pane.as_ref())
                 .is_some_and(|root_pane| root_pane.pane_count() > 1)
         };
@@ -527,15 +507,17 @@ impl WorkspaceApp {
                             let pane_id = *pane_id;
                             let tab_id = tab_id;
                             move |this, _event, window, cx| {
-                                if let Some(tab_id) = tab_id
-                                    && let Some(tab) = this.tab_mut_by_id(tab_id)
-                                {
-                                    tab.active_pane_id = Some(pane_id);
+                                if let Some(tab_id) = tab_id {
+                                    this.tab_host.update(cx, |tab_host, _| {
+                                        tab_host.set_active_pane(Some(tab_id), pane_id);
+                                    });
                                     if !this.tab_host.read(cx).is_outside_main_window(tab_id) {
                                         this.set_main_window_active_tab(Some(tab_id), cx);
                                     }
-                                } else if let Some(tab) = this.active_tab_mut() {
-                                    tab.active_pane_id = Some(pane_id);
+                                } else {
+                                    this.tab_host.update(cx, |tab_host, _| {
+                                        tab_host.set_active_pane(None, pane_id);
+                                    });
                                 }
                                 if let Some(pane) =
                                     this.tab_host.read(cx).panes().get(&pane_id).cloned()

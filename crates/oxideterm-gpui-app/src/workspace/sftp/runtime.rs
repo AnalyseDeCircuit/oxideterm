@@ -574,14 +574,17 @@ impl WorkspaceApp {
             *tab_id
         } else {
             let tab_id = self.alloc_tab_id(cx);
-            self.tabs.push(Tab {
-                id: tab_id,
-                kind: TabKind::Sftp,
-                title,
-                title_source: TabTitleSource::Static,
-                root_pane: None,
-                active_pane_id: None,
-            });
+            self.insert_tab(
+                Tab {
+                    id: tab_id,
+                    kind: TabKind::Sftp,
+                    title,
+                    title_source: TabTitleSource::Static,
+                    root_pane: None,
+                    active_pane_id: None,
+                },
+                cx,
+            );
             self.sftp_tab_nodes.insert(tab_id, node_id.clone());
             tab_id
         };
@@ -638,11 +641,11 @@ impl WorkspaceApp {
         &mut self,
         cx: &mut Context<Self>,
     ) -> bool {
-        let Some(tab_id) = self.main_window_tabs.active_tab_id else {
+        let Some(tab_id) = self.active_tab_id(cx) else {
             return false;
         };
         if self
-            .tabs
+            .tabs(cx)
             .iter()
             .find(|tab| tab.id == tab_id)
             .is_none_or(|tab| tab.kind != TabKind::Sftp)
@@ -720,7 +723,7 @@ impl WorkspaceApp {
                     self.spawn_sftp_incomplete_load_with_sender(node_id, delivery.clone());
                 }
                 SftpWorkspaceEffect::RemoteLoadPending { tab_id, node_id } => {
-                    if self.sftp_tab_is_visible(tab_id, &node_id) {
+                    if self.sftp_tab_is_visible(tab_id, &node_id, cx) {
                         let _ =
                             delivery.send(SftpWorkerResult::StartRemoteLoad { tab_id, node_id });
                     }
@@ -786,16 +789,17 @@ impl WorkspaceApp {
         tab_id: TabId,
         node_id: NodeId,
         delivery: delivery::ActiveDeliverySender<SftpWorkerResult>,
+        cx: &App,
     ) {
-        if self.sftp_tab_is_visible(tab_id, &node_id) {
+        if self.sftp_tab_is_visible(tab_id, &node_id, cx) {
             let _ = delivery.send(SftpWorkerResult::StartRemoteLoad { tab_id, node_id });
         }
     }
 
-    fn sftp_tab_is_visible(&self, tab_id: TabId, node_id: &NodeId) -> bool {
-        self.main_window_tabs.active_tab_id == Some(tab_id)
+    fn sftp_tab_is_visible(&self, tab_id: TabId, node_id: &NodeId, cx: &App) -> bool {
+        self.active_tab_id(cx) == Some(tab_id)
             && self
-                .tabs
+                .tabs(cx)
                 .iter()
                 .any(|tab| tab.id == tab_id && tab.kind == TabKind::Sftp)
             && self.sftp_tab_nodes.get(&tab_id) == Some(node_id)

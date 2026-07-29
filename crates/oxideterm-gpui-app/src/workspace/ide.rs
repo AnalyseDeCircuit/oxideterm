@@ -15,7 +15,7 @@ use std::{
     time::SystemTime,
 };
 
-use super::{TabId, WorkspaceApp};
+use super::{TabId, WorkspaceApp, tabs::TabRemovalTransition};
 
 /// Cross-workspace IDE effects that require settings, tabs, or reconnect coordination.
 pub(super) enum IdeWorkspaceEvent {
@@ -484,7 +484,7 @@ impl WorkspaceApp {
             )
         };
         let mount = ide_surface_mount_for_location(
-            self.main_window_tabs.active_tab_id == Some(tab_id),
+            self.active_tab_id(cx) == Some(tab_id),
             outside_main_window,
             detached_window_open,
         );
@@ -560,14 +560,17 @@ impl WorkspaceApp {
             let runtime_settings = self.ide_runtime_settings();
             let initial_path = initial_path_override.unwrap_or_else(|| "/".to_string());
 
-            self.tabs.push(Tab {
-                id: tab_id,
-                kind: TabKind::Ide,
-                title,
-                title_source: TabTitleSource::Static,
-                root_pane: None,
-                active_pane_id: None,
-            });
+            self.insert_tab(
+                Tab {
+                    id: tab_id,
+                    kind: TabKind::Ide,
+                    title,
+                    title_source: TabTitleSource::Static,
+                    root_pane: None,
+                    active_pane_id: None,
+                },
+                cx,
+            );
             self.ide_workspace.update(cx, |workspace, cx| {
                 workspace.create_folder_picker_surface(
                     tab_id,
@@ -686,14 +689,17 @@ impl WorkspaceApp {
                     return IdeReconnectRestoreStatus::Skipped;
                 }
 
-                self.tabs.push(Tab {
-                    id: tab_id,
-                    kind: TabKind::Ide,
-                    title,
-                    title_source: TabTitleSource::Static,
-                    root_pane: None,
-                    active_pane_id: None,
-                });
+                self.insert_tab(
+                    Tab {
+                        id: tab_id,
+                        kind: TabKind::Ide,
+                        title,
+                        title_source: TabTitleSource::Static,
+                        root_pane: None,
+                        active_pane_id: None,
+                    },
+                    cx,
+                );
                 (tab_id, false)
             }
         };
@@ -747,7 +753,7 @@ impl WorkspaceApp {
     }
 
     pub(super) fn render_ide_surface(&self, cx: &mut Context<Self>) -> AnyElement {
-        let Some(tab_id) = self.main_window_tabs.active_tab_id else {
+        let Some(tab_id) = self.active_tab_id(cx) else {
             return div().into_any_element();
         };
         self.render_ide_surface_for_tab(tab_id, cx)
@@ -818,8 +824,8 @@ impl WorkspaceApp {
         &self,
         cx: &App,
     ) -> Option<gpui::Entity<IdeSurface>> {
-        let tab_id = self.main_window_tabs.active_tab_id?;
-        let tab = self.tabs.iter().find(|tab| tab.id == tab_id)?;
+        let tab_id = self.active_tab_id(cx)?;
+        let tab = self.tabs(cx).iter().find(|tab| tab.id == tab_id)?;
         (tab.kind == TabKind::Ide)
             .then(|| self.ide_workspace.read(cx).surface(tab_id))
             .flatten()
@@ -1000,37 +1006,31 @@ impl WorkspaceApp {
         tab_id: oxideterm_workspace::TabId,
         cx: &mut Context<Self>,
     ) {
-        let Some(index) = self.tabs.iter().position(|tab| tab.id == tab_id) else {
+        let Some(index) = self.tabs(cx).iter().position(|tab| tab.id == tab_id) else {
             return;
         };
-        let removed_was_active = self.main_window_tabs.active_tab_id == Some(tab_id);
-        let tab = self.tabs.remove(index);
-        let mount_cleanup = self
+        let Some(TabRemovalTransition {
+            mount_cleanup,
+            previous_active_tab_id,
+            next_active_tab_id,
+            ..
+        }) = self
             .tab_host
-            .update(cx, |tab_host, _cx| tab_host.close_tab_mount(tab.id));
+            .update(cx, |tab_host, _cx| tab_host.remove_tab_at(index))
+        else {
+            return;
+        };
         self.apply_tab_mount_cleanup(mount_cleanup, None, cx);
 
-        if removed_was_active {
+        if previous_active_tab_id != next_active_tab_id {
             // Picker cancellation is not a user project-close action. Pick the
             // nearest visible tab without recording an IDE last-closed marker,
             // so reconnect restore remains governed only by real project tabs.
-            let tab_host = self.tab_host.read(cx);
-            let next_active_tab_id = self
-                .tabs
-                .iter()
-                .enumerate()
-                .skip(index.min(self.tabs.len().saturating_sub(1)))
-                .find(|(_, tab)| !tab_host.is_outside_main_window(tab.id))
-                .or_else(|| {
-                    self.tabs
-                        .iter()
-                        .enumerate()
-                        .take(index)
-                        .rev()
-                        .find(|(_, tab)| !tab_host.is_outside_main_window(tab.id))
-                })
-                .map(|(_, tab)| tab.id);
-            self.set_main_window_active_tab(next_active_tab_id, cx);
+            self.apply_main_window_active_tab_change(
+                previous_active_tab_id,
+                next_active_tab_id,
+                cx,
+            );
         }
 
         self.sync_active_tab_surface(cx);

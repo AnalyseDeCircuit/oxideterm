@@ -1110,6 +1110,10 @@ impl SftpWorkspaceEntity {
         self.dialog.clone()
     }
 
+    pub(in crate::workspace) fn dialog_is_open(&self) -> bool {
+        self.dialog.is_some()
+    }
+
     pub(in crate::workspace::sftp) fn start_folder_picker(
         &mut self,
         selection: impl std::future::Future<Output = Option<String>> + 'static,

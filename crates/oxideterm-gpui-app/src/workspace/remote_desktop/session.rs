@@ -744,8 +744,8 @@ impl WorkspaceApp {
 
     pub(in crate::workspace) fn remote_desktop_tab_visible(&self, tab_id: TabId, cx: &App) -> bool {
         let tab_host = self.tab_host.read(cx);
-        let main_tab_visible = self.main_window_tabs.active_tab_id == Some(tab_id)
-            && !tab_host.is_outside_main_window(tab_id);
+        let main_tab_visible =
+            self.active_tab_id(cx) == Some(tab_id) && !tab_host.is_outside_main_window(tab_id);
         let detached_tab_visible = tab_host.is_detached(tab_id);
         remote_desktop_tab_visible(main_tab_visible, detached_tab_visible)
     }
@@ -803,7 +803,7 @@ impl WorkspaceApp {
         &mut self,
         cx: &mut Context<Self>,
     ) {
-        if let Some(tab_id) = self.active_remote_desktop_tab_id() {
+        if let Some(tab_id) = self.active_remote_desktop_tab_id(cx) {
             self.release_remote_desktop_inputs_for_tab(tab_id, cx);
         }
     }
@@ -841,7 +841,7 @@ impl WorkspaceApp {
             changed = true;
         }
 
-        if let Some(tab_id) = self.active_remote_desktop_tab_id() {
+        if let Some(tab_id) = self.active_remote_desktop_tab_id(cx) {
             self.sync_remote_desktop_lock_keys(tab_id, window.capslock(), cx);
         }
         window.focus(&self.focus_handle, cx);

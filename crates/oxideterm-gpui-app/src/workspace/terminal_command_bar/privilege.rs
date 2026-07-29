@@ -8,13 +8,13 @@ impl WorkspaceApp {
         &self,
         cx: &App,
     ) -> Option<(String, Vec<SavedPrivilegeCredential>)> {
-        let Some(active_tab) = self.active_tab() else {
+        let Some(active_tab) = self.active_tab(cx) else {
             log_privilege_prompt_helper(format_args!("scope unavailable: no active tab"));
             return None;
         };
         match &active_tab.kind {
             TabKind::LocalTerminal => {
-                if self.active_tab_has_serial_terminal() {
+                if self.active_tab_has_serial_terminal(cx) {
                     log_privilege_prompt_helper(format_args!(
                         "scope unavailable: local tab is backed by a serial terminal"
                     ));
@@ -35,7 +35,7 @@ impl WorkspaceApp {
                 Some((connection_id, credentials))
             }
             TabKind::SshTerminal => {
-                let Some(session_id) = self.active_terminal_session_id() else {
+                let Some(session_id) = self.active_terminal_session_id(cx) else {
                     log_privilege_prompt_helper(format_args!(
                         "scope unavailable: ssh tab has no active terminal session"
                     ));
@@ -114,7 +114,7 @@ impl WorkspaceApp {
         &self,
         cx: &App,
     ) -> Option<PrivilegePromptHelperState> {
-        let Some(active_tab) = self.active_tab() else {
+        let Some(active_tab) = self.active_tab(cx) else {
             log_privilege_prompt_helper(format_args!("state unavailable: no active tab"));
             return None;
         };

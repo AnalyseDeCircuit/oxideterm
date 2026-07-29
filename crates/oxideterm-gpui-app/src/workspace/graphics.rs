@@ -625,18 +625,25 @@ impl WorkspaceApp {
     }
 
     pub(super) fn open_graphics_tab(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let tab_id = if let Some(tab) = self.tabs.iter().find(|tab| tab.kind == TabKind::Graphics) {
+        let tab_id = if let Some(tab) = self
+            .tabs(cx)
+            .iter()
+            .find(|tab| tab.kind == TabKind::Graphics)
+        {
             tab.id
         } else {
             let tab_id = self.alloc_tab_id(cx);
-            self.tabs.push(Tab {
-                id: tab_id,
-                kind: TabKind::Graphics,
-                title: self.i18n.t("graphics.tab_title"),
-                title_source: TabTitleSource::I18nKey("graphics.tab_title"),
-                root_pane: None,
-                active_pane_id: None,
-            });
+            self.insert_tab(
+                Tab {
+                    id: tab_id,
+                    kind: TabKind::Graphics,
+                    title: self.i18n.t("graphics.tab_title"),
+                    title_source: TabTitleSource::I18nKey("graphics.tab_title"),
+                    root_pane: None,
+                    active_pane_id: None,
+                },
+                cx,
+            );
             tab_id
         };
         if self.focus_detached_tab_window(tab_id, cx) {
@@ -672,13 +679,12 @@ impl WorkspaceApp {
 
     pub(in crate::workspace) fn sync_graphics_surface_visibility(&self, cx: &mut App) {
         let visible = self
-            .tabs
+            .tabs(cx)
             .iter()
             .find(|tab| tab.kind == TabKind::Graphics)
             .is_some_and(|tab| {
                 let tab_host = self.tab_host.read(cx);
-                (self.main_window_tabs.active_tab_id == Some(tab.id)
-                    && !tab_host.is_outside_main_window(tab.id))
+                (self.active_tab_id(cx) == Some(tab.id) && !tab_host.is_outside_main_window(tab.id))
                     || tab_host.is_detached(tab.id)
             });
         self.graphics.update(cx, |graphics, cx| {

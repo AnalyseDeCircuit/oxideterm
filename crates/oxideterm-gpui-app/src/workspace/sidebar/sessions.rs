@@ -872,7 +872,7 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
-        let active = self.active_terminal_session_id() == Some(session_id);
+        let active = self.active_terminal_session_id(cx) == Some(session_id);
         let text_color = if active {
             theme.accent
         } else {
@@ -1533,7 +1533,7 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
-        let active = self.active_terminal_session_id() == Some(session_id);
+        let active = self.active_terminal_session_id(cx) == Some(session_id);
         let text = self
             .i18n
             .t("sessions.focused_list.terminal")

@@ -212,18 +212,25 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) {
         self.set_connection_runtime_section(section, cx);
-        let tab_id = if let Some(tab) = self.tabs(cx).iter().find(|tab| tab.kind == TabKind::Runtime) {
+        let tab_id = if let Some(tab) = self
+            .tabs(cx)
+            .iter()
+            .find(|tab| tab.kind == TabKind::Runtime)
+        {
             tab.id
         } else {
             let tab_id = self.alloc_tab_id(cx);
-            self.insert_tab(Tab {
-                id: tab_id,
-                kind: TabKind::Runtime,
-                title: self.i18n.t("sidebar.panels.runtime"),
-                title_source: TabTitleSource::I18nKey("sidebar.panels.runtime"),
-                root_pane: None,
-                active_pane_id: None,
-            }, cx);
+            self.insert_tab(
+                Tab {
+                    id: tab_id,
+                    kind: TabKind::Runtime,
+                    title: self.i18n.t("sidebar.panels.runtime"),
+                    title_source: TabTitleSource::I18nKey("sidebar.panels.runtime"),
+                    root_pane: None,
+                    active_pane_id: None,
+                },
+                cx,
+            );
             tab_id
         };
         self.set_active_tab(tab_id, window, cx);

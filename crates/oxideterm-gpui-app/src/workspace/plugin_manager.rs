@@ -183,21 +183,24 @@ impl WorkspaceApp {
     pub(super) fn open_plugin_manager_tab(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.bootstrap_native_plugin_runtime(cx);
         let tab_id = if let Some(tab) = self
-            .tabs
+            .tabs(cx)
             .iter()
             .find(|tab| tab.kind == TabKind::PluginManager)
         {
             tab.id
         } else {
             let tab_id = self.alloc_tab_id(cx);
-            self.tabs.push(Tab {
-                id: tab_id,
-                kind: TabKind::PluginManager,
-                title: self.i18n.t("plugin.manager_title"),
-                title_source: TabTitleSource::I18nKey("plugin.manager_title"),
-                root_pane: None,
-                active_pane_id: None,
-            });
+            self.insert_tab(
+                Tab {
+                    id: tab_id,
+                    kind: TabKind::PluginManager,
+                    title: self.i18n.t("plugin.manager_title"),
+                    title_source: TabTitleSource::I18nKey("plugin.manager_title"),
+                    root_pane: None,
+                    active_pane_id: None,
+                },
+                cx,
+            );
             tab_id
         };
         if self.focus_detached_tab_window(tab_id, cx) {

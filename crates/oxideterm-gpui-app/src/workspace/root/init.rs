@@ -10,21 +10,7 @@ impl WorkspaceApp {
         single_instance_rx: Option<crate::single_instance::SingleInstanceReceiver>,
     ) -> Result<Self> {
         let focus_handle = cx.focus_handle();
-        let main_window_handle = window.window_handle();
-        let mut window_registry = window_registry::WorkspaceWindowRegistry::default();
-        let main_window_registration = window_registry.register(
-            window_registry::WindowRole::Main,
-            main_window_handle.window_id(),
-            main_window_handle,
-        );
-        let main_window_release_subscription =
-            cx.on_release_in(window, move |workspace, window, _cx| {
-                // Native-window release invalidates only the main route. Runtime
-                // shutdown remains owned by the later session-lifetime boundary.
-                workspace
-                    .window_registry
-                    .release(main_window_registration, window.window_handle().window_id());
-            });
+        let window_registry = window_registry::WorkspaceWindowRegistry::default();
         let window_intents = cx.new(|cx| {
             WorkspaceWindowIntentEntity::new(desktop_presence_rx, single_instance_rx, cx)
         });
@@ -297,6 +283,7 @@ impl WorkspaceApp {
                             *line_ending,
                             *generation,
                             delivery.clone(),
+                            cx,
                         ) {
                             let _ = delivery.send(sftp::SftpWorkerResult::PreviewSaved {
                                 generation: *generation,
@@ -318,6 +305,7 @@ impl WorkspaceApp {
                             *tab_id,
                             node_id.clone(),
                             delivery.clone(),
+                            cx,
                         );
                     }
                 }
@@ -447,12 +435,6 @@ impl WorkspaceApp {
                 workspace.enqueue_cloud_sync_window_effect(event.clone(), cx);
             },
         );
-        let initial_vibrancy_mode = effective_vibrancy_mode(&settings, &render_policy);
-        let initial_vibrancy_support = apply_window_vibrancy(window, initial_vibrancy_mode);
-        let initial_window_opacity = normalized_window_opacity(settings.appearance.window_opacity);
-        let _ = apply_window_opacity(window, settings.appearance.window_opacity);
-        let mut background_image_cache = BackgroundImageRenderCache::default();
-        background_image_cache.set_byte_limit(render_policy.image_cache_bytes);
         let mut background_images = match list_background_images(settings_store.path()) {
             Ok(paths) => paths
                 .into_iter()
@@ -525,7 +507,6 @@ impl WorkspaceApp {
         );
         let mut workspace = Self {
             focus_handle,
-            tabs: Vec::new(),
             main_window_tabs: WorkspaceWindowTabState::new(),
             detached_tab_return_drag: None,
             detached_tab_return_handoff: None,
@@ -670,7 +651,6 @@ impl WorkspaceApp {
             _window_intent_subscription: window_intent_subscription,
             window_registry,
             window_effect_delivery_scheduled: false,
-            _main_window_release_subscription: main_window_release_subscription,
             connection_flow,
             _connection_flow_observation: connection_flow_observation,
             _connection_flow_subscription: connection_flow_subscription,
@@ -693,7 +673,6 @@ impl WorkspaceApp {
             ),
             notification_sidebar_list_cache: RefCell::new(VirtualListSignatureCache::default()),
             event_log_sidebar_scroll_handle: UniformListScrollHandle::new(),
-            terminal_endpoint_sessions: HashMap::new(),
             ssh_nodes: HashMap::new(),
             saved_ssh_nodes: HashMap::new(),
             expanded_ssh_nodes: HashSet::new(),
@@ -726,11 +705,9 @@ impl WorkspaceApp {
             detected_graphics,
             render_profile_override,
             render_policy,
-            applied_vibrancy_mode: initial_vibrancy_mode,
-            vibrancy_support: initial_vibrancy_support,
-            applied_window_opacity: initial_window_opacity,
-            background_image_cache,
-            background_cache_poll_task: None,
+            // The native window shell applies the selected mode before the
+            // first workspace render and replaces this neutral diagnostic.
+            vibrancy_support: VibrancySupport::Supported,
             app_lock,
             settings_store,
             connection_store,
@@ -796,7 +773,7 @@ impl WorkspaceApp {
         cx: &App,
     ) -> TerminalUiPreferences {
         let key = self
-            .tabs
+            .tabs(cx)
             .iter()
             .find_map(|tab| {
                 tab.root_pane

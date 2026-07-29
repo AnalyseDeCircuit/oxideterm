@@ -72,7 +72,7 @@ impl WorkspaceApp {
                 .detach();
             }
             WorkspaceTabHostEvent::RecordingElapsedTick { pane_id } => {
-                if self.active_pane_id() == Some(*pane_id)
+                if self.active_pane_id(cx) == Some(*pane_id)
                     && self.active_terminal_recording_status(cx).state
                         == TerminalRecordingState::Recording
                 {
@@ -106,7 +106,7 @@ impl WorkspaceApp {
     ) {
         let outside_main_tabs = self.tab_host.read(cx).outside_main_tab_ids();
         let existing_tab_ids = self
-            .tabs
+            .tabs(cx)
             .iter()
             .filter(|tab| !outside_main_tabs.contains(&tab.id))
             .map(|tab| tab.id)
@@ -120,7 +120,7 @@ impl WorkspaceApp {
         self.set_main_window_active_tab(Some(tab_id), cx);
         self.sync_active_tab_surface(cx);
         self.needs_active_pane_focus = self
-            .active_tab()
+            .active_tab(cx)
             .is_some_and(|tab| matches!(tab.kind, TabKind::LocalTerminal | TabKind::SshTerminal));
         self.focus_active_tab_keyboard_owner(window, cx);
         self.reveal_active_tab(window, cx);
@@ -137,12 +137,12 @@ impl WorkspaceApp {
             return;
         }
         if self
-            .tabs
+            .tabs(cx)
             .iter()
             .any(|tab| tab.id == tab_id && !self.tab_host.read(cx).is_outside_main_window(tab.id))
         {
-            if self.main_window_tabs.active_tab_id != Some(tab_id)
-                && let Some(previous_tab_id) = self.main_window_tabs.active_tab_id
+            if self.active_tab_id(cx) != Some(tab_id)
+                && let Some(previous_tab_id) = self.active_tab_id(cx)
             {
                 // Remote desktops keep server-side input state. Release it when
                 // the tab loses focus so modifiers or mouse buttons cannot stick
@@ -152,7 +152,7 @@ impl WorkspaceApp {
             self.set_main_window_active_tab(Some(tab_id), cx);
             self.resume_remote_desktop_frame_delivery(tab_id, cx);
             self.sync_active_tab_surface(cx);
-            self.needs_active_pane_focus = self.active_tab().is_some_and(|tab| {
+            self.needs_active_pane_focus = self.active_tab(cx).is_some_and(|tab| {
                 matches!(tab.kind, TabKind::LocalTerminal | TabKind::SshTerminal)
             });
             self.focus_active_tab_keyboard_owner(window, cx);
@@ -166,13 +166,13 @@ impl WorkspaceApp {
         // but app-level utility tabs still light up their owning activity icon.
         // Keep terminal/SFTP/IDE ownership separate while syncing these sidebar
         // entry tabs so the selected icon frame follows the visible surface.
-        match self.active_tab().map(|tab| &tab.kind) {
+        match self.active_tab(cx).map(|tab| &tab.kind) {
             Some(TabKind::Settings) => {
                 self.active_surface = ActiveSurface::Settings;
             }
             Some(TabKind::Forwards) => {
                 self.active_surface = ActiveSurface::Terminal;
-                if let Some(active_tab_id) = self.main_window_tabs.active_tab_id
+                if let Some(active_tab_id) = self.active_tab_id(cx)
                     && let Some(node_id) = self.forwarding.read(cx).node_for_tab(active_tab_id)
                 {
                     self.active_ssh_node_id = Some(node_id.clone());
@@ -182,7 +182,7 @@ impl WorkspaceApp {
             }
             Some(TabKind::Sftp) => {
                 self.active_surface = ActiveSurface::Terminal;
-                if let Some(active_tab_id) = self.main_window_tabs.active_tab_id
+                if let Some(active_tab_id) = self.active_tab_id(cx)
                     && let Some(node_id) = self.sftp_tab_nodes.get(&active_tab_id).cloned()
                 {
                     self.active_ssh_node_id = Some(node_id.clone());
@@ -192,7 +192,7 @@ impl WorkspaceApp {
             }
             Some(TabKind::Ide) => {
                 self.active_surface = ActiveSurface::Terminal;
-                if let Some(active_tab_id) = self.main_window_tabs.active_tab_id
+                if let Some(active_tab_id) = self.active_tab_id(cx)
                     && let Some(node_id) = self.ide_workspace.read(cx).node_for_tab(active_tab_id)
                 {
                     self.active_ssh_node_id = Some(node_id.clone());
@@ -231,7 +231,7 @@ impl WorkspaceApp {
                 self.active_surface = ActiveSurface::Terminal;
             }
         }
-        if let Some(session_id) = self.active_terminal_session_id()
+        if let Some(session_id) = self.active_terminal_session_id(cx)
             && let Some(node_id) = self
                 .workspace_runtime
                 .read(cx)
@@ -282,7 +282,7 @@ impl WorkspaceApp {
 
     fn focus_active_tab_keyboard_owner(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self
-            .active_tab()
+            .active_tab(cx)
             .is_some_and(|tab| tab.kind == TabKind::RemoteDesktop)
         {
             // Remote desktop tabs are keyboard owners. Activating the tab must
@@ -342,7 +342,6 @@ impl WorkspaceApp {
             let _ = forwarding_registry.remove(&forwarding_session_id).await;
         });
 
-        self.terminal_endpoint_sessions.remove(&session_id);
         let node_id = self.workspace_runtime.update(cx, |runtime, _cx| {
             runtime.unregister_ssh_terminal_session(session_id)
         });
@@ -387,9 +386,9 @@ impl WorkspaceApp {
             return self.focus_detached_tab_window(location.tab_id, cx);
         }
         self.set_main_window_active_tab(Some(location.tab_id), cx);
-        if let Some(tab) = self.tab_mut_by_id(location.tab_id) {
-            tab.active_pane_id = Some(location.pane_id);
-        }
+        self.tab_host.update(cx, |tab_host, _| {
+            tab_host.set_active_pane(Some(location.tab_id), location.pane_id);
+        });
         if let Some(node_id) = self
             .workspace_runtime
             .read(cx)
@@ -419,7 +418,7 @@ impl WorkspaceApp {
             return;
         }
         let single_pane_tab = self
-            .active_tab()
+            .active_tab(cx)
             .and_then(|tab| tab.root_pane.as_ref())
             .is_none_or(|root| root.pane_count() <= 1);
         if single_pane_tab {
@@ -537,7 +536,7 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(index) = self.active_tab_index() else {
+        let Some(index) = self.active_tab_index(cx) else {
             return;
         };
         self.close_tab_at_index(index, window, cx);
@@ -548,7 +547,7 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(tab_id) = self.main_window_tabs.active_tab_id else {
+        let Some(tab_id) = self.active_tab_id(cx) else {
             return;
         };
         self.request_close_tab_by_id(tab_id, window, cx);
@@ -561,10 +560,10 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(index) = self.tabs.iter().position(|tab| tab.id == tab_id) else {
+        let Some(index) = self.tabs(cx).iter().position(|tab| tab.id == tab_id) else {
             return;
         };
-        if self.tabs[index].kind == TabKind::SshTerminal {
+        if self.tabs(cx)[index].kind == TabKind::SshTerminal {
             // Tauri confirms user-initiated SSH terminal tab closes while
             // still allowing backend/session cleanup paths to close directly.
             self.tab_host.update(cx, |tab_host, cx| {
@@ -573,7 +572,7 @@ impl WorkspaceApp {
             cx.notify();
             return;
         }
-        if self.tabs[index].kind == TabKind::LocalTerminal {
+        if self.tabs(cx)[index].kind == TabKind::LocalTerminal {
             self.request_local_terminal_close_check(
                 LocalTerminalCloseCheck::Single { tab_id },
                 window,
@@ -590,7 +589,7 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(index) = self.tabs.iter().position(|tab| tab.id == tab_id) else {
+        let Some(index) = self.tabs(cx).iter().position(|tab| tab.id == tab_id) else {
             return;
         };
         self.close_tab_at_index(index, window, cx);
@@ -601,15 +600,15 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(active_tab_id) = self.main_window_tabs.active_tab_id else {
+        let Some(active_tab_id) = self.active_tab_id(cx) else {
             return;
         };
         if self
-            .active_tab()
+            .active_tab(cx)
             .is_some_and(|tab| matches!(tab.kind, TabKind::LocalTerminal | TabKind::SshTerminal))
         {
             if self
-                .active_tab()
+                .active_tab(cx)
                 .and_then(|tab| tab.root_pane.as_ref())
                 .is_some_and(|root| root.pane_count() > 1)
             {
@@ -619,7 +618,7 @@ impl WorkspaceApp {
         }
 
         let tab_ids = self
-            .tabs
+            .tabs(cx)
             .iter()
             .filter(|tab| tab.id != active_tab_id)
             .map(|tab| tab.id)
@@ -627,7 +626,7 @@ impl WorkspaceApp {
         if tab_ids.is_empty() {
             return;
         }
-        if self.tab_close_ids_include_ssh_terminal(&tab_ids) {
+        if self.tab_close_ids_include_ssh_terminal(&tab_ids, cx) {
             self.tab_host.update(cx, |tab_host, cx| {
                 tab_host.open_close_confirm(TabCloseConfirm::Other { tab_ids }, cx);
             });
@@ -641,9 +640,9 @@ impl WorkspaceApp {
         );
     }
 
-    fn tab_close_ids_include_ssh_terminal(&self, tab_ids: &[TabId]) -> bool {
+    fn tab_close_ids_include_ssh_terminal(&self, tab_ids: &[TabId], cx: &App) -> bool {
         tab_ids.iter().any(|tab_id| {
-            self.tabs
+            self.tabs(cx)
                 .iter()
                 .any(|tab| tab.id == *tab_id && tab.kind == TabKind::SshTerminal)
         })
@@ -662,7 +661,7 @@ impl WorkspaceApp {
             tab_ids
                 .iter()
                 .filter_map(|tab_id| {
-                    self.tabs
+                    self.tabs(cx)
                         .iter()
                         .find(|tab| tab.id == *tab_id && tab.kind == TabKind::LocalTerminal)
                 })
@@ -804,11 +803,11 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(active_pane_id) = self.active_pane_id() else {
+        let Some(active_pane_id) = self.active_pane_id(cx) else {
             return;
         };
         let mut pane_ids = Vec::new();
-        if let Some(root) = self.active_tab().and_then(|tab| tab.root_pane.as_ref()) {
+        if let Some(root) = self.active_tab(cx).and_then(|tab| tab.root_pane.as_ref()) {
             root.collect_pane_ids(&mut pane_ids);
         }
         if pane_ids.len() < 2 {
@@ -828,22 +827,27 @@ impl WorkspaceApp {
             index - 1
         };
         let next_pane_id = pane_ids[next_index];
-        if let Some(tab) = self.active_tab_mut() {
-            tab.active_pane_id = Some(next_pane_id);
-        }
+        self.tab_host.update(cx, |tab_host, _| {
+            tab_host.set_active_pane(None, next_pane_id);
+        });
         self.needs_active_pane_focus = true;
         self.focus_active_pane(window, cx);
         cx.notify();
     }
 
     fn close_tab_at_index(&mut self, index: usize, window: &mut Window, cx: &mut Context<Self>) {
-        let old_active_tab_id = self.main_window_tabs.active_tab_id;
-        let removed_was_active = self.tabs.get(index).map(|tab| tab.id) == old_active_tab_id;
         let exiting_visual = self.tab_exit_visual(index, cx);
-        let tab = self.tabs.remove(index);
-        let mount_cleanup = self
+        let Some(TabRemovalTransition {
+            tab,
+            mount_cleanup,
+            previous_active_tab_id,
+            next_active_tab_id,
+        }) = self
             .tab_host
-            .update(cx, |tab_host, _cx| tab_host.close_tab_mount(tab.id));
+            .update(cx, |tab_host, _cx| tab_host.remove_tab_at(index))
+        else {
+            return;
+        };
         self.apply_tab_mount_cleanup(mount_cleanup, Some(window), cx);
         self.sync_host_tools_lifecycle(false, cx);
         if self
@@ -895,37 +899,10 @@ impl WorkspaceApp {
             }
         }
 
-        let outside_main_tabs = self.tab_host.read(cx).outside_main_tab_ids();
-        let next_active_tab_id = if self.tabs.is_empty() {
-            None
-        } else if !removed_was_active
-            && old_active_tab_id.is_some_and(|tab_id| {
-                self.tabs
-                    .iter()
-                    .any(|tab| tab.id == tab_id && !outside_main_tabs.contains(&tab.id))
-            })
-        {
-            old_active_tab_id
-        } else {
-            self.tabs
-                .iter()
-                .enumerate()
-                .skip(index.min(self.tabs.len().saturating_sub(1)))
-                .find(|(_, tab)| !outside_main_tabs.contains(&tab.id))
-                .or_else(|| {
-                    self.tabs
-                        .iter()
-                        .enumerate()
-                        .take(index)
-                        .rev()
-                        .find(|(_, tab)| !outside_main_tabs.contains(&tab.id))
-                })
-                .map(|(_, tab)| tab.id)
-        };
-        self.set_main_window_active_tab(next_active_tab_id, cx);
+        self.apply_main_window_active_tab_change(previous_active_tab_id, next_active_tab_id, cx);
         self.sync_active_tab_surface(cx);
         self.needs_active_pane_focus = self
-            .active_tab()
+            .active_tab(cx)
             .is_some_and(|tab| matches!(tab.kind, TabKind::LocalTerminal | TabKind::SshTerminal));
         self.focus_active_pane(window, cx);
         self.reveal_active_tab(window, cx);
@@ -936,12 +913,12 @@ impl WorkspaceApp {
     }
 
     pub(super) fn tab_exit_visual(&self, index: usize, cx: &App) -> Option<ExitingTabVisual> {
-        let tab = self.tabs.get(index)?;
+        let tab = self.tabs(cx).get(index)?;
         let outside_main_tabs = self.tab_host.read(cx).outside_main_tab_ids();
         if outside_main_tabs.contains(&tab.id) {
             return None;
         }
-        let live_visual_index = self.tabs[..index]
+        let live_visual_index = self.tabs(cx)[..index]
             .iter()
             .filter(|candidate| !outside_main_tabs.contains(&candidate.id))
             .count();
@@ -959,7 +936,7 @@ impl WorkspaceApp {
             title: self.tab_display_title(tab),
             width: self.tab_visual_width(tab),
             visual_index,
-            was_active: Some(tab.id) == self.main_window_tabs.active_tab_id,
+            was_active: Some(tab.id) == self.active_tab_id(cx),
         })
     }
 
@@ -1008,7 +985,7 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) {
         let tab_ids = self
-            .tabs
+            .tabs(cx)
             .iter()
             .filter(|tab| self.tab_belongs_to_node(tab, node_id, cx))
             .map(|tab| tab.id)
@@ -1047,7 +1024,7 @@ impl WorkspaceApp {
     ) {
         let outside_main_tabs = self.tab_host.read(cx).outside_main_tab_ids();
         let visible_tabs = self
-            .tabs
+            .tabs(cx)
             .iter()
             .filter(|tab| !outside_main_tabs.contains(&tab.id))
             .map(|tab| tab.id)
@@ -1056,8 +1033,7 @@ impl WorkspaceApp {
             return;
         }
         let current = self
-            .main_window_tabs
-            .active_tab_id
+            .active_tab_id(cx)
             .and_then(|active| visible_tabs.iter().position(|tab_id| *tab_id == active))
             .unwrap_or(0);
         let next = if forward {
@@ -1070,7 +1046,7 @@ impl WorkspaceApp {
         self.set_main_window_active_tab(Some(visible_tabs[next]), cx);
         self.sync_active_tab_surface(cx);
         self.needs_active_pane_focus = self
-            .active_tab()
+            .active_tab(cx)
             .is_some_and(|tab| matches!(tab.kind, TabKind::LocalTerminal | TabKind::SshTerminal));
         self.focus_active_pane(window, cx);
         self.reveal_active_tab(window, cx);
@@ -1085,7 +1061,7 @@ impl WorkspaceApp {
     ) {
         let outside_main_tabs = self.tab_host.read(cx).outside_main_tab_ids();
         if let Some(tab_id) = self
-            .tabs
+            .tabs(cx)
             .iter()
             .filter(|tab| !outside_main_tabs.contains(&tab.id))
             .nth(index)
@@ -1093,7 +1069,7 @@ impl WorkspaceApp {
         {
             self.set_main_window_active_tab(Some(tab_id), cx);
             self.sync_active_tab_surface(cx);
-            self.needs_active_pane_focus = self.active_tab().is_some_and(|tab| {
+            self.needs_active_pane_focus = self.active_tab(cx).is_some_and(|tab| {
                 matches!(tab.kind, TabKind::LocalTerminal | TabKind::SshTerminal)
             });
             self.focus_active_pane(window, cx);
@@ -1137,7 +1113,7 @@ impl WorkspaceApp {
         let outside_main_tabs = self.tab_host.read(cx).outside_main_tab_ids();
         self.tokens.metrics.tabbar_leading_offset
             + self
-                .tabs
+                .tabs(cx)
                 .iter()
                 .filter(|tab| !outside_main_tabs.contains(&tab.id))
                 .map(|tab| self.tab_visual_width(tab))
@@ -1229,20 +1205,20 @@ impl WorkspaceApp {
     }
 
     pub(in crate::workspace) fn reveal_active_tab(&mut self, window: &Window, cx: &App) {
-        let Some(index) = self.active_tab_index() else {
+        let Some(index) = self.active_tab_index(cx) else {
             self.clamp_tab_scroll(window, cx);
             return;
         };
         let outside_main_tabs = self.tab_host.read(cx).outside_main_tab_ids();
         let tab_left = self.tokens.metrics.tabbar_leading_offset
             + self
-                .tabs
+                .tabs(cx)
                 .iter()
                 .take(index)
                 .filter(|tab| !outside_main_tabs.contains(&tab.id))
                 .map(|tab| self.tab_visual_width(tab))
                 .sum::<f32>();
-        let tab_right = tab_left + self.tab_visual_width(&self.tabs[index]);
+        let tab_right = tab_left + self.tab_visual_width(&self.tabs(cx)[index]);
         let viewport_width = self.tabbar_scroll_viewport_width(window);
 
         let current_scroll_x = self.tabbar_effective_scroll_x(window, cx);
@@ -1295,7 +1271,7 @@ impl WorkspaceApp {
         client_x: f32,
         window: &Window,
         tab_widths: &[f32],
-        cx: &App,
+        cx: &mut App,
     ) -> usize {
         if tab_widths.is_empty() {
             return 0;
@@ -1321,20 +1297,22 @@ impl WorkspaceApp {
         window: &Window,
         cx: &mut Context<Self>,
     ) {
-        if index >= self.tabs.len() || self.tabs.get(index).is_none_or(|tab| tab.id != tab_id) {
+        if index >= self.tabs(cx).len()
+            || self.tabs(cx).get(index).is_none_or(|tab| tab.id != tab_id)
+        {
             return;
         }
         let start_x = f32::from(event.position.x);
         let start_y = f32::from(event.position.y);
         let outside_main_tabs = self.tab_host.read(cx).outside_main_tab_ids();
         let tab_widths = self
-            .tabs
+            .tabs(cx)
             .iter()
             .filter(|tab| !outside_main_tabs.contains(&tab.id))
             .map(|tab| self.tab_visual_width(tab))
             .collect::<Vec<_>>();
         let Some(visible_index) = self
-            .tabs
+            .tabs(cx)
             .iter()
             .filter(|tab| !outside_main_tabs.contains(&tab.id))
             .position(|tab| tab.id == tab_id)
@@ -1430,7 +1408,7 @@ impl WorkspaceApp {
                 }
             }
             TabDragMode::Pending | TabDragMode::Reorder => {
-                if self.tab_by_id(drag.tab_id).is_some() {
+                if self.tab_by_id(drag.tab_id, cx).is_some() {
                     self.set_active_tab(drag.tab_id, window, cx);
                 }
             }
@@ -1442,41 +1420,11 @@ impl WorkspaceApp {
         &mut self,
         tab_id: TabId,
         visible_index: usize,
-        cx: &App,
+        cx: &mut App,
     ) -> bool {
-        let Some(source_index) = self.tab_index_by_id(tab_id) else {
-            return false;
-        };
-        let outside_main_tabs = self.tab_host.read(cx).outside_main_tab_ids();
-        let current_visible_index = self
-            .tabs
-            .iter()
-            .filter(|tab| !outside_main_tabs.contains(&tab.id))
-            .position(|tab| tab.id == tab_id);
-        if current_visible_index == Some(visible_index) {
-            return false;
-        }
-        let visible_tab_ids = self
-            .tabs
-            .iter()
-            .filter(|tab| tab.id != tab_id && !outside_main_tabs.contains(&tab.id))
-            .map(|tab| tab.id)
-            .collect::<Vec<_>>();
-        let anchor_tab_id = visible_tab_ids.get(visible_index).copied();
-        let trailing_tab_id = visible_tab_ids.last().copied();
-        let moved_tab = self.tabs.remove(source_index);
-        let insertion_index = anchor_tab_id
-            .and_then(|anchor_id| self.tab_index_by_id(anchor_id))
-            .or_else(|| {
-                trailing_tab_id
-                    .and_then(|trailing_id| self.tab_index_by_id(trailing_id))
-                    .map(|index| index + 1)
-            })
-            .unwrap_or_else(|| source_index.min(self.tabs.len()))
-            .min(self.tabs.len());
-        let changed = insertion_index != source_index.min(self.tabs.len());
-        self.tabs.insert(insertion_index, moved_tab);
-        changed
+        self.tab_host.update(cx, |tab_host, _| {
+            tab_host.move_main_tab_to_visible_index(tab_id, visible_index)
+        })
     }
 }
 

@@ -228,7 +228,7 @@ impl WorkspaceApp {
 
     pub(super) fn clear_active_terminal_screen(&mut self, cx: &mut Context<Self>) -> bool {
         let terminal_active = self
-            .active_tab()
+            .active_tab(cx)
             .is_some_and(|tab| matches!(tab.kind, TabKind::LocalTerminal | TabKind::SshTerminal));
         if !terminal_active {
             return false;
@@ -330,7 +330,7 @@ impl WorkspaceApp {
         };
 
         let terminal_active = self
-            .active_tab()
+            .active_tab(cx)
             .is_some_and(|tab| matches!(tab.kind, TabKind::LocalTerminal | TabKind::SshTerminal));
         if matches!(
             definition.scope,
@@ -589,10 +589,6 @@ impl WorkspaceApp {
             return;
         }
 
-        if self.handle_tab_close_confirm_key(event, window, cx) {
-            return;
-        }
-
         if self.handle_ai_settings_confirm_key(event, cx) {
             return;
         }
@@ -622,7 +618,7 @@ impl WorkspaceApp {
         }
 
         let connection_monitor_keys_visible = self
-            .active_tab()
+            .active_tab(cx)
             .is_some_and(|tab| tab.kind == TabKind::ConnectionMonitor)
             || (self.context_sidebar_visible()
                 && self.active_context_sidebar_panel == ContextSidebarPanel::HostTools
@@ -742,7 +738,7 @@ impl WorkspaceApp {
         }
 
         if self
-            .active_tab()
+            .active_tab(cx)
             .is_some_and(|tab| tab.kind == TabKind::Sftp)
         {
             let _ = self.handle_sftp_key(event, cx);
@@ -750,7 +746,7 @@ impl WorkspaceApp {
         }
 
         if self
-            .active_tab()
+            .active_tab(cx)
             .is_some_and(|tab| tab.kind == TabKind::Launcher)
             && self.launcher.read(cx).focused_input().is_some()
         {
@@ -759,7 +755,7 @@ impl WorkspaceApp {
         }
 
         if self
-            .active_tab()
+            .active_tab(cx)
             .is_some_and(|tab| tab.kind == TabKind::Graphics)
             && self.graphics.read(cx).focused_input().is_some()
         {
@@ -843,7 +839,7 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> bool {
         let terminal_active = self
-            .active_tab()
+            .active_tab(cx)
             .is_some_and(|tab| matches!(tab.kind, TabKind::LocalTerminal | TabKind::SshTerminal));
         if !terminal_active {
             return false;
@@ -938,161 +934,211 @@ impl WorkspaceApp {
             }
             // The import dialog owns keyboard input while it is mounted.
             true
-        } else if self
-            .overlay
-            .read(cx)
-            .confirm_snapshot()
-            .is_some_and(|snapshot| {
-                matches!(snapshot.kind, WorkspaceOverlayConfirmKind::SettingsReset)
-            })
-        {
-            let key_action = self.overlay.update(cx, |overlay, cx| {
-                overlay.handle_confirm_key(
-                    event.keystroke.key.as_str(),
-                    event.keystroke.modifiers.shift,
-                    event.keystroke.modifiers.platform || event.keystroke.modifiers.control,
-                    cx,
-                )
-            });
-            match key_action {
-                Some(WorkspaceOverlayConfirmKeyAction::Cancel) => {
-                    self.begin_settings_reset_confirm_exit(false, cx);
-                    true
-                }
-                Some(WorkspaceOverlayConfirmKeyAction::Confirm) => {
-                    self.begin_settings_reset_confirm_exit(true, cx);
-                    true
-                }
-                Some(WorkspaceOverlayConfirmKeyAction::Handled) => true,
-                None => false,
-            }
-        } else if self
+        } else if self.handle_keybinding_reset_confirm_key(event, window, cx) {
+            true
+        } else if self.handle_knowledge_delete_confirm_key(event, cx) {
+            true
+        } else if self.handle_knowledge_document_dialog_key(event, cx) {
+            true
+        } else if self.handle_knowledge_collection_dialog_key(event, cx) {
+            true
+        } else {
+            self.handle_settings_data_directory_confirm_key(event, cx)
+        }
+    }
+
+    pub(super) fn handle_keybinding_reset_confirm_key(
+        &mut self,
+        event: &KeyDownEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if !self
             .settings_workspace
             .read(cx)
             .keybinding_reset_confirm_snapshot()
             .is_some_and(|snapshot| snapshot.phase == oxideterm_gpui_ui::motion::ExitPhase::Visible)
         {
-            let key_action = self.settings_workspace.update(cx, |settings, cx| {
-                settings.handle_keybinding_reset_confirm_key(
-                    event.keystroke.key.as_str(),
-                    event.keystroke.modifiers.shift,
-                    event.keystroke.modifiers.platform || event.keystroke.modifiers.control,
-                    cx,
-                )
-            });
-            match key_action {
-                Some(settings::KeybindingResetConfirmKeyAction::Cancel) => {
-                    self.begin_keybinding_reset_all_confirm_exit(cx);
-                    cx.notify();
-                    true
-                }
-                Some(settings::KeybindingResetConfirmKeyAction::Confirm) => {
-                    if self.begin_keybinding_reset_all_confirm_exit(cx) {
-                        self.reset_all_keybindings(window, cx);
-                    }
-                    true
-                }
-                Some(settings::KeybindingResetConfirmKeyAction::Handled) => true,
-                None => false,
+            return false;
+        }
+        let key_action = self.settings_workspace.update(cx, |settings, cx| {
+            settings.handle_keybinding_reset_confirm_key(
+                event.keystroke.key.as_str(),
+                event.keystroke.modifiers.shift,
+                event.keystroke.modifiers.platform || event.keystroke.modifiers.control,
+                cx,
+            )
+        });
+        match key_action {
+            Some(settings::KeybindingResetConfirmKeyAction::Cancel) => {
+                self.begin_keybinding_reset_all_confirm_exit(cx);
+                cx.notify();
+                true
             }
-        } else if self
+            Some(settings::KeybindingResetConfirmKeyAction::Confirm) => {
+                if self.begin_keybinding_reset_all_confirm_exit(cx) {
+                    self.reset_all_keybindings(window, cx);
+                }
+                true
+            }
+            Some(settings::KeybindingResetConfirmKeyAction::Handled) => true,
+            None => false,
+        }
+    }
+
+    pub(super) fn handle_settings_data_directory_confirm_key(
+        &mut self,
+        event: &KeyDownEvent,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if !self
             .settings_workspace
             .read(cx)
             .data_directory_confirm_is_visible()
         {
-            match self.handle_standard_confirm_key(event, cx) {
-                Some(ConfirmKeyboardAction::Cancel) => {
-                    self.cancel_settings_data_directory_confirm(cx);
-                    true
-                }
-                Some(ConfirmKeyboardAction::Confirm) => {
-                    self.confirm_settings_data_directory(cx);
-                    true
-                }
-                Some(ConfirmKeyboardAction::Handled) => true,
-                None => false,
+            return false;
+        }
+        match self.handle_standard_confirm_key(event, cx) {
+            Some(ConfirmKeyboardAction::Cancel) => {
+                self.cancel_settings_data_directory_confirm(cx);
+                true
             }
-        } else if self.ai_entity.read(cx).knowledge_create_dialog_open() {
-            match self.handle_standard_confirm_key(event, cx) {
-                Some(ConfirmKeyboardAction::Cancel) => {
+            Some(ConfirmKeyboardAction::Confirm) => {
+                self.confirm_settings_data_directory(cx);
+                true
+            }
+            Some(ConfirmKeyboardAction::Handled) => true,
+            None => false,
+        }
+    }
+
+    pub(super) fn handle_knowledge_collection_dialog_key(
+        &mut self,
+        event: &KeyDownEvent,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if !self.ai_entity.read(cx).knowledge_create_dialog_open() {
+            return false;
+        }
+        match self.handle_standard_confirm_key(event, cx) {
+            Some(ConfirmKeyboardAction::Cancel) => {
+                self.ai_entity.update(cx, |entity, cx| {
+                    entity.close_knowledge_create_dialog(Duration::ZERO, cx);
+                });
+                true
+            }
+            Some(ConfirmKeyboardAction::Confirm) => {
+                if self
+                    .ai_entity
+                    .read(cx)
+                    .knowledge_new_collection_name()
+                    .trim()
+                    .is_empty()
+                {
+                    // Disabled primary buttons retain ownership inside the dialog.
+                    self.reset_standard_confirm_focus();
+                    cx.notify();
+                } else {
+                    self.knowledge_create_collection(cx);
                     self.ai_entity.update(cx, |entity, cx| {
                         entity.close_knowledge_create_dialog(Duration::ZERO, cx);
                     });
-                    true
                 }
-                Some(ConfirmKeyboardAction::Confirm) => {
-                    if self
-                        .ai_entity
-                        .read(cx)
-                        .knowledge_new_collection_name()
-                        .trim()
-                        .is_empty()
-                    {
-                        // Disabled primary buttons keep focus in the dialog;
-                        // restore the shared footer owner after the key guard.
-                        self.reset_standard_confirm_focus();
-                        cx.notify();
-                    } else {
-                        self.knowledge_create_collection(cx);
-                        self.ai_entity.update(cx, |entity, cx| {
-                            entity.close_knowledge_create_dialog(Duration::ZERO, cx);
-                        });
-                    }
-                    true
-                }
-                Some(ConfirmKeyboardAction::Handled) => true,
-                None => false,
+                true
             }
-        } else if self.ai_entity.read(cx).knowledge_document_dialog_open() {
-            match self.handle_standard_confirm_key(event, cx) {
-                Some(ConfirmKeyboardAction::Cancel) => {
+            Some(ConfirmKeyboardAction::Handled) => true,
+            None => false,
+        }
+    }
+
+    pub(super) fn handle_knowledge_document_dialog_key(
+        &mut self,
+        event: &KeyDownEvent,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if !self.ai_entity.read(cx).knowledge_document_dialog_open() {
+            return false;
+        }
+        match self.handle_standard_confirm_key(event, cx) {
+            Some(ConfirmKeyboardAction::Cancel) => {
+                self.ai_entity.update(cx, |entity, cx| {
+                    entity.close_knowledge_document_dialog(Duration::ZERO, cx);
+                });
+                true
+            }
+            Some(ConfirmKeyboardAction::Confirm) => {
+                if self
+                    .ai_entity
+                    .read(cx)
+                    .knowledge_new_document_title()
+                    .trim()
+                    .is_empty()
+                {
+                    // Disabled primary buttons retain ownership inside the dialog.
+                    self.reset_standard_confirm_focus();
+                    cx.notify();
+                } else {
+                    self.knowledge_create_blank_document(cx);
                     self.ai_entity.update(cx, |entity, cx| {
                         entity.close_knowledge_document_dialog(Duration::ZERO, cx);
                     });
-                    true
                 }
-                Some(ConfirmKeyboardAction::Confirm) => {
-                    if self
-                        .ai_entity
-                        .read(cx)
-                        .knowledge_new_document_title()
-                        .trim()
-                        .is_empty()
-                    {
-                        // Keep disabled-submit behavior aligned with the
-                        // shared two-action footer instead of adding a local
-                        // key path for this dialog only.
-                        self.reset_standard_confirm_focus();
-                        cx.notify();
-                    } else {
-                        self.knowledge_create_blank_document(cx);
-                        self.ai_entity.update(cx, |entity, cx| {
-                            entity.close_knowledge_document_dialog(Duration::ZERO, cx);
-                        });
-                    }
-                    true
-                }
-                Some(ConfirmKeyboardAction::Handled) => true,
-                None => false,
+                true
             }
-        } else if self.ai_entity.read(cx).knowledge_delete_confirm().is_some() {
-            match self.handle_standard_confirm_key(event, cx) {
-                Some(ConfirmKeyboardAction::Cancel) => {
-                    self.ai_entity.update(cx, |entity, cx| {
-                        entity.clear_knowledge_delete_confirm();
-                        cx.notify();
-                    });
-                    true
-                }
-                Some(ConfirmKeyboardAction::Confirm) => {
-                    self.knowledge_confirm_delete(cx);
-                    true
-                }
-                Some(ConfirmKeyboardAction::Handled) => true,
-                None => false,
+            Some(ConfirmKeyboardAction::Handled) => true,
+            None => false,
+        }
+    }
+
+    pub(super) fn handle_knowledge_delete_confirm_key(
+        &mut self,
+        event: &KeyDownEvent,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if self.ai_entity.read(cx).knowledge_delete_confirm().is_none() {
+            return false;
+        }
+        match self.handle_standard_confirm_key(event, cx) {
+            Some(ConfirmKeyboardAction::Cancel) => {
+                self.ai_entity.update(cx, |entity, cx| {
+                    entity.clear_knowledge_delete_confirm();
+                    cx.notify();
+                });
+                true
             }
-        } else {
-            false
+            Some(ConfirmKeyboardAction::Confirm) => {
+                self.knowledge_confirm_delete(cx);
+                true
+            }
+            Some(ConfirmKeyboardAction::Handled) => true,
+            None => false,
+        }
+    }
+
+    pub(super) fn handle_settings_reset_confirm_key(
+        &mut self,
+        event: &KeyDownEvent,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let key_action = self.overlay.update(cx, |overlay, cx| {
+            overlay.handle_confirm_key(
+                event.keystroke.key.as_str(),
+                event.keystroke.modifiers.shift,
+                event.keystroke.modifiers.platform || event.keystroke.modifiers.control,
+                cx,
+            )
+        });
+        match key_action {
+            Some(WorkspaceOverlayConfirmKeyAction::Cancel) => {
+                self.begin_settings_reset_confirm_exit(false, cx);
+                true
+            }
+            Some(WorkspaceOverlayConfirmKeyAction::Confirm) => {
+                self.begin_settings_reset_confirm_exit(true, cx);
+                true
+            }
+            Some(WorkspaceOverlayConfirmKeyAction::Handled) => true,
+            None => false,
         }
     }
 
@@ -1175,74 +1221,96 @@ impl WorkspaceApp {
         event: &KeyDownEvent,
         cx: &mut Context<Self>,
     ) -> bool {
-        if self.ai.chat.safety_confirm_open {
-            if self.ai.chat.safety_confirm_presence.phase()
-                == oxideterm_gpui_ui::motion::ExitPhase::Exiting
-            {
-                return true;
+        // Summarize is rendered after Safety and therefore owns keys if a
+        // stale lower confirmation is still mounted during the same frame.
+        self.handle_ai_summarize_confirm_key(event, cx)
+            || self.handle_ai_safety_confirm_key(event, cx)
+    }
+
+    pub(super) fn handle_ai_safety_confirm_key(
+        &mut self,
+        event: &KeyDownEvent,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if !self.ai.chat.safety_confirm_open {
+            return false;
+        }
+        if self.ai.chat.safety_confirm_presence.phase()
+            == oxideterm_gpui_ui::motion::ExitPhase::Exiting
+        {
+            return true;
+        }
+        match self.handle_standard_confirm_key(event, cx) {
+            Some(ConfirmKeyboardAction::Cancel) => {
+                self.begin_ai_safety_confirm_exit(cx);
+                cx.notify();
+                true
             }
-            match self.handle_standard_confirm_key(event, cx) {
-                Some(ConfirmKeyboardAction::Cancel) => {
-                    self.begin_ai_safety_confirm_exit(cx);
-                    cx.notify();
-                    true
+            Some(ConfirmKeyboardAction::Confirm) => {
+                if self.begin_ai_safety_confirm_exit(cx) {
+                    self.confirm_ai_safety_bypass(cx);
                 }
-                Some(ConfirmKeyboardAction::Confirm) => {
-                    if self.begin_ai_safety_confirm_exit(cx) {
-                        self.confirm_ai_safety_bypass(cx);
-                    }
-                    true
-                }
-                Some(ConfirmKeyboardAction::Handled) => true,
-                None => false,
+                true
             }
-        } else if self.ai.chat.summarize_confirm_open {
-            if self.ai.chat.summarize_confirm_presence.phase()
-                == oxideterm_gpui_ui::motion::ExitPhase::Exiting
-            {
-                return true;
+            Some(ConfirmKeyboardAction::Handled) => true,
+            None => false,
+        }
+    }
+
+    pub(super) fn handle_ai_summarize_confirm_key(
+        &mut self,
+        event: &KeyDownEvent,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if !self.ai.chat.summarize_confirm_open {
+            return false;
+        }
+        if self.ai.chat.summarize_confirm_presence.phase()
+            == oxideterm_gpui_ui::motion::ExitPhase::Exiting
+        {
+            return true;
+        }
+        match self.handle_standard_confirm_key(event, cx) {
+            Some(ConfirmKeyboardAction::Cancel) => {
+                self.begin_ai_summarize_confirm_exit(cx);
+                cx.notify();
+                true
             }
-            match self.handle_standard_confirm_key(event, cx) {
-                Some(ConfirmKeyboardAction::Cancel) => {
-                    self.begin_ai_summarize_confirm_exit(cx);
-                    cx.notify();
-                    true
+            Some(ConfirmKeyboardAction::Confirm) => {
+                if self.begin_ai_summarize_confirm_exit(cx) {
+                    self.start_ai_summarize_conversation(cx);
                 }
-                Some(ConfirmKeyboardAction::Confirm) => {
-                    if self.begin_ai_summarize_confirm_exit(cx) {
-                        self.start_ai_summarize_conversation(cx);
-                    }
-                    true
-                }
-                Some(ConfirmKeyboardAction::Handled) => true,
-                None => false,
+                true
             }
-        } else if let Some(snapshot) = self.ai_entity.read(cx).chat_confirm_snapshot() {
-            if snapshot.phase == oxideterm_gpui_ui::motion::ExitPhase::Exiting {
-                return true;
+            Some(ConfirmKeyboardAction::Handled) => true,
+            None => false,
+        }
+    }
+
+    pub(super) fn handle_ai_chat_confirm_key(
+        &mut self,
+        event: &KeyDownEvent,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let key_action = self.ai_entity.update(cx, |ai, cx| {
+            ai.handle_chat_confirm_key(
+                event.keystroke.key.as_str(),
+                event.keystroke.modifiers.shift,
+                event.keystroke.modifiers.platform || event.keystroke.modifiers.control,
+                cx,
+            )
+        });
+        match key_action {
+            Some(ai_state::AiChatConfirmKeyAction::Cancel) => {
+                self.begin_ai_chat_confirm_exit(false, cx);
+                true
             }
-            let key_action = self.ai_entity.update(cx, |ai, cx| {
-                ai.handle_chat_confirm_key(
-                    event.keystroke.key.as_str(),
-                    event.keystroke.modifiers.shift,
-                    event.keystroke.modifiers.platform || event.keystroke.modifiers.control,
-                    cx,
-                )
-            });
-            match key_action {
-                Some(ai_state::AiChatConfirmKeyAction::Cancel) => {
-                    self.begin_ai_chat_confirm_exit(false, cx);
-                    true
-                }
-                Some(ai_state::AiChatConfirmKeyAction::Confirm) => {
-                    self.begin_ai_chat_confirm_exit(true, cx);
-                    true
-                }
-                Some(ai_state::AiChatConfirmKeyAction::Handled) => true,
-                None => false,
+            Some(ai_state::AiChatConfirmKeyAction::Confirm) => {
+                self.begin_ai_chat_confirm_exit(true, cx);
+                true
             }
-        } else {
-            false
+            Some(ai_state::AiChatConfirmKeyAction::Handled) => true,
+            None => false,
         }
     }
 
@@ -1692,7 +1760,7 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
-        if let Some(source_pane_id) = self.active_pane_id() {
+        if let Some(source_pane_id) = self.active_pane_id(cx) {
             self.send_terminal_command_to_pane(
                 source_pane_id,
                 command,
@@ -1772,7 +1840,7 @@ impl WorkspaceApp {
         &mut self,
         cx: &mut App,
     ) {
-        let pane_id = self.active_pane_id();
+        let pane_id = self.active_pane_id(cx);
         let recording =
             self.active_terminal_recording_status(cx).state == TerminalRecordingState::Recording;
         self.tab_host.update(cx, |tab_host, cx| {
@@ -1793,7 +1861,7 @@ impl WorkspaceApp {
     }
 
     pub(super) fn start_active_terminal_recording(&mut self, cx: &mut Context<Self>) {
-        let title = self.active_tab().map(|tab| tab.title.clone());
+        let title = self.active_tab(cx).map(|tab| tab.title.clone());
         if let Some(pane) = self.active_pane(cx) {
             let _ = pane.update(cx, |pane, cx| pane.start_recording(title, cx));
             self.push_workspace_notice(
@@ -1841,14 +1909,14 @@ impl WorkspaceApp {
     }
 
     pub(super) fn stop_active_terminal_recording(&mut self, cx: &mut Context<Self>) {
-        let Some(pane_id) = self.active_pane_id() else {
+        let Some(pane_id) = self.active_pane_id(cx) else {
             return;
         };
         let Some(pane) = self.tab_host.read(cx).panes().get(&pane_id).cloned() else {
             return;
         };
         let session_label = self
-            .active_terminal_session_id()
+            .active_terminal_session_id(cx)
             .map(|id| id.0.to_string())
             .unwrap_or_else(|| pane_id.0.to_string());
         let content = pane.update(cx, |pane, cx| pane.stop_recording(cx));
@@ -1971,7 +2039,7 @@ impl WorkspaceApp {
     ) -> Vec<PaneId> {
         let tab_host = self.tab_host.read(cx);
         let mut candidates = Vec::new();
-        for tab in &self.tabs {
+        for tab in self.tabs(cx) {
             if let Some(root) = tab.root_pane.as_ref() {
                 root.collect_pane_ids(&mut candidates);
             }
@@ -1996,7 +2064,7 @@ impl WorkspaceApp {
     ) -> Vec<(PaneId, String, TabKind)> {
         let tab_host = self.tab_host.read(cx);
         let mut entries = Vec::new();
-        for tab in &self.tabs {
+        for tab in self.tabs(cx) {
             let Some(root) = tab.root_pane.as_ref() else {
                 continue;
             };
@@ -2051,15 +2119,14 @@ impl WorkspaceApp {
         cx.notify();
     }
 
-    pub(super) fn sync_tab_titles(&mut self, _cx: &App) {
+    pub(super) fn sync_tab_titles(&mut self, cx: &mut App) {
         // Localized tab titles are derived only when the locale changes. Keeping
         // this work out of render avoids allocating every translated title on
         // unrelated terminal repaint frames.
-        for tab in &mut self.tabs {
-            if let TabTitleSource::I18nKey(key) = tab.title_source {
-                tab.title = self.i18n.t(key);
-            }
-        }
+        let i18n = &self.i18n;
+        self.tab_host.update(cx, |tab_host, _| {
+            tab_host.sync_tab_titles(|key| i18n.t(key))
+        });
     }
 
     pub(super) fn render_search_bar(&self, cx: &mut Context<Self>) -> AnyElement {

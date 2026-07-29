@@ -336,7 +336,7 @@ impl WorkspaceApp {
             self.start_sftp_path_edit(SftpPane::Remote, cx);
             return;
         }
-        let Some(tab_id) = self.main_window_tabs.active_tab_id else {
+        let Some(tab_id) = self.active_tab_id(cx) else {
             return;
         };
         let Some(node_id) = self.sftp_tab_nodes.get(&tab_id).cloned() else {
@@ -397,7 +397,7 @@ impl WorkspaceApp {
         transfer_id: String,
         cx: &mut Context<Self>,
     ) {
-        let Some(tab_id) = self.main_window_tabs.active_tab_id else {
+        let Some(tab_id) = self.active_tab_id(cx) else {
             return;
         };
         let Some(node_id) = self.sftp_tab_nodes.get(&tab_id).cloned() else {

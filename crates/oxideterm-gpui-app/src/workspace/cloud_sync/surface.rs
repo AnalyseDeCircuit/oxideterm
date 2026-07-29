@@ -12,19 +12,25 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let tab_id = if let Some(tab) = self.tabs.iter().find(|tab| tab.kind == TabKind::CloudSync)
+        let tab_id = if let Some(tab) = self
+            .tabs(cx)
+            .iter()
+            .find(|tab| tab.kind == TabKind::CloudSync)
         {
             tab.id
         } else {
             let tab_id = self.alloc_tab_id(cx);
-            self.tabs.push(Tab {
-                id: tab_id,
-                kind: TabKind::CloudSync,
-                title: self.i18n.t("plugin.cloud_sync.panel_title"),
-                title_source: TabTitleSource::I18nKey("plugin.cloud_sync.panel_title"),
-                root_pane: None,
-                active_pane_id: None,
-            });
+            self.insert_tab(
+                Tab {
+                    id: tab_id,
+                    kind: TabKind::CloudSync,
+                    title: self.i18n.t("plugin.cloud_sync.panel_title"),
+                    title_source: TabTitleSource::I18nKey("plugin.cloud_sync.panel_title"),
+                    root_pane: None,
+                    active_pane_id: None,
+                },
+                cx,
+            );
             tab_id
         };
         if self.focus_detached_tab_window(tab_id, cx) {

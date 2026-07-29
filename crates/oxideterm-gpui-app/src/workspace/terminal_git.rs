@@ -1012,7 +1012,7 @@ impl WorkspaceApp {
         failure_message: String,
         cx: &mut Context<Self>,
     ) {
-        let Some(pane_id) = self.active_pane_id() else {
+        let Some(pane_id) = self.active_pane_id(cx) else {
             self.terminal.update(cx, |terminal, _cx| {
                 terminal.set_git_panel_error(TerminalGitBranchError::Message(failure_message));
             });
@@ -1126,13 +1126,13 @@ impl WorkspaceApp {
             return None;
         }
 
-        let tab = self.active_tab()?;
+        let tab = self.active_tab(cx)?;
         let tab_kind = tab.kind.clone();
         let pane_id = tab.active_pane_id?;
         let scope = match tab_kind {
             TabKind::LocalTerminal => GitProbeScope::Local,
             TabKind::SshTerminal => {
-                let session_id = self.active_terminal_session_id()?;
+                let session_id = self.active_terminal_session_id(cx)?;
                 let node_id = self
                     .workspace_runtime
                     .read(cx)

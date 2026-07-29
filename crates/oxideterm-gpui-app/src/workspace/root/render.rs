@@ -103,8 +103,13 @@ impl WorkspaceApp {
     }
 }
 
-impl Render for WorkspaceApp {
-    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+impl WorkspaceApp {
+    pub(in crate::workspace) fn render_main_window(
+        &mut self,
+        window_background: &Entity<window_shell::WorkspaceWindowBackgroundEntity>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let active_ime_target = self.active_ime_target(cx);
         self.workspace_input.update(cx, |input, cx| {
             input.sync_active_target(active_ime_target, cx);
@@ -112,13 +117,7 @@ impl Render for WorkspaceApp {
         self.begin_selectable_text_frame();
         self.schedule_pending_auto_close_terminal_sessions(window, cx);
         self.sync_ai_workspace_visibility(cx);
-        let window_opacity =
-            normalized_window_opacity(self.settings_store.settings().appearance.window_opacity);
         let cloud_sync_confirm_open = self.cloud_sync.read(cx).view.confirm.is_some();
-        if self.applied_window_opacity != window_opacity {
-            let _ = apply_window_opacity(window, window_opacity as f64);
-            self.applied_window_opacity = window_opacity;
-        }
         if self.app_lock.locked {
             window.set_window_title(&SharedString::from(
                 self.i18n.t("settings_view.general.app_lock_window_title"),
@@ -131,23 +130,23 @@ impl Render for WorkspaceApp {
         let overlay_confirm_snapshot = self.overlay.read(cx).confirm_snapshot();
         let tab_close_confirm_open = self.tab_host.read(cx).close_confirm().is_some();
         let title = self
-            .active_tab()
+            .active_tab(cx)
             .map(|tab| self.tab_display_title(tab))
             .unwrap_or_else(|| "OxideTerm".to_string());
+        // Keep Entity borrows out of window rendering callbacks.
+        let active_tab_projection = self
+            .active_tab(cx)
+            .map(|tab| (tab.id, tab.kind.clone(), tab.root_pane.clone()));
         window.set_window_title(&SharedString::from(title));
         let vibrancy_mode =
             effective_vibrancy_mode(self.settings_store.settings(), &self.render_policy);
         // Modal/command-palette backdrop blur follows the active render profile
         // just like Tauri's linuxBackdropBlurClass compatibility gate.
         set_tauri_backdrop_blur_allowed(self.render_policy.allow_background_blur);
-        if self.applied_vibrancy_mode != vibrancy_mode {
-            self.vibrancy_support = apply_window_vibrancy(window, vibrancy_mode);
-            self.applied_vibrancy_mode = vibrancy_mode;
-        }
         if self.needs_active_pane_focus
-            && self.active_tab().is_some_and(|tab| {
+            && active_tab_projection.as_ref().is_some_and(|(_, kind, _)| {
                 !matches!(
-                    tab.kind,
+                    kind,
                     TabKind::Settings
                         | TabKind::SessionManager
                         | TabKind::FileManager
@@ -175,8 +174,8 @@ impl Render for WorkspaceApp {
             });
         }
 
-        let content = if let Some(tab) = self.active_tab() {
-            match (&tab.kind, &tab.root_pane) {
+        let content = if let Some((tab_id, tab_kind, root_pane)) = &active_tab_projection {
+            match (tab_kind, root_pane) {
                 (TabKind::Settings, _) => self.render_settings_surface(cx),
                 (TabKind::FileManager, _) => self.render_file_manager_surface(window, cx),
                 (TabKind::Launcher, _) => self.render_launcher_surface(window, cx),
@@ -205,7 +204,7 @@ impl Render for WorkspaceApp {
                 }
                 (TabKind::CloudSync, _) => self.render_cloud_sync_surface(cx),
                 (TabKind::RemoteDesktop, _) => {
-                    self.render_remote_desktop_surface(tab.id, window, cx)
+                    self.render_remote_desktop_surface(*tab_id, window, cx)
                 }
                 (_, Some(root_pane)) => self.render_terminal_surface(root_pane, cx),
                 _ => self.render_empty_workspace(cx),
@@ -214,22 +213,25 @@ impl Render for WorkspaceApp {
             self.render_empty_workspace(cx)
         };
         let content = self.wrap_content_background(
+            window_background,
             content,
-            self.active_tab().map(|tab| tab_background_key(&tab.kind)),
+            active_tab_projection
+                .as_ref()
+                .map(|(_, kind, _)| tab_background_key(kind)),
             window,
             cx,
         );
-        let active_tab_window_modals = self
-            .active_tab()
-            .cloned()
-            .map(|tab| self.render_tab_window_modals(tab.id, &tab.kind, window, cx))
+        let active_tab_window_modals = active_tab_projection
+            .as_ref()
+            .map(|(tab_id, kind, _)| self.render_tab_window_modals(*tab_id, kind, window, cx))
             .unwrap_or_default();
-        let window_background_layer = self.render_workspace_window_background(window, cx);
+        let window_background_layer =
+            self.render_workspace_window_background(window_background, window, cx);
         let has_window_background = window_background_layer.is_some();
         let native_update_notification = self.render_native_update_notification(cx);
         let overlay_layers = {
             let tokens = self.tokens;
-            let i18n = self.i18n.clone();
+            let i18n = &self.i18n;
             let mono_font_family = settings_mono_font_family(self.settings_store.settings());
             let control_exit_duration = oxideterm_gpui_ui::motion::duration(
                 &tokens,
@@ -239,7 +241,7 @@ impl Render for WorkspaceApp {
                 overlay.set_control_exit_duration(control_exit_duration, cx);
                 overlay.render_layers(
                     &tokens,
-                    &i18n,
+                    i18n,
                     mono_font_family,
                     native_update_notification,
                     cx,
@@ -294,11 +296,9 @@ impl Render for WorkspaceApp {
                 }),
             )
             .capture_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
-                // A modal close confirmation owns Enter/Escape even when the
-                // terminal or an IME target retained focus behind the dialog.
-                if this.tab_host.read(cx).close_confirm().is_some()
-                    && this.handle_tab_close_confirm_key(event, window, cx)
-                {
+                // The top rendered blocking portal owns every key before
+                // background IME, terminal, and shortcut routing can observe it.
+                if this.capture_active_window_modal_key(event, window, cx) {
                     window.prevent_default();
                     cx.stop_propagation();
                     return;
@@ -313,45 +313,7 @@ impl Render for WorkspaceApp {
                     // may not receive the character or IME candidate control.
                     return;
                 }
-                if this.handle_app_lock_dialog_key(event, cx) {
-                    window.prevent_default();
-                    cx.stop_propagation();
-                } else if this
-                    .connection_flow
-                    .read(cx)
-                    .has_keyboard_interactive_challenge()
-                {
-                    let _ = this.handle_keyboard_interactive_key(event, window, cx);
-                    window.prevent_default();
-                    cx.stop_propagation();
-                } else if this.connection_flow.read(cx).has_host_key_challenge() {
-                    if event.keystroke.key.as_str() == "escape" {
-                        this.cancel_host_key_challenge(cx);
-                    }
-                    window.prevent_default();
-                    cx.stop_propagation();
-                } else if this.handle_node_disconnect_confirm_key(event, window, cx) {
-                    window.prevent_default();
-                    cx.stop_propagation();
-                } else if this.handle_host_process_confirm_key(event, cx) {
-                    window.prevent_default();
-                    cx.stop_propagation();
-                } else if this.handle_host_docker_confirm_key(event, cx) {
-                    window.prevent_default();
-                    cx.stop_propagation();
-                } else if this.handle_host_service_confirm_key(event, cx) {
-                    window.prevent_default();
-                    cx.stop_propagation();
-                } else if this.handle_host_tmux_confirm_key(event, cx) {
-                    window.prevent_default();
-                    cx.stop_propagation();
-                } else if this.handle_host_schedule_confirm_key(event, cx) {
-                    window.prevent_default();
-                    cx.stop_propagation();
-                } else if this.handle_host_tmux_input_dialog_key(event, cx) {
-                    window.prevent_default();
-                    cx.stop_propagation();
-                } else if this.handle_active_text_input_edit_shortcut(&event.keystroke, cx) {
+                if this.handle_active_text_input_edit_shortcut(&event.keystroke, cx) {
                     window.prevent_default();
                     cx.stop_propagation();
                 } else if this.handle_active_text_input_delete_selection(&event.keystroke, cx) {
@@ -396,42 +358,7 @@ impl Render for WorkspaceApp {
                 } else if this.handle_host_package_search_key(event, cx) {
                     window.prevent_default();
                     cx.stop_propagation();
-                } else if this.handle_native_plugin_confirm_key(event, cx) {
-                    window.prevent_default();
-                    cx.stop_propagation();
-                } else if this.handle_cloud_sync_confirm_key(event, cx) {
-                    window.prevent_default();
-                    cx.stop_propagation();
-                } else if this.handle_ai_settings_confirm_key(event, cx) {
-                    window.prevent_default();
-                    cx.stop_propagation();
-                } else if this.handle_ai_sidebar_confirm_key(event, cx) {
-                    window.prevent_default();
-                    cx.stop_propagation();
-                } else if this.handle_settings_confirm_key(event, window, cx) {
-                    window.prevent_default();
-                    cx.stop_propagation();
-                } else if this.handle_ai_mcp_add_dialog_key(event, cx) {
-                    window.prevent_default();
-                    cx.stop_propagation();
-                } else if this.handle_oxide_dialog_footer_key(event, cx) {
-                    window.prevent_default();
-                    cx.stop_propagation();
                 } else if this.handle_cloud_sync_select_key(event, cx) {
-                    window.prevent_default();
-                    cx.stop_propagation();
-                } else if this.handle_session_manager_basic_dialog_footer_key(event, cx) {
-                    window.prevent_default();
-                    cx.stop_propagation();
-                } else if this.handle_native_update_release_notes_key(event, cx) {
-                    window.prevent_default();
-                    cx.stop_propagation();
-                } else if this.version_migration.open
-                    && this.handle_version_migration_key(event, cx)
-                {
-                    window.prevent_default();
-                    cx.stop_propagation();
-                } else if this.onboarding.open && this.handle_onboarding_key(event, cx) {
                     window.prevent_default();
                     cx.stop_propagation();
                 } else if !this.command_palette.read(cx).is_open()
@@ -449,18 +376,6 @@ impl Render for WorkspaceApp {
                     this.open_command_palette(cx);
                     window.prevent_default();
                     cx.stop_propagation();
-                } else if this.connection_form_state(cx).form.is_some() {
-                    let _ = this.handle_new_connection_key(event, window, cx);
-                    window.prevent_default();
-                    cx.stop_propagation();
-                } else if this.command_palette.read(cx).is_open() {
-                    this.handle_command_palette_key(event, window, cx);
-                    window.prevent_default();
-                    cx.stop_propagation();
-                } else if this.shortcuts_modal.open {
-                    this.handle_shortcuts_modal_key(event, cx);
-                    window.prevent_default();
-                    cx.stop_propagation();
                 } else if this
                     .settings_workspace
                     .read(cx)
@@ -471,9 +386,6 @@ impl Render for WorkspaceApp {
                         == SettingsTab::Keybindings
                 {
                     this.handle_keybinding_recording_key(event, window, cx);
-                    window.prevent_default();
-                    cx.stop_propagation();
-                } else if this.handle_help_legal_notice_key(event, cx) {
                     window.prevent_default();
                     cx.stop_propagation();
                 } else if {
@@ -522,7 +434,7 @@ impl Render for WorkspaceApp {
                     window.prevent_default();
                     cx.stop_propagation();
                 } else if this
-                    .active_tab()
+                    .active_tab(cx)
                     .is_some_and(|tab| tab.kind == TabKind::Forwards)
                     && this.forwarding.read(cx).view().focused_input.is_some()
                 {
@@ -530,7 +442,7 @@ impl Render for WorkspaceApp {
                     window.prevent_default();
                     cx.stop_propagation();
                 } else if this
-                    .active_tab()
+                    .active_tab(cx)
                     .is_some_and(|tab| tab.kind == TabKind::Launcher)
                     && this.launcher.read(cx).focused_input().is_some()
                 {
@@ -538,7 +450,7 @@ impl Render for WorkspaceApp {
                     window.prevent_default();
                     cx.stop_propagation();
                 } else if this
-                    .active_tab()
+                    .active_tab(cx)
                     .is_some_and(|tab| tab.kind == TabKind::Graphics)
                     && this.graphics.read(cx).focused_input().is_some()
                 {
@@ -546,14 +458,14 @@ impl Render for WorkspaceApp {
                     window.prevent_default();
                     cx.stop_propagation();
                 } else if this
-                    .active_tab()
+                    .active_tab(cx)
                     .is_some_and(|tab| tab.kind == TabKind::Sftp)
                 {
                     let _ = this.handle_sftp_key(event, cx);
                     window.prevent_default();
                     cx.stop_propagation();
                 } else if this
-                    .active_tab()
+                    .active_tab(cx)
                     .is_some_and(|tab| tab.kind == TabKind::FileManager)
                 {
                     let _ = this.handle_file_manager_key(event, cx);
@@ -576,10 +488,6 @@ impl Render for WorkspaceApp {
                         || this.ai.models.selector_search_focused)
                 {
                     let _ = this.handle_ai_sidebar_key(event, cx);
-                    window.prevent_default();
-                    cx.stop_propagation();
-                } else if this.terminal.read(cx).cast_search_focused() {
-                    this.handle_terminal_cast_search_key(event, cx);
                     window.prevent_default();
                     cx.stop_propagation();
                 }
@@ -1129,7 +1037,7 @@ impl Render for WorkspaceApp {
                 |root, handoff| root.child(handoff),
             )
             .when_some(
-                self.render_tab_detach_drag_preview(window),
+                self.render_tab_detach_drag_preview(window, cx),
                 |root, preview| root.child(preview),
             )
             .when_some(self.render_tab_context_menu(window, cx), |root, menu| {

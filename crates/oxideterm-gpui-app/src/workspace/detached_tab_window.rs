@@ -1,7 +1,7 @@
 use super::*;
 
 pub(super) struct DetachedTabWindow {
-    workspace: WeakEntity<WorkspaceApp>,
+    session: Entity<WorkspaceApp>,
     tab_id: TabId,
     mount_id: tabs::TabMountId,
     window_registration: window_registry::WindowRegistration,
@@ -9,13 +9,16 @@ pub(super) struct DetachedTabWindow {
     entry_handoff_duration: Duration,
     focus_handle: FocusHandle,
     ready: bool,
-    applied_window_opacity: Option<f32>,
+    native_style: window_shell::WorkspaceWindowNativeStyle,
+    background: Entity<window_shell::WorkspaceWindowBackgroundEntity>,
+    _session_observation: Subscription,
+    _background_observation: Subscription,
     _release_subscription: Subscription,
 }
 
 impl DetachedTabWindow {
     pub(super) fn new(
-        workspace: WeakEntity<WorkspaceApp>,
+        session: Entity<WorkspaceApp>,
         tab_id: TabId,
         mount_id: tabs::TabMountId,
         window_registration: window_registry::WindowRegistration,
@@ -25,7 +28,10 @@ impl DetachedTabWindow {
         cx: &mut Context<Self>,
     ) -> Self {
         let focus_handle = cx.focus_handle();
-        let workspace_on_release = workspace.clone();
+        let background = window_shell::WorkspaceWindowBackgroundEntity::for_session(&session, cx);
+        let session_observation = window_shell::observe_window_session(&session, cx);
+        let background_observation = window_shell::observe_window_background(&background, cx);
+        let session_on_release = session.clone();
         cx.on_next_frame(window, |detached, _window, cx| {
             detached.ready = true;
             if detached.entry_handoff_origin.is_some() && !detached.entry_handoff_duration.is_zero()
@@ -48,8 +54,8 @@ impl DetachedTabWindow {
         // into the main tab strip, not like closing the underlying session.
         let release_subscription = cx.on_release_in(window, move |detached, window, cx| {
             let window_id = window.window_handle().window_id();
-            let _ = workspace_on_release.update(cx, |workspace, cx| {
-                workspace.release_detached_tab_window(
+            session_on_release.update(cx, |session, cx| {
+                session.release_detached_tab_window(
                     detached.tab_id,
                     detached.mount_id,
                     detached.window_registration,
@@ -60,7 +66,7 @@ impl DetachedTabWindow {
         });
 
         Self {
-            workspace,
+            session,
             tab_id,
             mount_id,
             window_registration,
@@ -68,7 +74,10 @@ impl DetachedTabWindow {
             entry_handoff_duration,
             focus_handle,
             ready: false,
-            applied_window_opacity: None,
+            native_style: window_shell::WorkspaceWindowNativeStyle::unapplied(),
+            background,
+            _session_observation: session_observation,
+            _background_observation: background_observation,
             _release_subscription: release_subscription,
         }
     }
@@ -82,41 +91,19 @@ impl Focusable for DetachedTabWindow {
 
 impl Render for DetachedTabWindow {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let window_opacity = self
-            .workspace
-            .read_with(cx, |workspace, _cx| {
-                normalized_window_opacity(
-                    workspace
-                        .settings_store
-                        .settings()
-                        .appearance
-                        .window_opacity,
-                )
-            })
-            .unwrap_or(1.0);
-        if self.applied_window_opacity != Some(window_opacity) {
-            // Detached tabs own native windows, so they retain an independent
-            // applied value while reading the shared persisted preference.
-            let _ = apply_window_opacity(window, window_opacity as f64);
-            self.applied_window_opacity = Some(window_opacity);
-        }
+        self.native_style.apply(&self.session, window, cx);
         let tab_id = self.tab_id;
         let entry_handoff_origin = self.entry_handoff_origin;
         let content = if self.ready {
-            self.workspace
-                .update(cx, |workspace, cx| {
-                    workspace.render_detached_tab_window(tab_id, entry_handoff_origin, window, cx)
-                })
-                .unwrap_or_else(|_| {
-                    div()
-                        .size_full()
-                        .flex()
-                        .items_center()
-                        .justify_center()
-                        .text_color(rgb(0x9ca3af))
-                        .child("Workspace closed")
-                        .into_any_element()
-                })
+            self.session.update(cx, |session, cx| {
+                session.render_detached_tab_window(
+                    tab_id,
+                    entry_handoff_origin,
+                    &self.background,
+                    window,
+                    cx,
+                )
+            })
         } else {
             // GPUI draws a newly opened window synchronously. Wait one frame
             // before reading Workspace so creation never re-enters the source

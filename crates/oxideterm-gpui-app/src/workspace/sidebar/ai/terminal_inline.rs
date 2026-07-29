@@ -605,7 +605,7 @@ window.focus(&this.focus_handle, cx);
             return;
         };
         let messages = terminal_ai_inline_messages(
-            terminal_ai_inline_os_context(self.active_tab()),
+            terminal_ai_inline_os_context(self.active_tab(cx)),
             selection,
             prompt,
         );

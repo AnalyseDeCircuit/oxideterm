@@ -393,14 +393,14 @@ impl WorkspaceApp {
                 ContextSidebarTool::Monitor => self.render_host_tools_monitor_panel(cx),
                 ContextSidebarTool::Gpu => {
                     let tokens = self.tokens;
-                    let i18n = self.i18n.clone();
+                    let i18n = &self.i18n;
                     let mono_font_family =
                         settings_mono_font_family(self.settings_store.settings());
                     let selectable_text = self.selectable_text_render_state(cx);
                     self.host_tools.update(cx, |host_tools, cx| {
                         host_tools.render_host_gpu_panel(
                             &tokens,
-                            &i18n,
+                            i18n,
                             mono_font_family,
                             &selectable_text,
                             cx,

@@ -10,7 +10,7 @@ use oxideterm_connection_monitor::{
 impl WorkspaceApp {
     pub(super) fn render_host_services_panel(&self, cx: &mut Context<Self>) -> AnyElement {
         let tokens = self.tokens;
-        let i18n = self.i18n.clone();
+        let i18n = &self.i18n;
         let mono_font_family = settings_mono_font_family(self.settings_store.settings());
         let selectable_text = self.selectable_text_render_state(cx);
         let search_ime = self
@@ -31,7 +31,7 @@ impl WorkspaceApp {
                 search_ime,
                 follow_terminal_available,
                 &tokens,
-                &i18n,
+                i18n,
                 mono_font_family,
                 &selectable_text,
                 cx,
@@ -118,7 +118,7 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
         let tokens = self.tokens;
-        let i18n = self.i18n.clone();
+        let i18n = &self.i18n;
         let focused_action = self.standard_confirm_focus();
         let exit_delay = oxideterm_gpui_ui::motion::duration(
             &tokens,
@@ -127,7 +127,7 @@ impl WorkspaceApp {
         self.host_tools.update(cx, |host_tools, cx| {
             host_tools.render_host_service_confirm_dialog(
                 &tokens,
-                &i18n,
+                i18n,
                 focused_action,
                 exit_delay,
                 cx,
@@ -145,13 +145,13 @@ impl WorkspaceApp {
             .node_id_for_connection(&dialog.request.connection_id)
             .is_some_and(|node_id| self.ssh_nodes.contains_key(&node_id));
         let tokens = self.tokens;
-        let i18n = self.i18n.clone();
+        let i18n = &self.i18n;
         let mono_font_family = settings_mono_font_family(self.settings_store.settings());
         self.host_tools.update(cx, |host_tools, cx| {
             host_tools.render_host_service_logs_dialog(
                 follow_terminal_available,
                 &tokens,
-                &i18n,
+                i18n,
                 mono_font_family,
                 cx,
             )

@@ -628,13 +628,11 @@ impl WorkspaceApp {
         )
     }
 
-    pub(super) fn native_plugin_layout_snapshot(&self) -> Value {
+    pub(super) fn native_plugin_layout_snapshot(&self, cx: &App) -> Value {
         native_plugin_layout_snapshot(
             self.sidebar_collapsed,
-            self.main_window_tabs
-                .active_tab_id
-                .map(|tab_id| tab_id.0.to_string()),
-            self.tabs.len(),
+            self.active_tab_id(cx).map(|tab_id| tab_id.0.to_string()),
+            self.tabs(cx).len(),
         )
     }
 
@@ -698,7 +696,7 @@ impl WorkspaceApp {
         ) {
             samples.push((
                 plugin_entity::PluginSubscriptionSample::Layout,
-                self.native_plugin_layout_snapshot(),
+                self.native_plugin_layout_snapshot(cx),
             ));
         }
         if self.has_native_plugin_subscription(
@@ -858,7 +856,7 @@ impl WorkspaceApp {
     }
 
     fn emit_native_plugin_layout_if_changed(&mut self, cx: &mut Context<Self>) {
-        let layout = self.native_plugin_layout_snapshot();
+        let layout = self.native_plugin_layout_snapshot(cx);
         let (previous, layout) = self.plugin_entity.update(cx, |plugins, _cx| {
             plugins.update_subscription_snapshot(
                 plugin_entity::PluginSubscriptionSample::Layout,

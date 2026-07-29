@@ -74,15 +74,17 @@ mod tests {
 impl WorkspaceApp {
     pub(in crate::workspace) fn render_workspace_window_background(
         &mut self,
+        window_background: &Entity<window_shell::WorkspaceWindowBackgroundEntity>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
         let background = self.window_background_preferences()?;
-        Some(self.render_workspace_background_layer(background, window, cx))
+        Some(self.render_workspace_background_layer(window_background, background, window, cx))
     }
 
     pub(in crate::workspace) fn wrap_content_background(
         &mut self,
+        window_background: &Entity<window_shell::WorkspaceWindowBackgroundEntity>,
         content: AnyElement,
         background_key: Option<&str>,
         window: &mut Window,
@@ -101,54 +103,69 @@ impl WorkspaceApp {
             .size_full()
             .relative()
             .overflow_hidden()
-            .child(self.render_workspace_background_layer(background, window, cx))
+            .child(self.render_workspace_background_layer(
+                window_background,
+                background,
+                window,
+                cx,
+            ))
             .child(div().relative().size_full().child(content))
             .into_any_element()
     }
 
     fn render_workspace_background_layer(
         &mut self,
+        window_background: &Entity<window_shell::WorkspaceWindowBackgroundEntity>,
         background: TerminalBackgroundPreferences,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let blurred_image = self
-            .background_image_cache
-            .render_blurred_image(&background);
-        self.drop_workspace_background_retired_images(Some(window), cx);
-        if self.background_image_cache.has_pending() {
-            self.schedule_background_cache_poll(cx);
+        let byte_limit = self.render_policy.image_cache_bytes;
+        window_background.update(cx, |window_background, cx| {
+            window_background.cache.set_byte_limit(byte_limit);
+            window_background.render_layer(background, window, cx)
+        })
+    }
+}
+
+impl window_shell::WorkspaceWindowBackgroundEntity {
+    fn render_layer(
+        &mut self,
+        background: TerminalBackgroundPreferences,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let blurred_image = self.cache.render_blurred_image(&background);
+        self.drop_retired_images(Some(window), cx);
+        if self.cache.has_pending() {
+            self.schedule_poll(cx);
         }
         workspace_background_image_layer(background, blurred_image)
     }
 
-    pub(in crate::workspace) fn schedule_background_cache_poll(&mut self, cx: &mut Context<Self>) {
-        if self.background_cache_poll_task.is_some() {
+    fn schedule_poll(&mut self, cx: &mut Context<Self>) {
+        if self.poll_task.is_some() {
             return;
         }
-        // The render-cache owner retains the one-shot so dropping the workspace
-        // also cancels polling for cache entries that can no longer be painted.
-        self.background_cache_poll_task = Some(cx.spawn(async move |weak, cx| {
+        // Each shell owns its cache completion task, so releasing one native
+        // window cannot keep repaint work alive through the shared session.
+        self.poll_task = Some(cx.spawn(async move |window_background, cx| {
             Timer::after(Duration::from_millis(16)).await;
-            let _ = weak.update(cx, |this, cx| {
-                this.background_cache_poll_task = None;
-                if this.background_image_cache.drain_completed() {
-                    this.drop_workspace_background_retired_images(None, cx);
+            let _ = window_background.update(cx, |window_background, cx| {
+                window_background.poll_task = None;
+                if window_background.cache.drain_completed() {
+                    window_background.drop_retired_images(None, cx);
                     cx.notify();
                 }
-                if this.background_image_cache.has_pending() {
-                    this.schedule_background_cache_poll(cx);
+                if window_background.cache.has_pending() {
+                    window_background.schedule_poll(cx);
                 }
             });
         }));
     }
 
-    pub(in crate::workspace) fn drop_workspace_background_retired_images(
-        &mut self,
-        mut window: Option<&mut Window>,
-        cx: &mut Context<Self>,
-    ) {
-        for image in self.background_image_cache.take_retired_images() {
+    fn drop_retired_images(&mut self, mut window: Option<&mut Window>, cx: &mut Context<Self>) {
+        for image in self.cache.take_retired_images() {
             // RenderImage entries painted by gpui::img also stay in the atlas
             // until the app explicitly drops their image id.
             if let Some(window) = window.as_mut() {

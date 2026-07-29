@@ -81,7 +81,7 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let Some(tab_id) = self.main_window_tabs.active_tab_id else {
+        let Some(tab_id) = self.active_tab_id(cx) else {
             return self.render_empty_workspace(cx);
         };
         self.render_sftp_surface_for_tab(tab_id, window, cx)

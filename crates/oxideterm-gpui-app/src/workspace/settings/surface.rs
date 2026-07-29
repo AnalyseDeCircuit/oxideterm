@@ -80,7 +80,7 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) {
         let close_active_settings_tab = self
-            .active_tab()
+            .active_tab(cx)
             .is_some_and(|tab| tab.kind == TabKind::Settings);
         self.active_surface = ActiveSurface::Terminal;
         self.close_settings_select();
@@ -1103,8 +1103,6 @@ impl WorkspaceApp {
         // Settings changes can flip the render profile while a modal is open;
         // update the shared backdrop gate before the next top-layer render.
         set_tauri_backdrop_blur_allowed(self.render_policy.allow_background_blur);
-        self.background_image_cache
-            .set_byte_limit(self.render_policy.image_cache_bytes);
         self.sftp_transfer_manager
             .apply_settings(sftp_runtime_settings_from_settings(&settings));
         if !settings.terminal.command_bar.enabled || !settings.terminal.command_bar.project_tasks {

@@ -544,7 +544,7 @@ impl WorkspaceApp {
     ) -> Option<SessionManagerInput> {
         let input = self.session_manager.read(cx).focused_input?;
         let session_manager_tab_active = self
-            .active_tab()
+            .active_tab(cx)
             .is_some_and(|tab| tab.kind == oxideterm_workspace::TabKind::SessionManager);
         let settings = self.settings_store.settings();
         let saved_connections_sidebar_active = !self.sidebar_collapsed

@@ -665,10 +665,103 @@ impl WorkspaceApp {
 
 #[cfg(test)]
 mod tests {
+    use gpui::TestAppContext;
+
     use super::*;
+
+    struct WindowRegistryTestRoot;
+
+    impl Render for WindowRegistryTestRoot {
+        fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
+            div()
+        }
+    }
 
     fn window_id(value: u64) -> WindowId {
         value.into()
+    }
+
+    #[gpui::test]
+    fn actual_windows_keep_runtime_delivery_alive_until_the_last_shell_releases(
+        cx: &mut TestAppContext,
+    ) {
+        let main_handle: AnyWindowHandle =
+            cx.add_window(|_window, _cx| WindowRegistryTestRoot).into();
+        let first_detached_handle: AnyWindowHandle =
+            cx.add_window(|_window, _cx| WindowRegistryTestRoot).into();
+        let second_detached_handle: AnyWindowHandle =
+            cx.add_window(|_window, _cx| WindowRegistryTestRoot).into();
+        let mut registry = WorkspaceWindowRegistry::default();
+        let main = registry.register(WindowRole::Main, main_handle.window_id(), main_handle);
+        let first_detached = registry.register(
+            WindowRole::Detached { tab_id: TabId(7) },
+            first_detached_handle.window_id(),
+            first_detached_handle,
+        );
+        let second_detached = registry.register(
+            WindowRole::Detached { tab_id: TabId(8) },
+            second_detached_handle.window_id(),
+            second_detached_handle,
+        );
+        let runtime_effect =
+            WorkspaceWindowEffect::Runtime(runtime_entity::WorkspaceRuntimeEvent::EffectsReady);
+        registry.enqueue(
+            runtime_effect,
+            Some(WorkspaceWindowEffectKey::Runtime),
+            WindowTargetHint::MainOrAny,
+        );
+        registry.enqueue(
+            WorkspaceWindowEffect::Ai(AiWindowEffect::ChatStreamDeliveryReady),
+            Some(WorkspaceWindowEffectKey::Ai(AiWindowEffectKey::ChatStream)),
+            WindowTargetHint::MainOrAny,
+        );
+        registry.enqueue(
+            WorkspaceWindowEffect::Plugin(PluginWindowEffect::RuntimeRequestsReady),
+            Some(WorkspaceWindowEffectKey::Plugin(
+                PluginWindowEffect::RuntimeRequestsReady,
+            )),
+            WindowTargetHint::MainOrAny,
+        );
+
+        assert!(registry.release(main, main_handle.window_id()));
+        assert_eq!(registry.take_event(), None);
+        assert!(registry.release(first_detached, first_detached_handle.window_id()));
+        assert_eq!(registry.take_event(), None);
+
+        let delivery = registry
+            .next_delivery()
+            .expect("the surviving detached window should receive runtime readiness");
+        assert_eq!(delivery.registration, second_detached);
+        assert_eq!(delivery.handle, second_detached_handle);
+        assert!(matches!(
+            delivery.effect,
+            WorkspaceWindowEffect::Runtime(runtime_entity::WorkspaceRuntimeEvent::EffectsReady)
+        ));
+        let ai_delivery = registry
+            .next_delivery()
+            .expect("the surviving detached window should receive AI delivery");
+        assert_eq!(ai_delivery.registration, second_detached);
+        assert!(matches!(
+            ai_delivery.effect,
+            WorkspaceWindowEffect::Ai(AiWindowEffect::ChatStreamDeliveryReady)
+        ));
+        let plugin_delivery = registry
+            .next_delivery()
+            .expect("the surviving detached window should receive plugin delivery");
+        assert_eq!(plugin_delivery.registration, second_detached);
+        assert!(matches!(
+            plugin_delivery.effect,
+            WorkspaceWindowEffect::Plugin(PluginWindowEffect::RuntimeRequestsReady)
+        ));
+
+        assert!(registry.release(second_detached, second_detached_handle.window_id()));
+        assert_eq!(
+            registry.take_event(),
+            Some(WindowRegistryEvent::LastWindowReleased)
+        );
+        assert_eq!(registry.take_event(), None);
+        assert!(!registry.release(second_detached, second_detached_handle.window_id()));
+        assert_eq!(registry.take_event(), None);
     }
 
     #[test]
