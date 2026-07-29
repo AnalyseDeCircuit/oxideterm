@@ -19,9 +19,15 @@ impl WorkspaceWindowShell {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
-        let focus_handle = session.read(cx).focus_handle.clone();
+        let (focus_handle, background_cache_byte_limit) = session.read_with(cx, |session, _cx| {
+            (
+                session.focus_handle.clone(),
+                session.render_policy.image_cache_bytes,
+            )
+        });
         let native_style = WorkspaceWindowNativeStyle::unapplied();
-        let background = WorkspaceWindowBackgroundEntity::for_session(&session, cx);
+        let background =
+            WorkspaceWindowBackgroundEntity::with_byte_limit(background_cache_byte_limit, cx);
         let session_observation = observe_window_session(&session, cx);
         let background_observation = observe_window_background(&background, cx);
         let window_handle = window.window_handle();
@@ -103,14 +109,13 @@ pub(in crate::workspace) struct WorkspaceWindowBackgroundEntity {
 }
 
 impl WorkspaceWindowBackgroundEntity {
-    pub(in crate::workspace) fn for_session<Owner>(
-        session: &Entity<WorkspaceApp>,
+    pub(in crate::workspace) fn with_byte_limit<Owner>(
+        byte_limit: usize,
         cx: &mut Context<Owner>,
     ) -> Entity<Self>
     where
         Owner: 'static,
     {
-        let byte_limit = session.read(cx).render_policy.image_cache_bytes;
         cx.new(move |_| {
             let mut cache = BackgroundImageRenderCache::default();
             cache.set_byte_limit(byte_limit);
@@ -197,6 +202,21 @@ mod tests {
         }
     }
 
+    struct WindowBootstrapSession {
+        background_cache_byte_limit: usize,
+        detached_window_opened: bool,
+    }
+
+    struct BackgroundBootstrapWindow {
+        _background: Entity<WorkspaceWindowBackgroundEntity>,
+    }
+
+    impl Render for BackgroundBootstrapWindow {
+        fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
+            div()
+        }
+    }
+
     struct NotificationSource;
 
     struct ObservingWindowRoot {
@@ -267,6 +287,32 @@ mod tests {
         assert_eq!(drops.load(Ordering::Acquire), 1);
         cx.update(|_| {});
         assert_eq!(drops.load(Ordering::Acquire), 1);
+    }
+
+    #[gpui::test]
+    fn captured_background_budget_bootstraps_window_during_session_update(cx: &mut TestAppContext) {
+        let session = cx.new(|_| WindowBootstrapSession {
+            background_cache_byte_limit: 1024,
+            detached_window_opened: false,
+        });
+
+        session.update(cx, |session, cx| {
+            // Opening a window draws it synchronously, so the builder must not
+            // read the session Entity that owns this active update.
+            let background_cache_byte_limit = session.background_cache_byte_limit;
+            cx.open_window(gpui::WindowOptions::default(), move |_window, cx| {
+                cx.new(|cx| BackgroundBootstrapWindow {
+                    _background: WorkspaceWindowBackgroundEntity::with_byte_limit(
+                        background_cache_byte_limit,
+                        cx,
+                    ),
+                })
+            })
+            .expect("background-only detached window should open");
+            session.detached_window_opened = true;
+        });
+
+        assert!(session.read_with(cx, |session, _cx| { session.detached_window_opened }));
     }
 
     #[gpui::test]

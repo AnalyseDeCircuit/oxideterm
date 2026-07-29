@@ -24,11 +24,15 @@ impl DetachedTabWindow {
         window_registration: window_registry::WindowRegistration,
         entry_handoff_origin: Option<TabWindowHandoffOrigin>,
         entry_handoff_duration: Duration,
+        background_cache_byte_limit: usize,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
         let focus_handle = cx.focus_handle();
-        let background = window_shell::WorkspaceWindowBackgroundEntity::for_session(&session, cx);
+        let background = window_shell::WorkspaceWindowBackgroundEntity::with_byte_limit(
+            background_cache_byte_limit,
+            cx,
+        );
         let session_observation = window_shell::observe_window_session(&session, cx);
         let background_observation = window_shell::observe_window_background(&background, cx);
         let session_on_release = session.clone();
@@ -91,10 +95,12 @@ impl Focusable for DetachedTabWindow {
 
 impl Render for DetachedTabWindow {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        self.native_style.apply(&self.session, window, cx);
         let tab_id = self.tab_id;
         let entry_handoff_origin = self.entry_handoff_origin;
         let content = if self.ready {
+            // Native style reads and updates the shared session, so it must
+            // remain behind the same next-frame gate as detached content.
+            self.native_style.apply(&self.session, window, cx);
             self.session.update(cx, |session, cx| {
                 session.render_detached_tab_window(
                     tab_id,

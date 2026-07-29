@@ -198,6 +198,9 @@ impl WorkspaceApp {
             oxideterm_gpui_ui::motion::MotionDuration::Overlay,
         );
         let entry_handoff_origin = entry_handoff_origin.filter(|_| self.tokens.motion.enabled);
+        // GPUI constructs and draws the detached window synchronously while
+        // this Workspace update is active, so bootstrap it from scalar values.
+        let background_cache_byte_limit = self.render_policy.image_cache_bytes;
         let open_result = cx.open_window(
             oxideterm_gpui_platform::window_options(bounds),
             move |detached_window, cx| {
@@ -209,6 +212,7 @@ impl WorkspaceApp {
                         window_registration,
                         entry_handoff_origin,
                         entry_handoff_duration,
+                        background_cache_byte_limit,
                         detached_window,
                         cx,
                     )
