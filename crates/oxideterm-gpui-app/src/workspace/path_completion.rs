@@ -145,6 +145,8 @@ impl PathCompletionState {
         }
         let max_index = self.suggestions.len().saturating_sub(1) as isize;
         self.selected_index = (self.selected_index as isize + delta).clamp(0, max_index) as usize;
+        // Keep keyboard navigation and the popup viewport owned by the same state.
+        self.scroll_handle.scroll_to_item(self.selected_index);
         true
     }
 
@@ -527,5 +529,22 @@ mod tests {
 
         assert!(state.apply_entries(generation, &parent_path, entries));
         assert_eq!(state.suggestions().len(), 12);
+    }
+
+    #[test]
+    fn completion_selection_can_move_beyond_the_initial_viewport() {
+        let mut state = PathCompletionState::default();
+        let request = remote_path_completion_request("/root/").unwrap();
+        let (generation, parent_path) = state.request(request).unwrap();
+        let entries = (0..12)
+            .map(|index| candidate(&format!("folder-{index:02}"), true))
+            .collect();
+
+        assert!(state.apply_entries(generation, &parent_path, entries));
+        for _ in 0..PATH_COMPLETION_VISIBLE_ROWS {
+            assert!(state.move_selection(1));
+        }
+
+        assert_eq!(state.selected_index(), PATH_COMPLETION_VISIBLE_ROWS);
     }
 }
