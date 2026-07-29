@@ -407,7 +407,7 @@ impl WorkspaceApp {
                         this.open_plugin_manager_tab(window, cx);
                     } else {
                         this.active_surface = ActiveSurface::Terminal;
-                        this.set_sidebar_section(section, cx);
+                        this.toggle_sidebar_section(section, cx);
                     }
                 }),
             )
@@ -514,17 +514,27 @@ impl WorkspaceApp {
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |this, _event, _window, cx| {
+                    let requested_panel_is_visible = !this.sidebar_collapsed
+                        && this.active_sidebar_section == SidebarSection::Extensions
+                        && this
+                            .plugin_manager_state(cx)
+                            .active_sidebar_panel
+                            .as_ref()
+                            .is_some_and(|active_panel| active_panel == &selection);
+                    if requested_panel_is_visible {
+                        this.toggle_sidebar(cx);
+                        cx.stop_propagation();
+                        return;
+                    }
                     // Mirrors Tauri's `sidebarActiveSection = "plugin:<id>:<panel>"`
                     // path: choosing a plugin panel switches only the sidebar
                     // content, while Plugin Manager remains a separate tab.
                     this.plugin_entity.update(cx, |plugins, _cx| {
                         plugins.select_sidebar_panel(selection.clone());
                     });
-                    this.active_sidebar_section = SidebarSection::Extensions;
                     this.active_surface = ActiveSurface::Terminal;
-                    this.persist_sidebar_settings(cx);
+                    this.set_sidebar_section(SidebarSection::Extensions, cx);
                     cx.stop_propagation();
-                    cx.notify();
                 }),
             )
             .into_any_element()
