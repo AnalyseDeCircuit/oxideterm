@@ -300,6 +300,47 @@ pub(super) fn session_manager_virtual_rows_claim_the_available_list_width() {
 }
 
 #[test]
+pub(super) fn session_manager_grid_rows_preserve_symmetric_outer_gutters() {
+    let source = include_str!("views.rs");
+    let grid_view_start = source
+        .find("pub(super) fn render_session_manager_grid_view")
+        .expect("grid view function");
+    let grid_view_tail =
+        &source[grid_view_start + "pub(super) fn render_session_manager_grid_view".len()..];
+    let grid_view_end = grid_view_tail
+        .find("pub(super) fn render_session_manager_grid_row")
+        .expect("grid row function");
+    let grid_view_source = &grid_view_tail[..grid_view_end];
+    assert!(grid_view_source.contains(".pt(px(self.tokens.spacing.three))"));
+    assert!(!grid_view_source.contains(".p(px(self.tokens.spacing.three))"));
+
+    let grid_row_tail = &grid_view_tail[grid_view_end..];
+    let grid_row_end = grid_row_tail
+        .find("pub(super) fn render_session_manager_recent_item")
+        .expect("recent item function");
+    let grid_row_source = &grid_row_tail[..grid_row_end];
+    assert_eq!(
+        grid_row_source
+            .matches(".px(px(self.tokens.spacing.three))")
+            .count(),
+        2
+    );
+
+    let header_start = source
+        .find("pub(super) fn render_session_manager_section_header")
+        .expect("section header function");
+    let header_tail =
+        &source[header_start + "pub(super) fn render_session_manager_section_header".len()..];
+    let header_end = header_tail
+        .find("pub(super) fn render_session_manager_item_card")
+        .expect("item card function");
+    assert!(
+        header_tail[..header_end].contains(".px(px(self.tokens.spacing.three))"),
+        "grid section headers must align with card rows"
+    );
+}
+
+#[test]
 pub(super) fn session_menu_dismissal_closes_all_manager_popovers() {
     let mut state = SessionManagerState {
         show_batch_move: true,

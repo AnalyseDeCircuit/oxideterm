@@ -591,7 +591,8 @@ impl WorkspaceApp {
                 })
             },
         )
-        .p(px(self.tokens.spacing.three));
+        // Virtual rows own their horizontal gutters so full-width rows stay symmetric.
+        .pt(px(self.tokens.spacing.three));
         let content = div()
             .size_full()
             .flex()
@@ -626,6 +627,7 @@ impl WorkspaceApp {
             }) => div()
                 .w_full()
                 .min_w(px(0.0))
+                .px(px(self.tokens.spacing.three))
                 .flex()
                 .flex_wrap()
                 .gap(px(self.tokens.spacing.two))
@@ -643,6 +645,7 @@ impl WorkspaceApp {
             Some(SessionManagerGridRow::Cards { item_indices }) => div()
                 .w_full()
                 .min_w(px(0.0))
+                .px(px(self.tokens.spacing.three))
                 .flex()
                 .flex_wrap()
                 .gap(px(self.tokens.spacing.three))
@@ -760,6 +763,7 @@ impl WorkspaceApp {
         div()
             .w_full()
             .min_w(px(0.0))
+            .px(px(self.tokens.spacing.three))
             .flex()
             .flex_col()
             .gap(px(self.tokens.spacing.three))
