@@ -209,7 +209,7 @@ impl WorkspaceApp {
     ) {
         let requires_key = ai_provider_chat_requires_key(&config.provider_type);
         let provider_id = config.provider_id.clone();
-        let key_store = self.ai.models.key_store.clone();
+        let key_store = self.ai_entity.read(cx).key_store().clone();
         let runtime = self.forwarding_runtime.clone();
         let failed_to_get_key = self.i18n.t("ai.model_selector.failed_to_get_api_key");
         let api_key_not_found = self.i18n.t("ai.model_selector.api_key_not_found");

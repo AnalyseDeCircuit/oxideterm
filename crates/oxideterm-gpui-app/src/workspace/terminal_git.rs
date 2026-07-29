@@ -996,7 +996,7 @@ impl WorkspaceApp {
             provider_id: config.provider_id.clone(),
             requires_key: ai_provider_chat_requires_key(&config.provider_type),
             config,
-            key_store: self.ai.models.key_store.clone(),
+            key_store: self.ai_entity.read(cx).key_store().clone(),
             api_key_not_found: self.i18n.t("ai.model_selector.api_key_not_found"),
             failed_to_get_key: self.i18n.t("ai.model_selector.failed_to_get_api_key"),
             max_context_chars: context_max_chars.clamp(4_000, TERMINAL_GIT_AI_DIFF_MAX_CHARS),

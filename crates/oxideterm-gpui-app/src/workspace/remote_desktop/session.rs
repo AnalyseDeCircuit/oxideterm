@@ -823,8 +823,8 @@ impl WorkspaceApp {
 
         let ai_focus_changed = self.ai.chat.input_focused
             || self.ai.chat.footer_focus.is_some()
-            || self.ai.models.selector_open
-            || self.ai.models.selector_search_focused;
+            || self.ai_entity.read(cx).model_selector_open()
+            || self.ai_entity.read(cx).model_selector_search_focused();
         self.clear_ai_sidebar_keyboard_focus(cx);
         changed |= ai_focus_changed;
 

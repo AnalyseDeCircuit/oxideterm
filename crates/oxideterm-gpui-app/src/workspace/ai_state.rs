@@ -253,6 +253,7 @@ impl Default for AiSettingsViewState {
 pub(in crate::workspace) struct AiWorkspaceEntity {
     task_runtime: Arc<tokio::runtime::Runtime>,
     key_store: oxideterm_ai::AiProviderKeyStore,
+    model_ui: AiModelWorkspaceState,
     visibility: AiWorkspaceVisibility,
     settings_view: AiSettingsViewState,
     settings_secret_drafts: HashMap<SettingsInput, zeroize::Zeroizing<String>>,
@@ -351,6 +352,196 @@ pub(in crate::workspace) struct AiWorkspaceEntity {
 }
 
 impl AiWorkspaceEntity {
+    /// Returns the protected provider key store without copying key material.
+    pub(in crate::workspace) fn key_store(&self) -> &oxideterm_ai::AiProviderKeyStore {
+        &self.key_store
+    }
+
+    /// Returns provider and model presentation state from its sole owner.
+    pub(in crate::workspace) fn model_ui(&self) -> &AiModelWorkspaceState {
+        &self.model_ui
+    }
+
+    pub(in crate::workspace) fn model_selector_is_open(&self, scope: AiModelSelectorScope) -> bool {
+        self.model_ui.selector_open && self.model_ui.selector_scope == Some(scope)
+    }
+
+    pub(in crate::workspace) fn model_selector_open(&self) -> bool {
+        self.model_ui.selector_open
+    }
+
+    pub(in crate::workspace) fn model_selector_scope(&self) -> Option<AiModelSelectorScope> {
+        self.model_ui.selector_scope
+    }
+
+    pub(in crate::workspace) fn model_selector_focus_origin(
+        &self,
+    ) -> Option<browser_behavior::BrowserFocusOrigin> {
+        self.model_ui.selector_focus_origin
+    }
+
+    pub(in crate::workspace) fn set_model_selector_focus_origin(
+        &mut self,
+        origin: Option<browser_behavior::BrowserFocusOrigin>,
+    ) {
+        self.model_ui.selector_focus_origin = origin;
+    }
+
+    pub(in crate::workspace) fn model_selector_search_focused(&self) -> bool {
+        self.model_ui.selector_search_focused
+    }
+
+    pub(in crate::workspace) fn set_model_selector_search_focused(&mut self, focused: bool) {
+        self.model_ui.selector_search_focused = focused;
+    }
+
+    pub(in crate::workspace) fn model_selector_search_query(&self) -> &str {
+        &self.model_ui.selector_search_query
+    }
+
+    pub(in crate::workspace) fn replace_model_selector_search(
+        &mut self,
+        replacement_range: Option<std::ops::Range<usize>>,
+        text: &str,
+    ) {
+        replace_utf16(
+            &mut self.model_ui.selector_search_query,
+            replacement_range,
+            text,
+        );
+        self.model_ui.selector_highlighted_model = None;
+    }
+
+    pub(in crate::workspace) fn pop_model_selector_search(&mut self) -> bool {
+        let changed = self.model_ui.selector_search_query.pop().is_some()
+            || self.model_ui.selector_highlighted_model.take().is_some();
+        changed
+    }
+
+    pub(in crate::workspace) fn clear_model_selector_search(&mut self) -> bool {
+        let changed = !self.model_ui.selector_search_query.is_empty()
+            || self.model_ui.selector_highlighted_model.is_some();
+        self.model_ui.selector_search_query.clear();
+        self.model_ui.selector_highlighted_model = None;
+        changed
+    }
+
+    pub(in crate::workspace) fn set_model_selector_open(
+        &mut self,
+        scope: AiModelSelectorScope,
+        open: bool,
+    ) {
+        self.model_ui.selector_open = open;
+        self.model_ui.selector_scope = open.then_some(scope);
+        self.model_ui.selector_search_focused = open;
+        self.model_ui.selector_highlighted_model = None;
+    }
+
+    pub(in crate::workspace) fn close_model_selector(&mut self) {
+        self.model_ui.selector_open = false;
+        self.model_ui.selector_scope = None;
+        self.model_ui.selector_focus_origin = None;
+        self.model_ui.selector_search_focused = false;
+        self.model_ui.selector_search_query.clear();
+        self.model_ui.selector_highlighted_model = None;
+    }
+
+    pub(in crate::workspace) fn model_selector_provider_expanded(&self, provider_id: &str) -> bool {
+        self.model_ui
+            .selector_expanded_providers
+            .contains(provider_id)
+    }
+
+    pub(in crate::workspace) fn expand_model_selector_provider(&mut self, provider_id: String) {
+        self.model_ui
+            .selector_expanded_providers
+            .insert(provider_id);
+    }
+
+    pub(in crate::workspace) fn toggle_model_selector_provider(
+        &mut self,
+        provider_id: String,
+    ) -> bool {
+        let expanded = if self
+            .model_ui
+            .selector_expanded_providers
+            .remove(&provider_id)
+        {
+            false
+        } else {
+            self.model_ui
+                .selector_expanded_providers
+                .insert(provider_id);
+            true
+        };
+        self.model_ui.selector_highlighted_model = None;
+        expanded
+    }
+
+    pub(in crate::workspace) fn model_selector_highlight(&self) -> Option<&(String, String)> {
+        self.model_ui.selector_highlighted_model.as_ref()
+    }
+
+    pub(in crate::workspace) fn set_model_selector_highlight(
+        &mut self,
+        highlighted: Option<(String, String)>,
+    ) -> bool {
+        if self.model_ui.selector_highlighted_model == highlighted {
+            return false;
+        }
+        self.model_ui.selector_highlighted_model = highlighted;
+        true
+    }
+
+    pub(in crate::workspace) fn move_model_selector_highlight(
+        &mut self,
+        rows: &[(String, String)],
+        delta: isize,
+    ) {
+        if rows.is_empty() {
+            self.model_ui.selector_highlighted_model = None;
+            return;
+        }
+        let current = self
+            .model_ui
+            .selector_highlighted_model
+            .as_ref()
+            .and_then(|highlighted| rows.iter().position(|row| row == highlighted));
+        let next = match (current, delta.is_negative()) {
+            (Some(index), false) => (index + delta as usize).min(rows.len() - 1),
+            (Some(index), true) => index.saturating_sub(delta.unsigned_abs()),
+            (None, false) => 0,
+            (None, true) => rows.len() - 1,
+        };
+        self.model_ui.selector_highlighted_model = rows.get(next).cloned();
+    }
+
+    pub(in crate::workspace) fn set_model_selector_highlight_edge(
+        &mut self,
+        rows: &[(String, String)],
+        last: bool,
+    ) {
+        self.model_ui.selector_highlighted_model = if last {
+            rows.last().cloned()
+        } else {
+            rows.first().cloned()
+        };
+    }
+
+    pub(in crate::workspace) fn model_selector_status_signature_matches(
+        &self,
+        signature: u64,
+    ) -> bool {
+        self.model_ui.selector_status_signature == Some(signature)
+    }
+
+    pub(in crate::workspace) fn set_model_selector_status_signature(
+        &mut self,
+        signature: Option<u64>,
+    ) {
+        self.model_ui.selector_status_signature = signature;
+    }
+
     #[cfg(test)]
     pub(in crate::workspace) fn new(
         task_runtime: Arc<tokio::runtime::Runtime>,
@@ -393,6 +584,7 @@ impl AiWorkspaceEntity {
         let mcp_registry = oxideterm_ai::McpRegistry::new(key_store.clone());
         let entity = Self {
             task_runtime,
+            model_ui: AiModelWorkspaceState::new(),
             key_store,
             visibility: AiWorkspaceVisibility::default(),
             settings_view: AiSettingsViewState::default(),
@@ -3436,7 +3628,6 @@ impl gpui::EventEmitter<AiWorkspaceEvent> for AiWorkspaceEntity {}
 /// Owns all AI-related workspace state while preserving the existing feature boundaries.
 pub(super) struct AiWorkspaceState {
     pub(super) chat: AiChatWorkspaceState,
-    pub(super) models: AiModelWorkspaceState,
     pub(super) knowledge: AiKnowledgeWorkspaceState,
 }
 
@@ -3483,8 +3674,8 @@ pub(super) struct AiChatWorkspaceState {
     pub(super) include_all_panes: bool,
 }
 
-/// Owns provider/model settings and selector state not yet extracted into the AI Entity.
-pub(super) struct AiModelWorkspaceState {
+/// Owns provider and model presentation state inside the AI Entity.
+pub(in crate::workspace) struct AiModelWorkspaceState {
     pub(super) context_model_list_states: RefCell<HashMap<String, ListState>>,
     pub(super) context_model_list_caches: RefCell<HashMap<String, VirtualListSignatureCache>>,
     pub(super) provider_model_chip_list_states: RefCell<HashMap<String, ListState>>,
@@ -3501,7 +3692,6 @@ pub(super) struct AiModelWorkspaceState {
     pub(super) selector_expanded_providers: HashSet<String>,
     pub(super) selector_highlighted_model: Option<(String, String)>,
     pub(super) selector_status_signature: Option<u64>,
-    pub(super) key_store: oxideterm_ai::AiProviderKeyStore,
 }
 
 /// Owns the workspace-window observation adapter for Knowledge external edits.
@@ -3511,13 +3701,8 @@ pub(super) struct AiKnowledgeWorkspaceState {
 
 impl AiWorkspaceState {
     pub(super) fn new(sidebar_width: f32, overlay_window_size: Option<(f32, f32)>) -> Self {
-        // The model state and AI Entity share the same zeroizing key-store cache;
-        // no raw provider key is copied into workspace fields during extraction.
-        let key_store = oxideterm_ai::AiProviderKeyStore::new();
-
         Self {
             chat: AiChatWorkspaceState::new(sidebar_width, overlay_window_size),
-            models: AiModelWorkspaceState::new(key_store),
             knowledge: AiKnowledgeWorkspaceState::new(),
         }
     }
@@ -3567,7 +3752,7 @@ impl AiChatWorkspaceState {
 }
 
 impl AiModelWorkspaceState {
-    fn new(key_store: oxideterm_ai::AiProviderKeyStore) -> Self {
+    fn new() -> Self {
         Self {
             context_model_list_states: RefCell::new(HashMap::new()),
             context_model_list_caches: RefCell::new(HashMap::new()),
@@ -3603,7 +3788,6 @@ impl AiModelWorkspaceState {
             selector_expanded_providers: HashSet::new(),
             selector_highlighted_model: None,
             selector_status_signature: None,
-            key_store,
         }
     }
 }
@@ -3691,6 +3875,43 @@ mod entity_tests {
             capability_policy: Default::default(),
             status: Default::default(),
         }
+    }
+
+    #[gpui::test]
+    fn model_selector_transitions_remain_inside_ai_entity(cx: &mut TestAppContext) {
+        let entity = cx.new(|cx| {
+            AiWorkspaceEntity::new(test_runtime(), oxideterm_ai::AiProviderKeyStore::new(), cx)
+        });
+        entity.update(cx, |entity, _cx| {
+            entity.set_model_selector_open(AiModelSelectorScope::Sidebar, true);
+            entity.set_model_selector_focus_origin(Some(
+                browser_behavior::BrowserFocusOrigin::Keyboard,
+            ));
+            entity.replace_model_selector_search(None, "deep");
+            entity.expand_model_selector_provider("provider-a".to_string());
+            entity.set_model_selector_highlight(Some((
+                "provider-a".to_string(),
+                "model-a".to_string(),
+            )));
+            entity.set_model_selector_status_signature(Some(42));
+
+            assert!(entity.model_selector_is_open(AiModelSelectorScope::Sidebar));
+            assert_eq!(entity.model_selector_search_query(), "deep");
+            assert!(entity.model_selector_provider_expanded("provider-a"));
+            assert_eq!(
+                entity.model_selector_highlight(),
+                Some(&("provider-a".to_string(), "model-a".to_string()))
+            );
+            assert!(entity.model_selector_status_signature_matches(42));
+
+            entity.close_model_selector();
+            assert!(!entity.model_selector_open());
+            assert_eq!(entity.model_selector_scope(), None);
+            assert_eq!(entity.model_selector_focus_origin(), None);
+            assert!(!entity.model_selector_search_focused());
+            assert!(entity.model_selector_search_query().is_empty());
+            assert_eq!(entity.model_selector_highlight(), None);
+        });
     }
 
     #[gpui::test]

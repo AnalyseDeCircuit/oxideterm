@@ -534,6 +534,7 @@ impl WorkspaceApp {
     pub(super) fn cloud_sync_upload_sensitive_summary(
         &self,
         selection: &CloudSyncUploadSelection,
+        cx: &App,
     ) -> Option<String> {
         if !selection.sync_sensitive_credentials {
             return None;
@@ -553,7 +554,12 @@ impl WorkspaceApp {
         let portable_secret_count =
             oxideterm_ai::provider_views(&self.settings_store.settings().ai.providers)
                 .into_iter()
-                .filter(|provider| self.ai.models.key_store.has_provider_key(&provider.id))
+                .filter(|provider| {
+                    self.ai_entity
+                        .read(cx)
+                        .key_store()
+                        .has_provider_key(&provider.id)
+                })
                 .count();
         let preflight = oxideterm_connections::oxide_file::preflight_export(
             &self.connection_store,

@@ -92,9 +92,11 @@ impl WorkspaceApp {
         if !panel_open || event.keystroke.modifiers.platform {
             return false;
         }
-        if self.ai.models.selector_open
-            && self.ai.models.selector_scope == Some(AiModelSelectorScope::TerminalInline)
-            && self.ai.models.selector_search_focused
+        if self
+            .ai_entity
+            .read(cx)
+            .model_selector_is_open(AiModelSelectorScope::TerminalInline)
+            && self.ai_entity.read(cx).model_selector_search_focused()
         {
             return self.handle_ai_sidebar_key(event, cx);
         }
@@ -265,7 +267,9 @@ impl WorkspaceApp {
                                                 this.ai_entity.update(cx, |ai, _cx| {
                                                     ai.terminal_inline_panel_mut().prompt_focused = true;
                                                 });
-                                                this.ai.models.selector_search_focused = false;
+                                                this.ai_entity.update(cx, |ai, _cx| {
+                                                    ai.set_model_selector_search_focused(false);
+                                                });
                                                 this.ime_marked_text = None;
 window.focus(&this.focus_handle, cx);
                                                 this.begin_ime_selection_from_mouse_down(target, event, window, cx);
@@ -452,9 +456,9 @@ window.focus(&this.focus_handle, cx);
                         },
                     )
                     .when(
-                        self.ai.models.selector_open
-                            && self.ai.models.selector_scope
-                                == Some(AiModelSelectorScope::TerminalInline),
+                        self.ai_entity
+                            .read(cx)
+                            .model_selector_is_open(AiModelSelectorScope::TerminalInline),
                         |panel| {
                         panel.child(
                             div()

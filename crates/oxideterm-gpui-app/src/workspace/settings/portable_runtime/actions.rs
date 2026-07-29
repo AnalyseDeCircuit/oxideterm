@@ -175,7 +175,7 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) {
         let runtime = self.forwarding_runtime.clone();
-        let key_store = self.ai.models.key_store.clone();
+        let key_store = self.ai_entity.read(cx).key_store().clone();
         let ai_providers = self.settings_store.settings().ai.providers.clone();
         self.settings_workspace.update(cx, |settings, cx| {
             settings.start_portable_status_refresh(

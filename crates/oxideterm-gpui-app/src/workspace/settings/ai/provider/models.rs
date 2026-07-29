@@ -79,10 +79,11 @@ impl WorkspaceApp {
                 visible_model_count,
                 AI_PROVIDER_MODEL_CHIPS_PER_VIRTUAL_ROW,
             );
-            self.sync_ai_provider_model_chip_list_state(&provider.id, &chip_rows, hidden_count);
+            self.sync_ai_provider_model_chip_list_state(&provider.id, &chip_rows, hidden_count, cx);
             let state = self
-                .ai
-                .models
+                .ai_entity
+                .read(cx)
+                .model_ui()
                 .provider_model_chip_list_states
                 .borrow()
                 .get(&provider.id)
@@ -133,6 +134,7 @@ impl WorkspaceApp {
         provider_id: &str,
         rows: &[Vec<AiProviderModelChipItem>],
         hidden_count: usize,
+        cx: &App,
     ) {
         let signatures = rows
             .iter()
@@ -153,7 +155,8 @@ impl WorkspaceApp {
             })
             .collect::<Vec<_>>();
         let state = {
-            let mut states = self.ai.models.provider_model_chip_list_states.borrow_mut();
+            let ai = self.ai_entity.read(cx);
+            let mut states = ai.model_ui().provider_model_chip_list_states.borrow_mut();
             states
                 .entry(provider_id.to_string())
                 .or_insert_with(|| {
@@ -167,7 +170,8 @@ impl WorkspaceApp {
                 .clone()
         };
         {
-            let mut caches = self.ai.models.provider_model_chip_list_caches.borrow_mut();
+            let ai = self.ai_entity.read(cx);
+            let mut caches = ai.model_ui().provider_model_chip_list_caches.borrow_mut();
             let cache = caches.entry(provider_id.to_string()).or_default();
             sync_tauri_variable_list_state_by_signatures(
                 &state,

@@ -717,7 +717,12 @@ impl WorkspaceApp {
         );
         self.sync_ai_provider_card_list_state(providers, cx);
         let provider_list = if expanded {
-            let state = self.ai.models.provider_card_list_state.clone();
+            let state = self
+                .ai_entity
+                .read(cx)
+                .model_ui()
+                .provider_card_list_state
+                .clone();
             let spec = self.ai_provider_card_list_spec();
             let workspace = cx.entity();
             let list_height = self.ai_provider_card_list_estimated_height(providers, cx);
@@ -859,9 +864,11 @@ impl WorkspaceApp {
         // The add-provider controls are the final virtual row inside this
         // section. Keep a stable sentinel signature for that fixed row.
         signatures.push(0xadd0_0001);
+        let ai = self.ai_entity.read(cx);
+        let model_ui = ai.model_ui();
         sync_tauri_variable_list_state_by_signatures(
-            &self.ai.models.provider_card_list_state,
-            &mut self.ai.models.provider_card_list_cache.borrow_mut(),
+            &model_ui.provider_card_list_state,
+            &mut model_ui.provider_card_list_cache.borrow_mut(),
             "ai-provider-cards",
             &signatures,
             self.ai_provider_card_list_spec(),
@@ -1441,7 +1448,7 @@ impl WorkspaceApp {
         );
         let rows = if expanded {
             let models = panel.models.clone();
-            let state = self.sync_ai_context_model_list_state(settings, &provider_id, &models);
+            let state = self.sync_ai_context_model_list_state(settings, &provider_id, &models, cx);
             let spec = self.ai_provider_model_row_list_spec();
             let workspace = cx.entity();
             let provider_id_for_rows = provider_id;
@@ -1480,6 +1487,7 @@ impl WorkspaceApp {
         settings: &PersistedSettings,
         provider_id: &str,
         models: &[String],
+        cx: &App,
     ) -> ListState {
         let signatures = models
             .iter()
@@ -1496,7 +1504,8 @@ impl WorkspaceApp {
             })
             .collect::<Vec<_>>();
         let state = {
-            let mut states = self.ai.models.context_model_list_states.borrow_mut();
+            let ai = self.ai_entity.read(cx);
+            let mut states = ai.model_ui().context_model_list_states.borrow_mut();
             states
                 .entry(provider_id.to_string())
                 .or_insert_with(|| {
@@ -1512,7 +1521,8 @@ impl WorkspaceApp {
                 .clone()
         };
         {
-            let mut caches = self.ai.models.context_model_list_caches.borrow_mut();
+            let ai = self.ai_entity.read(cx);
+            let mut caches = ai.model_ui().context_model_list_caches.borrow_mut();
             let cache = caches.entry(provider_id.to_string()).or_default();
             sync_tauri_variable_list_state_by_signatures(
                 &state,

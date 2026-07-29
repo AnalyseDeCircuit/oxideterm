@@ -35,7 +35,7 @@ impl WorkspaceApp {
         if dx.abs() < f32::EPSILON && dy.abs() < f32::EPSILON {
             return;
         }
-        if !self.has_ai_sidebar_floating_overlay() {
+        if !self.has_ai_sidebar_floating_overlay(cx) {
             return;
         }
 
@@ -70,7 +70,7 @@ impl WorkspaceApp {
         _window: &Window,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
-        if !self.ai_sidebar_visible() || !self.has_ai_sidebar_floating_overlay() {
+        if !self.ai_sidebar_visible() || !self.has_ai_sidebar_floating_overlay(cx) {
             return None;
         }
 
@@ -115,8 +115,10 @@ impl WorkspaceApp {
                 top,
                 self.render_ai_chat_menu(cx),
             )
-        } else if self.ai.models.selector_open
-            && self.ai.models.selector_scope == Some(AiModelSelectorScope::Sidebar)
+        } else if self
+            .ai_entity
+            .read(cx)
+            .model_selector_is_open(AiModelSelectorScope::Sidebar)
         {
             let anchor = self.select_anchors.get(&SelectAnchorId::AiModelSelector)?;
             (
@@ -212,11 +214,13 @@ impl WorkspaceApp {
         )
     }
 
-    pub(in crate::workspace) fn has_ai_sidebar_floating_overlay(&self) -> bool {
+    pub(in crate::workspace) fn has_ai_sidebar_floating_overlay(&self, cx: &App) -> bool {
         self.ai.chat.conversation_list_open
             || self.ai.chat.menu_open
-            || (self.ai.models.selector_open
-                && self.ai.models.selector_scope == Some(AiModelSelectorScope::Sidebar))
+            || self
+                .ai_entity
+                .read(cx)
+                .model_selector_is_open(AiModelSelectorScope::Sidebar)
             || self.ai.chat.reasoning_menu_open
             || self.ai.chat.safety_menu_open
             || self.ai.chat.context_popover_open

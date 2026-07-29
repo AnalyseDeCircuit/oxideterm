@@ -620,7 +620,7 @@ impl WorkspaceApp {
             }
         }
         dialog.selected_plugin_ids = dialog.plugin_groups.keys().cloned().collect();
-        dialog.preflight = self.oxide_export_preflight_for_dialog(&dialog);
+        dialog.preflight = self.oxide_export_preflight_for_dialog(&dialog, cx);
         self.session_manager.update(cx, |session_manager, cx| {
             session_manager.oxide_export_dialog = Some(dialog);
             session_manager.focused_input = None;
@@ -1357,7 +1357,7 @@ impl WorkspaceApp {
             cx,
         );
 
-        self.apply_oxide_import_portable_secrets(&mut envelope);
+        self.apply_oxide_import_portable_secrets(&mut envelope, cx);
         self.queue_cloud_sync_dirty_refresh(cx);
 
         let result = OxideClientStateImportResult {
@@ -1486,19 +1486,26 @@ impl WorkspaceApp {
     pub(in crate::workspace) fn oxide_export_portable_secret_count(
         &self,
         dialog: &OxideExportDialogState,
+        cx: &App,
     ) -> usize {
         if !dialog.include_portable_secrets {
             return 0;
         }
         oxideterm_ai::provider_views(&self.settings_store.settings().ai.providers)
             .into_iter()
-            .filter(|provider| self.ai.models.key_store.has_provider_key(&provider.id))
+            .filter(|provider| {
+                self.ai_entity
+                    .read(cx)
+                    .key_store()
+                    .has_provider_key(&provider.id)
+            })
             .count()
     }
 
     pub(super) fn oxide_export_preflight(
         &self,
         dialog: &OxideExportDialogState,
+        cx: &App,
     ) -> ExportPreflightResult {
         let selected_ids = self
             .oxide_export_connection_ids(dialog)
@@ -1509,7 +1516,7 @@ impl WorkspaceApp {
             &selected_ids,
             dialog.embed_keys,
             dialog.include_managed_keys,
-            self.oxide_export_portable_secret_count(dialog),
+            self.oxide_export_portable_secret_count(dialog, cx),
         )
     }
 
@@ -1519,7 +1526,7 @@ impl WorkspaceApp {
             session_manager
                 .oxide_export_dialog
                 .as_ref()
-                .map(|dialog| self.oxide_export_preflight_for_dialog(dialog))
+                .map(|dialog| self.oxide_export_preflight_for_dialog(dialog, cx))
         }) else {
             return;
         };
@@ -1534,10 +1541,11 @@ impl WorkspaceApp {
     pub(super) fn oxide_export_preflight_for_dialog(
         &self,
         dialog: &OxideExportDialogState,
+        cx: &App,
     ) -> Option<ExportPreflightResult> {
         let has_preflight_content =
             !self.oxide_export_connection_ids(dialog).is_empty() || dialog.include_portable_secrets;
-        has_preflight_content.then(|| self.oxide_export_preflight(dialog))
+        has_preflight_content.then(|| self.oxide_export_preflight(dialog, cx))
     }
 
     pub(super) fn export_oxide_dialog(&mut self, cx: &mut Context<Self>) {
@@ -1563,8 +1571,8 @@ impl WorkspaceApp {
                     .oxide_export_connection_ids(dialog)
                     .into_iter()
                     .collect::<Vec<_>>();
-                let preflight = self.oxide_export_preflight(dialog);
-                self.build_oxide_export_options(dialog)
+                let preflight = self.oxide_export_preflight(dialog, cx);
+                self.build_oxide_export_options(dialog, cx)
                     .map(|options| (selected_ids, preflight, options))
             }
         };
@@ -1669,6 +1677,7 @@ impl WorkspaceApp {
     pub(super) fn build_oxide_export_options(
         &self,
         dialog: &OxideExportDialogState,
+        cx: &App,
     ) -> Result<OxideExportOptions, String> {
         let app_settings_json = if dialog.include_app_settings {
             Some(
@@ -1762,11 +1771,16 @@ impl WorkspaceApp {
                 oxideterm_ai::provider_views(&self.settings_store.settings().ai.providers)
                     .into_iter()
                     .map(|provider| provider.id)
-                    .filter(|provider_id| self.ai.models.key_store.has_provider_key(provider_id))
+                    .filter(|provider_id| {
+                        self.ai_entity
+                            .read(cx)
+                            .key_store()
+                            .has_provider_key(provider_id)
+                    })
                     .collect::<Vec<_>>();
-            self.ai
-                .models
-                .key_store
+            self.ai_entity
+                .read(cx)
+                .key_store()
                 .get_provider_keys(&provider_ids)
                 .map_err(|error| error.to_string())?
                 .into_iter()
@@ -1932,6 +1946,7 @@ impl WorkspaceApp {
     pub(in crate::workspace) fn apply_oxide_import_portable_secrets(
         &mut self,
         envelope: &mut ImportResultEnvelope,
+        cx: &mut Context<Self>,
     ) {
         let total = envelope.portable_secrets.len();
         if total == 0 {
@@ -1949,9 +1964,9 @@ impl WorkspaceApp {
             }
 
             match self
-                .ai
-                .models
-                .key_store
+                .ai_entity
+                .read(cx)
+                .key_store()
                 .store_provider_key(&secret.id, secret.secret)
             {
                 Ok(()) => imported += 1,

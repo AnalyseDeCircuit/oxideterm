@@ -662,7 +662,7 @@ impl WorkspaceApp {
                     | SelectAnchorId::AiReasoningMenu
                     | SelectAnchorId::AiSafetyMenu
                     | SelectAnchorId::AiContextPopover
-            ) && self.has_ai_sidebar_floating_overlay())
+            ) && self.has_ai_sidebar_floating_overlay(cx))
             || (anchor.id == SelectAnchorId::TerminalBroadcastMenu
                 && self.terminal.read(cx).broadcast_menu_open())
             || (anchor.id == SelectAnchorId::TerminalCommandBar
@@ -966,16 +966,15 @@ impl WorkspaceApp {
             self.ime_marked_text = None;
             changed = true;
         }
-        if self.ai.models.selector_search_focused || self.ai.models.selector_open {
+        if self.ai_entity.read(cx).model_selector_search_focused()
+            || self.ai_entity.read(cx).model_selector_open()
+        {
             // The AI model selector can live either in the sidebar portal or
             // inside the terminal inline panel. A generic outside blur should
             // release the searchable select without restoring inline focus.
-            self.ai.models.selector_search_focused = false;
-            self.ai.models.selector_open = false;
-            self.ai.models.selector_scope = None;
-            self.ai.models.selector_focus_origin = None;
-            self.ai.models.selector_search_query.clear();
-            self.ai.models.selector_highlighted_model = None;
+            self.ai_entity.update(cx, |ai, _cx| {
+                ai.close_model_selector();
+            });
             self.ime_marked_text = None;
             changed = true;
         }

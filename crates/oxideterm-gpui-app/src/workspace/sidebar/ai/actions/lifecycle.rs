@@ -50,15 +50,12 @@ impl WorkspaceApp {
         // searchable input owner. Closing it must clear popup state, keyboard
         // focus origin, highlighted option, and any marked text together so Esc,
         // outside click, Tab, footer navigation, and row activation do not drift.
-        let restore_terminal_inline_prompt = self.ai.models.selector_scope
+        let restore_terminal_inline_prompt = self.ai_entity.read(cx).model_selector_scope()
             == Some(AiModelSelectorScope::TerminalInline)
             && self.ai_entity.read(cx).terminal_inline_panel().open;
-        self.ai.models.selector_open = false;
-        self.ai.models.selector_scope = None;
-        self.ai.models.selector_focus_origin = None;
-        self.ai.models.selector_search_focused = false;
-        self.ai.models.selector_search_query.clear();
-        self.ai.models.selector_highlighted_model = None;
+        self.ai_entity.update(cx, |ai, _cx| {
+            ai.close_model_selector();
+        });
         self.ime_marked_text = None;
         if restore_terminal_inline_prompt {
             // Tauri's inline command bar returns focus to its prompt after a

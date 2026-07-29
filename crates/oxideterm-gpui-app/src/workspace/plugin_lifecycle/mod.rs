@@ -378,7 +378,7 @@ impl WorkspaceApp {
             options.selected_app_settings_sections.as_ref(),
             cx,
         );
-        self.apply_oxide_import_portable_secrets(&mut envelope);
+        self.apply_oxide_import_portable_secrets(&mut envelope, cx);
         self.queue_cloud_sync_dirty_refresh(cx);
 
         plugin_runtime::PluginResponse::ok(
@@ -1455,7 +1455,7 @@ impl WorkspaceApp {
                 .unwrap_or_default();
         let sync_plugin_settings_revisions =
             native_plugin_settings_revision_map(&sync_plugin_settings);
-        let plugin_secret_store = self.ai.models.key_store.clone();
+        let plugin_secret_store = self.ai_entity.read(cx).key_store().clone();
         let telnet_transport_plugins = self
             .plugin_entity
             .read(cx)

@@ -588,7 +588,7 @@ impl WorkspaceApp {
             rag_store: self.ai_entity.read(cx).rag_store(),
             ai_mcp_registry,
             ai_acp_runtime_registry,
-            ai_key_store: self.ai.models.key_store.clone(),
+            ai_key_store: self.ai_entity.read(cx).key_store().clone(),
             ai_providers: settings.ai.providers.clone(),
             ai_embedding_config: settings.ai.embedding_config.clone(),
             ai_context_window: AI_COMPACTION_DEFAULT_CONTEXT_WINDOW,

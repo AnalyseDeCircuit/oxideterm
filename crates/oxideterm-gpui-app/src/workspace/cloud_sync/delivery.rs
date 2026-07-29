@@ -349,7 +349,7 @@ impl WorkspaceApp {
             .map(CloudSyncUploadSelection::item_filter)
             .unwrap_or_default();
         let portable_secrets =
-            match self.collect_cloud_sync_sensitive_portable_secrets(&raw_sync_scope) {
+            match self.collect_cloud_sync_sensitive_portable_secrets(&raw_sync_scope, cx) {
                 Ok(secrets) => secrets,
                 Err(error) => {
                     self.finish_cloud_sync_error("upload", error, cx);
@@ -473,6 +473,7 @@ impl WorkspaceApp {
     pub(super) fn collect_cloud_sync_sensitive_portable_secrets(
         &self,
         raw_sync_scope: &RawSyncScope,
+        cx: &App,
     ) -> Result<Vec<oxideterm_connections::oxide_file::EncryptedPortableSecret>, String> {
         let scope = normalize_sync_scope(Some(raw_sync_scope), &[]);
         if !scope.sync_sensitive_credentials {
@@ -482,11 +483,16 @@ impl WorkspaceApp {
             oxideterm_ai::provider_views(&self.settings_store.settings().ai.providers)
                 .into_iter()
                 .map(|provider| provider.id)
-                .filter(|provider_id| self.ai.models.key_store.has_provider_key(provider_id))
+                .filter(|provider_id| {
+                    self.ai_entity
+                        .read(cx)
+                        .key_store()
+                        .has_provider_key(provider_id)
+                })
                 .collect::<Vec<_>>();
-        self.ai
-            .models
-            .key_store
+        self.ai_entity
+            .read(cx)
+            .key_store()
             .get_provider_keys(&provider_ids)
             .map_err(|error| error.to_string())
             .map(|secrets| {
@@ -1405,7 +1411,7 @@ impl WorkspaceApp {
             terminal.quick_commands.store.reload_from_store()
         });
         if let Some(envelope) = outcome.sensitive_credentials_envelope.as_mut() {
-            self.apply_oxide_import_portable_secrets(envelope);
+            self.apply_oxide_import_portable_secrets(envelope, cx);
         }
         let sensitive_restore_description = outcome
             .sensitive_credentials_envelope
@@ -1498,7 +1504,7 @@ impl WorkspaceApp {
             cx,
         );
         if cloud_options.oxide_options.import_portable_secrets {
-            self.apply_oxide_import_portable_secrets(&mut outcome.envelope);
+            self.apply_oxide_import_portable_secrets(&mut outcome.envelope, cx);
         }
         let sensitive_restore_description =
             self.cloud_sync_sensitive_restore_description(&outcome.envelope);

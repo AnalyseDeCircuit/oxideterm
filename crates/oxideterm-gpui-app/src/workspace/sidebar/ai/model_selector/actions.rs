@@ -155,10 +155,16 @@ impl WorkspaceApp {
     ) {
         let providers = self.ai_model_selector_providers(cx);
         let signature = ai_model_selector_status_signature(&providers);
-        if self.ai.models.selector_status_signature == Some(signature) {
+        if self
+            .ai_entity
+            .read(cx)
+            .model_selector_status_signature_matches(signature)
+        {
             return;
         }
-        self.ai.models.selector_status_signature = Some(signature);
+        self.ai_entity.update(cx, |ai, _cx| {
+            ai.set_model_selector_status_signature(Some(signature));
+        });
         // Mirrors Tauri ModelSelector's mount/provider-change checkAllKeys
         // effect: the trigger indicator starts probing before the user opens it.
         self.refresh_ai_model_selector_provider_statuses(cx);
@@ -188,7 +194,9 @@ impl WorkspaceApp {
         if changed && !visibility.model_selector_surface {
             // A later remount must re-run status checks even when provider
             // configuration stayed unchanged while the surface was hidden.
-            self.ai.models.selector_status_signature = None;
+            self.ai_entity.update(cx, |ai, _cx| {
+                ai.set_model_selector_status_signature(None);
+            });
         }
         if visibility.model_selector_surface {
             self.ensure_ai_model_selector_mount_statuses(cx);
@@ -201,12 +209,12 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let next_open =
-            !(self.ai.models.selector_open && self.ai.models.selector_scope == Some(scope));
+        let next_open = !self.ai_entity.read(cx).model_selector_is_open(scope);
         self.close_ai_sidebar_popovers(cx);
-        self.ai.models.selector_open = next_open;
-        self.ai.models.selector_scope = next_open.then_some(scope);
-        if self.ai.models.selector_open {
+        self.ai_entity.update(cx, |ai, _cx| {
+            ai.set_model_selector_open(scope, next_open);
+        });
+        if next_open {
             let providers = self.ai_model_selector_providers(cx);
             let mut active_acp_agent_id = None;
             if let Some(provider) = active_provider_view(
@@ -215,16 +223,13 @@ impl WorkspaceApp {
             ) {
                 active_acp_agent_id =
                     Self::ai_acp_agent_id_from_provider_id(&provider.id).map(str::to_string);
-                self.ai
-                    .models
-                    .selector_expanded_providers
-                    .insert(provider.id.clone());
+                self.ai_entity.update(cx, |ai, _cx| {
+                    ai.expand_model_selector_provider(provider.id.clone());
+                });
             }
             if let Some(agent_id) = active_acp_agent_id {
                 self.schedule_ai_acp_model_discovery(agent_id, cx);
             }
-            self.ai.models.selector_search_focused = true;
-            self.ai.models.selector_highlighted_model = None;
             self.ai.chat.input_focused = false;
             self.ai_entity.update(cx, |ai, _cx| {
                 ai.terminal_inline_panel_mut().prompt_focused = false;
@@ -243,17 +248,17 @@ impl WorkspaceApp {
         cx: &App,
     ) -> Vec<(String, String)> {
         let providers = self.ai_model_selector_providers(cx);
-        let searching = !self.ai.models.selector_search_query.trim().is_empty();
+        let ai = self.ai_entity.read(cx);
+        let model_ui = ai.model_ui();
+        let searching = !model_ui.selector_search_query.trim().is_empty();
         // Tauri renders models as focusable dropdown items only for expanded
         // providers, while search mode expands matching providers. Keep the
         // keyboard target list identical to the rendered, selectable rows.
-        model_selector_visible_provider_groups(&providers, &self.ai.models.selector_search_query)
+        model_selector_visible_provider_groups(&providers, &model_ui.selector_search_query)
             .into_iter()
             .filter(|group| {
                 searching
-                    || self
-                        .ai
-                        .models
+                    || model_ui
                         .selector_expanded_providers
                         .contains(&group.provider.id)
             })
@@ -274,48 +279,37 @@ impl WorkspaceApp {
     pub(in crate::workspace) fn move_ai_model_selector_highlight(
         &mut self,
         delta: isize,
-        cx: &App,
+        cx: &mut Context<Self>,
     ) {
         let rows = self.ai_model_selector_visible_model_keys(cx);
-        if rows.is_empty() {
-            self.ai.models.selector_highlighted_model = None;
-            return;
-        }
-        let current = self
-            .ai
-            .models
-            .selector_highlighted_model
-            .as_ref()
-            .and_then(|highlighted| rows.iter().position(|row| row == highlighted));
-        let next = match (current, delta.is_negative()) {
-            (Some(index), false) => (index + delta as usize).min(rows.len() - 1),
-            (Some(index), true) => index.saturating_sub(delta.unsigned_abs()),
-            (None, false) => 0,
-            (None, true) => rows.len() - 1,
-        };
-        self.ai.models.selector_highlighted_model = rows.get(next).cloned();
+        self.ai_entity.update(cx, |ai, _cx| {
+            ai.move_model_selector_highlight(&rows, delta);
+        });
     }
 
     pub(in crate::workspace) fn set_ai_model_selector_highlight_edge(
         &mut self,
         last: bool,
-        cx: &App,
+        cx: &mut Context<Self>,
     ) {
         let rows = self.ai_model_selector_visible_model_keys(cx);
         // Home/End in Radix-style menu focus moves to the first/last selectable
         // model row, not to provider headers or disabled provider messages.
-        self.ai.models.selector_highlighted_model = if last {
-            rows.last().cloned()
-        } else {
-            rows.first().cloned()
-        };
+        self.ai_entity.update(cx, |ai, _cx| {
+            ai.set_model_selector_highlight_edge(&rows, last);
+        });
     }
 
     pub(in crate::workspace) fn select_highlighted_ai_model(
         &mut self,
         cx: &mut Context<Self>,
     ) -> bool {
-        let Some((provider_id, model)) = self.ai.models.selector_highlighted_model.clone() else {
+        let Some((provider_id, model)) = self
+            .ai_entity
+            .read(cx)
+            .model_selector_highlight()
+            .cloned()
+        else {
             return false;
         };
         if !self
@@ -323,11 +317,15 @@ impl WorkspaceApp {
             .iter()
             .any(|row| row == &(provider_id.clone(), model.clone()))
         {
-            self.ai.models.selector_highlighted_model = None;
+            self.ai_entity.update(cx, |ai, _cx| {
+                ai.set_model_selector_highlight(None);
+            });
             return false;
         }
         self.select_ai_model_from_selector(provider_id, model, cx);
-        self.ai.models.selector_highlighted_model = None;
+        self.ai_entity.update(cx, |ai, _cx| {
+            ai.set_model_selector_highlight(None);
+        });
         true
     }
 

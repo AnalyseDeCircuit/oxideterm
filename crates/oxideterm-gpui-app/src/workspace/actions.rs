@@ -721,7 +721,8 @@ impl WorkspaceApp {
         }
 
         if self.ai_sidebar_visible()
-            && (self.ai.chat.input_focused || self.ai.models.selector_search_focused)
+            && (self.ai.chat.input_focused
+                || self.ai_entity.read(cx).model_selector_search_focused())
         {
             let _ = self.handle_ai_sidebar_key(event, cx);
             return;

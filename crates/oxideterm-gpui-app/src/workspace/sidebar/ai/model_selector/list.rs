@@ -4,10 +4,12 @@ impl WorkspaceApp {
         providers: &[AiProviderView],
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let groups = model_selector_visible_provider_groups(
-            providers,
-            &self.ai.models.selector_search_query,
-        );
+        let search_query = self
+            .ai_entity
+            .read(cx)
+            .model_selector_search_query()
+            .to_owned();
+        let groups = model_selector_visible_provider_groups(providers, &search_query);
         let mut list = ai_model_selector_list("ai-model-selector-list");
         if groups.is_empty() {
             return list
@@ -22,12 +24,11 @@ impl WorkspaceApp {
             let provider = group.provider;
             let has_key = self.ai_model_selector_has_key(&provider, cx);
             let online = self.ai_model_selector_provider_is_online(&provider, cx);
-            let expanded = !self.ai.models.selector_search_query.trim().is_empty()
+            let expanded = !search_query.trim().is_empty()
                 || self
-                    .ai
-                    .models
-                    .selector_expanded_providers
-                    .contains(&provider.id);
+                    .ai_entity
+                    .read(cx)
+                    .model_selector_provider_expanded(&provider.id);
             let active_provider = self.ai_active_model_selector_provider_id().as_deref()
                 == Some(provider.id.as_str());
             let active_provider_model = (active_provider
@@ -96,20 +97,9 @@ impl WorkspaceApp {
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |this, _event, _window, cx| {
-                    let expanded = if !this
-                        .ai
-                        .models
-                        .selector_expanded_providers
-                        .remove(&provider_id)
-                    {
-                        this.ai
-                            .models
-                            .selector_expanded_providers
-                            .insert(provider_id.clone());
-                        true
-                    } else {
-                        false
-                    };
+                    let expanded = this.ai_entity.update(cx, |ai, _cx| {
+                        ai.toggle_model_selector_provider(provider_id.clone())
+                    });
                     if expanded
                         && let Some(agent_id) =
                             Self::ai_acp_agent_id_from_provider_id(&provider_id)
@@ -119,7 +109,6 @@ impl WorkspaceApp {
                     // Collapsing/expanding changes which model rows are
                     // focusable, so clear the active item like Radix does when
                     // menu content is restructured.
-                    this.ai.models.selector_highlighted_model = None;
                     cx.stop_propagation();
                     cx.notify();
                 }),

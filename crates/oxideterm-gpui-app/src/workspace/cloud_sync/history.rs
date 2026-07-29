@@ -61,7 +61,7 @@ impl WorkspaceApp {
             .view
             .upload_selection
             .as_ref()
-            .and_then(|selection| self.cloud_sync_upload_sensitive_summary(selection));
+            .and_then(|selection| self.cloud_sync_upload_sensitive_summary(selection, cx));
         // I18n clones share the catalog Arc; no locale table or secret draft is copied.
         CloudSyncPageRenderer {
             cloud_sync: self.cloud_sync.clone(),

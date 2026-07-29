@@ -460,10 +460,11 @@ impl WorkspaceApp {
                 .clamp(AI_SIDEBAR_MIN_WIDTH, AI_SIDEBAR_MAX_WIDTH),
             Some(current_window_size(window)),
         );
+        let ai_key_store = oxideterm_ai::AiProviderKeyStore::new();
         let ai_entity = cx.new(|cx| {
             ai_state::AiWorkspaceEntity::new_with_agent_fs(
                 forwarding_runtime.clone(),
-                ai.models.key_store.clone(),
+                ai_key_store,
                 ai_agent_fs,
                 cx,
             )

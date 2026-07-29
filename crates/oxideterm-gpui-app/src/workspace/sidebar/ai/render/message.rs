@@ -1454,7 +1454,9 @@ window.focus(&this.focus_handle, cx);
             cx.listener(move |this, event: &gpui::MouseDownEvent, window, cx| {
                 this.ai.chat.editing_message_focused = true;
                 this.ai.chat.input_focused = false;
-                this.ai.models.selector_search_focused = false;
+                this.ai_entity.update(cx, |ai, _cx| {
+                    ai.set_model_selector_search_focused(false);
+                });
                 this.ime_marked_text = None;
 window.focus(&this.focus_handle, cx);
                 this.begin_ime_selection_from_mouse_down(target, event, window, cx);

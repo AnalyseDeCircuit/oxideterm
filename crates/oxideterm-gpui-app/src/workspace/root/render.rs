@@ -485,7 +485,7 @@ impl WorkspaceApp {
                 } else if this.ai_sidebar_visible()
                     && (this.ai.chat.input_focused
                         || this.ai.chat.footer_focus.is_some()
-                        || this.ai.models.selector_search_focused)
+                        || this.ai_entity.read(cx).model_selector_search_focused())
                 {
                     let _ = this.handle_ai_sidebar_key(event, cx);
                     window.prevent_default();

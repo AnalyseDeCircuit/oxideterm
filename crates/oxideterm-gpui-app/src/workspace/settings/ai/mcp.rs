@@ -54,8 +54,13 @@ impl WorkspaceApp {
                     .child(self.i18n.t("settings_view.mcp.no_servers")),
             )
         } else {
-            self.sync_ai_mcp_server_list_state(&configs, &snapshots);
-            let state = self.ai.models.mcp_server_list_state.clone();
+            self.sync_ai_mcp_server_list_state(&configs, &snapshots, cx);
+            let state = self
+                .ai_entity
+                .read(cx)
+                .model_ui()
+                .mcp_server_list_state
+                .clone();
             let spec = self.ai_mcp_server_list_spec();
             let workspace = cx.entity();
             let configs_for_rows = configs.clone();
@@ -138,6 +143,7 @@ impl WorkspaceApp {
         &self,
         configs: &[oxideterm_ai::McpServerConfig],
         snapshots: &[oxideterm_ai::McpServerStateSnapshot],
+        cx: &App,
     ) {
         let signatures = configs
             .iter()
@@ -150,9 +156,11 @@ impl WorkspaceApp {
                 )
             })
             .collect::<Vec<_>>();
+        let ai = self.ai_entity.read(cx);
+        let model_ui = ai.model_ui();
         sync_tauri_variable_list_state_by_signatures(
-            &self.ai.models.mcp_server_list_state,
-            &mut self.ai.models.mcp_server_list_cache.borrow_mut(),
+            &model_ui.mcp_server_list_state,
+            &mut model_ui.mcp_server_list_cache.borrow_mut(),
             "ai-mcp-servers",
             &signatures,
             self.ai_mcp_server_list_spec(),

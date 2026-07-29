@@ -979,11 +979,13 @@ impl WorkspaceApp {
             self.terminal_command_suggestion_highlighted = None;
             changed = true;
         }
-        if self.has_ai_sidebar_floating_overlay() {
+        if self.has_ai_sidebar_floating_overlay(cx) {
             self.close_ai_sidebar_popovers(cx);
             changed = true;
-        } else if self.ai.models.selector_open
-            && self.ai.models.selector_scope == Some(AiModelSelectorScope::TerminalInline)
+        } else if self
+            .ai_entity
+            .read(cx)
+            .model_selector_is_open(AiModelSelectorScope::TerminalInline)
         {
             // The terminal inline model selector is painted inside the pane
             // instead of the sidebar popover portal, so include it in the same

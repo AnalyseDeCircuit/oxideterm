@@ -494,7 +494,7 @@ impl WorkspaceApp {
             );
             return;
         };
-        let key_store = self.ai.models.key_store.clone();
+        let key_store = self.ai_entity.read(cx).key_store().clone();
         let runtime = self.forwarding_runtime.clone();
         let failed_to_get_key = self.i18n.t("ai.model_selector.failed_to_get_api_key");
         let api_key_not_found = self.i18n.t("ai.model_selector.api_key_not_found");
@@ -676,7 +676,7 @@ impl WorkspaceApp {
             ai.set_active_conversation_safety_bypass(false);
         });
         self.ai.chat.safety_menu_open = false;
-        self.restore_ai_chat_input_focus_after_safety_mode_change();
+        self.restore_ai_chat_input_focus_after_safety_mode_change(cx);
         cx.notify();
     }
 
@@ -685,16 +685,21 @@ impl WorkspaceApp {
             ai.set_active_conversation_safety_bypass(true);
         });
         self.ai.chat.safety_menu_open = false;
-        self.restore_ai_chat_input_focus_after_safety_mode_change();
+        self.restore_ai_chat_input_focus_after_safety_mode_change(cx);
         cx.notify();
     }
 
-    pub(in crate::workspace) fn restore_ai_chat_input_focus_after_safety_mode_change(&mut self) {
+    pub(in crate::workspace) fn restore_ai_chat_input_focus_after_safety_mode_change(
+        &mut self,
+        cx: &mut Context<Self>,
+    ) {
         // Closing the safety menu returns keyboard ownership to the composer so
         // Enter/Space continue the conversation instead of falling through.
         self.ai.chat.input_focused = true;
         self.ai.chat.footer_focus = None;
-        self.ai.models.selector_search_focused = false;
+        self.ai_entity.update(cx, |ai, _cx| {
+            ai.set_model_selector_search_focused(false);
+        });
         self.ime_marked_text = None;
     }
 
@@ -712,7 +717,9 @@ impl WorkspaceApp {
         self.ai.chat.editing_message_draft = content;
         self.ai.chat.editing_message_focused = true;
         self.ai.chat.input_focused = false;
-        self.ai.models.selector_search_focused = false;
+        self.ai_entity.update(cx, |ai, _cx| {
+            ai.set_model_selector_search_focused(false);
+        });
         self.ime_marked_text = None;
         cx.notify();
     }

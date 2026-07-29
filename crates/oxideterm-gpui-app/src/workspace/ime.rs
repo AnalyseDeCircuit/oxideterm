@@ -1028,8 +1028,8 @@ impl WorkspaceApp {
 
         let terminal_inline_panel = self.ai_entity.read(cx).terminal_inline_panel();
         if (self.ai_sidebar_visible() || terminal_inline_panel.open)
-            && self.ai.models.selector_open
-            && self.ai.models.selector_search_focused
+            && self.ai_entity.read(cx).model_selector_open()
+            && self.ai_entity.read(cx).model_selector_search_focused()
         {
             return Some(WorkspaceImeTarget::AiModelSelectorSearch);
         }
@@ -1835,10 +1835,15 @@ impl WorkspaceApp {
                 }
             }
             WorkspaceImeTarget::AiModelSelectorSearch => self
-                .ai
-                .models
-                .selector_search_focused
-                .then(|| self.ai.models.selector_search_query.clone()),
+                .ai_entity
+                .read(cx)
+                .model_selector_search_focused()
+                .then(|| {
+                    self.ai_entity
+                        .read(cx)
+                        .model_selector_search_query()
+                        .to_owned()
+                }),
             WorkspaceImeTarget::AiInlinePrompt => {
                 let panel = self.ai_entity.read(cx).terminal_inline_panel();
                 panel.prompt_focused.then(|| panel.prompt.clone())
@@ -2695,16 +2700,13 @@ impl WorkspaceApp {
                 }
             }
             WorkspaceImeTarget::AiModelSelectorSearch => {
-                if self.ai.models.selector_search_focused {
-                    replace_utf16(
-                        &mut self.ai.models.selector_search_query,
-                        replacement_range,
-                        text,
-                    );
+                if self.ai_entity.read(cx).model_selector_search_focused() {
+                    self.ai_entity.update(cx, |ai, _cx| {
+                        ai.replace_model_selector_search(replacement_range, text);
+                    });
                     // Search changes rebuild the visible model rows; clear the
                     // Radix-style active item so keyboard focus cannot point at
                     // a filtered-out model.
-                    self.ai.models.selector_highlighted_model = None;
                     self.show_active_input_caret(cx);
                     cx.notify();
                 }

@@ -4,7 +4,9 @@ impl WorkspaceApp {
         event: &KeyDownEvent,
         cx: &mut Context<Self>,
     ) -> bool {
-        if self.ai.models.selector_open && self.ai.models.selector_search_focused {
+        if self.ai_entity.read(cx).model_selector_open()
+            && self.ai_entity.read(cx).model_selector_search_focused()
+        {
             if event.keystroke.modifiers.platform {
                 return false;
             }
@@ -47,8 +49,9 @@ impl WorkspaceApp {
                     true
                 }
                 "backspace" => {
-                    let changed = self.ai.models.selector_search_query.pop().is_some()
-                        || self.ai.models.selector_highlighted_model.take().is_some()
+                    let changed = self
+                        .ai_entity
+                        .update(cx, |ai, _cx| ai.pop_model_selector_search())
                         || self.ime_marked_text.take().is_some();
                     if changed {
                         // Empty Backspace should not repaint the selector when

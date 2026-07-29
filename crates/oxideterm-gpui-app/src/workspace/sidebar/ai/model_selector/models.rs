@@ -283,9 +283,9 @@ impl WorkspaceApp {
             let model_for_click = model.clone();
             let provider_id = provider.id.clone();
             let highlighted = self
-                .ai
-                .models
-                .selector_highlighted_model
+                .ai_entity
+                .read(cx)
+                .model_selector_highlight()
                 .as_ref()
                 .is_some_and(|(id, highlighted_model)| {
                     id == &provider.id && highlighted_model == &model
@@ -309,10 +309,11 @@ impl WorkspaceApp {
                     let model_for_hover = model_for_click.clone();
                     cx.listener(move |this, _event: &MouseMoveEvent, _window, cx| {
                         let next = Some((provider_id.clone(), model_for_hover.clone()));
-                        if this.ai.models.selector_highlighted_model != next {
+                        if this.ai_entity.update(cx, |ai, _cx| {
+                            ai.set_model_selector_highlight(next)
+                        }) {
                             // Pointer hover and keyboard navigation share the
                             // same active-item state, matching Radix menu focus.
-                            this.ai.models.selector_highlighted_model = next;
                             cx.notify();
                         }
                     })
@@ -325,7 +326,9 @@ impl WorkspaceApp {
                             model_for_click.clone(),
                             cx,
                         );
-                        this.ai.models.selector_highlighted_model = None;
+                        this.ai_entity.update(cx, |ai, _cx| {
+                            ai.set_model_selector_highlight(None);
+                        });
                         cx.stop_propagation();
                     }),
                 ),
@@ -399,9 +402,9 @@ impl WorkspaceApp {
         {
             let active = Some(choice.value_id.as_str()) == selected_value_id;
             let highlighted = self
-                .ai
-                .models
-                .selector_highlighted_model
+                .ai_entity
+                .read(cx)
+                .model_selector_highlight()
                 .as_ref()
                 .is_some_and(|(id, model)| {
                     id == &Self::ai_acp_provider_id(&agent_id) && model == &choice.label
@@ -429,8 +432,9 @@ impl WorkspaceApp {
                     let choice_label = choice_label.clone();
                     cx.listener(move |this, _event: &MouseMoveEvent, _window, cx| {
                         let next = Some((provider_id.clone(), choice_label.clone()));
-                        if this.ai.models.selector_highlighted_model != next {
-                            this.ai.models.selector_highlighted_model = next;
+                        if this.ai_entity.update(cx, |ai, _cx| {
+                            ai.set_model_selector_highlight(next)
+                        }) {
                             cx.notify();
                         }
                     })
@@ -444,7 +448,9 @@ impl WorkspaceApp {
                             choice_value_id.clone(),
                             cx,
                         );
-                        this.ai.models.selector_highlighted_model = None;
+                        this.ai_entity.update(cx, |ai, _cx| {
+                            ai.set_model_selector_highlight(None);
+                        });
                         cx.stop_propagation();
                     }),
                 ),
