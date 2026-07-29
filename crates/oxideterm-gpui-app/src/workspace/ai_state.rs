@@ -32,6 +32,15 @@ pub(in crate::workspace) enum AiWorkspaceEvent {
     TerminalInlineDeliveryReady,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(in crate::workspace) enum AiChatPopover {
+    ConversationList,
+    Menu,
+    Reasoning,
+    Safety,
+    Context,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(in crate::workspace) enum AiChatConfirmKind {
     ClearAll,
@@ -369,9 +378,336 @@ impl AiWorkspaceEntity {
         &self.chat_ui
     }
 
-    /// Mutates chat presentation state inside the owning Entity.
-    pub(in crate::workspace) fn chat_ui_mut(&mut self) -> &mut AiChatWorkspaceState {
-        &mut self.chat_ui
+    pub(in crate::workspace) fn configure_chat_surface(
+        &mut self,
+        sidebar_width: f32,
+        overlay_window_size: Option<(f32, f32)>,
+    ) {
+        self.chat_ui.sidebar_width = sidebar_width;
+        self.chat_ui.overlay_window_size = overlay_window_size;
+    }
+
+    pub(in crate::workspace) fn set_chat_draft(&mut self, draft: String) {
+        self.chat_ui.draft = draft;
+    }
+
+    pub(in crate::workspace) fn focus_chat_input(&mut self) {
+        self.chat_ui.input_focused = true;
+        self.chat_ui.footer_focus = None;
+    }
+
+    pub(in crate::workspace) fn blur_chat_input(&mut self, suppress_autocomplete: bool) {
+        self.chat_ui.input_focused = false;
+        self.chat_ui.footer_focus = None;
+        if suppress_autocomplete {
+            self.chat_ui.autocomplete_suppressed = true;
+        }
+    }
+
+    pub(in crate::workspace) fn set_chat_footer_focus(
+        &mut self,
+        focus: Option<AiChatFooterAction>,
+    ) {
+        self.chat_ui.input_focused = focus.is_none();
+        self.chat_ui.footer_focus = focus;
+    }
+
+    pub(in crate::workspace) fn clear_chat_footer_focus(&mut self) {
+        self.chat_ui.footer_focus = None;
+    }
+
+    pub(in crate::workspace) fn set_chat_popover_open(
+        &mut self,
+        popover: AiChatPopover,
+        open: bool,
+    ) {
+        match popover {
+            AiChatPopover::ConversationList => self.chat_ui.conversation_list_open = open,
+            AiChatPopover::Menu => self.chat_ui.menu_open = open,
+            AiChatPopover::Reasoning => self.chat_ui.reasoning_menu_open = open,
+            AiChatPopover::Safety => self.chat_ui.safety_menu_open = open,
+            AiChatPopover::Context => self.chat_ui.context_popover_open = open,
+        }
+    }
+
+    pub(in crate::workspace) fn close_chat_popovers(&mut self) {
+        self.chat_ui.conversation_list_open = false;
+        self.chat_ui.menu_open = false;
+        self.chat_ui.reasoning_menu_open = false;
+        self.chat_ui.safety_menu_open = false;
+        self.chat_ui.context_popover_open = false;
+    }
+
+    pub(in crate::workspace) fn toggle_chat_context(&mut self) {
+        self.chat_ui.include_context = !self.chat_ui.include_context;
+        if !self.chat_ui.include_context {
+            self.chat_ui.include_all_panes = false;
+        }
+    }
+
+    pub(in crate::workspace) fn toggle_chat_all_panes(&mut self) {
+        self.chat_ui.include_all_panes = !self.chat_ui.include_all_panes;
+    }
+
+    pub(in crate::workspace) fn replace_chat_input(
+        &mut self,
+        replacement_range: Option<std::ops::Range<usize>>,
+        text: &str,
+    ) -> bool {
+        if !self.chat_ui.input_focused {
+            return false;
+        }
+        replace_utf16(&mut self.chat_ui.draft, replacement_range, text);
+        self.chat_ui.autocomplete_suppressed = false;
+        self.chat_ui.autocomplete_index = 0;
+        true
+    }
+
+    pub(in crate::workspace) fn replace_message_edit(
+        &mut self,
+        replacement_range: Option<std::ops::Range<usize>>,
+        text: &str,
+    ) -> bool {
+        if !self.chat_ui.editing_message_focused {
+            return false;
+        }
+        replace_utf16(
+            &mut self.chat_ui.editing_message_draft,
+            replacement_range,
+            text,
+        );
+        true
+    }
+
+    pub(in crate::workspace) fn apply_chat_autocomplete(
+        &mut self,
+        candidate: &oxideterm_ai::AiAutocompleteCandidate,
+    ) {
+        self.chat_ui.draft = oxideterm_ai::apply_ai_autocomplete_candidate(
+            &self.chat_ui.draft,
+            self.chat_ui.draft.len(),
+            candidate,
+        );
+        self.chat_ui.autocomplete_index = 0;
+        self.chat_ui.autocomplete_suppressed = true;
+    }
+
+    pub(in crate::workspace) fn move_chat_autocomplete(&mut self, delta: isize, item_count: usize) {
+        if item_count == 0 {
+            self.chat_ui.autocomplete_index = 0;
+            return;
+        }
+        self.chat_ui.autocomplete_index = if delta.is_negative() {
+            (self.chat_ui.autocomplete_index + item_count - 1) % item_count
+        } else {
+            (self.chat_ui.autocomplete_index + 1) % item_count
+        };
+    }
+
+    pub(in crate::workspace) fn suppress_chat_autocomplete(&mut self) {
+        self.chat_ui.autocomplete_suppressed = true;
+    }
+
+    pub(in crate::workspace) fn pop_chat_draft(&mut self) -> bool {
+        let changed = self.chat_ui.draft.pop().is_some()
+            || self.chat_ui.autocomplete_suppressed
+            || self.chat_ui.autocomplete_index != 0;
+        self.chat_ui.autocomplete_suppressed = false;
+        self.chat_ui.autocomplete_index = 0;
+        changed
+    }
+
+    pub(in crate::workspace) fn push_chat_draft_newline(&mut self) {
+        self.chat_ui.draft.push('\n');
+    }
+
+    pub(in crate::workspace) fn pop_message_edit(&mut self) -> bool {
+        self.chat_ui.editing_message_draft.pop().is_some()
+    }
+
+    pub(in crate::workspace) fn push_message_edit_newline(&mut self) {
+        self.chat_ui.editing_message_draft.push('\n');
+    }
+
+    pub(in crate::workspace) fn blur_message_edit(&mut self) {
+        self.chat_ui.editing_message_focused = false;
+    }
+
+    pub(in crate::workspace) fn focus_message_edit(&mut self) {
+        self.chat_ui.editing_message_focused = true;
+        self.chat_ui.input_focused = false;
+    }
+
+    pub(in crate::workspace) fn begin_message_edit(&mut self, message_id: String, content: String) {
+        self.chat_ui.editing_message_id = Some(message_id);
+        self.chat_ui.editing_message_draft = content;
+        self.focus_message_edit();
+    }
+
+    pub(in crate::workspace) fn clear_message_edit(&mut self) {
+        self.chat_ui.editing_message_id = None;
+        self.chat_ui.editing_message_draft.clear();
+        self.chat_ui.editing_message_focused = false;
+    }
+
+    pub(in crate::workspace) fn reset_chat_for_conversation_selection(&mut self) {
+        self.chat_ui.conversation_list_open = false;
+        self.chat_ui.menu_open = false;
+        self.chat_ui.safety_menu_open = false;
+        self.clear_message_edit();
+        self.clear_chat_expansions();
+        self.blur_chat_input(false);
+    }
+
+    pub(in crate::workspace) fn reset_chat_after_conversation_delete(
+        &mut self,
+        has_conversations: bool,
+    ) {
+        self.clear_chat_expansions();
+        self.chat_ui.conversation_list_open = has_conversations;
+        self.chat_ui.menu_open = false;
+    }
+
+    pub(in crate::workspace) fn reset_chat_for_new_conversation(&mut self) {
+        self.chat_ui.conversation_list_open = false;
+        self.chat_ui.menu_open = false;
+        self.chat_ui.draft.clear();
+        self.chat_ui.input_focused = false;
+        self.chat_ui.autocomplete_index = 0;
+        self.chat_ui.autocomplete_suppressed = false;
+    }
+
+    pub(in crate::workspace) fn reset_chat_message_list(&mut self) {
+        self.chat_ui.message_list_state =
+            tauri_virtual_list_state(0, ListAlignment::Top, ai_chat_virtual_list_spec());
+        self.chat_ui
+            .message_list_cache
+            .replace(VirtualListSignatureCache::default());
+    }
+
+    pub(in crate::workspace) fn sync_chat_message_list(
+        &mut self,
+        conversation_id: &str,
+        signatures: &[u64],
+        spec: TauriVirtualListSpec,
+    ) {
+        let chat = &mut self.chat_ui;
+        let mut cache = chat.message_list_cache.borrow_mut();
+        let list_was_reset = sync_tauri_virtual_list_state_by_signatures(
+            &mut chat.message_list_state,
+            &mut cache,
+            conversation_id,
+            signatures,
+            ListAlignment::Top,
+            spec,
+        );
+        if list_was_reset {
+            chat.message_list_state.set_follow_mode(FollowMode::Tail);
+        }
+    }
+
+    pub(in crate::workspace) fn clear_chat_expansions(&mut self) {
+        self.chat_ui.thinking_expansion_state.clear();
+        self.chat_ui.tool_call_expansion_state.clear();
+    }
+
+    pub(in crate::workspace) fn remove_thinking_expansion(&mut self, message_id: &str) {
+        self.chat_ui.thinking_expansion_state.remove(message_id);
+    }
+
+    pub(in crate::workspace) fn clear_chat_input_after_submit(&mut self) {
+        self.chat_ui.draft.clear();
+        self.chat_ui.autocomplete_index = 0;
+        self.chat_ui.autocomplete_suppressed = false;
+        self.chat_ui.include_context = false;
+        self.chat_ui.include_all_panes = false;
+    }
+
+    pub(in crate::workspace) fn open_standard_chat_confirm(&mut self, kind: AiStandardConfirmKind) {
+        match kind {
+            AiStandardConfirmKind::Safety => {
+                self.chat_ui.safety_confirm_open = true;
+                self.chat_ui.safety_confirm_presence.reopen();
+            }
+            AiStandardConfirmKind::Summarize => {
+                self.chat_ui.summarize_confirm_open = true;
+                self.chat_ui.summarize_confirm_presence.reopen();
+            }
+        }
+    }
+
+    pub(in crate::workspace) fn begin_standard_chat_confirm_exit(
+        &mut self,
+        kind: AiStandardConfirmKind,
+    ) -> Option<u64> {
+        match kind {
+            AiStandardConfirmKind::Safety => self.chat_ui.safety_confirm_presence.begin_exit(),
+            AiStandardConfirmKind::Summarize => {
+                self.chat_ui.summarize_confirm_presence.begin_exit()
+            }
+        }
+    }
+
+    pub(in crate::workspace) fn finish_standard_chat_confirm_exit(
+        &mut self,
+        kind: AiStandardConfirmKind,
+        generation: u64,
+    ) -> bool {
+        let finished = match kind {
+            AiStandardConfirmKind::Safety => {
+                self.chat_ui.safety_confirm_presence.finish_exit(generation)
+            }
+            AiStandardConfirmKind::Summarize => self
+                .chat_ui
+                .summarize_confirm_presence
+                .finish_exit(generation),
+        };
+        if finished {
+            match kind {
+                AiStandardConfirmKind::Safety => self.chat_ui.safety_confirm_open = false,
+                AiStandardConfirmKind::Summarize => self.chat_ui.summarize_confirm_open = false,
+            }
+        }
+        finished
+    }
+
+    pub(in crate::workspace) fn set_model_switch_warning(&mut self, percentage: Option<usize>) {
+        self.chat_ui.model_switch_warning_percentage = percentage;
+    }
+
+    pub(in crate::workspace) fn show_context_trim_notice(&mut self, count: usize) -> u64 {
+        self.chat_ui.context_trim_notice_count = Some(count);
+        self.chat_ui.context_trim_notice_sequence =
+            self.chat_ui.context_trim_notice_sequence.saturating_add(1);
+        self.chat_ui.context_trim_notice_sequence
+    }
+
+    pub(in crate::workspace) fn clear_context_trim_notice(&mut self, sequence: u64) -> bool {
+        if self.chat_ui.context_trim_notice_sequence != sequence {
+            return false;
+        }
+        self.chat_ui.context_trim_notice_count = None;
+        true
+    }
+
+    pub(in crate::workspace) fn set_chat_sidebar_width(&mut self, width: f32) {
+        self.chat_ui.sidebar_width = width;
+    }
+
+    pub(in crate::workspace) fn set_chat_sidebar_resizing(&mut self, resizing: bool) {
+        self.chat_ui.sidebar_resizing = resizing;
+    }
+
+    pub(in crate::workspace) fn finish_chat_sidebar_resize(&mut self) -> f32 {
+        self.chat_ui.sidebar_resizing = false;
+        self.chat_ui.sidebar_width
+    }
+
+    pub(in crate::workspace) fn replace_overlay_window_size(
+        &mut self,
+        size: (f32, f32),
+    ) -> Option<(f32, f32)> {
+        self.chat_ui.overlay_window_size.replace(size)
     }
 
     /// Retains workspace-window observers for exactly the AI Entity lifetime.
@@ -3927,6 +4263,41 @@ mod entity_tests {
             assert!(!entity.model_selector_search_focused());
             assert!(entity.model_selector_search_query().is_empty());
             assert_eq!(entity.model_selector_highlight(), None);
+        });
+    }
+
+    #[gpui::test]
+    fn chat_presentation_transitions_remain_inside_ai_entity(cx: &mut TestAppContext) {
+        let entity = cx.new(|cx| {
+            AiWorkspaceEntity::new(test_runtime(), oxideterm_ai::AiProviderKeyStore::new(), cx)
+        });
+        entity.update(cx, |entity, _cx| {
+            entity.configure_chat_surface(412.0, Some((1280.0, 720.0)));
+            entity.set_chat_draft("draft".to_string());
+            entity.focus_chat_input();
+            entity.set_chat_popover_open(AiChatPopover::Menu, true);
+            entity.toggle_chat_context();
+            entity.begin_message_edit("message-a".to_string(), "before".to_string());
+            assert!(entity.replace_message_edit(Some(6..6), " after"));
+            entity.open_standard_chat_confirm(AiStandardConfirmKind::Safety);
+
+            assert_eq!(entity.chat_ui.sidebar_width, 412.0);
+            assert_eq!(entity.chat_ui.overlay_window_size, Some((1280.0, 720.0)));
+            assert_eq!(entity.chat_ui.draft, "draft");
+            assert!(entity.chat_ui.menu_open);
+            assert!(entity.chat_ui.include_context);
+            assert_eq!(entity.chat_ui.editing_message_draft, "before after");
+            assert!(entity.chat_ui.safety_confirm_open);
+
+            entity.close_chat_popovers();
+            entity.clear_message_edit();
+            entity.clear_chat_input_after_submit();
+            entity.finish_chat_sidebar_resize();
+            assert!(!entity.chat_ui.menu_open);
+            assert!(entity.chat_ui.editing_message_id.is_none());
+            assert!(entity.chat_ui.editing_message_draft.is_empty());
+            assert!(entity.chat_ui.draft.is_empty());
+            assert!(!entity.chat_ui.sidebar_resizing);
         });
     }
 

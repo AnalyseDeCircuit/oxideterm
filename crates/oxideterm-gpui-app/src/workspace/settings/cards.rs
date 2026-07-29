@@ -996,16 +996,14 @@ impl WorkspaceApp {
         }
         if self.ai_entity.read(cx).chat_ui().input_focused {
             self.ai_entity.update(cx, |ai, _cx| {
-                let chat = ai.chat_ui_mut();
-                chat.input_focused = false;
-                chat.autocomplete_suppressed = true;
+                ai.blur_chat_input(true);
             });
             self.ime_marked_text = None;
             changed = true;
         }
         if self.ai_entity.read(cx).chat_ui().editing_message_focused {
             self.ai_entity.update(cx, |ai, _cx| {
-                ai.chat_ui_mut().editing_message_focused = false;
+                ai.blur_message_edit();
             });
             self.ime_marked_text = None;
             changed = true;

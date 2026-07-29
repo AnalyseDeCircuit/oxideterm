@@ -1,7 +1,7 @@
 use std::{collections::HashMap, sync::Arc};
 
 use crate::workspace::ai_state::{
-    AiChatInitializationOutcome, AiWorkspaceEntity, AiWorkspaceVisibility,
+    AiChatInitializationOutcome, AiChatPopover, AiWorkspaceEntity, AiWorkspaceVisibility,
 };
 use crate::workspace::ime::WorkspaceImeTarget;
 use crate::workspace::*;
@@ -17,8 +17,8 @@ use oxideterm_ai::{
     ai_detected_intent_system_prompt, ai_help_markdown as ai_help_markdown_core,
     ai_input_system_prompt, ai_orchestrator_obligation_prompt, ai_reference_context_block,
     ai_required_tool_retry_prompt, ai_should_trigger_hard_deny, ai_user_explicitly_requested_json,
-    ai_visible_suggestion_content, apply_ai_autocomplete_candidate, apply_chat_request_overrides,
-    detect_ai_intent, extract_ai_error_context, generate_chat_title, infer_ai_cwd,
+    ai_visible_suggestion_content, apply_chat_request_overrides, detect_ai_intent,
+    extract_ai_error_context, generate_chat_title, infer_ai_cwd,
     model_max_response_tokens as ai_model_max_response_tokens, model_reasoning_capability,
     model_selector_display_name, model_selector_truncated_label,
     model_selector_visible_provider_groups, parse_ai_user_input,
@@ -135,10 +135,9 @@ impl WorkspaceApp {
             loading,
             cx.listener(move |this, event, window, cx| {
                 this.ai_entity.update(cx, |ai, _cx| {
-                    let chat = ai.chat_ui_mut();
-                    chat.menu_open = false;
-                    chat.conversation_list_open = false;
-                    chat.safety_menu_open = false;
+                    ai.set_chat_popover_open(AiChatPopover::Menu, false);
+                    ai.set_chat_popover_open(AiChatPopover::ConversationList, false);
+                    ai.set_chat_popover_open(AiChatPopover::Safety, false);
                 });
                 listener(this, event, window, cx);
                 cx.stop_propagation();

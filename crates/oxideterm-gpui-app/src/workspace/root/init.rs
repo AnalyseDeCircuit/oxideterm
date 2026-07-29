@@ -463,9 +463,11 @@ impl WorkspaceApp {
                 ai_agent_fs,
                 cx,
             );
-            entity.chat_ui_mut().sidebar_width = (settings.sidebar_ui.ai_sidebar_width as f32)
-                .clamp(AI_SIDEBAR_MIN_WIDTH, AI_SIDEBAR_MAX_WIDTH);
-            entity.chat_ui_mut().overlay_window_size = Some(current_window_size(window));
+            entity.configure_chat_surface(
+                (settings.sidebar_ui.ai_sidebar_width as f32)
+                    .clamp(AI_SIDEBAR_MIN_WIDTH, AI_SIDEBAR_MAX_WIDTH),
+                Some(current_window_size(window)),
+            );
             entity
         });
         let ai_entity_subscription = cx.subscribe(

@@ -343,7 +343,7 @@ impl WorkspaceApp {
             return;
         };
         self.ai_entity.update(cx, |ai, _cx| {
-            ai.chat_ui_mut().model_switch_warning_percentage = None;
+            ai.set_model_switch_warning(None);
         });
         self.persist_ai_summary_created(
             &conversation_id,

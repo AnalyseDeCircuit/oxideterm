@@ -244,9 +244,7 @@ impl AiWorkspaceEntity {
 impl WorkspaceApp {
     pub(in crate::workspace) fn open_ai_safety_confirm(&mut self, cx: &mut Context<Self>) {
         self.ai_entity.update(cx, |ai, _cx| {
-            let chat = ai.chat_ui_mut();
-            chat.safety_confirm_open = true;
-            chat.safety_confirm_presence.reopen();
+            ai.open_standard_chat_confirm(AiStandardConfirmKind::Safety);
         });
         // Pointer-opened confirmations do not show keyboard focus until navigation starts.
         self.clear_standard_confirm_focus();
@@ -260,7 +258,7 @@ impl WorkspaceApp {
         let Some(generation) = self
             .ai_entity
             .update(cx, |ai, _cx| {
-                ai.chat_ui_mut().safety_confirm_presence.begin_exit()
+                ai.begin_standard_chat_confirm_exit(AiStandardConfirmKind::Safety)
             })
         else {
             return false;
@@ -272,9 +270,7 @@ impl WorkspaceApp {
 
     pub(in crate::workspace) fn open_ai_summarize_confirm(&mut self, cx: &mut Context<Self>) {
         self.ai_entity.update(cx, |ai, _cx| {
-            let chat = ai.chat_ui_mut();
-            chat.summarize_confirm_open = true;
-            chat.summarize_confirm_presence.reopen();
+            ai.open_standard_chat_confirm(AiStandardConfirmKind::Summarize);
         });
         self.reset_standard_confirm_focus();
         cx.notify();
@@ -287,7 +283,7 @@ impl WorkspaceApp {
         let Some(generation) = self
             .ai_entity
             .update(cx, |ai, _cx| {
-                ai.chat_ui_mut().summarize_confirm_presence.begin_exit()
+                ai.begin_standard_chat_confirm_exit(AiStandardConfirmKind::Summarize)
             })
         else {
             return false;
@@ -330,22 +326,7 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> bool {
         self.ai_entity.update(cx, |ai, _cx| {
-            let chat = ai.chat_ui_mut();
-            let finished = match kind {
-                AiStandardConfirmKind::Safety => {
-                    chat.safety_confirm_presence.finish_exit(generation)
-                }
-                AiStandardConfirmKind::Summarize => {
-                    chat.summarize_confirm_presence.finish_exit(generation)
-                }
-            };
-            if finished {
-                match kind {
-                    AiStandardConfirmKind::Safety => chat.safety_confirm_open = false,
-                    AiStandardConfirmKind::Summarize => chat.summarize_confirm_open = false,
-                }
-            }
-            finished
+            ai.finish_standard_chat_confirm_exit(kind, generation)
         })
     }
 
@@ -361,13 +342,7 @@ impl WorkspaceApp {
             .ai_entity
             .update(cx, |ai, _cx| ai.create_chat_conversation(id, title, now));
         self.ai_entity.update(cx, |ai, _cx| {
-            let chat = ai.chat_ui_mut();
-            chat.conversation_list_open = false;
-            chat.menu_open = false;
-            chat.draft.clear();
-            chat.input_focused = false;
-            chat.autocomplete_index = 0;
-            chat.autocomplete_suppressed = false;
+            ai.reset_chat_for_new_conversation();
         });
         cx.notify();
         id
@@ -623,7 +598,7 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) {
         self.ai_entity.update(cx, |ai, _cx| {
-            ai.chat_ui_mut().draft = text;
+            ai.set_chat_draft(text);
         });
         self.send_ai_chat_draft(cx);
     }
@@ -688,9 +663,7 @@ impl WorkspaceApp {
             return;
         }
         self.ai_entity.update(cx, |ai, _cx| {
-            ai.chat_ui_mut()
-                .thinking_expansion_state
-                .remove(message_id);
+            ai.remove_thinking_expansion(message_id);
         });
         cx.notify();
     }
@@ -700,7 +673,7 @@ impl WorkspaceApp {
             ai.set_active_conversation_safety_bypass(false);
         });
         self.ai_entity.update(cx, |ai, _cx| {
-            ai.chat_ui_mut().safety_menu_open = false;
+            ai.set_chat_popover_open(AiChatPopover::Safety, false);
         });
         self.restore_ai_chat_input_focus_after_safety_mode_change(cx);
         cx.notify();
@@ -711,7 +684,7 @@ impl WorkspaceApp {
             ai.set_active_conversation_safety_bypass(true);
         });
         self.ai_entity.update(cx, |ai, _cx| {
-            ai.chat_ui_mut().safety_menu_open = false;
+            ai.set_chat_popover_open(AiChatPopover::Safety, false);
         });
         self.restore_ai_chat_input_focus_after_safety_mode_change(cx);
         cx.notify();
@@ -724,9 +697,7 @@ impl WorkspaceApp {
         // Closing the safety menu returns keyboard ownership to the composer so
         // Enter/Space continue the conversation instead of falling through.
         self.ai_entity.update(cx, |ai, _cx| {
-            let chat = ai.chat_ui_mut();
-            chat.input_focused = true;
-            chat.footer_focus = None;
+            ai.focus_chat_input();
         });
         self.ai_entity.update(cx, |ai, _cx| {
             ai.set_model_selector_search_focused(false);
@@ -745,11 +716,7 @@ impl WorkspaceApp {
             return;
         }
         self.ai_entity.update(cx, |ai, _cx| {
-            let chat = ai.chat_ui_mut();
-            chat.editing_message_id = Some(message_id);
-            chat.editing_message_draft = content;
-            chat.editing_message_focused = true;
-            chat.input_focused = false;
+            ai.begin_message_edit(message_id, content);
         });
         self.ai_entity.update(cx, |ai, _cx| {
             ai.set_model_selector_search_focused(false);
@@ -760,10 +727,7 @@ impl WorkspaceApp {
 
     pub(in crate::workspace) fn cancel_edit_ai_message(&mut self, cx: &mut Context<Self>) {
         self.ai_entity.update(cx, |ai, _cx| {
-            let chat = ai.chat_ui_mut();
-            chat.editing_message_id = None;
-            chat.editing_message_draft.clear();
-            chat.editing_message_focused = false;
+            ai.clear_message_edit();
         });
         self.ime_marked_text = None;
         cx.notify();
@@ -822,10 +786,7 @@ impl WorkspaceApp {
             return;
         };
         self.ai_entity.update(cx, |ai, _cx| {
-            let chat = ai.chat_ui_mut();
-            chat.editing_message_id = None;
-            chat.editing_message_draft.clear();
-            chat.editing_message_focused = false;
+            ai.clear_message_edit();
         });
         self.ime_marked_text = None;
         self.start_ai_chat_stream_after_api_key_lookup(
@@ -855,22 +816,14 @@ impl WorkspaceApp {
             return;
         }
         self.ai_entity.update(cx, |ai, _cx| {
-            let chat = ai.chat_ui_mut();
-            chat.editing_message_id = None;
-            chat.editing_message_draft.clear();
-            chat.editing_message_focused = false;
+            ai.clear_message_edit();
         });
         cx.notify();
     }
 
     pub(in crate::workspace) fn reset_ai_chat_input_after_submit(&mut self, cx: &mut App) {
         self.ai_entity.update(cx, |ai, _cx| {
-            let chat = ai.chat_ui_mut();
-            chat.draft.clear();
-            chat.autocomplete_index = 0;
-            chat.autocomplete_suppressed = false;
-            chat.include_context = false;
-            chat.include_all_panes = false;
+            ai.clear_chat_input_after_submit();
         });
         self.ime_marked_text = None;
     }

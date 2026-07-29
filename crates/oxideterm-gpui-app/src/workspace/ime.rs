@@ -2740,16 +2740,9 @@ impl WorkspaceApp {
                 }
             }
             WorkspaceImeTarget::AiChatInput => {
-                let changed = self.ai_entity.update(cx, |ai, _cx| {
-                    let chat = ai.chat_ui_mut();
-                    if !chat.input_focused {
-                        return false;
-                    }
-                    replace_utf16(&mut chat.draft, replacement_range, text);
-                    chat.autocomplete_suppressed = false;
-                    chat.autocomplete_index = 0;
-                    true
-                });
+                let changed = self
+                    .ai_entity
+                    .update(cx, |ai, _cx| ai.replace_chat_input(replacement_range, text));
                 if changed {
                     self.show_active_input_caret(cx);
                     cx.notify();
@@ -2757,12 +2750,7 @@ impl WorkspaceApp {
             }
             WorkspaceImeTarget::AiMessageEdit => {
                 let changed = self.ai_entity.update(cx, |ai, _cx| {
-                    let chat = ai.chat_ui_mut();
-                    if !chat.editing_message_focused {
-                        return false;
-                    }
-                    replace_utf16(&mut chat.editing_message_draft, replacement_range, text);
-                    true
+                    ai.replace_message_edit(replacement_range, text)
                 });
                 if changed {
                     self.show_active_input_caret(cx);

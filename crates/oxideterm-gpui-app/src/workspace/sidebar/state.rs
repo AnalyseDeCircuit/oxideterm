@@ -323,7 +323,7 @@ impl WorkspaceApp {
             .ai_sidebar_collapsed = true;
         self.set_context_sidebar_rendered_with_motion(false, cx);
         self.ai_entity.update(cx, |ai, _cx| {
-            ai.chat_ui_mut().sidebar_resizing = false;
+            ai.set_chat_sidebar_resizing(false);
         });
         self.sidebar_resize_hotzone_hovered = false;
         self.sync_host_tools_lifecycle(false, cx);
@@ -345,7 +345,7 @@ impl WorkspaceApp {
         // Same repaint contract as the main sidebar: pointer capture may keep
         // sending moves after the width is clamped at a boundary.
         self.ai_entity.update(cx, |ai, _cx| {
-            ai.chat_ui_mut().sidebar_width = next_width;
+            ai.set_chat_sidebar_width(next_width);
         });
         cx.notify();
         true
@@ -359,7 +359,7 @@ impl WorkspaceApp {
     ) {
         let was_resizing = self.ai_entity.read(cx).chat_ui().sidebar_resizing;
         self.ai_entity.update(cx, |ai, _cx| {
-            ai.chat_ui_mut().sidebar_resizing = true;
+            ai.set_chat_sidebar_resizing(true);
         });
         // Mirror the browser sidebar: the first press updates the width from
         // the pointer position so a resize drag is visible before the next move.
@@ -397,11 +397,9 @@ impl WorkspaceApp {
 
     pub(in crate::workspace) fn finish_ai_sidebar_resize(&mut self, cx: &mut Context<Self>) {
         if self.ai_entity.read(cx).chat_ui().sidebar_resizing {
-            let sidebar_width = self.ai_entity.update(cx, |ai, _cx| {
-                let chat = ai.chat_ui_mut();
-                chat.sidebar_resizing = false;
-                chat.sidebar_width
-            });
+            let sidebar_width = self
+                .ai_entity
+                .update(cx, |ai, _cx| ai.finish_chat_sidebar_resize());
             self.settings_store
                 .settings_mut()
                 .sidebar_ui

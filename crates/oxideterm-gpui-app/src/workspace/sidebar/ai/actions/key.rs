@@ -74,7 +74,7 @@ impl WorkspaceApp {
                 }
                 "backspace" => {
                     let changed = self.ai_entity.update(cx, |ai, _cx| {
-                        ai.chat_ui_mut().editing_message_draft.pop().is_some()
+                        ai.pop_message_edit()
                     }) || self.ime_marked_text.take().is_some();
                     if changed {
                         cx.notify();
@@ -87,7 +87,7 @@ impl WorkspaceApp {
                 }
                 "enter" => {
                     self.ai_entity.update(cx, |ai, _cx| {
-                        ai.chat_ui_mut().editing_message_draft.push('\n');
+                        ai.push_message_edit_newline();
                     });
                     self.ime_marked_text = None;
                     cx.notify();
@@ -97,7 +97,7 @@ impl WorkspaceApp {
                     // Textareas in the Tauri sidebar release focus on Tab
                     // unless an autocomplete/menu owner consumes it first.
                     self.ai_entity.update(cx, |ai, _cx| {
-                        ai.chat_ui_mut().editing_message_focused = false;
+                        ai.blur_message_edit();
                     });
                     self.ime_marked_text = None;
                     cx.notify();
@@ -139,19 +139,14 @@ impl WorkspaceApp {
                 match event.keystroke.key.as_str() {
                     "down" | "arrowdown" => {
                         self.ai_entity.update(cx, |ai, _cx| {
-                            let chat = ai.chat_ui_mut();
-                            chat.autocomplete_index =
-                                (chat.autocomplete_index + 1) % autocomplete_len;
+                            ai.move_chat_autocomplete(1, autocomplete_len);
                         });
                         cx.notify();
                         return true;
                     }
                     "up" | "arrowup" => {
                         self.ai_entity.update(cx, |ai, _cx| {
-                            let chat = ai.chat_ui_mut();
-                            chat.autocomplete_index =
-                                (chat.autocomplete_index + autocomplete_len - 1)
-                                    % autocomplete_len;
+                            ai.move_chat_autocomplete(-1, autocomplete_len);
                         });
                         cx.notify();
                         return true;
@@ -167,7 +162,7 @@ impl WorkspaceApp {
                     }
                     "escape" => {
                         self.ai_entity.update(cx, |ai, _cx| {
-                            ai.chat_ui_mut().autocomplete_suppressed = true;
+                            ai.suppress_chat_autocomplete();
                         });
                         self.ime_marked_text = None;
                         cx.notify();
@@ -195,13 +190,7 @@ impl WorkspaceApp {
             match event.keystroke.key.as_str() {
                 "backspace" => {
                     let changed = self.ai_entity.update(cx, |ai, _cx| {
-                        let chat = ai.chat_ui_mut();
-                        let changed = chat.draft.pop().is_some()
-                            || chat.autocomplete_suppressed
-                            || chat.autocomplete_index != 0;
-                        chat.autocomplete_suppressed = false;
-                        chat.autocomplete_index = 0;
-                        changed
+                        ai.pop_chat_draft()
                     })
                         || self.ime_marked_text.take().is_some();
                     if changed {
@@ -215,7 +204,7 @@ impl WorkspaceApp {
                 }
                 "enter" => {
                     self.ai_entity.update(cx, |ai, _cx| {
-                        ai.chat_ui_mut().draft.push('\n');
+                        ai.push_chat_draft_newline();
                     });
                     self.ime_marked_text = None;
                     cx.notify();
@@ -254,7 +243,7 @@ impl WorkspaceApp {
             }
             AiChatFooterAction::Submit => {
                 self.ai_entity.update(cx, |ai, _cx| {
-                    ai.chat_ui_mut().footer_focus = None;
+                    ai.clear_chat_footer_focus();
                 });
                 cx.notify();
             }
@@ -272,27 +261,21 @@ impl WorkspaceApp {
         match action {
             browser_behavior::InlineFooterInputKeyAction::ClearFocus => {
                 self.ai_entity.update(cx, |ai, _cx| {
-                    let chat = ai.chat_ui_mut();
-                    chat.input_focused = false;
-                    chat.footer_focus = None;
+                    ai.blur_chat_input(false);
                 });
                 self.ime_marked_text = None;
                 cx.notify();
             }
             browser_behavior::InlineFooterInputKeyAction::FocusInput => {
                 self.ai_entity.update(cx, |ai, _cx| {
-                    let chat = ai.chat_ui_mut();
-                    chat.input_focused = true;
-                    chat.footer_focus = None;
+                    ai.focus_chat_input();
                 });
                 self.ime_marked_text = None;
                 cx.notify();
             }
             browser_behavior::InlineFooterInputKeyAction::FocusFooter(action) => {
                 self.ai_entity.update(cx, |ai, _cx| {
-                    let chat = ai.chat_ui_mut();
-                    chat.input_focused = false;
-                    chat.footer_focus = Some(action);
+                    ai.set_chat_footer_focus(Some(action));
                 });
                 self.ime_marked_text = None;
                 cx.notify();

@@ -1400,9 +1400,7 @@ window.focus(&this.focus_handle, cx);
             MouseButton::Left,
             cx.listener(move |this, event: &gpui::MouseDownEvent, window, cx| {
                 this.ai_entity.update(cx, |ai, _cx| {
-                    let chat = ai.chat_ui_mut();
-                    chat.editing_message_focused = true;
-                    chat.input_focused = false;
+                    ai.focus_message_edit();
                 });
                 this.ai_entity.update(cx, |ai, _cx| {
                     ai.set_model_selector_search_focused(false);
@@ -1566,7 +1564,10 @@ window.focus(&this.focus_handle, cx);
                                         let next_open = !this.ai_entity.read(cx).chat_ui().conversation_list_open;
                                         this.close_ai_sidebar_popovers(cx);
                                         this.ai_entity.update(cx, |ai, _cx| {
-                                            ai.chat_ui_mut().conversation_list_open = next_open;
+                                            ai.set_chat_popover_open(
+                                                AiChatPopover::ConversationList,
+                                                next_open,
+                                            );
                                         });
                                         cx.stop_propagation();
                                         cx.notify();
@@ -1634,7 +1635,7 @@ window.focus(&this.focus_handle, cx);
                             let next_open = !this.ai_entity.read(cx).chat_ui().menu_open;
                             this.close_ai_sidebar_popovers(cx);
                             this.ai_entity.update(cx, |ai, _cx| {
-                                ai.chat_ui_mut().menu_open = next_open;
+                                ai.set_chat_popover_open(AiChatPopover::Menu, next_open);
                             });
 window.focus(&this.focus_handle, cx);
                             cx.notify();

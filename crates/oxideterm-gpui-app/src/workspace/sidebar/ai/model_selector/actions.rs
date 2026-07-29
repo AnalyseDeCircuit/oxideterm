@@ -50,7 +50,7 @@ impl WorkspaceApp {
             level.as_str(),
         );
         self.ai_entity.update(cx, |ai, _cx| {
-            ai.chat_ui_mut().reasoning_menu_open = false;
+            ai.set_chat_popover_open(AiChatPopover::Reasoning, false);
             ai.set_active_reasoning_level(&provider_id, &model, level);
         });
         self.edit_settings(
@@ -231,7 +231,7 @@ impl WorkspaceApp {
                 self.schedule_ai_acp_model_discovery(agent_id, cx);
             }
             self.ai_entity.update(cx, |ai, _cx| {
-                ai.chat_ui_mut().input_focused = false;
+                ai.blur_chat_input(false);
                 ai.terminal_inline_panel_mut().prompt_focused = false;
             });
             self.refresh_ai_model_selector_provider_statuses(cx);
@@ -670,8 +670,7 @@ impl WorkspaceApp {
         let percentage = ai_context_percentage(total_tokens, max_tokens);
         if percentage > AI_CONTEXT_WARNING_PERCENT {
             self.ai_entity.update(cx, |ai, _cx| {
-                ai.chat_ui_mut().model_switch_warning_percentage =
-                    Some(percentage.round() as usize);
+                ai.set_model_switch_warning(Some(percentage.round() as usize));
             });
         }
     }

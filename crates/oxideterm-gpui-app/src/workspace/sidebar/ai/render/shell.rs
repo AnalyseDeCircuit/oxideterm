@@ -279,21 +279,9 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) {
         self.ai_entity.update(cx, |ai, _cx| {
-            let chat = ai.chat_ui_mut();
-            let mut cache = chat.message_list_cache.borrow_mut();
-            let list_was_reset = sync_tauri_virtual_list_state_by_signatures(
-                &mut chat.message_list_state,
-                &mut cache,
-                conversation_id,
-                signatures,
-                ListAlignment::Top,
-                spec,
-            );
-            if list_was_reset {
-                // Opening a conversation starts at its newest message. GPUI's tail
-                // mode then pauses automatically while the user reads older content.
-                chat.message_list_state.set_follow_mode(FollowMode::Tail);
-            }
+            // Opening a conversation starts at its newest message. GPUI's tail
+            // mode then pauses automatically while the user reads older content.
+            ai.sync_chat_message_list(conversation_id, signatures, spec);
         });
     }
 
@@ -622,9 +610,8 @@ impl WorkspaceApp {
                 MouseButton::Left,
                 cx.listener(move |this, _event, window, cx| {
                     this.ai_entity.update(cx, |ai, _cx| {
-                        let chat = ai.chat_ui_mut();
-                        chat.draft = prompt.clone();
-                        chat.input_focused = true;
+                        ai.set_chat_draft(prompt.clone());
+                        ai.focus_chat_input();
                     });
                     this.ime_marked_text = None;
 window.focus(&this.focus_handle, cx);
@@ -784,7 +771,7 @@ window.focus(&this.focus_handle, cx);
                     AiContextWarningAction::Compact(model_switch) => {
                         if model_switch {
                             this.ai_entity.update(cx, |ai, _cx| {
-                                ai.chat_ui_mut().model_switch_warning_percentage = None;
+                                ai.set_model_switch_warning(None);
                             });
                         }
                         this.start_ai_compact_conversation(cx);
@@ -792,14 +779,14 @@ window.focus(&this.focus_handle, cx);
                     AiContextWarningAction::NewChat(model_switch) => {
                         if model_switch {
                             this.ai_entity.update(cx, |ai, _cx| {
-                                ai.chat_ui_mut().model_switch_warning_percentage = None;
+                                ai.set_model_switch_warning(None);
                             });
                         }
                         this.create_ai_sidebar_conversation(None, cx);
                     }
                     AiContextWarningAction::Dismiss => {
                         this.ai_entity.update(cx, |ai, _cx| {
-                            ai.chat_ui_mut().model_switch_warning_percentage = None;
+                            ai.set_model_switch_warning(None);
                         });
                     }
                     AiContextWarningAction::Summarize => {

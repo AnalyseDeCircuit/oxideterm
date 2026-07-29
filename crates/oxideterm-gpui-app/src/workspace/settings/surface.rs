@@ -1154,7 +1154,7 @@ impl WorkspaceApp {
         let ai_sidebar_width = (settings.sidebar_ui.ai_sidebar_width as f32)
             .clamp(AI_SIDEBAR_MIN_WIDTH, AI_SIDEBAR_MAX_WIDTH);
         self.ai_entity.update(cx, |ai, _cx| {
-            ai.chat_ui_mut().sidebar_width = ai_sidebar_width;
+            ai.set_chat_sidebar_width(ai_sidebar_width);
         });
         let panes = self
             .tab_host

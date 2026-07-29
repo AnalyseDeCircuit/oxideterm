@@ -83,7 +83,7 @@ impl WorkspaceApp {
                     let next_open = !this.ai_entity.read(cx).chat_ui().reasoning_menu_open;
                     this.close_ai_sidebar_popovers(cx);
                     this.ai_entity.update(cx, |ai, _cx| {
-                        ai.chat_ui_mut().reasoning_menu_open = next_open;
+                        ai.set_chat_popover_open(AiChatPopover::Reasoning, next_open);
                     });
                     cx.stop_propagation();
                     cx.notify();

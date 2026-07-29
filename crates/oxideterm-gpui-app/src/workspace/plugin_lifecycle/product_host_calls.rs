@@ -258,7 +258,7 @@ impl WorkspaceApp {
                     let content = Zeroizing::new(content.to_string());
                     let sanitized = oxideterm_ai::sanitize_for_ai(content.as_str());
                     self.ai_entity.update(cx, |ai, _cx| {
-                        ai.chat_ui_mut().draft = sanitized;
+                        ai.set_chat_draft(sanitized);
                     });
                     self.send_ai_chat_draft(cx);
                 }

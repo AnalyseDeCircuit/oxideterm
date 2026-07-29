@@ -28,7 +28,7 @@ impl WorkspaceApp {
     ) {
         let next_size = current_window_size(window);
         let previous_size = self.ai_entity.update(cx, |ai, _cx| {
-            ai.chat_ui_mut().overlay_window_size.replace(next_size)
+            ai.replace_overlay_window_size(next_size)
         });
         let Some(previous_size) = previous_size else {
             return;

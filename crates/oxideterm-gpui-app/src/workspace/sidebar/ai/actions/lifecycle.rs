@@ -10,11 +10,7 @@ impl WorkspaceApp {
 
     fn reset_ai_message_list(&mut self, cx: &mut App) {
         self.ai_entity.update(cx, |ai, _cx| {
-            let chat = ai.chat_ui_mut();
-            chat.message_list_state =
-                tauri_virtual_list_state(0, ListAlignment::Top, ai_chat_virtual_list_spec());
-            chat.message_list_cache
-                .replace(VirtualListSignatureCache::default());
+            ai.reset_chat_message_list();
         });
     }
 
@@ -32,9 +28,7 @@ impl WorkspaceApp {
 
     pub(in crate::workspace) fn clear_ai_sidebar_keyboard_focus(&mut self, cx: &mut App) {
         self.ai_entity.update(cx, |ai, _cx| {
-            let chat = ai.chat_ui_mut();
-            chat.input_focused = false;
-            chat.footer_focus = None;
+            ai.blur_chat_input(false);
         });
         self.close_ai_model_selector(cx);
         self.ime_marked_text = None;
@@ -42,12 +36,7 @@ impl WorkspaceApp {
 
     pub(in crate::workspace) fn close_ai_sidebar_popovers(&mut self, cx: &mut App) {
         self.ai_entity.update(cx, |ai, _cx| {
-            let chat = ai.chat_ui_mut();
-            chat.conversation_list_open = false;
-            chat.menu_open = false;
-            chat.reasoning_menu_open = false;
-            chat.safety_menu_open = false;
-            chat.context_popover_open = false;
+            ai.close_chat_popovers();
         });
         self.close_ai_model_selector(cx);
     }
@@ -85,17 +74,7 @@ impl WorkspaceApp {
             ai.select_conversation(id);
         });
         self.ai_entity.update(cx, |ai, _cx| {
-            let chat = ai.chat_ui_mut();
-            chat.conversation_list_open = false;
-            chat.menu_open = false;
-            chat.safety_menu_open = false;
-            chat.editing_message_id = None;
-            chat.editing_message_draft.clear();
-            chat.editing_message_focused = false;
-            chat.thinking_expansion_state.clear();
-            chat.tool_call_expansion_state.clear();
-            chat.input_focused = false;
-            chat.footer_focus = None;
+            ai.reset_chat_for_conversation_selection();
         });
     }
 
@@ -106,11 +85,7 @@ impl WorkspaceApp {
             has_conversations
         });
         self.ai_entity.update(cx, |ai, _cx| {
-            let chat = ai.chat_ui_mut();
-            chat.thinking_expansion_state.clear();
-            chat.tool_call_expansion_state.clear();
-            chat.conversation_list_open = has_conversations;
-            chat.menu_open = false;
+            ai.reset_chat_after_conversation_delete(has_conversations);
         });
     }
 
@@ -122,9 +97,7 @@ impl WorkspaceApp {
             ai.persist_chat_state();
         });
         self.ai_entity.update(cx, |ai, _cx| {
-            let chat = ai.chat_ui_mut();
-            chat.thinking_expansion_state.clear();
-            chat.tool_call_expansion_state.clear();
+            ai.clear_chat_expansions();
         });
         self.close_ai_sidebar_popovers(cx);
     }

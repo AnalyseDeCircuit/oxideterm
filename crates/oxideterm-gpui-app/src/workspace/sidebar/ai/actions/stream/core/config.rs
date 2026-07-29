@@ -506,19 +506,15 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) {
         let sequence = self.ai_entity.update(cx, |ai, _cx| {
-            let chat = ai.chat_ui_mut();
-            chat.context_trim_notice_count = Some(count);
-            chat.context_trim_notice_sequence =
-                chat.context_trim_notice_sequence.saturating_add(1);
-            chat.context_trim_notice_sequence
+            ai.show_context_trim_notice(count)
         });
         cx.spawn(async move |weak, cx| {
             Timer::after(Duration::from_secs(5)).await;
             let _ = weak.update(cx, |this, cx| {
-                if this.ai_entity.read(cx).chat_ui().context_trim_notice_sequence == sequence {
-                    this.ai_entity.update(cx, |ai, _cx| {
-                        ai.chat_ui_mut().context_trim_notice_count = None;
-                    });
+                let cleared = this
+                    .ai_entity
+                    .update(cx, |ai, _cx| ai.clear_context_trim_notice(sequence));
+                if cleared {
                     cx.notify();
                 }
             });
