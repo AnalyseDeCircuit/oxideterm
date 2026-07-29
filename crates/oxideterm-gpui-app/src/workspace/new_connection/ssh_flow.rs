@@ -15,9 +15,11 @@ use oxideterm_remote_desktop::{
 };
 use oxideterm_ssh::{
     AuthMethod, ConnectionConsumer, HostKeyStatus, KeyboardInteractivePromptRequest,
-    KeyboardInteractiveResponses, NodeId, NodeReadiness, NodeTreeExpansion, ProxyHopConfig,
-    SshConfig, SshPromptError, SshPromptHandler, SshTransportClient, UpstreamProxyAuth,
-    UpstreamProxyConfig, UpstreamProxyProtocol, check_host_key_with_upstream_proxy,
+    KeyboardInteractiveResponses, NativeSessionTreeConnectAction, NativeSessionTreeConnectEndpoint,
+    NativeSessionTreeConnectPlan, NativeSessionTreeConnectStep, NodeId, NodeReadiness,
+    NodeTreeExpansion, ProxyHopConfig, SshConfig, SshPromptError, SshPromptHandler,
+    SshTransportClient, UpstreamProxyAuth, UpstreamProxyConfig, UpstreamProxyProtocol,
+    check_host_key_with_upstream_proxy,
 };
 use tokio::sync::oneshot;
 
@@ -29,10 +31,6 @@ use super::{
         SavedConnectionPromptAction, SshAuthTab,
     },
     host_key_dialog::HostKeyChallenge,
-    session_tree_plan::{
-        NativeSessionTreeConnectAction, NativeSessionTreeConnectEndpoint,
-        NativeSessionTreeConnectPlan, NativeSessionTreeConnectStep,
-    },
 };
 use crate::workspace::{
     WorkspaceApp, WorkspaceSshNode,

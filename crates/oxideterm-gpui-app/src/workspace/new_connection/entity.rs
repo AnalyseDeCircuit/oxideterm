@@ -7,14 +7,14 @@ use gpui::{Context, EventEmitter, Task, Timer};
 use oxideterm_connections::{SaveConnectionRequest, SecretString};
 use oxideterm_editor_core::utf16::replace_utf16;
 use oxideterm_ssh::{
-    HostKeyStatus, KeyboardInteractivePromptRequest, KeyboardInteractiveResponses, SshPromptError,
+    HostKeyStatus, KeyboardInteractivePromptRequest, KeyboardInteractiveResponses,
+    NativeSessionTreeConnectAction, NativeSessionTreeConnectPlan, SshPromptError,
     UpstreamProxyConfig,
 };
 use tokio::sync::oneshot;
 
 use super::{
-    ConnectionFormState, HostKeyChallenge, KeyboardInteractiveChallenge,
-    NativeSessionTreeConnectAction, NativeSessionTreeConnectPlan, NewConnectionField,
+    ConnectionFormState, HostKeyChallenge, KeyboardInteractiveChallenge, NewConnectionField,
     SshConnectionIntent, SshConnectionWorkerResult, form_state::clear_connection_selection,
 };
 use crate::workspace::delivery;
@@ -907,18 +907,17 @@ mod tests {
     use gpui::{AppContext, TestAppContext};
     use oxideterm_connections::SecretString;
     use oxideterm_ssh::{
-        HostKeyStatus, KeyboardInteractivePrompt, KeyboardInteractivePromptRequest, NodeId,
-        SshConfig, SshPromptError,
+        HostKeyStatus, KeyboardInteractivePrompt, KeyboardInteractivePromptRequest,
+        NativeSessionTreeConnectAction, NativeSessionTreeConnectPlan, NativeSessionTreeConnectStep,
+        NodeId, SshConfig, SshPromptError,
     };
     use tokio::sync::oneshot;
 
     use super::{ConnectionFlowEntity, ConnectionFlowEvent, NativeProxyConnectRun};
     use crate::workspace::new_connection::{
-        HostKeyChallenge, NativeSessionTreeConnectAction, NativeSessionTreeConnectPlan,
-        NewConnectionField, NewConnectionForm, NewConnectionProxyHop, SavedConnectionPromptAction,
-        SshConnectionIntent, SshConnectionWorkerResult,
+        HostKeyChallenge, NewConnectionField, NewConnectionForm, NewConnectionProxyHop,
+        SavedConnectionPromptAction, SshConnectionIntent, SshConnectionWorkerResult,
     };
-    use oxideterm_ssh::NativeSessionTreeConnectStep;
 
     fn unknown_host_key_challenge() -> HostKeyChallenge {
         HostKeyChallenge {
