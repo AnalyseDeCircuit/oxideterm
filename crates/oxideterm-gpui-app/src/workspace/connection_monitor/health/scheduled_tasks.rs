@@ -1966,7 +1966,7 @@ impl WorkspaceApp {
         let search_ime = self
             .host_tools_plain_text_ime_frame(HostToolsTextInput::ScheduleSearch, cx)
             .expect("schedule search is a non-secret Host Tools input");
-        let sidebar_width = self.ai.chat.sidebar_width;
+        let sidebar_width = self.ai_entity.read(cx).chat_ui().sidebar_width;
         let tokens = self.tokens;
         let i18n = &self.i18n;
         let mono_font_family = settings_mono_font_family(self.settings_store.settings());

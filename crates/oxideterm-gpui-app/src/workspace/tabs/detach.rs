@@ -111,6 +111,7 @@ impl WorkspaceApp {
         window: &Window,
         titlebar_visible: bool,
         zen_mode: bool,
+        cx: &App,
     ) {
         if zen_mode {
             self.main_window_tabbar_drop_bounds = None;
@@ -129,7 +130,7 @@ impl WorkspaceApp {
             self.sidebar_width
         };
         let right_offset = if self.context_sidebar_visible() {
-            self.ai.chat.sidebar_width
+            self.ai_entity.read(cx).chat_ui().sidebar_width
         } else {
             0.0
         };

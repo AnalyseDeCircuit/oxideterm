@@ -1038,13 +1038,18 @@ impl WorkspaceApp {
             return Some(WorkspaceImeTarget::AiInlinePrompt);
         }
 
-        if self.ai_sidebar_visible() && self.ai.chat.input_focused {
+        if self.ai_sidebar_visible() && self.ai_entity.read(cx).chat_ui().input_focused {
             return Some(WorkspaceImeTarget::AiChatInput);
         }
 
         if self.ai_sidebar_visible()
-            && self.ai.chat.editing_message_id.is_some()
-            && self.ai.chat.editing_message_focused
+            && self
+                .ai_entity
+                .read(cx)
+                .chat_ui()
+                .editing_message_id
+                .is_some()
+            && self.ai_entity.read(cx).chat_ui().editing_message_focused
         {
             return Some(WorkspaceImeTarget::AiMessageEdit);
         }
@@ -1849,15 +1854,23 @@ impl WorkspaceApp {
                 panel.prompt_focused.then(|| panel.prompt.clone())
             }
             WorkspaceImeTarget::AiChatInput => self
-                .ai
-                .chat
+                .ai_entity
+                .read(cx)
+                .chat_ui()
                 .input_focused
-                .then(|| self.ai.chat.draft.clone()),
+                .then(|| self.ai_entity.read(cx).chat_ui().draft.clone()),
             WorkspaceImeTarget::AiMessageEdit => self
-                .ai
-                .chat
+                .ai_entity
+                .read(cx)
+                .chat_ui()
                 .editing_message_focused
-                .then(|| self.ai.chat.editing_message_draft.clone()),
+                .then(|| {
+                    self.ai_entity
+                        .read(cx)
+                        .chat_ui()
+                        .editing_message_draft
+                        .clone()
+                }),
             WorkspaceImeTarget::PluginControl { key, .. } => self
                 .native_plugin_ui_control_is_visible(key, cx)
                 .then(|| {
@@ -2057,7 +2070,7 @@ impl WorkspaceApp {
                 keystroke.key.as_str(),
                 "up" | "arrowup" | "down" | "arrowdown"
             )
-            && !self.ai_chat_autocomplete_items().is_empty()
+            && !self.ai_chat_autocomplete_items(cx).is_empty()
         {
             return false;
         }
@@ -2727,21 +2740,31 @@ impl WorkspaceApp {
                 }
             }
             WorkspaceImeTarget::AiChatInput => {
-                if self.ai.chat.input_focused {
-                    replace_utf16(&mut self.ai.chat.draft, replacement_range, text);
-                    self.ai.chat.autocomplete_suppressed = false;
-                    self.ai.chat.autocomplete_index = 0;
+                let changed = self.ai_entity.update(cx, |ai, _cx| {
+                    let chat = ai.chat_ui_mut();
+                    if !chat.input_focused {
+                        return false;
+                    }
+                    replace_utf16(&mut chat.draft, replacement_range, text);
+                    chat.autocomplete_suppressed = false;
+                    chat.autocomplete_index = 0;
+                    true
+                });
+                if changed {
                     self.show_active_input_caret(cx);
                     cx.notify();
                 }
             }
             WorkspaceImeTarget::AiMessageEdit => {
-                if self.ai.chat.editing_message_focused {
-                    replace_utf16(
-                        &mut self.ai.chat.editing_message_draft,
-                        replacement_range,
-                        text,
-                    );
+                let changed = self.ai_entity.update(cx, |ai, _cx| {
+                    let chat = ai.chat_ui_mut();
+                    if !chat.editing_message_focused {
+                        return false;
+                    }
+                    replace_utf16(&mut chat.editing_message_draft, replacement_range, text);
+                    true
+                });
+                if changed {
                     self.show_active_input_caret(cx);
                     cx.notify();
                 }

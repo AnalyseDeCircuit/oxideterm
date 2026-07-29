@@ -721,7 +721,7 @@ impl WorkspaceApp {
         }
 
         if self.ai_sidebar_visible()
-            && (self.ai.chat.input_focused
+            && (self.ai_entity.read(cx).chat_ui().input_focused
                 || self.ai_entity.read(cx).model_selector_search_focused())
         {
             let _ = self.handle_ai_sidebar_key(event, cx);
@@ -1233,10 +1233,15 @@ impl WorkspaceApp {
         event: &KeyDownEvent,
         cx: &mut Context<Self>,
     ) -> bool {
-        if !self.ai.chat.safety_confirm_open {
+        if !self.ai_entity.read(cx).chat_ui().safety_confirm_open {
             return false;
         }
-        if self.ai.chat.safety_confirm_presence.phase()
+        if self
+            .ai_entity
+            .read(cx)
+            .chat_ui()
+            .safety_confirm_presence
+            .phase()
             == oxideterm_gpui_ui::motion::ExitPhase::Exiting
         {
             return true;
@@ -1263,10 +1268,15 @@ impl WorkspaceApp {
         event: &KeyDownEvent,
         cx: &mut Context<Self>,
     ) -> bool {
-        if !self.ai.chat.summarize_confirm_open {
+        if !self.ai_entity.read(cx).chat_ui().summarize_confirm_open {
             return false;
         }
-        if self.ai.chat.summarize_confirm_presence.phase()
+        if self
+            .ai_entity
+            .read(cx)
+            .chat_ui()
+            .summarize_confirm_presence
+            .phase()
             == oxideterm_gpui_ui::motion::ExitPhase::Exiting
         {
             return true;

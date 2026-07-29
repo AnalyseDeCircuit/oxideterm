@@ -13,7 +13,7 @@ fn adjusted_sftp_queue_height(start_height: f32, delta_y: f32, viewport_height: 
 }
 
 impl WorkspaceApp {
-    fn sftp_pane_layout_width(&self, window: &Window) -> f32 {
+    fn sftp_pane_layout_width(&self, window: &Window, cx: &App) -> f32 {
         let zen_mode = self.settings_store.settings().sidebar_ui.zen_mode;
         let mut width = f32::from(window.viewport_size().width);
         if !zen_mode {
@@ -22,7 +22,7 @@ impl WorkspaceApp {
                 width -= self.sidebar_panel_width();
             }
             if self.context_sidebar_rendered {
-                width -= self.ai.chat.sidebar_width;
+                width -= self.ai_entity.read(cx).chat_ui().sidebar_width;
             }
         }
         // The split ratio is applied inside the SFTP root padding.
@@ -72,7 +72,7 @@ impl WorkspaceApp {
         let next_ratio = adjusted_sftp_pane_ratio(
             drag.start_ratio,
             f32::from(event.position.x - drag.start_cursor_x),
-            self.sftp_pane_layout_width(window),
+            self.sftp_pane_layout_width(window, cx),
         );
         self.sftp_view.update(cx, |sftp, cx| {
             if (next_ratio - sftp.pane_split_ratio).abs() >= f32::EPSILON {

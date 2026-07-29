@@ -994,14 +994,19 @@ impl WorkspaceApp {
             self.ime_marked_text = None;
             changed = true;
         }
-        if self.ai.chat.input_focused {
-            self.ai.chat.input_focused = false;
-            self.ai.chat.autocomplete_suppressed = true;
+        if self.ai_entity.read(cx).chat_ui().input_focused {
+            self.ai_entity.update(cx, |ai, _cx| {
+                let chat = ai.chat_ui_mut();
+                chat.input_focused = false;
+                chat.autocomplete_suppressed = true;
+            });
             self.ime_marked_text = None;
             changed = true;
         }
-        if self.ai.chat.editing_message_focused {
-            self.ai.chat.editing_message_focused = false;
+        if self.ai_entity.read(cx).chat_ui().editing_message_focused {
+            self.ai_entity.update(cx, |ai, _cx| {
+                ai.chat_ui_mut().editing_message_focused = false;
+            });
             self.ime_marked_text = None;
             changed = true;
         }

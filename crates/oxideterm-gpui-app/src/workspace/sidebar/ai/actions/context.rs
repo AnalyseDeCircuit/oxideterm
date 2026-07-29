@@ -22,10 +22,10 @@ impl WorkspaceApp {
         &self,
         cx: &mut Context<Self>,
     ) -> Option<String> {
-        if !self.ai.chat.include_context || !self.ai_active_terminal_context_available(cx) {
+        if !self.ai_entity.read(cx).chat_ui().include_context || !self.ai_active_terminal_context_available(cx) {
             return None;
         }
-        if self.ai.chat.include_all_panes && self.ai_active_tab_has_split_panes(cx) {
+        if self.ai_entity.read(cx).chat_ui().include_all_panes && self.ai_active_tab_has_split_panes(cx) {
             return self.ai_all_panes_terminal_context(cx);
         }
         self.ai_single_pane_terminal_context(cx)

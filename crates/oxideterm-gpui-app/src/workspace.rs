@@ -707,7 +707,6 @@ pub(crate) struct WorkspaceApp {
     sidebar_width: f32,
     context_sidebar_rendered: bool,
     context_sidebar_motion_generation: u64,
-    ai: ai_state::AiWorkspaceState,
     ai_entity: Entity<ai_state::AiWorkspaceEntity>,
     _ai_entity_subscription: Subscription,
     active_context_sidebar_panel: ContextSidebarPanel,

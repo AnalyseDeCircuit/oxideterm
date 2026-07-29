@@ -1324,8 +1324,9 @@ impl WorkspaceApp {
                     ),
             );
         let palette_top = self
-            .ai
-            .chat
+            .ai_entity
+            .read(cx)
+            .chat_ui()
             .overlay_window_size
             .map(|(_, height)| height * COMMAND_PALETTE_TOP_RATIO)
             .unwrap_or(COMMAND_PALETTE_FALLBACK_TOP);

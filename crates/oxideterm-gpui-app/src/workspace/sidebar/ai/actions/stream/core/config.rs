@@ -505,15 +505,20 @@ impl WorkspaceApp {
         count: usize,
         cx: &mut Context<Self>,
     ) {
-        self.ai.chat.context_trim_notice_count = Some(count);
-        self.ai.chat.context_trim_notice_sequence =
-            self.ai.chat.context_trim_notice_sequence.saturating_add(1);
-        let sequence = self.ai.chat.context_trim_notice_sequence;
+        let sequence = self.ai_entity.update(cx, |ai, _cx| {
+            let chat = ai.chat_ui_mut();
+            chat.context_trim_notice_count = Some(count);
+            chat.context_trim_notice_sequence =
+                chat.context_trim_notice_sequence.saturating_add(1);
+            chat.context_trim_notice_sequence
+        });
         cx.spawn(async move |weak, cx| {
             Timer::after(Duration::from_secs(5)).await;
             let _ = weak.update(cx, |this, cx| {
-                if this.ai.chat.context_trim_notice_sequence == sequence {
-                    this.ai.chat.context_trim_notice_count = None;
+                if this.ai_entity.read(cx).chat_ui().context_trim_notice_sequence == sequence {
+                    this.ai_entity.update(cx, |ai, _cx| {
+                        ai.chat_ui_mut().context_trim_notice_count = None;
+                    });
                     cx.notify();
                 }
             });

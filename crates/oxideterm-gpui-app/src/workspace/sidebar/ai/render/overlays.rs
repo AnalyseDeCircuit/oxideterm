@@ -27,7 +27,10 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) {
         let next_size = current_window_size(window);
-        let Some(previous_size) = self.ai.chat.overlay_window_size.replace(next_size) else {
+        let previous_size = self.ai_entity.update(cx, |ai, _cx| {
+            ai.chat_ui_mut().overlay_window_size.replace(next_size)
+        });
+        let Some(previous_size) = previous_size else {
             return;
         };
         let dx = next_size.0 - previous_size.0;
@@ -82,7 +85,7 @@ impl WorkspaceApp {
         let panel_right = f32::from(panel_anchor.bounds.right());
         let panel_width = f32::from(panel_anchor.bounds.size.width);
 
-        let (corner, anchor_x, anchor_y, popup) = if self.ai.chat.conversation_list_open {
+        let (corner, anchor_x, anchor_y, popup) = if self.ai_entity.read(cx).chat_ui().conversation_list_open {
             let top = self
                 .select_anchors
                 .get(&SelectAnchorId::AiConversationList)
@@ -97,7 +100,7 @@ impl WorkspaceApp {
                 top,
                 self.render_ai_conversation_dropdown(dropdown_width, cx),
             )
-        } else if self.ai.chat.menu_open {
+        } else if self.ai_entity.read(cx).chat_ui().menu_open {
             let anchor = self
                 .select_anchors
                 .get(&SelectAnchorId::AiChatMenu)
@@ -132,7 +135,7 @@ impl WorkspaceApp {
                 f32::from(anchor.bounds.top()) - AI_FLOATING_GAP,
                 self.render_ai_model_selector_dropdown(&self.ai_model_selector_providers(cx), cx),
             )
-        } else if self.ai.chat.reasoning_menu_open {
+        } else if self.ai_entity.read(cx).chat_ui().reasoning_menu_open {
             let anchor = self.select_anchors.get(&SelectAnchorId::AiReasoningMenu)?;
             (
                 Corner::BottomLeft,
@@ -145,7 +148,7 @@ impl WorkspaceApp {
                 f32::from(anchor.bounds.top()) - AI_FLOATING_GAP,
                 self.render_ai_reasoning_menu(cx)?,
             )
-        } else if self.ai.chat.safety_menu_open {
+        } else if self.ai_entity.read(cx).chat_ui().safety_menu_open {
             let anchor = self.select_anchors.get(&SelectAnchorId::AiSafetyMenu)?;
             (
                 Corner::BottomLeft,
@@ -158,7 +161,7 @@ impl WorkspaceApp {
                 f32::from(anchor.bounds.top()) - AI_FLOATING_GAP,
                 self.render_ai_safety_menu(cx),
             )
-        } else if self.ai.chat.context_popover_open {
+        } else if self.ai_entity.read(cx).chat_ui().context_popover_open {
             let anchor = self.select_anchors.get(&SelectAnchorId::AiContextPopover)?;
             // Context usage is an informational inspector rather than a menu.
             // Reduced motion keeps only opacity, while Off mounts immediately.
@@ -215,15 +218,15 @@ impl WorkspaceApp {
     }
 
     pub(in crate::workspace) fn has_ai_sidebar_floating_overlay(&self, cx: &App) -> bool {
-        self.ai.chat.conversation_list_open
-            || self.ai.chat.menu_open
+        self.ai_entity.read(cx).chat_ui().conversation_list_open
+            || self.ai_entity.read(cx).chat_ui().menu_open
             || self
                 .ai_entity
                 .read(cx)
                 .model_selector_is_open(AiModelSelectorScope::Sidebar)
-            || self.ai.chat.reasoning_menu_open
-            || self.ai.chat.safety_menu_open
-            || self.ai.chat.context_popover_open
+            || self.ai_entity.read(cx).chat_ui().reasoning_menu_open
+            || self.ai_entity.read(cx).chat_ui().safety_menu_open
+            || self.ai_entity.read(cx).chat_ui().context_popover_open
     }
 
     pub(in crate::workspace) fn render_ai_conversation_dropdown(

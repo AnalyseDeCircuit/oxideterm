@@ -84,9 +84,9 @@ impl WorkspaceApp {
                     return None;
                 }
                 let mut items = Vec::new();
-                if let Some(count) = self.ai.chat.context_trim_notice_count {
+                if let Some(count) = self.ai_entity.read(cx).chat_ui().context_trim_notice_count {
                     items.push(AiChatListItem::TrimNotice {
-                        sequence: self.ai.chat.context_trim_notice_sequence,
+                        sequence: self.ai_entity.read(cx).chat_ui().context_trim_notice_sequence,
                         count,
                     });
                 }
@@ -96,7 +96,7 @@ impl WorkspaceApp {
                     });
                 }
                 items.push(AiChatListItem::BottomSpacer);
-                let signatures = self.ai_chat_list_signatures(conversation, &items);
+                let signatures = self.ai_chat_list_signatures(conversation, &items, cx);
                 Some((conversation.id.clone(), items, signatures))
             })
         else {
@@ -104,11 +104,11 @@ impl WorkspaceApp {
         };
 
         let virtual_spec = ai_chat_virtual_list_spec();
-        self.sync_ai_chat_list_state(&conversation_id, &signatures, virtual_spec);
+        self.sync_ai_chat_list_state(&conversation_id, &signatures, virtual_spec, cx);
 
         let entity = cx.entity();
-        let state = self.ai.chat.message_list_state.clone();
-        let viewport = self.ai_chat_list_viewport_snapshot();
+        let state = self.ai_entity.read(cx).chat_ui().message_list_state.clone();
+        let viewport = self.ai_chat_list_viewport_snapshot(cx);
         tauri_virtual_list(state, virtual_spec, move |index, _window, cx| {
             let Some(item) = items.get(index).cloned() else {
                 return div().into_any_element();
@@ -162,13 +162,14 @@ impl WorkspaceApp {
 
     pub(in crate::workspace) fn ai_chat_list_viewport_snapshot(
         &self,
+        cx: &App,
     ) -> Option<AiChatListViewportSnapshot> {
-        let bounds = self.ai.chat.message_list_state.viewport_bounds();
+        let bounds = self.ai_entity.read(cx).chat_ui().message_list_state.viewport_bounds();
         let height = f32::from(bounds.size.height);
         if height <= 0.0 {
             return None;
         }
-        let scroll_top = self.ai.chat.message_list_state.logical_scroll_top();
+        let scroll_top = self.ai_entity.read(cx).chat_ui().message_list_state.logical_scroll_top();
         Some(AiChatListViewportSnapshot {
             item_ix: scroll_top.item_ix,
             offset_in_item: f32::from(scroll_top.offset_in_item),
@@ -198,10 +199,11 @@ impl WorkspaceApp {
         &self,
         conversation: &AiConversation,
         items: &[AiChatListItem],
+        cx: &App,
     ) -> Vec<u64> {
         items
             .iter()
-            .map(|item| self.ai_chat_list_item_signature(conversation, item))
+            .map(|item| self.ai_chat_list_item_signature(conversation, item, cx))
             .collect()
     }
 
@@ -209,6 +211,7 @@ impl WorkspaceApp {
         &self,
         conversation: &AiConversation,
         item: &AiChatListItem,
+        cx: &App,
     ) -> u64 {
         let mut hasher = std::collections::hash_map::DefaultHasher::new();
         match item {
@@ -246,7 +249,7 @@ impl WorkspaceApp {
                         std::hash::Hash::hash(&branches.active_index, &mut hasher);
                     }
                     std::hash::Hash::hash(
-                        &self.ai.chat.thinking_expansion_state.get(&message.id),
+                        &self.ai_entity.read(cx).chat_ui().thinking_expansion_state.get(&message.id),
                         &mut hasher,
                     );
                     if let Some(turn) = message.turn.as_ref() {
@@ -273,24 +276,25 @@ impl WorkspaceApp {
         conversation_id: &str,
         signatures: &[u64],
         spec: TauriVirtualListSpec,
+        cx: &mut Context<Self>,
     ) {
-        let mut cache = self.ai.chat.message_list_cache.borrow_mut();
-        let list_was_reset = sync_tauri_virtual_list_state_by_signatures(
-            &mut self.ai.chat.message_list_state,
-            &mut cache,
-            conversation_id,
-            signatures,
-            ListAlignment::Top,
-            spec,
-        );
-        if list_was_reset {
-            // Opening a conversation starts at its newest message. GPUI's tail
-            // mode then pauses automatically while the user reads older content.
-            self.ai
-                .chat
-                .message_list_state
-                .set_follow_mode(FollowMode::Tail);
-        }
+        self.ai_entity.update(cx, |ai, _cx| {
+            let chat = ai.chat_ui_mut();
+            let mut cache = chat.message_list_cache.borrow_mut();
+            let list_was_reset = sync_tauri_virtual_list_state_by_signatures(
+                &mut chat.message_list_state,
+                &mut cache,
+                conversation_id,
+                signatures,
+                ListAlignment::Top,
+                spec,
+            );
+            if list_was_reset {
+                // Opening a conversation starts at its newest message. GPUI's tail
+                // mode then pauses automatically while the user reads older content.
+                chat.message_list_state.set_follow_mode(FollowMode::Tail);
+            }
+        });
     }
 
     pub(in crate::workspace) fn render_ai_compaction_notice(
@@ -617,8 +621,11 @@ impl WorkspaceApp {
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |this, _event, window, cx| {
-                    this.ai.chat.draft = prompt.clone();
-                    this.ai.chat.input_focused = true;
+                    this.ai_entity.update(cx, |ai, _cx| {
+                        let chat = ai.chat_ui_mut();
+                        chat.draft = prompt.clone();
+                        chat.input_focused = true;
+                    });
                     this.ime_marked_text = None;
 window.focus(&this.focus_handle, cx);
                     cx.stop_propagation();
@@ -633,7 +640,7 @@ window.focus(&this.focus_handle, cx);
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let mut banners = div().flex_none().flex().flex_col();
-        if let Some(percentage) = self.ai.chat.model_switch_warning_percentage {
+        if let Some(percentage) = self.ai_entity.read(cx).chat_ui().model_switch_warning_percentage {
             banners = banners.child(
                 self.render_ai_context_warning_banner(
                     self.i18n
@@ -776,18 +783,24 @@ window.focus(&this.focus_handle, cx);
                 match action {
                     AiContextWarningAction::Compact(model_switch) => {
                         if model_switch {
-                            this.ai.chat.model_switch_warning_percentage = None;
+                            this.ai_entity.update(cx, |ai, _cx| {
+                                ai.chat_ui_mut().model_switch_warning_percentage = None;
+                            });
                         }
                         this.start_ai_compact_conversation(cx);
                     }
                     AiContextWarningAction::NewChat(model_switch) => {
                         if model_switch {
-                            this.ai.chat.model_switch_warning_percentage = None;
+                            this.ai_entity.update(cx, |ai, _cx| {
+                                ai.chat_ui_mut().model_switch_warning_percentage = None;
+                            });
                         }
                         this.create_ai_sidebar_conversation(None, cx);
                     }
                     AiContextWarningAction::Dismiss => {
-                        this.ai.chat.model_switch_warning_percentage = None;
+                        this.ai_entity.update(cx, |ai, _cx| {
+                            ai.chat_ui_mut().model_switch_warning_percentage = None;
+                        });
                     }
                     AiContextWarningAction::Summarize => {
                         this.open_ai_summarize_confirm(cx);
@@ -823,7 +836,7 @@ window.focus(&this.focus_handle, cx);
         oxideterm_gpui_ui::confirm::confirm_dialog_with_focus_motion(
             &self.tokens,
             "ai-summarize-confirm-motion",
-            self.ai.chat.summarize_confirm_presence.phase(),
+            self.ai_entity.read(cx).chat_ui().summarize_confirm_presence.phase(),
             ConfirmDialogView {
                 variant: ConfirmDialogVariant::Default,
                 title: div()

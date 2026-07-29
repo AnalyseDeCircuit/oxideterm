@@ -590,15 +590,29 @@ impl WorkspaceApp {
             ai_provider_key_remove_phase,
             ai_provider_remove_phase,
             ai_safety_phase: self
-                .ai
-                .chat
+                .ai_entity
+                .read(cx)
+                .chat_ui()
                 .safety_confirm_open
-                .then_some(self.ai.chat.safety_confirm_presence.phase()),
+                .then_some(
+                    self.ai_entity
+                        .read(cx)
+                        .chat_ui()
+                        .safety_confirm_presence
+                        .phase(),
+                ),
             ai_summarize_phase: self
-                .ai
-                .chat
+                .ai_entity
+                .read(cx)
+                .chat_ui()
                 .summarize_confirm_open
-                .then_some(self.ai.chat.summarize_confirm_presence.phase()),
+                .then_some(
+                    self.ai_entity
+                        .read(cx)
+                        .chat_ui()
+                        .summarize_confirm_presence
+                        .phase(),
+                ),
             ai_confirm,
             overlay_confirm: self.overlay.read(cx).confirm_owner_snapshot(),
             settings_data_directory_phase,

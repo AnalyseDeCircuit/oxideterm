@@ -254,6 +254,8 @@ pub(in crate::workspace) struct AiWorkspaceEntity {
     task_runtime: Arc<tokio::runtime::Runtime>,
     key_store: oxideterm_ai::AiProviderKeyStore,
     model_ui: AiModelWorkspaceState,
+    chat_ui: AiChatWorkspaceState,
+    knowledge_window_activation_subscription: Option<Subscription>,
     visibility: AiWorkspaceVisibility,
     settings_view: AiSettingsViewState,
     settings_secret_drafts: HashMap<SettingsInput, zeroize::Zeroizing<String>>,
@@ -360,6 +362,46 @@ impl AiWorkspaceEntity {
     /// Returns provider and model presentation state from its sole owner.
     pub(in crate::workspace) fn model_ui(&self) -> &AiModelWorkspaceState {
         &self.model_ui
+    }
+
+    /// Returns chat presentation state from its sole owner.
+    pub(in crate::workspace) fn chat_ui(&self) -> &AiChatWorkspaceState {
+        &self.chat_ui
+    }
+
+    /// Mutates chat presentation state inside the owning Entity.
+    pub(in crate::workspace) fn chat_ui_mut(&mut self) -> &mut AiChatWorkspaceState {
+        &mut self.chat_ui
+    }
+
+    /// Retains workspace-window observers for exactly the AI Entity lifetime.
+    pub(in crate::workspace) fn retain_window_observers(
+        &mut self,
+        overlay_bounds: Subscription,
+        knowledge_activation: Subscription,
+    ) {
+        self.chat_ui.overlay_window_bounds_subscription = Some(overlay_bounds);
+        self.knowledge_window_activation_subscription = Some(knowledge_activation);
+    }
+
+    pub(in crate::workspace) fn toggle_thinking_expansion(
+        &mut self,
+        key: String,
+        default_expanded: bool,
+    ) {
+        let current = self
+            .chat_ui
+            .thinking_expansion_state
+            .get(&key)
+            .copied()
+            .unwrap_or(default_expanded);
+        self.chat_ui.thinking_expansion_state.insert(key, !current);
+    }
+
+    pub(in crate::workspace) fn toggle_tool_call_expansion(&mut self, key: String) {
+        if !self.chat_ui.tool_call_expansion_state.remove(&key) {
+            self.chat_ui.tool_call_expansion_state.insert(key);
+        }
     }
 
     pub(in crate::workspace) fn model_selector_is_open(&self, scope: AiModelSelectorScope) -> bool {
@@ -585,6 +627,8 @@ impl AiWorkspaceEntity {
         let entity = Self {
             task_runtime,
             model_ui: AiModelWorkspaceState::new(),
+            chat_ui: AiChatWorkspaceState::new(360.0, None),
+            knowledge_window_activation_subscription: None,
             key_store,
             visibility: AiWorkspaceVisibility::default(),
             settings_view: AiSettingsViewState::default(),
@@ -3625,12 +3669,6 @@ impl Drop for AiWorkspaceEntity {
 
 impl gpui::EventEmitter<AiWorkspaceEvent> for AiWorkspaceEntity {}
 
-/// Owns all AI-related workspace state while preserving the existing feature boundaries.
-pub(super) struct AiWorkspaceState {
-    pub(super) chat: AiChatWorkspaceState,
-    pub(super) knowledge: AiKnowledgeWorkspaceState,
-}
-
 /// Identifies the AI confirmation whose retained payload may finish exiting.
 #[derive(Clone, Copy)]
 pub(super) enum AiStandardConfirmKind {
@@ -3692,20 +3730,6 @@ pub(in crate::workspace) struct AiModelWorkspaceState {
     pub(super) selector_expanded_providers: HashSet<String>,
     pub(super) selector_highlighted_model: Option<(String, String)>,
     pub(super) selector_status_signature: Option<u64>,
-}
-
-/// Owns the workspace-window observation adapter for Knowledge external edits.
-pub(super) struct AiKnowledgeWorkspaceState {
-    pub(super) window_activation_subscription: Option<Subscription>,
-}
-
-impl AiWorkspaceState {
-    pub(super) fn new(sidebar_width: f32, overlay_window_size: Option<(f32, f32)>) -> Self {
-        Self {
-            chat: AiChatWorkspaceState::new(sidebar_width, overlay_window_size),
-            knowledge: AiKnowledgeWorkspaceState::new(),
-        }
-    }
 }
 
 impl AiChatWorkspaceState {
@@ -3788,14 +3812,6 @@ impl AiModelWorkspaceState {
             selector_expanded_providers: HashSet::new(),
             selector_highlighted_model: None,
             selector_status_signature: None,
-        }
-    }
-}
-
-impl AiKnowledgeWorkspaceState {
-    fn new() -> Self {
-        Self {
-            window_activation_subscription: None,
         }
     }
 }

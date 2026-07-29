@@ -4,17 +4,18 @@ impl WorkspaceApp {
             ai.ensure_chat_initialized(default_ai_conversations_path())
         });
         if matches!(outcome, AiChatInitializationOutcome::Loaded) {
-            self.reset_ai_message_list();
+            self.reset_ai_message_list(cx);
         }
     }
 
-    fn reset_ai_message_list(&mut self) {
-        self.ai.chat.message_list_state =
-            tauri_virtual_list_state(0, ListAlignment::Top, ai_chat_virtual_list_spec());
-        self.ai
-            .chat
-            .message_list_cache
-            .replace(VirtualListSignatureCache::default());
+    fn reset_ai_message_list(&mut self, cx: &mut App) {
+        self.ai_entity.update(cx, |ai, _cx| {
+            let chat = ai.chat_ui_mut();
+            chat.message_list_state =
+                tauri_virtual_list_state(0, ListAlignment::Top, ai_chat_virtual_list_spec());
+            chat.message_list_cache
+                .replace(VirtualListSignatureCache::default());
+        });
     }
 
     pub(in crate::workspace) fn bootstrap_ai_mcp_registry(&self, cx: &App) {
@@ -30,18 +31,24 @@ impl WorkspaceApp {
     }
 
     pub(in crate::workspace) fn clear_ai_sidebar_keyboard_focus(&mut self, cx: &mut App) {
-        self.ai.chat.input_focused = false;
-        self.ai.chat.footer_focus = None;
+        self.ai_entity.update(cx, |ai, _cx| {
+            let chat = ai.chat_ui_mut();
+            chat.input_focused = false;
+            chat.footer_focus = None;
+        });
         self.close_ai_model_selector(cx);
         self.ime_marked_text = None;
     }
 
     pub(in crate::workspace) fn close_ai_sidebar_popovers(&mut self, cx: &mut App) {
-        self.ai.chat.conversation_list_open = false;
-        self.ai.chat.menu_open = false;
-        self.ai.chat.reasoning_menu_open = false;
-        self.ai.chat.safety_menu_open = false;
-        self.ai.chat.context_popover_open = false;
+        self.ai_entity.update(cx, |ai, _cx| {
+            let chat = ai.chat_ui_mut();
+            chat.conversation_list_open = false;
+            chat.menu_open = false;
+            chat.reasoning_menu_open = false;
+            chat.safety_menu_open = false;
+            chat.context_popover_open = false;
+        });
         self.close_ai_model_selector(cx);
     }
 
@@ -77,16 +84,19 @@ impl WorkspaceApp {
         self.ai_entity.update(cx, |ai, _cx| {
             ai.select_conversation(id);
         });
-        self.ai.chat.conversation_list_open = false;
-        self.ai.chat.menu_open = false;
-        self.ai.chat.safety_menu_open = false;
-        self.ai.chat.editing_message_id = None;
-        self.ai.chat.editing_message_draft.clear();
-        self.ai.chat.editing_message_focused = false;
-        self.ai.chat.thinking_expansion_state.clear();
-        self.ai.chat.tool_call_expansion_state.clear();
-        self.ai.chat.input_focused = false;
-        self.ai.chat.footer_focus = None;
+        self.ai_entity.update(cx, |ai, _cx| {
+            let chat = ai.chat_ui_mut();
+            chat.conversation_list_open = false;
+            chat.menu_open = false;
+            chat.safety_menu_open = false;
+            chat.editing_message_id = None;
+            chat.editing_message_draft.clear();
+            chat.editing_message_focused = false;
+            chat.thinking_expansion_state.clear();
+            chat.tool_call_expansion_state.clear();
+            chat.input_focused = false;
+            chat.footer_focus = None;
+        });
     }
 
     pub(in crate::workspace) fn delete_ai_conversation(&mut self, id: &str, cx: &mut App) {
@@ -95,10 +105,13 @@ impl WorkspaceApp {
             ai.persist_chat_state();
             has_conversations
         });
-        self.ai.chat.thinking_expansion_state.clear();
-        self.ai.chat.tool_call_expansion_state.clear();
-        self.ai.chat.conversation_list_open = has_conversations;
-        self.ai.chat.menu_open = false;
+        self.ai_entity.update(cx, |ai, _cx| {
+            let chat = ai.chat_ui_mut();
+            chat.thinking_expansion_state.clear();
+            chat.tool_call_expansion_state.clear();
+            chat.conversation_list_open = has_conversations;
+            chat.menu_open = false;
+        });
     }
 
     pub(in crate::workspace) fn clear_ai_conversations(&mut self, cx: &mut App) {
@@ -108,8 +121,11 @@ impl WorkspaceApp {
             ai.clear_conversations();
             ai.persist_chat_state();
         });
-        self.ai.chat.thinking_expansion_state.clear();
-        self.ai.chat.tool_call_expansion_state.clear();
+        self.ai_entity.update(cx, |ai, _cx| {
+            let chat = ai.chat_ui_mut();
+            chat.thinking_expansion_state.clear();
+            chat.tool_call_expansion_state.clear();
+        });
         self.close_ai_sidebar_popovers(cx);
     }
 
@@ -169,7 +185,7 @@ impl WorkspaceApp {
             ai.retry_chat_initialization(default_ai_conversations_path())
         });
         if matches!(outcome, AiChatInitializationOutcome::Loaded) {
-            self.reset_ai_message_list();
+            self.reset_ai_message_list(cx);
         }
         cx.notify();
     }

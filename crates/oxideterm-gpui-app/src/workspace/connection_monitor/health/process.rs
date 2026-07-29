@@ -1147,7 +1147,7 @@ impl WorkspaceApp {
         let renice_ime = self
             .host_tools_plain_text_ime_frame(HostToolsTextInput::ProcessRenice, cx)
             .expect("process renice is a non-secret Host Tools input");
-        let sidebar_width = self.ai.chat.sidebar_width;
+        let sidebar_width = self.ai_entity.read(cx).chat_ui().sidebar_width;
         self.host_tools.update(cx, |host_tools, cx| {
             host_tools.render_host_processes_panel(
                 search_ime,

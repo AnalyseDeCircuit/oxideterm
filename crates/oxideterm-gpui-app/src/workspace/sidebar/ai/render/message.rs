@@ -94,7 +94,7 @@ impl WorkspaceApp {
         };
         let user = message.role == AiChatRole::User;
         let editing =
-            user && self.ai.chat.editing_message_id.as_deref() == Some(message.id.as_str());
+            user && self.ai_entity.read(cx).chat_ui().editing_message_id.as_deref() == Some(message.id.as_str());
         let label = match message.role {
             AiChatRole::User => self.i18n.t("ai.message.you"),
             AiChatRole::Assistant => self.i18n.t("ai.chat.title"),
@@ -137,10 +137,7 @@ impl WorkspaceApp {
                     .filter(|content| !content.is_empty())
             })
             .flatten();
-        let thinking_expanded = self
-            .ai
-            .chat
-            .thinking_expansion_state
+        let thinking_expanded = self.ai_entity.read(cx).chat_ui().thinking_expansion_state
             .get(&message.id)
             .copied()
             .unwrap_or_else(|| self.settings_store.settings().ai.thinking_default_expanded);
@@ -185,17 +182,12 @@ impl WorkspaceApp {
                         cx.listener(move |this, _event, _window, cx| {
                             let default_expanded =
                                 this.settings_store.settings().ai.thinking_default_expanded;
-                            let current = this
-                                .ai
-                                .chat
-                                .thinking_expansion_state
-                                .get(&thinking_message_id)
-                                .copied()
-                                .unwrap_or(default_expanded);
-                            this.ai
-                                .chat
-                                .thinking_expansion_state
-                                .insert(thinking_message_id.clone(), !current);
+                            this.ai_entity.update(cx, |ai, _cx| {
+                                ai.toggle_thinking_expansion(
+                                    thinking_message_id.clone(),
+                                    default_expanded,
+                                );
+                            });
                             cx.stop_propagation();
                             cx.notify();
                         }),
@@ -227,17 +219,12 @@ impl WorkspaceApp {
                     cx.listener(move |this, _event, _window, cx| {
                         let default_expanded =
                             this.settings_store.settings().ai.thinking_default_expanded;
-                        let current = this
-                            .ai
-                            .chat
-                            .thinking_expansion_state
-                            .get(&thinking_message_id)
-                            .copied()
-                            .unwrap_or(default_expanded);
-                        this.ai
-                            .chat
-                            .thinking_expansion_state
-                            .insert(thinking_message_id.clone(), !current);
+                        this.ai_entity.update(cx, |ai, _cx| {
+                            ai.toggle_thinking_expansion(
+                                thinking_message_id.clone(),
+                                default_expanded,
+                            );
+                        });
                         cx.stop_propagation();
                         cx.notify();
                     }),
@@ -546,7 +533,8 @@ window.focus(&this.focus_handle, cx);
         // sidebar, so its code surfaces must use the same translucent contract.
         options.background_surface_active = self.window_background_preferences().is_some();
         let content = ai_visible_suggestion_content(&message.content);
-        let cached = self.cached_ai_markdown_document(&content, &options, !message.is_streaming);
+        let cached =
+            self.cached_ai_markdown_document(&content, &options, !message.is_streaming, cx);
         let group_id = crate::workspace::selectable_text::selectable_text_id(
             "ai-markdown-message",
             &message.id,
@@ -847,10 +835,7 @@ window.focus(&this.focus_handle, cx);
             .and_then(serde_json::Value::as_str)
             .filter(|value| !value.trim().is_empty());
         let expanded_key = format!("{}-guardrail-{segment_index}", message.id);
-        let expanded = self
-            .ai
-            .chat
-            .tool_call_expansion_state
+        let expanded = self.ai_entity.read(cx).chat_ui().tool_call_expansion_state
             .contains(&expanded_key);
         let mut block = ai_guardrail_block(
             &self.tokens,
@@ -895,16 +880,9 @@ window.focus(&this.focus_handle, cx);
                     .on_mouse_down(
                         MouseButton::Left,
                         cx.listener(move |this, _event, _window, cx| {
-                            let current =
-                                this.ai.chat.tool_call_expansion_state.contains(&toggle_key);
-                            if current {
-                                this.ai.chat.tool_call_expansion_state.remove(&toggle_key);
-                            } else {
-                                this.ai
-                                    .chat
-                                    .tool_call_expansion_state
-                                    .insert(toggle_key.clone());
-                            }
+                            this.ai_entity.update(cx, |ai, _cx| {
+                                ai.toggle_tool_call_expansion(toggle_key.clone());
+                            });
                             cx.stop_propagation();
                             cx.notify();
                         }),
@@ -931,10 +909,7 @@ window.focus(&this.focus_handle, cx);
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let thinking_key = format!("{}-thinking-{segment_index}", message.id);
-        let thinking_expanded = self
-            .ai
-            .chat
-            .thinking_expansion_state
+        let thinking_expanded = self.ai_entity.read(cx).chat_ui().thinking_expansion_state
             .get(&thinking_key)
             .copied()
             .unwrap_or_else(|| self.settings_store.settings().ai.thinking_default_expanded);
@@ -963,17 +938,9 @@ window.focus(&this.focus_handle, cx);
                 cx.listener(move |this, _event, _window, cx| {
                     let default_expanded =
                         this.settings_store.settings().ai.thinking_default_expanded;
-                    let current = this
-                        .ai
-                        .chat
-                        .thinking_expansion_state
-                        .get(&toggle_key)
-                        .copied()
-                        .unwrap_or(default_expanded);
-                    this.ai
-                        .chat
-                        .thinking_expansion_state
-                        .insert(toggle_key.clone(), !current);
+                    this.ai_entity.update(cx, |ai, _cx| {
+                        ai.toggle_thinking_expansion(toggle_key.clone(), default_expanded);
+                    });
                     cx.stop_propagation();
                     cx.notify();
                 }),
@@ -1001,17 +968,9 @@ window.focus(&this.focus_handle, cx);
             MouseButton::Left,
             cx.listener(move |this, _event, _window, cx| {
                 let default_expanded = this.settings_store.settings().ai.thinking_default_expanded;
-                let current = this
-                    .ai
-                    .chat
-                    .thinking_expansion_state
-                    .get(&toggle_key)
-                    .copied()
-                    .unwrap_or(default_expanded);
-                this.ai
-                    .chat
-                    .thinking_expansion_state
-                    .insert(toggle_key.clone(), !current);
+                this.ai_entity.update(cx, |ai, _cx| {
+                    ai.toggle_thinking_expansion(toggle_key.clone(), default_expanded);
+                });
                 cx.stop_propagation();
                 cx.notify();
             }),
@@ -1088,10 +1047,7 @@ window.focus(&this.focus_handle, cx);
             0
         };
         let condensed_key = format!("{}:condensed-tools", message.id);
-        let show_condensed = self
-            .ai
-            .chat
-            .tool_call_expansion_state
+        let show_condensed = self.ai_entity.read(cx).chat_ui().tool_call_expansion_state
             .contains(&condensed_key);
         if should_condense {
             let hidden_count = split_at;
@@ -1143,12 +1099,9 @@ window.focus(&this.focus_handle, cx);
                     .on_mouse_down(
                         MouseButton::Left,
                         cx.listener(move |this, _event, _window, cx| {
-                            if !this.ai.chat.tool_call_expansion_state.remove(&expanded_key) {
-                                this.ai
-                                    .chat
-                                    .tool_call_expansion_state
-                                    .insert(expanded_key.clone());
-                            }
+                            this.ai_entity.update(cx, |ai, _cx| {
+                                ai.toggle_tool_call_expansion(expanded_key.clone());
+                            });
                             cx.stop_propagation();
                             cx.notify();
                         }),
@@ -1220,10 +1173,7 @@ window.focus(&this.focus_handle, cx);
             };
             let tool_mono_font = settings_mono_font_family(self.settings_store.settings());
             let expansion_key = format!("{}:{id}", message.id);
-            let expanded = self
-                .ai
-                .chat
-                .tool_call_expansion_state
+            let expanded = self.ai_entity.read(cx).chat_ui().tool_call_expansion_state
                 .contains(&expansion_key);
             let header_key = expansion_key.clone();
             let args_scroll =
@@ -1271,12 +1221,9 @@ window.focus(&this.focus_handle, cx);
                 .on_mouse_down(
                     MouseButton::Left,
                     cx.listener(move |this, _event, _window, cx| {
-                        if !this.ai.chat.tool_call_expansion_state.remove(&header_key) {
-                            this.ai
-                                .chat
-                                .tool_call_expansion_state
-                                .insert(header_key.clone());
-                        }
+                        this.ai_entity.update(cx, |ai, _cx| {
+                            ai.toggle_tool_call_expansion(header_key.clone());
+                        });
                         cx.stop_propagation();
                         cx.notify();
                     }),
@@ -1431,13 +1378,13 @@ window.focus(&this.focus_handle, cx);
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let target = WorkspaceImeTarget::AiMessageEdit;
-        let save_disabled = self.ai.chat.editing_message_draft.trim().is_empty();
+        let save_disabled = self.ai_entity.read(cx).chat_ui().editing_message_draft.trim().is_empty();
         let input = text_input(
             &self.tokens,
             TextInputView {
-                value: &self.ai.chat.editing_message_draft,
+                value: &self.ai_entity.read(cx).chat_ui().editing_message_draft,
                 placeholder: String::new(),
-                focused: self.ai.chat.editing_message_focused,
+                focused: self.ai_entity.read(cx).chat_ui().editing_message_focused,
                 caret_visible: self.input_caret.visible(),
                 secret: false,
                 selected_all: false,
@@ -1452,8 +1399,11 @@ window.focus(&this.focus_handle, cx);
         .on_mouse_down(
             MouseButton::Left,
             cx.listener(move |this, event: &gpui::MouseDownEvent, window, cx| {
-                this.ai.chat.editing_message_focused = true;
-                this.ai.chat.input_focused = false;
+                this.ai_entity.update(cx, |ai, _cx| {
+                    let chat = ai.chat_ui_mut();
+                    chat.editing_message_focused = true;
+                    chat.input_focused = false;
+                });
                 this.ai_entity.update(cx, |ai, _cx| {
                     ai.set_model_selector_search_focused(false);
                 });
@@ -1613,9 +1563,11 @@ window.focus(&this.focus_handle, cx);
                                 .on_mouse_down(
                                     MouseButton::Left,
                                     cx.listener(|this, _event, _window, cx| {
-                                        let next_open = !this.ai.chat.conversation_list_open;
+                                        let next_open = !this.ai_entity.read(cx).chat_ui().conversation_list_open;
                                         this.close_ai_sidebar_popovers(cx);
-                                        this.ai.chat.conversation_list_open = next_open;
+                                        this.ai_entity.update(cx, |ai, _cx| {
+                                            ai.chat_ui_mut().conversation_list_open = next_open;
+                                        });
                                         cx.stop_propagation();
                                         cx.notify();
                                     }),
@@ -1679,9 +1631,11 @@ window.focus(&this.focus_handle, cx);
                             this.create_ai_sidebar_conversation(None, cx);
                         }
                         Some(AiHeaderAction::Settings) => {
-                            let next_open = !this.ai.chat.menu_open;
+                            let next_open = !this.ai_entity.read(cx).chat_ui().menu_open;
                             this.close_ai_sidebar_popovers(cx);
-                            this.ai.chat.menu_open = next_open;
+                            this.ai_entity.update(cx, |ai, _cx| {
+                                ai.chat_ui_mut().menu_open = next_open;
+                            });
 window.focus(&this.focus_handle, cx);
                             cx.notify();
                         }

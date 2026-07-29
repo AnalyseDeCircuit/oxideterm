@@ -1078,7 +1078,7 @@ impl WorkspaceApp {
         }
     }
 
-    fn tabbar_outer_width(&self, window: &Window) -> f32 {
+    fn tabbar_outer_width(&self, window: &Window, cx: &App) -> f32 {
         let window_width = f32::from(window.inner_window_bounds().get_bounds().size.width);
         let sidebar_width = if self.sidebar_collapsed {
             self.tokens.metrics.activity_bar_width
@@ -1086,19 +1086,23 @@ impl WorkspaceApp {
             self.sidebar_width
         };
         let context_sidebar_width = if self.context_sidebar_visible() {
-            self.ai.chat.sidebar_width
+            self.ai_entity.read(cx).chat_ui().sidebar_width
         } else {
             0.0
         };
         (window_width - sidebar_width - context_sidebar_width).max(0.0)
     }
 
-    pub(in crate::workspace) fn tabbar_scroll_viewport_width(&self, window: &Window) -> f32 {
+    pub(in crate::workspace) fn tabbar_scroll_viewport_width(
+        &self,
+        window: &Window,
+        cx: &App,
+    ) -> f32 {
         let measured_width = f32::from(self.main_window_tabs.scroll_handle.bounds().size.width);
         if measured_width > 1.0 {
             return measured_width;
         }
-        self.tabbar_outer_width(window)
+        self.tabbar_outer_width(window, cx)
     }
 
     pub(in crate::workspace) fn tabbar_left_x(&self) -> f32 {
@@ -1125,7 +1129,7 @@ impl WorkspaceApp {
         if measured_width > 1.0 {
             return f32::from(self.main_window_tabs.scroll_handle.max_offset().x);
         }
-        (self.tabbar_content_width(cx) - self.tabbar_scroll_viewport_width(window)).max(0.0)
+        (self.tabbar_content_width(cx) - self.tabbar_scroll_viewport_width(window, cx)).max(0.0)
     }
 
     fn clamp_tab_scroll(&mut self, window: &Window, cx: &App) {
@@ -1219,7 +1223,7 @@ impl WorkspaceApp {
                 .map(|tab| self.tab_visual_width(tab))
                 .sum::<f32>();
         let tab_right = tab_left + self.tab_visual_width(&self.tabs(cx)[index]);
-        let viewport_width = self.tabbar_scroll_viewport_width(window);
+        let viewport_width = self.tabbar_scroll_viewport_width(window, cx);
 
         let current_scroll_x = self.tabbar_effective_scroll_x(window, cx);
         let mut next_scroll_x = current_scroll_x;

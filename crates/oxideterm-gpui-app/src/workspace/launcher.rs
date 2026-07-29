@@ -1471,7 +1471,7 @@ impl WorkspaceApp {
             );
         }
 
-        let columns = self.launcher_app_grid_columns(window);
+        let columns = self.launcher_app_grid_columns(window, cx);
         self.launcher.update(cx, |launcher, _cx| {
             launcher.sync_app_grid_list_state(columns)
         });
@@ -1494,7 +1494,7 @@ impl WorkspaceApp {
             .into_any_element()
     }
 
-    fn launcher_app_grid_columns(&self, window: &Window) -> usize {
+    fn launcher_app_grid_columns(&self, window: &Window, cx: &App) -> usize {
         let settings = self.settings_store.settings();
         let mut available_width = f32::from(window.viewport_size().width);
         if !settings.sidebar_ui.zen_mode {
@@ -1504,7 +1504,7 @@ impl WorkspaceApp {
             }
         }
         if self.context_sidebar_visible() {
-            available_width -= self.ai.chat.sidebar_width;
+            available_width -= self.ai_entity.read(cx).chat_ui().sidebar_width;
         }
         let page_padding = self.tokens.metrics.settings_content_padding;
         let grid_width = (available_width - page_padding * 2.0).max(LAUNCHER_TILE_W);

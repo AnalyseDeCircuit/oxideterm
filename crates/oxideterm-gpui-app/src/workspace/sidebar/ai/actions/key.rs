@@ -62,7 +62,7 @@ impl WorkspaceApp {
                 }
                 _ => true,
             }
-        } else if self.ai.chat.editing_message_id.is_some() && self.ai.chat.editing_message_focused
+        } else if self.ai_entity.read(cx).chat_ui().editing_message_id.is_some() && self.ai_entity.read(cx).chat_ui().editing_message_focused
         {
             if event.keystroke.modifiers.platform {
                 return false;
@@ -73,8 +73,9 @@ impl WorkspaceApp {
                     true
                 }
                 "backspace" => {
-                    let changed = self.ai.chat.editing_message_draft.pop().is_some()
-                        || self.ime_marked_text.take().is_some();
+                    let changed = self.ai_entity.update(cx, |ai, _cx| {
+                        ai.chat_ui_mut().editing_message_draft.pop().is_some()
+                    }) || self.ime_marked_text.take().is_some();
                     if changed {
                         cx.notify();
                     }
@@ -85,7 +86,9 @@ impl WorkspaceApp {
                     true
                 }
                 "enter" => {
-                    self.ai.chat.editing_message_draft.push('\n');
+                    self.ai_entity.update(cx, |ai, _cx| {
+                        ai.chat_ui_mut().editing_message_draft.push('\n');
+                    });
                     self.ime_marked_text = None;
                     cx.notify();
                     true
@@ -93,7 +96,9 @@ impl WorkspaceApp {
                 "tab" => {
                     // Textareas in the Tauri sidebar release focus on Tab
                     // unless an autocomplete/menu owner consumes it first.
-                    self.ai.chat.editing_message_focused = false;
+                    self.ai_entity.update(cx, |ai, _cx| {
+                        ai.chat_ui_mut().editing_message_focused = false;
+                    });
                     self.ime_marked_text = None;
                     cx.notify();
                     true
@@ -110,7 +115,7 @@ impl WorkspaceApp {
                 }
                 _ => true,
             }
-        } else if let Some(action) = self.ai.chat.footer_focus {
+        } else if let Some(action) = self.ai_entity.read(cx).chat_ui().footer_focus {
             if event.keystroke.modifiers.platform {
                 return false;
             }
@@ -125,37 +130,45 @@ impl WorkspaceApp {
                 self.apply_ai_chat_inline_footer_key_action(action, cx);
             }
             true
-        } else if self.ai.chat.input_focused {
+        } else if self.ai_entity.read(cx).chat_ui().input_focused {
             if event.keystroke.modifiers.platform {
                 return false;
             }
-            let autocomplete_len = self.ai_chat_autocomplete_items().len();
+            let autocomplete_len = self.ai_chat_autocomplete_items(cx).len();
             if autocomplete_len > 0 {
                 match event.keystroke.key.as_str() {
                     "down" | "arrowdown" => {
-                        self.ai.chat.autocomplete_index =
-                            (self.ai.chat.autocomplete_index + 1) % autocomplete_len;
+                        self.ai_entity.update(cx, |ai, _cx| {
+                            let chat = ai.chat_ui_mut();
+                            chat.autocomplete_index =
+                                (chat.autocomplete_index + 1) % autocomplete_len;
+                        });
                         cx.notify();
                         return true;
                     }
                     "up" | "arrowup" => {
-                        self.ai.chat.autocomplete_index =
-                            (self.ai.chat.autocomplete_index + autocomplete_len - 1)
-                                % autocomplete_len;
+                        self.ai_entity.update(cx, |ai, _cx| {
+                            let chat = ai.chat_ui_mut();
+                            chat.autocomplete_index =
+                                (chat.autocomplete_index + autocomplete_len - 1)
+                                    % autocomplete_len;
+                        });
                         cx.notify();
                         return true;
                     }
                     "tab" | "enter" if !event.keystroke.modifiers.shift => {
-                        let index = self.ai.chat.autocomplete_index.min(autocomplete_len - 1);
+                        let index = self.ai_entity.read(cx).chat_ui().autocomplete_index.min(autocomplete_len - 1);
                         if let Some(candidate) =
-                            self.ai_chat_autocomplete_items().get(index).cloned()
+                            self.ai_chat_autocomplete_items(cx).get(index).cloned()
                         {
                             self.apply_ai_chat_autocomplete_candidate(&candidate, cx);
                         }
                         return true;
                     }
                     "escape" => {
-                        self.ai.chat.autocomplete_suppressed = true;
+                        self.ai_entity.update(cx, |ai, _cx| {
+                            ai.chat_ui_mut().autocomplete_suppressed = true;
+                        });
                         self.ime_marked_text = None;
                         cx.notify();
                         return true;
@@ -181,12 +194,16 @@ impl WorkspaceApp {
             }
             match event.keystroke.key.as_str() {
                 "backspace" => {
-                    let changed = self.ai.chat.draft.pop().is_some()
-                        || self.ai.chat.autocomplete_suppressed
-                        || self.ai.chat.autocomplete_index != 0
+                    let changed = self.ai_entity.update(cx, |ai, _cx| {
+                        let chat = ai.chat_ui_mut();
+                        let changed = chat.draft.pop().is_some()
+                            || chat.autocomplete_suppressed
+                            || chat.autocomplete_index != 0;
+                        chat.autocomplete_suppressed = false;
+                        chat.autocomplete_index = 0;
+                        changed
+                    })
                         || self.ime_marked_text.take().is_some();
-                    self.ai.chat.autocomplete_suppressed = false;
-                    self.ai.chat.autocomplete_index = 0;
                     if changed {
                         cx.notify();
                     }
@@ -197,7 +214,9 @@ impl WorkspaceApp {
                     true
                 }
                 "enter" => {
-                    self.ai.chat.draft.push('\n');
+                    self.ai_entity.update(cx, |ai, _cx| {
+                        ai.chat_ui_mut().draft.push('\n');
+                    });
                     self.ime_marked_text = None;
                     cx.notify();
                     true
@@ -220,7 +239,7 @@ impl WorkspaceApp {
     }
 
     pub(in crate::workspace) fn ai_chat_footer_action_enabled(&self, cx: &App) -> bool {
-        self.ai_entity.read(cx).chat_is_loading() || !self.ai.chat.draft.trim().is_empty()
+        self.ai_entity.read(cx).chat_is_loading() || !self.ai_entity.read(cx).chat_ui().draft.trim().is_empty()
     }
 
     pub(in crate::workspace) fn activate_ai_chat_footer_action(
@@ -230,11 +249,13 @@ impl WorkspaceApp {
     ) {
         match action {
             AiChatFooterAction::Submit if self.ai_entity.read(cx).chat_is_loading() => self.cancel_ai_chat_stream(cx),
-            AiChatFooterAction::Submit if !self.ai.chat.draft.trim().is_empty() => {
+            AiChatFooterAction::Submit if !self.ai_entity.read(cx).chat_ui().draft.trim().is_empty() => {
                 self.send_ai_chat_draft(cx)
             }
             AiChatFooterAction::Submit => {
-                self.ai.chat.footer_focus = None;
+                self.ai_entity.update(cx, |ai, _cx| {
+                    ai.chat_ui_mut().footer_focus = None;
+                });
                 cx.notify();
             }
         }
@@ -250,20 +271,29 @@ impl WorkspaceApp {
         // helper while this method performs the Workspace-specific state writes.
         match action {
             browser_behavior::InlineFooterInputKeyAction::ClearFocus => {
-                self.ai.chat.input_focused = false;
-                self.ai.chat.footer_focus = None;
+                self.ai_entity.update(cx, |ai, _cx| {
+                    let chat = ai.chat_ui_mut();
+                    chat.input_focused = false;
+                    chat.footer_focus = None;
+                });
                 self.ime_marked_text = None;
                 cx.notify();
             }
             browser_behavior::InlineFooterInputKeyAction::FocusInput => {
-                self.ai.chat.input_focused = true;
-                self.ai.chat.footer_focus = None;
+                self.ai_entity.update(cx, |ai, _cx| {
+                    let chat = ai.chat_ui_mut();
+                    chat.input_focused = true;
+                    chat.footer_focus = None;
+                });
                 self.ime_marked_text = None;
                 cx.notify();
             }
             browser_behavior::InlineFooterInputKeyAction::FocusFooter(action) => {
-                self.ai.chat.input_focused = false;
-                self.ai.chat.footer_focus = Some(action);
+                self.ai_entity.update(cx, |ai, _cx| {
+                    let chat = ai.chat_ui_mut();
+                    chat.input_focused = false;
+                    chat.footer_focus = Some(action);
+                });
                 self.ime_marked_text = None;
                 cx.notify();
             }

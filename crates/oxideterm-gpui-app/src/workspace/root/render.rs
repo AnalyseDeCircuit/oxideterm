@@ -256,8 +256,8 @@ impl WorkspaceApp {
         let sidebar_resize_cursor_active = (resize_hotzone_visible
             && self.sidebar_resize_hotzone_hovered)
             || self.sidebar_resizing
-            || self.ai.chat.sidebar_resizing;
-        self.update_main_window_tabbar_drop_bounds(window, titlebar_visible, zen_mode);
+            || self.ai_entity.read(cx).chat_ui().sidebar_resizing;
+        self.update_main_window_tabbar_drop_bounds(window, titlebar_visible, zen_mode, cx);
 
         div()
             .id("workspace-root")
@@ -483,8 +483,8 @@ impl WorkspaceApp {
                     window.prevent_default();
                     cx.stop_propagation();
                 } else if this.ai_sidebar_visible()
-                    && (this.ai.chat.input_focused
-                        || this.ai.chat.footer_focus.is_some()
+                    && (this.ai_entity.read(cx).chat_ui().input_focused
+                        || this.ai_entity.read(cx).chat_ui().footer_focus.is_some()
                         || this.ai_entity.read(cx).model_selector_search_focused())
                 {
                     let _ = this.handle_ai_sidebar_key(event, cx);
@@ -928,12 +928,14 @@ impl WorkspaceApp {
                     .is_some(),
                 |root| root.child(self.render_ai_provider_remove_confirm_dialog(cx)),
             )
-            .when(self.ai.chat.safety_confirm_open, |root| {
-                root.child(self.render_ai_safety_confirm_dialog(cx))
-            })
-            .when(self.ai.chat.summarize_confirm_open, |root| {
-                root.child(self.render_ai_summarize_confirm_dialog(cx))
-            })
+            .when(
+                self.ai_entity.read(cx).chat_ui().safety_confirm_open,
+                |root| root.child(self.render_ai_safety_confirm_dialog(cx)),
+            )
+            .when(
+                self.ai_entity.read(cx).chat_ui().summarize_confirm_open,
+                |root| root.child(self.render_ai_summarize_confirm_dialog(cx)),
+            )
             .when(
                 ai_chat_confirm_snapshot.as_ref().is_some_and(|snapshot| {
                     matches!(&snapshot.kind, ai_state::AiChatConfirmKind::ClearAll)

@@ -49,7 +49,7 @@ impl WorkspaceApp {
             return None;
         }
         let selected = self.active_ai_reasoning_level(provider, &model, cx);
-        let open = self.ai.chat.reasoning_menu_open;
+        let open = self.ai_entity.read(cx).chat_ui().reasoning_menu_open;
         let trigger = div()
             .flex()
             .flex_none()
@@ -80,9 +80,11 @@ impl WorkspaceApp {
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(|this, _event, _window, cx| {
-                    let next_open = !this.ai.chat.reasoning_menu_open;
+                    let next_open = !this.ai_entity.read(cx).chat_ui().reasoning_menu_open;
                     this.close_ai_sidebar_popovers(cx);
-                    this.ai.chat.reasoning_menu_open = next_open;
+                    this.ai_entity.update(cx, |ai, _cx| {
+                        ai.chat_ui_mut().reasoning_menu_open = next_open;
+                    });
                     cx.stop_propagation();
                     cx.notify();
                 }),

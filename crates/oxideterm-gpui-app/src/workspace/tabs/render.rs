@@ -481,7 +481,7 @@ impl WorkspaceApp {
         let viewport_width = if measured_width > 1.0 {
             measured_width
         } else {
-            self.tabbar_scroll_viewport_width(window)
+            self.tabbar_scroll_viewport_width(window, cx)
         };
         let viewport_left = if measured_width > 1.0 {
             f32::from(viewport_bounds.origin.x)

@@ -821,8 +821,8 @@ impl WorkspaceApp {
         changed |= self.ime_marked_text.take().is_some();
         changed |= self.pending_platform_text_commit.take().is_some();
 
-        let ai_focus_changed = self.ai.chat.input_focused
-            || self.ai.chat.footer_focus.is_some()
+        let ai_focus_changed = self.ai_entity.read(cx).chat_ui().input_focused
+            || self.ai_entity.read(cx).chat_ui().footer_focus.is_some()
             || self.ai_entity.read(cx).model_selector_open()
             || self.ai_entity.read(cx).model_selector_search_focused();
         self.clear_ai_sidebar_keyboard_focus(cx);

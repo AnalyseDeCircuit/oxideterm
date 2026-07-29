@@ -256,7 +256,10 @@ impl WorkspaceApp {
                     // Plugin text is a sensitive boundary: redact credential-like
                     // material before the existing AI workflow builds model context.
                     let content = Zeroizing::new(content.to_string());
-                    self.ai.chat.draft = oxideterm_ai::sanitize_for_ai(content.as_str());
+                    let sanitized = oxideterm_ai::sanitize_for_ai(content.as_str());
+                    self.ai_entity.update(cx, |ai, _cx| {
+                        ai.chat_ui_mut().draft = sanitized;
+                    });
                     self.send_ai_chat_draft(cx);
                 }
             }

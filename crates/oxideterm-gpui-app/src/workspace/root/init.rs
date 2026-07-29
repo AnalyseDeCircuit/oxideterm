@@ -455,19 +455,18 @@ impl WorkspaceApp {
             settings.initialize_background_gallery(background_images);
         });
         let app_lock = app_lock::AppLockState::load(oxideterm_app_lock::AppLockStore::new());
-        let ai = ai_state::AiWorkspaceState::new(
-            (settings.sidebar_ui.ai_sidebar_width as f32)
-                .clamp(AI_SIDEBAR_MIN_WIDTH, AI_SIDEBAR_MAX_WIDTH),
-            Some(current_window_size(window)),
-        );
         let ai_key_store = oxideterm_ai::AiProviderKeyStore::new();
         let ai_entity = cx.new(|cx| {
-            ai_state::AiWorkspaceEntity::new_with_agent_fs(
+            let mut entity = ai_state::AiWorkspaceEntity::new_with_agent_fs(
                 forwarding_runtime.clone(),
                 ai_key_store,
                 ai_agent_fs,
                 cx,
-            )
+            );
+            entity.chat_ui_mut().sidebar_width = (settings.sidebar_ui.ai_sidebar_width as f32)
+                .clamp(AI_SIDEBAR_MIN_WIDTH, AI_SIDEBAR_MAX_WIDTH);
+            entity.chat_ui_mut().overlay_window_size = Some(current_window_size(window));
+            entity
         });
         let ai_entity_subscription = cx.subscribe(
             &ai_entity,
@@ -570,7 +569,6 @@ impl WorkspaceApp {
                 && !settings.sidebar_ui.zen_mode
                 && settings.ai.enabled,
             context_sidebar_motion_generation: 0,
-            ai,
             ai_entity,
             _ai_entity_subscription: ai_entity_subscription,
             active_context_sidebar_panel: ContextSidebarPanel::Assistant,
@@ -725,16 +723,17 @@ impl WorkspaceApp {
             overlay,
             _overlay_observation: overlay_observation,
         };
-        workspace.ai.chat.overlay_window_bounds_subscription =
-            Some(cx.observe_window_bounds(window, |this, window, cx| {
-                this.update_ai_sidebar_overlay_for_window_bounds(window, cx);
-            }));
-        workspace.ai.knowledge.window_activation_subscription =
-            Some(cx.observe_window_activation(window, |this, window, cx| {
-                if window.is_window_active() {
-                    this.knowledge_sync_external_edit(false, cx);
-                }
-            }));
+        let ai_overlay_bounds = cx.observe_window_bounds(window, |this, window, cx| {
+            this.update_ai_sidebar_overlay_for_window_bounds(window, cx);
+        });
+        let ai_knowledge_activation = cx.observe_window_activation(window, |this, window, cx| {
+            if window.is_window_active() {
+                this.knowledge_sync_external_edit(false, cx);
+            }
+        });
+        workspace.ai_entity.update(cx, |ai, _cx| {
+            ai.retain_window_observers(ai_overlay_bounds, ai_knowledge_activation);
+        });
         workspace.sync_ai_workspace_visibility(cx);
         if workspace.ai_sidebar_visible() {
             workspace.ensure_ai_chat_initialized(cx);

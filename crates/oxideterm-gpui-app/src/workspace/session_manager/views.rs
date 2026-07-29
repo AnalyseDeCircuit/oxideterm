@@ -395,7 +395,7 @@ impl WorkspaceApp {
         });
     }
 
-    fn session_manager_grid_columns(&self, window: &Window) -> (usize, usize) {
+    fn session_manager_grid_columns(&self, window: &Window, cx: &App) -> (usize, usize) {
         let settings = self.settings_store.settings();
         let mut available_width = f32::from(window.viewport_size().width);
         if !settings.sidebar_ui.zen_mode {
@@ -405,7 +405,7 @@ impl WorkspaceApp {
             }
         }
         if self.context_sidebar_visible() {
-            available_width -= self.ai.chat.sidebar_width;
+            available_width -= self.ai_entity.read(cx).chat_ui().sidebar_width;
         }
         let grid_width =
             (available_width - self.tokens.spacing.three * 2.0).max(MANAGER_GRID_CARD_MIN_WIDTH);
@@ -563,7 +563,7 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
-        let (card_columns, recent_columns) = self.session_manager_grid_columns(window);
+        let (card_columns, recent_columns) = self.session_manager_grid_columns(window, cx);
         let (roots, _) = self.session_group_tree();
         let rows = Arc::<[SessionManagerGridRow]>::from(session_manager_grid_rows(
             &items,

@@ -765,7 +765,7 @@ impl WorkspaceApp {
         let search_ime = self
             .host_tools_plain_text_ime_frame(HostToolsTextInput::PortSearch, cx)
             .expect("port search is a non-secret Host Tools input");
-        let sidebar_width = self.ai.chat.sidebar_width;
+        let sidebar_width = self.ai_entity.read(cx).chat_ui().sidebar_width;
         self.host_tools.update(cx, |host_tools, cx| {
             host_tools.render_host_ports_panel(
                 search_ime,

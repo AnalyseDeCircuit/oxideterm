@@ -134,9 +134,12 @@ impl WorkspaceApp {
             disabled,
             loading,
             cx.listener(move |this, event, window, cx| {
-                this.ai.chat.menu_open = false;
-                this.ai.chat.conversation_list_open = false;
-                this.ai.chat.safety_menu_open = false;
+                this.ai_entity.update(cx, |ai, _cx| {
+                    let chat = ai.chat_ui_mut();
+                    chat.menu_open = false;
+                    chat.conversation_list_open = false;
+                    chat.safety_menu_open = false;
+                });
                 listener(this, event, window, cx);
                 cx.stop_propagation();
                 cx.notify();
