@@ -316,13 +316,15 @@ impl WorkspaceApp {
     pub(in crate::workspace) fn return_detached_tab_to_main(
         &mut self,
         tab_id: TabId,
+        current_window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         let transition = self.tab_host.update(cx, |tab_host, _cx| {
             tab_host.return_to_main_and_select(tab_id, tabs::TabMountCloseReason::ReturnToMain)
         });
         if let Some(transition) = transition {
-            self.apply_tab_mount_cleanup(transition.cleanup, None, cx);
+            // Close the source shell directly; re-entering its handle from its own event fails.
+            self.apply_tab_mount_cleanup(transition.cleanup, Some(current_window), cx);
             self.apply_main_window_active_tab_change(
                 transition.selection.previous,
                 transition.selection.current,
@@ -536,7 +538,7 @@ impl WorkspaceApp {
         &mut self,
         tab_id: TabId,
         event: &MouseUpEvent,
-        window: &Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
         let screen_point = Self::detached_window_screen_point(window, event.position);
@@ -559,7 +561,7 @@ impl WorkspaceApp {
                 self.move_tab_to_visible_index(tab_id, visible_index, cx);
             }
             self.begin_detached_tab_return_handoff(tab_id, handoff_origin, cx);
-            self.return_detached_tab_to_main(tab_id, cx);
+            self.return_detached_tab_to_main(tab_id, window, cx);
             true
         } else {
             cx.notify();
@@ -954,7 +956,7 @@ impl WorkspaceApp {
                         cx.listener(move |this, _event, window, cx| {
                             this.close_tab_context_menu();
                             if detached {
-                                this.return_detached_tab_to_main(menu.tab_id, cx);
+                                this.return_detached_tab_to_main(menu.tab_id, window, cx);
                             } else {
                                 this.detach_tab_to_window(menu.tab_id, None, window, cx);
                             }
@@ -1218,8 +1220,8 @@ impl WorkspaceApp {
                     .child(self.i18n.t("tabbar.return_to_main_window"))
                     .on_mouse_down(
                         MouseButton::Left,
-                        cx.listener(move |this, _event, _window, cx| {
-                            this.return_detached_tab_to_main(tab_id, cx);
+                        cx.listener(move |this, _event, window, cx| {
+                            this.return_detached_tab_to_main(tab_id, window, cx);
                             cx.stop_propagation();
                         }),
                     ),
@@ -1345,5 +1347,24 @@ mod tests {
             detached_tab_surface_route(tab_id, &TabKind::Forwards),
             DetachedTabSurfaceRoute::Forwards(tab_id)
         );
+    }
+
+    #[test]
+    fn detached_return_passes_the_source_window_to_mount_cleanup() {
+        let source = include_str!("detach.rs");
+        let return_start = source
+            .find("pub(in crate::workspace) fn return_detached_tab_to_main")
+            .expect("detached return function");
+        let return_tail = &source
+            [return_start + "pub(in crate::workspace) fn return_detached_tab_to_main".len()..];
+        let return_end = return_tail
+            .find("pub(in crate::workspace) fn release_detached_tab_window")
+            .expect("detached release function");
+        let return_source = &return_tail[..return_end];
+
+        assert!(return_source.contains("current_window: &mut Window"));
+        assert!(return_source.contains(
+            "self.apply_tab_mount_cleanup(transition.cleanup, Some(current_window), cx)"
+        ));
     }
 }
