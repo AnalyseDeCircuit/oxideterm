@@ -28,7 +28,6 @@ impl WorkspaceApp {
             .size_full()
             .p(px(16.0))
             .child(markdown_virtual_with_code_actions(
-                cx.entity(),
                 "sftp-preview-markdown-virtual",
                 &self.tokens,
                 source,

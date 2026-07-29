@@ -404,7 +404,6 @@ impl WorkspaceApp {
                         .bg(rgb(self.tokens.ui.bg))
                         .text_color(rgb(self.tokens.ui.text))
                         .child(markdown_virtual_with_code_actions(
-                            cx.entity(),
                             "native-update-release-notes-markdown",
                             &self.tokens,
                             &release_body,

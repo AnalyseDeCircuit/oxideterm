@@ -1024,7 +1024,6 @@ impl WorkspaceApp {
                         .bg(rgb(self.tokens.ui.bg))
                         .text_color(rgb(self.tokens.ui.text))
                         .child(markdown_virtual_with_code_actions(
-                            cx.entity(),
                             "settings-help-legal-notice-markdown",
                             &self.tokens,
                             HELP_LEGAL_MARKDOWN,
