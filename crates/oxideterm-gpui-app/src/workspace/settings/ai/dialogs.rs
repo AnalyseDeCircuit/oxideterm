@@ -34,12 +34,6 @@ impl WorkspaceApp {
             .on_mouse_down(MouseButton::Left, |_event, _window, cx| {
                 cx.stop_propagation();
             })
-            .on_key_down(cx.listener(|this, event: &KeyDownEvent, _window, cx| {
-                if event.keystroke.key.as_str() == "escape" {
-                    this.close_ai_text_editor(false, cx);
-                    cx.stop_propagation();
-                }
-            }))
             .child(
                 dialog_header(&self.tokens)
                     .child(dialog_title(&self.tokens, self.i18n.t(title_key)))
@@ -156,7 +150,7 @@ impl WorkspaceApp {
                 .clone(),
             AiTextEditorDialog::Memory => self.settings_store.settings().ai.memory.content.clone(),
         };
-        self.prepare_modal_interaction_boundary();
+        self.prepare_modal_interaction_boundary(cx);
         let tokens = self.tokens;
         let runtime_settings = self.ide_runtime_settings();
         let placeholder = self.i18n.t(match dialog {
@@ -241,33 +235,7 @@ impl WorkspaceApp {
         event: &KeyDownEvent,
         cx: &mut Context<Self>,
     ) -> bool {
-        if self.settings_page.show_ai_enable_confirm {
-            match self.handle_standard_confirm_key(event, cx) {
-                Some(ConfirmKeyboardAction::Cancel) => {
-                    self.close_ai_settings_dialog(false, cx);
-                    true
-                }
-                Some(ConfirmKeyboardAction::Confirm) => {
-                    self.close_ai_settings_dialog(true, cx);
-                    true
-                }
-                Some(ConfirmKeyboardAction::Handled) => true,
-                None => false,
-            }
-        } else if self.settings_page.ai_provider_key_remove_confirm.is_some() {
-            match self.handle_standard_confirm_key(event, cx) {
-                Some(ConfirmKeyboardAction::Cancel) => {
-                    self.close_ai_settings_dialog(false, cx);
-                    true
-                }
-                Some(ConfirmKeyboardAction::Confirm) => {
-                    self.close_ai_settings_dialog(true, cx);
-                    true
-                }
-                Some(ConfirmKeyboardAction::Handled) => true,
-                None => false,
-            }
-        } else if self.settings_page.ai_provider_remove_confirm.is_some() {
+        if self.ai_entity.read(cx).settings_confirm_is_open() {
             match self.handle_standard_confirm_key(event, cx) {
                 Some(ConfirmKeyboardAction::Cancel) => {
                     self.close_ai_settings_dialog(false, cx);
@@ -289,8 +257,7 @@ impl WorkspaceApp {
         &self,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let is_visible = self.ai_settings_dialog_presence.phase()
-            == oxideterm_gpui_ui::motion::ExitPhase::Visible;
+        let is_visible = self.ai_entity.read(cx).settings_confirm_is_visible();
         dismissible_dialog_backdrop()
             .on_mouse_down(
                 MouseButton::Left,
@@ -416,8 +383,7 @@ impl WorkspaceApp {
         &self,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let is_visible = self.ai_settings_dialog_presence.phase()
-            == oxideterm_gpui_ui::motion::ExitPhase::Visible;
+        let is_visible = self.ai_entity.read(cx).settings_confirm_is_visible();
         dismissible_dialog_backdrop()
             .on_mouse_down(
                 MouseButton::Left,
@@ -513,18 +479,16 @@ impl WorkspaceApp {
         &self,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let provider_name = self
-            .settings_page
-            .ai_provider_remove_confirm
-            .as_ref()
-            .map(|(_, name)| name.as_str())
-            .unwrap_or_default();
-        let title = self
-            .i18n
-            .t("settings_view.ai.remove_provider_confirm")
-            .replace("{{name}}", provider_name);
-        let is_visible = self.ai_settings_dialog_presence.phase()
-            == oxideterm_gpui_ui::motion::ExitPhase::Visible;
+        let title = {
+            let ai_workspace = self.ai_entity.read(cx);
+            let provider_name = ai_workspace
+                .settings_confirm_provider_name()
+                .unwrap_or_default();
+            self.i18n
+                .t("settings_view.ai.remove_provider_confirm")
+                .replace("{{name}}", provider_name)
+        };
+        let is_visible = self.ai_entity.read(cx).settings_confirm_is_visible();
         dismissible_dialog_backdrop()
             .on_mouse_down(
                 MouseButton::Left,
@@ -633,13 +597,11 @@ impl WorkspaceApp {
             return;
         };
         let provider_id = provider_id.to_string();
-        self.ai.models.provider_key_status.remove(&provider_id);
-        self.ai
-            .models
-            .provider_key_status_pending
-            .remove(&provider_id);
-        self.settings_page
-            .remove_ai_provider_page_state(&provider_id);
+        self.ai_entity.update(cx, |ai, cx| {
+            ai.invalidate_provider_key_status(&provider_id);
+            ai.invalidate_selector_provider_status(&provider_id);
+            ai.remove_settings_provider_view_state(&provider_id, cx);
+        });
         self.edit_settings(
             |settings| {
                 ai_remove_provider_at_with_scoped_settings(
@@ -656,26 +618,9 @@ impl WorkspaceApp {
             cx,
         );
 
-        let key_store = self.ai.models.key_store.clone();
-        let runtime = self.forwarding_runtime.clone();
-        cx.spawn(async move |weak, cx| {
-            let provider_id_for_delete = provider_id.clone();
-            let result = runtime
-                .spawn_blocking(move || key_store.delete_provider_key(&provider_id_for_delete))
-                .await
-                .map_err(|error| error.to_string())
-                .and_then(|result| result.map_err(|error| error.to_string()));
-            if let Err(error) = result {
-                let _ = weak.update(cx, |this, cx| {
-                    this.push_ai_settings_toast(
-                        this.ai_i18n_error("settings_view.ai.remove_failed", &error),
-                        TerminalNoticeVariant::Error,
-                    );
-                    cx.notify();
-                });
-            }
-        })
-        .detach();
+        self.ai_entity.update(cx, |ai, cx| {
+            ai.remove_provider_key(provider_id, cx);
+        });
     }
 
     /// Defers payload removal until the matching exit generation completes.
@@ -685,62 +630,13 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) {
         self.clear_standard_confirm_focus();
-        let Some(generation) = self.ai_settings_dialog_presence.begin_exit() else {
-            return;
-        };
         let delay = oxideterm_gpui_ui::motion::duration(
             &self.tokens,
             oxideterm_gpui_ui::motion::MotionDuration::Overlay,
         );
-        if delay.is_zero() {
-            self.finish_ai_settings_dialog_exit(generation, confirm, cx);
-            cx.notify();
-            return;
-        }
-        cx.spawn(async move |weak, cx| {
-            gpui::Timer::after(delay).await;
-            let _ = weak.update(cx, |this, cx| {
-                if this.finish_ai_settings_dialog_exit(generation, confirm, cx) {
-                    cx.notify();
-                }
-            });
-        })
-        .detach();
+        self.ai_entity.update(cx, |ai, cx| {
+            ai.begin_settings_confirm_exit(confirm, delay, cx);
+        });
         cx.notify();
-    }
-
-    fn finish_ai_settings_dialog_exit(
-        &mut self,
-        generation: u64,
-        confirm: bool,
-        cx: &mut Context<Self>,
-    ) -> bool {
-        if !self.ai_settings_dialog_presence.finish_exit(generation) {
-            return false;
-        }
-        if self.settings_page.show_ai_enable_confirm {
-            self.settings_page.set_ai_enable_confirm_open(false);
-            if confirm {
-                self.edit_settings(
-                    |settings| {
-                        settings.ai.enabled = true;
-                        settings.ai.enabled_confirmed = true;
-                    },
-                    cx,
-                );
-            }
-        } else if self.settings_page.ai_provider_key_remove_confirm.is_some() {
-            let target = self.settings_page.take_ai_provider_key_remove();
-            if confirm && let Some((index, provider_id)) = target {
-                self.remove_ai_provider_api_key(index, &provider_id, cx);
-            }
-        } else if self.settings_page.ai_provider_remove_confirm.is_some() {
-            let target = self.settings_page.take_ai_provider_remove();
-            if confirm && let Some((provider_id, _name)) = target {
-                self.remove_ai_provider(&provider_id, cx);
-            }
-        }
-        self.ai_settings_dialog_presence.reopen();
-        true
     }
 }

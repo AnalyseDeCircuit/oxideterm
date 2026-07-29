@@ -56,12 +56,19 @@ mod tests {
 
         let endpoint = TerminalEndpoint {
             ws_port: 0,
-            ws_token: "native-terminal-term-a".to_string(),
+            ws_token: Zeroizing::new("native-terminal-term-a".to_string()),
             session_id: "term-a".to_string(),
         };
-        router
+        let event = router
             .bind_terminal_endpoint(&node, endpoint.clone())
             .unwrap();
+        assert!(matches!(
+            event,
+            NodeStateEvent::TerminalEndpointChanged {
+                available: true,
+                ..
+            }
+        ));
 
         assert_eq!(router.terminal_url(&node).unwrap(), endpoint);
 
@@ -73,18 +80,173 @@ mod tests {
     }
 
     #[test]
+    fn metadata_snapshot_omits_authentication_and_endpoint_tokens() {
+        let store = NodeRuntimeStore::default();
+        let node = NodeId::new("node-a");
+        let config = SshConfig::password(
+            "example.test",
+            22,
+            "deploy",
+            "representative-password",
+        );
+        store.upsert_node(node.clone(), config);
+        store
+            .bind_terminal_endpoint(
+                &node,
+                TerminalEndpoint {
+                    ws_port: 8022,
+                    ws_token: Zeroizing::new("representative-endpoint-token".to_string()),
+                    session_id: "term-a".to_string(),
+                },
+            )
+            .unwrap();
+
+        let metadata = store.metadata_snapshots();
+        let debug_output = format!("{metadata:?}");
+
+        assert_eq!(metadata[0].host, "example.test");
+        assert_eq!(metadata[0].username, "deploy");
+        assert_eq!(metadata[0].origin, NodeOrigin::Direct);
+        assert!(!debug_output.contains("representative-password"));
+        assert!(!debug_output.contains("representative-endpoint-token"));
+
+        store
+            .update_origin(
+                &node,
+                NodeOrigin::Restored {
+                    saved_connection_id: "saved-connection".to_string(),
+                },
+            )
+            .unwrap();
+        assert_eq!(
+            store.metadata_snapshot(&node).unwrap().origin,
+            NodeOrigin::Restored {
+                saved_connection_id: "saved-connection".to_string(),
+            }
+        );
+    }
+
+    #[test]
+    fn persistence_snapshot_excludes_runtime_secrets_and_endpoints() {
+        let store = NodeRuntimeStore::default();
+        let secret_root = NodeId::new("secret-root");
+        let mut secret_root_snapshot = snapshot_node("secret-root", None, 0, Vec::new());
+        secret_root_snapshot.config = SshConfig::password(
+            "secret.example.test",
+            22,
+            "deploy",
+            "representative-password",
+        );
+        secret_root_snapshot.state.readiness = NodeReadiness::Ready;
+        store
+            .apply_snapshot(NodeTreeSnapshot {
+                version: 1,
+                exported_at_ms: now_ms(),
+                root_ids: vec![secret_root.clone()],
+                nodes: vec![secret_root_snapshot],
+            })
+            .unwrap();
+        let secret_child = store
+            .drill_down(
+                secret_root,
+                SshConfig {
+                    host: "child.example.test".to_string(),
+                    username: "deploy".to_string(),
+                    auth: crate::AuthMethod::Agent,
+                    ..SshConfig::default()
+                },
+            )
+            .unwrap();
+
+        let saved_node = NodeId::new("saved-node");
+        store.upsert_node_with_origin(
+            saved_node.clone(),
+            SshConfig::password(
+                "saved.example.test",
+                22,
+                "deploy",
+                "saved-store-password",
+            ),
+            NodeOrigin::Restored {
+                saved_connection_id: "saved-connection".to_string(),
+            },
+        );
+        store
+            .bind_terminal_endpoint(
+                &saved_node,
+                TerminalEndpoint {
+                    ws_port: 8022,
+                    ws_token: Zeroizing::new("representative-endpoint-token".to_string()),
+                    session_id: "term-a".to_string(),
+                },
+            )
+            .unwrap();
+
+        let snapshot = store.export_persistence_snapshot();
+        let debug_output = format!("{snapshot:?}");
+
+        assert_eq!(snapshot.nodes.len(), 1);
+        assert_eq!(snapshot.nodes[0].id, saved_node);
+        assert!(snapshot.nodes[0].config.is_none());
+        assert!(!snapshot.nodes.iter().any(|node| node.id == secret_child));
+        assert!(!debug_output.contains("representative-password"));
+        assert!(!debug_output.contains("saved-store-password"));
+        assert!(!debug_output.contains("representative-endpoint-token"));
+    }
+
+    #[test]
+    fn minimal_subtree_roots_drop_descendant_candidates_without_config_snapshots() {
+        let store = NodeRuntimeStore::default();
+        let root = NodeId::new("root");
+        let child = NodeId::new("child");
+        let sibling = NodeId::new("sibling");
+        store.upsert_node(
+            root.clone(),
+            SshConfig {
+                host: "root.example.test".to_string(),
+                auth: crate::AuthMethod::Agent,
+                ..SshConfig::default()
+            },
+        );
+        store
+            .upsert_child_node(
+                root.clone(),
+                child.clone(),
+                SshConfig {
+                    host: "child.example.test".to_string(),
+                    auth: crate::AuthMethod::Agent,
+                    ..SshConfig::default()
+                },
+            )
+            .unwrap();
+        store.upsert_node(
+            sibling.clone(),
+            SshConfig {
+                host: "sibling.example.test".to_string(),
+                auth: crate::AuthMethod::Agent,
+                ..SshConfig::default()
+            },
+        );
+
+        assert_eq!(
+            store.minimal_subtree_roots([child, sibling.clone(), root.clone()]),
+            vec![root, sibling]
+        );
+    }
+
+    #[test]
     fn removing_primary_terminal_elects_another_endpoint() {
         let router = NodeRouter::new(SshConnectionRegistry::default());
         let node = NodeId::new("node-a");
         router.upsert_node(node.clone(), SshConfig::password("host", 22, "me", "pw"));
         let first = TerminalEndpoint {
             ws_port: 0,
-            ws_token: "first-token".to_string(),
+            ws_token: Zeroizing::new("first-token".to_string()),
             session_id: "term-a".to_string(),
         };
         let second = TerminalEndpoint {
             ws_port: 0,
-            ws_token: "second-token".to_string(),
+            ws_token: Zeroizing::new("second-token".to_string()),
             session_id: "term-b".to_string(),
         };
 
@@ -97,7 +259,8 @@ mod tests {
         assert_eq!(router.terminal_url(&node).unwrap(), second);
         let snapshot = router.runtime_store().snapshot(&node).unwrap();
         assert_eq!(snapshot.terminal_session_id.as_deref(), Some("term-b"));
-        assert_eq!(snapshot.terminal_endpoints.len(), 1);
+        let tree_snapshot = router.export_tree_snapshot();
+        assert_eq!(tree_snapshot.nodes[0].terminal_endpoints.len(), 1);
     }
 
     #[test]
@@ -396,30 +559,9 @@ mod tests {
         ));
 
         {
-            let mut snapshot = store.snapshot(&root).unwrap();
-            snapshot.state.readiness = NodeReadiness::Ready;
-            store
-                .apply_snapshot(NodeTreeSnapshot {
-                    version: 1,
-                    exported_at_ms: now_ms(),
-                    root_ids: vec![root.clone()],
-                    nodes: vec![NodeTreeSnapshotNode {
-                        id: root.clone(),
-                        parent_id: None,
-                        children_ids: Vec::new(),
-                        depth: 0,
-                        config: snapshot.config,
-                        origin: snapshot.origin,
-                        state: snapshot.state,
-                        connection_id: snapshot.connection_id,
-                        terminal_session_id: snapshot.terminal_session_id,
-                        terminal_endpoints: snapshot.terminal_endpoints,
-                        sftp_session_id: snapshot.sftp_session_id,
-                        created_at_ms: snapshot.created_at_ms,
-                        generation: snapshot.generation,
-                    }],
-                })
-                .unwrap();
+            let mut snapshot = store.export_snapshot();
+            snapshot.nodes[0].state.readiness = NodeReadiness::Ready;
+            store.apply_snapshot(snapshot).unwrap();
         }
 
         let child = store
@@ -453,7 +595,7 @@ mod tests {
                         sftp_cwd: Some("/home/me".to_string()),
                         ws_endpoint: Some(TerminalEndpoint {
                             ws_port: 0,
-                            ws_token: "token".to_string(),
+                            ws_token: Zeroizing::new("token".to_string()),
                             session_id: "term-a".to_string(),
                         }),
                     },
@@ -493,7 +635,7 @@ mod tests {
                 &node,
                 TerminalEndpoint {
                     ws_port: 0,
-                    ws_token: "native-terminal-term-a".to_string(),
+                    ws_token: Zeroizing::new("native-terminal-term-a".to_string()),
                     session_id: "term-a".to_string(),
                 },
             )
@@ -557,6 +699,32 @@ mod tests {
     }
 
     #[test]
+    fn connection_attempt_preparation_clears_runtime_without_disconnect_event() {
+        let registry = SshConnectionRegistry::default();
+        let router = NodeRouter::new(registry.clone());
+        let node = NodeId::new("node-a");
+        let config = SshConfig::password("host", 22, "me", "pw");
+        router.upsert_node(node.clone(), config.clone());
+        let handle = registry.acquire(config, ConnectionConsumer::NodeRouter("node-a".into()));
+        router
+            .bind_connection(&node, handle.connection_id().to_string())
+            .unwrap();
+        router
+            .bind_sftp_session(&node, "sftp-a", Some("/home/me".to_string()))
+            .unwrap();
+        let (tx, rx) = mpsc::channel();
+        router.emitter().subscribe(tx);
+
+        router.prepare_node_connection_attempt(&node).unwrap();
+
+        let snapshot = router.runtime_store().snapshot(&node).unwrap();
+        assert_eq!(snapshot.state.readiness, NodeReadiness::Disconnected);
+        assert!(snapshot.connection_id.is_none());
+        assert!(snapshot.sftp_session_id.is_none());
+        assert!(rx.try_iter().next().is_none());
+    }
+
+    #[test]
     fn acquiring_consumer_does_not_revive_link_down_connection() {
         let registry = SshConnectionRegistry::default();
         let router = NodeRouter::new(registry.clone());
@@ -607,6 +775,51 @@ mod tests {
 
         assert!(matches!(result, Err(RouteError::NotConnected(_))));
         assert_eq!(handle.state(), ConnectionState::LinkDown);
+    }
+
+    #[test]
+    fn active_registry_state_without_physical_transport_is_not_ready() {
+        let registry = SshConnectionRegistry::default();
+        let router = NodeRouter::new(registry.clone());
+        let node = NodeId::new("node-a");
+        let config = SshConfig::password("host", 22, "me", "pw");
+        router.upsert_node(node.clone(), config.clone());
+        let handle = registry.acquire(config, ConnectionConsumer::NodeRouter("node-a".into()));
+        registry.mark_state(handle.connection_id(), ConnectionState::Active);
+
+        router
+            .bind_connection(&node, handle.connection_id().to_string())
+            .unwrap();
+
+        assert_ne!(
+            router.node_state(&node).unwrap().state.readiness,
+            NodeReadiness::Ready
+        );
+    }
+
+    #[test]
+    fn closing_terminal_consumer_does_not_change_node_readiness() {
+        let registry = SshConnectionRegistry::default();
+        let router = NodeRouter::new(registry.clone());
+        let node = NodeId::new("node-a");
+        let config = SshConfig::password("host", 22, "me", "pw");
+        router.upsert_node(node.clone(), config.clone());
+        let handle = bind_active_node(&registry, &router, &node, config.clone());
+        let terminal_consumer = ConnectionConsumer::Terminal("term-a".into());
+        let terminal_handle = registry.acquire(config, terminal_consumer.clone());
+        assert_eq!(terminal_handle.connection_id(), handle.connection_id());
+        router
+            .bind_terminal_session(&node, "term-a".to_string())
+            .unwrap();
+
+        registry.release(handle.connection_id(), &terminal_consumer);
+        router.unbind_terminal_session(&node, "term-a").unwrap();
+
+        assert_eq!(
+            router.node_state(&node).unwrap().state.readiness,
+            NodeReadiness::Ready
+        );
+        assert!(handle.has_physical());
     }
 
     #[test]
@@ -691,7 +904,7 @@ mod tests {
                 &child_id,
                 TerminalEndpoint {
                     ws_port: 0,
-                    ws_token: "native-terminal-term-target".to_string(),
+                    ws_token: Zeroizing::new("native-terminal-term-target".to_string()),
                     session_id: "term-target".to_string(),
                 },
             )

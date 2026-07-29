@@ -831,6 +831,7 @@
     "enable_success": "{{name}} 已启用。",
     "disable_success": "{{name}} 已禁用。",
     "load_failed_default": "插件加载失败。",
+    "runtime_failure": "插件运行时操作失败。",
     "error_copied": "已复制插件错误。",
     "open_dir_create_failed": "无法创建插件目录：{{message}}",
     "open_dir_failed": "无法打开插件目录：{{message}}",
@@ -1176,7 +1177,7 @@
     "vnc_legacy_security_description": "此安全方式无法保护服务器身份，并可能使会话遭到拦截。仅应在可信且受保护的网络中继续。",
     "vnc_security_method": "安全方式：{{method}}",
     "vnc_continue_anyway": "仍然继续",
-    "certificate_save_failed": "无法保存证书信任记录：{{error}}",
-    "clipboard_file_failed": "无法接收剪贴板文件：{{error}}"
+    "certificate_save_failed": "无法保存证书信任记录",
+    "clipboard_file_failed": "无法接收剪贴板文件"
   }
 }

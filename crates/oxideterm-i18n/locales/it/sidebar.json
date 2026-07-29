@@ -133,6 +133,7 @@
         "invalid_nice": "Inserisci un valore nice tra -20 e 19.",
         "connection_missing": "La connessione selezionata non è più disponibile.",
         "action_failed": "Azione processo non riuscita.",
+        "action_succeeded": "Azione del processo per il PID {{pid}} completata.",
         "partial_support": "La gestione processi è parziale su {{os}}."
       }
     },
@@ -191,7 +192,8 @@
         "exec_opened": "Shell aperta per {{name}}.",
         "follow_opened": "Log di {{name}} in monitoraggio.",
         "connection_missing": "La connessione selezionata non è più disponibile.",
-        "action_failed": "Azione Docker non riuscita."
+        "action_failed": "Azione Docker non riuscita.",
+        "action_succeeded": "Azione Docker per {{name}} completata."
       }
     },
     "host_services": {
@@ -267,6 +269,7 @@
         "follow_opened": "Segui log per {{name}}.",
         "connection_missing": "La connessione selezionata non è più disponibile.",
         "action_failed": "Azione servizio non riuscita.",
+        "action_succeeded": "Azione del servizio per {{name}} completata.",
         "partial_support": "La gestione dei servizi è parziale su {{os}}."
       }
     },
@@ -379,6 +382,7 @@
         "new_session_opened": "Apertura di {{name}}.",
         "action_already_running": "Un'azione tmux è già in esecuzione.",
         "action_failed": "Azione tmux non riuscita.",
+        "action_succeeded": "Azione tmux per {{target}} completata.",
         "unknown_error": "Errore sconosciuto",
         "input_required": "Inserisci un valore prima di continuare."
       },

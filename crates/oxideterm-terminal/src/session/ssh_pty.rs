@@ -31,7 +31,7 @@ pub struct SshPtySession {
 
 impl SshPtySession {
     pub fn new(
-        config: SshSessionConfig,
+        mut config: SshSessionConfig,
         cols: usize,
         rows: usize,
         graphics_options: GraphicsOptions,
@@ -64,35 +64,59 @@ impl SshPtySession {
         };
         let runtime_handle = config
             .runtime_handle
-            .clone()
+            .take()
             .or_else(|| runtime.as_ref().map(|runtime| runtime.handle().clone()));
         let (connect_tx, connect_rx) = unbounded();
         if let Some(runtime_handle) = runtime_handle {
-            let mut ssh_config = config.config.clone();
-            if config.defer_pty_until_resize() {
-                ssh_config.cols = 0;
-                ssh_config.rows = 0;
+            let connection = config.connection.take();
+            let registry = config.registry.take();
+            let consumer = config.consumer.take();
+            let prompt_handler = config.prompt_handler.take();
+            let managed_key_resolver = config.managed_key_resolver.take();
+            let (cols, rows) = if config.defer_pty_until_resize() {
+                (0, 0)
             } else {
-                ssh_config.cols = resize.cols as u32;
-                ssh_config.rows = resize.rows as u32;
-            }
-            let registry = config.registry.clone();
-            let consumer = config.consumer.clone();
-            let prompt_handler = config.prompt_handler.clone();
-            let managed_key_resolver = config.managed_key_resolver.clone();
+                (resize.cols as u32, resize.rows as u32)
+            };
             runtime_handle.spawn(async move {
-                let mut client = SshTransportClient::new(ssh_config);
-                if let Some(prompt_handler) = prompt_handler {
-                    client = client.with_prompt_handler(prompt_handler);
-                }
-                if let Some(resolver) = managed_key_resolver {
-                    client = client.with_managed_key_resolver(resolver);
-                }
-                let result = match (registry, consumer) {
-                    (Some(registry), Some(consumer)) => {
-                        client.connect_shell_with_registry(registry, consumer).await
+                let result = match connection {
+                    Some(SshSessionConnection::New(mut ssh_config)) => {
+                        ssh_config.cols = cols;
+                        ssh_config.rows = rows;
+                        let mut client = SshTransportClient::new(ssh_config);
+                        if let Some(prompt_handler) = prompt_handler {
+                            client = client.with_prompt_handler(prompt_handler);
+                        }
+                        if let Some(resolver) = managed_key_resolver {
+                            client = client.with_managed_key_resolver(resolver);
+                        }
+                        match (registry, consumer) {
+                            (Some(registry), Some(consumer)) => {
+                                client.connect_shell_with_registry(registry, consumer).await
+                            }
+                            _ => client.connect_shell().await,
+                        }
                     }
-                    _ => client.connect_shell().await,
+                    Some(SshSessionConnection::Existing { connection_id }) => {
+                        match (registry, consumer) {
+                            (Some(registry), Some(consumer)) => {
+                                SshTransportClient::connect_shell_on_existing_connection(
+                                    registry,
+                                    connection_id,
+                                    consumer,
+                                    cols,
+                                    rows,
+                                )
+                                .await
+                            }
+                            _ => Err(oxideterm_ssh::SshTransportError::ConnectionFailed(
+                                "existing SSH terminal requires a connection registry".to_string(),
+                            )),
+                        }
+                    }
+                    None => Err(oxideterm_ssh::SshTransportError::ConnectionFailed(
+                        "SSH terminal connection ownership was already transferred".to_string(),
+                    )),
                 }
                 .map_err(|error| error.to_string());
                 let _ = connect_tx.send(result);

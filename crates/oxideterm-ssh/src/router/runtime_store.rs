@@ -12,28 +12,33 @@ impl NodeRuntimeStore {
     }
 
     pub fn upsert_node_with_origin(&self, node_id: NodeId, config: SshConfig, origin: NodeOrigin) {
-        let is_new = !self.nodes.contains_key(&node_id);
-        self.nodes
-            .entry(node_id.clone())
-            .and_modify(|route| {
-                route.config = config.clone();
-                route.origin = origin.clone();
+        let is_new = match self.nodes.entry(node_id.clone()) {
+            Entry::Occupied(mut entry) => {
+                let route = entry.get_mut();
+                // Move auth material into the existing runtime owner without a transient clone.
+                route.config = config;
+                route.origin = origin;
                 route.generation += 1;
-            })
-            .or_insert_with(|| NodeRuntimeEntry {
-                config,
-                parent_id: None,
-                children_ids: Vec::new(),
-                depth: 0,
-                origin,
-                connection_id: None,
-                terminal_session_id: None,
-                terminal_endpoints: Vec::new(),
-                sftp_session_id: None,
-                state: NodeState::default(),
-                created_at_ms: now_ms(),
-                generation: 0,
-            });
+                false
+            }
+            Entry::Vacant(entry) => {
+                entry.insert(NodeRuntimeEntry {
+                    config,
+                    parent_id: None,
+                    children_ids: Vec::new(),
+                    depth: 0,
+                    origin,
+                    connection_id: None,
+                    terminal_session_id: None,
+                    terminal_endpoints: Vec::new(),
+                    sftp_session_id: None,
+                    state: NodeState::default(),
+                    created_at_ms: now_ms(),
+                    generation: 0,
+                });
+                true
+            }
+        };
         if is_new {
             let mut root_ids = self.root_ids.write();
             if !root_ids.contains(&node_id) {
@@ -52,7 +57,6 @@ impl NodeRuntimeStore {
             origin: route.origin.clone(),
             connection_id: route.connection_id.clone(),
             terminal_session_id: route.terminal_session_id.clone(),
-            terminal_endpoints: route.terminal_endpoints.clone(),
             sftp_session_id: route.sftp_session_id.clone(),
             state: route.state.clone(),
             created_at_ms: route.created_at_ms,
@@ -104,29 +108,33 @@ impl NodeRuntimeStore {
             parent.depth
         };
 
-        self.nodes
-            .entry(node_id.clone())
-            .and_modify(|route| {
-                route.config = config.clone();
+        match self.nodes.entry(node_id.clone()) {
+            Entry::Occupied(mut entry) => {
+                let route = entry.get_mut();
+                // Existing child nodes receive the new config by value so secrets are not copied.
+                route.config = config;
                 route.parent_id = Some(parent_id.clone());
                 route.depth = parent_depth + 1;
-                route.origin = origin.clone();
+                route.origin = origin;
                 route.generation += 1;
-            })
-            .or_insert_with(|| NodeRuntimeEntry {
-                config,
-                parent_id: Some(parent_id),
-                children_ids: Vec::new(),
-                depth: parent_depth + 1,
-                origin,
-                connection_id: None,
-                terminal_session_id: None,
-                terminal_endpoints: Vec::new(),
-                sftp_session_id: None,
-                state: NodeState::default(),
-                created_at_ms: now_ms(),
-                generation: 0,
-            });
+            }
+            Entry::Vacant(entry) => {
+                entry.insert(NodeRuntimeEntry {
+                    config,
+                    parent_id: Some(parent_id),
+                    children_ids: Vec::new(),
+                    depth: parent_depth + 1,
+                    origin,
+                    connection_id: None,
+                    terminal_session_id: None,
+                    terminal_endpoints: Vec::new(),
+                    sftp_session_id: None,
+                    state: NodeState::default(),
+                    created_at_ms: now_ms(),
+                    generation: 0,
+                });
+            }
+        }
         self.root_ids.write().retain(|id| id != &node_id);
         Ok(())
     }
@@ -350,6 +358,155 @@ impl NodeRuntimeStore {
         }
     }
 
+    pub fn export_persistence_snapshot(&self) -> NodeTreePersistenceSnapshot {
+        let mut nodes = self
+            .nodes
+            .iter()
+            .filter_map(|entry| {
+                let route = entry.value();
+                let config = if route.origin.saved_connection_id().is_some() {
+                    None
+                } else if route.config.has_runtime_auth_secret() {
+                    return None;
+                } else {
+                    // Only restart-safe configurations cross the persistence boundary.
+                    Some(route.config.clone())
+                };
+                Some(NodeTreePersistenceNode {
+                    id: entry.key().clone(),
+                    parent_id: route.parent_id.clone(),
+                    children_ids: route.children_ids.clone(),
+                    depth: route.depth,
+                    origin: route.origin.clone(),
+                    config,
+                    created_at_ms: route.created_at_ms,
+                    generation: route.generation,
+                })
+            })
+            .collect::<Vec<_>>();
+        // A child cannot be restored when a secret-bearing unsaved ancestor
+        // was excluded, so prune such descendants before writing the tree.
+        loop {
+            let candidate_ids = nodes
+                .iter()
+                .map(|node| node.id.clone())
+                .collect::<HashSet<_>>();
+            let previous_len = nodes.len();
+            nodes.retain(|node| {
+                node.parent_id
+                    .as_ref()
+                    .is_none_or(|parent_id| candidate_ids.contains(parent_id))
+            });
+            if nodes.len() == previous_len {
+                break;
+            }
+        }
+        let retained_ids = nodes
+            .iter()
+            .map(|node| node.id.clone())
+            .collect::<HashSet<_>>();
+        for node in &mut nodes {
+            node.children_ids
+                .retain(|child_id| retained_ids.contains(child_id));
+        }
+        nodes.sort_by_key(|node| (node.depth, node.created_at_ms, node.id.0.clone()));
+
+        NodeTreePersistenceSnapshot {
+            version: 1,
+            exported_at_ms: now_ms(),
+            root_ids: self
+                .root_ids
+                .read()
+                .iter()
+                .filter(|node_id| retained_ids.contains(*node_id))
+                .cloned()
+                .collect(),
+            nodes,
+        }
+    }
+
+    pub fn root_node_ids(&self) -> Vec<NodeId> {
+        self.root_ids.read().clone()
+    }
+
+    pub fn contains_node(&self, node_id: &NodeId) -> bool {
+        self.nodes.contains_key(node_id)
+    }
+
+    /// Returns the non-secret projection used by UI and plugin readers.
+    pub fn metadata_snapshot(&self, node_id: &NodeId) -> Option<NodeMetadataSnapshot> {
+        let route = self.nodes.get(node_id)?;
+        Some(node_metadata_snapshot(node_id.clone(), &route))
+    }
+
+    /// Changes persistence ownership without copying the node's SSH config.
+    pub fn update_origin(
+        &self,
+        node_id: &NodeId,
+        origin: NodeOrigin,
+    ) -> Result<(), RouteError> {
+        let mut route = self
+            .nodes
+            .get_mut(node_id)
+            .ok_or_else(|| RouteError::NodeNotFound(node_id.0.clone()))?;
+        route.origin = origin;
+        route.generation = route.generation.saturating_add(1);
+        Ok(())
+    }
+
+    /// Selects non-overlapping existing roots without cloning node configs.
+    pub fn minimal_subtree_roots(
+        &self,
+        candidate_node_ids: impl IntoIterator<Item = NodeId>,
+    ) -> Vec<NodeId> {
+        let mut candidates = candidate_node_ids
+            .into_iter()
+            .filter(|node_id| self.nodes.contains_key(node_id))
+            .collect::<Vec<_>>();
+        candidates.sort_by_key(|node_id| {
+            self.nodes
+                .get(node_id)
+                .map(|node| (node.depth, node_id.0.clone()))
+                .unwrap_or((u32::MAX, node_id.0.clone()))
+        });
+
+        let mut roots = Vec::new();
+        for node_id in candidates {
+            if roots
+                .iter()
+                .any(|root_id| self.node_is_descendant_or_same(&node_id, root_id))
+            {
+                continue;
+            }
+            roots.push(node_id);
+        }
+        roots
+    }
+
+    fn node_is_descendant_or_same(&self, node_id: &NodeId, ancestor_id: &NodeId) -> bool {
+        let mut current_id = Some(node_id.clone());
+        while let Some(candidate_id) = current_id {
+            if &candidate_id == ancestor_id {
+                return true;
+            }
+            current_id = self
+                .nodes
+                .get(&candidate_id)
+                .and_then(|node| node.parent_id.clone());
+        }
+        false
+    }
+
+    pub fn metadata_snapshots(&self) -> Vec<NodeMetadataSnapshot> {
+        let mut nodes = self
+            .nodes
+            .iter()
+            .map(|entry| node_metadata_snapshot(entry.key().clone(), entry.value()))
+            .collect::<Vec<_>>();
+        nodes.sort_by_key(|node| (node.depth, node.created_at_ms, node.id.0.clone()));
+        nodes
+    }
+
     pub fn apply_snapshot(&self, snapshot: NodeTreeSnapshot) -> Result<(), RouteError> {
         let node_ids = snapshot
             .nodes
@@ -411,6 +568,9 @@ impl NodeRuntimeStore {
                 self.connection_nodes
                     .insert(connection_id.clone(), node_id.clone());
             }
+            let mut state = node.state;
+            let terminal_endpoints =
+                restored_terminal_endpoints(node.terminal_endpoints, state.ws_endpoint.take());
             self.nodes.insert(
                 node_id.clone(),
                 NodeRuntimeEntry {
@@ -421,12 +581,9 @@ impl NodeRuntimeStore {
                     origin: node.origin,
                     connection_id: node.connection_id,
                     terminal_session_id: node.terminal_session_id,
-                    terminal_endpoints: restored_terminal_endpoints(
-                        &node.terminal_endpoints,
-                        node.state.ws_endpoint.as_ref(),
-                    ),
+                    terminal_endpoints,
                     sftp_session_id: node.sftp_session_id,
-                    state: node.state,
+                    state,
                     created_at_ms: node.created_at_ms,
                     generation: node.generation,
                 },
@@ -672,27 +829,31 @@ impl NodeRuntimeStore {
             .nodes
             .get_mut(node_id)
             .ok_or_else(|| RouteError::NodeNotFound(node_id.0.clone()))?;
+        let endpoint_session_id = endpoint.session_id.clone();
         if let Some(existing) = route
             .terminal_endpoints
             .iter_mut()
             .find(|existing| existing.session_id == endpoint.session_id)
         {
-            *existing = endpoint.clone();
+            *existing = endpoint;
         } else {
-            route.terminal_endpoints.push(endpoint.clone());
+            route.terminal_endpoints.push(endpoint);
         }
         if route.terminal_session_id.is_none()
-            || route.terminal_session_id.as_deref() == Some(endpoint.session_id.as_str())
+            || route.terminal_session_id.as_deref() == Some(endpoint_session_id.as_str())
         {
-            route.terminal_session_id = Some(endpoint.session_id.clone());
-            route.state.ws_endpoint = Some(endpoint.clone());
+            route.terminal_session_id = Some(endpoint_session_id);
+            // The legacy state slot is accepted on import only. Runtime keeps
+            // one endpoint owner in terminal_endpoints.
+            route.state.ws_endpoint = None;
         }
         route.generation += 1;
         Ok(NodeStateEvent::TerminalEndpointChanged {
             node_id: node_id.0.clone(),
             generation: route.generation,
-            ws_port: endpoint.ws_port,
-            ws_token: endpoint.ws_token,
+            // Event fan-out carries only availability; the token stays in the
+            // runtime endpoint owner and is resolved explicitly by consumers.
+            available: true,
         })
     }
 
@@ -710,16 +871,34 @@ impl NodeRuntimeStore {
             .terminal_endpoints
             .retain(|endpoint| endpoint.session_id != session_id);
         if route.terminal_session_id.as_deref() == Some(session_id) {
-            let replacement = route.terminal_endpoints.first().cloned();
-            route.terminal_session_id = replacement
-                .as_ref()
+            route.terminal_session_id = route
+                .terminal_endpoints
+                .first()
                 .map(|endpoint| endpoint.session_id.clone());
-            route.state.ws_endpoint = replacement;
+            route.state.ws_endpoint = None;
             route.generation += 1;
         } else if route.terminal_endpoints.len() != before {
             route.generation += 1;
         }
         Ok(())
+    }
+
+    pub(super) fn primary_terminal_endpoint(
+        &self,
+        node_id: &NodeId,
+    ) -> Result<Option<TerminalEndpoint>, RouteError> {
+        let route = self
+            .nodes
+            .get(node_id)
+            .ok_or_else(|| RouteError::NodeNotFound(node_id.0.clone()))?;
+        let Some(primary_session_id) = route.terminal_session_id.as_deref() else {
+            return Ok(None);
+        };
+        Ok(route
+            .terminal_endpoints
+            .iter()
+            .find(|endpoint| endpoint.session_id == primary_session_id)
+            .cloned())
     }
 
     fn bind_sftp_session(
@@ -899,14 +1078,33 @@ impl NodeRuntimeStore {
     }
 }
 
+fn node_metadata_snapshot(node_id: NodeId, route: &NodeRuntimeEntry) -> NodeMetadataSnapshot {
+    NodeMetadataSnapshot {
+        id: node_id,
+        parent_id: route.parent_id.clone(),
+        children_ids: route.children_ids.clone(),
+        depth: route.depth,
+        origin: route.origin.clone(),
+        host: route.config.host.clone(),
+        port: route.config.port,
+        username: route.config.username.clone(),
+        readiness: route.state.readiness.clone(),
+        error: route.state.error.clone(),
+        connection_id: route.connection_id.clone(),
+        terminal_session_id: route.terminal_session_id.clone(),
+        sftp_session_id: route.sftp_session_id.clone(),
+        created_at_ms: route.created_at_ms,
+    }
+}
+
 fn restored_terminal_endpoints(
-    endpoints: &[TerminalEndpoint],
-    legacy_primary: Option<&TerminalEndpoint>,
+    endpoints: Vec<TerminalEndpoint>,
+    legacy_primary: Option<TerminalEndpoint>,
 ) -> Vec<TerminalEndpoint> {
     if !endpoints.is_empty() {
-        return endpoints.to_vec();
+        return endpoints;
     }
-    legacy_primary.cloned().into_iter().collect()
+    legacy_primary.into_iter().collect()
 }
 
 fn root_ids_from_nodes(nodes: &[NodeTreeSnapshotNode]) -> Vec<NodeId> {

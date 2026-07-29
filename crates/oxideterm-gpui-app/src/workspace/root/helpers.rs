@@ -660,14 +660,18 @@ impl WorkspaceApp {
         title: impl Into<String>,
         description: Option<String>,
         variant: TerminalNoticeVariant,
+        cx: &App,
     ) {
-        let _ = self.terminal_notice_tx.send(TerminalNotice {
-            title: title.into(),
-            description,
-            status_text: None,
-            progress: None,
-            variant,
-        });
+        self.push_workspace_notice(
+            TerminalNotice {
+                title: title.into(),
+                description,
+                status_text: None,
+                progress: None,
+                variant,
+            },
+            cx,
+        );
     }
 
     pub(in crate::workspace) fn i18n_with(
@@ -730,6 +734,7 @@ impl WorkspaceApp {
         &self,
         node_id: &NodeId,
         error: &str,
+        cx: &App,
     ) -> Option<(String, Option<String>)> {
         if connection_error_is_cancelled(error) {
             return None;
@@ -742,13 +747,11 @@ impl WorkspaceApp {
             ));
         }
 
-        if let Some(run) = self.active_connection_chain.as_ref()
-            && let Some(position) = run
-                .node_ids
-                .iter()
-                .position(|candidate| candidate == node_id)
+        if let Some((position, total)) = self
+            .workspace_runtime
+            .read(cx)
+            .connection_chain_position(node_id)
         {
-            let total = run.node_ids.len();
             let description = self
                 .ssh_algorithm_diagnostic_message(error)
                 .unwrap_or_else(|| error.to_string());
@@ -774,45 +777,10 @@ impl WorkspaceApp {
         ))
     }
 
-    pub(in crate::workspace) fn connection_trace_plan_for_node(
-        &mut self,
-        node_id: &NodeId,
-        mode: ConnectionTraceMode,
-    ) -> Option<ConnectionTracePlan> {
-        let mut path = Vec::new();
-        let mut current = Some(node_id.clone());
-        while let Some(current_id) = current {
-            path.push(current_id.clone());
-            current = self
-                .node_runtime_store
-                .snapshot(&current_id)
-                .and_then(|snapshot| snapshot.parent_id);
-        }
-        path.reverse();
-        let path = path
-            .into_iter()
-            .map(|candidate| {
-                let ready = self.connection_trace_node_is_ready(&candidate);
-                (candidate, ready)
-            })
-            .collect::<Vec<_>>();
-        self.connection_trace_state.plan_for_path(mode, &path)
-    }
-
     pub(in crate::workspace) fn connection_trace_node_is_ready(&self, node_id: &NodeId) -> bool {
-        self.ssh_nodes.get(node_id).is_some_and(|node| {
-            matches!(node.readiness, NodeReadiness::Ready)
-                && self
-                    .node_router
-                    .connection_id_for_node(node_id)
-                    .and_then(|connection_id| self.ssh_registry.get(&connection_id))
-                    .is_some_and(|handle| {
-                        matches!(
-                            handle.state(),
-                            ConnectionState::Active | ConnectionState::Idle
-                        )
-                    })
-        })
+        self.node_router
+            .node_state(node_id)
+            .is_ok_and(|snapshot| snapshot.state.readiness == NodeReadiness::Ready)
     }
 
     pub(in crate::workspace) fn begin_connection_trace_for_node(
@@ -820,104 +788,12 @@ impl WorkspaceApp {
         node_id: &NodeId,
         plan: Option<&ConnectionTracePlan>,
         parent_id: Option<&NodeId>,
+        cx: &mut Context<Self>,
     ) {
         let label = self.ssh_nodes.get(node_id).map(|node| node.title.clone());
-        self.connection_trace_state
-            .begin(node_id.clone(), label, plan);
-        self.emit_connection_trace_stage(node_id, ConnectionTraceStage::Queued, 5.0, None);
-        self.emit_connection_trace_stage(node_id, ConnectionTraceStage::Preparing, 15.0, None);
-        self.emit_connection_trace_stage(
-            node_id,
-            ConnectionTraceStage::OpeningTransport,
-            28.0,
-            None,
-        );
-        self.emit_connection_trace_stage(node_id, ConnectionTraceStage::HostKey, 38.0, None);
-        self.emit_connection_trace_stage(
-            node_id,
-            ConnectionTraceStage::SshHandshake,
-            48.0,
-            parent_id.map(|parent_id| format!("via {}", parent_id.0)),
-        );
-        self.emit_connection_trace_stage(node_id, ConnectionTraceStage::Authentication, 62.0, None);
-    }
-
-    pub(in crate::workspace) fn emit_connection_trace_stage(
-        &self,
-        node_id: &NodeId,
-        stage: ConnectionTraceStage,
-        progress: f32,
-        detail: Option<String>,
-    ) {
-        self.emit_connection_trace_event(
-            node_id,
-            stage,
-            ConnectionTraceStatus::Running,
-            progress,
-            detail,
-        );
-    }
-
-    pub(in crate::workspace) fn finish_connection_trace_success(&mut self, node_id: &NodeId) {
-        if self.connection_trace_state.contains(node_id) {
-            self.emit_connection_trace_stage(node_id, ConnectionTraceStage::Pty, 86.0, None);
-            self.emit_connection_trace_stage(node_id, ConnectionTraceStage::ShellReady, 96.0, None);
-            self.emit_connection_trace_event(
-                node_id,
-                ConnectionTraceStage::Ready,
-                ConnectionTraceStatus::Ready,
-                100.0,
-                None,
-            );
-            self.connection_trace_state.finish(node_id);
-        }
-    }
-
-    pub(in crate::workspace) fn finish_connection_trace_failed(
-        &mut self,
-        node_id: &NodeId,
-        detail: Option<String>,
-    ) {
-        if self.connection_trace_state.contains(node_id) {
-            let stage = oxideterm_ssh::connection_trace_failure_stage(detail.as_deref());
-            self.emit_connection_trace_event(
-                node_id,
-                stage,
-                ConnectionTraceStatus::Failed,
-                100.0,
-                detail,
-            );
-            self.connection_trace_state.finish(node_id);
-        }
-    }
-
-    pub(in crate::workspace) fn cancel_connection_trace_for_node(&mut self, node_id: &NodeId) {
-        if self.connection_trace_state.contains(node_id) {
-            self.emit_connection_trace_event(
-                node_id,
-                ConnectionTraceStage::Authentication,
-                ConnectionTraceStatus::Cancelled,
-                100.0,
-                None,
-            );
-            self.connection_trace_state.finish(node_id);
-        }
-    }
-
-    pub(in crate::workspace) fn emit_connection_trace_event(
-        &self,
-        node_id: &NodeId,
-        stage: ConnectionTraceStage,
-        status: ConnectionTraceStatus,
-        progress: f32,
-        detail: Option<String>,
-    ) {
-        if let Some(event) = self
-            .connection_trace_state
-            .event(node_id, stage, status, progress, detail)
-        {
-            let _ = self.connection_trace_tx.send(event);
-        }
+        self.workspace_runtime.update(cx, |runtime, cx| {
+            runtime.begin_connection_trace(node_id, label, plan, parent_id, cx);
+        });
     }
 
     pub(in crate::workspace) fn log_reconnect_phase(
@@ -962,10 +838,14 @@ impl WorkspaceApp {
         );
     }
 
-    pub(in crate::workspace) fn has_active_reconnect_job(&self, node_id: &NodeId) -> bool {
-        self.reconnect_orchestrator
-            .job(&node_id.0)
-            .is_some_and(|job| job.ended_at.is_none())
+    pub(in crate::workspace) fn has_active_reconnect_job(
+        &self,
+        node_id: &NodeId,
+        cx: &App,
+    ) -> bool {
+        self.workspace_runtime
+            .read(cx)
+            .has_active_reconnect_job(node_id)
     }
 
     pub(in crate::workspace) fn cancel_reconnect_for_node(
@@ -973,34 +853,20 @@ impl WorkspaceApp {
         node_id: &NodeId,
         cx: &mut Context<Self>,
     ) {
-        let mut affected_nodes = self.node_runtime_store.subtree_postorder(node_id);
+        let mut affected_nodes = self.node_router.subtree_postorder(node_id);
         if affected_nodes.is_empty() {
             affected_nodes.push(node_id.clone());
         }
-        let mut cancelled = 0_u32;
-        for affected_node_id in affected_nodes {
-            if self
-                .reconnect_orchestrator
-                .cancel(&affected_node_id.0)
-                .is_some()
-            {
-                cancelled = cancelled.saturating_add(1);
+        let cancelled = self.workspace_runtime.update(cx, |runtime, _cx| {
+            runtime.cancel_queued_reconnects(&affected_nodes);
+            let mut cancelled = 0_u32;
+            for affected_node_id in affected_nodes {
+                if runtime.cancel_reconnect_job(&affected_node_id) {
+                    cancelled = cancelled.saturating_add(1);
+                }
             }
-            self.cancel_forward_restore_token(&affected_node_id);
-            self.pending_reconnect_node_ids.remove(&affected_node_id);
-            self.reconnect_requeue_counts.remove(&affected_node_id);
-            self.pending_reconnect_transfer_resumes
-                .remove(&affected_node_id);
-            self.reconnect_transfer_resume_totals
-                .remove(&affected_node_id);
-            self.reconnect_transfer_resume_successes
-                .remove(&affected_node_id);
-            self.pending_ide_restore_transfer_counts
-                .remove(&affected_node_id);
-            self.reconnect_forward_restore_totals
-                .remove(&affected_node_id);
-            self.clear_reconnect_pipeline_active(&affected_node_id);
-        }
+            cancelled
+        });
         if cancelled > 0 {
             self.push_event_log_entry(
                 WorkspaceEventSeverity::Warn,
@@ -1015,31 +881,42 @@ impl WorkspaceApp {
                 self.i18n.t("connections.reconnect.cancelled"),
                 None,
                 TerminalNoticeVariant::Default,
+                cx,
             );
             cx.notify();
         }
     }
 
-    pub(in crate::workspace) fn prepare_modal_interaction_boundary(&mut self) {
+    pub(in crate::workspace) fn prepare_modal_interaction_boundary(
+        &mut self,
+        cx: &mut Context<Self>,
+    ) {
         // Tauri dialogs are Radix modal roots: opening one dismisses background
         // popovers and input focus before the overlay starts trapping events.
-        self.release_active_remote_desktop_inputs();
+        self.release_active_remote_desktop_inputs(cx);
         self.close_settings_select();
-        self.close_new_connection_select();
+        self.close_new_connection_select(cx);
         // Cloud Sync provider/config selects are Radix-like transient popovers;
         // a modal boundary must release both the open menu and the trigger
         // focus owner so keyboard rings do not leak behind the dialog.
-        self.cloud_sync.view.open_select = None;
+        self.cloud_sync.update(cx, |cloud_sync, cx| {
+            let open_changed = cloud_sync.view.open_select.take().is_some();
+            let focus_changed = cloud_sync.view.focused_select.take().is_some();
+            let changed = open_changed || focus_changed;
+            if changed {
+                cx.notify();
+            }
+        });
         self.focused_settings_input = None;
-        self.cloud_sync.view.focused_select = None;
         self.settings_slider_drag = None;
         self.ime_marked_text = None;
-        self.workspace_tooltip = None;
-        self.workspace_tooltip_pending = None;
-        self.workspace_tooltip_generation = self.workspace_tooltip_generation.wrapping_add(1);
+        self.clear_all_workspace_tooltips(cx);
     }
 
-    pub(in crate::workspace) fn dismiss_transient_workspace_overlays(&mut self) -> bool {
+    pub(in crate::workspace) fn dismiss_transient_workspace_overlays(
+        &mut self,
+        cx: &mut Context<Self>,
+    ) -> bool {
         let mut changed = false;
 
         // Match browser/Radix outside-click behavior for non-modal UI only.
@@ -1050,38 +927,51 @@ impl WorkspaceApp {
             self.close_settings_select();
             changed = true;
         }
-        if self.open_new_connection_select.is_some() {
-            self.close_new_connection_select();
+        if self.connection_form_state(cx).open_select.is_some() {
+            self.close_new_connection_select(cx);
             changed = true;
         }
-        if self.cloud_sync.view.open_select.take().is_some() {
-            self.cloud_sync.view.select_highlighted = None;
-            changed = true;
-        }
-        if self.cloud_sync.view.focused_select.take().is_some() {
+        if self.cloud_sync.update(cx, |cloud_sync, cx| {
+            let open_changed = cloud_sync.view.open_select.take().is_some();
+            if open_changed {
+                cloud_sync.view.select_highlighted = None;
+            }
             // Outside pointer focus in the browser leaves the Radix trigger;
             // mirror that owner release so the native focus ring cannot linger.
+            let focus_changed = cloud_sync.view.focused_select.take().is_some();
+            let changed = open_changed || focus_changed;
+            if changed {
+                cx.notify();
+            }
+            changed
+        }) {
             changed = true;
         }
-        if self.connection_monitor.selector_open {
-            self.connection_monitor.selector_open = false;
-            self.connection_monitor.selector_highlighted_index = None;
-            self.connection_monitor.selector_focus_origin = None;
+        if self
+            .host_tools
+            .update(cx, |host_tools, cx| host_tools.close_selector(true, cx))
+        {
             changed = true;
         }
-        if self.session_manager.show_batch_move {
-            self.session_manager.show_batch_move = false;
+        if self.session_manager.update(cx, |session_manager, cx| {
+            if !session_manager.show_batch_move {
+                return false;
+            }
+            session_manager.show_batch_move = false;
+            cx.notify();
+            true
+        }) {
             changed = true;
         }
-        if self.dismiss_workspace_context_menus() {
+        if self.dismiss_workspace_context_menus(cx) {
             changed = true;
         }
         if self.detached_local_terminals_popover_open {
             self.detached_local_terminals_popover_open = false;
             changed = true;
         }
-        if self.terminal_quick_commands_open || self.terminal_quick_command_pending.is_some() {
-            self.close_terminal_quick_commands_popover();
+        if self.terminal.read(cx).quick_commands.has_open_or_pending() {
+            self.close_terminal_quick_commands_popover(cx);
             changed = true;
         }
         if self.terminal_command_suggestions_open {
@@ -1089,22 +979,21 @@ impl WorkspaceApp {
             self.terminal_command_suggestion_highlighted = None;
             changed = true;
         }
-        if self.has_ai_sidebar_floating_overlay() {
-            self.close_ai_sidebar_popovers();
+        if self.has_ai_sidebar_floating_overlay(cx) {
+            self.close_ai_sidebar_popovers(cx);
             changed = true;
-        } else if self.ai.models.selector_open
-            && self.ai.models.selector_scope == Some(AiModelSelectorScope::TerminalInline)
+        } else if self
+            .ai_entity
+            .read(cx)
+            .model_selector_is_open(AiModelSelectorScope::TerminalInline)
         {
             // The terminal inline model selector is painted inside the pane
             // instead of the sidebar popover portal, so include it in the same
             // transient-dismiss path used by wheel/outside-pointer behavior.
-            self.close_ai_model_selector();
+            self.close_ai_model_selector(cx);
             changed = true;
         }
-        if self.workspace_tooltip.is_some() || self.workspace_tooltip_pending.is_some() {
-            self.workspace_tooltip = None;
-            self.workspace_tooltip_pending = None;
-            self.workspace_tooltip_generation = self.workspace_tooltip_generation.wrapping_add(1);
+        if self.clear_all_workspace_tooltips(cx) {
             changed = true;
         }
         if changed {
@@ -1114,28 +1003,37 @@ impl WorkspaceApp {
         changed
     }
 
-    pub(in crate::workspace) fn dismiss_workspace_context_menus(&mut self) -> bool {
+    pub(in crate::workspace) fn dismiss_workspace_context_menus(
+        &mut self,
+        cx: &mut Context<Self>,
+    ) -> bool {
         let mut changed = false;
 
         // Radix ContextMenu uses one close policy for outside pointer and Esc.
         // Keep all native context-menu owners here so feature handlers do not
         // each mutate their own menu state differently.
-        if self.connection_monitor.dismiss_topology_menu() {
+        if self
+            .host_tools
+            .update(cx, |host_tools, cx| host_tools.dismiss_topology_menu(cx))
+        {
             changed = true;
         }
-        if self.close_session_row_menus() {
+        if self.close_session_row_menus(cx) {
             changed = true;
         }
-        if self.dismiss_file_manager_context_menu() {
+        if self.dismiss_file_manager_context_menu(cx) {
             changed = true;
         }
-        if self.dismiss_sftp_context_menu() {
+        if self
+            .sftp_view
+            .update(cx, |sftp, cx| sftp.dismiss_context_menu(cx))
+        {
             changed = true;
         }
-        if self.dismiss_terminal_broadcast_menu() {
+        if self.dismiss_terminal_broadcast_menu(cx) {
             changed = true;
         }
-        if self.close_terminal_git_branch_picker() {
+        if self.close_terminal_git_branch_picker(cx) {
             changed = true;
         }
         if self.close_tab_context_menu() {
@@ -1150,7 +1048,7 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
-        let changed = self.dismiss_transient_workspace_overlays();
+        let changed = self.dismiss_transient_workspace_overlays(cx);
         if changed {
             // Radix restores focus to the trigger/outside target after closing
             // transient popovers. Native tracks most triggers as workspace
@@ -1171,7 +1069,7 @@ impl WorkspaceApp {
         if event.keystroke.key.as_str() != "escape" || event.keystroke.modifiers.platform {
             return false;
         }
-        if self.dismiss_transient_workspace_overlays() {
+        if self.dismiss_transient_workspace_overlays(cx) {
             window.focus(&self.focus_handle, cx);
             cx.notify();
             return true;
@@ -1184,7 +1082,7 @@ impl WorkspaceApp {
         let Ok(bytes) = fs::read(&path) else {
             return;
         };
-        let Ok(persisted) = serde_json::from_slice::<PersistedNodeTreeSnapshot>(&bytes) else {
+        let Ok(persisted) = serde_json::from_slice::<NodeTreePersistenceSnapshot>(&bytes) else {
             eprintln!("failed to parse session tree snapshot: {}", path.display());
             return;
         };
@@ -1231,17 +1129,14 @@ impl WorkspaceApp {
             root_ids: restored_roots,
             nodes: restored_nodes,
         };
-        if let Err(error) = self.node_router.apply_tree_snapshot(snapshot.clone()) {
-            eprintln!("failed to restore session tree snapshot: {error}");
-            return;
-        }
 
         // Rebuild the UI-facing node cache from the SessionTree owner. Runtime
         // ids are deliberately cleared above: after process restart, Tauri also
         // needs reconnect/connect_tree_node to create fresh SSH/SFTP/terminal
         // owners instead of trusting stale ids from disk.
         let mut saved_targets: HashMap<String, (u32, NodeId)> = HashMap::new();
-        for node in snapshot.nodes {
+        let mut ui_nodes = Vec::with_capacity(snapshot.nodes.len());
+        for node in &snapshot.nodes {
             let title = node
                 .origin
                 .saved_connection_id()
@@ -1257,16 +1152,25 @@ impl WorkspaceApp {
                     *entry = (rank, node.id.clone());
                 }
             }
-            self.ssh_nodes.insert(
-                node.id,
-                WorkspaceSshNode {
-                    saved_connection_id: node.origin.saved_connection_id().map(str::to_string),
-                    config: node.config,
+            ui_nodes.push((
+                node.id.clone(),
+                WorkspaceSshNode::new(
+                    node.origin.saved_connection_id().map(str::to_string),
+                    &node.config,
                     title,
-                    terminal_ids: Vec::new(),
-                    readiness: NodeReadiness::Disconnected,
-                },
-            );
+                    Vec::new(),
+                    NodeReadiness::Disconnected,
+                ),
+            ));
+        }
+        // Move the only reconstructed secret-bearing tree into NodeRouter after
+        // deriving the display-safe projection; do not clone the full snapshot.
+        if let Err(error) = self.node_router.apply_tree_snapshot(snapshot) {
+            eprintln!("failed to restore session tree snapshot: {error}");
+            return;
+        }
+        for (node_id, node) in ui_nodes {
+            self.ssh_nodes.insert(node_id, node);
         }
         for (saved_connection_id, (_, node_id)) in saved_targets {
             self.saved_ssh_nodes.insert(saved_connection_id, node_id);
@@ -1274,41 +1178,9 @@ impl WorkspaceApp {
     }
 
     pub(in crate::workspace) fn persist_session_tree_snapshot(&self) {
-        let runtime = self.node_router.export_tree_snapshot();
-        let nodes = runtime
-            .nodes
-            .into_iter()
-            .filter_map(|node| {
-                let config = persistable_session_tree_config(&node);
-                if config.is_none() && node.origin.saved_connection_id().is_none() {
-                    return None;
-                }
-                Some(PersistedNodeTreeNode {
-                    id: node.id,
-                    parent_id: node.parent_id,
-                    children_ids: node.children_ids,
-                    depth: node.depth,
-                    origin: node.origin,
-                    config,
-                    created_at_ms: node.created_at_ms,
-                    generation: node.generation,
-                })
-            })
-            .collect::<Vec<_>>();
-        let retained_ids = nodes
-            .iter()
-            .map(|node| node.id.clone())
-            .collect::<HashSet<_>>();
-        let persisted = PersistedNodeTreeSnapshot {
-            version: runtime.version,
-            exported_at_ms: runtime.exported_at_ms,
-            root_ids: runtime
-                .root_ids
-                .into_iter()
-                .filter(|id| retained_ids.contains(id))
-                .collect(),
-            nodes,
-        };
+        // Build the disk projection inside the SSH runtime so secret-bearing
+        // configs and endpoint tokens are never cloned into an app snapshot.
+        let persisted = self.node_router.export_persistence_snapshot();
         let path = default_session_tree_path();
         if let Err(error) = write_session_tree_snapshot(&path, &persisted) {
             eprintln!("failed to persist session tree snapshot: {error}");
@@ -1327,7 +1199,7 @@ pub(in crate::workspace) fn restored_saved_node_rank(origin: &NodeOrigin) -> u32
 
 pub(in crate::workspace) fn write_session_tree_snapshot(
     path: &Path,
-    snapshot: &PersistedNodeTreeSnapshot,
+    snapshot: &NodeTreePersistenceSnapshot,
 ) -> Result<()> {
     let bytes = serde_json::to_vec_pretty(snapshot)?;
     durable_write_with_before_replace(path, &bytes, fail_before_session_tree_replace_for_tests)?;
@@ -1355,15 +1227,6 @@ pub(in crate::workspace) fn fail_before_session_tree_replace_for_tests() -> io::
 #[cfg(test)]
 pub(in crate::workspace) fn inject_session_tree_replace_failure() {
     FAIL_NEXT_SESSION_TREE_REPLACE.with(|fail| fail.set(true));
-}
-
-pub(in crate::workspace) fn persistable_session_tree_config(
-    node: &NodeTreeSnapshotNode,
-) -> Option<SshConfig> {
-    if node.origin.saved_connection_id().is_some() {
-        return None;
-    }
-    (!node.config.has_runtime_auth_secret()).then(|| node.config.clone())
 }
 
 pub(in crate::workspace) fn connection_error_is_cancelled(error: &str) -> bool {

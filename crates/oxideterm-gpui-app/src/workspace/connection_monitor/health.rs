@@ -6,6 +6,8 @@ use oxideterm_gpui_ui::select::{
 };
 use oxideterm_gpui_ui::text_input::{TextInputView, text_input, text_input_anchor_probe};
 
+use crate::workspace::selectable_text::{SelectableTextRenderState, selectable_document_group_id};
+
 const HOST_TOOLS_CONNECTION_ROW_HEIGHT: f32 = 32.0;
 const SYSTEM_HEALTH_SELECTOR_OPTION_HEIGHT: f32 = 36.0;
 const SYSTEM_HEALTH_SELECTOR_MENU_PADDING_Y: f32 = 8.0;
@@ -38,7 +40,7 @@ struct HostToolsTabScrollbarGeometry {
     max_scroll: f32,
 }
 
-fn host_tools_tab_index(tool: ContextSidebarTool) -> usize {
+pub(in crate::workspace) fn host_tools_tab_index(tool: ContextSidebarTool) -> usize {
     // Keep indices aligned with the stable render order in the scroll strip.
     match tool {
         ContextSidebarTool::Monitor => 0,
@@ -56,7 +58,10 @@ fn host_tools_tab_index(tool: ContextSidebarTool) -> usize {
 }
 
 impl ContextSidebarTool {
-    fn monitoring_enabled(self, settings: &oxideterm_settings::HostToolsSettings) -> bool {
+    pub(super) fn monitoring_enabled(
+        self,
+        settings: &oxideterm_settings::HostToolsSettings,
+    ) -> bool {
         match self {
             Self::Monitor => settings.monitor_enabled,
             Self::Gpu => settings.gpu_enabled,
@@ -91,6 +96,176 @@ impl ContextSidebarTool {
             Self::Filesystems => settings.filesystems_enabled = enabled,
             Self::Packages => settings.packages_enabled = enabled,
         }
+    }
+}
+
+impl HostToolsEntity {
+    fn render_connection_switcher(
+        &self,
+        connections: &[MonitorConnectionOption],
+        selected_id: &str,
+        is_running: bool,
+        tokens: &ThemeTokens,
+        mono_font_family: SharedString,
+        selectable_text: &SelectableTextRenderState,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let Some(connection) = connections
+            .iter()
+            .find(|connection| connection.connection_id == selected_id)
+            .or_else(|| connections.first())
+        else {
+            return div().into_any_element();
+        };
+
+        let theme = tokens.ui;
+        let selected_index = monitor_connection_selected_index(connections, selected_id);
+        let can_switch = monitor_connection_can_switch(connections);
+        let selector_focus_origin = self.selector_focus_origin();
+        let focus_visible = browser_behavior::browser_focus_visible(
+            selector_focus_origin.is_some(),
+            selector_focus_origin,
+        );
+        // The selector owns its pointer state and connection transition. The
+        // selectable text snapshot is a transient workspace text service and
+        // is never retained by HostToolsEntity.
+        let selector_bottom_margin = if can_switch && self.selector_open() {
+            let visible_options = connections
+                .len()
+                .max(1)
+                .min(SYSTEM_HEALTH_SELECTOR_VISIBLE_OPTIONS)
+                as f32;
+            SYSTEM_HEALTH_SELECTOR_MENU_PADDING_Y
+                + (visible_options * SYSTEM_HEALTH_SELECTOR_OPTION_HEIGHT)
+                + (SYSTEM_HEALTH_SELECTOR_GAP * 2.0)
+        } else {
+            0.0
+        };
+        let mut trigger = div()
+            .h(px(HOST_TOOLS_CONNECTION_ROW_HEIGHT))
+            .w_full()
+            .min_w_0()
+            .flex()
+            .items_center()
+            .gap_2()
+            .px_1()
+            .rounded(px(tokens.radii.md))
+            .when(can_switch, |row| row.cursor_pointer())
+            .when(
+                can_switch && (self.selector_open() || focus_visible),
+                |row| row.bg(rgba((theme.bg_panel << 8) | MONITOR_TINT_ALPHA)),
+            )
+            .when(can_switch, |row| {
+                row.hover(|hovered| hovered.bg(rgba((theme.bg_panel << 8) | MONITOR_TINT_ALPHA)))
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(move |host_tools, _event, _window, cx| {
+                            host_tools.toggle_selector_from_pointer(selected_index, cx);
+                            cx.stop_propagation();
+                        }),
+                    )
+            })
+            .child(WorkspaceApp::render_lucide_icon(
+                LucideIcon::Server,
+                14.0,
+                if is_running {
+                    rgb(MONITOR_EMERALD)
+                } else {
+                    rgb(theme.text_muted)
+                },
+            ))
+            .child(
+                div()
+                    .flex_1()
+                    .min_w(px(0.0))
+                    .truncate()
+                    .whitespace_nowrap()
+                    .text_size(px(13.0))
+                    .font_family(mono_font_family.clone())
+                    .text_color(rgb(theme.text))
+                    .child(selectable_text.render_display_text_with_role_in_group(
+                        SelectableTextRole::PlainDocument,
+                        selectable_document_group_id(),
+                        "host-tools-connection-endpoint",
+                        connection.connection_id.as_str(),
+                        0,
+                        monitor_connection_label(connection),
+                        theme.text,
+                        cx,
+                    )),
+            );
+        if can_switch {
+            trigger = trigger.child(div().flex_none().opacity(0.75).child(
+                WorkspaceApp::render_lucide_icon(
+                    LucideIcon::ChevronDown,
+                    14.0,
+                    rgb(theme.text_muted),
+                ),
+            ));
+        }
+
+        let mut wrapper = div()
+            .relative()
+            .mb(px(selector_bottom_margin))
+            .child(trigger);
+        if can_switch && self.selector_open() {
+            let highlighted = self.selector_highlighted_index().unwrap_or(selected_index);
+            let mut popup = select_event_boundary(
+                div()
+                    .absolute()
+                    .top(px(
+                        HOST_TOOLS_CONNECTION_ROW_HEIGHT + SYSTEM_HEALTH_SELECTOR_GAP
+                    ))
+                    .left_0()
+                    .right_0()
+                    .overflow_hidden()
+                    .max_h(px(SYSTEM_HEALTH_SELECTOR_MENU_PADDING_Y
+                        + (SYSTEM_HEALTH_SELECTOR_VISIBLE_OPTIONS as f32
+                            * SYSTEM_HEALTH_SELECTOR_OPTION_HEIGHT)))
+                    .rounded(px(tokens.radii.md))
+                    .border_1()
+                    .border_color(rgb(tokens.ui.border))
+                    .bg(rgb(tokens.ui.bg_panel))
+                    .p_1()
+                    .shadow_lg(),
+            );
+            for (index, connection) in connections.iter().enumerate() {
+                let connection_id = connection.connection_id.clone();
+                let selected = connection.connection_id == selected_id;
+                let highlighted = highlighted == index;
+                popup = popup.child(select_option_action(
+                    select_option_highlighted(
+                        tokens,
+                        monitor_connection_label(connection),
+                        selected,
+                        highlighted,
+                    )
+                    .font_family(mono_font_family.clone())
+                    .on_mouse_move(cx.listener(move |host_tools, _event, _window, cx| {
+                        host_tools.highlight_selector_index(index, cx);
+                    }))
+                    .child(div().mr_2().child(
+                        WorkspaceApp::render_lucide_icon(
+                            LucideIcon::Server,
+                            14.0,
+                            rgb(tokens.ui.text_muted),
+                        ),
+                    )),
+                    false,
+                    false,
+                    cx.listener(move |host_tools, _event, _window, cx| {
+                        host_tools.select_connection_for_active_tool(
+                            connection_id.clone(),
+                            None,
+                            cx,
+                        );
+                        cx.stop_propagation();
+                    }),
+                ));
+            }
+            wrapper = wrapper.child(popup);
+        }
+        wrapper.into_any_element()
     }
 }
 
@@ -147,6 +322,7 @@ mod gpu;
 mod logs;
 #[path = "health/monitor.rs"]
 mod monitor;
+pub(in crate::workspace::connection_monitor) use monitor::MonitorRenderContext;
 #[path = "health/packages.rs"]
 mod packages;
 #[path = "health/ports.rs"]
@@ -165,7 +341,7 @@ impl WorkspaceApp {
         tool.monitoring_enabled(&self.settings_store.settings().host_tools)
     }
 
-    fn set_host_tool_monitoring_enabled(
+    pub(in crate::workspace) fn set_host_tool_monitoring_enabled(
         &mut self,
         tool: ContextSidebarTool,
         enabled: bool,
@@ -175,7 +351,11 @@ impl WorkspaceApp {
             move |settings| tool.set_monitoring_enabled(&mut settings.host_tools, enabled),
             cx,
         );
-        if enabled && self.active_context_sidebar_tool == tool {
+        if !enabled && tool == ContextSidebarTool::Services {
+            self.host_tools
+                .update(cx, |host_tools, _cx| host_tools.pause_service_refreshes());
+        }
+        if enabled && self.host_tools.read(cx).active_tool() == tool {
             self.request_host_tool_snapshot_if_needed(tool, cx);
         }
     }
@@ -185,58 +365,20 @@ impl WorkspaceApp {
         tool: ContextSidebarTool,
         cx: &mut Context<Self>,
     ) {
-        match tool {
-            ContextSidebarTool::Services => {
-                self.request_host_services_snapshot_for_selected_connection(cx);
-            }
-            ContextSidebarTool::Logs => {
-                self.request_host_logs_snapshot_for_selected_connection(cx);
-            }
-            ContextSidebarTool::Tmux => {
-                self.request_host_tmux_snapshot_for_selected_connection(cx);
-            }
-            ContextSidebarTool::Ports => {
-                self.request_host_ports_snapshot_for_selected_connection(cx);
-            }
-            ContextSidebarTool::Schedules => {
-                self.request_host_schedules_snapshot_for_selected_connection(cx);
-            }
-            ContextSidebarTool::Filesystems => {
-                self.request_host_filesystems_snapshot_for_selected_connection(cx);
-            }
-            ContextSidebarTool::Packages => {
-                self.request_host_packages_snapshot_for_selected_connection(cx);
-            }
+        if matches!(
+            tool,
             ContextSidebarTool::Monitor
-            | ContextSidebarTool::Gpu
-            | ContextSidebarTool::Processes
-            | ContextSidebarTool::Docker => {}
+                | ContextSidebarTool::Gpu
+                | ContextSidebarTool::Processes
+                | ContextSidebarTool::Docker
+        ) {
+            return;
         }
-    }
-
-    // Keep Host Tools filter chips visually consistent across resource panels.
-    fn host_tools_filter_chip(&self, active: bool) -> Div {
-        let theme = self.tokens.ui;
-        div()
-            .flex_none()
-            .h(px(self.tokens.metrics.ui_button_sm_height * 0.75))
-            .px(px(self.tokens.spacing.two))
-            .flex()
-            .items_center()
-            .rounded(px(self.tokens.radii.md))
-            .cursor_pointer()
-            .bg(if active {
-                rgb(theme.bg_hover)
-            } else {
-                rgba(0x00000000)
-            })
-            .text_size(px(self.tokens.metrics.ui_text_xs))
-            .text_color(if active {
-                rgb(theme.text)
-            } else {
-                rgb(theme.text_muted)
-            })
-            .hover(move |chip| chip.bg(rgb(theme.bg_hover)))
+        // Snapshot ownership stays in the Entity; the root only persists the
+        // monitoring toggle that led to this request.
+        self.host_tools.update(cx, |host_tools, cx| {
+            host_tools.request_active_tool_snapshot(HostSnapshotFeedback::Silent, cx);
+        });
     }
 
     pub(in crate::workspace) fn render_host_tools_context_panel(
@@ -244,12 +386,27 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
-        let active_tool = self.active_context_sidebar_tool;
+        let active_tool = self.host_tools.read(cx).active_tool();
         let enabled = self.host_tool_monitoring_enabled(active_tool);
         let content = if enabled {
             match active_tool {
                 ContextSidebarTool::Monitor => self.render_host_tools_monitor_panel(cx),
-                ContextSidebarTool::Gpu => self.render_host_gpu_panel(cx),
+                ContextSidebarTool::Gpu => {
+                    let tokens = self.tokens;
+                    let i18n = &self.i18n;
+                    let mono_font_family =
+                        settings_mono_font_family(self.settings_store.settings());
+                    let selectable_text = self.selectable_text_render_state(cx);
+                    self.host_tools.update(cx, |host_tools, cx| {
+                        host_tools.render_host_gpu_panel(
+                            &tokens,
+                            i18n,
+                            mono_font_family,
+                            &selectable_text,
+                            cx,
+                        )
+                    })
+                }
                 ContextSidebarTool::Processes => self.render_host_processes_panel(cx),
                 ContextSidebarTool::Services => self.render_host_services_panel(cx),
                 ContextSidebarTool::Logs => self.render_host_logs_panel(cx),
@@ -329,11 +486,13 @@ impl WorkspaceApp {
     }
 
     fn render_host_tools_context_tabs(&self, cx: &mut Context<Self>) -> AnyElement {
-        let active_index = host_tools_tab_index(self.active_context_sidebar_tool);
+        let active_index = host_tools_tab_index(self.host_tools.read(cx).active_tool());
+        let tab_scroll_handle = self.host_tools.read(cx).tab_scroll_handle();
         let selection_geometry =
-            host_tools_tab_selection_geometry(&self.host_tools_tab_scroll_handle, active_index);
-        let selection_indicator = selection_geometry
-            .map(|geometry| self.render_host_tools_tab_selection_indicator(geometry));
+            host_tools_tab_selection_geometry(&tab_scroll_handle, active_index);
+        let selection_indicator = selection_geometry.map(|geometry| {
+            self.render_host_tools_tab_selection_indicator(geometry, &tab_scroll_handle, cx)
+        });
         let selection_indicator_visible = selection_indicator.is_some();
         let mut tabs = div()
             .id("host-tools-tab-scroll-viewport")
@@ -351,7 +510,7 @@ impl WorkspaceApp {
             // thin visible thumb keeps hidden tab overflow discoverable.
             .occlude()
             .overflow_x_scroll()
-            .track_scroll(&self.host_tools_tab_scroll_handle)
+            .track_scroll(&tab_scroll_handle)
             .on_scroll_wheel(cx.listener(|this, event: &ScrollWheelEvent, window, cx| {
                 this.handle_host_tools_tab_scroll(event, window, cx);
             }));
@@ -448,7 +607,7 @@ impl WorkspaceApp {
             ));
 
         let monitoring_enabled =
-            self.host_tool_monitoring_enabled(self.active_context_sidebar_tool);
+            self.host_tool_monitoring_enabled(self.host_tools.read(cx).active_tool());
         div()
             .id("host-tools-tab-strip")
             .flex_none()
@@ -483,7 +642,7 @@ impl WorkspaceApp {
         enabled: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let tool = self.active_context_sidebar_tool;
+        let tool = self.host_tools.read(cx).active_tool();
         let color = if enabled {
             MONITOR_EMERALD
         } else {
@@ -591,6 +750,8 @@ impl WorkspaceApp {
     fn render_host_tools_tab_selection_indicator(
         &self,
         target: HostToolsTabSelectionGeometry,
+        tab_scroll_handle: &ScrollHandle,
+        cx: &mut Context<Self>,
     ) -> AnyElement {
         let surface = div()
             .absolute()
@@ -605,7 +766,7 @@ impl WorkspaceApp {
         // Host Tools keeps its compact geometry but shares the selected-card
         // chrome established by Settings navigation.
         let surface = oxideterm_gpui_ui::theme_card_surface_shadow(surface, &self.tokens);
-        let active_index = host_tools_tab_index(self.active_context_sidebar_tool);
+        let active_index = host_tools_tab_index(self.host_tools.read(cx).active_tool());
         let Some((generation, _)) = self.segmented_control_user_transition(
             selection_motion::HOST_TOOLS_SWITCHER_ID,
             active_index,
@@ -619,11 +780,9 @@ impl WorkspaceApp {
             gpui::ElementId::from(selection_motion::HOST_TOOLS_SWITCHER_ID),
             format!("selection-{generation}"),
         );
-        let source_index =
-            host_tools_tab_index(self.connection_monitor.previous_context_sidebar_tool);
+        let source_index = host_tools_tab_index(self.host_tools.read(cx).previous_tool());
         if motion.spatial
-            && let Some(source) =
-                host_tools_tab_selection_geometry(&self.host_tools_tab_scroll_handle, source_index)
+            && let Some(source) = host_tools_tab_selection_geometry(tab_scroll_handle, source_index)
         {
             return surface
                 .with_animation(
@@ -654,7 +813,8 @@ impl WorkspaceApp {
     }
 
     fn render_host_tools_tab_scrollbar(&self, cx: &mut Context<Self>) -> AnyElement {
-        let Some(geometry) = self.host_tools_tab_scrollbar_geometry() else {
+        let tab_scroll_handle = self.host_tools.read(cx).tab_scroll_handle();
+        let Some(geometry) = self.host_tools_tab_scrollbar_geometry(&tab_scroll_handle) else {
             return div().into_any_element();
         };
 
@@ -693,10 +853,13 @@ impl WorkspaceApp {
             .into_any_element()
     }
 
-    fn host_tools_tab_scrollbar_geometry(&self) -> Option<HostToolsTabScrollbarGeometry> {
-        let viewport_bounds = self.host_tools_tab_scroll_handle.bounds();
+    fn host_tools_tab_scrollbar_geometry(
+        &self,
+        tab_scroll_handle: &ScrollHandle,
+    ) -> Option<HostToolsTabScrollbarGeometry> {
+        let viewport_bounds = tab_scroll_handle.bounds();
         let viewport_width = f32::from(viewport_bounds.size.width);
-        let max_scroll = f32::from(self.host_tools_tab_scroll_handle.max_offset().x);
+        let max_scroll = f32::from(tab_scroll_handle.max_offset().x);
         let track_width =
             (viewport_width - HOST_TOOLS_TAB_SCROLLBAR_HORIZONTAL_INSET * 2.0).max(0.0);
         if viewport_width <= 1.0 || max_scroll <= 1.0 || track_width <= 1.0 {
@@ -711,7 +874,7 @@ impl WorkspaceApp {
         if track_width - thumb_width <= 1.0 {
             return None;
         }
-        let scroll_x = self.current_host_tools_tab_scroll_x();
+        let scroll_x = self.current_host_tools_tab_scroll_x(tab_scroll_handle);
         let thumb_left = HOST_TOOLS_TAB_SCROLLBAR_HORIZONTAL_INSET
             + (scroll_x / max_scroll * (track_width - thumb_width).max(0.0));
         Some(HostToolsTabScrollbarGeometry {
@@ -723,25 +886,27 @@ impl WorkspaceApp {
         })
     }
 
-    pub(in crate::workspace) fn host_tools_tab_scrollbar_drag_active(&self) -> bool {
-        // The root capture registry cannot access ConnectionMonitorState's private drag field.
-        self.connection_monitor.tab_scrollbar_drag.is_some()
+    pub(in crate::workspace) fn host_tools_tab_scrollbar_drag_active(
+        &self,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        self.host_tools.read(cx).tab_scrollbar_drag_active()
     }
 
-    fn current_host_tools_tab_scroll_x(&self) -> f32 {
-        let max_scroll = f32::from(self.host_tools_tab_scroll_handle.max_offset().x);
-        f32::from(-self.host_tools_tab_scroll_handle.offset().x).clamp(0.0, max_scroll)
+    fn current_host_tools_tab_scroll_x(&self, tab_scroll_handle: &ScrollHandle) -> f32 {
+        let max_scroll = f32::from(tab_scroll_handle.max_offset().x);
+        f32::from(-tab_scroll_handle.offset().x).clamp(0.0, max_scroll)
     }
 
     fn set_host_tools_tab_scroll_x(&mut self, scroll_x: f32, cx: &mut Context<Self>) {
-        let max_scroll = f32::from(self.host_tools_tab_scroll_handle.max_offset().x);
+        let tab_scroll_handle = self.host_tools.read(cx).tab_scroll_handle();
+        let max_scroll = f32::from(tab_scroll_handle.max_offset().x);
         let next_scroll_x = scroll_x.clamp(0.0, max_scroll);
-        let current_scroll_x = self.current_host_tools_tab_scroll_x();
+        let current_scroll_x = self.current_host_tools_tab_scroll_x(&tab_scroll_handle);
         if (next_scroll_x - current_scroll_x).abs() < 0.01 {
             return;
         }
-        self.host_tools_tab_scroll_handle
-            .set_offset(Point::new(px(-next_scroll_x), px(0.0)));
+        tab_scroll_handle.set_offset(Point::new(px(-next_scroll_x), px(0.0)));
         cx.notify();
     }
 
@@ -750,7 +915,8 @@ impl WorkspaceApp {
         event: &MouseDownEvent,
         cx: &mut Context<Self>,
     ) {
-        let Some(geometry) = self.host_tools_tab_scrollbar_geometry() else {
+        let tab_scroll_handle = self.host_tools.read(cx).tab_scroll_handle();
+        let Some(geometry) = self.host_tools_tab_scrollbar_geometry(&tab_scroll_handle) else {
             return;
         };
         let pointer_x = f32::from(event.position.x) - geometry.viewport_left;
@@ -762,8 +928,9 @@ impl WorkspaceApp {
         } else {
             geometry.thumb_width / 2.0
         };
-        self.connection_monitor.tab_scrollbar_drag =
-            Some(HostToolsTabScrollbarDragState { grab_offset_x });
+        self.host_tools.update(cx, |host_tools, cx| {
+            host_tools.begin_tab_scrollbar_drag(grab_offset_x, cx);
+        });
         let thumb_left =
             (pointer_x - grab_offset_x).clamp(track_left, track_right - geometry.thumb_width);
         let ratio = (thumb_left - track_left) / (geometry.track_width - geometry.thumb_width);
@@ -776,21 +943,22 @@ impl WorkspaceApp {
         event: &MouseMoveEvent,
         cx: &mut Context<Self>,
     ) {
-        let Some(drag) = self.connection_monitor.tab_scrollbar_drag else {
+        let Some(grab_offset_x) = self.host_tools.read(cx).tab_scrollbar_grab_offset() else {
             return;
         };
         if !event.dragging() {
             self.finish_host_tools_tab_scrollbar_drag(cx);
             return;
         }
-        let Some(geometry) = self.host_tools_tab_scrollbar_geometry() else {
+        let tab_scroll_handle = self.host_tools.read(cx).tab_scroll_handle();
+        let Some(geometry) = self.host_tools_tab_scrollbar_geometry(&tab_scroll_handle) else {
             self.finish_host_tools_tab_scrollbar_drag(cx);
             return;
         };
         let pointer_x = f32::from(event.position.x) - geometry.viewport_left;
         let track_left = HOST_TOOLS_TAB_SCROLLBAR_HORIZONTAL_INSET;
         let max_thumb_left = track_left + geometry.track_width - geometry.thumb_width;
-        let thumb_left = (pointer_x - drag.grab_offset_x).clamp(track_left, max_thumb_left);
+        let thumb_left = (pointer_x - grab_offset_x).clamp(track_left, max_thumb_left);
         let ratio = (thumb_left - track_left) / (geometry.track_width - geometry.thumb_width);
         self.set_host_tools_tab_scroll_x(ratio * geometry.max_scroll, cx);
         cx.stop_propagation();
@@ -800,9 +968,9 @@ impl WorkspaceApp {
         &mut self,
         cx: &mut Context<Self>,
     ) {
-        if self.connection_monitor.tab_scrollbar_drag.take().is_some() {
-            cx.notify();
-        }
+        self.host_tools.update(cx, |host_tools, cx| {
+            host_tools.finish_tab_scrollbar_drag(cx);
+        });
     }
 
     fn handle_host_tools_tab_scroll(
@@ -811,11 +979,11 @@ impl WorkspaceApp {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let max_scroll = f32::from(self.host_tools_tab_scroll_handle.max_offset().x);
+        let tab_scroll_handle = self.host_tools.read(cx).tab_scroll_handle();
+        let max_scroll = f32::from(tab_scroll_handle.max_offset().x);
         if max_scroll <= 1.0 {
-            if self.host_tools_tab_scroll_handle.offset().x != px(0.0) {
-                self.host_tools_tab_scroll_handle
-                    .set_offset(Point::new(px(0.0), px(0.0)));
+            if tab_scroll_handle.offset().x != px(0.0) {
+                tab_scroll_handle.set_offset(Point::new(px(0.0), px(0.0)));
                 cx.notify();
             }
             cx.stop_propagation();
@@ -830,7 +998,7 @@ impl WorkspaceApp {
             return;
         }
 
-        let current_scroll_x = self.current_host_tools_tab_scroll_x();
+        let current_scroll_x = self.current_host_tools_tab_scroll_x(&tab_scroll_handle);
         let next_scroll_x = (current_scroll_x - scroll_delta).clamp(0.0, max_scroll);
         if (next_scroll_x - current_scroll_x).abs() < 0.01 {
             cx.stop_propagation();
@@ -851,7 +1019,7 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
-        let active = self.active_context_sidebar_tool == tool;
+        let active = self.host_tools.read(cx).active_tool() == tool;
         let tab = div()
             .h(px(28.0))
             .flex_none()
@@ -917,93 +1085,9 @@ impl WorkspaceApp {
             tab.on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |this, _event, _window, cx| {
-                    if this.active_context_sidebar_tool != tool {
-                        this.connection_monitor.previous_context_sidebar_tool =
-                            this.active_context_sidebar_tool;
-                        this.active_context_sidebar_tool = tool;
-                        this.begin_user_segmented_control_transition(
-                            selection_motion::HOST_TOOLS_SWITCHER_ID,
-                            host_tools_tab_index(tool),
-                            cx,
-                        );
-                        if tool != ContextSidebarTool::Processes {
-                            this.connection_monitor.host_process_search_focused = false;
-                            this.clear_ime_selection();
-                            this.ime_marked_text = None;
-                        }
-                        if tool != ContextSidebarTool::Docker {
-                            this.connection_monitor.host_docker_search_focused = false;
-                            this.clear_ime_selection();
-                            this.ime_marked_text = None;
-                        }
-                        if tool != ContextSidebarTool::Services {
-                            this.connection_monitor.host_service_search_focused = false;
-                            this.clear_ime_selection();
-                            this.ime_marked_text = None;
-                        }
-                        if tool != ContextSidebarTool::Logs {
-                            this.connection_monitor.host_log_search_focused = false;
-                            this.clear_ime_selection();
-                            this.ime_marked_text = None;
-                        }
-                        if tool != ContextSidebarTool::Tmux {
-                            this.connection_monitor.host_tmux_search_focused = false;
-                            this.connection_monitor.host_tmux_pending_confirm = None;
-                            this.connection_monitor.host_tmux_input_dialog = None;
-                            this.clear_ime_selection();
-                            this.ime_marked_text = None;
-                        }
-                        if tool != ContextSidebarTool::Ports {
-                            this.connection_monitor.host_port_search_focused = false;
-                            this.clear_ime_selection();
-                            this.ime_marked_text = None;
-                        }
-                        if tool != ContextSidebarTool::Schedules {
-                            this.connection_monitor.host_schedule_search_focused = false;
-                            this.connection_monitor.host_schedule_pending_confirm = None;
-                            this.clear_ime_selection();
-                            this.ime_marked_text = None;
-                        }
-                        if tool != ContextSidebarTool::Filesystems {
-                            this.connection_monitor.host_filesystem_search_focused = false;
-                            this.clear_ime_selection();
-                            this.ime_marked_text = None;
-                        }
-                        if tool != ContextSidebarTool::Packages {
-                            this.connection_monitor.host_package_search_focused = false;
-                            this.clear_ime_selection();
-                            this.ime_marked_text = None;
-                        }
-                        // Switching Host Tools pages should eagerly attach
-                        // the selected connection profiler. Waiting for the
-                        // heartbeat made data appear only after another
-                        // layout event, such as entering fullscreen.
-                        this.refresh_connection_monitor_pool_stats();
-                        this.sync_connection_monitor_selection(cx);
-                        this.sync_host_gpu_sampling(cx);
-                        if tool == ContextSidebarTool::Services {
-                            this.request_host_services_snapshot_for_selected_connection(cx);
-                        }
-                        if tool == ContextSidebarTool::Logs {
-                            this.request_host_logs_snapshot_for_selected_connection(cx);
-                        }
-                        if tool == ContextSidebarTool::Tmux {
-                            this.request_host_tmux_snapshot_for_selected_connection(cx);
-                        }
-                        if tool == ContextSidebarTool::Ports {
-                            this.request_host_ports_snapshot_for_selected_connection(cx);
-                        }
-                        if tool == ContextSidebarTool::Schedules {
-                            this.request_host_schedules_snapshot_for_selected_connection(cx);
-                        }
-                        if tool == ContextSidebarTool::Filesystems {
-                            this.request_host_filesystems_snapshot_for_selected_connection(cx);
-                        }
-                        if tool == ContextSidebarTool::Packages {
-                            this.request_host_packages_snapshot_for_selected_connection(cx);
-                        }
-                        cx.notify();
-                    }
+                    this.host_tools.update(cx, |host_tools, cx| {
+                        host_tools.select_sidebar_tool(tool, cx)
+                    });
                     cx.stop_propagation();
                 }),
             )
@@ -1011,238 +1095,15 @@ impl WorkspaceApp {
         .into_any_element()
     }
 
-    fn render_connection_switcher_row(
-        &self,
-        connections: &[MonitorConnectionOption],
-        selected_id: &str,
-        is_running: bool,
+    fn select_host_tools_connection(
+        &mut self,
+        connection_id: String,
+        focus_origin: Option<browser_behavior::BrowserFocusOrigin>,
         cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let Some(connection) = connections
-            .iter()
-            .find(|connection| connection.connection_id == selected_id)
-            .or_else(|| connections.first())
-        else {
-            return div().into_any_element();
-        };
-
-        let theme = self.tokens.ui;
-        let selected_index = monitor_connection_selected_index(connections, selected_id);
-        let can_switch = monitor_connection_can_switch(connections);
-        let focus_visible = browser_behavior::browser_focus_visible(
-            self.connection_monitor.selector_focus_origin.is_some(),
-            self.connection_monitor.selector_focus_origin,
-        );
-        // This is a host identity row first and a selector only when multiple
-        // live hosts exist. Keeping it visually inline avoids the old form-field
-        // dropdown sitting between the tabs and each Host Tools page.
-        let selector_bottom_margin = if can_switch && self.connection_monitor.selector_open {
-            let visible_options = connections
-                .len()
-                .max(1)
-                .min(SYSTEM_HEALTH_SELECTOR_VISIBLE_OPTIONS)
-                as f32;
-            SYSTEM_HEALTH_SELECTOR_MENU_PADDING_Y
-                + (visible_options * SYSTEM_HEALTH_SELECTOR_OPTION_HEIGHT)
-                + (SYSTEM_HEALTH_SELECTOR_GAP * 2.0)
-        } else {
-            0.0
-        };
-        let mut trigger = div()
-            .h(px(HOST_TOOLS_CONNECTION_ROW_HEIGHT))
-            .w_full()
-            .min_w_0()
-            .flex()
-            .items_center()
-            .gap_2()
-            .px_1()
-            .rounded(px(self.tokens.radii.md))
-            .when(can_switch, |row| row.cursor_pointer())
-            .when(
-                can_switch && (self.connection_monitor.selector_open || focus_visible),
-                |row| row.bg(rgba((theme.bg_panel << 8) | MONITOR_TINT_ALPHA)),
-            )
-            .when(can_switch, |row| {
-                row.hover(|hovered| hovered.bg(rgba((theme.bg_panel << 8) | MONITOR_TINT_ALPHA)))
-                    .on_mouse_down(
-                        MouseButton::Left,
-                        cx.listener(|this, _event, _window, cx| {
-                            this.connection_monitor.selector_focus_origin =
-                                Some(browser_behavior::BrowserFocusOrigin::Pointer);
-                            if this.connection_monitor.selector_open {
-                                this.connection_monitor.selector_open = false;
-                                this.connection_monitor.selector_highlighted_index = None;
-                            } else {
-                                let connections = this.monitor_connections();
-                                let selected_id = this
-                                    .connection_monitor
-                                    .selected_connection_id
-                                    .as_deref()
-                                    .unwrap_or_else(|| {
-                                        connections
-                                            .first()
-                                            .map(|connection| connection.connection_id.as_str())
-                                            .unwrap_or_default()
-                                    });
-                                this.connection_monitor.selector_highlighted_index = Some(
-                                    monitor_connection_selected_index(&connections, selected_id),
-                                );
-                                this.connection_monitor.selector_open = true;
-                            }
-                            cx.stop_propagation();
-                            cx.notify();
-                        }),
-                    )
-            })
-            .child(Self::render_lucide_icon(
-                LucideIcon::Server,
-                14.0,
-                if is_running {
-                    rgb(MONITOR_EMERALD)
-                } else {
-                    rgb(theme.text_muted)
-                },
-            ))
-            .child(
-                div()
-                    .flex_1()
-                    .min_w(px(0.0))
-                    .truncate()
-                    .whitespace_nowrap()
-                    .text_size(px(13.0))
-                    .font_family(settings_mono_font_family(self.settings_store.settings()))
-                    .text_color(rgb(theme.text))
-                    .child(self.render_display_text_with_role(
-                        SelectableTextRole::PlainDocument,
-                        "host-tools-connection-endpoint",
-                        connection.connection_id.as_str(),
-                        monitor_connection_label(connection),
-                        theme.text,
-                        cx,
-                    )),
-            );
-        if can_switch {
-            trigger = trigger.child(div().flex_none().opacity(0.75).child(
-                Self::render_lucide_icon(LucideIcon::ChevronDown, 14.0, rgb(theme.text_muted)),
-            ));
-        }
-
-        let mut wrapper = div()
-            .relative()
-            .mb(px(selector_bottom_margin))
-            .child(trigger);
-        if can_switch && self.connection_monitor.selector_open {
-            let highlighted = self
-                .connection_monitor
-                .selector_highlighted_index
-                .unwrap_or(selected_index);
-            let mut popup = select_event_boundary(
-                div()
-                    .absolute()
-                    .top(px(
-                        HOST_TOOLS_CONNECTION_ROW_HEIGHT + SYSTEM_HEALTH_SELECTOR_GAP
-                    ))
-                    .left_0()
-                    .right_0()
-                    .overflow_hidden()
-                    .max_h(px(SYSTEM_HEALTH_SELECTOR_MENU_PADDING_Y
-                        + (SYSTEM_HEALTH_SELECTOR_VISIBLE_OPTIONS as f32
-                            * SYSTEM_HEALTH_SELECTOR_OPTION_HEIGHT)))
-                    .rounded(px(self.tokens.radii.md))
-                    .border_1()
-                    .border_color(rgb(self.tokens.ui.border))
-                    .bg(rgb(self.tokens.ui.bg_panel))
-                    .p_1()
-                    .shadow_lg(),
-            );
-            for (index, connection) in connections.iter().enumerate() {
-                let connection_id = connection.connection_id.clone();
-                let selected = connection.connection_id == selected_id;
-                let highlighted = highlighted == index;
-                popup = popup.child(select_option_action(
-                    select_option_highlighted(
-                        &self.tokens,
-                        monitor_connection_label(connection),
-                        selected,
-                        highlighted,
-                    )
-                    .font_family(settings_mono_font_family(self.settings_store.settings()))
-                    .on_mouse_move(cx.listener(move |this, _event, _window, cx| {
-                        if this.connection_monitor.selector_highlighted_index != Some(index) {
-                            this.connection_monitor.selector_highlighted_index = Some(index);
-                            cx.notify();
-                        }
-                    }))
-                    .child(div().mr_2().child(Self::render_lucide_icon(
-                        LucideIcon::Server,
-                        14.0,
-                        rgb(self.tokens.ui.text_muted),
-                    ))),
-                    false,
-                    false,
-                    cx.listener(move |this, _event, _window, cx| {
-                        this.connection_monitor.selected_connection_id =
-                            Some(connection_id.clone());
-                        this.connection_monitor.selector_open = false;
-                        this.connection_monitor.selector_highlighted_index = None;
-                        this.connection_monitor.selector_focus_origin = None;
-                        this.connection_monitor.host_tmux_pending_confirm = None;
-                        this.connection_monitor.host_tmux_input_dialog = None;
-                        this.connection_monitor.host_schedule_pending_confirm = None;
-                        this.sync_connection_monitor_selection(cx);
-                        this.sync_host_gpu_sampling(cx);
-                        if this.active_context_sidebar_tool == ContextSidebarTool::Services {
-                            this.request_host_service_snapshot(connection_id.clone(), cx);
-                        }
-                        if this.active_context_sidebar_tool == ContextSidebarTool::Logs {
-                            this.request_host_logs_snapshot(
-                                connection_id.clone(),
-                                HostSnapshotFeedback::Silent,
-                                cx,
-                            );
-                        }
-                        if this.active_context_sidebar_tool == ContextSidebarTool::Tmux {
-                            this.request_host_tmux_snapshot(
-                                connection_id.clone(),
-                                HostSnapshotFeedback::Silent,
-                                cx,
-                            );
-                        }
-                        if this.active_context_sidebar_tool == ContextSidebarTool::Ports {
-                            this.request_host_ports_snapshot(
-                                connection_id.clone(),
-                                HostSnapshotFeedback::Silent,
-                                cx,
-                            );
-                        }
-                        if this.active_context_sidebar_tool == ContextSidebarTool::Schedules {
-                            this.request_host_schedules_snapshot(
-                                connection_id.clone(),
-                                HostSnapshotFeedback::Silent,
-                                cx,
-                            );
-                        }
-                        if this.active_context_sidebar_tool == ContextSidebarTool::Filesystems {
-                            this.request_host_filesystems_snapshot(
-                                connection_id.clone(),
-                                HostSnapshotFeedback::Silent,
-                                cx,
-                            );
-                        }
-                        if this.active_context_sidebar_tool == ContextSidebarTool::Packages {
-                            this.request_host_packages_snapshot(
-                                connection_id.clone(),
-                                HostSnapshotFeedback::Silent,
-                                cx,
-                            );
-                        }
-                        cx.stop_propagation();
-                    }),
-                ));
-            }
-            wrapper = wrapper.child(popup);
-        }
-        wrapper.into_any_element()
+    ) {
+        self.host_tools.update(cx, |host_tools, cx| {
+            host_tools.select_connection_for_active_tool(connection_id, focus_origin, cx);
+        });
     }
 
     pub(in crate::workspace) fn handle_connection_monitor_select_key(
@@ -1253,25 +1114,29 @@ impl WorkspaceApp {
         if event.keystroke.modifiers.platform || event.keystroke.modifiers.control {
             return false;
         }
-        let connections = self.monitor_connections();
+        let connections = self.monitor_connections(cx);
         if !monitor_connection_can_switch(&connections) {
-            self.connection_monitor.selector_open = false;
-            self.connection_monitor.selector_highlighted_index = None;
-            self.connection_monitor.selector_focus_origin = None;
+            self.host_tools.update(cx, |host_tools, cx| {
+                host_tools.close_selector(true, cx);
+            });
             return false;
         }
-        let selected_id = self
-            .connection_monitor
-            .selected_connection_id
+        let (selector_open, highlighted_index, focus_origin, selected_connection_id) = {
+            let host_tools = self.host_tools.read(cx);
+            (
+                host_tools.selector_open(),
+                host_tools.selector_highlighted_index(),
+                host_tools.selector_focus_origin(),
+                host_tools.selected_connection_id_owned(),
+            )
+        };
+        let selected_id = selected_connection_id
             .as_deref()
             .unwrap_or(connections[0].connection_id.as_str());
         let selected_index = monitor_connection_selected_index(&connections, selected_id);
-        let current = self
-            .connection_monitor
-            .selector_highlighted_index
-            .unwrap_or(selected_index);
+        let current = highlighted_index.unwrap_or(selected_index);
 
-        if self.connection_monitor.selector_open {
+        if selector_open {
             return self.handle_open_connection_monitor_select_key(
                 event,
                 &connections,
@@ -1285,25 +1150,20 @@ impl WorkspaceApp {
                 // Tauri/Radix exposes the select trigger as a keyboard tab stop.
                 // Native has no DOM focus chain, so the monitor page owns that
                 // first trigger focus explicitly.
-                self.connection_monitor.selector_focus_origin =
-                    Some(browser_behavior::BrowserFocusOrigin::Keyboard);
-                cx.notify();
+                self.host_tools
+                    .update(cx, |host_tools, cx| host_tools.focus_selector_trigger(cx));
                 true
             }
-            "enter" | "space" | " " | "arrowdown" | "down"
-                if self.connection_monitor.selector_focus_origin.is_some() =>
-            {
-                self.connection_monitor.selector_open = true;
-                self.connection_monitor.selector_highlighted_index = Some(selected_index);
-                self.connection_monitor.selector_focus_origin =
-                    Some(browser_behavior::BrowserFocusOrigin::Keyboard);
-                cx.notify();
+            "enter" | "space" | " " | "arrowdown" | "down" if focus_origin.is_some() => {
+                self.host_tools.update(cx, |host_tools, cx| {
+                    host_tools.open_selector_from_keyboard(selected_index, cx);
+                });
                 true
             }
-            "escape" if self.connection_monitor.selector_focus_origin.is_some() => {
-                self.connection_monitor.selector_focus_origin = None;
-                self.connection_monitor.selector_highlighted_index = None;
-                cx.notify();
+            "escape" if focus_origin.is_some() => {
+                self.host_tools.update(cx, |host_tools, cx| {
+                    host_tools.close_selector(true, cx);
+                });
                 true
             }
             _ => false,
@@ -1319,117 +1179,59 @@ impl WorkspaceApp {
     ) -> bool {
         match event.keystroke.key.as_str() {
             "escape" => {
-                self.connection_monitor.selector_open = false;
-                self.connection_monitor.selector_highlighted_index = None;
-                self.connection_monitor.selector_focus_origin =
-                    Some(browser_behavior::BrowserFocusOrigin::Keyboard);
-                cx.notify();
+                self.host_tools.update(cx, |host_tools, cx| {
+                    host_tools.close_selector_to_keyboard_trigger(cx);
+                });
                 true
             }
             "tab" => {
-                self.connection_monitor.selector_open = false;
-                self.connection_monitor.selector_highlighted_index = None;
-                self.connection_monitor.selector_focus_origin = None;
-                cx.notify();
+                self.host_tools.update(cx, |host_tools, cx| {
+                    host_tools.close_selector(true, cx);
+                });
                 true
             }
             "arrowdown" | "down" => {
-                self.connection_monitor.selector_highlighted_index =
-                    Some(browser_behavior::browser_select_next_index(
-                        current,
-                        connections.len(),
-                        browser_behavior::BrowserSelectKeyDirection::Next,
-                    ));
-                self.connection_monitor.selector_focus_origin =
-                    Some(browser_behavior::BrowserFocusOrigin::Keyboard);
-                cx.notify();
+                let next_index = browser_behavior::browser_select_next_index(
+                    current,
+                    connections.len(),
+                    browser_behavior::BrowserSelectKeyDirection::Next,
+                );
+                self.host_tools.update(cx, |host_tools, cx| {
+                    host_tools.highlight_selector_from_keyboard(next_index, cx);
+                });
                 true
             }
             "arrowup" | "up" => {
-                self.connection_monitor.selector_highlighted_index =
-                    Some(browser_behavior::browser_select_next_index(
-                        current,
-                        connections.len(),
-                        browser_behavior::BrowserSelectKeyDirection::Previous,
-                    ));
-                self.connection_monitor.selector_focus_origin =
-                    Some(browser_behavior::BrowserFocusOrigin::Keyboard);
-                cx.notify();
+                let previous_index = browser_behavior::browser_select_next_index(
+                    current,
+                    connections.len(),
+                    browser_behavior::BrowserSelectKeyDirection::Previous,
+                );
+                self.host_tools.update(cx, |host_tools, cx| {
+                    host_tools.highlight_selector_from_keyboard(previous_index, cx);
+                });
                 true
             }
             "home" => {
-                self.connection_monitor.selector_highlighted_index = Some(0);
-                self.connection_monitor.selector_focus_origin =
-                    Some(browser_behavior::BrowserFocusOrigin::Keyboard);
-                cx.notify();
+                self.host_tools.update(cx, |host_tools, cx| {
+                    host_tools.highlight_selector_from_keyboard(0, cx);
+                });
                 true
             }
             "end" => {
-                self.connection_monitor.selector_highlighted_index =
-                    Some(connections.len().saturating_sub(1));
-                self.connection_monitor.selector_focus_origin =
-                    Some(browser_behavior::BrowserFocusOrigin::Keyboard);
-                cx.notify();
+                let last_index = connections.len().saturating_sub(1);
+                self.host_tools.update(cx, |host_tools, cx| {
+                    host_tools.highlight_selector_from_keyboard(last_index, cx);
+                });
                 true
             }
             "enter" | "space" | " " => {
                 if let Some(connection) = connections.get(current.min(connections.len() - 1)) {
-                    self.connection_monitor.selected_connection_id =
-                        Some(connection.connection_id.clone());
-                    self.connection_monitor.selector_open = false;
-                    self.connection_monitor.selector_highlighted_index = None;
-                    self.connection_monitor.selector_focus_origin =
-                        Some(browser_behavior::BrowserFocusOrigin::Keyboard);
-                    self.connection_monitor.host_tmux_pending_confirm = None;
-                    self.connection_monitor.host_tmux_input_dialog = None;
-                    self.connection_monitor.host_schedule_pending_confirm = None;
-                    self.sync_connection_monitor_selection(cx);
-                    self.sync_host_gpu_sampling(cx);
-                    if self.active_context_sidebar_tool == ContextSidebarTool::Services {
-                        self.request_host_service_snapshot(connection.connection_id.clone(), cx);
-                    }
-                    if self.active_context_sidebar_tool == ContextSidebarTool::Logs {
-                        self.request_host_logs_snapshot(
-                            connection.connection_id.clone(),
-                            HostSnapshotFeedback::Silent,
-                            cx,
-                        );
-                    }
-                    if self.active_context_sidebar_tool == ContextSidebarTool::Tmux {
-                        self.request_host_tmux_snapshot(
-                            connection.connection_id.clone(),
-                            HostSnapshotFeedback::Silent,
-                            cx,
-                        );
-                    }
-                    if self.active_context_sidebar_tool == ContextSidebarTool::Ports {
-                        self.request_host_ports_snapshot(
-                            connection.connection_id.clone(),
-                            HostSnapshotFeedback::Silent,
-                            cx,
-                        );
-                    }
-                    if self.active_context_sidebar_tool == ContextSidebarTool::Schedules {
-                        self.request_host_schedules_snapshot(
-                            connection.connection_id.clone(),
-                            HostSnapshotFeedback::Silent,
-                            cx,
-                        );
-                    }
-                    if self.active_context_sidebar_tool == ContextSidebarTool::Filesystems {
-                        self.request_host_filesystems_snapshot(
-                            connection.connection_id.clone(),
-                            HostSnapshotFeedback::Silent,
-                            cx,
-                        );
-                    }
-                    if self.active_context_sidebar_tool == ContextSidebarTool::Packages {
-                        self.request_host_packages_snapshot(
-                            connection.connection_id.clone(),
-                            HostSnapshotFeedback::Silent,
-                            cx,
-                        );
-                    }
+                    self.select_host_tools_connection(
+                        connection.connection_id.clone(),
+                        Some(browser_behavior::BrowserFocusOrigin::Keyboard),
+                        cx,
+                    );
                 }
                 true
             }

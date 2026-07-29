@@ -1,9 +1,251 @@
 use crate::workspace::ai_state::AiStandardConfirmKind;
 
+impl AiWorkspaceEntity {
+    fn create_chat_conversation(
+        &mut self,
+        id: String,
+        title: Option<String>,
+        now_ms: i64,
+    ) -> String {
+        let id = self
+            .conversation_state_mut()
+            .create_conversation(id, title, now_ms, None);
+        self.persist_chat_state();
+        id
+    }
+
+    fn begin_sidebar_user_turn(
+        &mut self,
+        candidate_id: String,
+        title: String,
+        now_ms: i64,
+        message: AiChatMessage,
+        stream_config: &AiChatStreamConfig,
+        active_participant: Option<String>,
+    ) -> String {
+        let first_user_message = message.content.clone();
+        let conversation_id = self.conversation_state_mut().ensure_conversation(
+            candidate_id,
+            Some(title),
+            now_ms,
+            None,
+        );
+        self.conversation_state_mut()
+            .add_message(&conversation_id, message);
+        if let Some(conversation) = self
+            .conversation_state_mut()
+            .conversations
+            .iter_mut()
+            .find(|conversation| conversation.id == conversation_id)
+        {
+            let metadata = conversation
+                .session_metadata
+                .get_or_insert_with(|| serde_json::json!({ "conversationId": conversation_id }));
+            if let Some(object) = metadata.as_object_mut() {
+                object.insert(
+                    "conversationId".to_string(),
+                    serde_json::json!(conversation_id),
+                );
+                object.insert("origin".to_string(), serde_json::json!("sidebar"));
+                object
+                    .entry("firstUserMessage".to_string())
+                    .or_insert_with(|| serde_json::json!(first_user_message));
+                object.insert(
+                    "providerId".to_string(),
+                    serde_json::json!(stream_config.provider_id),
+                );
+                object.insert(
+                    "providerModel".to_string(),
+                    serde_json::json!(stream_config.model),
+                );
+                if let Some(participant) = active_participant {
+                    object.insert(
+                        "activeParticipant".to_string(),
+                        serde_json::json!(participant),
+                    );
+                }
+            }
+        }
+        // Save the message and session metadata as one projection.
+        self.persist_chat_state();
+        conversation_id
+    }
+
+    fn add_help_exchange(
+        &mut self,
+        candidate_id: String,
+        title: String,
+        now_ms: i64,
+        user_message: AiChatMessage,
+        assistant_message: AiChatMessage,
+    ) {
+        let conversation_id = self.conversation_state_mut().ensure_conversation(
+            candidate_id,
+            Some(title),
+            now_ms,
+            None,
+        );
+        self.conversation_state_mut()
+            .add_message(&conversation_id, user_message);
+        self.conversation_state_mut()
+            .add_message(&conversation_id, assistant_message);
+        self.persist_chat_state();
+    }
+
+    fn truncate_active_conversation_after_last_user(&mut self, now_ms: i64) -> Option<String> {
+        let conversation = self.conversation_state_mut().active_conversation_mut()?;
+        let last_user_index = conversation
+            .messages
+            .iter()
+            .rposition(|message| message.role == AiChatRole::User)?;
+        conversation.messages.truncate(last_user_index + 1);
+        conversation.message_count = conversation.messages.len();
+        conversation.updated_at_ms = now_ms;
+        let conversation_id = conversation.id.clone();
+        self.persist_chat_state();
+        Some(conversation_id)
+    }
+
+    fn delete_active_message(&mut self, message_id: &str, now_ms: i64) -> bool {
+        let Some(conversation) = self.conversation_state_mut().active_conversation_mut() else {
+            return false;
+        };
+        let original_len = conversation.messages.len();
+        conversation
+            .messages
+            .retain(|message| message.id != message_id);
+        if conversation.messages.len() == original_len {
+            return false;
+        }
+        conversation.message_count = conversation.messages.len();
+        conversation.updated_at_ms = now_ms;
+        self.persist_chat_state();
+        true
+    }
+
+    fn replace_active_user_message(
+        &mut self,
+        message_id: &str,
+        new_user_id: String,
+        edited_content: String,
+        model: String,
+        now_ms: i64,
+    ) -> Option<String> {
+        let conversation = self.conversation_state_mut().active_conversation_mut()?;
+        let message_index = conversation
+            .messages
+            .iter()
+            .position(|message| message.id == message_id)?;
+        if conversation.messages.get(message_index)?.role != AiChatRole::User {
+            return None;
+        }
+        let current_tail = strip_ai_nested_branches(&conversation.messages[message_index..]);
+        let original = conversation.messages.get_mut(message_index)?;
+        let branches = match original.branches.take() {
+            Some(mut branches) => {
+                branches.tails.insert(branches.active_index, current_tail);
+                branches.total = branches.total.saturating_add(1);
+                branches.active_index = branches.total.saturating_sub(1);
+                branches
+            }
+            None => AiMessageBranches {
+                total: 2,
+                active_index: 1,
+                tails: HashMap::from([(0, current_tail)]),
+            },
+        };
+        let context = original.context.take();
+        conversation.messages.truncate(message_index);
+        conversation.messages.push(AiChatMessage {
+            id: new_user_id,
+            role: AiChatRole::User,
+            content: edited_content,
+            timestamp_ms: now_ms,
+            model: Some(model),
+            context,
+            is_streaming: false,
+            thinking_content: None,
+            metadata: None,
+            tool_call_id: None,
+            tool_calls: Vec::new(),
+            turn: None,
+            transcript_ref: None,
+            summary_ref: None,
+            branches: Some(branches),
+            suggestions: Vec::new(),
+        });
+        conversation.message_count = conversation.messages.len();
+        conversation.updated_at_ms = now_ms;
+        let conversation_id = conversation.id.clone();
+        self.persist_chat_state();
+        Some(conversation_id)
+    }
+
+    fn switch_active_message_branch(
+        &mut self,
+        message_id: &str,
+        branch_index: usize,
+        now_ms: i64,
+    ) -> bool {
+        let Some(conversation) = self.conversation_state_mut().active_conversation_mut() else {
+            return false;
+        };
+        let Some(message_index) = conversation
+            .messages
+            .iter()
+            .position(|message| message.id == message_id)
+        else {
+            return false;
+        };
+        let Some(branches) = conversation.messages[message_index].branches.as_ref() else {
+            return false;
+        };
+        if branch_index >= branches.total || branch_index == branches.active_index {
+            return false;
+        }
+        if !branches
+            .tails
+            .get(&branch_index)
+            .is_some_and(|target_tail| !target_tail.is_empty())
+        {
+            return false;
+        }
+        let live_tail = strip_ai_nested_branches(&conversation.messages[message_index..]);
+        // This branch payload belongs to the message being replaced, so move it
+        // instead of cloning every stored branch and message tail.
+        let mut branches = conversation.messages[message_index]
+            .branches
+            .take()
+            .expect("validated branch metadata must remain present");
+        let target_tail = branches
+            .tails
+            .remove(&branch_index)
+            .expect("validated branch tail must remain present");
+        branches.tails.insert(branches.active_index, live_tail);
+        branches.active_index = branch_index;
+        let mut new_messages = conversation.messages[..message_index].to_vec();
+        let mut updated_branches = Some(branches);
+        for (index, mut message) in target_tail.into_iter().enumerate() {
+            message.branches = if index == 0 {
+                updated_branches.take()
+            } else {
+                None
+            };
+            new_messages.push(message);
+        }
+        conversation.messages = new_messages;
+        conversation.message_count = conversation.messages.len();
+        conversation.updated_at_ms = now_ms;
+        self.persist_chat_state();
+        true
+    }
+}
+
 impl WorkspaceApp {
     pub(in crate::workspace) fn open_ai_safety_confirm(&mut self, cx: &mut Context<Self>) {
-        self.ai.chat.safety_confirm_open = true;
-        self.ai.chat.safety_confirm_presence.reopen();
+        self.ai_entity.update(cx, |ai, _cx| {
+            ai.open_standard_chat_confirm(AiStandardConfirmKind::Safety);
+        });
         // Pointer-opened confirmations do not show keyboard focus until navigation starts.
         self.clear_standard_confirm_focus();
         cx.notify();
@@ -13,7 +255,12 @@ impl WorkspaceApp {
         &mut self,
         cx: &mut Context<Self>,
     ) -> bool {
-        let Some(generation) = self.ai.chat.safety_confirm_presence.begin_exit() else {
+        let Some(generation) = self
+            .ai_entity
+            .update(cx, |ai, _cx| {
+                ai.begin_standard_chat_confirm_exit(AiStandardConfirmKind::Safety)
+            })
+        else {
             return false;
         };
         self.clear_standard_confirm_focus();
@@ -22,8 +269,9 @@ impl WorkspaceApp {
     }
 
     pub(in crate::workspace) fn open_ai_summarize_confirm(&mut self, cx: &mut Context<Self>) {
-        self.ai.chat.summarize_confirm_open = true;
-        self.ai.chat.summarize_confirm_presence.reopen();
+        self.ai_entity.update(cx, |ai, _cx| {
+            ai.open_standard_chat_confirm(AiStandardConfirmKind::Summarize);
+        });
         self.reset_standard_confirm_focus();
         cx.notify();
     }
@@ -32,7 +280,12 @@ impl WorkspaceApp {
         &mut self,
         cx: &mut Context<Self>,
     ) -> bool {
-        let Some(generation) = self.ai.chat.summarize_confirm_presence.begin_exit() else {
+        let Some(generation) = self
+            .ai_entity
+            .update(cx, |ai, _cx| {
+                ai.begin_standard_chat_confirm_exit(AiStandardConfirmKind::Summarize)
+            })
+        else {
             return false;
         };
         self.clear_standard_confirm_focus();
@@ -51,14 +304,14 @@ impl WorkspaceApp {
             oxideterm_gpui_ui::motion::MotionDuration::Control,
         );
         if delay.is_zero() {
-            self.finish_ai_standard_confirm_exit(kind, generation);
+            self.finish_ai_standard_confirm_exit(kind, generation, cx);
             return;
         }
         // The open flag remains set until this generation's exit frame completes.
         cx.spawn(async move |weak, cx| {
             Timer::after(delay).await;
             let _ = weak.update(cx, |this, cx| {
-                if this.finish_ai_standard_confirm_exit(kind, generation) {
+                if this.finish_ai_standard_confirm_exit(kind, generation, cx) {
                     cx.notify();
                 }
             });
@@ -70,25 +323,11 @@ impl WorkspaceApp {
         &mut self,
         kind: AiStandardConfirmKind,
         generation: u64,
+        cx: &mut Context<Self>,
     ) -> bool {
-        let finished = match kind {
-            AiStandardConfirmKind::Safety => {
-                self.ai.chat.safety_confirm_presence.finish_exit(generation)
-            }
-            AiStandardConfirmKind::Summarize => self
-                .ai
-                .chat
-                .summarize_confirm_presence
-                .finish_exit(generation),
-        };
-        if !finished {
-            return false;
-        }
-        match kind {
-            AiStandardConfirmKind::Safety => self.ai.chat.safety_confirm_open = false,
-            AiStandardConfirmKind::Summarize => self.ai.chat.summarize_confirm_open = false,
-        }
-        true
+        self.ai_entity.update(cx, |ai, _cx| {
+            ai.finish_standard_chat_confirm_exit(kind, generation)
+        })
     }
 
     pub(in crate::workspace) fn create_ai_sidebar_conversation(
@@ -96,28 +335,22 @@ impl WorkspaceApp {
         title: Option<String>,
         cx: &mut Context<Self>,
     ) -> String {
-        self.ensure_ai_chat_initialized();
+        self.ensure_ai_chat_initialized(cx);
         let now = ai_now_ms();
-        let id = self.next_ai_chat_id(now);
+        let id = self.next_ai_chat_id(now, cx);
         let id = self
-            .ai
-            .chat
-            .conversation_state
-            .create_conversation(id, title, now, None);
-        self.persist_ai_chat_state();
-        self.ai.chat.conversation_list_open = false;
-        self.ai.chat.menu_open = false;
-        self.ai.chat.draft.clear();
-        self.ai.chat.input_focused = false;
-        self.ai.chat.autocomplete_index = 0;
-        self.ai.chat.autocomplete_suppressed = false;
+            .ai_entity
+            .update(cx, |ai, _cx| ai.create_chat_conversation(id, title, now));
+        self.ai_entity.update(cx, |ai, _cx| {
+            ai.reset_chat_for_new_conversation();
+        });
         cx.notify();
         id
     }
 
     pub(in crate::workspace) fn send_ai_chat_draft(&mut self, cx: &mut Context<Self>) {
-        self.ensure_ai_chat_initialized();
-        let content = self.ai.chat.draft.trim().to_string();
+        self.ensure_ai_chat_initialized(cx);
+        let content = self.ai_entity.read(cx).chat_ui().draft.trim().to_string();
         if content.is_empty() {
             cx.notify();
             return;
@@ -126,11 +359,12 @@ impl WorkspaceApp {
             self.push_ai_settings_toast(
                 self.i18n.t("ai.chat.disabled_message"),
                 TerminalNoticeVariant::Warning,
+                cx,
             );
             cx.notify();
             return;
         }
-        self.bootstrap_ai_mcp_registry();
+        self.bootstrap_ai_mcp_registry(cx);
 
         let parsed_input = parse_ai_user_input(&content);
         let detected_intent = detect_ai_intent(&parsed_input);
@@ -150,7 +384,7 @@ impl WorkspaceApp {
             match command.name {
                 "clear" => {
                     self.create_ai_sidebar_conversation(None, cx);
-                    self.reset_ai_chat_input_after_submit();
+                    self.reset_ai_chat_input_after_submit(cx);
                     cx.notify();
                     return;
                 }
@@ -160,7 +394,7 @@ impl WorkspaceApp {
                 }
                 "compact" => {
                     self.start_ai_compact_conversation(cx);
-                    self.reset_ai_chat_input_after_submit();
+                    self.reset_ai_chat_input_after_submit(cx);
                     cx.notify();
                     return;
                 }
@@ -168,24 +402,19 @@ impl WorkspaceApp {
             }
         }
 
-        let stream_config = match self.resolve_ai_stream_config() {
+        let stream_config = match self.resolve_ai_stream_config(cx) {
             Ok(config) => config,
             Err(error) => {
-                self.push_ai_settings_toast(error, TerminalNoticeVariant::Error);
+                self.push_ai_settings_toast(error, TerminalNoticeVariant::Error, cx);
                 cx.notify();
                 return;
             }
         };
         let now = ai_now_ms();
         let title = generate_chat_title(&content);
-        let id = self.next_ai_chat_id(now);
-        let conversation_id =
-            self.ai
-                .chat
-                .conversation_state
-                .ensure_conversation(id, Some(title), now, None);
+        let id = self.next_ai_chat_id(now, cx);
         let message = AiChatMessage {
-            id: self.next_ai_chat_id(now),
+            id: self.next_ai_chat_id(now, cx),
             role: AiChatRole::User,
             content,
             timestamp_ms: now,
@@ -202,61 +431,32 @@ impl WorkspaceApp {
             branches: None,
             suggestions: Vec::new(),
         };
-        self.ai
-            .chat
-            .conversation_state
-            .add_message(&conversation_id, message);
-        // Sending a new turn is an explicit request to resume following the
-        // conversation tail; manual upward scrolling can pause it again.
-        self.ai
-            .chat
-            .message_list_state
-            .set_follow_mode(FollowMode::Tail);
-        self.persist_ai_chat_state();
-        let request_content =
-            (!parsed_input.clean_text.is_empty()).then_some(parsed_input.clean_text.clone());
         let runtime_system_prompt = self.resolve_ai_sidebar_system_prompt_segment(cx);
         let task_system_prompt = ai_chat_message_context([
             ai_input_system_prompt(slash_command, &parsed_input.participants),
             runtime_system_prompt,
             ai_detected_intent_system_prompt(&detected_intent),
         ]);
-        if let Some(conversation) = self
-            .ai
-            .chat
-            .conversation_state
-            .conversations
-            .iter_mut()
-            .find(|conversation| conversation.id == conversation_id)
-        {
-            let metadata = conversation
-                .session_metadata
-                .get_or_insert_with(|| serde_json::json!({ "conversationId": conversation_id }));
-            if let Some(object) = metadata.as_object_mut() {
-                object.insert(
-                    "conversationId".to_string(),
-                    serde_json::json!(conversation_id),
-                );
-                object.insert("origin".to_string(), serde_json::json!("sidebar"));
-                object
-                    .entry("firstUserMessage".to_string())
-                    .or_insert_with(|| serde_json::json!(parsed_input.raw_text.clone()));
-                object.insert(
-                    "providerId".to_string(),
-                    serde_json::json!(stream_config.provider_id),
-                );
-                object.insert(
-                    "providerModel".to_string(),
-                    serde_json::json!(stream_config.model),
-                );
-                if let Some(participant) = parsed_input.participants.first() {
-                    object.insert(
-                        "activeParticipant".to_string(),
-                        serde_json::json!(participant.name.clone()),
-                    );
-                }
-            }
-        }
+        let active_participant = parsed_input
+            .participants
+            .first()
+            .map(|participant| participant.name.clone());
+        let request_content =
+            (!parsed_input.clean_text.is_empty()).then_some(parsed_input.clean_text);
+        let conversation_id = self.ai_entity.update(cx, |ai, _cx| {
+            ai.begin_sidebar_user_turn(
+                id,
+                title,
+                now,
+                message,
+                &stream_config,
+                active_participant,
+            )
+        });
+        // Sending a new turn is an explicit request to resume following the
+        // conversation tail; manual upward scrolling can pause it again.
+        self.ai_entity.read(cx).chat_ui().message_list_state
+            .set_follow_mode(FollowMode::Tail);
         self.start_ai_chat_stream_after_api_key_lookup(
             conversation_id,
             stream_config,
@@ -264,7 +464,7 @@ impl WorkspaceApp {
             task_system_prompt,
             cx,
         );
-        self.reset_ai_chat_input_after_submit();
+        self.reset_ai_chat_input_after_submit(cx);
         cx.notify();
     }
 
@@ -287,11 +487,11 @@ impl WorkspaceApp {
             );
             return;
         };
-        let key_store = self.ai.models.key_store.clone();
+        let key_store = self.ai_entity.read(cx).key_store().clone();
         let runtime = self.forwarding_runtime.clone();
         let failed_to_get_key = self.i18n.t("ai.model_selector.failed_to_get_api_key");
         let api_key_not_found = self.i18n.t("ai.model_selector.api_key_not_found");
-        self.ai.chat.loading = true;
+        self.ai_entity.update(cx, |ai, _cx| ai.set_chat_loading(true));
         cx.spawn(async move |weak, cx| {
             let key_result = runtime
                 .spawn_blocking(move || key_store.get_provider_key(&provider_id))
@@ -301,15 +501,17 @@ impl WorkspaceApp {
             let _ = weak.update(cx, |this, cx| match key_result {
                 Ok(api_key) => {
                     if requires_key && api_key.is_none() {
-                        this.ai.chat.loading = false;
+                        this.ai_entity.update(cx, |ai, _cx| ai.set_chat_loading(false));
                         this.push_ai_settings_toast(
                             api_key_not_found,
                             TerminalNoticeVariant::Error,
+                            cx,
                         );
                         cx.notify();
                         return;
                     }
-                    stream_config.api_key = api_key;
+                    stream_config.api_key =
+                        api_key.map(oxideterm_ai::SharedAiProviderKey::new);
                     this.start_ai_chat_stream_after_rag_lookup(
                         conversation_id,
                         stream_config,
@@ -319,8 +521,8 @@ impl WorkspaceApp {
                     );
                 }
                 Err(_) if requires_key => {
-                    this.ai.chat.loading = false;
-                    this.push_ai_settings_toast(failed_to_get_key, TerminalNoticeVariant::Error);
+                    this.ai_entity.update(cx, |ai, _cx| ai.set_chat_loading(false));
+                    this.push_ai_settings_toast(failed_to_get_key, TerminalNoticeVariant::Error, cx);
                     cx.notify();
                 }
                 Err(_) => {
@@ -346,14 +548,9 @@ impl WorkspaceApp {
     ) {
         let now = ai_now_ms();
         let title = generate_chat_title(&content);
-        let id = self.next_ai_chat_id(now);
-        let conversation_id =
-            self.ai
-                .chat
-                .conversation_state
-                .ensure_conversation(id, Some(title), now, None);
+        let id = self.next_ai_chat_id(now, cx);
         let user_message = AiChatMessage {
-            id: self.next_ai_chat_id(now),
+            id: self.next_ai_chat_id(now, cx),
             role: AiChatRole::User,
             content,
             timestamp_ms: now,
@@ -371,7 +568,7 @@ impl WorkspaceApp {
             suggestions: Vec::new(),
         };
         let assistant_message = AiChatMessage {
-            id: self.next_ai_chat_id(now),
+            id: self.next_ai_chat_id(now, cx),
             role: AiChatRole::Assistant,
             content: self.ai_help_markdown(),
             timestamp_ms: now,
@@ -388,16 +585,10 @@ impl WorkspaceApp {
             branches: None,
             suggestions: Vec::new(),
         };
-        self.ai
-            .chat
-            .conversation_state
-            .add_message(&conversation_id, user_message);
-        self.ai
-            .chat
-            .conversation_state
-            .add_message(&conversation_id, assistant_message);
-        self.persist_ai_chat_state();
-        self.reset_ai_chat_input_after_submit();
+        self.ai_entity.update(cx, |ai, _cx| {
+            ai.add_help_exchange(id, title, now, user_message, assistant_message);
+        });
+        self.reset_ai_chat_input_after_submit(cx);
         cx.notify();
     }
 
@@ -406,53 +597,31 @@ impl WorkspaceApp {
         text: String,
         cx: &mut Context<Self>,
     ) {
-        self.ai.chat.draft = text;
+        self.ai_entity.update(cx, |ai, _cx| {
+            ai.set_chat_draft(text);
+        });
         self.send_ai_chat_draft(cx);
     }
 
     pub(in crate::workspace) fn regenerate_ai_last_response(&mut self, cx: &mut Context<Self>) {
-        if self.ai.chat.loading {
+        if self.ai_entity.read(cx).chat_is_loading() {
             cx.notify();
             return;
         }
-        let Some(conversation_id) = self
-            .ai
-            .chat
-            .conversation_state
-            .active_conversation_id
-            .clone()
-        else {
-            return;
-        };
-        let Some(conversation) = self
-            .ai
-            .chat
-            .conversation_state
-            .conversations
-            .iter_mut()
-            .find(|conversation| conversation.id == conversation_id)
-        else {
-            return;
-        };
-        let Some(last_user_index) = conversation
-            .messages
-            .iter()
-            .rposition(|message| message.role == AiChatRole::User)
-        else {
-            return;
-        };
-        conversation.messages.truncate(last_user_index + 1);
-        conversation.message_count = conversation.messages.len();
-        conversation.updated_at_ms = ai_now_ms();
-        let stream_config = match self.resolve_ai_stream_config() {
+        let stream_config = match self.resolve_ai_stream_config(cx) {
             Ok(config) => config,
             Err(error) => {
-                self.push_ai_settings_toast(error, TerminalNoticeVariant::Error);
+                self.push_ai_settings_toast(error, TerminalNoticeVariant::Error, cx);
                 cx.notify();
                 return;
             }
         };
-        self.persist_ai_chat_state();
+        let conversation_id = self.ai_entity.update(cx, |ai, _cx| {
+            ai.truncate_active_conversation_after_last_user(ai_now_ms())
+        });
+        let Some(conversation_id) = conversation_id else {
+            return;
+        };
         self.start_ai_chat_stream_after_api_key_lookup(
             conversation_id,
             stream_config,
@@ -468,14 +637,18 @@ impl WorkspaceApp {
         message_id: String,
         cx: &mut Context<Self>,
     ) {
-        if self.ai.chat.loading {
+        if self.ai_entity.read(cx).chat_is_loading() {
             cx.notify();
             return;
         }
-        self.ai.chat.delete_message_confirm = Some(message_id);
-        self.ai_delete_message_confirm_presence.reopen();
-        self.reset_standard_confirm_focus();
-        cx.notify();
+        self.ai_entity.update(cx, |ai, cx| {
+            ai.open_chat_confirm(
+                ai_state::AiChatConfirmKind::DeleteMessage {
+                    message_id: Arc::from(message_id),
+                },
+                cx,
+            );
+        });
     }
 
     pub(in crate::workspace) fn delete_ai_message(
@@ -483,65 +656,52 @@ impl WorkspaceApp {
         message_id: &str,
         cx: &mut Context<Self>,
     ) {
-        let Some(conversation) = self.ai.chat.conversation_state.active_conversation_mut() else {
-            return;
-        };
-        let original_len = conversation.messages.len();
-        conversation
-            .messages
-            .retain(|message| message.id != message_id);
-        if conversation.messages.len() == original_len {
+        let deleted = self
+            .ai_entity
+            .update(cx, |ai, _cx| ai.delete_active_message(message_id, ai_now_ms()));
+        if !deleted {
             return;
         }
-        self.ai.chat.thinking_expansion_state.remove(message_id);
-        conversation.message_count = conversation.messages.len();
-        conversation.updated_at_ms = ai_now_ms();
-        self.persist_ai_chat_state();
+        self.ai_entity.update(cx, |ai, _cx| {
+            ai.remove_thinking_expansion(message_id);
+        });
         cx.notify();
     }
 
     pub(in crate::workspace) fn set_ai_safety_mode_default(&mut self, cx: &mut Context<Self>) {
-        if let Some(conversation_id) = self
-            .ai
-            .chat
-            .conversation_state
-            .active_conversation_id
-            .as_ref()
-        {
-            self.ai
-                .chat
-                .safety_bypass_conversations
-                .remove(conversation_id);
-        }
-        self.ai.chat.safety_menu_open = false;
-        self.restore_ai_chat_input_focus_after_safety_mode_change();
+        self.ai_entity.update(cx, |ai, _cx| {
+            ai.set_active_conversation_safety_bypass(false);
+        });
+        self.ai_entity.update(cx, |ai, _cx| {
+            ai.set_chat_popover_open(AiChatPopover::Safety, false);
+        });
+        self.restore_ai_chat_input_focus_after_safety_mode_change(cx);
         cx.notify();
     }
 
     pub(in crate::workspace) fn confirm_ai_safety_bypass(&mut self, cx: &mut Context<Self>) {
-        if let Some(conversation_id) = self
-            .ai
-            .chat
-            .conversation_state
-            .active_conversation_id
-            .as_ref()
-        {
-            self.ai
-                .chat
-                .safety_bypass_conversations
-                .insert(conversation_id.clone());
-        }
-        self.ai.chat.safety_menu_open = false;
-        self.restore_ai_chat_input_focus_after_safety_mode_change();
+        self.ai_entity.update(cx, |ai, _cx| {
+            ai.set_active_conversation_safety_bypass(true);
+        });
+        self.ai_entity.update(cx, |ai, _cx| {
+            ai.set_chat_popover_open(AiChatPopover::Safety, false);
+        });
+        self.restore_ai_chat_input_focus_after_safety_mode_change(cx);
         cx.notify();
     }
 
-    pub(in crate::workspace) fn restore_ai_chat_input_focus_after_safety_mode_change(&mut self) {
+    pub(in crate::workspace) fn restore_ai_chat_input_focus_after_safety_mode_change(
+        &mut self,
+        cx: &mut Context<Self>,
+    ) {
         // Closing the safety menu returns keyboard ownership to the composer so
         // Enter/Space continue the conversation instead of falling through.
-        self.ai.chat.input_focused = true;
-        self.ai.chat.footer_focus = None;
-        self.ai.models.selector_search_focused = false;
+        self.ai_entity.update(cx, |ai, _cx| {
+            ai.focus_chat_input();
+        });
+        self.ai_entity.update(cx, |ai, _cx| {
+            ai.set_model_selector_search_focused(false);
+        });
         self.ime_marked_text = None;
     }
 
@@ -551,134 +711,84 @@ impl WorkspaceApp {
         content: String,
         cx: &mut Context<Self>,
     ) {
-        if self.ai.chat.loading {
+        if self.ai_entity.read(cx).chat_is_loading() {
             cx.notify();
             return;
         }
-        self.ai.chat.editing_message_id = Some(message_id);
-        self.ai.chat.editing_message_draft = content;
-        self.ai.chat.editing_message_focused = true;
-        self.ai.chat.input_focused = false;
-        self.ai.models.selector_search_focused = false;
+        self.ai_entity.update(cx, |ai, _cx| {
+            ai.begin_message_edit(message_id, content);
+        });
+        self.ai_entity.update(cx, |ai, _cx| {
+            ai.set_model_selector_search_focused(false);
+        });
         self.ime_marked_text = None;
         cx.notify();
     }
 
     pub(in crate::workspace) fn cancel_edit_ai_message(&mut self, cx: &mut Context<Self>) {
-        self.ai.chat.editing_message_id = None;
-        self.ai.chat.editing_message_draft.clear();
-        self.ai.chat.editing_message_focused = false;
+        self.ai_entity.update(cx, |ai, _cx| {
+            ai.clear_message_edit();
+        });
         self.ime_marked_text = None;
         cx.notify();
     }
 
     pub(in crate::workspace) fn save_ai_message_edit(&mut self, cx: &mut Context<Self>) {
-        if self.ai.chat.loading {
+        if self.ai_entity.read(cx).chat_is_loading() {
             cx.notify();
             return;
         }
-        let edited_content = self.ai.chat.editing_message_draft.trim().to_string();
+        let edited_content = self.ai_entity.read(cx).chat_ui().editing_message_draft.trim().to_string();
         if edited_content.is_empty() {
             cx.notify();
             return;
         }
-        let Some(message_id) = self.ai.chat.editing_message_id.clone() else {
+        let Some(message_id) = self.ai_entity.read(cx).chat_ui().editing_message_id.clone() else {
             return;
         };
-        let Some(conversation_id) = self
-            .ai
-            .chat
-            .conversation_state
-            .active_conversation_id
-            .clone()
-        else {
+        let editable = self
+            .ai_entity
+            .read(cx)
+            .conversation_state()
+            .active_conversation()
+            .and_then(|conversation| {
+                conversation
+                    .messages
+                    .iter()
+                    .find(|message| message.id == message_id)
+            })
+            .is_some_and(|message| message.role == AiChatRole::User);
+        if !editable {
             return;
-        };
-        let Some(conversation_index) = self
-            .ai
-            .chat
-            .conversation_state
-            .conversations
-            .iter()
-            .position(|conversation| conversation.id == conversation_id)
-        else {
-            return;
-        };
-        let message_index = {
-            let conversation = &self.ai.chat.conversation_state.conversations[conversation_index];
-            let Some(index) = conversation
-                .messages
-                .iter()
-                .position(|message| message.id == message_id)
-            else {
-                return;
-            };
-            if conversation.messages[index].role != AiChatRole::User {
-                return;
-            }
-            index
-        };
-        let stream_config = match self.resolve_ai_stream_config() {
+        }
+        let stream_config = match self.resolve_ai_stream_config(cx) {
             Ok(config) => config,
             Err(error) => {
-                self.push_ai_settings_toast(error, TerminalNoticeVariant::Error);
+                self.push_ai_settings_toast(error, TerminalNoticeVariant::Error, cx);
                 cx.notify();
                 return;
             }
         };
 
         let now = ai_now_ms();
-        let new_user_id = self.next_ai_chat_id(now);
-        let (context, branch_data) = {
-            let conversation = &self.ai.chat.conversation_state.conversations[conversation_index];
-            let original = &conversation.messages[message_index];
-            let current_tail = strip_ai_nested_branches(&conversation.messages[message_index..]);
-            let mut branches = original
-                .branches
-                .clone()
-                .unwrap_or_else(|| AiMessageBranches {
-                    total: 2,
-                    active_index: 1,
-                    tails: HashMap::from([(0, current_tail.clone())]),
-                });
-            if original.branches.is_some() {
-                branches.tails.insert(branches.active_index, current_tail);
-                branches.total = branches.total.saturating_add(1);
-                branches.active_index = branches.total.saturating_sub(1);
-            }
-            (original.context.clone(), branches)
-        };
+        let new_user_id = self.next_ai_chat_id(now, cx);
         let request_content = Some(edited_content.clone());
-        {
-            let conversation =
-                &mut self.ai.chat.conversation_state.conversations[conversation_index];
-            conversation.messages.truncate(message_index);
-            conversation.messages.push(AiChatMessage {
-                id: new_user_id,
-                role: AiChatRole::User,
-                content: edited_content,
-                timestamp_ms: now,
-                model: Some(stream_config.model.clone()),
-                context,
-                is_streaming: false,
-                thinking_content: None,
-                metadata: None,
-                tool_call_id: None,
-                tool_calls: Vec::new(),
-                turn: None,
-                transcript_ref: None,
-                summary_ref: None,
-                branches: Some(branch_data),
-                suggestions: Vec::new(),
-            });
-            conversation.message_count = conversation.messages.len();
-            conversation.updated_at_ms = now;
-        }
-        self.ai.chat.editing_message_id = None;
-        self.ai.chat.editing_message_draft.clear();
-        self.ai.chat.editing_message_focused = false;
+        let conversation_id = self.ai_entity.update(cx, |ai, _cx| {
+            ai.replace_active_user_message(
+                &message_id,
+                new_user_id,
+                edited_content,
+                stream_config.model.clone(),
+                now,
+            )
+        });
+        let Some(conversation_id) = conversation_id else {
+            return;
+        };
+        self.ai_entity.update(cx, |ai, _cx| {
+            ai.clear_message_edit();
+        });
         self.ime_marked_text = None;
-        self.persist_ai_chat_state();
         self.start_ai_chat_stream_after_api_key_lookup(
             conversation_id,
             stream_config,
@@ -695,63 +805,26 @@ impl WorkspaceApp {
         branch_index: usize,
         cx: &mut Context<Self>,
     ) {
-        if self.ai.chat.loading {
+        if self.ai_entity.read(cx).chat_is_loading() {
             cx.notify();
             return;
         }
-        let Some(conversation) = self.ai.chat.conversation_state.active_conversation_mut() else {
-            return;
-        };
-        let Some(message_index) = conversation
-            .messages
-            .iter()
-            .position(|message| message.id == message_id)
-        else {
-            return;
-        };
-        let Some(branch_point) = conversation.messages.get(message_index) else {
-            return;
-        };
-        let Some(mut branches) = branch_point.branches.clone() else {
-            return;
-        };
-        if branch_index >= branches.total || branch_index == branches.active_index {
+        let switched = self.ai_entity.update(cx, |ai, _cx| {
+            ai.switch_active_message_branch(&message_id, branch_index, ai_now_ms())
+        });
+        if !switched {
             return;
         }
-        let live_tail = strip_ai_nested_branches(&conversation.messages[message_index..]);
-        let Some(target_tail) = branches.tails.get(&branch_index).cloned() else {
-            return;
-        };
-        if target_tail.is_empty() {
-            return;
-        }
-        branches.tails.insert(branches.active_index, live_tail);
-        branches.active_index = branch_index;
-        let mut new_messages = conversation.messages[..message_index].to_vec();
-        for (index, mut message) in target_tail.into_iter().enumerate() {
-            if index == 0 {
-                message.branches = Some(branches.clone());
-            } else {
-                message.branches = None;
-            }
-            new_messages.push(message);
-        }
-        conversation.messages = new_messages;
-        conversation.message_count = conversation.messages.len();
-        conversation.updated_at_ms = ai_now_ms();
-        self.ai.chat.editing_message_id = None;
-        self.ai.chat.editing_message_draft.clear();
-        self.ai.chat.editing_message_focused = false;
-        self.persist_ai_chat_state();
+        self.ai_entity.update(cx, |ai, _cx| {
+            ai.clear_message_edit();
+        });
         cx.notify();
     }
 
-    pub(in crate::workspace) fn reset_ai_chat_input_after_submit(&mut self) {
-        self.ai.chat.draft.clear();
-        self.ai.chat.autocomplete_index = 0;
-        self.ai.chat.autocomplete_suppressed = false;
-        self.ai.chat.include_context = false;
-        self.ai.chat.include_all_panes = false;
+    pub(in crate::workspace) fn reset_ai_chat_input_after_submit(&mut self, cx: &mut App) {
+        self.ai_entity.update(cx, |ai, _cx| {
+            ai.clear_chat_input_after_submit();
+        });
         self.ime_marked_text = None;
     }
 }

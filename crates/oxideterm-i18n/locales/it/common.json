@@ -831,6 +831,7 @@
     "enable_success": "{{name}} abilitato.",
     "disable_success": "{{name}} disabilitato.",
     "load_failed_default": "Caricamento del plugin non riuscito.",
+    "runtime_failure": "L’operazione del runtime del plugin non è riuscita.",
     "error_copied": "Errore del plugin copiato.",
     "open_dir_create_failed": "Impossibile creare la directory dei plugin: {{message}}",
     "open_dir_failed": "Impossibile aprire la directory dei plugin: {{message}}",
@@ -1176,7 +1177,7 @@
     "vnc_legacy_security_description": "Questo metodo non protegge l’identità del server e può esporre la sessione a intercettazioni. Continua solo su una rete attendibile e protetta.",
     "vnc_security_method": "Metodo di sicurezza: {{method}}",
     "vnc_continue_anyway": "Continua comunque",
-    "certificate_save_failed": "Impossibile salvare il record di attendibilità del certificato: {{error}}",
-    "clipboard_file_failed": "Impossibile ricevere i file dagli appunti: {{error}}"
+    "certificate_save_failed": "Impossibile salvare il record di attendibilità del certificato",
+    "clipboard_file_failed": "Impossibile ricevere i file dagli appunti"
   }
 }

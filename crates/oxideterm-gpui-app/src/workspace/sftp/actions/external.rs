@@ -59,19 +59,19 @@ impl WorkspaceApp {
                 self.i18n.t("sftp.toolbar.browse_folder"),
             )),
         });
-        cx.spawn(async move |weak, cx| {
-            let Ok(Ok(Some(paths))) = receiver.await else {
-                return;
-            };
-            let Some(path) = paths.into_iter().next() else {
-                return;
-            };
-            let path = path.to_string_lossy().to_string();
-            let _ = weak.update(cx, |this, cx| {
-                this.set_sftp_path(SftpPane::Local, path);
-                cx.notify();
-            });
-        })
-        .detach();
+        self.sftp_view.update(cx, |sftp, cx| {
+            sftp.start_folder_picker(
+                async move {
+                    let Ok(Ok(Some(paths))) = receiver.await else {
+                        return None;
+                    };
+                    paths
+                        .into_iter()
+                        .next()
+                        .map(|path| path.to_string_lossy().to_string())
+                },
+                cx,
+            );
+        });
     }
 }

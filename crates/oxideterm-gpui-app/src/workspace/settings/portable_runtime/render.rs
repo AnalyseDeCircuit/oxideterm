@@ -69,7 +69,8 @@ impl WorkspaceApp {
     }
 
     pub(in crate::workspace) fn portable_runtime_card(&self, cx: &mut Context<Self>) -> AnyElement {
-        let portable_status = self.portable_status_snapshot.as_ref();
+        let portable_snapshot = self.settings_workspace.read(cx).portable_status_snapshot();
+        let portable_status = portable_snapshot.status.as_ref();
         let is_portable = portable_status.is_some_and(|status| status.is_portable);
         let hint_key = if is_portable {
             "settings_view.general.portable_runtime_hint"
@@ -229,6 +230,11 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let can_change_password = status.is_unlocked;
+        let action_error = self
+            .settings_workspace
+            .read(cx)
+            .portable_action_error()
+            .map(str::to_owned);
         div()
             .w_full()
             .flex()
@@ -281,23 +287,20 @@ impl WorkspaceApp {
                         ),
                     ),
             )
-            .when_some(
-                self.portable_settings_action_error.clone(),
-                |group, error| {
-                    group.child(
-                        div()
-                            .rounded(px(self.tokens.radii.md))
-                            .border_1()
-                            .border_color(rgba((self.tokens.ui.error << 8) | 0x4d))
-                            .bg(rgba((self.tokens.ui.error << 8) | 0x1a))
-                            .px(px(10.0))
-                            .py(px(8.0))
-                            .text_size(px(self.tokens.metrics.ui_text_sm))
-                            .text_color(rgb(self.tokens.ui.error))
-                            .child(error),
-                    )
-                },
-            )
+            .when_some(action_error, |group, error| {
+                group.child(
+                    div()
+                        .rounded(px(self.tokens.radii.md))
+                        .border_1()
+                        .border_color(rgba((self.tokens.ui.error << 8) | 0x4d))
+                        .bg(rgba((self.tokens.ui.error << 8) | 0x1a))
+                        .px(px(10.0))
+                        .py(px(8.0))
+                        .text_size(px(self.tokens.metrics.ui_text_sm))
+                        .text_color(rgb(self.tokens.ui.error))
+                        .child(error),
+                )
+            })
             .into_any_element()
     }
 
@@ -305,7 +308,8 @@ impl WorkspaceApp {
         &self,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let portable_status = self.portable_status_snapshot.as_ref();
+        let portable_snapshot = self.settings_workspace.read(cx).portable_status_snapshot();
+        let portable_status = portable_snapshot.status.as_ref();
         let is_portable = portable_status.is_some_and(|status| status.is_portable);
         let current_data_dir = self
             .settings_store
@@ -317,7 +321,7 @@ impl WorkspaceApp {
         let portable_data_dir = portable_status
             .map(|status| status.data_dir.clone())
             .unwrap_or_else(|| current_data_dir.clone());
-        let secret_count = self.portable_exportable_secret_count.unwrap_or(0);
+        let secret_count = portable_snapshot.exportable_secret_count.unwrap_or(0);
 
         self.plain_settings_card(vec![
             self.card_title("settings_view.general.portable_migration"),

@@ -271,8 +271,9 @@ impl WorkspaceApp {
     }
 
     fn version_migration_cli_page(&self, compact: bool, cx: &mut Context<Self>) -> AnyElement {
-        let status = self.settings_page.cli_companion_status.as_ref();
-        let loading = self.settings_page.cli_companion_loading;
+        let cli = self.settings_workspace.read(cx).cli_companion_snapshot();
+        let status = cli.status.as_ref();
+        let loading = cli.loading;
         let new_installed = status.is_some_and(|status| status.installed);
         let new_ready = status.is_some_and(|status| status.installed && !status.needs_reinstall);
         let legacy_installed = status.is_some_and(|status| status.legacy_installed);
@@ -357,10 +358,9 @@ impl WorkspaceApp {
                         )),
                 )
                 .child(commands)
-                .when_some(
-                    self.settings_page.cli_companion_error.clone(),
-                    |card, error| card.child(self.version_migration_error(error)),
-                )
+                .when_some(cli.error.clone(), |card, error| {
+                    card.child(self.version_migration_error(error))
+                })
                 .child(
                     div()
                         .flex()
@@ -402,19 +402,16 @@ impl WorkspaceApp {
                                 cx,
                             ))
                         })
-                        .when(
-                            status.is_none() || self.settings_page.cli_companion_error.is_some(),
-                            |row| {
-                                row.child(self.version_migration_button(
-                                    self.i18n.t("migration.cli_retry"),
-                                    LucideIcon::RefreshCw,
-                                    ButtonVariant::Outline,
-                                    loading,
-                                    |this, cx| this.refresh_cli_companion_status(cx),
-                                    cx,
-                                ))
-                            },
-                        ),
+                        .when(status.is_none() || cli.error.is_some(), |row| {
+                            row.child(self.version_migration_button(
+                                self.i18n.t("migration.cli_retry"),
+                                LucideIcon::RefreshCw,
+                                ButtonVariant::Outline,
+                                loading,
+                                |this, cx| this.refresh_cli_companion_status(cx),
+                                cx,
+                            ))
+                        }),
                 )
                 .when(!bundled && status.is_some(), |card| {
                     card.child(self.version_migration_notice(

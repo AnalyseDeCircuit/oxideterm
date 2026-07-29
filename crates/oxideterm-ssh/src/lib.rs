@@ -52,16 +52,18 @@ pub use oxideterm_sftp::{
     TransferDirection, TransferProgress, TransferState,
 };
 pub use reconnect::{
-    MAX_RETAINED_RECONNECT_JOBS, PhaseEvent, PhaseResult, ReconnectForwardRule,
-    ReconnectForwardRuleSnapshot, ReconnectIdeSnapshot, ReconnectJob,
+    MAX_RETAINED_RECONNECT_JOBS, PhaseEvent, PhaseResult, ReconnectForwardRestorePlan,
+    ReconnectForwardRule, ReconnectForwardRuleSnapshot, ReconnectIdeSnapshot, ReconnectJob,
     ReconnectNodeConnectionSnapshot, ReconnectNodeTerminalSnapshot, ReconnectNodeTransferSnapshot,
-    ReconnectOrchestratorStore, ReconnectPhase, ReconnectSnapshot, ReconnectTiming,
+    ReconnectOrchestratorStore, ReconnectPhase, ReconnectProgress, ReconnectSnapshot,
+    ReconnectTiming,
 };
 pub use router::{
     FlatNode, NodeEventEmitter, NodeEventReceiver, NodeEventSequencer, NodeEventSubscription,
-    NodeId, NodeOrigin, NodeReadiness, NodeRouter, NodeRuntimeStore, NodeState, NodeStateEvent,
-    NodeStateSnapshot, NodeTreeExpansion, NodeTreeSnapshot, NodeTreeSnapshotNode,
-    ResolvedConnection, RouteError, SessionTreeSummary, TerminalEndpoint,
+    NodeId, NodeMetadataSnapshot, NodeOrigin, NodeReadiness, NodeRouter, NodeRuntimeStore,
+    NodeState, NodeStateEvent, NodeStateSnapshot, NodeTreeExpansion, NodeTreePersistenceNode,
+    NodeTreePersistenceSnapshot, NodeTreeSnapshot, NodeTreeSnapshotNode, ResolvedConnection,
+    RouteError, SessionTreeSummary, TerminalEndpoint,
 };
 pub use session_tree_plan::{
     NativeSessionTreeConnectAction, NativeSessionTreeConnectChallenge,

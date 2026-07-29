@@ -5,7 +5,6 @@ use std::{
     sync::{
         Mutex, OnceLock,
         atomic::{AtomicBool, AtomicIsize, AtomicU32, Ordering},
-        mpsc,
     },
     thread,
 };
@@ -38,7 +37,7 @@ use windows::{
     core::{PCWSTR, w},
 };
 
-use crate::{DesktopPresenceEvent, DesktopPresenceMenu};
+use crate::{DesktopPresenceDeliverySender, DesktopPresenceEvent, DesktopPresenceMenu};
 
 const TRAY_ICON_ID: u32 = 1;
 const TRAY_CALLBACK_MESSAGE: u32 = WM_APP + 0x51;
@@ -57,7 +56,7 @@ static TASKBAR_CREATED_MESSAGE: AtomicU32 = AtomicU32::new(0);
 static TRAY_THREAD_STARTED: AtomicBool = AtomicBool::new(false);
 static QUIT_REQUESTED: AtomicBool = AtomicBool::new(false);
 static KEEP_RUNNING_ON_CLOSE: AtomicBool = AtomicBool::new(true);
-static EVENT_TX: OnceLock<Mutex<Option<mpsc::Sender<DesktopPresenceEvent>>>> = OnceLock::new();
+static EVENT_TX: OnceLock<Mutex<Option<DesktopPresenceDeliverySender>>> = OnceLock::new();
 static MENU: OnceLock<Mutex<DesktopPresenceMenu>> = OnceLock::new();
 static APP_ICON_HANDLES: OnceLock<Mutex<Vec<isize>>> = OnceLock::new();
 
@@ -65,7 +64,7 @@ pub(crate) fn install_for_window(
     window: &mut Window,
     cx: &App,
     menu: DesktopPresenceMenu,
-    tx: mpsc::Sender<DesktopPresenceEvent>,
+    tx: DesktopPresenceDeliverySender,
 ) -> anyhow::Result<()> {
     let hwnd = main_window_hwnd(window)?;
     MAIN_HWND.store(hwnd.0 as isize, Ordering::SeqCst);
@@ -203,7 +202,7 @@ fn apply_app_icon_to_window(hwnd: HWND, icon: windows::Win32::UI::WindowsAndMess
     }
 }
 
-fn set_event_sender(tx: mpsc::Sender<DesktopPresenceEvent>) {
+fn set_event_sender(tx: DesktopPresenceDeliverySender) {
     let mut sender = EVENT_TX
         .get_or_init(|| Mutex::new(None))
         .lock()

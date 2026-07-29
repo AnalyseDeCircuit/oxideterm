@@ -2,7 +2,11 @@ use std::borrow::Cow;
 
 use super::ime::WorkspaceImeTarget;
 use super::*;
-use gpui::{AnchoredPositionMode, Corner, UniformListScrollHandle, anchored, deferred, prelude::*};
+use gpui::{
+    AnchoredPositionMode, Corner, EventEmitter, Task, UniformListScrollHandle, anchored, deferred,
+    prelude::*,
+};
+use oxideterm_editor_core::utf16::replace_utf16;
 use oxideterm_gpui_markdown::{
     MarkdownOptions, MarkdownVirtualListScrollHandle, highlight, markdown_virtual_with_code_actions,
 };
@@ -224,6 +228,15 @@ pub(super) struct FileManagerProperties {
 }
 
 #[derive(Clone, Debug)]
+pub(super) enum FileManagerWorkspaceEvent {
+    Error(String),
+    OperationSucceeded,
+    OpenEntry(LocalFileEntry),
+}
+
+impl EventEmitter<FileManagerWorkspaceEvent> for FileManagerState {}
+
+#[derive(Clone, Debug)]
 pub(super) struct FileManagerOperationProgress {
     pub(super) current: usize,
     pub(super) total: usize,
@@ -323,8 +336,11 @@ pub(super) struct FileManagerState {
     pub(super) context_menu: Option<FileManagerContextMenu>,
     pub(super) context_menu_presence: oxideterm_gpui_ui::motion::ExitPresence,
     pub(super) context_menu_exit_generation: Option<u64>,
+    pub(super) context_menu_exit_task: Option<Task<()>>,
     pub(super) dialog: Option<FileManagerDialog>,
     pub(super) dialog_presence: oxideterm_gpui_ui::motion::ExitPresence,
+    dialog_exit_task: Option<Task<()>>,
+    folder_picker_task: Option<Task<()>>,
     pub(super) dialog_value: String,
     pub(super) clipboard: Option<LocalClipboard>,
     pub(super) bookmarks: Vec<LocalBookmark>,
@@ -333,7 +349,9 @@ pub(super) struct FileManagerState {
     pub(super) bookmarks_path: PathBuf,
     pub(super) bookmarks_visible: bool,
     pub(super) list_scroll: UniformListScrollHandle,
-    pub(super) preview: Option<LocalPreview>,
+    // Preview payloads can contain large text or archive listings. Share the
+    // immutable payload across render snapshots instead of cloning its contents.
+    pub(super) preview: Option<Arc<LocalPreview>>,
     pub(super) preview_metadata: Option<LocalPreviewMetadata>,
     pub(super) preview_show_metadata: bool,
     pub(super) preview_markdown_source: bool,
@@ -343,6 +361,8 @@ pub(super) struct FileManagerState {
     pub(super) preview_retired_images: RefCell<Vec<Arc<RenderImage>>>,
     pub(super) preview_code_scroll: UniformListScrollHandle,
     pub(super) preview_markdown_scroll: MarkdownVirtualListScrollHandle,
+    pub(in crate::workspace) preview_document_scroll: ScrollHandle,
+    pub(in crate::workspace) preview_metadata_scroll: ScrollHandle,
     pub(super) preview_archive_list_state: ListState,
     pub(super) preview_archive_list_cache: RefCell<VirtualListSignatureCache>,
     pub(super) preview_stream: FileManagerPreviewStreamState,
@@ -352,13 +372,12 @@ pub(super) struct FileManagerState {
     pub(super) preview_font_error: Option<String>,
     pub(super) preview_font_size: f32,
     pub(super) operation_progress: Option<FileManagerOperationProgress>,
-    pub(super) operation_rx: Option<std::sync::mpsc::Receiver<FileManagerOperationEvent>>,
-    pub(super) operation_poll_active: bool,
+    operation_tx: Option<delivery::ActiveDeliverySender<FileManagerOperationEvent>>,
+    operation_rx: Option<std::sync::mpsc::Receiver<FileManagerOperationEvent>>,
+    operation_thread: Option<std::thread::JoinHandle<()>>,
     pub(super) properties_checksum: Option<LocalChecksumResult>,
     pub(super) properties_checksum_loading: bool,
-    pub(super) properties_checksum_rx:
-        Option<std::sync::mpsc::Receiver<Result<LocalChecksumResult, String>>>,
-    pub(super) properties_checksum_poll_active: bool,
+    pub(super) properties_checksum_task: Option<Task<()>>,
 }
 
 impl Default for FileManagerState {
@@ -385,8 +404,11 @@ impl Default for FileManagerState {
             context_menu: None,
             context_menu_presence: oxideterm_gpui_ui::motion::ExitPresence::visible(),
             context_menu_exit_generation: None,
+            context_menu_exit_task: None,
             dialog: None,
             dialog_presence: oxideterm_gpui_ui::motion::ExitPresence::visible(),
+            dialog_exit_task: None,
+            folder_picker_task: None,
             dialog_value: String::new(),
             clipboard: None,
             bookmarks: Vec::new(),
@@ -408,6 +430,8 @@ impl Default for FileManagerState {
             preview_retired_images: RefCell::new(Vec::new()),
             preview_code_scroll: UniformListScrollHandle::new(),
             preview_markdown_scroll: MarkdownVirtualListScrollHandle::new(),
+            preview_document_scroll: ScrollHandle::new(),
+            preview_metadata_scroll: ScrollHandle::new(),
             // Archive previews can contain thousands of entries. Keep the file
             // rows on ListState instead of rebuilding the entire archive tree.
             preview_archive_list_state: ListState::new(
@@ -428,17 +452,454 @@ impl Default for FileManagerState {
             preview_font_error: None,
             preview_font_size: 32.0,
             operation_progress: None,
+            operation_tx: None,
             operation_rx: None,
-            operation_poll_active: false,
+            operation_thread: None,
             properties_checksum: None,
             properties_checksum_loading: false,
-            properties_checksum_rx: None,
-            properties_checksum_poll_active: false,
+            properties_checksum_task: None,
         }
     }
 }
 
 impl FileManagerState {
+    fn close_dialog(&mut self, cx: &mut Context<Self>) {
+        if let Err(error) = self.preview_audio.command(AudioPreviewCommand::Stop) {
+            cx.emit(FileManagerWorkspaceEvent::Error(error));
+        }
+        self.preview_video_surface.detach();
+        self.dialog = None;
+        self.dialog_exit_task = None;
+        self.focused_input = None;
+        self.focused_dialog_footer_action = None;
+        self.dialog_value.clear();
+        self.preview = None;
+        self.preview_metadata = None;
+        self.preview_markdown_source = false;
+        self.preview_code_scroll = UniformListScrollHandle::new();
+        self.preview_markdown_scroll = MarkdownVirtualListScrollHandle::new();
+        self.preview_document_scroll = ScrollHandle::new();
+        self.preview_metadata_scroll = ScrollHandle::new();
+        self.preview_stream = FileManagerPreviewStreamState::default();
+        self.properties_checksum = None;
+        self.properties_checksum_loading = false;
+        self.properties_checksum_task = None;
+        cx.notify();
+    }
+
+    fn begin_rich_dialog_exit(&mut self, delay: Duration, cx: &mut Context<Self>) -> bool {
+        if !matches!(
+            self.dialog,
+            Some(FileManagerDialog::Preview { .. } | FileManagerDialog::Properties { .. })
+        ) {
+            self.close_dialog(cx);
+            return true;
+        }
+        let Some(generation) = self.dialog_presence.begin_exit() else {
+            return false;
+        };
+        if let Err(error) = self.preview_audio.command(AudioPreviewCommand::Stop) {
+            cx.emit(FileManagerWorkspaceEvent::Error(error));
+        }
+        self.preview_video_surface.detach();
+        if delay.is_zero() {
+            self.finish_rich_dialog_exit(generation, cx);
+            return true;
+        }
+        self.dialog_exit_task = Some(cx.spawn(async move |entity, cx| {
+            Timer::after(delay).await;
+            let _ = entity.update(cx, |file_manager, cx| {
+                file_manager.finish_rich_dialog_exit(generation, cx);
+            });
+        }));
+        cx.notify();
+        true
+    }
+
+    fn finish_rich_dialog_exit(&mut self, generation: u64, cx: &mut Context<Self>) -> bool {
+        if !self.dialog_presence.finish_exit(generation) {
+            return false;
+        }
+        self.close_dialog(cx);
+        self.dialog_presence.reopen();
+        true
+    }
+
+    fn start_folder_picker(
+        &mut self,
+        selection: impl std::future::Future<Output = Option<PathBuf>> + 'static,
+        cx: &mut Context<Self>,
+    ) {
+        if self.folder_picker_task.is_some() {
+            return;
+        }
+        self.folder_picker_task = Some(cx.spawn(async move |entity, cx| {
+            let selected_path = selection.await;
+            let _ = entity.update(cx, |file_manager, cx| {
+                file_manager.folder_picker_task = None;
+                if let Some(path) = selected_path {
+                    file_manager.set_path(path.to_string_lossy().to_string());
+                }
+                cx.notify();
+            });
+        }));
+    }
+
+    fn start_operation(
+        &mut self,
+        total: usize,
+        work: impl FnOnce(
+            delivery::ActiveDeliverySender<FileManagerOperationEvent>,
+        ) -> Result<(), String>
+        + Send
+        + 'static,
+        cx: &mut Context<Self>,
+    ) {
+        if self
+            .operation_progress
+            .as_ref()
+            .is_some_and(|progress| progress.active)
+        {
+            return;
+        }
+        let Some(sender) = self.operation_tx.clone() else {
+            cx.emit(FileManagerWorkspaceEvent::Error(
+                "File operation delivery is unavailable.".to_string(),
+            ));
+            return;
+        };
+        self.operation_progress = Some(FileManagerOperationProgress {
+            current: 0,
+            total: total.max(1),
+            file_name: String::new(),
+            active: true,
+        });
+        self.operation_thread = Some(std::thread::spawn(move || {
+            let result = work(sender.clone());
+            let _ = sender.send(FileManagerOperationEvent::Finished(result));
+        }));
+        cx.notify();
+    }
+
+    fn schedule_operation_delivery(&self, cx: &mut Context<Self>) {
+        let Some(operation_tx) = self.operation_tx.as_ref() else {
+            return;
+        };
+        let operation_wake = operation_tx.wake();
+        let release_wake = operation_wake.clone();
+        cx.on_release(move |_, _| {
+            // Local filesystem operations may finish after the surface closes,
+            // but their delivery waiter must not outlive the owning entity.
+            release_wake.stop();
+        })
+        .detach();
+        cx.spawn(async move |entity, cx| {
+            loop {
+                operation_wake.wait().await;
+                let should_drain = operation_wake.take();
+                let stopped = operation_wake.is_stopped();
+                if should_drain {
+                    let backlog_remaining = entity
+                        .update(cx, |file_manager, cx| {
+                            file_manager.drain_operation_results(cx)
+                        })
+                        .unwrap_or(false);
+                    if backlog_remaining {
+                        operation_wake.mark();
+                    }
+                }
+                if stopped {
+                    break;
+                }
+            }
+        })
+        .detach();
+    }
+
+    fn drain_operation_results(&mut self, cx: &mut Context<Self>) -> bool {
+        let Some(receiver) = self.operation_rx.as_ref() else {
+            return false;
+        };
+        let batch = delivery::drain_channel(receiver, delivery::USER_ACTION_DELIVERY_BUDGET);
+        let changed = !batch.items.is_empty();
+        for event in batch.items {
+            match event {
+                FileManagerOperationEvent::Progress(progress) => {
+                    self.operation_progress = Some(progress);
+                }
+                FileManagerOperationEvent::Finished(result) => {
+                    if let Some(worker) = self.operation_thread.take() {
+                        // Finished is sent as the worker's final action, so this
+                        // join only reaps an already-completing owned thread.
+                        let _ = worker.join();
+                    }
+                    if let Some(progress) = self.operation_progress.as_mut() {
+                        progress.active = false;
+                        progress.current = progress.total;
+                        progress.file_name.clear();
+                    }
+                    match result {
+                        Ok(()) => {
+                            self.refresh();
+                            cx.emit(FileManagerWorkspaceEvent::OperationSucceeded);
+                        }
+                        Err(error) => cx.emit(FileManagerWorkspaceEvent::Error(error)),
+                    }
+                }
+            }
+        }
+        if changed {
+            cx.notify();
+        }
+        batch.outcome.backlog_remaining
+    }
+
+    fn calculate_properties_checksum(&mut self, cx: &mut Context<Self>) {
+        if self.properties_checksum_loading {
+            return;
+        }
+        let Some(FileManagerDialog::Properties { entry, .. }) = self.dialog.as_ref() else {
+            return;
+        };
+        if entry.file_type != LocalFileType::File {
+            return;
+        }
+        let path = entry.path.clone();
+        self.properties_checksum = None;
+        self.properties_checksum_loading = true;
+        let checksum_task = cx
+            .background_executor()
+            .spawn(async move { calculate_local_checksum(&path) });
+        self.properties_checksum_task = Some(cx.spawn(async move |entity, cx| {
+            let result = checksum_task.await;
+            let _ = entity.update(cx, |file_manager, cx| {
+                file_manager.properties_checksum_loading = false;
+                file_manager.properties_checksum_task = None;
+                match result {
+                    Ok(checksum) => file_manager.properties_checksum = Some(checksum),
+                    Err(error) => cx.emit(FileManagerWorkspaceEvent::Error(error)),
+                }
+                cx.notify();
+            });
+        }));
+        cx.notify();
+    }
+
+    fn refresh(&mut self) {
+        self.loading = true;
+        match list_local_files(&self.path) {
+            Ok(files) => {
+                self.replace_files(files);
+                self.error = None;
+                self.prune_selection();
+            }
+            Err(error) => {
+                self.clear_files();
+                self.error = Some(error.to_string());
+            }
+        }
+        self.loading = false;
+    }
+
+    fn refresh_drives(&mut self) {
+        self.drives = local_drives();
+    }
+
+    fn set_path(&mut self, path: String) {
+        let normalized = normalize_local_path(&path);
+        self.path = normalized.clone();
+        self.path_input = normalized;
+        self.path_completion.dismiss();
+        self.path_scroll.set_offset(Point::new(px(0.0), px(0.0)));
+        self.editing_path = false;
+        self.focused_input = None;
+        self.selected.clear();
+        self.last_selected = None;
+        self.clear_context_menu_immediately();
+        self.list_scroll = UniformListScrollHandle::new();
+        self.refresh();
+    }
+
+    fn clear_context_menu_immediately(&mut self) -> bool {
+        let changed = self.context_menu.take().is_some();
+        self.context_menu_exit_generation = None;
+        self.context_menu_presence.reopen();
+        self.context_menu_exit_task = None;
+        changed
+    }
+
+    fn blur_inline_inputs(&mut self) {
+        // Row interactions mirror the browser's input blur behavior without
+        // routing page-local focus state through WorkspaceApp.
+        if self.editing_path || self.focused_input == Some(FileManagerInput::Path) {
+            self.path_input = self.path.clone();
+            self.path_completion.dismiss();
+            self.editing_path = false;
+            self.focused_input = None;
+        } else if self.focused_input == Some(FileManagerInput::Filter) {
+            self.focused_input = None;
+        }
+    }
+
+    fn select_entry(
+        &mut self,
+        name: String,
+        modifiers: gpui::Modifiers,
+        visible_files: &[LocalFileEntry],
+    ) {
+        self.blur_inline_inputs();
+        if modifiers.shift {
+            let anchor = self.last_selected.clone().unwrap_or_else(|| name.clone());
+            let start = visible_files
+                .iter()
+                .position(|file| file.name == anchor)
+                .unwrap_or(0);
+            let end = visible_files
+                .iter()
+                .position(|file| file.name == name)
+                .unwrap_or(start);
+            self.selected.clear();
+            for file in &visible_files[start.min(end)..=start.max(end)] {
+                self.selected.insert(file.name.clone());
+            }
+        } else if modifiers.platform || modifiers.control {
+            if !self.selected.insert(name.clone()) {
+                self.selected.remove(&name);
+            }
+            self.last_selected = Some(name);
+        } else {
+            self.selected.clear();
+            self.selected.insert(name.clone());
+            self.last_selected = Some(name);
+        }
+    }
+
+    fn activate_entry(&mut self, entry: LocalFileEntry, cx: &mut Context<Self>) {
+        self.blur_inline_inputs();
+        self.clear_context_menu_immediately();
+        cx.emit(FileManagerWorkspaceEvent::OpenEntry(entry));
+        cx.notify();
+    }
+
+    fn open_context_menu(
+        &mut self,
+        file: Option<LocalFileEntry>,
+        x: f32,
+        y: f32,
+        cx: &mut Context<Self>,
+    ) {
+        self.blur_inline_inputs();
+        if let Some(file) = file.as_ref()
+            && crate::workspace::browser_behavior::preserve_or_move_context_selection(
+                &mut self.selected,
+                file.name.clone(),
+            )
+        {
+            self.last_selected = Some(file.name.clone());
+        }
+        self.context_menu_presence.reopen();
+        self.context_menu_exit_generation = None;
+        self.context_menu = Some(FileManagerContextMenu { file, x, y });
+        cx.notify();
+    }
+
+    fn selected_names(&self) -> Vec<String> {
+        self.selected.iter().cloned().collect()
+    }
+
+    fn selected_entries(&self) -> Vec<LocalFileEntry> {
+        self.files
+            .iter()
+            .filter(|file| self.selected.contains(&file.name))
+            .cloned()
+            .collect()
+    }
+
+    fn single_selected_file(&self) -> Option<LocalFileEntry> {
+        if self.selected.len() != 1 {
+            return None;
+        }
+        let name = self.selected.iter().next()?;
+        self.files.iter().find(|file| &file.name == name).cloned()
+    }
+
+    fn prune_selection(&mut self) {
+        let names = self
+            .files
+            .iter()
+            .map(|file| file.name.as_str())
+            .collect::<HashSet<_>>();
+        self.selected.retain(|name| names.contains(name.as_str()));
+        if self
+            .last_selected
+            .as_ref()
+            .is_some_and(|name| !names.contains(name.as_str()))
+        {
+            self.last_selected = None;
+        }
+    }
+
+    pub(super) fn focused_input(&self) -> Option<FileManagerInput> {
+        self.focused_input
+    }
+
+    pub(super) fn input_value(&self, input: FileManagerInput) -> &str {
+        match input {
+            FileManagerInput::Path => &self.path_input,
+            FileManagerInput::Filter => &self.filter,
+            FileManagerInput::DialogValue => &self.dialog_value,
+        }
+    }
+
+    pub(super) fn replace_input(
+        &mut self,
+        input: FileManagerInput,
+        replacement_range: Option<std::ops::Range<usize>>,
+        text: &str,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if self.focused_input != Some(input) {
+            return false;
+        }
+        let value = match input {
+            FileManagerInput::Path => &mut self.path_input,
+            FileManagerInput::Filter => &mut self.filter,
+            FileManagerInput::DialogValue => &mut self.dialog_value,
+        };
+        replace_utf16(value, replacement_range, text);
+        cx.notify();
+        true
+    }
+
+    pub(super) fn clear_input_focus(&mut self, cx: &mut Context<Self>) -> bool {
+        let changed = self.focused_input.take().is_some();
+        if changed {
+            cx.notify();
+        }
+        changed
+    }
+
+    pub(super) fn schedule_context_menu_exit(&mut self, delay: Duration, cx: &mut Context<Self>) {
+        let Some(generation) = self.context_menu_exit_generation else {
+            self.context_menu_exit_task = None;
+            return;
+        };
+        if self.context_menu_exit_task.is_some() {
+            return;
+        }
+        self.context_menu_exit_task = Some(cx.spawn(async move |entity, cx| {
+            Timer::after(delay).await;
+            let _ = entity.update(cx, |file_manager, cx| {
+                if file_manager.context_menu_presence.finish_exit(generation) {
+                    file_manager.context_menu = None;
+                    file_manager.context_menu_exit_generation = None;
+                    file_manager.context_menu_exit_task = None;
+                    cx.notify();
+                }
+            });
+        }));
+    }
+
     fn sorted_files(&self) -> Arc<Vec<LocalFileEntry>> {
         if let Some(cache) = self.sorted_files_cache.borrow().as_ref()
             && cache.source_revision == self.source_revision
@@ -494,13 +955,16 @@ impl FileManagerState {
         self.replace_files(Vec::new());
     }
 
-    pub(super) fn load(settings_path: &std::path::Path) -> Self {
+    pub(super) fn load(settings_path: &std::path::Path, cx: &mut Context<Self>) -> Self {
         let bookmarks_path = settings_path
             .parent()
             .unwrap_or(settings_path)
             .join(FILE_MANAGER_BOOKMARKS_FILENAME);
+        let (operation_tx, operation_rx) = delivery::ActiveDeliverySender::channel();
         let mut state = Self {
             bookmarks_path,
+            operation_tx: Some(operation_tx),
+            operation_rx: Some(operation_rx),
             ..Self::default()
         };
         if let Ok(bytes) = std::fs::read(&state.bookmarks_path)
@@ -508,6 +972,7 @@ impl FileManagerState {
         {
             state.bookmarks = bookmarks;
         }
+        state.schedule_operation_delivery(cx);
         state
     }
 }
@@ -536,6 +1001,8 @@ fn file_manager_border(color: u32, has_background: bool) -> Rgba {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use gpui::TestAppContext;
+    use std::sync::atomic::{AtomicBool, Ordering};
 
     fn cache_entry(name: &str) -> LocalFileEntry {
         LocalFileEntry {
@@ -581,5 +1048,88 @@ mod tests {
         assert!(!Arc::ptr_eq(&filtered, &refreshed));
         assert!(!Arc::ptr_eq(&filtered_rows, &refreshed_rows));
         assert_eq!(refreshed.len(), 2);
+    }
+
+    #[test]
+    fn file_row_selection_is_owned_by_file_manager_entity() {
+        let mut state = FileManagerState::default();
+        let visible = vec![cache_entry("alpha"), cache_entry("beta")];
+
+        state.select_entry("alpha".to_string(), gpui::Modifiers::default(), &visible);
+
+        assert_eq!(state.selected, HashSet::from(["alpha".to_string()]));
+        assert_eq!(state.last_selected.as_deref(), Some("alpha"));
+    }
+
+    #[gpui::test]
+    fn file_activation_emits_typed_workspace_intent(cx: &mut TestAppContext) {
+        let file_manager = cx.new(|_| FileManagerState::default());
+        let observed = Arc::new(AtomicBool::new(false));
+        let observed_event = observed.clone();
+        let _subscription = file_manager.update(cx, |_, cx| {
+            cx.subscribe(
+                &file_manager,
+                move |_, _, event: &FileManagerWorkspaceEvent, _cx| {
+                    if matches!(
+                        event,
+                        FileManagerWorkspaceEvent::OpenEntry(entry) if entry.name == "alpha"
+                    ) {
+                        observed_event.store(true, Ordering::Release);
+                    }
+                },
+            )
+        });
+
+        file_manager.update(cx, |file_manager, cx| {
+            file_manager.activate_entry(cache_entry("alpha"), cx);
+        });
+
+        assert!(observed.load(Ordering::Acquire));
+    }
+
+    #[gpui::test]
+    fn operation_delivery_finishes_without_a_mounted_workspace(cx: &mut TestAppContext) {
+        let file_manager = cx.new(|cx| {
+            let (operation_tx, operation_rx) = delivery::ActiveDeliverySender::channel();
+            let state = FileManagerState {
+                operation_tx: Some(operation_tx),
+                operation_rx: Some(operation_rx),
+                ..FileManagerState::default()
+            };
+            state.schedule_operation_delivery(cx);
+            state
+        });
+        let sender = file_manager.read_with(cx, |file_manager, _cx| {
+            file_manager
+                .operation_tx
+                .as_ref()
+                .expect("operation sender")
+                .clone()
+        });
+        sender
+            .send(FileManagerOperationEvent::Progress(
+                FileManagerOperationProgress {
+                    current: 1,
+                    total: 2,
+                    file_name: "first".to_string(),
+                    active: true,
+                },
+            ))
+            .expect("progress delivery");
+        sender
+            .send(FileManagerOperationEvent::Finished(Err(
+                "expected test failure".to_string(),
+            )))
+            .expect("completion delivery");
+
+        // Delivery remains entity-owned when no File Manager page or root app is mounted.
+        cx.run_until_parked();
+
+        file_manager.read_with(cx, |file_manager, _cx| {
+            let progress = file_manager.operation_progress.as_ref().expect("progress");
+            assert!(!progress.active);
+            assert_eq!(progress.current, progress.total);
+            assert!(progress.file_name.is_empty());
+        });
     }
 }

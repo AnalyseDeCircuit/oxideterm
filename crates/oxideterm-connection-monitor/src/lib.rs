@@ -128,7 +128,9 @@ pub use tmux::{
     ResourceTmuxPane, ResourceTmuxSession, ResourceTmuxSnapshot, ResourceTmuxStatus,
     ResourceTmuxWindow, TmuxActionCommand, TmuxActionKind, TmuxCaptureCommand,
     TmuxCommandCapability, build_tmux_action_command, build_tmux_attach_command,
-    build_tmux_new_session_command, build_tmux_snapshot_command, parse_tmux_snapshot,
-    tmux_action_failure_message, tmux_action_succeeded, tmux_action_success_message,
-    tmux_capture_snapshot, tmux_session_row_signature, visible_tmux_session_rows,
+    build_tmux_new_session_command, build_tmux_rename_session_command,
+    build_tmux_rename_window_command, build_tmux_send_pane_command, build_tmux_snapshot_command,
+    parse_tmux_snapshot, tmux_action_failure_message, tmux_action_succeeded,
+    tmux_action_success_message, tmux_capture_snapshot, tmux_session_row_signature,
+    visible_tmux_session_rows,
 };

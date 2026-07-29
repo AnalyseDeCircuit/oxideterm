@@ -18,7 +18,7 @@ impl WorkspaceApp {
     ) -> AnyElement {
         let theme = self.tokens.ui;
         let has_background = self.background_surface_active("runtime");
-        let active_section = self.active_connection_runtime_section;
+        let active_section = self.host_tools.read(cx).active_runtime_section;
         let content = match active_section {
             ConnectionRuntimeSection::Overview => self.render_connection_runtime_overview(cx),
             ConnectionRuntimeSection::Health => self.render_connection_runtime_health(cx),
@@ -140,13 +140,14 @@ impl WorkspaceApp {
                 cx,
             ),
         ];
-        let active_index = connection_runtime_section_index(self.active_connection_runtime_section);
+        let host_tools = self.host_tools.read(cx);
+        let active_index = connection_runtime_section_index(host_tools.active_runtime_section);
         oxideterm_gpui_ui::segmented_control(
             &self.tokens,
             selection_motion::CONNECTION_RUNTIME_SWITCHER_ID,
             oxideterm_gpui_ui::SegmentedControlOptions::new(
                 active_index,
-                connection_runtime_section_index(self.previous_connection_runtime_section),
+                connection_runtime_section_index(host_tools.previous_runtime_section),
                 3,
             )
             .user_transition_active(self.segmented_control_user_transition_active(
@@ -168,7 +169,7 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
-        let active = self.active_connection_runtime_section == section;
+        let active = self.host_tools.read(cx).active_runtime_section == section;
         let content = div()
             .w_full()
             .py(px(2.0))
@@ -195,16 +196,15 @@ impl WorkspaceApp {
         .on_mouse_down(
             MouseButton::Left,
             cx.listener(move |this, _event, _window, cx| {
-                if this.active_connection_runtime_section != section {
-                    this.set_connection_runtime_section(section);
+                if this.host_tools.read(cx).active_runtime_section != section {
+                    this.set_connection_runtime_section(section, cx);
                     this.begin_user_segmented_control_transition(
                         selection_motion::CONNECTION_RUNTIME_SWITCHER_ID,
                         connection_runtime_section_index(section),
                         cx,
                     );
                 }
-                this.refresh_connection_monitor_pool_stats();
-                this.sync_connection_monitor_selection(cx);
+                this.sync_host_tools_lifecycle(true, cx);
                 cx.stop_propagation();
                 cx.notify();
             }),
@@ -214,7 +214,7 @@ impl WorkspaceApp {
 
     fn render_connection_runtime_overview(&mut self, cx: &mut Context<Self>) -> AnyElement {
         let theme = self.tokens.ui;
-        let Some(stats) = self.connection_monitor.pool_stats.clone() else {
+        let Some(stats) = self.host_tools.read(cx).pool_stats_snapshot() else {
             return div()
                 .id("connection-runtime-overview")
                 .flex_1()

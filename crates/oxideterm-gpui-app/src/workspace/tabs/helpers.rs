@@ -1,5 +1,3 @@
-use super::*;
-
 // Keep empty-workspace hints aligned with the same effective bindings used by dispatch.
 pub(super) fn effective_shortcut_label(
     action_id: &str,
@@ -12,17 +10,6 @@ pub(super) fn effective_shortcut_label(
         crate::keybindings::KeybindingSide::current(),
     )?;
     Some(crate::keybindings::format_combo(&combo))
-}
-
-pub(super) fn readiness_for_connection_state(state: &ConnectionState) -> NodeReadiness {
-    match state {
-        ConnectionState::Active | ConnectionState::Idle => NodeReadiness::Ready,
-        ConnectionState::Connecting | ConnectionState::Reconnecting => NodeReadiness::Connecting,
-        ConnectionState::Error(_) | ConnectionState::LinkDown => NodeReadiness::Error,
-        ConnectionState::Disconnecting | ConnectionState::Disconnected => {
-            NodeReadiness::Disconnected
-        }
-    }
 }
 
 #[cfg(test)]

@@ -13,21 +13,24 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) {
         let tab_id = if let Some(tab) = self
-            .tabs
+            .tabs(cx)
             .iter()
             .find(|tab| tab.kind == TabKind::NotificationCenter)
         {
             tab.id
         } else {
-            let tab_id = self.alloc_tab_id();
-            self.tabs.push(Tab {
-                id: tab_id,
-                kind: TabKind::NotificationCenter,
-                title: self.i18n.t("sidebar.panels.notifications"),
-                title_source: TabTitleSource::I18nKey("sidebar.panels.notifications"),
-                root_pane: None,
-                active_pane_id: None,
-            });
+            let tab_id = self.alloc_tab_id(cx);
+            self.insert_tab(
+                Tab {
+                    id: tab_id,
+                    kind: TabKind::NotificationCenter,
+                    title: self.i18n.t("sidebar.panels.notifications"),
+                    title_source: TabTitleSource::I18nKey("sidebar.panels.notifications"),
+                    root_pane: None,
+                    active_pane_id: None,
+                },
+                cx,
+            );
             tab_id
         };
         self.mark_active_notification_center_view_read();

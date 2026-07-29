@@ -831,6 +831,7 @@
     "enable_success": "{{name}} activé.",
     "disable_success": "{{name}} désactivé.",
     "load_failed_default": "Échec du chargement du plugin.",
+    "runtime_failure": "L’opération d’exécution du plugin a échoué.",
     "error_copied": "Erreur du plugin copiée.",
     "open_dir_create_failed": "Impossible de créer le dossier des plugins : {{message}}",
     "open_dir_failed": "Impossible d’ouvrir le dossier des plugins : {{message}}",
@@ -1176,7 +1177,7 @@
     "vnc_legacy_security_description": "Cette méthode ne protège pas l’identité du serveur et peut exposer la session à une interception. Continuez uniquement sur un réseau fiable et protégé.",
     "vnc_security_method": "Méthode de sécurité : {{method}}",
     "vnc_continue_anyway": "Continuer quand même",
-    "certificate_save_failed": "Impossible d’enregistrer la relation de confiance du certificat : {{error}}",
-    "clipboard_file_failed": "Impossible de recevoir les fichiers du presse-papiers : {{error}}"
+    "certificate_save_failed": "Impossible d’enregistrer la relation de confiance du certificat",
+    "clipboard_file_failed": "Impossible de recevoir les fichiers du presse-papiers"
   }
 }

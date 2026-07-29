@@ -6,11 +6,17 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
-        let query = self
-            .session_manager
-            .saved_search_query
-            .trim()
-            .to_lowercase();
+        let (saved_search_query, saved_scroll) = {
+            let session_manager = self.session_manager.read(cx);
+            (
+                session_manager
+                    .input_value(SessionManagerInput::SavedSearch)
+                    .unwrap_or_default()
+                    .to_string(),
+                session_manager.saved_sidebar_scroll_handle.clone(),
+            )
+        };
+        let query = saved_search_query.trim().to_lowercase();
         let mut connections = self.connection_store.connection_infos();
         if !query.is_empty() {
             connections.retain(|conn| conn.matches_search_query(&query));
@@ -23,7 +29,6 @@ impl WorkspaceApp {
         let row_count = connections.len();
         let virtual_connections = Arc::new(connections.clone());
         let workspace = cx.entity();
-        let saved_scroll = self.session_manager.saved_sidebar_scroll_handle.clone();
         let virtual_spec = TauriVirtualListSpec::new(
             px(SAVED_CONNECTION_VIRTUAL_ROW_HEIGHT),
             SAVED_CONNECTION_VIRTUAL_OVERSCAN,
@@ -39,7 +44,7 @@ impl WorkspaceApp {
             .gap(px(8.0))
             .child(div().px_2().child(self.render_session_text_input(
                 SessionManagerInput::SavedSearch,
-                &self.session_manager.saved_search_query,
+                &saved_search_query,
                 self.i18n.t("sessionManager.toolbar.search_placeholder"),
                 cx,
             )))

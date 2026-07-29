@@ -1,7 +1,7 @@
 // Copyright (C) 2026 AnalyseDeCircuit
 // SPDX-License-Identifier: GPL-3.0-only
 
-use std::{collections::HashMap, time::Duration};
+use std::{collections::HashMap, fmt, time::Duration};
 
 use serde_json::Value;
 
@@ -10,6 +10,7 @@ use crate::{
     event::PluginEvent,
     message::{PluginOutboundMessage, PluginRegistration, PluginRuntimeLogLevel},
     runtime_state::{PluginRuntimeHealth, PluginRuntimeLifecycleState, PluginRuntimeLogEntry},
+    sensitive::PluginHostCallSensitivity,
 };
 
 const DEFAULT_RUNTIME_MAX_ERROR_COUNT: u32 = 3;
@@ -127,8 +128,15 @@ impl PluginRuntimeSupervisorState {
 
     pub fn handle_outbound_message(
         &mut self,
-        message: PluginOutboundMessage,
+        mut message: PluginOutboundMessage,
     ) -> Result<PluginOutboundEffect, PluginError> {
+        if message.host_call_sensitivity().is_sensitive() {
+            message.zeroize_sensitive_host_call_args();
+            return Err(PluginError::protocol(
+                "sensitive_host_call_requires_direct_owner",
+                "Sensitive host calls cannot enter the generic outbound effect path",
+            ));
+        }
         match message {
             PluginOutboundMessage::RegisterContribution { registration } => {
                 self.record_registration(registration)
@@ -174,7 +182,7 @@ impl PluginRuntimeSupervisorState {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(PartialEq)]
 pub enum PluginOutboundEffect {
     None,
     RegistrationChanged,
@@ -190,4 +198,41 @@ pub enum PluginOutboundEffect {
         method: String,
         args: Value,
     },
+}
+
+impl fmt::Debug for PluginOutboundEffect {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::None => formatter.write_str("None"),
+            Self::RegistrationChanged => formatter.write_str("RegistrationChanged"),
+            Self::LifecycleChanged => formatter.write_str("LifecycleChanged"),
+            Self::Progress {
+                registration_id,
+                value,
+            } => formatter
+                .debug_struct("Progress")
+                .field("registration_id", registration_id)
+                .field("value", value)
+                .finish(),
+            Self::Event(event) => formatter.debug_tuple("Event").field(event).finish(),
+            Self::HostCall {
+                request_id,
+                namespace,
+                method,
+                args,
+            } => {
+                let mut debug = formatter.debug_struct("HostCall");
+                debug
+                    .field("request_id", request_id)
+                    .field("namespace", namespace)
+                    .field("method", method);
+                if PluginHostCallSensitivity::classify(namespace, method).is_sensitive() {
+                    debug.field("args", &"<redacted>");
+                } else {
+                    debug.field("args", args);
+                }
+                debug.finish()
+            }
+        }
+    }
 }

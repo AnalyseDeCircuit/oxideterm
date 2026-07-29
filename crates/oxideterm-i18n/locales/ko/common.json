@@ -831,6 +831,7 @@
     "enable_success": "{{name}} 활성화됨.",
     "disable_success": "{{name}} 비활성화됨.",
     "load_failed_default": "플러그인을 로드하지 못했습니다.",
+    "runtime_failure": "플러그인 런타임 작업에 실패했습니다.",
     "error_copied": "플러그인 오류를 복사했습니다.",
     "open_dir_create_failed": "플러그인 디렉터리를 만들 수 없습니다: {{message}}",
     "open_dir_failed": "플러그인 디렉터리를 열 수 없습니다: {{message}}",
@@ -1176,7 +1177,7 @@
     "vnc_legacy_security_description": "이 보안 방식은 서버 신원을 보호하지 않으며 세션이 가로채기에 노출될 수 있습니다. 신뢰할 수 있고 보호된 네트워크에서만 계속하세요.",
     "vnc_security_method": "보안 방식: {{method}}",
     "vnc_continue_anyway": "계속 진행",
-    "certificate_save_failed": "인증서 신뢰 기록을 저장할 수 없습니다: {{error}}",
-    "clipboard_file_failed": "클립보드 파일을 받을 수 없습니다: {{error}}"
+    "certificate_save_failed": "인증서 신뢰 기록을 저장할 수 없습니다",
+    "clipboard_file_failed": "클립보드 파일을 받을 수 없습니다"
   }
 }

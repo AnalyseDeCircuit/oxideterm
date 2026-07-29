@@ -133,6 +133,7 @@
         "invalid_nice": "-20부터 19 사이의 nice 값을 입력하세요.",
         "connection_missing": "선택한 연결을 사용할 수 없습니다.",
         "action_failed": "프로세스 작업에 실패했습니다.",
+        "action_succeeded": "PID {{pid}} 프로세스 작업을 완료했습니다.",
         "partial_support": "{{os}}의 프로세스 관리는 부분 지원입니다."
       }
     },
@@ -191,7 +192,8 @@
         "exec_opened": "{{name}}의 셸을 열었습니다.",
         "follow_opened": "{{name}}의 로그를 따라가는 중입니다.",
         "connection_missing": "선택한 연결을 사용할 수 없습니다.",
-        "action_failed": "Docker 작업에 실패했습니다."
+        "action_failed": "Docker 작업에 실패했습니다.",
+        "action_succeeded": "{{name}}의 Docker 작업을 완료했습니다."
       }
     },
     "host_services": {
@@ -267,6 +269,7 @@
         "follow_opened": "{{name}} 로그를 추적하는 중입니다.",
         "connection_missing": "선택한 연결을 더 이상 사용할 수 없습니다.",
         "action_failed": "서비스 작업 실패.",
+        "action_succeeded": "{{name}} 서비스 작업을 완료했습니다.",
         "partial_support": "{{os}}에서는 서비스 관리가 부분 지원됩니다."
       }
     },
@@ -379,6 +382,7 @@
         "new_session_opened": "{{name}}을 여는 중입니다.",
         "action_already_running": "tmux 작업이 이미 실행 중입니다.",
         "action_failed": "tmux 작업 실패.",
+        "action_succeeded": "{{target}} tmux 작업을 완료했습니다.",
         "unknown_error": "알 수 없는 오류",
         "input_required": "계속하기 전에 값을 입력하세요."
       },

@@ -3,7 +3,7 @@
 
 use std::collections::HashMap;
 
-use gpui::Context;
+use gpui::{App, Context};
 use serde_json::{Value, json};
 
 use super::{TabKind, TerminalSessionId, WorkspaceApp};
@@ -22,7 +22,7 @@ pub(super) fn native_plugin_terminal_snapshots(
         let Some(session_id) = node.terminal_ids.first().copied() else {
             continue;
         };
-        let Some(pane) = native_plugin_pane_for_session(workspace, session_id) else {
+        let Some(pane) = native_plugin_pane_for_session(workspace, session_id, cx) else {
             continue;
         };
         let pane = pane.read(cx);
@@ -37,7 +37,7 @@ pub(super) fn native_plugin_terminal_snapshots(
     }
 
     (
-        native_plugin_active_terminal_target(workspace, connection_states),
+        native_plugin_active_terminal_target(workspace, connection_states, cx),
         terminal_nodes,
     )
 }
@@ -45,8 +45,9 @@ pub(super) fn native_plugin_terminal_snapshots(
 pub(super) fn native_plugin_pane_for_session(
     workspace: &WorkspaceApp,
     session_id: TerminalSessionId,
+    cx: &App,
 ) -> Option<gpui::Entity<oxideterm_gpui_terminal::TerminalPane>> {
-    for tab in &workspace.tabs {
+    for tab in workspace.tabs(cx) {
         let Some(root) = tab.root_pane.as_ref() else {
             continue;
         };
@@ -54,7 +55,7 @@ pub(super) fn native_plugin_pane_for_session(
         root.collect_pane_ids(&mut pane_ids);
         for pane_id in pane_ids {
             if root.session_id_for_pane(pane_id) == Some(session_id) {
-                return workspace.panes.get(&pane_id).cloned();
+                return workspace.tab_host.read(cx).panes().get(&pane_id).cloned();
             }
         }
     }
@@ -64,15 +65,16 @@ pub(super) fn native_plugin_pane_for_session(
 pub(super) fn native_plugin_active_terminal_target(
     workspace: &WorkspaceApp,
     connection_states: &HashMap<String, Value>,
+    cx: &App,
 ) -> Value {
-    let Some(session_id) = workspace.active_terminal_session_id() else {
+    let Some(session_id) = workspace.active_terminal_session_id(cx) else {
         return Value::Null;
     };
     if let Some(config) = workspace.serial_terminal_configs.get(&session_id) {
         return native_plugin_serial_terminal_target(session_id, config);
     }
     let terminal_type = workspace
-        .active_tab()
+        .active_tab(cx)
         .map(|tab| {
             if tab.kind == TabKind::LocalTerminal {
                 "local_terminal"
@@ -93,10 +95,13 @@ pub(super) fn native_plugin_active_terminal_target(
         });
     }
 
-    let node_id = workspace.terminal_ssh_nodes.get(&session_id).cloned();
+    let node_id = workspace
+        .workspace_runtime
+        .read(cx)
+        .ssh_terminal_node_id(session_id);
     let connection_id = node_id
         .as_ref()
-        .and_then(|node_id| workspace.node_runtime_store.connection_id_for_node(node_id));
+        .and_then(|node_id| workspace.node_router.connection_id_for_node(node_id));
     let connection_state = connection_id
         .as_ref()
         .and_then(|connection_id| connection_states.get(connection_id))

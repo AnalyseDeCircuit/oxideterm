@@ -6,7 +6,7 @@
 use oxideterm_cloud_sync::{
     AuthMode, BackendType, CloudSyncSettings, secret_keys, secrets::CloudSyncKeychainSecretProvider,
 };
-use oxideterm_settings_model::CloudSyncFormDraft;
+use oxideterm_settings_model::{CloudSyncFormDraft, CloudSyncSecretDraftHandoff};
 
 use crate::{cloud_sync_number_string, non_empty_secret};
 
@@ -101,50 +101,32 @@ pub fn normalize_cloud_sync_interval_draft(form: &mut CloudSyncFormDraft, interv
 }
 
 pub fn store_cloud_sync_touched_secrets(
-    form: &CloudSyncFormDraft,
+    secrets: &CloudSyncSecretDraftHandoff,
     provider: &mut impl CloudSyncSecretWriter,
 ) -> anyhow::Result<()> {
-    if form.token_touched {
-        provider.write_secret(secret_keys::TOKEN, non_empty_secret(&form.token))?;
+    if let Some(value) = secrets.token.as_deref() {
+        provider.write_secret(secret_keys::TOKEN, non_empty_secret(value))?;
     }
-    if form.git_token_touched {
-        provider.write_secret(secret_keys::GIT_TOKEN, non_empty_secret(&form.git_token))?;
+    if let Some(value) = secrets.git_token.as_deref() {
+        provider.write_secret(secret_keys::GIT_TOKEN, non_empty_secret(value))?;
     }
-    if form.basic_username_touched {
-        provider.write_secret(
-            secret_keys::BASIC_USERNAME,
-            non_empty_secret(&form.basic_username),
-        )?;
+    if let Some(value) = secrets.basic_username.as_deref() {
+        provider.write_secret(secret_keys::BASIC_USERNAME, non_empty_secret(value))?;
     }
-    if form.basic_password_touched {
-        provider.write_secret(
-            secret_keys::BASIC_PASSWORD,
-            non_empty_secret(&form.basic_password),
-        )?;
+    if let Some(value) = secrets.basic_password.as_deref() {
+        provider.write_secret(secret_keys::BASIC_PASSWORD, non_empty_secret(value))?;
     }
-    if form.access_key_id_touched {
-        provider.write_secret(
-            secret_keys::ACCESS_KEY_ID,
-            non_empty_secret(&form.access_key_id),
-        )?;
+    if let Some(value) = secrets.access_key_id.as_deref() {
+        provider.write_secret(secret_keys::ACCESS_KEY_ID, non_empty_secret(value))?;
     }
-    if form.secret_access_key_touched {
-        provider.write_secret(
-            secret_keys::SECRET_ACCESS_KEY,
-            non_empty_secret(&form.secret_access_key),
-        )?;
+    if let Some(value) = secrets.secret_access_key.as_deref() {
+        provider.write_secret(secret_keys::SECRET_ACCESS_KEY, non_empty_secret(value))?;
     }
-    if form.session_token_touched {
-        provider.write_secret(
-            secret_keys::SESSION_TOKEN,
-            non_empty_secret(&form.session_token),
-        )?;
+    if let Some(value) = secrets.session_token.as_deref() {
+        provider.write_secret(secret_keys::SESSION_TOKEN, non_empty_secret(value))?;
     }
-    if form.sync_password_touched {
-        provider.write_secret(
-            secret_keys::SYNC_PASSWORD,
-            non_empty_secret(&form.sync_password),
-        )?;
+    if let Some(value) = secrets.sync_password.as_deref() {
+        provider.write_secret(secret_keys::SYNC_PASSWORD, non_empty_secret(value))?;
     }
     Ok(())
 }

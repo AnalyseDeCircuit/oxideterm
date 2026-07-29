@@ -1,9 +1,10 @@
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use gpui::{Rgba, rgb, rgba};
 use oxideterm_gpui_ui::motion::ExitPresence;
 use oxideterm_ssh::SshCommandOutput;
-use oxideterm_topology::{ConnectionTopologySnapshot, TopologyViewStatus};
+use oxideterm_topology::TopologyViewStatus;
+use zeroize::Zeroize;
 
 use super::*;
 
@@ -253,21 +254,43 @@ impl MonitorConnectionOption {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone)]
 pub(super) struct HostProcessActionRequest {
     pub(super) connection_id: String,
     pub(super) pid: String,
-    pub(super) command: String,
+    // Process names can contain credential-like command fragments. All UI
+    // clones share one buffer that is cleared when the confirmation closes.
+    pub(super) display_command: Arc<zeroize::Zeroizing<String>>,
     pub(super) action: ProcessActionKind,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub(super) struct HostProcessActionDelivery {
-    pub(super) request: HostProcessActionRequest,
-    pub(super) result: Result<SshCommandOutput, String>,
+#[derive(Clone, Eq, PartialEq)]
+pub(super) struct HostProcessActionRun {
+    pub(super) connection_id: String,
+    pub(super) pid: String,
+    pub(super) action: ProcessActionKind,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+pub(super) struct HostProcessActionDelivery {
+    pub(super) request: HostProcessActionRun,
+    pub(super) result: Result<bool, ()>,
+}
+
+pub(super) struct HostProcessActionsState {
+    pub(super) pending_confirm: Option<HostToolConfirmState<HostProcessActionRequest>>,
+    pub(super) running: Option<HostProcessActionRun>,
+}
+
+impl HostProcessActionsState {
+    pub(super) fn new() -> Self {
+        Self {
+            pending_confirm: None,
+            running: None,
+        }
+    }
+}
+
+#[derive(Clone, Eq, PartialEq)]
 pub(super) struct HostDockerActionRequest {
     pub(super) connection_id: String,
     pub(super) container_id: String,
@@ -275,45 +298,68 @@ pub(super) struct HostDockerActionRequest {
     pub(super) action: DockerActionKind,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
 pub(super) struct HostDockerActionDelivery {
     pub(super) request: HostDockerActionRequest,
-    pub(super) result: Result<SshCommandOutput, String>,
+    pub(super) result: Result<bool, ()>,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Eq, PartialEq)]
 pub(super) struct HostDockerLogsRequest {
     pub(super) connection_id: String,
     pub(super) container_id: String,
     pub(super) container_name: String,
+    pub(super) failure_fallback: String,
+    pub(super) empty_fallback: String,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
 pub(super) struct HostDockerLogsDelivery {
     pub(super) request: HostDockerLogsRequest,
-    pub(super) result: Result<SshCommandOutput, String>,
+    pub(super) result: Result<SshCommandOutput, ()>,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Eq, PartialEq)]
 pub(super) struct HostDockerLogsDialog {
     pub(super) request: HostDockerLogsRequest,
-    pub(super) output: Option<String>,
+    // Docker output stays in one shared zeroizing buffer while rendered.
+    pub(super) output: Option<Arc<zeroize::Zeroizing<String>>>,
     pub(super) error: Option<String>,
     pub(super) loading: bool,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+pub(super) struct HostDockerOperationsState {
+    pub(super) pending_confirm: Option<HostToolConfirmState<HostDockerActionRequest>>,
+    pub(super) action_running: Option<HostDockerActionRequest>,
+    pub(super) logs_dialog: Option<HostDockerLogsDialog>,
+}
+
+impl HostDockerOperationsState {
+    pub(super) fn new() -> Self {
+        Self {
+            pending_confirm: None,
+            action_running: None,
+            logs_dialog: None,
+        }
+    }
+}
+
+#[derive(Clone, Eq, PartialEq)]
 pub(super) struct HostServiceSnapshotRequest {
     pub(super) connection_id: String,
+    pub(super) connection_fallback: String,
+    pub(super) failure_fallback: String,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
 pub(super) struct HostServiceSnapshotDelivery {
     pub(super) request: HostServiceSnapshotRequest,
-    pub(super) result: Result<SshCommandOutput, String>,
+    pub(super) result: Result<SshCommandOutput, ()>,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+pub(super) struct HostServiceSnapshotPending {
+    pub(super) request: HostServiceSnapshotRequest,
+    pub(super) runtime: tokio::runtime::Handle,
+}
+
+#[derive(Clone, Eq, PartialEq)]
 pub(super) struct HostServiceActionRequest {
     pub(super) connection_id: String,
     pub(super) service_id: String,
@@ -321,37 +367,78 @@ pub(super) struct HostServiceActionRequest {
     pub(super) action: ServiceActionKind,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
 pub(super) struct HostServiceActionDelivery {
     pub(super) request: HostServiceActionRequest,
-    pub(super) result: Result<SshCommandOutput, String>,
+    pub(super) result: Result<bool, ()>,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Eq, PartialEq)]
 pub(super) struct HostServiceLogsRequest {
     pub(super) connection_id: String,
     pub(super) service_id: String,
     pub(super) description: String,
+    pub(super) failure_fallback: String,
+    pub(super) empty_fallback: String,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
 pub(super) struct HostServiceLogsDelivery {
     pub(super) request: HostServiceLogsRequest,
-    pub(super) result: Result<SshCommandOutput, String>,
+    pub(super) result: Result<SshCommandOutput, ()>,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Eq, PartialEq)]
 pub(super) struct HostServiceLogsDialog {
     pub(super) request: HostServiceLogsRequest,
-    pub(super) output: Option<String>,
+    // Service output stays in one shared zeroizing buffer while rendered.
+    pub(super) output: Option<Arc<zeroize::Zeroizing<String>>>,
     pub(super) error: Option<String>,
     pub(super) loading: bool,
 }
 
+pub(super) struct HostServicesState {
+    pub(super) snapshot_connection_id: Option<String>,
+    pub(super) snapshot: Option<oxideterm_connection_monitor::ResourceServiceSnapshot>,
+    pub(super) snapshot_running: Option<HostServiceSnapshotRequest>,
+    pub(super) snapshot_pending: Option<HostServiceSnapshotPending>,
+    pub(super) snapshot_in_flight: bool,
+    pub(super) pending_confirm: Option<HostToolConfirmState<HostServiceActionRequest>>,
+    pub(super) action_running: Option<HostServiceActionRequest>,
+    pub(super) logs_dialog: Option<HostServiceLogsDialog>,
+}
+
+impl HostServicesState {
+    pub(super) fn new() -> Self {
+        Self {
+            snapshot_connection_id: None,
+            snapshot: None,
+            snapshot_running: None,
+            snapshot_pending: None,
+            snapshot_in_flight: false,
+            pending_confirm: None,
+            action_running: None,
+            logs_dialog: None,
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(super) enum HostSnapshotFeedback {
+pub(in crate::workspace) enum HostSnapshotFeedback {
     Silent,
     Toast,
+}
+
+/// Identifies the top Host Tools portal using the same order as root rendering.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(in crate::workspace) enum HostToolsWindowModalSnapshot {
+    ProcessConfirm(oxideterm_gpui_ui::motion::ExitPhase),
+    DockerConfirm(oxideterm_gpui_ui::motion::ExitPhase),
+    DockerLogs,
+    ServiceConfirm(oxideterm_gpui_ui::motion::ExitPhase),
+    ServiceLogs,
+    TmuxConfirm(oxideterm_gpui_ui::motion::ExitPhase),
+    TmuxInput,
+    ScheduleConfirm(oxideterm_gpui_ui::motion::ExitPhase),
+    ScheduleLogs,
 }
 
 impl HostSnapshotFeedback {
@@ -366,90 +453,293 @@ pub(super) struct HostLogSnapshotRequest {
     pub(super) preset: LogPreset,
     pub(super) limit: usize,
     pub(super) feedback: HostSnapshotFeedback,
+    pub(super) failure_fallback: String,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
 pub(super) struct HostLogSnapshotDelivery {
     pub(super) request: HostLogSnapshotRequest,
-    pub(super) result: Result<SshCommandOutput, String>,
+    pub(super) result: Result<SshCommandOutput, ()>,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+pub(super) fn zeroize_host_snapshot_output(output: &mut SshCommandOutput) {
+    // Host inspection commands may return credentials embedded in logs or
+    // diagnostics. Clear both raw streams once parsing or classification ends.
+    output.stdout.zeroize();
+    output.stderr.zeroize();
+}
+
+#[cfg(test)]
+mod snapshot_output_zeroize_tests {
+    use super::*;
+
+    #[test]
+    fn host_snapshot_output_zeroizes_both_raw_streams() {
+        let mut output = SshCommandOutput {
+            stdout: "Authorization: secret-output".to_string(),
+            stderr: "Proxy-Authorization: secret-error".to_string(),
+            exit_code: Some(1),
+            truncated: true,
+        };
+
+        zeroize_host_snapshot_output(&mut output);
+
+        assert!(output.stdout.is_empty());
+        assert!(output.stderr.is_empty());
+        assert_eq!(output.exit_code, Some(1));
+        assert!(output.truncated);
+    }
+}
+
+pub(super) struct HostLogsState {
+    pub(super) expanded_index: Option<usize>,
+    pub(super) preset: LogPreset,
+    pub(super) snapshot_connection_id: Option<String>,
+    pub(super) snapshot: Option<ResourceLogSnapshot>,
+    pub(super) running: Option<HostLogSnapshotRequest>,
+    pub(super) snapshot_in_flight: bool,
+    pub(super) list_state: ListState,
+    pub(super) list_cache: RefCell<VirtualListSignatureCache>,
+}
+
+impl HostLogsState {
+    pub(super) fn new() -> Self {
+        Self {
+            expanded_index: None,
+            preset: LogPreset::All,
+            snapshot_connection_id: None,
+            snapshot: None,
+            running: None,
+            snapshot_in_flight: false,
+            list_state: tauri_virtual_list_state(
+                0,
+                ListAlignment::Top,
+                TauriVirtualListSpec::new(px(HOST_LOG_LIST_ESTIMATED_ROW_HEIGHT), 8),
+            ),
+            list_cache: RefCell::new(VirtualListSignatureCache::default()),
+        }
+    }
+}
+
+#[derive(Clone, Eq, PartialEq)]
 pub(super) struct HostTmuxSnapshotRequest {
     pub(super) connection_id: String,
     pub(super) feedback: HostSnapshotFeedback,
+    pub(super) search_query: String,
+    pub(super) failure_fallback: String,
+    pub(super) unavailable_fallback: String,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
 pub(super) struct HostTmuxSnapshotDelivery {
     pub(super) request: HostTmuxSnapshotRequest,
-    pub(super) result: Result<SshCommandOutput, String>,
+    pub(super) result: Result<SshCommandOutput, ()>,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Eq, PartialEq)]
+pub(super) enum HostTmuxDestructiveAction {
+    KillSession { target: String },
+    KillWindow { target: String },
+    KillPane { target: String },
+}
+
+#[derive(Clone, Eq, PartialEq)]
 pub(super) struct HostTmuxActionRequest {
     pub(super) connection_id: String,
     pub(super) session_id: String,
     pub(super) session_name: String,
     pub(super) target_label: String,
-    pub(super) action: TmuxActionKind,
+    // Confirm state accepts only destructive actions, so secret-bearing rename
+    // and send-command values can never enter its cloneable request type.
+    pub(super) action: HostTmuxDestructiveAction,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Eq, PartialEq)]
+pub(super) struct HostTmuxActionRun {
+    pub(super) connection_id: String,
+    pub(super) session_id: String,
+    pub(super) session_name: String,
+    pub(super) target_label: String,
+}
+
 pub(super) struct HostTmuxActionDelivery {
-    pub(super) request: HostTmuxActionRequest,
-    pub(super) result: Result<SshCommandOutput, String>,
+    pub(super) request: HostTmuxActionRun,
+    pub(super) result: Result<bool, ()>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(super) struct HostPortSnapshotRequest {
     pub(super) connection_id: String,
     pub(super) feedback: HostSnapshotFeedback,
+    pub(super) failure_fallback: String,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
 pub(super) struct HostPortSnapshotDelivery {
     pub(super) request: HostPortSnapshotRequest,
-    pub(super) result: Result<SshCommandOutput, String>,
+    pub(super) result: Result<SshCommandOutput, ()>,
+}
+
+pub(super) struct HostPortsState {
+    pub(super) filter: PortFilter,
+    pub(super) expanded_index: Option<usize>,
+    pub(super) snapshot_connection_id: Option<String>,
+    pub(super) snapshot: Option<ResourcePortSnapshot>,
+    pub(super) running: Option<HostPortSnapshotRequest>,
+    pub(super) snapshot_in_flight: bool,
+    pub(super) list_state: ListState,
+    pub(super) list_cache: RefCell<VirtualListSignatureCache>,
+}
+
+impl HostPortsState {
+    pub(super) fn new() -> Self {
+        Self {
+            filter: PortFilter::All,
+            expanded_index: None,
+            snapshot_connection_id: None,
+            snapshot: None,
+            running: None,
+            snapshot_in_flight: false,
+            list_state: tauri_virtual_list_state(
+                0,
+                ListAlignment::Top,
+                TauriVirtualListSpec::new(px(HOST_PORT_LIST_ESTIMATED_ROW_HEIGHT), 8),
+            ),
+            list_cache: RefCell::new(VirtualListSignatureCache::default()),
+        }
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(super) struct HostScheduleSnapshotRequest {
     pub(super) connection_id: String,
     pub(super) feedback: HostSnapshotFeedback,
+    pub(super) failure_fallback: String,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
 pub(super) struct HostScheduleSnapshotDelivery {
     pub(super) request: HostScheduleSnapshotRequest,
-    pub(super) result: Result<SshCommandOutput, String>,
+    pub(super) result: Result<SshCommandOutput, ()>,
+}
+
+pub(super) struct HostSchedulesState {
+    pub(super) filter: ScheduledTaskFilter,
+    pub(super) expanded_index: Option<usize>,
+    pub(super) snapshot_connection_id: Option<String>,
+    pub(super) snapshot: Option<ResourceScheduledTaskSnapshot>,
+    pub(super) running: Option<HostScheduleSnapshotRequest>,
+    pub(super) snapshot_in_flight: bool,
+    pub(super) list_state: ListState,
+    pub(super) list_cache: RefCell<VirtualListSignatureCache>,
+    pub(super) pending_confirm: Option<HostToolConfirmState<HostScheduleActionRequest>>,
+    pub(super) action_running: Option<HostScheduleActionRequest>,
+    pub(super) logs_dialog: Option<HostScheduleLogsDialog>,
+}
+
+impl HostSchedulesState {
+    pub(super) fn new() -> Self {
+        Self {
+            filter: ScheduledTaskFilter::All,
+            expanded_index: None,
+            snapshot_connection_id: None,
+            snapshot: None,
+            running: None,
+            snapshot_in_flight: false,
+            list_state: tauri_virtual_list_state(
+                0,
+                ListAlignment::Top,
+                TauriVirtualListSpec::new(px(HOST_SCHEDULE_LIST_ESTIMATED_ROW_HEIGHT), 8),
+            ),
+            list_cache: RefCell::new(VirtualListSignatureCache::default()),
+            pending_confirm: None,
+            action_running: None,
+            logs_dialog: None,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(super) struct HostFilesystemSnapshotRequest {
     pub(super) connection_id: String,
     pub(super) feedback: HostSnapshotFeedback,
+    pub(super) failure_fallback: String,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
 pub(super) struct HostFilesystemSnapshotDelivery {
     pub(super) request: HostFilesystemSnapshotRequest,
-    pub(super) result: Result<SshCommandOutput, String>,
+    pub(super) result: Result<SshCommandOutput, ()>,
+}
+
+pub(super) struct HostFilesystemsState {
+    pub(super) filter: FilesystemFilter,
+    pub(super) expanded_index: Option<usize>,
+    pub(super) snapshot_connection_id: Option<String>,
+    pub(super) snapshot: Option<ResourceFilesystemSnapshot>,
+    pub(super) running: Option<HostFilesystemSnapshotRequest>,
+    pub(super) snapshot_in_flight: bool,
+    pub(super) list_state: ListState,
+    pub(super) list_cache: RefCell<VirtualListSignatureCache>,
+}
+
+impl HostFilesystemsState {
+    pub(super) fn new() -> Self {
+        Self {
+            filter: FilesystemFilter::All,
+            expanded_index: None,
+            snapshot_connection_id: None,
+            snapshot: None,
+            running: None,
+            snapshot_in_flight: false,
+            list_state: tauri_virtual_list_state(
+                0,
+                ListAlignment::Top,
+                TauriVirtualListSpec::new(px(HOST_FILESYSTEM_LIST_ESTIMATED_ROW_HEIGHT), 8),
+            ),
+            list_cache: RefCell::new(VirtualListSignatureCache::default()),
+        }
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(super) struct HostPackageSnapshotRequest {
     pub(super) connection_id: String,
     pub(super) feedback: HostSnapshotFeedback,
+    pub(super) failure_fallback: String,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
 pub(super) struct HostPackageSnapshotDelivery {
     pub(super) request: HostPackageSnapshotRequest,
-    pub(super) result: Result<SshCommandOutput, String>,
+    pub(super) result: Result<SshCommandOutput, ()>,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+pub(super) struct HostPackagesState {
+    pub(super) filter: PackageFilter,
+    pub(super) expanded_index: Option<usize>,
+    pub(super) snapshot_connection_id: Option<String>,
+    pub(super) snapshot: Option<ResourcePackageSnapshot>,
+    pub(super) running: Option<HostPackageSnapshotRequest>,
+    pub(super) snapshot_in_flight: bool,
+    pub(super) list_state: ListState,
+    pub(super) list_cache: RefCell<VirtualListSignatureCache>,
+}
+
+impl HostPackagesState {
+    pub(super) fn new() -> Self {
+        Self {
+            filter: PackageFilter::All,
+            expanded_index: None,
+            snapshot_connection_id: None,
+            snapshot: None,
+            running: None,
+            snapshot_in_flight: false,
+            list_state: tauri_virtual_list_state(
+                0,
+                ListAlignment::Top,
+                TauriVirtualListSpec::new(px(HOST_PACKAGE_LIST_ESTIMATED_ROW_HEIGHT), 8),
+            ),
+            list_cache: RefCell::new(VirtualListSignatureCache::default()),
+        }
+    }
+}
+
+#[derive(Clone, Eq, PartialEq)]
 pub(super) struct HostScheduleActionRequest {
     pub(super) connection_id: String,
     pub(super) task_id: String,
@@ -458,48 +748,93 @@ pub(super) struct HostScheduleActionRequest {
     pub(super) action: ScheduledTaskActionKind,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
 pub(super) struct HostScheduleActionDelivery {
     pub(super) request: HostScheduleActionRequest,
-    pub(super) result: Result<SshCommandOutput, String>,
+    pub(super) result: Result<bool, ()>,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Eq, PartialEq)]
 pub(super) struct HostScheduleLogsRequest {
     pub(super) connection_id: String,
-    pub(super) task: ResourceScheduledTask,
+    // Keep sampled commands out of asynchronous deliveries; logs need only
+    // the public task identity used by the dialog and follow action.
+    pub(super) task_id: String,
+    pub(super) task_name: String,
+    pub(super) task_source: String,
+    pub(super) task_unit: String,
+    pub(super) failure_fallback: String,
+    pub(super) empty_fallback: String,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
 pub(super) struct HostScheduleLogsDelivery {
     pub(super) request: HostScheduleLogsRequest,
-    pub(super) result: Result<SshCommandOutput, String>,
+    pub(super) result: Result<SshCommandOutput, ()>,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Eq, PartialEq)]
 pub(super) struct HostScheduleLogsDialog {
     pub(super) request: HostScheduleLogsRequest,
-    pub(super) output: Option<String>,
+    // The Entity and render tree share one zeroizing capture buffer.
+    pub(super) output: Option<Arc<zeroize::Zeroizing<String>>>,
     pub(super) error: Option<String>,
     pub(super) loading: bool,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Eq, PartialEq)]
 pub(in crate::workspace) enum HostTmuxInputDialogKind {
     RenameSession { target: String },
     RenameWindow { target: String },
     SendPaneCommand { target: String },
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
 pub(in crate::workspace) struct HostTmuxInputDialog {
     pub(super) connection_id: String,
     pub(super) session_id: String,
     pub(super) session_name: String,
     pub(super) target_label: String,
-    pub(in crate::workspace) value: String,
-    pub(in crate::workspace) focused: bool,
+    // User commands may contain secrets; the dialog clears the only retained
+    // input buffer when it closes or hands the value to command construction.
+    pub(in crate::workspace) value: zeroize::Zeroizing<String>,
     pub(super) kind: HostTmuxInputDialogKind,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(in crate::workspace) enum HostToolsTextInput {
+    ProcessSearch,
+    ProcessRenice,
+    DockerSearch,
+    ServiceSearch,
+    LogSearch,
+    TmuxSearch,
+    TmuxDialog,
+    PortSearch,
+    ScheduleSearch,
+    FilesystemSearch,
+    PackageSearch,
+}
+
+pub(super) struct HostTmuxState {
+    pub(super) snapshot_connection_id: Option<String>,
+    pub(super) snapshot: Option<ResourceTmuxSnapshot>,
+    pub(super) snapshot_running: Option<HostTmuxSnapshotRequest>,
+    pub(super) snapshot_in_flight: bool,
+    pub(super) last_error: Option<String>,
+    pub(super) pending_confirm: Option<HostToolConfirmState<HostTmuxActionRequest>>,
+    pub(super) action_running: Option<HostTmuxActionRun>,
+}
+
+impl HostTmuxState {
+    pub(super) fn new() -> Self {
+        Self {
+            snapshot_connection_id: None,
+            snapshot: None,
+            snapshot_running: None,
+            snapshot_in_flight: false,
+            last_error: None,
+            pending_confirm: None,
+            action_running: None,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -507,6 +842,95 @@ pub(in crate::workspace) enum ConnectionRuntimeSection {
     Overview,
     Health,
     Topology,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(in crate::workspace) enum HostToolsVisibility {
+    Hidden,
+    VisibleMainTab,
+    VisibleSidebar,
+    VisibleDetachedWindow,
+    VisibleMultiple {
+        main_tab: bool,
+        sidebar: bool,
+        detached_window: bool,
+    },
+    Dropped,
+}
+
+impl HostToolsVisibility {
+    pub(in crate::workspace) fn from_mounts(
+        main_tab: bool,
+        sidebar: bool,
+        detached_window: bool,
+    ) -> Self {
+        match (
+            usize::from(main_tab) + usize::from(sidebar) + usize::from(detached_window),
+            main_tab,
+            sidebar,
+            detached_window,
+        ) {
+            (0, _, _, _) => Self::Hidden,
+            (1, true, _, _) => Self::VisibleMainTab,
+            (1, _, true, _) => Self::VisibleSidebar,
+            (1, _, _, true) => Self::VisibleDetachedWindow,
+            _ => Self::VisibleMultiple {
+                main_tab,
+                sidebar,
+                detached_window,
+            },
+        }
+    }
+
+    pub(in crate::workspace) fn is_visible(self) -> bool {
+        !matches!(self, Self::Hidden | Self::Dropped)
+    }
+
+    pub(in crate::workspace) fn sidebar_is_visible(self) -> bool {
+        matches!(
+            self,
+            Self::VisibleSidebar | Self::VisibleMultiple { sidebar: true, .. }
+        )
+    }
+
+    pub(in crate::workspace) fn main_window_is_visible(self) -> bool {
+        matches!(
+            self,
+            Self::VisibleMainTab
+                | Self::VisibleSidebar
+                | Self::VisibleMultiple { main_tab: true, .. }
+                | Self::VisibleMultiple { sidebar: true, .. }
+        )
+    }
+}
+
+#[derive(Clone)]
+pub(in crate::workspace) struct HostToolsMessages {
+    pub(super) service_connection_missing: String,
+    pub(super) service_action_failed: String,
+    pub(super) log_unknown_error: String,
+    pub(super) port_unknown_error: String,
+    pub(super) filesystem_unknown_error: String,
+    pub(super) package_unknown_error: String,
+    pub(super) schedule_unknown_error: String,
+    pub(super) tmux_unknown_error: String,
+    pub(super) tmux_unavailable: String,
+}
+
+impl HostToolsMessages {
+    pub(in crate::workspace) fn from_i18n(i18n: &I18n) -> Self {
+        Self {
+            service_connection_missing: i18n.t("sidebar.host_services.toast.connection_missing"),
+            service_action_failed: i18n.t("sidebar.host_services.toast.action_failed"),
+            log_unknown_error: i18n.t("sidebar.host_logs.toast.unknown_error"),
+            port_unknown_error: i18n.t("sidebar.host_ports.toast.unknown_error"),
+            filesystem_unknown_error: i18n.t("sidebar.host_filesystems.toast.unknown_error"),
+            package_unknown_error: i18n.t("sidebar.host_packages.toast.unknown_error"),
+            schedule_unknown_error: i18n.t("sidebar.host_schedules.toast.unknown_error"),
+            tmux_unknown_error: i18n.t("sidebar.host_tmux.toast.unknown_error"),
+            tmux_unavailable: i18n.t("sidebar.host_tmux.unavailable"),
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -523,7 +947,6 @@ pub(super) struct HostToolConfirmState<T> {
 
 pub(super) struct HostGpuViewState {
     pub(super) update_tx: tokio::sync::mpsc::UnboundedSender<GpuUpdate>,
-    pub(super) update_rx: tokio::sync::mpsc::UnboundedReceiver<GpuUpdate>,
     pub(super) sampling_task: Option<GpuSamplingTask>,
     pub(super) snapshot_connection_id: Option<String>,
     pub(super) snapshot: Option<GpuSnapshot>,
@@ -533,11 +956,9 @@ pub(super) struct HostGpuViewState {
 }
 
 impl HostGpuViewState {
-    fn new() -> Self {
-        let (update_tx, update_rx) = tokio::sync::mpsc::unbounded_channel();
+    pub(super) fn new(update_tx: tokio::sync::mpsc::UnboundedSender<GpuUpdate>) -> Self {
         Self {
             update_tx,
-            update_rx,
             sampling_task: None,
             snapshot_connection_id: None,
             snapshot: None,
@@ -571,25 +992,10 @@ impl<T> HostToolConfirmState<T> {
     }
 }
 
-pub(in crate::workspace) struct ConnectionMonitorState {
-    pub(in crate::workspace) pool_stats: Option<ConnectionPoolMonitorStats>,
-    pub(in crate::workspace) pool_summaries: Vec<ConnectionPoolEntrySummary>,
-    pub(in crate::workspace) topology_snapshot: Option<ConnectionTopologySnapshot>,
-    pub(in crate::workspace) pool_error: Option<String>,
-    pub(in crate::workspace) last_pool_refresh: Option<Instant>,
-    pub(in crate::workspace) selected_connection_id: Option<String>,
-    pub(in crate::workspace) selector_open: bool,
-    pub(in crate::workspace) selector_highlighted_index: Option<usize>,
-    pub(in crate::workspace) selector_focus_origin: Option<browser_behavior::BrowserFocusOrigin>,
-    pub(in crate::workspace) profiler_registry: ProfilerRegistry,
-    pub(in crate::workspace) profiler_update_tx: tokio::sync::mpsc::UnboundedSender<ProfilerUpdate>,
-    pub(in crate::workspace) profiler_update_rx:
-        tokio::sync::mpsc::UnboundedReceiver<ProfilerUpdate>,
-    pub(super) host_gpu: HostGpuViewState,
-    pub(super) compact_monitor_list_state: ListState,
-    pub(super) compact_monitor_list_cache: RefCell<VirtualListSignatureCache>,
+/// Owns Host Tools input, selection, expansion, and virtual-list presentation state.
+pub(in crate::workspace) struct HostToolsUiState {
+    pub(in crate::workspace) focused_input: Option<HostToolsTextInput>,
     pub(in crate::workspace) host_process_search_query: String,
-    pub(in crate::workspace) host_process_search_focused: bool,
     pub(super) host_process_filter: ProcessFilter,
     pub(super) host_process_sort: ProcessSort,
     pub(super) host_process_sort_descending: bool,
@@ -597,168 +1003,32 @@ pub(in crate::workspace) struct ConnectionMonitorState {
     pub(super) host_process_list_state: ListState,
     pub(super) host_process_list_cache: RefCell<VirtualListSignatureCache>,
     pub(in crate::workspace) host_process_renice_value: String,
-    pub(in crate::workspace) host_process_renice_focused: bool,
-    pub(super) host_process_pending_confirm: Option<HostToolConfirmState<HostProcessActionRequest>>,
-    pub(super) host_process_action_running: Option<HostProcessActionRequest>,
-    pub(super) host_process_action_rx: Option<std::sync::mpsc::Receiver<HostProcessActionDelivery>>,
-    pub(super) host_process_action_polling: bool,
     pub(in crate::workspace) host_docker_search_query: String,
-    pub(in crate::workspace) host_docker_search_focused: bool,
     pub(in crate::workspace) host_docker_expanded_id: Option<String>,
     pub(super) host_docker_list_state: ListState,
     pub(super) host_docker_list_cache: RefCell<VirtualListSignatureCache>,
-    pub(super) host_docker_pending_confirm: Option<HostToolConfirmState<HostDockerActionRequest>>,
-    pub(super) host_docker_action_running: Option<HostDockerActionRequest>,
-    pub(super) host_docker_action_rx: Option<std::sync::mpsc::Receiver<HostDockerActionDelivery>>,
-    pub(super) host_docker_action_polling: bool,
-    pub(super) host_docker_logs_dialog: Option<HostDockerLogsDialog>,
-    pub(super) host_docker_logs_rx: Option<std::sync::mpsc::Receiver<HostDockerLogsDelivery>>,
-    pub(super) host_docker_logs_polling: bool,
     pub(in crate::workspace) host_service_search_query: String,
-    pub(in crate::workspace) host_service_search_focused: bool,
     pub(in crate::workspace) host_service_expanded_id: Option<String>,
     pub(super) host_service_list_state: ListState,
     pub(super) host_service_list_cache: RefCell<VirtualListSignatureCache>,
-    pub(super) host_service_snapshot_connection_id: Option<String>,
-    pub(super) host_service_snapshot: Option<oxideterm_connection_monitor::ResourceServiceSnapshot>,
-    pub(super) host_service_snapshot_rx:
-        Option<std::sync::mpsc::Receiver<HostServiceSnapshotDelivery>>,
-    pub(super) host_service_snapshot_running: Option<HostServiceSnapshotRequest>,
-    pub(super) host_service_snapshot_pending_connection_id: Option<String>,
-    pub(super) host_service_snapshot_polling: bool,
-    pub(super) host_service_pending_confirm: Option<HostToolConfirmState<HostServiceActionRequest>>,
-    pub(super) host_service_action_running: Option<HostServiceActionRequest>,
-    pub(super) host_service_action_rx: Option<std::sync::mpsc::Receiver<HostServiceActionDelivery>>,
-    pub(super) host_service_action_polling: bool,
-    pub(super) host_service_logs_dialog: Option<HostServiceLogsDialog>,
-    pub(super) host_service_logs_rx: Option<std::sync::mpsc::Receiver<HostServiceLogsDelivery>>,
-    pub(super) host_service_logs_polling: bool,
     pub(in crate::workspace) host_log_search_query: String,
-    pub(in crate::workspace) host_log_search_focused: bool,
-    pub(in crate::workspace) host_log_expanded_index: Option<usize>,
-    pub(super) host_log_preset: LogPreset,
-    pub(super) host_log_snapshot_connection_id: Option<String>,
-    pub(super) host_log_snapshot: Option<ResourceLogSnapshot>,
-    pub(super) host_log_snapshot_rx: Option<std::sync::mpsc::Receiver<HostLogSnapshotDelivery>>,
-    pub(super) host_log_snapshot_running: Option<HostLogSnapshotRequest>,
-    pub(super) host_log_snapshot_polling: bool,
-    pub(super) host_log_last_error: Option<String>,
-    pub(super) host_log_list_state: ListState,
-    pub(super) host_log_list_cache: RefCell<VirtualListSignatureCache>,
     pub(in crate::workspace) host_tmux_search_query: String,
-    pub(in crate::workspace) host_tmux_search_focused: bool,
     pub(in crate::workspace) host_tmux_expanded_session_id: Option<String>,
     pub(in crate::workspace) host_tmux_expanded_window_id: Option<String>,
-    pub(super) host_tmux_snapshot_connection_id: Option<String>,
-    pub(super) host_tmux_snapshot: Option<ResourceTmuxSnapshot>,
-    pub(super) host_tmux_snapshot_rx: Option<std::sync::mpsc::Receiver<HostTmuxSnapshotDelivery>>,
-    pub(super) host_tmux_snapshot_running: Option<HostTmuxSnapshotRequest>,
-    pub(super) host_tmux_snapshot_polling: bool,
-    pub(super) host_tmux_last_error: Option<String>,
-    pub(super) host_tmux_pending_confirm: Option<HostToolConfirmState<HostTmuxActionRequest>>,
     pub(in crate::workspace) host_tmux_input_dialog: Option<HostTmuxInputDialog>,
-    pub(super) host_tmux_action_running: Option<HostTmuxActionRequest>,
-    pub(super) host_tmux_action_rx: Option<std::sync::mpsc::Receiver<HostTmuxActionDelivery>>,
-    pub(super) host_tmux_action_polling: bool,
     pub(super) host_tmux_list_state: ListState,
     pub(super) host_tmux_list_cache: RefCell<VirtualListSignatureCache>,
     pub(in crate::workspace) host_port_search_query: String,
-    pub(in crate::workspace) host_port_search_focused: bool,
-    pub(super) host_port_filter: PortFilter,
-    pub(in crate::workspace) host_port_expanded_index: Option<usize>,
-    pub(super) host_port_snapshot_connection_id: Option<String>,
-    pub(super) host_port_snapshot: Option<ResourcePortSnapshot>,
-    pub(super) host_port_snapshot_rx: Option<std::sync::mpsc::Receiver<HostPortSnapshotDelivery>>,
-    pub(super) host_port_snapshot_running: Option<HostPortSnapshotRequest>,
-    pub(super) host_port_snapshot_polling: bool,
-    pub(super) host_port_last_error: Option<String>,
-    pub(super) host_port_list_state: ListState,
-    pub(super) host_port_list_cache: RefCell<VirtualListSignatureCache>,
     pub(in crate::workspace) host_schedule_search_query: String,
-    pub(in crate::workspace) host_schedule_search_focused: bool,
-    pub(super) host_schedule_filter: ScheduledTaskFilter,
-    pub(in crate::workspace) host_schedule_expanded_index: Option<usize>,
-    pub(super) host_schedule_snapshot_connection_id: Option<String>,
-    pub(super) host_schedule_snapshot: Option<ResourceScheduledTaskSnapshot>,
-    pub(super) host_schedule_snapshot_rx:
-        Option<std::sync::mpsc::Receiver<HostScheduleSnapshotDelivery>>,
-    pub(super) host_schedule_snapshot_running: Option<HostScheduleSnapshotRequest>,
-    pub(super) host_schedule_snapshot_polling: bool,
-    pub(super) host_schedule_last_error: Option<String>,
-    pub(super) host_schedule_pending_confirm:
-        Option<HostToolConfirmState<HostScheduleActionRequest>>,
-    pub(super) host_schedule_action_running: Option<HostScheduleActionRequest>,
-    pub(super) host_schedule_action_rx:
-        Option<std::sync::mpsc::Receiver<HostScheduleActionDelivery>>,
-    pub(super) host_schedule_action_polling: bool,
-    pub(super) host_schedule_logs_dialog: Option<HostScheduleLogsDialog>,
-    pub(super) host_schedule_logs_rx: Option<std::sync::mpsc::Receiver<HostScheduleLogsDelivery>>,
-    pub(super) host_schedule_logs_polling: bool,
-    pub(super) host_schedule_list_state: ListState,
-    pub(super) host_schedule_list_cache: RefCell<VirtualListSignatureCache>,
     pub(in crate::workspace) host_filesystem_search_query: String,
-    pub(in crate::workspace) host_filesystem_search_focused: bool,
-    pub(super) host_filesystem_filter: FilesystemFilter,
-    pub(in crate::workspace) host_filesystem_expanded_index: Option<usize>,
-    pub(super) host_filesystem_snapshot_connection_id: Option<String>,
-    pub(super) host_filesystem_snapshot: Option<ResourceFilesystemSnapshot>,
-    pub(super) host_filesystem_snapshot_rx:
-        Option<std::sync::mpsc::Receiver<HostFilesystemSnapshotDelivery>>,
-    pub(super) host_filesystem_snapshot_running: Option<HostFilesystemSnapshotRequest>,
-    pub(super) host_filesystem_snapshot_polling: bool,
-    pub(super) host_filesystem_last_error: Option<String>,
-    pub(super) host_filesystem_list_state: ListState,
-    pub(super) host_filesystem_list_cache: RefCell<VirtualListSignatureCache>,
     pub(in crate::workspace) host_package_search_query: String,
-    pub(in crate::workspace) host_package_search_focused: bool,
-    pub(super) host_package_filter: PackageFilter,
-    pub(in crate::workspace) host_package_expanded_index: Option<usize>,
-    pub(super) host_package_snapshot_connection_id: Option<String>,
-    pub(super) host_package_snapshot: Option<ResourcePackageSnapshot>,
-    pub(super) host_package_snapshot_rx:
-        Option<std::sync::mpsc::Receiver<HostPackageSnapshotDelivery>>,
-    pub(super) host_package_snapshot_running: Option<HostPackageSnapshotRequest>,
-    pub(super) host_package_snapshot_polling: bool,
-    pub(super) host_package_last_error: Option<String>,
-    pub(super) host_package_list_state: ListState,
-    pub(super) host_package_list_cache: RefCell<VirtualListSignatureCache>,
-    pub(super) topology_transform: TopologyTransform,
-    pub(super) previous_context_sidebar_tool: ContextSidebarTool,
-    pub(super) tab_scrollbar_drag: Option<HostToolsTabScrollbarDragState>,
-    pub(super) topology_drag: Option<TopologyDragState>,
-    pub(super) topology_menu: Option<TopologyNodeMenuState>,
 }
 
-impl ConnectionMonitorState {
-    pub(in crate::workspace) fn new(
-        profiler_update_tx: tokio::sync::mpsc::UnboundedSender<ProfilerUpdate>,
-        profiler_update_rx: tokio::sync::mpsc::UnboundedReceiver<ProfilerUpdate>,
-    ) -> Self {
+impl HostToolsUiState {
+    pub(in crate::workspace) fn new() -> Self {
         Self {
-            pool_stats: None,
-            pool_summaries: Vec::new(),
-            topology_snapshot: None,
-            pool_error: None,
-            last_pool_refresh: None,
-            selected_connection_id: None,
-            selector_open: false,
-            selector_highlighted_index: None,
-            selector_focus_origin: None,
-            profiler_registry: ProfilerRegistry::new(),
-            profiler_update_tx,
-            profiler_update_rx,
-            host_gpu: HostGpuViewState::new(),
-            compact_monitor_list_state: tauri_virtual_list_state(
-                0,
-                ListAlignment::Top,
-                TauriVirtualListSpec::new(
-                    px(COMPACT_MONITOR_LIST_ESTIMATED_ROW_HEIGHT),
-                    COMPACT_MONITOR_LIST_OVERSCAN,
-                ),
-            ),
-            compact_monitor_list_cache: RefCell::new(VirtualListSignatureCache::default()),
+            focused_input: None,
             host_process_search_query: String::new(),
-            host_process_search_focused: false,
             host_process_filter: ProcessFilter::All,
             host_process_sort: ProcessSort::Memory,
             host_process_sort_descending: true,
@@ -770,13 +1040,7 @@ impl ConnectionMonitorState {
             ),
             host_process_list_cache: RefCell::new(VirtualListSignatureCache::default()),
             host_process_renice_value: "0".to_string(),
-            host_process_renice_focused: false,
-            host_process_pending_confirm: None,
-            host_process_action_running: None,
-            host_process_action_rx: None,
-            host_process_action_polling: false,
             host_docker_search_query: String::new(),
-            host_docker_search_focused: false,
             host_docker_expanded_id: None,
             host_docker_list_state: tauri_virtual_list_state(
                 0,
@@ -784,15 +1048,7 @@ impl ConnectionMonitorState {
                 TauriVirtualListSpec::new(px(HOST_DOCKER_LIST_ESTIMATED_ROW_HEIGHT), 8),
             ),
             host_docker_list_cache: RefCell::new(VirtualListSignatureCache::default()),
-            host_docker_pending_confirm: None,
-            host_docker_action_running: None,
-            host_docker_action_rx: None,
-            host_docker_action_polling: false,
-            host_docker_logs_dialog: None,
-            host_docker_logs_rx: None,
-            host_docker_logs_polling: false,
             host_service_search_query: String::new(),
-            host_service_search_focused: false,
             host_service_expanded_id: None,
             host_service_list_state: tauri_virtual_list_state(
                 0,
@@ -800,50 +1056,11 @@ impl ConnectionMonitorState {
                 TauriVirtualListSpec::new(px(HOST_SERVICE_LIST_ESTIMATED_ROW_HEIGHT), 8),
             ),
             host_service_list_cache: RefCell::new(VirtualListSignatureCache::default()),
-            host_service_snapshot_connection_id: None,
-            host_service_snapshot: None,
-            host_service_snapshot_rx: None,
-            host_service_snapshot_running: None,
-            host_service_snapshot_pending_connection_id: None,
-            host_service_snapshot_polling: false,
-            host_service_pending_confirm: None,
-            host_service_action_running: None,
-            host_service_action_rx: None,
-            host_service_action_polling: false,
-            host_service_logs_dialog: None,
-            host_service_logs_rx: None,
-            host_service_logs_polling: false,
             host_log_search_query: String::new(),
-            host_log_search_focused: false,
-            host_log_expanded_index: None,
-            host_log_preset: LogPreset::All,
-            host_log_snapshot_connection_id: None,
-            host_log_snapshot: None,
-            host_log_snapshot_rx: None,
-            host_log_snapshot_running: None,
-            host_log_snapshot_polling: false,
-            host_log_last_error: None,
-            host_log_list_state: tauri_virtual_list_state(
-                0,
-                ListAlignment::Top,
-                TauriVirtualListSpec::new(px(HOST_LOG_LIST_ESTIMATED_ROW_HEIGHT), 8),
-            ),
-            host_log_list_cache: RefCell::new(VirtualListSignatureCache::default()),
             host_tmux_search_query: String::new(),
-            host_tmux_search_focused: false,
             host_tmux_expanded_session_id: None,
             host_tmux_expanded_window_id: None,
-            host_tmux_snapshot_connection_id: None,
-            host_tmux_snapshot: None,
-            host_tmux_snapshot_rx: None,
-            host_tmux_snapshot_running: None,
-            host_tmux_snapshot_polling: false,
-            host_tmux_last_error: None,
-            host_tmux_pending_confirm: None,
             host_tmux_input_dialog: None,
-            host_tmux_action_running: None,
-            host_tmux_action_rx: None,
-            host_tmux_action_polling: false,
             host_tmux_list_state: tauri_virtual_list_state(
                 0,
                 ListAlignment::Top,
@@ -851,87 +1068,105 @@ impl ConnectionMonitorState {
             ),
             host_tmux_list_cache: RefCell::new(VirtualListSignatureCache::default()),
             host_port_search_query: String::new(),
-            host_port_search_focused: false,
-            host_port_filter: PortFilter::All,
-            host_port_expanded_index: None,
-            host_port_snapshot_connection_id: None,
-            host_port_snapshot: None,
-            host_port_snapshot_rx: None,
-            host_port_snapshot_running: None,
-            host_port_snapshot_polling: false,
-            host_port_last_error: None,
-            host_port_list_state: tauri_virtual_list_state(
-                0,
-                ListAlignment::Top,
-                TauriVirtualListSpec::new(px(HOST_PORT_LIST_ESTIMATED_ROW_HEIGHT), 8),
-            ),
-            host_port_list_cache: RefCell::new(VirtualListSignatureCache::default()),
             host_schedule_search_query: String::new(),
-            host_schedule_search_focused: false,
-            host_schedule_filter: ScheduledTaskFilter::All,
-            host_schedule_expanded_index: None,
-            host_schedule_snapshot_connection_id: None,
-            host_schedule_snapshot: None,
-            host_schedule_snapshot_rx: None,
-            host_schedule_snapshot_running: None,
-            host_schedule_snapshot_polling: false,
-            host_schedule_last_error: None,
-            host_schedule_pending_confirm: None,
-            host_schedule_action_running: None,
-            host_schedule_action_rx: None,
-            host_schedule_action_polling: false,
-            host_schedule_logs_dialog: None,
-            host_schedule_logs_rx: None,
-            host_schedule_logs_polling: false,
-            host_schedule_list_state: tauri_virtual_list_state(
-                0,
-                ListAlignment::Top,
-                TauriVirtualListSpec::new(px(HOST_SCHEDULE_LIST_ESTIMATED_ROW_HEIGHT), 8),
-            ),
-            host_schedule_list_cache: RefCell::new(VirtualListSignatureCache::default()),
             host_filesystem_search_query: String::new(),
-            host_filesystem_search_focused: false,
-            host_filesystem_filter: FilesystemFilter::All,
-            host_filesystem_expanded_index: None,
-            host_filesystem_snapshot_connection_id: None,
-            host_filesystem_snapshot: None,
-            host_filesystem_snapshot_rx: None,
-            host_filesystem_snapshot_running: None,
-            host_filesystem_snapshot_polling: false,
-            host_filesystem_last_error: None,
-            host_filesystem_list_state: tauri_virtual_list_state(
-                0,
-                ListAlignment::Top,
-                TauriVirtualListSpec::new(px(HOST_FILESYSTEM_LIST_ESTIMATED_ROW_HEIGHT), 8),
-            ),
-            host_filesystem_list_cache: RefCell::new(VirtualListSignatureCache::default()),
             host_package_search_query: String::new(),
-            host_package_search_focused: false,
-            host_package_filter: PackageFilter::All,
-            host_package_expanded_index: None,
-            host_package_snapshot_connection_id: None,
-            host_package_snapshot: None,
-            host_package_snapshot_rx: None,
-            host_package_snapshot_running: None,
-            host_package_snapshot_polling: false,
-            host_package_last_error: None,
-            host_package_list_state: tauri_virtual_list_state(
-                0,
-                ListAlignment::Top,
-                TauriVirtualListSpec::new(px(HOST_PACKAGE_LIST_ESTIMATED_ROW_HEIGHT), 8),
-            ),
-            host_package_list_cache: RefCell::new(VirtualListSignatureCache::default()),
-            topology_transform: TopologyTransform::default(),
-            previous_context_sidebar_tool: ContextSidebarTool::Monitor,
-            tab_scrollbar_drag: None,
-            topology_drag: None,
-            topology_menu: None,
         }
     }
 
-    pub(in crate::workspace) fn dismiss_topology_menu(&mut self) -> bool {
-        // Topology menu state owns a private node snapshot; expose only the
-        // browser-style transient dismissal result to the workspace root.
-        self.topology_menu.take().is_some()
+    pub(in crate::workspace) fn focus_input(&mut self, input: HostToolsTextInput) {
+        self.focused_input = Some(input);
+    }
+
+    pub(in crate::workspace) fn clear_input_focus(&mut self) {
+        self.focused_input = None;
+    }
+
+    pub(in crate::workspace) fn retain_input_focus_for_tool(&mut self, tool: ContextSidebarTool) {
+        let belongs_to_tool = matches!(
+            (self.focused_input, tool),
+            (
+                Some(HostToolsTextInput::ProcessSearch | HostToolsTextInput::ProcessRenice),
+                ContextSidebarTool::Processes
+            ) | (
+                Some(HostToolsTextInput::DockerSearch),
+                ContextSidebarTool::Docker
+            ) | (
+                Some(HostToolsTextInput::ServiceSearch),
+                ContextSidebarTool::Services
+            ) | (
+                Some(HostToolsTextInput::LogSearch),
+                ContextSidebarTool::Logs
+            ) | (
+                Some(HostToolsTextInput::TmuxSearch | HostToolsTextInput::TmuxDialog),
+                ContextSidebarTool::Tmux
+            ) | (
+                Some(HostToolsTextInput::PortSearch),
+                ContextSidebarTool::Ports
+            ) | (
+                Some(HostToolsTextInput::ScheduleSearch),
+                ContextSidebarTool::Schedules
+            ) | (
+                Some(HostToolsTextInput::FilesystemSearch),
+                ContextSidebarTool::Filesystems
+            ) | (
+                Some(HostToolsTextInput::PackageSearch),
+                ContextSidebarTool::Packages
+            )
+        );
+        if !belongs_to_tool {
+            self.clear_input_focus();
+        }
+    }
+
+    pub(in crate::workspace) fn input_is_focused(&self, input: HostToolsTextInput) -> bool {
+        self.focused_input == Some(input)
+    }
+
+    pub(in crate::workspace) fn input_value(&self, input: HostToolsTextInput) -> Option<&str> {
+        if !self.input_is_focused(input) {
+            return None;
+        }
+        match input {
+            HostToolsTextInput::ProcessSearch => Some(&self.host_process_search_query),
+            HostToolsTextInput::ProcessRenice => Some(&self.host_process_renice_value),
+            HostToolsTextInput::DockerSearch => Some(&self.host_docker_search_query),
+            HostToolsTextInput::ServiceSearch => Some(&self.host_service_search_query),
+            HostToolsTextInput::LogSearch => Some(&self.host_log_search_query),
+            HostToolsTextInput::TmuxSearch => Some(&self.host_tmux_search_query),
+            HostToolsTextInput::TmuxDialog => self
+                .host_tmux_input_dialog
+                .as_ref()
+                .map(|dialog| dialog.value.as_str()),
+            HostToolsTextInput::PortSearch => Some(&self.host_port_search_query),
+            HostToolsTextInput::ScheduleSearch => Some(&self.host_schedule_search_query),
+            HostToolsTextInput::FilesystemSearch => Some(&self.host_filesystem_search_query),
+            HostToolsTextInput::PackageSearch => Some(&self.host_package_search_query),
+        }
+    }
+
+    pub(in crate::workspace) fn input_value_mut(
+        &mut self,
+        input: HostToolsTextInput,
+    ) -> Option<&mut String> {
+        if !self.input_is_focused(input) {
+            return None;
+        }
+        match input {
+            HostToolsTextInput::ProcessSearch => Some(&mut self.host_process_search_query),
+            HostToolsTextInput::ProcessRenice => Some(&mut self.host_process_renice_value),
+            HostToolsTextInput::DockerSearch => Some(&mut self.host_docker_search_query),
+            HostToolsTextInput::ServiceSearch => Some(&mut self.host_service_search_query),
+            HostToolsTextInput::LogSearch => Some(&mut self.host_log_search_query),
+            HostToolsTextInput::TmuxSearch => Some(&mut self.host_tmux_search_query),
+            HostToolsTextInput::TmuxDialog => self
+                .host_tmux_input_dialog
+                .as_mut()
+                .map(|dialog| &mut *dialog.value),
+            HostToolsTextInput::PortSearch => Some(&mut self.host_port_search_query),
+            HostToolsTextInput::ScheduleSearch => Some(&mut self.host_schedule_search_query),
+            HostToolsTextInput::FilesystemSearch => Some(&mut self.host_filesystem_search_query),
+            HostToolsTextInput::PackageSearch => Some(&mut self.host_package_search_query),
+        }
     }
 }

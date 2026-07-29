@@ -7497,6 +7497,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tokio",
+ "zeroize",
 ]
 
 [[package]]
@@ -7538,6 +7539,7 @@ dependencies = [
  "objc2 0.6.4",
  "objc2-app-kit 0.3.2",
  "raw-window-handle",
+ "tokio",
  "windows 0.61.3",
 ]
 
@@ -7988,6 +7990,7 @@ dependencies = [
  "oxideterm-plugin-manifest",
  "serde",
  "serde_json",
+ "zeroize",
 ]
 
 [[package]]
@@ -8174,6 +8177,7 @@ dependencies = [
  "oxideterm-settings",
  "oxideterm-theme",
  "serde_json",
+ "zeroize",
 ]
 
 [[package]]

@@ -15,7 +15,10 @@ pub(crate) async fn stream_anthropic_completion(
     messages: Vec<AiChatMessage>,
     events: tokio::sync::mpsc::UnboundedSender<AiStreamEvent>,
 ) -> Result<()> {
-    let api_key = api_key_required_ref(&config.provider_type, config.api_key.as_ref())?;
+    let api_key = api_key_required_ref(
+        &config.provider_type,
+        config.api_key.as_ref().map(|api_key| api_key.as_str()),
+    )?;
     let url = format!(
         "{}/v1/messages",
         config.base_url.trim().trim_end_matches('/')
@@ -29,7 +32,7 @@ pub(crate) async fn stream_anthropic_completion(
     let response = client
         .post(&url)
         .header(reqwest::header::CONTENT_TYPE, "application/json")
-        .header("x-api-key", api_key.as_str())
+        .header("x-api-key", api_key)
         .header("anthropic-version", ANTHROPIC_VERSION)
         .json(&body)
         .send()

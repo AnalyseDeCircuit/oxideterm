@@ -632,7 +632,7 @@ fn ai_policy_requires_destructive_approval_but_bypass_allows_it() {
         Some(&args),
         &policy,
         AiPolicySafetyMode::Default,
-        Some("profile-a".to_string()),
+        Some("profile-a"),
     );
     assert_eq!(
         default_decision.decision,
@@ -840,6 +840,34 @@ fn sanitize_for_ai_preserves_tauri_type_annotation_exclusions() {
 }
 
 #[test]
+fn sanitize_json_for_ai_uses_keys_to_redact_short_or_unstructured_secrets() {
+    let input = serde_json::json!({
+        "apiKey": "short",
+        "nested": {
+            "Authorization": "opaque credential",
+            "output": "export TOKEN=long-secret-value",
+        },
+        "key": "visible-key-name",
+        "usage": {
+            "inputTokens": 42,
+            "maxToken": 8192,
+        },
+        "safe": ["visible", 3],
+    });
+
+    let sanitized = sanitize_json_for_ai(&input);
+
+    assert_eq!(sanitized["apiKey"], "[REDACTED]");
+    assert_eq!(sanitized["nested"]["Authorization"], "[REDACTED]");
+    assert_eq!(sanitized["nested"]["output"], "export TOKEN=[REDACTED]");
+    assert_eq!(sanitized["key"], "visible-key-name");
+    assert_eq!(sanitized["usage"]["inputTokens"], 42);
+    assert_eq!(sanitized["usage"]["maxToken"], 8192);
+    assert_eq!(sanitized["safe"], serde_json::json!(["visible", 3]));
+    assert!(!sanitized.to_string().contains("opaque credential"));
+}
+
+#[test]
 fn sanitize_api_messages_redacts_provider_content_without_touching_tool_calls() {
     let original = vec![
         chat_message(
@@ -1011,40 +1039,54 @@ fn embedding_provider_resolution_matches_tauri_auto_and_configured_paths() {
 
 #[test]
 fn chat_embedding_key_scope_matches_tauri_prompt_guard() {
-    assert_eq!(
+    assert!(matches!(
         resolve_chat_embedding_api_key("local", Some("chat"), None, false, AiEmbeddingMode::Auto,),
         AiChatEmbeddingApiKeyDecision::NoKey
+    ));
+    let provider_key = SharedAiProviderKey::new(zeroize::Zeroizing::new("sk-active".to_string()));
+    let active_key = resolve_chat_embedding_api_key(
+        "chat",
+        Some("chat"),
+        Some(&provider_key),
+        true,
+        AiEmbeddingMode::Auto,
     );
-    assert_eq!(
-        resolve_chat_embedding_api_key(
-            "chat",
-            Some("chat"),
-            Some(zeroize::Zeroizing::new("sk-active".to_string())),
-            true,
-            AiEmbeddingMode::Auto,
-        ),
-        AiChatEmbeddingApiKeyDecision::UseKey(zeroize::Zeroizing::new("sk-active".to_string()))
-    );
-    assert_eq!(
+    assert!(matches!(
+        active_key,
+        AiChatEmbeddingApiKeyDecision::UseKey(key) if key.as_str() == "sk-active"
+    ));
+    assert!(matches!(
         resolve_chat_embedding_api_key(
             "embedding",
             Some("chat"),
-            Some(zeroize::Zeroizing::new("sk-active".to_string())),
+            Some(&provider_key),
             true,
             AiEmbeddingMode::Auto,
         ),
         AiChatEmbeddingApiKeyDecision::Skip
-    );
-    assert_eq!(
+    ));
+    assert!(matches!(
         resolve_chat_embedding_api_key(
             "embedding",
             Some("chat"),
-            Some(zeroize::Zeroizing::new("sk-active".to_string())),
+            Some(&provider_key),
             true,
             AiEmbeddingMode::Configured,
         ),
-        AiChatEmbeddingApiKeyDecision::LoadProviderKey("embedding".to_string())
-    );
+        AiChatEmbeddingApiKeyDecision::LoadProviderKey(provider_id)
+            if provider_id == "embedding"
+    ));
+}
+
+#[test]
+fn shared_provider_key_debug_is_redacted() {
+    let key =
+        SharedAiProviderKey::new(zeroize::Zeroizing::new("provider-secret-value".to_string()));
+
+    let debug = format!("{key:?}");
+
+    assert_eq!(debug, "SharedAiProviderKey(<redacted>)");
+    assert!(!debug.contains("provider-secret-value"));
 }
 
 #[test]
@@ -1361,7 +1403,7 @@ fn chat_persistence_round_trips_tauri_redb_tables() {
         },
     );
 
-    store.save_state(&state).unwrap();
+    store.save_state(state.clone()).unwrap();
     assert_eq!(store.load_state().unwrap(), state);
     drop(store);
 
@@ -1548,7 +1590,7 @@ fn chat_persistence_save_state_rejects_stale_projection_snapshots() {
     );
 
     store
-        .save_state_with_projection_updated_at(&state, 2_000)
+        .save_state_with_projection_updated_at(state.clone(), 2_000)
         .unwrap();
 
     let mut stale_state = state.clone();
@@ -1563,7 +1605,7 @@ fn chat_persistence_save_state_rejects_stale_projection_snapshots() {
         }));
     });
     store
-        .save_state_with_projection_updated_at(&stale_state, 1_500)
+        .save_state_with_projection_updated_at(stale_state.clone(), 1_500)
         .unwrap();
 
     let loaded = store.load_state().unwrap();
@@ -1585,7 +1627,7 @@ fn chat_persistence_save_state_rejects_stale_projection_snapshots() {
         message.content = "newer projection".into();
     });
     store
-        .save_state_with_projection_updated_at(&stale_state, 2_500)
+        .save_state_with_projection_updated_at(stale_state.clone(), 2_500)
         .unwrap();
     let loaded = store.load_state().unwrap();
     assert_eq!(
@@ -1653,7 +1695,7 @@ fn chat_persistence_hydrates_interrupted_stream_as_closed_turn() {
         },
     );
 
-    store.save_state(&state).unwrap();
+    store.save_state(state.clone()).unwrap();
 
     let loaded = store.load_state().unwrap();
     let message = &loaded.conversations[0].messages[0];
@@ -1756,11 +1798,11 @@ fn chat_persistence_replays_completed_stream_turn_and_transcript_order() {
         },
     );
 
-    store.save_state(&state).unwrap();
+    store.save_state(state.clone()).unwrap();
     store
         .append_transcript_entries(
             &conversation_id,
-            &[
+            vec![
                 PersistedTranscriptEntry {
                     id: "transcript-user-user-1".into(),
                     conversation_id: conversation_id.clone(),
@@ -1907,13 +1949,13 @@ fn chat_persistence_appends_transcript_and_diagnostic_events() {
     };
 
     store
-        .append_transcript_entries("conversation-1", std::slice::from_ref(&transcript))
+        .append_transcript_entries("conversation-1", vec![transcript])
         .unwrap();
     store
-        .append_diagnostic_events("conversation-1", std::slice::from_ref(&diagnostic))
+        .append_diagnostic_events("conversation-1", vec![diagnostic.clone()])
         .unwrap();
     store
-        .append_diagnostic_events("conversation-1", std::slice::from_ref(&diagnostic))
+        .append_diagnostic_events("conversation-1", vec![diagnostic.clone()])
         .unwrap();
 
     let tail = store.diagnostic_tail("conversation-1", 10).unwrap();
@@ -1953,6 +1995,131 @@ fn chat_persistence_appends_transcript_and_diagnostic_events() {
 }
 
 #[test]
+fn chat_persistence_redacts_transcript_and_diagnostic_payloads() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("chat_history.redb");
+    let store = AiChatPersistenceStore::new(&path);
+    store
+        .append_transcript_entries(
+            "conversation-secret",
+            vec![PersistedTranscriptEntry {
+                id: "tr-secret".into(),
+                conversation_id: "conversation-secret".into(),
+                turn_id: Some("assistant-secret".into()),
+                parent_id: None,
+                timestamp: 44,
+                kind: "tool_result".into(),
+                payload: serde_json::json!({
+                    "apiKey": "short-secret",
+                    "output": "export TOKEN=transcript-secret-value",
+                }),
+            }],
+        )
+        .unwrap();
+    store
+        .append_diagnostic_events(
+            "conversation-secret",
+            vec![PersistedDiagnosticEvent {
+                id: "diag-secret".into(),
+                conversation_id: "conversation-secret".into(),
+                turn_id: Some("assistant-secret".into()),
+                round_id: None,
+                timestamp: 45,
+                event_type: "tool_result".into(),
+                data: serde_json::json!({
+                    "Authorization": "Bearer diagnostic-secret-value",
+                }),
+            }],
+        )
+        .unwrap();
+
+    let diagnostic = store
+        .diagnostic_tail("conversation-secret", 1)
+        .unwrap()
+        .pop()
+        .expect("diagnostic");
+    assert_eq!(diagnostic.data["Authorization"], "[REDACTED]");
+    assert!(
+        !diagnostic
+            .data
+            .to_string()
+            .contains("diagnostic-secret-value")
+    );
+
+    drop(store);
+    let db = redb::Database::create(&path).unwrap();
+    let read = db.begin_read().unwrap();
+    // Inspect the durable row rather than only the caller-owned input.
+    let transcript_table = read
+        .open_table(redb::TableDefinition::<&str, &[u8]>::new(
+            "ai_chat_transcript",
+        ))
+        .unwrap();
+    let stored = transcript_table.get("tr-secret").unwrap().unwrap();
+    let transcript: PersistedTranscriptEntry = rmp_serde::from_slice(stored.value()).unwrap();
+    assert_eq!(transcript.payload["apiKey"], "[REDACTED]");
+    assert!(!transcript.payload.to_string().contains("short-secret"));
+    assert!(
+        !transcript
+            .payload
+            .to_string()
+            .contains("transcript-secret-value")
+    );
+}
+
+#[test]
+fn chat_persistence_redacts_conversation_projection_before_storage() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("chat_history.redb");
+    let store = AiChatPersistenceStore::new(&path);
+    let mut state = AiChatState::default();
+    let conversation_id = state.create_conversation(
+        "conversation-secret".into(),
+        Some("API_KEY=title-secret-value".into()),
+        42,
+        None,
+    );
+    let mut message = chat_message(
+        "assistant-secret",
+        AiChatRole::Assistant,
+        "export TOKEN=content-secret-value",
+    );
+    message.context = Some("Authorization: Bearer context-secret-value".into());
+    message.thinking_content = Some("password=thinking-secret-value".into());
+    message.tool_calls = vec![serde_json::json!({
+        "id": "tool-secret",
+        "arguments": "{\"apiKey\":\"short\"}",
+    })];
+    message.turn = Some(serde_json::json!({
+        "parts": [{
+            "type": "guardrail",
+            "rawText": "PRIVATE_KEY=turn-secret-value",
+        }],
+    }));
+    state.add_message(&conversation_id, message);
+    state.conversations[0].session_metadata = Some(serde_json::json!({
+        "authToken": "metadata-secret-value",
+    }));
+
+    store.save_state(state).unwrap();
+
+    let loaded = store.load_state().unwrap();
+    let retained = format!("{loaded:?}");
+    for secret in [
+        "title-secret-value",
+        "content-secret-value",
+        "context-secret-value",
+        "thinking-secret-value",
+        "\"short\"",
+        "turn-secret-value",
+        "metadata-secret-value",
+    ] {
+        assert!(!retained.contains(secret));
+    }
+    assert!(retained.contains("[REDACTED]"));
+}
+
+#[test]
 fn chat_persistence_hydrates_round_summaries_from_transcript() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("chat_history.redb");
@@ -1978,11 +2145,11 @@ fn chat_persistence_hydrates_round_summaries_from_transcript() {
         chat_message("user-1", AiChatRole::User, "hello"),
     );
     state.add_message(&conversation_id, assistant);
-    store.save_state(&state).unwrap();
+    store.save_state(state.clone()).unwrap();
     store
         .append_transcript_entries(
             &conversation_id,
-            &[PersistedTranscriptEntry {
+            vec![PersistedTranscriptEntry {
                 id: "summary-1".into(),
                 conversation_id: conversation_id.clone(),
                 turn_id: Some("assistant-1".into()),
@@ -2049,7 +2216,7 @@ fn chat_persistence_preserves_message_branches() {
     });
     state.add_message(&conversation_id, edited);
 
-    store.save_state(&state).unwrap();
+    store.save_state(state).unwrap();
     let reloaded = store.load_state().unwrap();
     let message = &reloaded.conversations[0].messages[0];
     let branches = message.branches.as_ref().unwrap();
@@ -2078,7 +2245,7 @@ fn chat_persistence_preserves_follow_up_suggestions() {
     }];
     state.add_message(&conversation_id, reply);
 
-    store.save_state(&state).unwrap();
+    store.save_state(state).unwrap();
     let reloaded = store.load_state().unwrap();
     let message = &reloaded.conversations[0].messages[0];
     assert_eq!(message.suggestions.len(), 1);
@@ -2102,7 +2269,7 @@ fn chat_persistence_loads_metadata_first_and_conversation_on_demand() {
         &newer,
         chat_message("newer-message", AiChatRole::User, "new"),
     );
-    store.save_state(&state).unwrap();
+    store.save_state(state).unwrap();
 
     let reloaded = store.load_state().unwrap();
     assert_eq!(reloaded.active_conversation_id.as_deref(), Some("newer"));
@@ -2134,11 +2301,11 @@ fn chat_persistence_keeps_more_than_legacy_conversation_limit() {
             None,
         );
     }
-    store.save_state(&state).unwrap();
+    store.save_state(state).unwrap();
 
     let reloaded = store.load_state().unwrap();
     assert_eq!(reloaded.conversations.len(), 125);
-    store.save_state(&reloaded).unwrap();
+    store.save_state(reloaded).unwrap();
     assert!(store.load_conversation("conversation-0").unwrap().is_some());
 }
 
@@ -2163,7 +2330,7 @@ fn chat_persistence_keeps_more_than_legacy_message_limit() {
             ),
         );
     }
-    store.save_state(&state).unwrap();
+    store.save_state(state).unwrap();
 
     let reloaded = store.load_conversation(&conversation_id).unwrap().unwrap();
     assert_eq!(reloaded.messages.len(), 250);

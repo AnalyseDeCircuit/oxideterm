@@ -16,7 +16,6 @@ pub mod navigation;
 pub mod plugin;
 pub mod provider_models;
 pub mod reconnect;
-pub mod state;
 pub mod theme;
 pub mod types;
 
@@ -28,6 +27,5 @@ pub use navigation::*;
 pub use plugin::*;
 pub use provider_models::*;
 pub use reconnect::*;
-pub use state::*;
 pub use theme::*;
 pub use types::*;

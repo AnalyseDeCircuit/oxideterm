@@ -1,53 +1,49 @@
 use std::{
-    collections::HashMap,
-    future::Future,
-    pin::Pin,
-    result::Result as StdResult,
-    sync::{Arc, mpsc},
+    collections::HashMap, future::Future, pin::Pin, result::Result as StdResult, sync::Arc,
     time::Duration,
 };
 
-use gpui::{Context, Window};
+use gpui::{App, Context, Window};
 use oxideterm_connections::{
     SaveConnectionRequest, SaveRemoteDesktopProfileRequest, SaveSerialProfileRequest,
-    SaveTelnetProfileRequest, SavedUpstreamProxyProtocol, SecretString,
-    first_available_default_key_path,
+    SaveTelnetProfileRequest, SavedConnectionRuntimeSecrets, SavedUpstreamProxyProtocol,
+    SecretString, first_available_default_key_path,
 };
 use oxideterm_remote_desktop::{
     RemoteDesktopConnectionProfile, RemoteDesktopEndpoint, RemoteDesktopProtocol,
     RemoteDesktopSecret,
 };
 use oxideterm_ssh::{
-    AuthMethod, ConnectionConsumer, ConnectionState, HostKeyStatus,
-    KeyboardInteractivePromptRequest, KeyboardInteractiveResponses, NodeId, NodeReadiness,
+    AuthMethod, ConnectionConsumer, HostKeyStatus, KeyboardInteractivePromptRequest,
+    KeyboardInteractiveResponses, NativeSessionTreeConnectAction, NativeSessionTreeConnectEndpoint,
+    NativeSessionTreeConnectPlan, NativeSessionTreeConnectStep, NodeId, NodeReadiness,
     NodeTreeExpansion, ProxyHopConfig, SshConfig, SshPromptError, SshPromptHandler,
-    SshTransportClient, UpstreamProxyAuth, UpstreamProxyProtocol,
+    SshTransportClient, UpstreamProxyAuth, UpstreamProxyConfig, UpstreamProxyProtocol,
     check_host_key_with_upstream_proxy,
 };
 use tokio::sync::oneshot;
 
 use super::{
+    ConnectionFormState, NativeProxyConnectRun, ProxyConnectPreflightContext,
     form_state::{
         NewConnectionForm, NewConnectionFormMode, NewConnectionProxyHop, NewConnectionSubmitAction,
         NewConnectionTransport, NewConnectionUpstreamProxyAuth, NewConnectionUpstreamProxyPolicy,
-        SavedConnectionPromptAction, SshAuthTab, new_connection_form_mode,
+        SavedConnectionPromptAction, SshAuthTab,
     },
     host_key_dialog::HostKeyChallenge,
-    session_tree_plan::{
-        NativeSessionTreeConnectAction, NativeSessionTreeConnectEndpoint,
-        NativeSessionTreeConnectPlan, NativeSessionTreeConnectStep,
-    },
 };
 use crate::workspace::{
-    NativeProxyConnectRun, WorkspaceApp, WorkspaceSshNode,
+    WorkspaceApp, WorkspaceSshNode,
+    delivery::ActiveDeliverySender,
     session_manager::{
-        duplicate_connection_template_name, form_from_saved_connection, save_request_from_form,
-        save_request_from_form_with_existing_auth, upstream_proxy_config_from_form,
+        duplicate_connection_template_name, form_from_saved_connection,
+        save_request_from_form_with_existing_auth, save_request_from_form_with_proxy_hop_prefix,
+        upstream_proxy_config_from_form,
     },
 };
 use oxideterm_session_adapter::{
     managed_key_resolver_from_store, proxy_chain_config_from_saved_connection,
-    ssh_config_from_saved_connection,
+    ssh_config_from_saved_connection, ssh_config_from_saved_connection_with_runtime_secrets,
 };
 use oxideterm_terminal::{SerialSessionConfig, TelnetSessionConfig};
 
@@ -56,6 +52,13 @@ mod conversion;
 mod save;
 
 use conversion::*;
+
+/// Carries the original zeroizing allocations from persistence into one runtime start.
+struct SavedConnectionRuntimeHandoff {
+    connection_id: String,
+    secrets: SavedConnectionRuntimeSecrets,
+    auth_override: Option<AuthMethod>,
+}
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(in crate::workspace) enum SshConnectionIntent {
@@ -68,12 +71,15 @@ pub(in crate::workspace) enum SshConnectionIntent {
 pub(in crate::workspace) enum SshConnectionWorkerResult {
     Preflight {
         config: SshConfig,
+        upstream_proxy: Option<UpstreamProxyConfig>,
         title: String,
         intent: SshConnectionIntent,
         status: HostKeyStatus,
     },
     SessionTreePreflight {
-        run: NativeProxyConnectRun,
+        generation: u64,
+        step_index: usize,
+        upstream_proxy: Option<UpstreamProxyConfig>,
         status: HostKeyStatus,
     },
     Test {
@@ -87,7 +93,7 @@ pub(in crate::workspace) enum SshConnectionWorkerResult {
 
 #[derive(Clone)]
 pub(in crate::workspace) struct NativeSshPromptHandler {
-    tx: mpsc::Sender<SshConnectionWorkerResult>,
+    tx: ActiveDeliverySender<SshConnectionWorkerResult>,
 }
 
 fn sync_saved_connection_node_title_for_nodes(
@@ -112,7 +118,7 @@ fn sync_saved_connection_node_title_for_nodes(
 }
 
 impl NativeSshPromptHandler {
-    pub(in crate::workspace) fn new(tx: mpsc::Sender<SshConnectionWorkerResult>) -> Self {
+    pub(in crate::workspace) fn new(tx: ActiveDeliverySender<SshConnectionWorkerResult>) -> Self {
         Self { tx }
     }
 }
@@ -142,15 +148,64 @@ impl SshPromptHandler for NativeSshPromptHandler {
 }
 
 impl WorkspaceApp {
-    pub(in crate::workspace) fn saved_connection_form_source_id(&self) -> Option<&str> {
-        self.editing_saved_connection_id
-            .as_deref()
-            .or(self.duplicating_saved_connection_id.as_deref())
+    /// Borrows the entity-owned form state without copying secret drafts.
+    pub(in crate::workspace) fn connection_form_state<'a>(
+        &self,
+        cx: &'a App,
+    ) -> &'a super::ConnectionFormState {
+        &self.connection_flow.read(cx).form
     }
 
-    pub(in crate::workspace) fn saved_connection_form_uses_unloaded_secret(&self) -> bool {
-        self.saved_connection_form_source_id().is_some()
-            && self.saved_connection_prompt_action.is_none()
+    /// Applies one UI transition inside the form entity and schedules its repaint.
+    pub(in crate::workspace) fn update_connection_form_state<R>(
+        &self,
+        cx: &mut App,
+        update: impl FnOnce(&mut super::ConnectionFormState) -> R,
+    ) -> R {
+        self.connection_flow.update(cx, |connection_flow, cx| {
+            let result = update(&mut connection_flow.form);
+            cx.notify();
+            result
+        })
+    }
+
+    /// Moves the secret-bearing form through one synchronous root adapter without cloning it.
+    pub(in crate::workspace) fn with_connection_form_mut<R>(
+        &mut self,
+        cx: &mut Context<Self>,
+        update: impl FnOnce(&mut Self, Option<&mut NewConnectionForm>, &mut Context<Self>) -> R,
+    ) -> R {
+        let mut form = self.connection_flow.update(cx, |connection_flow, cx| {
+            let form = connection_flow.form.form.take();
+            cx.notify();
+            form
+        });
+        let result = update(self, form.as_mut(), cx);
+        self.connection_flow.update(cx, |connection_flow, cx| {
+            debug_assert!(
+                connection_flow.form.form.is_none(),
+                "synchronous form adapter must remain the only draft owner"
+            );
+            connection_flow.form.form = form;
+            cx.notify();
+        });
+        result
+    }
+
+    pub(in crate::workspace) fn saved_connection_form_source_id<'a>(
+        &self,
+        cx: &'a App,
+    ) -> Option<&'a str> {
+        self.connection_form_state(cx).saved_connection_source_id()
+    }
+
+    pub(in crate::workspace) fn saved_connection_form_uses_unloaded_secret(
+        &self,
+        cx: &App,
+    ) -> bool {
+        let state = self.connection_form_state(cx);
+        state.saved_connection_source_id().is_some()
+            && state.saved_connection_prompt_action.is_none()
     }
 
     pub(in crate::workspace) fn open_new_connection_form(
@@ -158,24 +213,17 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.prepare_modal_interaction_boundary();
-        self.new_connection_form = Some(NewConnectionForm {
-            group: self.i18n.t("ssh.form.ungrouped"),
-            agent_available: detect_ssh_agent_available(),
-            save_connection: self
-                .settings_store
-                .settings()
-                .new_connection
-                .save_connection,
-            ..NewConnectionForm::default()
-        });
-        self.drill_down_parent_node_id = None;
-        self.editing_saved_connection_id = None;
-        self.editing_saved_connection_connect_after_save_node_id = None;
-        self.duplicating_saved_connection_id = None;
-        self.saved_connection_prompt_action = None;
-        self.close_new_connection_select();
-        self.new_connection_caret_visible = true;
+        self.prepare_modal_interaction_boundary(cx);
+        let mut form = NewConnectionForm::default();
+        form.group = self.i18n.t("ssh.form.ungrouped");
+        form.agent_available = detect_ssh_agent_available();
+        form.save_connection = self
+            .settings_store
+            .settings()
+            .new_connection
+            .save_connection;
+        self.update_connection_form_state(cx, |state| state.replace_with_new_form(form));
+        self.show_active_input_caret(cx);
         self.needs_active_pane_focus = false;
         window.focus(&self.focus_handle, cx);
         cx.notify();
@@ -187,11 +235,13 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) {
         self.open_new_connection_form(window, cx);
-        if let Some(form) = self.new_connection_form.as_mut() {
-            form.transport = NewConnectionTransport::Serial;
-            form.focused_field = super::form_state::NewConnectionField::SerialPortPath;
-            form.field_focused = false;
-        }
+        self.update_connection_form_state(cx, |state| {
+            if let Some(form) = state.form.as_mut() {
+                form.transport = NewConnectionTransport::Serial;
+                form.focused_field = super::form_state::NewConnectionField::SerialPortPath;
+                form.field_focused = false;
+            }
+        });
         self.refresh_serial_ports(cx);
     }
 
@@ -201,12 +251,14 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) {
         self.open_new_connection_form(window, cx);
-        if let Some(form) = self.new_connection_form.as_mut() {
-            form.transport = NewConnectionTransport::Telnet;
-            form.port = super::form_state::TELNET_DEFAULT_PORT_TEXT.to_string();
-            form.focused_field = super::form_state::NewConnectionField::Host;
-            form.field_focused = false;
-        }
+        self.update_connection_form_state(cx, |state| {
+            if let Some(form) = state.form.as_mut() {
+                form.transport = NewConnectionTransport::Telnet;
+                form.port = super::form_state::TELNET_DEFAULT_PORT_TEXT.to_string();
+                form.focused_field = super::form_state::NewConnectionField::Host;
+                form.field_focused = false;
+            }
+        });
     }
 
     pub(in crate::workspace) fn open_drill_down_form(
@@ -216,37 +268,34 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) {
         let parent_ready = self
-            .node_runtime_store
-            .snapshot(&parent_node_id)
-            .is_some_and(|snapshot| snapshot.state.readiness == NodeReadiness::Ready);
+            .node_router
+            .node_metadata(&parent_node_id)
+            .is_some_and(|snapshot| snapshot.readiness == NodeReadiness::Ready);
         if !parent_ready {
-            self.session_manager.status = Some(format!(
+            let message = format!(
                 "{}: {}",
                 self.i18n.t("sessions.tree.actions.drill_in"),
                 self.i18n.t("ssh.drill_down.parent_not_ready")
-            ));
-            cx.notify();
+            );
+            self.session_manager.update(cx, |session_manager, cx| {
+                session_manager.set_status(Some(message), cx);
+            });
             return;
         }
 
-        self.prepare_modal_interaction_boundary();
-        let mut form = NewConnectionForm {
-            auth_tab: SshAuthTab::Agent,
-            focused_field: super::form_state::NewConnectionField::Host,
-            save_connection: false,
-            group: self.i18n.t("ssh.form.ungrouped"),
-            agent_available: detect_ssh_agent_available(),
-            ..NewConnectionForm::default()
-        };
+        self.prepare_modal_interaction_boundary(cx);
+        let mut form = NewConnectionForm::default();
+        form.auth_tab = SshAuthTab::Agent;
+        form.focused_field = super::form_state::NewConnectionField::Host;
+        form.save_connection = false;
+        form.group = self.i18n.t("ssh.form.ungrouped");
+        form.agent_available = detect_ssh_agent_available();
         form.username = String::new();
-        self.new_connection_form = Some(form);
-        self.drill_down_parent_node_id = Some(parent_node_id);
-        self.editing_saved_connection_id = None;
-        self.editing_saved_connection_connect_after_save_node_id = None;
-        self.duplicating_saved_connection_id = None;
-        self.saved_connection_prompt_action = None;
-        self.close_new_connection_select();
-        self.new_connection_caret_visible = true;
+        self.update_connection_form_state(cx, |state| {
+            state.replace_with_new_form(form);
+            state.drill_down_parent_node_id = Some(parent_node_id);
+        });
+        self.show_active_input_caret(cx);
         self.needs_active_pane_focus = false;
         window.focus(&self.focus_handle, cx);
         cx.notify();
@@ -260,9 +309,9 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) {
         let parent_ready = self
-            .node_runtime_store
-            .snapshot(&parent_node_id)
-            .is_some_and(|snapshot| snapshot.state.readiness == NodeReadiness::Ready);
+            .node_router
+            .node_metadata(&parent_node_id)
+            .is_some_and(|snapshot| snapshot.readiness == NodeReadiness::Ready);
         if !parent_ready {
             self.report_saved_next_hop_error("sessions.saved_next_hop.parent_not_ready", cx);
             return;
@@ -310,13 +359,15 @@ impl WorkspaceApp {
             node.readiness = NodeReadiness::Connecting;
         }
         self.active_ssh_node_id = Some(target_node_id.clone());
-        self.host_key_challenge = None;
-        self.new_connection_form = None;
-        self.drill_down_parent_node_id = None;
-        self.duplicating_saved_connection_id = None;
-        self.close_new_connection_select();
-        self.session_manager.status = Some(self.i18n.t("ssh.drill_down.connecting"));
-        self.ensure_node_connection_started(&target_node_id);
+        self.connection_flow.update(cx, |connection_flow, cx| {
+            connection_flow.clear_host_key_challenge(cx);
+        });
+        self.update_connection_form_state(cx, ConnectionFormState::clear);
+        let message = self.i18n.t("ssh.drill_down.connecting");
+        self.session_manager.update(cx, |session_manager, cx| {
+            session_manager.set_status(Some(message), cx);
+        });
+        self.ensure_node_connection_started(&target_node_id, cx);
         let _ = self.connection_store.mark_used(&saved_connection_id);
         self.persist_session_tree_snapshot();
         cx.notify();

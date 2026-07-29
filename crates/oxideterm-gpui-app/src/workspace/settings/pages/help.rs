@@ -54,7 +54,7 @@ impl WorkspaceApp {
     }
 
     pub(in crate::workspace) fn help_version_card(&self, cx: &mut Context<Self>) -> AnyElement {
-        let is_portable = self.resolved_help_portable_mode();
+        let is_portable = self.resolved_help_portable_mode(cx);
         let channel_label = update_channel_label(
             self.settings_store.settings().general.update_channel,
             &self.i18n,
@@ -427,17 +427,21 @@ impl WorkspaceApp {
         &self,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let button_icon = if matches!(self.native_update_state, NativeUpdateUiState::Checking) {
+        let update_state = self
+            .settings_workspace
+            .read(cx)
+            .native_update_render_state();
+        let button_icon = if matches!(update_state, NativeUpdateRenderState::Checking) {
             LucideIcon::LoaderCircle
         } else {
             LucideIcon::RefreshCw
         };
         let disabled = matches!(
-            self.native_update_state,
-            NativeUpdateUiState::Checking
-                | NativeUpdateUiState::Downloading(_)
-                | NativeUpdateUiState::Verifying(_)
-                | NativeUpdateUiState::Installing(_)
+            update_state,
+            NativeUpdateRenderState::Checking
+                | NativeUpdateRenderState::Downloading(_)
+                | NativeUpdateRenderState::Verifying(_)
+                | NativeUpdateRenderState::Installing(_)
         );
 
         let mut area = div().flex().flex_col().gap(px(12.0)).child(
@@ -454,47 +458,50 @@ impl WorkspaceApp {
                     },
                     cx,
                 ))
-                .children(self.help_update_status_inline()),
+                .children(self.help_update_status_inline(&update_state)),
         );
 
-        if let Some(detail) = self.help_update_detail(cx) {
+        if let Some(detail) = self.help_update_detail(&update_state, cx) {
             area = area.child(detail);
         }
 
         area.into_any_element()
     }
 
-    pub(in crate::workspace) fn help_update_status_inline(&self) -> Option<AnyElement> {
-        let (label, icon, color) = match &self.native_update_state {
-            NativeUpdateUiState::Checking => (
+    pub(in crate::workspace) fn help_update_status_inline(
+        &self,
+        update_state: &NativeUpdateRenderState,
+    ) -> Option<AnyElement> {
+        let (label, icon, color) = match update_state {
+            NativeUpdateRenderState::Checking => (
                 self.i18n.t("settings_view.help.checking"),
                 None,
                 self.tokens.ui.text_muted,
             ),
-            NativeUpdateUiState::UpToDate => (
+            NativeUpdateRenderState::UpToDate => (
                 self.i18n.t("settings_view.help.up_to_date"),
                 Some(LucideIcon::CheckCircle),
                 self.tokens.ui.success,
             ),
-            NativeUpdateUiState::Verifying(_) => (
+            NativeUpdateRenderState::Verifying(_) => (
                 self.i18n.t("settings_view.help.verifying"),
                 None,
                 self.tokens.ui.text_muted,
             ),
-            NativeUpdateUiState::Installing(plan) => (
-                plan.as_ref()
-                    .map(|plan| plan.summary.clone())
+            NativeUpdateRenderState::Installing(summary) => (
+                summary
+                    .clone()
                     .unwrap_or_else(|| self.i18n.t("settings_view.help.installing")),
                 None,
                 self.tokens.ui.text_muted,
             ),
-            NativeUpdateUiState::Downloaded(_) => (
+            NativeUpdateRenderState::Downloaded => (
                 self.i18n.t("settings_view.help.update_downloaded"),
                 Some(LucideIcon::CheckCircle),
                 self.tokens.ui.success,
             ),
-            NativeUpdateUiState::InstallFinished(outcome) => {
-                let label_key = match outcome.status {
+            NativeUpdateRenderState::InstallFinished { status, .. } => {
+                let label_key = match status {
                     oxideterm_update::NativeInstallStatus::ManualActionRequired => {
                         "settings_view.help.update_downloaded"
                     }
@@ -511,7 +518,7 @@ impl WorkspaceApp {
                     self.tokens.ui.success,
                 )
             }
-            NativeUpdateUiState::Error(error) => (
+            NativeUpdateRenderState::Error(error) => (
                 if error.is_empty() {
                     self.i18n.t("settings_view.help.update_error")
                 } else {
@@ -520,9 +527,9 @@ impl WorkspaceApp {
                 Some(LucideIcon::AlertCircle),
                 self.tokens.ui.error,
             ),
-            NativeUpdateUiState::Idle
-            | NativeUpdateUiState::Available(_)
-            | NativeUpdateUiState::Downloading(_) => return None,
+            NativeUpdateRenderState::Idle
+            | NativeUpdateRenderState::Available { .. }
+            | NativeUpdateRenderState::Downloading(_) => return None,
         };
 
         let mut row = div()
@@ -539,20 +546,20 @@ impl WorkspaceApp {
 
     pub(in crate::workspace) fn help_update_detail(
         &self,
+        update_state: &NativeUpdateRenderState,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
-        match &self.native_update_state {
-            NativeUpdateUiState::Available(package) => {
-                let has_release_notes = package
-                    .body
-                    .as_deref()
-                    .is_some_and(|body| !body.trim().is_empty());
+        match update_state {
+            NativeUpdateRenderState::Available {
+                version,
+                has_release_notes,
+            } => {
                 let mut actions = div()
                     .flex()
                     .flex_wrap()
                     .justify_end()
                     .gap(px(self.tokens.spacing.two));
-                if has_release_notes {
+                if *has_release_notes {
                     actions = actions.child(self.help_outline_button(
                         self.i18n.t("settings_view.help.release_notes"),
                         LucideIcon::BookOpen,
@@ -588,20 +595,20 @@ impl WorkspaceApp {
                                     div()
                                         .text_color(rgb(self.tokens.ui.accent))
                                         .font_weight(gpui::FontWeight::MEDIUM)
-                                        .child(format!("v{}", package.version)),
+                                        .child(format!("v{version}")),
                                 ),
                         )
                         .child(actions)
                         .into_any_element(),
                 )
             }
-            NativeUpdateUiState::Downloading(status) => {
+            NativeUpdateRenderState::Downloading(status) => {
                 Some(self.help_transfer_progress(status.as_ref(), false, cx))
             }
-            NativeUpdateUiState::Verifying(status) => {
+            NativeUpdateRenderState::Verifying(status) => {
                 Some(self.help_transfer_progress(status.as_ref(), true, cx))
             }
-            NativeUpdateUiState::Downloaded(_) => Some(
+            NativeUpdateRenderState::Downloaded => Some(
                 div()
                     .flex()
                     .justify_end()
@@ -658,10 +665,10 @@ impl WorkspaceApp {
             .into_any_element()
     }
 
-    pub(in crate::workspace) fn resolved_help_portable_mode(&self) -> bool {
-        self.portable_status_snapshot
-            .as_ref()
-            .map(|status| status.is_portable)
+    pub(in crate::workspace) fn resolved_help_portable_mode(&self, cx: &App) -> bool {
+        self.settings_workspace
+            .read(cx)
+            .portable_mode()
             .unwrap_or_else(|| oxideterm_portable_runtime::is_portable_mode().unwrap_or(false))
     }
 
@@ -917,38 +924,20 @@ impl WorkspaceApp {
     }
 
     pub(in crate::workspace) fn open_help_legal_notice(&mut self, cx: &mut Context<Self>) {
-        self.help_legal_notice_presence.reopen();
-        self.settings_page.legal_notice_open = true;
         self.settings_legal_notice_scroll = MarkdownVirtualListScrollHandle::new();
-        cx.notify();
+        self.overlay.update(cx, |overlay, cx| {
+            overlay.open_confirm(WorkspaceOverlayConfirmKind::LegalNotice, cx);
+        });
     }
 
     pub(in crate::workspace) fn close_help_legal_notice(&mut self, cx: &mut Context<Self>) {
-        let Some(generation) = self.help_legal_notice_presence.begin_exit() else {
-            return;
-        };
         let delay = oxideterm_gpui_ui::motion::duration(
             &self.tokens,
             oxideterm_gpui_ui::motion::MotionDuration::Overlay,
         );
-        if delay.is_zero() {
-            self.settings_page.legal_notice_open = false;
-            self.help_legal_notice_presence.reopen();
-            cx.notify();
-            return;
-        }
-        cx.spawn(async move |weak, cx| {
-            gpui::Timer::after(delay).await;
-            let _ = weak.update(cx, |this, cx| {
-                if this.help_legal_notice_presence.finish_exit(generation) {
-                    this.settings_page.legal_notice_open = false;
-                    this.help_legal_notice_presence.reopen();
-                    cx.notify();
-                }
-            });
-        })
-        .detach();
-        cx.notify();
+        self.overlay.update(cx, |overlay, cx| {
+            overlay.begin_confirm_exit(false, delay, cx);
+        });
     }
 
     pub(in crate::workspace) fn handle_help_legal_notice_key(
@@ -956,20 +945,46 @@ impl WorkspaceApp {
         event: &KeyDownEvent,
         cx: &mut Context<Self>,
     ) -> bool {
-        if !self.settings_page.legal_notice_open
-            || event.keystroke.key.as_str() != "escape"
-            || event.keystroke.modifiers.platform
-        {
+        let Some(snapshot) = self.overlay.read(cx).confirm_snapshot() else {
+            return false;
+        };
+        if !matches!(snapshot.kind, WorkspaceOverlayConfirmKind::LegalNotice) {
             return false;
         }
-        self.close_help_legal_notice(cx);
-        true
+        if snapshot.phase == oxideterm_gpui_ui::motion::ExitPhase::Exiting {
+            return true;
+        }
+        let key_action = self.overlay.update(cx, |overlay, cx| {
+            overlay.handle_confirm_key(
+                event.keystroke.key.as_str(),
+                event.keystroke.modifiers.shift,
+                event.keystroke.modifiers.platform || event.keystroke.modifiers.control,
+                cx,
+            )
+        });
+        match key_action {
+            Some(
+                WorkspaceOverlayConfirmKeyAction::Cancel
+                | WorkspaceOverlayConfirmKeyAction::Confirm,
+            ) => {
+                self.close_help_legal_notice(cx);
+                true
+            }
+            Some(WorkspaceOverlayConfirmKeyAction::Handled) => true,
+            None => false,
+        }
     }
 
     pub(in crate::workspace) fn render_help_legal_notice_dialog(
         &self,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        let Some(snapshot) = self.overlay.read(cx).confirm_snapshot() else {
+            return div().into_any_element();
+        };
+        if !matches!(snapshot.kind, WorkspaceOverlayConfirmKind::LegalNotice) {
+            return div().into_any_element();
+        }
         let mut options = self.localized_markdown_options();
         options.base_font_size = self.tokens.metrics.ui_text_sm;
         options.block_gap = 8.0;
@@ -1009,7 +1024,6 @@ impl WorkspaceApp {
                         .bg(rgb(self.tokens.ui.bg))
                         .text_color(rgb(self.tokens.ui.text))
                         .child(markdown_virtual_with_code_actions(
-                            cx.entity(),
                             "settings-help-legal-notice-markdown",
                             &self.tokens,
                             HELP_LEGAL_MARKDOWN,
@@ -1036,7 +1050,7 @@ impl WorkspaceApp {
             "help-legal-notice-form",
             backdrop,
             form,
-            self.help_legal_notice_presence,
+            snapshot.phase,
         )
     }
 
@@ -1046,7 +1060,7 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) {
         if let Err(error) = open_external_url(url) {
-            self.push_ai_settings_toast(error.to_string(), TerminalNoticeVariant::Error);
+            self.push_ai_settings_toast(error.to_string(), TerminalNoticeVariant::Error, cx);
             cx.notify();
         }
     }
@@ -1057,7 +1071,7 @@ impl WorkspaceApp {
             .and_then(|()| open_path_external(&log_dir))
             .map_err(|error| error.to_string());
         if let Err(error) = opened {
-            self.push_ai_settings_toast(error, TerminalNoticeVariant::Error);
+            self.push_ai_settings_toast(error, TerminalNoticeVariant::Error, cx);
             cx.notify();
         }
     }

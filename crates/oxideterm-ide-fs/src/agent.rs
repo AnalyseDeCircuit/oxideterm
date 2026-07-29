@@ -34,7 +34,10 @@ use oxideterm_ssh::{
 };
 use russh::ChannelMsg;
 use serde::{Deserialize, Serialize};
-use tokio::sync::{Mutex, broadcast, mpsc, oneshot};
+use tokio::{
+    sync::{Mutex, broadcast, mpsc, oneshot, watch},
+    task::JoinHandle,
+};
 use tracing::{debug, info, warn};
 
 use crate::NodeSftpIdeFileSystem;
@@ -49,6 +52,8 @@ const CURRENT_AGENT_COMPATIBILITY_VERSION: u32 = 3;
 const INVALID_AGENT_COMPATIBILITY_VERSION: u32 = 0;
 
 static NEXT_AGENT_REQUEST_ID: AtomicU64 = AtomicU64::new(1);
+static NEXT_IDE_OWNER_ID: AtomicU64 = AtomicU64::new(1);
+static NEXT_IDE_SESSION_ID: AtomicU64 = AtomicU64::new(1);
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum NodeAgentMode {
@@ -99,19 +104,19 @@ pub struct NodeAgentIdeFileSystem {
     router: NodeRouter,
     sftp: NodeSftpIdeFileSystem,
     registry: Arc<AgentRegistry>,
-    // Tauri's IDE is node-scoped: it can outlive terminal panes and should keep
-    // using the node connection until the IDE project/tab is closed. Native now
-    // models that as an explicit remote session handle whose Drop releases the
-    // NodeRouter consumer, instead of relying on GPUI panes to remember every
-    // low-level release path.
-    ide_sessions: Arc<DashMap<String, Arc<IdeRemoteSessionInner>>>,
+    // Each UI or AI owner keeps a node-scoped lease that can outlive terminal
+    // panes. Owners share the NodeRouter transport but release only their own
+    // consumer instead of relying on GPUI panes to remember low-level paths.
+    ide_sessions: Arc<DashMap<IdeSessionKey, Arc<IdeRemoteSessionInner>>>,
+    owner_id: u64,
     mode: NodeAgentMode,
     // Tauri computes node_agent_status by resolving node_id to the current SSH
     // connection id, then querying AgentRegistry by that connection. Keep the
     // same shape here so one node's agent result cannot overwrite another's.
     agent_statuses: Arc<DashMap<AgentStatusKey, AgentStatus>>,
     latest_agent_status: Arc<DashMap<String, AgentStatusKey>>,
-    watch_subscriptions: Arc<DashMap<IdeWatchKey, Arc<IdeWatchShared>>>,
+    watch_subscriptions: Arc<DashMap<IdeOwnedWatchKey, Arc<IdeWatchShared>>>,
+    watch_lifecycle_locks: Arc<DashMap<IdeWatchKey, Arc<Mutex<()>>>>,
     deploy_lock: Arc<Mutex<()>>,
 }
 
@@ -119,6 +124,18 @@ pub struct NodeAgentIdeFileSystem {
 struct IdeConnectionLease {
     connection_id: String,
     consumer: ConnectionConsumer,
+}
+
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+struct IdeSessionKey {
+    owner_id: u64,
+    node_id: String,
+}
+
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+struct IdeOwnedWatchKey {
+    owner_id: u64,
+    watch: IdeWatchKey,
 }
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
@@ -130,6 +147,108 @@ struct AgentStatusKey {
 struct IdeWatchShared {
     connection_id: String,
     events_tx: broadcast::Sender<IdeWatchEvent>,
+    shutdown_tx: watch::Sender<bool>,
+    dispatcher_task: StdMutex<Option<JoinHandle<()>>>,
+}
+
+impl IdeWatchShared {
+    fn new(connection_id: String) -> Self {
+        let (events_tx, _) = broadcast::channel::<IdeWatchEvent>(1024);
+        let (shutdown_tx, _) = watch::channel(false);
+        Self {
+            connection_id,
+            events_tx,
+            shutdown_tx,
+            dispatcher_task: StdMutex::new(None),
+        }
+    }
+
+    fn start_dispatcher(
+        &self,
+        key: IdeWatchKey,
+        mut events_rx: broadcast::Receiver<AgentWatchEvent>,
+    ) {
+        let events_tx = self.events_tx.clone();
+        let mut shutdown_rx = self.shutdown_tx.subscribe();
+        let dispatcher_task = tokio::spawn(async move {
+            loop {
+                tokio::select! {
+                    shutdown = shutdown_rx.changed() => {
+                        if shutdown.is_err() || *shutdown_rx.borrow() {
+                            break;
+                        }
+                    }
+                    event = events_rx.recv() => {
+                        let Ok(event) = event else {
+                            break;
+                        };
+                        let event_path = normalize_agent_watch_path(&event.path);
+                        if event_path != key.path
+                            && !event_path.starts_with(&format!(
+                                "{}/",
+                                key.path.trim_end_matches('/')
+                            ))
+                        {
+                            continue;
+                        }
+                        let _ = events_tx.send(IdeWatchEvent {
+                            path: event.path,
+                            kind: event.kind,
+                        });
+                    }
+                }
+            }
+        });
+        *self
+            .dispatcher_task
+            .lock()
+            .expect("IDE watch dispatcher task poisoned") = Some(dispatcher_task);
+    }
+
+    async fn shutdown(&self) {
+        let _ = self.shutdown_tx.send(true);
+        let dispatcher_task = self
+            .dispatcher_task
+            .lock()
+            .expect("IDE watch dispatcher task poisoned")
+            .take();
+        if let Some(mut dispatcher_task) = dispatcher_task
+            && tokio::time::timeout(Duration::from_secs(1), &mut dispatcher_task)
+                .await
+                .is_err()
+        {
+            // The dispatcher normally exits immediately through the shutdown
+            // receiver. Abort is the bounded fallback during runtime teardown.
+            dispatcher_task.abort();
+            let _ = dispatcher_task.await;
+        }
+    }
+
+    fn cancel_now(&self) {
+        let _ = self.shutdown_tx.send(true);
+        if let Some(dispatcher_task) = self
+            .dispatcher_task
+            .lock()
+            .expect("IDE watch dispatcher task poisoned")
+            .take()
+        {
+            dispatcher_task.abort();
+        }
+    }
+}
+
+impl Drop for IdeWatchShared {
+    fn drop(&mut self) {
+        let _ = self.shutdown_tx.send(true);
+        if let Some(dispatcher_task) = self
+            .dispatcher_task
+            .get_mut()
+            .expect("IDE watch dispatcher task poisoned")
+            .take()
+        {
+            dispatcher_task.abort();
+        }
+    }
 }
 
 pub struct IdeWatchSubscription {
@@ -151,20 +270,39 @@ impl IdeWatchSubscription {
 struct IdeRemoteSessionInner {
     node_id: NodeId,
     router: NodeRouter,
-    lease: StdMutex<Option<IdeConnectionLease>>,
+    // Session-unique identity prevents a stale async release from removing a
+    // replacement session's consumer for the same logical node.
+    consumer: ConnectionConsumer,
+    state: StdMutex<IdeRemoteSessionState>,
+}
+
+#[derive(Default)]
+struct IdeRemoteSessionState {
+    lease: Option<IdeConnectionLease>,
+    closed: bool,
 }
 
 impl IdeRemoteSessionInner {
     fn new(node_id: NodeId, router: NodeRouter) -> Self {
+        let session_id = NEXT_IDE_SESSION_ID.fetch_add(1, Ordering::Relaxed);
         Self {
+            consumer: ConnectionConsumer::Ide(format!("{}:{session_id}", node_id.0)),
             node_id,
             router,
-            lease: StdMutex::new(None),
+            state: StdMutex::new(IdeRemoteSessionState::default()),
         }
     }
 
     async fn acquire_connection(&self) -> Result<ResolvedConnection, RouteError> {
-        let consumer = ConnectionConsumer::Ide(self.node_id.0.clone());
+        if self
+            .state
+            .lock()
+            .expect("IDE remote session state poisoned")
+            .closed
+        {
+            return Err(RouteError::NotConnected(self.node_id.0.clone()));
+        }
+        let consumer = self.consumer.clone();
         let resolved = self
             .router
             .acquire_connection_wait(&self.node_id, consumer.clone(), Duration::from_secs(15))
@@ -174,14 +312,23 @@ impl IdeRemoteSessionInner {
             consumer,
         };
         let previous = {
-            let mut lease = self
-                .lease
+            let mut state = self
+                .state
                 .lock()
-                .expect("IDE remote session lease poisoned");
-            if lease.as_ref() == Some(&next) {
+                .expect("IDE remote session state poisoned");
+            if state.closed {
+                drop(state);
+                // A connection may become ready after the owning IDE surface
+                // was released. Remove this session's unique consumer instead
+                // of reviving the released runtime dependency.
+                self.router
+                    .release_consumer(&next.connection_id, &next.consumer);
+                return Err(RouteError::NotConnected(self.node_id.0.clone()));
+            }
+            if state.lease.as_ref() == Some(&next) {
                 None
             } else {
-                lease.replace(next)
+                state.lease.replace(next)
             }
         };
         if let Some(previous) = previous {
@@ -192,20 +339,24 @@ impl IdeRemoteSessionInner {
     }
 
     fn connection_id(&self) -> Option<String> {
-        self.lease
+        self.state
             .lock()
-            .expect("IDE remote session lease poisoned")
+            .expect("IDE remote session state poisoned")
+            .lease
             .as_ref()
             .map(|lease| lease.connection_id.clone())
     }
 
     fn close(&self) {
-        if let Some(lease) = self
-            .lease
-            .lock()
-            .expect("IDE remote session lease poisoned")
-            .take()
-        {
+        let lease = {
+            let mut state = self
+                .state
+                .lock()
+                .expect("IDE remote session state poisoned");
+            state.closed = true;
+            state.lease.take()
+        };
+        if let Some(lease) = lease {
             self.router
                 .release_consumer(&lease.connection_id, &lease.consumer);
         }

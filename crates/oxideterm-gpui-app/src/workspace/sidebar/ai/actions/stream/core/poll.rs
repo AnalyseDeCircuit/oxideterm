@@ -1,6 +1,3 @@
-pub(in crate::workspace) const AI_STREAM_UPDATE_INTERVAL_MS: u64 = 50;
-pub(in crate::workspace) const AI_STREAM_MAX_EVENTS_PER_POLL: usize = 256;
-
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(in crate::workspace) enum PendingAiStreamTextKind {
     Content,
@@ -16,26 +13,44 @@ pub(in crate::workspace) struct PendingAiStreamText {
 }
 
 impl WorkspaceApp {
-    pub(in crate::workspace) fn poll_ai_chat_stream_events(
+    pub(in crate::workspace) fn schedule_ai_chat_stream_delivery_apply(
         &mut self,
-        mut window: Option<&mut Window>,
+        window_handle: AnyWindowHandle,
         cx: &mut Context<Self>,
     ) {
-        let Some(rx) = self.ai.chat.stream_rx.take() else {
+        let deliveries = self
+            .ai_entity
+            .update(cx, |ai, _cx| ai.take_chat_stream_deliveries());
+        if deliveries.is_empty() {
             return;
-        };
-        let mut keep_rx = true;
+        }
+        cx.spawn(async move |weak, cx| {
+            let _ = cx.update_window(window_handle, |_, window, cx| {
+                weak.update(cx, |workspace, cx| {
+                    workspace.apply_ai_chat_stream_deliveries(deliveries, window, cx);
+                })
+            });
+        })
+        .detach();
+    }
+
+    pub(in crate::workspace) fn apply_ai_chat_stream_deliveries(
+        &mut self,
+        deliveries: VecDeque<AiStreamDelivery>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let mut pending_text: Option<PendingAiStreamText> = None;
-        let mut processed = 0;
-        while let Ok(delivery) = rx.try_recv() {
-            if processed >= AI_STREAM_MAX_EVENTS_PER_POLL {
-                break;
+        for delivery in deliveries {
+            if !self
+                .ai_entity
+                .read(cx)
+                .is_chat_stream_generation(delivery.generation)
+            {
+                // Dropping a stale delivery also drops any retained approval
+                // sender, matching the old generation-scoped receiver.
+                continue;
             }
-            processed += 1;
-            let done = matches!(
-                delivery.event,
-                AiStreamDeliveryEvent::Stream(AiStreamEvent::Done | AiStreamEvent::Error(_))
-            );
             match delivery.event {
                 AiStreamDeliveryEvent::Stream(AiStreamEvent::Content(chunk)) => {
                     self.merge_or_flush_pending_ai_stream_text(
@@ -79,7 +94,9 @@ impl WorkspaceApp {
                             response_tx,
                         } => {
                             self.flush_pending_ai_stream_text(&mut pending_text, cx);
-                            if self.ai.chat.stream_generation != delivery.generation {
+                            if self.ai_entity.read(cx).chat_stream_generation()
+                                != delivery.generation
+                            {
                                 let _ = response_tx
                                     .send(Ok(oxideterm_ai::acp_permission_cancelled_response()));
                                 continue;
@@ -87,18 +104,6 @@ impl WorkspaceApp {
                             let projection =
                                 oxideterm_ai::acp_permission_request_projection(&request);
                             let (approval_tx, approval_rx) = tokio::sync::oneshot::channel();
-                            self.ai
-                                .runtime
-                                .pending_tool_approvals
-                                .insert(projection.tool_call_id.clone(), approval_tx);
-                            let forwarding_runtime = self.forwarding_runtime.clone();
-                            forwarding_runtime.spawn(async move {
-                                let approved = approval_rx.await.unwrap_or(false);
-                                let response = oxideterm_ai::acp_permission_response_for_decision(
-                                    &request, approved,
-                                );
-                                let _ = response_tx.send(Ok(response));
-                            });
                             self.apply_ai_tool_status(
                                 delivery.generation,
                                 &delivery.conversation_id,
@@ -116,6 +121,21 @@ impl WorkspaceApp {
                                 None,
                                 cx,
                             );
+                            self.ai_entity.update(cx, |ai, _cx| {
+                                ai.register_tool_approval(
+                                    delivery.generation,
+                                    projection.tool_call_id,
+                                    approval_tx,
+                                );
+                            });
+                            let forwarding_runtime = self.forwarding_runtime.clone();
+                            forwarding_runtime.spawn(async move {
+                                let approved = approval_rx.await.unwrap_or(false);
+                                let response = oxideterm_ai::acp_permission_response_for_decision(
+                                    &request, approved,
+                                );
+                                let _ = response_tx.send(Ok(response));
+                            });
                         }
                         event => {
                             for stream_event in
@@ -173,6 +193,7 @@ impl WorkspaceApp {
                         session_metadata,
                         session_config_options,
                         &agent_id,
+                        cx,
                     ) {
                         cx.notify();
                     }
@@ -213,6 +234,7 @@ impl WorkspaceApp {
                         synthetic,
                         retry_attempt,
                         hard_deny_triggered,
+                        cx,
                     );
                 }
                 AiStreamDeliveryEvent::RoundSummary {
@@ -255,6 +277,7 @@ impl WorkspaceApp {
                         &event_type,
                         round_id,
                         data,
+                        cx,
                     );
                 }
                 AiStreamDeliveryEvent::ToolStatus {
@@ -298,10 +321,6 @@ impl WorkspaceApp {
                     sender,
                 } => {
                     self.flush_pending_ai_stream_text(&mut pending_text, cx);
-                    self.ai
-                        .runtime
-                        .pending_tool_approvals
-                        .insert(tool_call_id.clone(), sender);
                     self.apply_ai_tool_status(
                         delivery.generation,
                         &delivery.conversation_id,
@@ -319,6 +338,9 @@ impl WorkspaceApp {
                         None,
                         cx,
                     );
+                    self.ai_entity.update(cx, |ai, _cx| {
+                        ai.register_tool_approval(delivery.generation, tool_call_id, sender);
+                    });
                 }
                 AiStreamDeliveryEvent::ToolExecutionRequested {
                     tool_call_id,
@@ -327,12 +349,6 @@ impl WorkspaceApp {
                     sender,
                 } => {
                     self.flush_pending_ai_stream_text(&mut pending_text, cx);
-                    let Some(window) = window.as_deref_mut() else {
-                        self.ai.chat.stream_rx = Some(rx);
-                        self.schedule_ai_chat_stream_poll(cx);
-                        cx.notify();
-                        return;
-                    };
                     self.start_ai_ui_orchestrator_tool_execution(
                         tool_call_id,
                         name,
@@ -343,15 +359,8 @@ impl WorkspaceApp {
                     );
                 }
             }
-            if done {
-                keep_rx = false;
-                break;
-            }
         }
         self.flush_pending_ai_stream_text(&mut pending_text, cx);
-        if keep_rx {
-            self.ai.chat.stream_rx = Some(rx);
-        }
     }
 
     pub(in crate::workspace) fn merge_or_flush_pending_ai_stream_text(
@@ -408,31 +417,12 @@ impl WorkspaceApp {
         );
     }
 
-    pub(in crate::workspace) fn schedule_ai_chat_stream_poll(&mut self, cx: &mut Context<Self>) {
-        if self.ai.chat.stream_polling {
-            return;
-        }
-        self.ai.chat.stream_polling = true;
-        cx.spawn(async move |weak, cx| {
-            Timer::after(Duration::from_millis(AI_STREAM_UPDATE_INTERVAL_MS)).await;
-            let _ = weak.update(cx, |this, cx| {
-                this.ai.chat.stream_polling = false;
-                if this.ai.chat.stream_rx.is_some() {
-                    cx.notify();
-                    this.schedule_ai_chat_stream_poll(cx);
-                }
-            });
-        })
-        .detach();
-    }
-
-    pub(in crate::workspace) fn poll_ai_compaction_results(&mut self, cx: &mut Context<Self>) {
-        let Some(rx) = self.ai.chat.compaction_rx.take() else {
-            return;
-        };
-        let mut keep_rx = true;
-        while let Ok(delivery) = rx.try_recv() {
-            keep_rx = false;
+    pub(in crate::workspace) fn apply_ai_compaction_deliveries(
+        &mut self,
+        deliveries: VecDeque<AiCompactionDelivery>,
+        cx: &mut Context<Self>,
+    ) {
+        for delivery in deliveries {
             match delivery.kind {
                 AiCompactionDeliveryKind::Compact => {
                     if let Some(plan) = delivery.plan {
@@ -441,7 +431,7 @@ impl WorkspaceApp {
                             delivery.base_ids,
                             plan,
                             delivery.summary,
-                            delivery.stream_error,
+                            delivery.failed,
                             delivery.resume_after,
                             delivery.silent,
                             cx,
@@ -453,32 +443,11 @@ impl WorkspaceApp {
                         delivery.conversation_id,
                         delivery.base_ids,
                         delivery.summary,
-                        delivery.stream_error,
+                        delivery.failed,
                         cx,
                     );
                 }
             }
         }
-        if keep_rx {
-            self.ai.chat.compaction_rx = Some(rx);
-        }
-    }
-
-    pub(in crate::workspace) fn schedule_ai_compaction_poll(&mut self, cx: &mut Context<Self>) {
-        if self.ai.chat.compaction_polling {
-            return;
-        }
-        self.ai.chat.compaction_polling = true;
-        cx.spawn(async move |weak, cx| {
-            Timer::after(Duration::from_millis(50)).await;
-            let _ = weak.update(cx, |this, cx| {
-                this.ai.chat.compaction_polling = false;
-                this.poll_ai_compaction_results(cx);
-                if this.ai.chat.compaction_rx.is_some() {
-                    this.schedule_ai_compaction_poll(cx);
-                }
-            });
-        })
-        .detach();
     }
 }

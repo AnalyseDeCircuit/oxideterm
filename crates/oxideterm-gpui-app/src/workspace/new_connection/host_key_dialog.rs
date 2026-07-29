@@ -1,6 +1,6 @@
 use gpui::{
-    AnyElement, Context, MouseButton, ParentElement, SharedString, Styled, Timer, Window, div,
-    prelude::*, px, rgb, rgba,
+    AnyElement, Context, MouseButton, ParentElement, SharedString, Styled, Window, div, prelude::*,
+    px, rgb, rgba,
 };
 use oxideterm_gpui_ui::{
     button::{ButtonOptions, ButtonRadius, ButtonSize, ButtonVariant, ToolbarButtonOptions},
@@ -8,7 +8,7 @@ use oxideterm_gpui_ui::{
 };
 use oxideterm_ssh::{HostKeyStatus, SshConfig, remove_host_key};
 
-use super::{NativeSessionTreeConnectChallenge, ssh_flow::SshConnectionIntent};
+use super::ssh_flow::SshConnectionIntent;
 use crate::workspace::WorkspaceApp;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -19,14 +19,13 @@ enum HostKeyButtonAction {
     RemoveSaved,
 }
 
-#[derive(Clone, Debug)]
 pub(in crate::workspace) struct HostKeyChallenge {
     pub(in crate::workspace) presence: oxideterm_gpui_ui::motion::ExitPresence,
     pub(in crate::workspace) config: SshConfig,
     pub(in crate::workspace) title: String,
     pub(in crate::workspace) status: HostKeyStatus,
     pub(in crate::workspace) intent: SshConnectionIntent,
-    pub(in crate::workspace) session_tree_challenge: Option<NativeSessionTreeConnectChallenge>,
+    pub(in crate::workspace) session_tree_challenge: bool,
     pub(in crate::workspace) host: String,
     pub(in crate::workspace) port: u16,
 }
@@ -38,27 +37,39 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(mut challenge) = self.host_key_challenge.take() else {
+        let Some(mut challenge) = self.connection_flow.update(cx, |connection_flow, cx| {
+            connection_flow.take_host_key_challenge(cx)
+        }) else {
             return;
         };
         let fingerprint = match &challenge.status {
             HostKeyStatus::Unknown { fingerprint, .. } => fingerprint.clone(),
             HostKeyStatus::Changed { .. } => {
-                if let Some(form) = self.new_connection_form.as_mut() {
-                    form.error = Some(self.i18n.t("ssh.host_key.changed_requires_remove"));
-                }
+                let message = self.i18n.t("ssh.host_key.changed_requires_remove");
+                self.update_connection_form_state(cx, |state| {
+                    if let Some(form) = state.form.as_mut() {
+                        form.error = Some(message);
+                    }
+                });
                 cx.notify();
                 return;
             }
             HostKeyStatus::Verified | HostKeyStatus::Error { .. } => return,
         };
 
-        if challenge.session_tree_challenge.is_some() {
-            if let Some(form) = self.new_connection_form.as_mut() {
-                form.pending = true;
-                form.error = Some(self.i18n.t("ssh.form.checking_host_key"));
+        if challenge.session_tree_challenge {
+            let message = self.i18n.t("ssh.form.checking_host_key");
+            if self.connection_form_state(cx).form.is_some() {
+                self.update_connection_form_state(cx, |state| {
+                    if let Some(form) = state.form.as_mut() {
+                        form.pending = true;
+                        form.error = Some(message);
+                    }
+                });
             } else {
-                self.session_manager.status = Some(self.i18n.t("ssh.form.checking_host_key"));
+                self.session_manager.update(cx, |session_manager, cx| {
+                    session_manager.set_status(Some(message), cx);
+                });
             }
             self.accept_active_proxy_connect_host_key(persist, fingerprint, window, cx);
             cx.notify();
@@ -78,56 +89,39 @@ impl WorkspaceApp {
     }
 
     pub(in crate::workspace) fn cancel_host_key_challenge(&mut self, cx: &mut Context<Self>) {
-        let Some(challenge) = self.host_key_challenge.as_mut() else {
-            return;
-        };
-        let Some(generation) = challenge.presence.begin_exit() else {
-            return;
-        };
-        self.cancel_active_proxy_connect_run();
-        // Tauri HostKeyConfirmDialog cancellation only clears pending
-        // connect/test state. It does not surface a form or session-manager
-        // error for a user-initiated close.
-        if let Some(form) = self.new_connection_form.as_mut() {
-            form.pending = false;
-            form.error = None;
-        } else {
-            self.session_manager.status = None;
-        }
         let delay = oxideterm_gpui_ui::motion::duration(
             &self.tokens,
             oxideterm_gpui_ui::motion::MotionDuration::Overlay,
         );
-        if delay.is_zero() {
-            self.finish_host_key_challenge_exit(generation);
+        let began_exit = self.connection_flow.update(cx, |connection_flow, cx| {
+            connection_flow.begin_host_key_challenge_exit(delay, cx)
+        });
+        if !began_exit {
+            return;
+        }
+        self.cancel_active_proxy_connect_run(cx);
+        // Tauri HostKeyConfirmDialog cancellation only clears pending
+        // connect/test state. It does not surface a form or session-manager
+        // error for a user-initiated close.
+        if self.connection_form_state(cx).form.is_some() {
+            self.update_connection_form_state(cx, |state| {
+                if let Some(form) = state.form.as_mut() {
+                    form.pending = false;
+                    form.error = None;
+                }
+            });
         } else {
-            cx.spawn(async move |weak, cx| {
-                Timer::after(delay).await;
-                let _ = weak.update(cx, |this, cx| {
-                    if this.finish_host_key_challenge_exit(generation) {
-                        cx.notify();
-                    }
-                });
-            })
-            .detach();
+            self.session_manager.update(cx, |session_manager, cx| {
+                session_manager.set_status(None, cx);
+            });
         }
         cx.notify();
     }
 
-    fn finish_host_key_challenge_exit(&mut self, generation: u64) -> bool {
-        if !self
-            .host_key_challenge
-            .as_ref()
-            .is_some_and(|challenge| challenge.presence.finish_exit(generation))
-        {
-            return false;
-        }
-        self.host_key_challenge = None;
-        true
-    }
-
     fn remove_changed_host_key_challenge(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
-        let Some(challenge) = self.host_key_challenge.take() else {
+        let Some(challenge) = self.connection_flow.update(cx, |connection_flow, cx| {
+            connection_flow.take_host_key_challenge(cx)
+        }) else {
             return;
         };
         let HostKeyStatus::Changed {
@@ -136,7 +130,9 @@ impl WorkspaceApp {
             ..
         } = &challenge.status
         else {
-            self.host_key_challenge = Some(challenge);
+            self.connection_flow.update(cx, |connection_flow, cx| {
+                connection_flow.restore_host_key_challenge(challenge, cx);
+            });
             return;
         };
 
@@ -147,25 +143,46 @@ impl WorkspaceApp {
             expected_fingerprint,
         ) {
             Ok(()) => {
-                if let Some(form) = self.new_connection_form.as_mut() {
-                    form.pending = true;
-                    form.error = Some(self.i18n.t("ssh.form.checking_host_key"));
+                let message = self.i18n.t("ssh.form.checking_host_key");
+                if self.connection_form_state(cx).form.is_some() {
+                    self.update_connection_form_state(cx, |state| {
+                        if let Some(form) = state.form.as_mut() {
+                            form.pending = true;
+                            form.error = Some(message);
+                        }
+                    });
                 } else {
-                    self.session_manager.status = Some(self.i18n.t("ssh.form.checking_host_key"));
+                    self.session_manager.update(cx, |session_manager, cx| {
+                        session_manager.set_status(Some(message), cx);
+                    });
                 }
-                if challenge.session_tree_challenge.is_some() {
+                if challenge.session_tree_challenge {
                     self.continue_active_proxy_session_tree_preflight_only(cx);
                 } else {
-                    self.start_ssh_preflight(challenge.config, challenge.title, challenge.intent);
+                    self.start_ssh_preflight(
+                        challenge.config,
+                        challenge.title,
+                        challenge.intent,
+                        cx,
+                    );
                 }
             }
             Err(error) => {
-                if let Some(form) = self.new_connection_form.as_mut() {
-                    form.error = Some(error.to_string());
+                let message = error.to_string();
+                if self.connection_form_state(cx).form.is_some() {
+                    self.update_connection_form_state(cx, |state| {
+                        if let Some(form) = state.form.as_mut() {
+                            form.error = Some(message);
+                        }
+                    });
                 } else {
-                    self.session_manager.status = Some(error.to_string());
+                    self.session_manager.update(cx, |session_manager, cx| {
+                        session_manager.set_status(Some(message), cx);
+                    });
                 }
-                self.host_key_challenge = Some(challenge);
+                self.connection_flow.update(cx, |connection_flow, cx| {
+                    connection_flow.restore_host_key_challenge(challenge, cx);
+                });
             }
         }
         cx.notify();
@@ -175,11 +192,10 @@ impl WorkspaceApp {
         &self,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let Some(challenge) = self.host_key_challenge.as_ref() else {
+        let Some(challenge) = self.connection_flow.read(cx).host_key_dialog_snapshot() else {
             return div().into_any_element();
         };
-        let dialog_visible =
-            challenge.presence.phase() == oxideterm_gpui_ui::motion::ExitPhase::Visible;
+        let dialog_visible = challenge.visible;
         let theme = self.tokens.ui;
         let (title, message, key_type, fingerprint, changed) = match &challenge.status {
             HostKeyStatus::Unknown {

@@ -1,16 +1,208 @@
 use super::*;
 
-use oxideterm_connection_monitor::ResourceSampler;
+fn is_host_tools_tab_kind(tab_kind: &TabKind) -> bool {
+    matches!(
+        tab_kind,
+        TabKind::ConnectionPool | TabKind::ConnectionMonitor | TabKind::Topology | TabKind::Runtime
+    )
+}
+
+fn host_tools_visibility(
+    main_tab_visible: bool,
+    detached_tab_visible: bool,
+    sidebar_visible: bool,
+) -> HostToolsVisibility {
+    HostToolsVisibility::from_mounts(main_tab_visible, sidebar_visible, detached_tab_visible)
+}
+
+impl HostToolsEntity {
+    pub(super) fn schedule_lifecycle_refresh(&mut self, cx: &mut Context<Self>) {
+        // Pool/topology freshness belongs to Host Tools and stops with the Entity.
+        self.lifecycle_refresh_task = Some(cx.spawn(async move |host_tools, cx| {
+            loop {
+                Timer::after(MONITOR_POOL_REFRESH_INTERVAL).await;
+                let should_continue = host_tools
+                    .update(cx, |host_tools, cx| {
+                        host_tools.refresh_lifecycle_tick(cx);
+                        true
+                    })
+                    .unwrap_or(false);
+                if !should_continue {
+                    break;
+                }
+            }
+        }));
+    }
+
+    pub(super) fn refresh_lifecycle_tick(&mut self, cx: &mut Context<Self>) {
+        let Some(runtime) = self.lifecycle_runtime.clone() else {
+            return;
+        };
+        if !self.visibility.is_visible() {
+            // Hidden pages keep shared nodes and long-running work, but do not
+            // sample or repaint page-only snapshots.
+            return;
+        }
+        self.update_lifecycle(
+            self.visibility,
+            self.monitoring.clone(),
+            self.sampling_config,
+            runtime,
+            false,
+            cx,
+        );
+    }
+
+    pub(in crate::workspace) fn set_messages(&mut self, messages: HostToolsMessages) {
+        self.messages = Some(messages);
+    }
+
+    pub(in crate::workspace) fn update_lifecycle(
+        &mut self,
+        visibility: HostToolsVisibility,
+        monitoring: oxideterm_settings::HostToolsSettings,
+        sampling_config: oxideterm_connection_monitor::ResourceSamplingConfig,
+        runtime: tokio::runtime::Handle,
+        force_pool_refresh: bool,
+        cx: &mut Context<Self>,
+    ) {
+        self.visibility = visibility;
+        self.monitoring = monitoring;
+        self.sampling_config = sampling_config;
+        self.lifecycle_runtime = Some(runtime.clone());
+        let gpu_visible = self.monitoring.gpu_enabled
+            && visibility.sidebar_is_visible()
+            && self.active_tool() == ContextSidebarTool::Gpu;
+        let selected_connection_id = self.selected_connection_id_owned();
+        self.sync_gpu_sampling(gpu_visible, selected_connection_id, runtime.clone(), cx);
+
+        let stale = self.pool_refresh_is_stale(MONITOR_POOL_REFRESH_INTERVAL);
+        if force_pool_refresh || stale {
+            self.refresh_pool_snapshot(cx);
+        }
+        if !visibility.is_visible() {
+            // Hidden Host Tools stop page samplers only. The registry keeps
+            // shared nodes, SFTP sessions, and forwarding tasks alive.
+            self.stop_profiler_sampling();
+            self.pause_service_refreshes();
+            return;
+        }
+
+        let connections = self.monitor_connections();
+        let selected_missing = self.selected_connection_id().is_none_or(|selected| {
+            !connections
+                .iter()
+                .any(|connection| connection.connection_id == selected)
+        });
+        let profiler_missing = self
+            .selected_connection_id()
+            .is_some_and(|connection_id| self.profiler_connection_missing(connection_id));
+        if force_pool_refresh || stale || selected_missing || profiler_missing {
+            // Re-showing Host Tools must restart the page profiler even when
+            // the selected connection and cached pool snapshot stayed stable.
+            self.sync_live_connections(connections, sampling_config, runtime, cx);
+        }
+    }
+
+    pub(super) fn sync_live_connections(
+        &mut self,
+        connections: Vec<MonitorConnectionOption>,
+        sampling_config: oxideterm_connection_monitor::ResourceSamplingConfig,
+        runtime: tokio::runtime::Handle,
+        cx: &mut Context<Self>,
+    ) {
+        let live_connection_ids = connections
+            .iter()
+            .map(|connection| connection.connection_id.as_str())
+            .collect::<HashSet<_>>();
+        for connection_id in self.profiler_connection_ids() {
+            if !live_connection_ids.contains(connection_id.as_str()) {
+                self.remove_profiler_connection(&connection_id);
+            }
+        }
+        if connections.is_empty() {
+            if let Some(connection_id) = self.take_selected_connection(cx) {
+                self.remove_profiler_connection(&connection_id);
+            }
+            return;
+        }
+
+        let live_connection_ids = connections
+            .into_iter()
+            .map(|connection| connection.connection_id)
+            .collect::<Vec<_>>();
+        let Some(connection_id) = self.ensure_selected_connection(&live_connection_ids, cx) else {
+            return;
+        };
+        if !self.visibility.is_visible() || sampling_config.is_empty() {
+            self.stop_profiler_sampling();
+            return;
+        }
+        if self.profiler_connection_missing(&connection_id) {
+            self.start_profiler(connection_id, sampling_config, runtime, cx);
+        }
+    }
+
+    pub(in crate::workspace) fn apply_monitoring_settings(
+        &mut self,
+        visibility: HostToolsVisibility,
+        monitoring: oxideterm_settings::HostToolsSettings,
+        sampling_config: oxideterm_connection_monitor::ResourceSamplingConfig,
+        runtime: tokio::runtime::Handle,
+        cx: &mut Context<Self>,
+    ) {
+        self.visibility = visibility;
+        self.monitoring = monitoring;
+        self.sampling_config = sampling_config;
+        self.lifecycle_runtime = Some(runtime.clone());
+        if sampling_config.is_empty() || !visibility.is_visible() {
+            self.stop_profiler_sampling();
+        } else {
+            for connection_id in self.profiler_connection_ids() {
+                self.start_profiler(connection_id, sampling_config.clone(), runtime.clone(), cx);
+            }
+            self.sync_live_connections(
+                self.monitor_connections(),
+                sampling_config,
+                runtime.clone(),
+                cx,
+            );
+        }
+
+        let gpu_visible = self.monitoring.gpu_enabled
+            && visibility.sidebar_is_visible()
+            && self.active_tool() == ContextSidebarTool::Gpu;
+        let selected_connection_id = self.selected_connection_id_owned();
+        self.sync_gpu_sampling(gpu_visible, selected_connection_id, runtime, cx);
+    }
+}
 
 impl WorkspaceApp {
+    pub(in crate::workspace) fn host_tools_visibility(&self, cx: &App) -> HostToolsVisibility {
+        let tab_host = self.tab_host.read(cx);
+        let main_tab_visible = self.tabs(cx).iter().any(|tab| {
+            is_host_tools_tab_kind(&tab.kind)
+                && self.active_tab_id(cx) == Some(tab.id)
+                && !tab_host.is_outside_main_window(tab.id)
+        });
+        let detached_tab_visible = self
+            .tabs(cx)
+            .iter()
+            .any(|tab| is_host_tools_tab_kind(&tab.kind) && tab_host.is_detached(tab.id));
+        let sidebar_visible = self.context_sidebar_visible()
+            && self.active_context_sidebar_panel == ContextSidebarPanel::HostTools;
+
+        host_tools_visibility(main_tab_visible, detached_tab_visible, sidebar_visible)
+    }
+
     pub(in crate::workspace) fn set_connection_runtime_section(
         &mut self,
         section: ConnectionRuntimeSection,
+        cx: &mut Context<Self>,
     ) {
-        if self.active_connection_runtime_section != section {
-            self.previous_connection_runtime_section = self.active_connection_runtime_section;
-            self.active_connection_runtime_section = section;
-        }
+        self.host_tools.update(cx, |host_tools, _cx| {
+            host_tools.set_runtime_section(section);
+        });
     }
 
     pub(in crate::workspace) fn open_connection_runtime_tab(
@@ -19,24 +211,30 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.set_connection_runtime_section(section);
-        let tab_id = if let Some(tab) = self.tabs.iter().find(|tab| tab.kind == TabKind::Runtime) {
+        self.set_connection_runtime_section(section, cx);
+        let tab_id = if let Some(tab) = self
+            .tabs(cx)
+            .iter()
+            .find(|tab| tab.kind == TabKind::Runtime)
+        {
             tab.id
         } else {
-            let tab_id = self.alloc_tab_id();
-            self.tabs.push(Tab {
-                id: tab_id,
-                kind: TabKind::Runtime,
-                title: self.i18n.t("sidebar.panels.runtime"),
-                title_source: TabTitleSource::I18nKey("sidebar.panels.runtime"),
-                root_pane: None,
-                active_pane_id: None,
-            });
+            let tab_id = self.alloc_tab_id(cx);
+            self.insert_tab(
+                Tab {
+                    id: tab_id,
+                    kind: TabKind::Runtime,
+                    title: self.i18n.t("sidebar.panels.runtime"),
+                    title_source: TabTitleSource::I18nKey("sidebar.panels.runtime"),
+                    root_pane: None,
+                    active_pane_id: None,
+                },
+                cx,
+            );
             tab_id
         };
         self.set_active_tab(tab_id, window, cx);
-        self.refresh_connection_monitor_pool_stats();
-        self.sync_connection_monitor_selection(cx);
+        self.sync_host_tools_lifecycle(true, cx);
     }
 
     pub(in crate::workspace) fn open_connection_monitor_tab(
@@ -63,196 +261,46 @@ impl WorkspaceApp {
         self.open_connection_runtime_tab(ConnectionRuntimeSection::Topology, window, cx);
     }
 
-    pub(in crate::workspace) fn poll_connection_monitor_updates(
+    pub(in crate::workspace) fn sync_host_tools_lifecycle(
         &mut self,
-        request_repaint: bool,
-        cx: &mut Context<Self>,
+        force_pool_refresh: bool,
+        cx: &mut App,
     ) {
-        let mut received_update = false;
-        while self
-            .connection_monitor
-            .profiler_update_rx
-            .try_recv()
-            .is_ok()
-        {
-            received_update = true;
-        }
-        if received_update && request_repaint {
-            // Background polling should wake the UI, but render-time draining
-            // must not schedule a second frame after the current one.
-            cx.notify();
-        }
-    }
-
-    pub(in crate::workspace) fn maybe_refresh_connection_monitor(
-        &mut self,
-        cx: &mut Context<Self>,
-    ) {
-        self.poll_host_service_snapshot_results(cx);
-        self.sync_host_gpu_sampling(cx);
-        let monitor_surface_visible = self.active_tab().is_some_and(|tab| {
-            matches!(
-                tab.kind,
-                TabKind::ConnectionPool
-                    | TabKind::ConnectionMonitor
-                    | TabKind::Topology
-                    | TabKind::Runtime
-            )
-        }) || (self.context_sidebar_visible()
-            && self.active_context_sidebar_panel == ContextSidebarPanel::HostTools
-            && matches!(
-                self.active_context_sidebar_tool,
-                ContextSidebarTool::Monitor
-                    | ContextSidebarTool::Gpu
-                    | ContextSidebarTool::Processes
-                    | ContextSidebarTool::Services
-                    | ContextSidebarTool::Logs
-                    | ContextSidebarTool::Tmux
-                    | ContextSidebarTool::Docker
-                    | ContextSidebarTool::Ports
-                    | ContextSidebarTool::Schedules
-                    | ContextSidebarTool::Filesystems
-                    | ContextSidebarTool::Packages
-            ));
-        if !monitor_surface_visible {
-            return;
-        }
-
-        let stale = self
-            .connection_monitor
-            .last_pool_refresh
-            .is_none_or(|last| last.elapsed() >= MONITOR_POOL_REFRESH_INTERVAL);
-        if stale {
-            self.refresh_connection_monitor_pool_stats();
-        }
-        let selected_missing = self
-            .connection_monitor
-            .selected_connection_id
-            .as_ref()
-            .is_none_or(|selected| {
-                !self
-                    .connection_monitor
-                    .pool_summaries
-                    .iter()
-                    .any(|summary| summary.id == *selected)
-            });
-        if stale || selected_missing {
-            // Selection sync scans the registry and may start profilers. Keep it
-            // tied to pool refreshes instead of every terminal-driven repaint.
-            self.sync_connection_monitor_selection(cx);
-        }
-    }
-
-    pub(in crate::workspace) fn refresh_connection_monitor_pool_stats(&mut self) {
-        self.connection_monitor.pool_stats = Some(self.ssh_registry.monitor_stats());
-        self.connection_monitor.pool_summaries = self.ssh_registry.list_connection_summaries();
-        self.connection_monitor.topology_snapshot =
-            Some(self.ssh_registry.connection_topology_snapshot());
-        self.connection_monitor.pool_error = None;
-        self.connection_monitor.last_pool_refresh = Some(Instant::now());
-    }
-
-    pub(in crate::workspace) fn sync_connection_monitor_selection(
-        &mut self,
-        cx: &mut Context<Self>,
-    ) {
-        let connections = self.monitor_connections();
-        let live_connection_ids = connections
-            .iter()
-            .map(|connection| connection.connection_id.as_str())
-            .collect::<HashSet<_>>();
-        for connection_id in self.connection_monitor.profiler_registry.connection_ids() {
-            if !live_connection_ids.contains(connection_id.as_str()) {
-                self.connection_monitor
-                    .profiler_registry
-                    .remove(&connection_id);
-            }
-        }
-        if connections.is_empty() {
-            if let Some(connection_id) = self.connection_monitor.selected_connection_id.take() {
-                self.connection_monitor
-                    .profiler_registry
-                    .remove(&connection_id);
-            }
-            self.connection_monitor.selector_open = false;
-            self.connection_monitor.selector_highlighted_index = None;
-            self.connection_monitor.selector_focus_origin = None;
-            return;
-        }
-
-        let selected_missing = self
-            .connection_monitor
-            .selected_connection_id
-            .as_ref()
-            .is_none_or(|selected| {
-                !connections
-                    .iter()
-                    .any(|connection| connection.connection_id == *selected)
-            });
-        if selected_missing {
-            self.connection_monitor.selected_connection_id =
-                Some(connections[0].connection_id.clone());
-        }
-
-        let Some(connection_id) = self.connection_monitor.selected_connection_id.clone() else {
-            return;
-        };
-        if self.resource_sampling_config().is_empty() {
-            self.connection_monitor.profiler_registry.stop_all();
-            return;
-        }
-        if self
-            .connection_monitor
-            .profiler_registry
-            .state(&connection_id)
-            .is_none()
-        {
-            self.start_connection_monitor_profiler(connection_id, cx);
-        }
-    }
-
-    pub(super) fn start_connection_monitor_profiler(
-        &mut self,
-        connection_id: String,
-        cx: &mut Context<Self>,
-    ) {
-        let Some(handle) = self.ssh_registry.get(&connection_id) else {
-            return;
-        };
-        let Some(os_type) = handle.remote_env().map(|env| env.os_type) else {
-            // Lifecycle polling retries this start after environment detection;
-            // choosing Linux here would run incorrect probes on other hosts.
-            return;
-        };
-        let sampler: Arc<dyn ResourceSampler> = Arc::new(handle);
-        self.connection_monitor
-            .profiler_registry
-            .start_with_sampler_on_config(
-                connection_id,
-                sampler,
-                os_type,
-                self.resource_sampling_config(),
-                Some(self.connection_monitor.profiler_update_tx.clone()),
-                self.forwarding_runtime.handle().clone(),
+        let visibility = self.host_tools_visibility(cx);
+        let monitoring = self.settings_store.settings().host_tools.clone();
+        let sampling_config = self.resource_sampling_config();
+        let runtime = self.forwarding_runtime.handle().clone();
+        self.host_tools.update(cx, |host_tools, cx| {
+            host_tools.update_lifecycle(
+                visibility,
+                monitoring,
+                sampling_config,
+                runtime,
+                force_pool_refresh,
+                cx,
             );
-        cx.notify();
+        });
     }
 
     pub(in crate::workspace) fn apply_host_tool_monitoring_settings(
         &mut self,
         cx: &mut Context<Self>,
     ) {
-        let config = self.resource_sampling_config();
-        if config.is_empty() {
-            // The registry owns persistent shells, so stop them at the settings boundary.
-            self.connection_monitor.profiler_registry.stop_all();
-        } else {
-            for connection_id in self.connection_monitor.profiler_registry.connection_ids() {
-                self.start_connection_monitor_profiler(connection_id, cx);
-            }
-            self.sync_connection_monitor_selection(cx);
-        }
-        self.sync_host_gpu_sampling(cx);
+        let visibility = self.host_tools_visibility(cx);
+        let monitoring = self.settings_store.settings().host_tools.clone();
+        let sampling_config = self.resource_sampling_config();
+        let runtime = self.forwarding_runtime.handle().clone();
+        let messages = HostToolsMessages::from_i18n(&self.i18n);
+        self.host_tools.update(cx, |host_tools, cx| {
+            host_tools.set_messages(messages);
+            host_tools.apply_monitoring_settings(
+                visibility,
+                monitoring,
+                sampling_config,
+                runtime,
+                cx,
+            );
+        });
     }
 
     fn resource_sampling_config(&self) -> oxideterm_connection_monitor::ResourceSamplingConfig {
@@ -266,26 +314,47 @@ impl WorkspaceApp {
         }
     }
 
-    pub(super) fn monitor_connections(&self) -> Vec<MonitorConnectionOption> {
-        if !self.connection_monitor.pool_summaries.is_empty() {
-            return self
-                .connection_monitor
-                .pool_summaries
-                .iter()
-                .filter(|summary| summary.is_displayed_in_pool())
-                .map(MonitorConnectionOption::from_pool_summary)
-                .collect();
-        }
+    pub(super) fn monitor_connections(
+        &self,
+        cx: &mut Context<Self>,
+    ) -> Vec<MonitorConnectionOption> {
+        self.host_tools.read(cx).monitor_connections()
+    }
+}
 
-        let mut connections = self
-            .ssh_registry
-            .list()
-            .into_iter()
-            .map(MonitorConnectionOption::from_connection_info)
-            .collect::<Vec<_>>();
-        connections.sort_by(|left, right| {
-            monitor_connection_label(left).cmp(&monitor_connection_label(right))
-        });
-        connections
+#[cfg(test)]
+mod tests {
+    use super::{HostToolsVisibility, host_tools_visibility};
+
+    #[test]
+    fn host_tools_visibility_covers_main_detached_and_sidebar_surfaces() {
+        assert_eq!(
+            host_tools_visibility(true, false, false),
+            HostToolsVisibility::VisibleMainTab
+        );
+        assert_eq!(
+            host_tools_visibility(false, true, false),
+            HostToolsVisibility::VisibleDetachedWindow
+        );
+        assert_eq!(
+            host_tools_visibility(false, false, true),
+            HostToolsVisibility::VisibleSidebar
+        );
+        assert!(matches!(
+            host_tools_visibility(true, true, true),
+            HostToolsVisibility::VisibleMultiple {
+                main_tab: true,
+                sidebar: true,
+                detached_window: true,
+            }
+        ));
+        assert_eq!(
+            host_tools_visibility(false, false, false),
+            HostToolsVisibility::Hidden
+        );
+        assert!(host_tools_visibility(true, false, false).main_window_is_visible());
+        assert!(host_tools_visibility(false, false, true).main_window_is_visible());
+        assert!(!host_tools_visibility(false, true, false).main_window_is_visible());
+        assert!(!HostToolsVisibility::Dropped.is_visible());
     }
 }

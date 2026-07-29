@@ -1,8 +1,7 @@
 use std::{
-    collections::hash_map::DefaultHasher,
+    collections::{HashMap, VecDeque, hash_map::DefaultHasher},
     hash::{Hash, Hasher},
     sync::Arc,
-    thread,
     time::{Duration, Instant},
 };
 
@@ -31,7 +30,9 @@ use oxideterm_gpui_ui::{
     typography::tauri_cjk_ui_font_family as forwards_cjk_ui_font_family,
 };
 use oxideterm_i18n::I18n;
-use oxideterm_ssh::{ConnectionConsumer, ConnectionState, NodeId, NodeReadiness, NodeRouter};
+use oxideterm_ssh::{
+    ConnectionConsumer, ConnectionState, NodeId, NodeReadiness, NodeRouter, PhaseResult,
+};
 use oxideterm_workspace::{Tab, TabId, TabKind, TabTitleSource};
 
 use super::ime::WorkspaceImeTarget;
@@ -45,9 +46,30 @@ use super::{
 // Real modules keep forwarding UI dependencies and visibility boundaries compiler-checked.
 mod actions;
 mod components;
+mod entity;
 mod forms;
 mod helpers;
+mod reconnect;
+mod runtime_service;
 mod surface;
+mod view_state;
+
+pub(in crate::workspace) use entity::{
+    ForwardingDeliveryIntent, ForwardingWorkspaceEntity, ForwardingWorkspaceEvent,
+};
+pub(in crate::workspace) use reconnect::{
+    cleanup_reconnect_created_forwards, forward_restore_failure_label,
+    forward_restore_key_for_rule, forward_restore_key_for_snapshot_rule,
+    forward_restore_phase_result, forward_restore_result_detail,
+    forward_rule_from_reconnect_snapshot, reconnect_forward_rule_from_rule,
+    release_reconnect_forward_bindings,
+};
+use runtime_service::{
+    ForwardingQuickAction, ForwardingRuntimeOperation, ForwardingRuntimeSnapshot,
+};
+pub(in crate::workspace) use runtime_service::{
+    ForwardingRuntimeService, ReconnectForwardRestoreRequest,
+};
 
 const FORWARDS_PAGE_PADDING: f32 = 16.0; // Tauri p-4
 const FORWARDS_SECTION_GAP: f32 = 24.0; // Tauri space-y-6
@@ -56,6 +78,7 @@ const FORWARDS_TABLE_ROW_H: f32 = 42.0;
 const FORWARDS_TYPE_BADGE_H: f32 = 20.0;
 const FORWARDS_PORT_SCAN_INTERVAL: Duration = Duration::from_secs(12);
 const FORWARDS_STATS_REFRESH_INTERVAL: Duration = Duration::from_secs(5);
+const FORWARDS_SAMPLING_TICK_INTERVAL: Duration = Duration::from_secs(1);
 const FORWARDS_BG_ACTIVE_THEME_ALPHA: u32 = 0x66; // Tauri [data-bg-active] theme bg/panel/card 40%
 const FORWARDS_BG_ACTIVE_HOVER_ALPHA: u32 = 0x80; // Tauri [data-bg-active] bg-hover 50%
 const FORWARDS_BG_ACTIVE_SUNKEN_ALPHA: u32 = 0x59; // Tauri [data-bg-active] bg-sunken 35%
@@ -92,6 +115,14 @@ const TW_RED_950: u32 = 0x450a0a;
 const TW_YELLOW_400: u32 = 0xfacc15;
 const TW_YELLOW_900: u32 = 0x713f12;
 
+fn forwarding_tab_mount_is_visible(
+    tab_id: TabId,
+    active_tab_id: Option<TabId>,
+    has_detached_window: bool,
+) -> bool {
+    active_tab_id == Some(tab_id) || has_detached_window
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub(super) enum ForwardInput {
     CreateBindAddress,
@@ -119,7 +150,7 @@ impl ForwardInput {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub(super) struct ForwardsViewState {
     show_new_form: bool,
     new_form_presence: oxideterm_gpui_ui::motion::ExitPresence,
@@ -193,6 +224,20 @@ impl Default for ForwardsViewState {
     }
 }
 
+#[cfg(test)]
+mod visibility_tests {
+    use super::*;
+
+    #[test]
+    fn forwarding_tab_visibility_covers_main_detached_and_hidden_mounts() {
+        let tab_id = TabId(9);
+
+        assert!(forwarding_tab_mount_is_visible(tab_id, Some(tab_id), false));
+        assert!(forwarding_tab_mount_is_visible(tab_id, None, true));
+        assert!(!forwarding_tab_mount_is_visible(tab_id, None, false));
+    }
+}
+
 pub(super) enum ForwardingWorkerResult {
     Operation {
         tab_id: TabId,
@@ -209,5 +254,14 @@ pub(super) enum ForwardingWorkerResult {
         connection_id: Option<String>,
         binding: Option<(String, String, ConnectionConsumer)>,
         result: Result<PortDetectionSnapshot, String>,
+    },
+    ReconnectRestore {
+        node_id: NodeId,
+        result: PhaseResult,
+        restored: u32,
+        detail: String,
+        job_id: String,
+        created_forwards: Vec<(String, String)>,
+        bindings: Vec<(String, String, ConnectionConsumer)>,
     },
 }

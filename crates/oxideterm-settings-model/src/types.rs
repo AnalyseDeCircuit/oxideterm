@@ -11,6 +11,20 @@ const PLUGIN_MANAGER_INPUT_ANCHOR_BASE: u64 = 28_000;
 const PLUGIN_SETTING_INPUT_ANCHOR_BASE: u64 = 29_000;
 const DEFAULT_SETTINGS_TEXTAREA_LINE_HEIGHT: f32 = 20.0;
 
+/// Describes the installed CLI companion relative to the bundled executable.
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+pub struct CliCompanionStatus {
+    pub bundled: bool,
+    pub installed: bool,
+    pub install_path: Option<String>,
+    pub legacy_installed: bool,
+    pub legacy_install_path: Option<String>,
+    pub bundle_path: Option<String>,
+    pub app_version: String,
+    pub matches_bundled: Option<bool>,
+    pub needs_reinstall: bool,
+}
+
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum SettingsTab {
     General,

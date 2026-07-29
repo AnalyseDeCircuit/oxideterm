@@ -23,7 +23,7 @@ use oxideterm_terminal::{
 
 use super::{
     ModemProgressState, TerminalCommandNavigationDirection, TerminalContextAction,
-    TerminalContextMenu, TerminalPane, command_mark_ui_available,
+    TerminalContextMenu, TerminalPane, TerminalPaneEvent, command_mark_ui_available,
 };
 use crate::terminal_ui::*;
 use crate::terminal_view::*;
@@ -1388,6 +1388,7 @@ impl TerminalPane {
         // Workspace owns AI and command-bar behavior; the terminal only records
         // the user's menu intent and lets the active-pane owner consume it.
         self.context_action_requested = Some(action);
+        cx.emit(TerminalPaneEvent::ContextActionRequested);
         cx.notify();
     }
 

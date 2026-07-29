@@ -13,7 +13,7 @@ pub(crate) fn install_for_window(
     _window: &mut gpui::Window,
     _cx: &gpui::App,
     _menu: crate::DesktopPresenceMenu,
-    _tx: std::sync::mpsc::Sender<crate::DesktopPresenceEvent>,
+    _tx: crate::DesktopPresenceDeliverySender,
 ) -> anyhow::Result<()> {
     Ok(())
 }

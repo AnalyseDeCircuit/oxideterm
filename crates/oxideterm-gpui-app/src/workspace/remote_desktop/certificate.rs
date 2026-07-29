@@ -19,41 +19,42 @@ pub(super) struct RemoteDesktopCertificateChallengeState {
     pub(super) remember: bool,
 }
 
-impl WorkspaceApp {
-    pub(super) fn handle_remote_desktop_certificate(
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum RemoteDesktopCertificateAcceptance {
+    Ignored,
+    Accepted,
+    StoreFailed,
+}
+
+impl RemoteDesktopSessionEntity {
+    pub(super) fn handle_certificate(
         &mut self,
-        tab_id: TabId,
         generation: u64,
         certificate: RemoteDesktopServerCertificate,
         cx: &mut Context<Self>,
     ) {
-        if !self.remote_desktop_worker_generation_matches(tab_id, generation) {
+        if self.worker_generation != generation {
             return;
         }
-        let store_path =
-            RemoteDesktopCertificateStore::path_next_to_settings(self.settings_store.path());
-        let persisted_fingerprint = RemoteDesktopCertificateStore::load(store_path)
-            .ok()
-            .and_then(|store| {
-                store
-                    .fingerprint(certificate.protocol, &certificate.endpoint)
-                    .map(str::to_owned)
-            });
-        let Some(session) = self.remote_desktop_sessions.get_mut(&tab_id) else {
-            return;
-        };
-        if certificate.endpoint != session.profile.endpoint
-            || certificate.protocol != session.profile.protocol
+        let persisted_fingerprint =
+            RemoteDesktopCertificateStore::load(self.certificate_store_path.clone())
+                .ok()
+                .and_then(|store| {
+                    store
+                        .fingerprint(certificate.protocol, &certificate.endpoint)
+                        .map(str::to_owned)
+                });
+        if certificate.endpoint != self.profile.endpoint
+            || certificate.protocol != self.profile.protocol
         {
-            // Never release credentials for a certificate challenge bound to a
-            // different endpoint than the session the user opened.
-            if let Some(sender) = session.request_tx.as_ref() {
-                let _ = sender.send(RemoteDesktopHelperRequest::Close);
+            // Credentials may only cross an identity challenge bound to this session.
+            if let Some(worker) = self.worker.as_ref() {
+                worker.send(RemoteDesktopHelperRequest::Close);
             }
             return;
         }
         if certificate.identity_kind != RemoteDesktopServerIdentityKind::X509Certificate {
-            let policy = session.profile.session_options.vnc.security_policy;
+            let policy = self.profile.session_options.vnc.security_policy;
             let explicitly_allowed = match certificate.identity_kind {
                 RemoteDesktopServerIdentityKind::AnonymousTls => {
                     policy != RemoteDesktopVncSecurityPolicy::RequireVerifiedEncryption
@@ -64,30 +65,28 @@ impl WorkspaceApp {
                 RemoteDesktopServerIdentityKind::X509Certificate => true,
             };
             if explicitly_allowed {
-                // Weak transport modes still require an explicit per-session
-                // acknowledgement before the helper can receive credentials.
-                session.certificate_challenge = Some(RemoteDesktopCertificateChallengeState {
+                // Weak transport modes still require a per-session acknowledgement.
+                self.certificate_challenge = Some(RemoteDesktopCertificateChallengeState {
                     certificate,
                     expected_fingerprint: None,
                     remember: false,
                 });
                 cx.notify();
-            } else if let Some(sender) = session.request_tx.as_ref() {
-                let _ = sender.send(RemoteDesktopHelperRequest::Close);
+            } else if let Some(worker) = self.worker.as_ref() {
+                worker.send(RemoteDesktopHelperRequest::Close);
             }
             return;
         }
-        let trusted_for_session = session.session_trusted_certificate_fingerprint.as_deref()
+        let trusted_for_session = self.session_trusted_certificate_fingerprint.as_deref()
             == Some(certificate.sha256_fingerprint.as_str());
         let trusted_permanently =
             persisted_fingerprint.as_deref() == Some(certificate.sha256_fingerprint.as_str());
-
         if trusted_for_session || trusted_permanently {
-            send_remote_desktop_authentication(session, &certificate);
+            send_remote_desktop_authentication(self, &certificate);
             return;
         }
 
-        session.certificate_challenge = Some(RemoteDesktopCertificateChallengeState {
+        self.certificate_challenge = Some(RemoteDesktopCertificateChallengeState {
             certificate,
             expected_fingerprint: persisted_fingerprint,
             remember: false,
@@ -95,17 +94,8 @@ impl WorkspaceApp {
         cx.notify();
     }
 
-    pub(super) fn toggle_remote_desktop_certificate_remember(
-        &mut self,
-        tab_id: TabId,
-        challenge_id: &str,
-        cx: &mut Context<Self>,
-    ) {
-        let Some(challenge) = self
-            .remote_desktop_sessions
-            .get_mut(&tab_id)
-            .and_then(|session| session.certificate_challenge.as_mut())
-        else {
+    fn toggle_certificate_remember(&mut self, challenge_id: &str, cx: &mut Context<Self>) {
+        let Some(challenge) = self.certificate_challenge.as_mut() else {
             return;
         };
         if challenge.certificate.challenge_id != challenge_id {
@@ -113,6 +103,85 @@ impl WorkspaceApp {
         }
         challenge.remember = !challenge.remember;
         cx.notify();
+    }
+
+    fn accept_certificate(
+        &mut self,
+        generation: u64,
+        challenge_id: &str,
+        fingerprint: &str,
+        cx: &mut Context<Self>,
+    ) -> RemoteDesktopCertificateAcceptance {
+        if self.worker_generation != generation {
+            return RemoteDesktopCertificateAcceptance::Ignored;
+        }
+        let Some(challenge) = self.certificate_challenge.clone() else {
+            return RemoteDesktopCertificateAcceptance::Ignored;
+        };
+        if challenge.certificate.challenge_id != challenge_id
+            || challenge.certificate.sha256_fingerprint != fingerprint
+        {
+            return RemoteDesktopCertificateAcceptance::Ignored;
+        }
+
+        let persistent_identity =
+            challenge.certificate.identity_kind == RemoteDesktopServerIdentityKind::X509Certificate;
+        if persistent_identity
+            && challenge.remember
+            && RemoteDesktopCertificateStore::load(self.certificate_store_path.clone())
+                .and_then(|mut store| {
+                    store.trust(
+                        challenge.certificate.protocol,
+                        &challenge.certificate.endpoint,
+                        challenge.certificate.sha256_fingerprint.clone(),
+                    )
+                })
+                .is_err()
+        {
+            return RemoteDesktopCertificateAcceptance::StoreFailed;
+        }
+        if persistent_identity && !challenge.remember {
+            self.session_trusted_certificate_fingerprint =
+                Some(challenge.certificate.sha256_fingerprint.clone());
+        }
+        let request = remote_desktop_authenticate_request(self, &challenge.certificate);
+        self.certificate_challenge = None;
+        if let Some(worker) = self.worker.as_ref() {
+            worker.send(request);
+        }
+        cx.notify();
+        RemoteDesktopCertificateAcceptance::Accepted
+    }
+
+    fn reject_certificate(&mut self, generation: u64, challenge_id: &str, cx: &mut Context<Self>) {
+        if self.worker_generation != generation
+            || self
+                .certificate_challenge
+                .as_ref()
+                .is_none_or(|challenge| challenge.certificate.challenge_id != challenge_id)
+        {
+            return;
+        }
+        self.certificate_challenge = None;
+        if let Some(worker) = self.worker.as_ref() {
+            worker.send(RemoteDesktopHelperRequest::Close);
+        }
+        cx.notify();
+    }
+}
+
+impl WorkspaceApp {
+    pub(super) fn toggle_remote_desktop_certificate_remember(
+        &mut self,
+        tab_id: TabId,
+        challenge_id: &str,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(session) = self.remote_desktop_session_entity(tab_id, cx) {
+            session.update(cx, |session, cx| {
+                session.toggle_certificate_remember(challenge_id, cx);
+            });
+        }
     }
 
     pub(super) fn accept_remote_desktop_certificate(
@@ -123,60 +192,19 @@ impl WorkspaceApp {
         fingerprint: &str,
         cx: &mut Context<Self>,
     ) {
-        if !self.remote_desktop_worker_generation_matches(tab_id, generation) {
-            return;
-        }
-        let Some(challenge) = self
-            .remote_desktop_sessions
-            .get(&tab_id)
-            .and_then(|session| session.certificate_challenge.clone())
-        else {
-            return;
-        };
-        if challenge.certificate.challenge_id != challenge_id
-            || challenge.certificate.sha256_fingerprint != fingerprint
-        {
-            return;
-        }
-
-        let persistent_identity =
-            challenge.certificate.identity_kind == RemoteDesktopServerIdentityKind::X509Certificate;
-        if persistent_identity && challenge.remember {
-            let store_path =
-                RemoteDesktopCertificateStore::path_next_to_settings(self.settings_store.path());
-            let persist_result =
-                RemoteDesktopCertificateStore::load(store_path).and_then(|mut store| {
-                    store.trust(
-                        challenge.certificate.protocol,
-                        &challenge.certificate.endpoint,
-                        challenge.certificate.sha256_fingerprint.clone(),
-                    )
-                });
-            if let Err(error) = persist_result {
+        if let Some(session) = self.remote_desktop_session_entity(tab_id, cx) {
+            let acceptance = session.update(cx, |session, cx| {
+                session.accept_certificate(generation, challenge_id, fingerprint, cx)
+            });
+            if acceptance == RemoteDesktopCertificateAcceptance::StoreFailed {
                 self.push_command_palette_toast(
-                    self.i18n
-                        .t("remote_desktop.certificate_save_failed")
-                        .replace("{{error}}", &error.to_string()),
+                    self.i18n.t("remote_desktop.certificate_save_failed"),
                     None,
                     TerminalNoticeVariant::Error,
+                    cx,
                 );
-                return;
             }
         }
-
-        let Some(session) = self.remote_desktop_sessions.get_mut(&tab_id) else {
-            return;
-        };
-        if persistent_identity && !challenge.remember {
-            session.session_trusted_certificate_fingerprint =
-                Some(challenge.certificate.sha256_fingerprint.clone());
-        }
-        let request = remote_desktop_authenticate_request(session, &challenge.certificate);
-        session.certificate_challenge = None;
-        if let Some(sender) = session.request_tx.as_ref() {
-            let _ = sender.send(request);
-        }
-        cx.notify();
     }
 
     pub(super) fn reject_remote_desktop_certificate(
@@ -186,24 +214,11 @@ impl WorkspaceApp {
         challenge_id: &str,
         cx: &mut Context<Self>,
     ) {
-        if !self.remote_desktop_worker_generation_matches(tab_id, generation) {
-            return;
+        if let Some(session) = self.remote_desktop_session_entity(tab_id, cx) {
+            session.update(cx, |session, cx| {
+                session.reject_certificate(generation, challenge_id, cx);
+            });
         }
-        let Some(session) = self.remote_desktop_sessions.get_mut(&tab_id) else {
-            return;
-        };
-        if session
-            .certificate_challenge
-            .as_ref()
-            .is_none_or(|challenge| challenge.certificate.challenge_id != challenge_id)
-        {
-            return;
-        }
-        session.certificate_challenge = None;
-        if let Some(sender) = session.request_tx.as_ref() {
-            let _ = sender.send(RemoteDesktopHelperRequest::Close);
-        }
-        cx.notify();
     }
 
     pub(super) fn render_remote_desktop_certificate_dialog(
@@ -420,16 +435,21 @@ impl WorkspaceApp {
 }
 
 fn remote_desktop_authenticate_request(
-    session: &RemoteDesktopSession,
+    session: &mut RemoteDesktopSessionEntity,
     certificate: &RemoteDesktopServerCertificate,
 ) -> RemoteDesktopHelperRequest {
     let password = if matches!(
         certificate.security_method.as_str(),
         "none" | "tls-none" | "x509-none"
     ) {
+        // A password supplied for a no-authentication server must not remain
+        // resident for the rest of the session.
+        drop(session.password.take());
         None
     } else {
-        session.password.clone()
+        // Authentication is the single ownership handoff. Reconnect must load
+        // a new credential or ask the user instead of cloning this secret.
+        session.password.take()
     };
     RemoteDesktopHelperRequest::Authenticate {
         challenge_id: certificate.challenge_id.clone(),
@@ -441,10 +461,14 @@ fn remote_desktop_authenticate_request(
 }
 
 fn send_remote_desktop_authentication(
-    session: &RemoteDesktopSession,
+    session: &mut RemoteDesktopSessionEntity,
     certificate: &RemoteDesktopServerCertificate,
 ) {
-    let Some(sender) = session.request_tx.as_ref() else {
+    let Some(sender) = session
+        .worker
+        .as_ref()
+        .and_then(RemoteDesktopWorkerOwner::request_sender_cloned)
+    else {
         return;
     };
     // The helper validates which optional credentials the negotiated security

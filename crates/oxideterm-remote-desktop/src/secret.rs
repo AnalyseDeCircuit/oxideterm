@@ -6,7 +6,7 @@ use std::fmt;
 use serde::{Deserialize, Serialize};
 use zeroize::Zeroizing;
 
-#[derive(Clone, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Default, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct RemoteDesktopSecret(Zeroizing<String>);
 
@@ -17,10 +17,6 @@ impl RemoteDesktopSecret {
 
     pub fn expose_secret(&self) -> &str {
         self.0.as_str()
-    }
-
-    pub fn into_zeroizing(self) -> Zeroizing<String> {
-        self.0
     }
 
     pub fn is_empty(&self) -> bool {
@@ -64,5 +60,14 @@ mod tests {
 
         assert!(debug.contains("redacted"));
         assert!(!debug.contains("rdp-password"));
+    }
+
+    #[test]
+    fn zeroizing_secret_handoff_reuses_the_original_buffer() {
+        let source = Zeroizing::new("rdp-password".to_string());
+        let source_buffer = source.as_ptr();
+        let secret = RemoteDesktopSecret::from(source);
+
+        assert_eq!(source_buffer, secret.0.as_ptr());
     }
 }

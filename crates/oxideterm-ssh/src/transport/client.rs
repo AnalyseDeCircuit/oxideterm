@@ -1,4 +1,20 @@
 const AGENT_FORWARDING_RESPONSE_TIMEOUT: Duration = Duration::from_secs(5);
+const CHILD_CONNECTION_RETIRED_DURING_CONNECT: &str =
+    "child connection was retired while its SSH transport was connecting";
+
+enum ShellRequestConfig {
+    Owned(SshConfig),
+    Registry(SshConnectionHandle),
+}
+
+impl ShellRequestConfig {
+    fn config(&self) -> &SshConfig {
+        match self {
+            Self::Owned(config) => config,
+            Self::Registry(connection) => connection.config(),
+        }
+    }
+}
 
 fn validate_agent_forwarding_response(
     response: Option<ChannelMsg>,
@@ -16,6 +32,38 @@ fn validate_agent_forwarding_response(
             "SSH channel closed while enabling agent forwarding".to_string(),
         )),
     }
+}
+
+fn commit_child_registry_ownership(
+    registry: &SshConnectionRegistry,
+    connection_id: &str,
+    parent_connection_id: &str,
+    parent_consumer: &ConnectionConsumer,
+    child_release_guard: &mut RegistryConsumerGuard,
+    parent_release_guard: &mut RegistryConsumerGuard,
+) -> Result<(), SshTransportError> {
+    let child_still_registered = registry
+        .set_parent_connection_ownership(
+            connection_id,
+            parent_connection_id.to_string(),
+            parent_consumer.clone(),
+        )
+        .is_some()
+        && registry
+            .mark_state(connection_id, ConnectionState::Active)
+            .is_some();
+    if !child_still_registered {
+        // A retired child cannot own the ancestor consumer acquired for its tunnel.
+        parent_release_guard.release_now();
+        child_release_guard.release_now();
+        return Err(SshTransportError::ConnectionFailed(
+            CHILD_CONNECTION_RETIRED_DURING_CONNECT.to_string(),
+        ));
+    }
+
+    child_release_guard.disarm();
+    parent_release_guard.disarm();
+    Ok(())
 }
 
 async fn request_agent_forwarding_for_shell(
@@ -191,13 +239,14 @@ impl SshTransportClient {
             }
         };
 
-        let result = self
-            .open_shell_from_pooled(
-                pooled,
-                release_guard.release_tuple(),
-                Some(connection.clone()),
-            )
-            .await;
+        let result = Self::open_shell_from_pooled(
+            ShellRequestConfig::Registry(connection.clone()),
+            pooled,
+            None,
+            release_guard.release_tuple(),
+            Some(connection.clone()),
+        )
+        .await;
 
         match &result {
             Ok(_) => {
@@ -213,6 +262,68 @@ impl SshTransportClient {
                 // A PTY, shell, or forwarding request failure belongs to this
                 // terminal consumer. Preserve the node-owned physical transport
                 // and let release select Active or Idle from remaining owners.
+                release_guard.release_now();
+            }
+        }
+
+        result
+    }
+
+    pub async fn connect_shell_on_existing_connection(
+        registry: SshConnectionRegistry,
+        connection_id: String,
+        consumer: ConnectionConsumer,
+        cols: u32,
+        rows: u32,
+    ) -> Result<SshPtyHandle, SshTransportError> {
+        let Some(connection) =
+            registry.acquire_consumer_for_connection(&connection_id, consumer.clone())
+        else {
+            return Err(SshTransportError::ConnectionFailed(
+                "node SSH connection is unavailable".to_string(),
+            ));
+        };
+        let mut release_guard =
+            RegistryConsumerGuard::new(registry.clone(), connection_id.clone(), consumer);
+        let Some(pooled) = connection.physical::<PooledSshConnection>() else {
+            release_guard.release_now();
+            return Err(SshTransportError::ConnectionFailed(
+                "node SSH transport is unavailable".to_string(),
+            ));
+        };
+        if pooled.is_closed().await {
+            let _ = registry
+                .mark_transport_lost_cascade(&connection_id, "terminal found closed transport")
+                .await;
+            release_guard.release_now();
+            return Err(SshTransportError::ConnectionFailed(
+                "node SSH transport is closed".to_string(),
+            ));
+        }
+
+        // Opening a terminal on an existing node must never reacquire or copy
+        // authentication material. The registry-owned transport and config
+        // remain authoritative; this consumer only adds one shell channel.
+        let result = Self::open_shell_from_pooled(
+            ShellRequestConfig::Registry(connection.clone()),
+            pooled,
+            Some((cols, rows)),
+            release_guard.release_tuple(),
+            Some(connection),
+        )
+        .await;
+
+        match &result {
+            Ok(_) => {
+                let _ = registry.mark_state(&connection_id, ConnectionState::Active);
+                release_guard.disarm();
+            }
+            Err(error) => {
+                if ssh_channel_error_is_transport_lost(&error.to_string()) {
+                    let _ = registry
+                        .mark_transport_lost_cascade(&connection_id, "channel open failed")
+                        .await;
+                }
                 release_guard.release_now();
             }
         }
@@ -362,13 +473,18 @@ impl SshTransportClient {
         match pooled {
             Ok(pooled) => {
                 connection.set_physical(pooled);
-                let _ = registry.set_parent_connection_id(
+                if let Err(error) = commit_child_registry_ownership(
+                    &registry,
                     &connection_id,
-                    Some(parent_connection_id),
-                );
-                let _ = registry.mark_state(&connection_id, ConnectionState::Active);
-                child_release_guard.disarm();
-                parent_release_guard.disarm();
+                    &parent_connection_id,
+                    &parent_consumer,
+                    &mut child_release_guard,
+                    &mut parent_release_guard,
+                ) {
+                    // The unregistered authenticated transport has no remaining owner.
+                    connection.clear_physical().await;
+                    return Err(error);
+                }
                 Ok(connection)
             }
             Err(error) => {
@@ -386,8 +502,14 @@ impl SshTransportClient {
         registry_release: Option<(SshConnectionRegistry, String, ConnectionConsumer)>,
     ) -> Result<SshPtyHandle, SshTransportError> {
         let pooled = self.connect_authenticated_connection().await?;
-        self.open_shell_from_pooled(pooled, registry_release, None)
-            .await
+        Self::open_shell_from_pooled(
+            ShellRequestConfig::Owned(self.config),
+            pooled,
+            None,
+            registry_release,
+            None,
+        )
+        .await
     }
 
     async fn connect_authenticated_connection(
@@ -768,8 +890,9 @@ impl SshTransportClient {
     }
 
     async fn open_shell_from_pooled(
-        self,
+        request_config: ShellRequestConfig,
         pooled: Arc<PooledSshConnection>,
+        dimensions: Option<(u32, u32)>,
         registry_release: Option<(SshConnectionRegistry, String, ConnectionConsumer)>,
         ssh_connection: Option<SshConnectionHandle>,
     ) -> Result<SshPtyHandle, SshTransportError> {
@@ -781,11 +904,11 @@ impl SshTransportClient {
         // so a slow or hidden pane cannot accumulate tens of MiB per session.
         let (output_tx, output_rx) = ssh_output_channel();
         let task_session_id = session_id.clone();
-        let agent_forwarding = self.config.agent_forwarding;
-        let x11_forwarding = self.config.x11_forwarding.clone();
-        let deferred_pty = self.config.cols == 0 || self.config.rows == 0;
-        let initial_cols = self.config.cols.clamp(1, 500);
-        let initial_rows = self.config.rows.clamp(1, 200);
+        let shell_config = request_config.config();
+        let (cols, rows) = dimensions.unwrap_or((shell_config.cols, shell_config.rows));
+        let deferred_pty = cols == 0 || rows == 0;
+        let initial_cols = cols.clamp(1, 500);
+        let initial_rows = rows.clamp(1, 200);
         let transport_lost_registry = registry_release
             .as_ref()
             .map(|(registry, _, _)| registry.clone());
@@ -808,12 +931,13 @@ impl SshTransportClient {
                     &pooled,
                     initial_cols,
                     initial_rows,
-                    agent_forwarding,
-                    x11_forwarding.as_ref(),
+                    shell_config.agent_forwarding,
+                    shell_config.x11_forwarding.as_ref(),
                 )
                 .await?,
             )
         };
+        let mut deferred_request_config = deferred_pty.then_some(request_config);
 
         tokio::spawn(async move {
             let mut output_batcher = SshOutputBatcher::new();
@@ -866,15 +990,24 @@ impl SshTransportClient {
                         (120, 40)
                     }
                 };
-                match open_plain_shell(
-                    &pooled,
-                    pty_cols,
-                    pty_rows,
-                    agent_forwarding,
-                    x11_forwarding.as_ref(),
-                )
-                .await
-                {
+                let request_config = deferred_request_config
+                    .take()
+                    .expect("deferred SSH shell config must remain owned until channel open");
+                let open_result = {
+                    let shell_config = request_config.config();
+                    open_plain_shell(
+                        &pooled,
+                        pty_cols,
+                        pty_rows,
+                        shell_config.agent_forwarding,
+                        shell_config.x11_forwarding.as_ref(),
+                    )
+                    .await
+                };
+                // New direct sessions may own authentication material here.
+                // Drop it immediately after the deferred channel is opened.
+                drop(request_config);
+                match open_result {
                     Ok(channel) => channel,
                     Err(error) => {
                         if ssh_channel_error_is_transport_lost(&error.to_string()) {
@@ -1006,5 +1139,117 @@ mod agent_forwarding_tests {
                 .to_string()
                 .contains("server rejected agent forwarding")
         );
+    }
+
+    #[test]
+    fn retired_child_releases_parent_ancestor_consumer_before_success_handoff() {
+        let registry = SshConnectionRegistry::new(Default::default());
+        let parent_consumer = ConnectionConsumer::NodeRouter("parent".to_string());
+        let parent = registry.acquire(
+            SshConfig {
+                host: "parent.example.test".to_string(),
+                ..SshConfig::default()
+            },
+            parent_consumer.clone(),
+        );
+        let child_consumer = ConnectionConsumer::NodeRouter("child".to_string());
+        let child = registry.acquire(
+            SshConfig {
+                host: "child.example.test".to_string(),
+                ..SshConfig::default()
+            },
+            child_consumer.clone(),
+        );
+        let parent_connection_id = parent.connection_id().to_string();
+        let child_connection_id = child.connection_id().to_string();
+        let ancestor_consumer = ConnectionConsumer::NodeRouter("child:ancestor".to_string());
+        registry
+            .acquire_consumer_for_connection(&parent_connection_id, ancestor_consumer.clone())
+            .expect("parent ancestor consumer");
+        let mut child_guard = RegistryConsumerGuard::new(
+            registry.clone(),
+            child_connection_id.clone(),
+            child_consumer,
+        );
+        let mut parent_guard = RegistryConsumerGuard::new(
+            registry.clone(),
+            parent_connection_id.clone(),
+            ancestor_consumer.clone(),
+        );
+        registry
+            .retire_connection(&child_connection_id)
+            .expect("retired child connection");
+
+        let result = commit_child_registry_ownership(
+            &registry,
+            &child_connection_id,
+            &parent_connection_id,
+            &ancestor_consumer,
+            &mut child_guard,
+            &mut parent_guard,
+        );
+
+        assert!(result.is_err());
+        let parent_info = registry
+            .get(&parent_connection_id)
+            .expect("parent remains registered")
+            .info();
+        assert!(parent_info.consumers.contains(&parent_consumer));
+        assert!(!parent_info.consumers.contains(&ancestor_consumer));
+    }
+
+    #[test]
+    fn retired_child_releases_parent_ancestor_consumer_after_success_handoff() {
+        let registry = SshConnectionRegistry::new(Default::default());
+        let parent = registry.acquire(
+            SshConfig {
+                host: "parent.example.test".to_string(),
+                ..SshConfig::default()
+            },
+            ConnectionConsumer::NodeRouter("parent".to_string()),
+        );
+        let child_consumer = ConnectionConsumer::NodeRouter("child".to_string());
+        let child = registry.acquire(
+            SshConfig {
+                host: "child.example.test".to_string(),
+                ..SshConfig::default()
+            },
+            child_consumer.clone(),
+        );
+        let parent_connection_id = parent.connection_id().to_string();
+        let child_connection_id = child.connection_id().to_string();
+        let ancestor_consumer = ConnectionConsumer::NodeRouter("child:ancestor".to_string());
+        registry
+            .acquire_consumer_for_connection(&parent_connection_id, ancestor_consumer.clone())
+            .expect("parent ancestor consumer");
+        let mut child_guard = RegistryConsumerGuard::new(
+            registry.clone(),
+            child_connection_id.clone(),
+            child_consumer,
+        );
+        let mut parent_guard = RegistryConsumerGuard::new(
+            registry.clone(),
+            parent_connection_id.clone(),
+            ancestor_consumer.clone(),
+        );
+
+        commit_child_registry_ownership(
+            &registry,
+            &child_connection_id,
+            &parent_connection_id,
+            &ancestor_consumer,
+            &mut child_guard,
+            &mut parent_guard,
+        )
+        .expect("child ownership handoff");
+        registry
+            .retire_connection(&child_connection_id)
+            .expect("retired child connection");
+
+        let parent_info = registry
+            .get(&parent_connection_id)
+            .expect("parent remains registered")
+            .info();
+        assert!(!parent_info.consumers.contains(&ancestor_consumer));
     }
 }

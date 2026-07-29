@@ -3,12 +3,69 @@ use super::*;
 use gpui::{PathBuilder, canvas, point};
 use oxideterm_topology::TopologyViewStatus;
 
+use crate::workspace::selectable_text::{SelectableTextRenderState, selectable_document_group_id};
+
+pub(super) fn host_tools_tooltip_icon_button(
+    tokens: &ThemeTokens,
+    icon: LucideIcon,
+    icon_size: f32,
+    icon_color: Rgba,
+    options: oxideterm_gpui_ui::button::IconButtonOptions,
+    tooltip: String,
+    element_id_prefix: &'static str,
+    flex_none: bool,
+    listener: impl Fn(&MouseDownEvent, &mut Window, &mut App) + 'static,
+) -> AnyElement {
+    let actionable = !(options.disabled || options.loading);
+    let tooltip_label = tooltip.clone();
+    let tooltip_tokens = *tokens;
+
+    // Host Tools owns these controls, so their tooltip and click lifecycle must
+    // not depend on the workspace entity or its global overlay state.
+    oxideterm_gpui_ui::button::icon_button(
+        tokens,
+        svg()
+            .path(icon.path())
+            .size(px(icon_size))
+            .text_color(icon_color)
+            .into_any_element(),
+        options,
+    )
+    .id((gpui::ElementId::from(element_id_prefix), tooltip))
+    .tooltip(move |_window, cx| {
+        oxideterm_gpui_ui::tooltip::tooltip_view(tooltip_tokens, tooltip_label.clone(), None, cx)
+    })
+    .when(actionable, |button| {
+        button.on_mouse_down(MouseButton::Left, listener)
+    })
+    .when(!actionable, |button| {
+        // Disabled and loading buttons still consume the click so parent rows
+        // cannot treat an unavailable action as a selection request.
+        button.on_mouse_down(MouseButton::Left, |_event, _window, cx| {
+            cx.stop_propagation();
+        })
+    })
+    .when(flex_none, |button| button.flex_none())
+    .into_any_element()
+}
+
 pub(super) fn monitor_center_state(
     app: &WorkspaceApp,
     icon: LucideIcon,
     color: u32,
     label: String,
     cx: &mut Context<WorkspaceApp>,
+) -> AnyElement {
+    let selectable_text = app.selectable_text_render_state(cx);
+    host_tools_center_state(icon, color, label, &selectable_text, cx)
+}
+
+pub(super) fn host_tools_center_state(
+    icon: LucideIcon,
+    color: u32,
+    label: String,
+    selectable_text: &SelectableTextRenderState,
+    cx: &mut App,
 ) -> AnyElement {
     let label_key = label.clone();
     div()
@@ -24,18 +81,18 @@ pub(super) fn monitor_center_state(
                 .mb_2()
                 .child(WorkspaceApp::render_lucide_icon(icon, 20.0, rgb(color))),
         )
-        .child(
-            div()
-                .text_size(px(14.0))
-                .child(app.render_display_text_with_role(
-                    SelectableTextRole::PlainDocument,
-                    "monitor-center-state",
-                    label_key,
-                    label,
-                    color,
-                    cx,
-                )),
-        )
+        .child(div().text_size(px(14.0)).child(
+            selectable_text.render_display_text_with_role_in_group(
+                SelectableTextRole::PlainDocument,
+                selectable_document_group_id(),
+                "monitor-center-state",
+                label_key,
+                0,
+                label,
+                color,
+                cx,
+            ),
+        ))
         .into_any_element()
 }
 

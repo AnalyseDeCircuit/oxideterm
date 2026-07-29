@@ -21,6 +21,7 @@ impl WorkspaceApp {
                     self.i18n.t("remote_desktop.provider_missing"),
                     None,
                     TerminalNoticeVariant::Error,
+                    cx,
                 );
                 return;
             }
@@ -47,6 +48,7 @@ impl WorkspaceApp {
                     self.i18n.t("remote_desktop.provider_missing"),
                     None,
                     TerminalNoticeVariant::Error,
+                    cx,
                 );
                 return;
             }
@@ -65,37 +67,82 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let tab_id = self.alloc_tab_id();
+        let tab_id = self.alloc_tab_id(cx);
         let frame_slot = RemoteDesktopFrameDeliverySlot::new();
-        let session = RemoteDesktopSession::new(profile, provider, password, frame_slot);
-
-        if let Some(previous_tab_id) = self.main_window_tabs.active_tab_id {
-            self.release_remote_desktop_inputs_for_tab(previous_tab_id);
-        }
-        self.remote_desktop_sessions.insert(tab_id, session);
-        self.tabs.push(Tab {
-            id: tab_id,
-            kind: TabKind::RemoteDesktop,
-            title,
-            title_source: TabTitleSource::Static,
-            root_pane: None,
-            active_pane_id: None,
+        let certificate_store_path =
+            oxideterm_remote_desktop::RemoteDesktopCertificateStore::path_next_to_settings(
+                self.settings_store.path(),
+            );
+        let session = cx.new(|cx| {
+            let session = RemoteDesktopSessionEntity::new(
+                tab_id,
+                profile,
+                provider,
+                password,
+                certificate_store_path,
+                frame_slot,
+                window.window_handle(),
+            );
+            session.install_release_handler(cx);
+            session
         });
-        self.main_window_tabs.active_tab_id = Some(tab_id);
+        let session_subscription = cx.subscribe(
+            &session,
+            move |workspace, session, event: &RemoteDesktopSessionEvent, cx| {
+                workspace.handle_remote_desktop_session_event(tab_id, &session, event, cx);
+            },
+        );
+        let session_observation = cx.observe(&session, |_workspace, _session, cx| {
+            // Session-owned state changes repaint every mounted workspace view,
+            // including a detached window, without copying state back to root.
+            cx.notify();
+        });
+
+        if let Some(previous_tab_id) = self.active_tab_id(cx) {
+            self.release_remote_desktop_inputs_for_tab(previous_tab_id, cx);
+        }
+        self.remote_desktop.update(cx, |remote_desktop, _cx| {
+            remote_desktop.insert(
+                tab_id,
+                session,
+                vec![session_subscription, session_observation],
+            );
+        });
+        self.insert_tab(
+            Tab {
+                id: tab_id,
+                kind: TabKind::RemoteDesktop,
+                title,
+                title_source: TabTitleSource::Static,
+                root_pane: None,
+                active_pane_id: None,
+            },
+            cx,
+        );
+        self.set_main_window_active_tab(Some(tab_id), cx);
         self.active_surface = ActiveSurface::Terminal;
         self.needs_active_pane_focus = false;
         self.focus_remote_desktop_keyboard(window, cx);
-        self.reveal_active_tab(window);
-        self.schedule_remote_desktop_initial_layout_probe(tab_id, cx);
+        self.reveal_active_tab(window, cx);
+        if let Some(session) = self.remote_desktop_session_entity(tab_id, cx) {
+            let initial_scale_factor = remote_desktop_scale_factor_percent(window.scale_factor());
+            session.update(cx, |session, cx| {
+                session.schedule_initial_layout_probe(initial_scale_factor, cx);
+            });
+        }
         cx.notify();
     }
 
     pub(in crate::workspace) fn render_remote_desktop_surface(
         &mut self,
         tab_id: TabId,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let Some(session) = self.remote_desktop_sessions.get(&tab_id) else {
+        // Rendering is the authoritative mount boundary for both the main
+        // workspace and detached windows.
+        self.bind_remote_desktop_window(tab_id, window.window_handle(), cx);
+        let Some(session_entity) = self.remote_desktop.read(cx).session(tab_id) else {
             return div()
                 .size_full()
                 .flex()
@@ -106,6 +153,7 @@ impl WorkspaceApp {
                 .into_any_element();
         };
 
+        let session = session_entity.read(cx);
         let geometry = session.geometry.clone();
         let certificate_challenge = session.certificate_challenge.clone();
         let worker_generation = session.worker_generation;
@@ -126,6 +174,7 @@ impl WorkspaceApp {
                         event.position,
                         event.button,
                         RemoteDesktopMouseButtonState::Pressed,
+                        cx,
                     ) {
                         cx.notify();
                     }
@@ -141,6 +190,7 @@ impl WorkspaceApp {
                         event.position,
                         event.button,
                         RemoteDesktopMouseButtonState::Pressed,
+                        cx,
                     ) {
                         cx.notify();
                     }
@@ -156,6 +206,7 @@ impl WorkspaceApp {
                         event.position,
                         event.button,
                         RemoteDesktopMouseButtonState::Pressed,
+                        cx,
                     ) {
                         cx.notify();
                     }
@@ -171,6 +222,7 @@ impl WorkspaceApp {
                         event.position,
                         event.button,
                         RemoteDesktopMouseButtonState::Pressed,
+                        cx,
                     ) {
                         cx.notify();
                     }
@@ -186,6 +238,7 @@ impl WorkspaceApp {
                         event.position,
                         event.button,
                         RemoteDesktopMouseButtonState::Pressed,
+                        cx,
                     ) {
                         cx.notify();
                     }
@@ -201,6 +254,7 @@ impl WorkspaceApp {
                         event.position,
                         event.button,
                         RemoteDesktopMouseButtonState::Released,
+                        cx,
                     ) {
                         cx.notify();
                     }
@@ -213,6 +267,7 @@ impl WorkspaceApp {
                     if this.handle_remote_desktop_mouse_button_release_out(
                         tab_id,
                         RemoteDesktopMouseButton::Left,
+                        cx,
                     ) {
                         cx.notify();
                     }
@@ -226,6 +281,7 @@ impl WorkspaceApp {
                         event.position,
                         event.button,
                         RemoteDesktopMouseButtonState::Released,
+                        cx,
                     ) {
                         cx.notify();
                     }
@@ -238,6 +294,7 @@ impl WorkspaceApp {
                     if this.handle_remote_desktop_mouse_button_release_out(
                         tab_id,
                         RemoteDesktopMouseButton::Right,
+                        cx,
                     ) {
                         cx.notify();
                     }
@@ -251,6 +308,7 @@ impl WorkspaceApp {
                         event.position,
                         event.button,
                         RemoteDesktopMouseButtonState::Released,
+                        cx,
                     ) {
                         cx.notify();
                     }
@@ -263,6 +321,7 @@ impl WorkspaceApp {
                     if this.handle_remote_desktop_mouse_button_release_out(
                         tab_id,
                         RemoteDesktopMouseButton::Middle,
+                        cx,
                     ) {
                         cx.notify();
                     }
@@ -276,6 +335,7 @@ impl WorkspaceApp {
                         event.position,
                         event.button,
                         RemoteDesktopMouseButtonState::Released,
+                        cx,
                     ) {
                         cx.notify();
                     }
@@ -288,6 +348,7 @@ impl WorkspaceApp {
                     if this.handle_remote_desktop_mouse_button_release_out(
                         tab_id,
                         RemoteDesktopMouseButton::Back,
+                        cx,
                     ) {
                         cx.notify();
                     }
@@ -301,6 +362,7 @@ impl WorkspaceApp {
                         event.position,
                         event.button,
                         RemoteDesktopMouseButtonState::Released,
+                        cx,
                     ) {
                         cx.notify();
                     }
@@ -313,6 +375,7 @@ impl WorkspaceApp {
                     if this.handle_remote_desktop_mouse_button_release_out(
                         tab_id,
                         RemoteDesktopMouseButton::Forward,
+                        cx,
                     ) {
                         cx.notify();
                     }
@@ -320,7 +383,7 @@ impl WorkspaceApp {
             )
             .on_mouse_move(
                 cx.listener(move |this, event: &MouseMoveEvent, _window, cx| {
-                    if this.handle_remote_desktop_mouse_move(tab_id, event.position) {
+                    if this.handle_remote_desktop_mouse_move(tab_id, event.position, cx) {
                         cx.notify();
                     }
                     cx.stop_propagation();
@@ -328,7 +391,7 @@ impl WorkspaceApp {
             )
             .on_scroll_wheel(
                 cx.listener(move |this, event: &ScrollWheelEvent, _window, cx| {
-                    if this.handle_remote_desktop_wheel(tab_id, event.position, &event.delta) {
+                    if this.handle_remote_desktop_wheel(tab_id, event.position, &event.delta, cx) {
                         cx.notify();
                     }
                     cx.stop_propagation();

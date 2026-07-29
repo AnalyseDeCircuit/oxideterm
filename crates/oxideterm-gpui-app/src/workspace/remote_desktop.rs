@@ -57,9 +57,15 @@ const REMOTE_DESKTOP_MIN_SCALE_FACTOR_PERCENT: u32 = 100;
 const REMOTE_DESKTOP_MAX_SCALE_FACTOR_PERCENT: u32 = 500;
 const REMOTE_DESKTOP_SCALE_PERCENT_MULTIPLIER: f32 = 100.0;
 const REMOTE_DESKTOP_SCROLL_PIXEL_STEP: f32 = 120.0;
+const REMOTE_DESKTOP_DELIVERY_BUDGET: delivery::DeliveryBudget =
+    delivery::DeliveryBudget::new(64, Duration::from_millis(4));
 const REMOTE_DESKTOP_FRAME_READY_DRAIN_LIMIT: usize = 32;
 const REMOTE_DESKTOP_FRAME_READY_DRAIN_BUDGET: Duration = Duration::from_millis(6);
 const REMOTE_DESKTOP_DIAGNOSTICS_ENV: &str = "OXIDETERM_REMOTE_DESKTOP_DIAGNOSTICS";
+
+fn remote_desktop_tab_visible(main_tab_visible: bool, detached_tab_visible: bool) -> bool {
+    main_tab_visible || detached_tab_visible
+}
 
 #[derive(Debug)]
 pub(super) enum RemoteDesktopWorkerDelivery {
@@ -81,6 +87,16 @@ pub(super) enum RemoteDesktopWorkerDelivery {
         generation: u64,
         message: String,
     },
+}
+
+pub(super) enum RemoteDesktopDeliveryIntent {
+    ClipboardTransferFailed,
+}
+
+pub(super) struct RemoteDesktopDeliveryOutcome {
+    changed: bool,
+    backlog_remaining: bool,
+    intents: Vec<RemoteDesktopDeliveryIntent>,
 }
 
 #[derive(Clone)]
@@ -123,6 +139,19 @@ impl RemoteDesktopWorkerWake {
 
     async fn wait(&self) {
         self.notification.notified().await;
+    }
+}
+
+#[cfg(test)]
+mod visibility_tests {
+    use super::remote_desktop_tab_visible;
+
+    #[test]
+    fn remote_desktop_visibility_covers_main_detached_and_hidden_tabs() {
+        assert!(remote_desktop_tab_visible(true, false));
+        assert!(remote_desktop_tab_visible(false, true));
+        assert!(remote_desktop_tab_visible(true, true));
+        assert!(!remote_desktop_tab_visible(false, false));
     }
 }
 
@@ -214,8 +243,10 @@ fn send_remote_desktop_worker_delivery(
     worker_wake: &RemoteDesktopWorkerWake,
     delivery: RemoteDesktopWorkerDelivery,
 ) {
-    worker_wake.mark();
-    let _ = delivery_tx.send(delivery);
+    // Publish before waking so the foreground task cannot observe an empty queue.
+    if delivery_tx.send(delivery).is_ok() {
+        worker_wake.mark();
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -239,17 +270,91 @@ impl RemoteDesktopModifierState {
     }
 }
 
-pub(super) struct RemoteDesktopSession {
+struct RemoteDesktopWorkerOwner {
+    request_tx: Option<mpsc::Sender<RemoteDesktopHelperRequest>>,
+    worker_thread: Option<thread::JoinHandle<()>>,
+}
+
+impl RemoteDesktopWorkerOwner {
+    fn new(
+        request_tx: mpsc::Sender<RemoteDesktopHelperRequest>,
+        worker_thread: thread::JoinHandle<()>,
+    ) -> Self {
+        Self {
+            request_tx: Some(request_tx),
+            worker_thread: Some(worker_thread),
+        }
+    }
+
+    fn request_sender(&self) -> Option<&mpsc::Sender<RemoteDesktopHelperRequest>> {
+        self.request_tx.as_ref()
+    }
+
+    fn request_sender_cloned(&self) -> Option<mpsc::Sender<RemoteDesktopHelperRequest>> {
+        self.request_tx.clone()
+    }
+
+    fn send(&self, request: RemoteDesktopHelperRequest) {
+        if let Some(request_tx) = self.request_tx.as_ref() {
+            let _ = request_tx.send(request);
+        }
+    }
+
+    fn shutdown(&mut self) {
+        if let Some(request_tx) = self.request_tx.take() {
+            // Session shutdown and helper replacement release input state before
+            // asking the helper to exit cooperatively.
+            let _ = request_tx.send(RemoteDesktopHelperRequest::ReleaseAllInputs);
+            let _ = request_tx.send(RemoteDesktopHelperRequest::Close);
+        }
+        self.retire_worker_thread();
+    }
+
+    fn retire_worker_thread(&mut self) {
+        let Some(worker_thread) = self.worker_thread.take() else {
+            return;
+        };
+        if worker_thread.is_finished() {
+            let _ = worker_thread.join();
+            return;
+        }
+
+        let reaper_name = worker_thread
+            .thread()
+            .name()
+            .map(|name| format!("{name}-reaper"))
+            .unwrap_or_else(|| "remote-desktop-worker-reaper".to_string());
+        // The protocol worker has its own helper timeout, so this reaper owns a
+        // bounded join without blocking the GPUI thread during session teardown.
+        let _ = thread::Builder::new().name(reaper_name).spawn(move || {
+            let _ = worker_thread.join();
+        });
+    }
+}
+
+impl Drop for RemoteDesktopWorkerOwner {
+    fn drop(&mut self) {
+        self.shutdown();
+    }
+}
+
+pub(in crate::workspace) struct RemoteDesktopSessionEntity {
+    tab_id: TabId,
     profile: RemoteDesktopConnectionProfile,
     provider: RemoteDesktopProviderManifest,
     password: Option<RemoteDesktopSecret>,
+    certificate_store_path: PathBuf,
     certificate_challenge: Option<RemoteDesktopCertificateChallengeState>,
     session_trusted_certificate_fingerprint: Option<String>,
     state: RemoteDesktopViewState,
     geometry: SharedRemoteDesktopGeometry,
     frame_slot: RemoteDesktopFrameDeliverySlot,
-    request_tx: Option<mpsc::Sender<RemoteDesktopHelperRequest>>,
+    delivery_tx: mpsc::Sender<RemoteDesktopWorkerDelivery>,
+    delivery_rx: mpsc::Receiver<RemoteDesktopWorkerDelivery>,
+    worker: Option<RemoteDesktopWorkerOwner>,
+    worker_wake: Option<RemoteDesktopWorkerWake>,
     worker_generation: u64,
+    window_handle: AnyWindowHandle,
     last_viewport_size: Option<RemoteDesktopSize>,
     last_sent_resize: Option<RemoteDesktopResizeRequestState>,
     last_viewport_scale_factor: Option<u32>,
@@ -262,13 +367,17 @@ pub(super) struct RemoteDesktopSession {
     render_diagnostics: RemoteDesktopRenderDiagnostics,
 }
 
-impl RemoteDesktopSession {
+impl RemoteDesktopSessionEntity {
     fn new(
+        tab_id: TabId,
         profile: RemoteDesktopConnectionProfile,
         provider: RemoteDesktopProviderManifest,
         password: Option<RemoteDesktopSecret>,
+        certificate_store_path: PathBuf,
         frame_slot: RemoteDesktopFrameDeliverySlot,
+        window_handle: AnyWindowHandle,
     ) -> Self {
+        let (delivery_tx, delivery_rx) = mpsc::channel();
         let mut state = RemoteDesktopViewState::new(profile.label.clone(), profile.protocol)
             .with_read_only(profile.read_only);
         state.apply_event(RemoteDesktopHelperEvent::Status {
@@ -276,18 +385,26 @@ impl RemoteDesktopSession {
             message: None,
         });
         Self {
+            tab_id,
             profile,
             provider,
-            // Runtime credentials are kept only for this tab so a user-visible
-            // reconnect can start a fresh helper after the previous one exits.
+            // The tab owns the credential only until one accepted certificate
+            // moves it into the helper authentication request.
             password,
+            certificate_store_path,
             certificate_challenge: None,
             session_trusted_certificate_fingerprint: None,
             state,
             geometry: SharedRemoteDesktopGeometry::default(),
             frame_slot,
-            request_tx: None,
+            // Each tab owns its delivery mailbox. A wake for one detached window
+            // must never drain another tab's lifecycle events or frame notices.
+            delivery_tx,
+            delivery_rx,
+            worker: None,
+            worker_wake: None,
             worker_generation: 0,
+            window_handle,
             last_viewport_size: None,
             last_sent_resize: None,
             last_viewport_scale_factor: None,
@@ -300,6 +417,102 @@ impl RemoteDesktopSession {
             render_diagnostics: RemoteDesktopRenderDiagnostics::default(),
         }
     }
+
+    fn schedule_worker_wake(
+        &self,
+        generation: u64,
+        worker_wake: RemoteDesktopWorkerWake,
+        cx: &mut Context<Self>,
+    ) {
+        cx.spawn(async move |session, cx| {
+            loop {
+                worker_wake.wait().await;
+                let should_deliver = worker_wake.take();
+                let stopped = worker_wake.is_stopped();
+                if should_deliver {
+                    let delivery_available = session
+                        .update(cx, |current, cx| {
+                            if current.worker_generation != generation {
+                                return false;
+                            }
+                            cx.emit(RemoteDesktopSessionEvent::DeliveryReady { generation });
+                            true
+                        })
+                        .unwrap_or(false);
+                    if !delivery_available {
+                        break;
+                    }
+                }
+                if stopped {
+                    break;
+                }
+            }
+        })
+        .detach();
+    }
+
+    fn schedule_frame_apply(&self, generation: u64, delay: Duration, cx: &mut Context<Self>) {
+        cx.spawn(async move |session, cx| {
+            if !delay.is_zero() {
+                Timer::after(delay).await;
+            }
+            let _ = session.update(cx, |current, cx| {
+                if current.worker_generation == generation {
+                    cx.emit(RemoteDesktopSessionEvent::FrameApplyReady { generation });
+                }
+            });
+        })
+        .detach();
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(in crate::workspace) enum RemoteDesktopSessionEvent {
+    DeliveryReady { generation: u64 },
+    FrameApplyReady { generation: u64 },
+    ClipboardTransferFailed,
+}
+
+impl gpui::EventEmitter<RemoteDesktopSessionEvent> for RemoteDesktopSessionEntity {}
+
+/// Owns all remote desktop sessions independently from the workspace window shell.
+pub(in crate::workspace) struct RemoteDesktopWorkspaceEntity {
+    sessions: HashMap<TabId, Entity<RemoteDesktopSessionEntity>>,
+    session_subscriptions: HashMap<TabId, Vec<Subscription>>,
+}
+
+impl RemoteDesktopWorkspaceEntity {
+    pub(in crate::workspace) fn new() -> Self {
+        Self {
+            sessions: HashMap::new(),
+            session_subscriptions: HashMap::new(),
+        }
+    }
+
+    pub(in crate::workspace) fn session(
+        &self,
+        tab_id: TabId,
+    ) -> Option<Entity<RemoteDesktopSessionEntity>> {
+        self.sessions.get(&tab_id).cloned()
+    }
+
+    pub(in crate::workspace) fn insert(
+        &mut self,
+        tab_id: TabId,
+        session: Entity<RemoteDesktopSessionEntity>,
+        subscriptions: Vec<Subscription>,
+    ) {
+        self.sessions.insert(tab_id, session);
+        self.session_subscriptions.insert(tab_id, subscriptions);
+    }
+
+    pub(in crate::workspace) fn remove(
+        &mut self,
+        tab_id: TabId,
+    ) -> Option<Entity<RemoteDesktopSessionEntity>> {
+        self.session_subscriptions.remove(&tab_id);
+        self.sessions.remove(&tab_id)
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -311,6 +524,15 @@ struct RemoteDesktopResizeRequestState {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use gpui::TestAppContext;
+
+    struct RemoteDesktopTestRoot;
+
+    impl Render for RemoteDesktopTestRoot {
+        fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
+            div()
+        }
+    }
 
     #[test]
     fn worker_wake_uses_event_notification_and_stops_explicitly() {
@@ -324,6 +546,149 @@ mod tests {
         wake.stop();
         runtime.block_on(wake.wait());
         assert!(wake.is_stopped());
+    }
+
+    #[test]
+    fn worker_delivery_enqueues_before_marking_the_wake() {
+        let (sender, receiver) = mpsc::channel();
+        let wake = RemoteDesktopWorkerWake::default();
+        let tab_id = TabId(7);
+
+        send_remote_desktop_worker_delivery(
+            &sender,
+            &wake,
+            RemoteDesktopWorkerDelivery::FrameReady {
+                tab_id,
+                generation: 3,
+            },
+        );
+
+        assert!(wake.take());
+        assert!(matches!(
+            receiver.try_recv(),
+            Ok(RemoteDesktopWorkerDelivery::FrameReady {
+                tab_id: received_tab_id,
+                generation: 3,
+            }) if received_tab_id == tab_id
+        ));
+    }
+
+    #[test]
+    fn worker_deliveries_remain_isolated_by_session_mailbox() {
+        let (first_sender, first_receiver) = mpsc::channel();
+        let (second_sender, second_receiver) = mpsc::channel();
+        let first_wake = RemoteDesktopWorkerWake::default();
+        let second_wake = RemoteDesktopWorkerWake::default();
+
+        send_remote_desktop_worker_delivery(
+            &first_sender,
+            &first_wake,
+            RemoteDesktopWorkerDelivery::FrameReady {
+                tab_id: TabId(1),
+                generation: 4,
+            },
+        );
+
+        assert!(first_wake.take());
+        assert!(!second_wake.take());
+        assert!(first_receiver.try_recv().is_ok());
+        assert!(second_receiver.try_recv().is_err());
+
+        // A second tab owns a distinct sender, receiver and wake permit.
+        send_remote_desktop_worker_delivery(
+            &second_sender,
+            &second_wake,
+            RemoteDesktopWorkerDelivery::FrameReady {
+                tab_id: TabId(2),
+                generation: 7,
+            },
+        );
+        assert!(second_wake.take());
+        assert!(second_receiver.try_recv().is_ok());
+        assert!(first_receiver.try_recv().is_err());
+    }
+
+    #[gpui::test]
+    fn session_release_stops_waiter_and_closes_only_its_helper(cx: &mut TestAppContext) {
+        let window = cx.add_window(|_window, _cx| RemoteDesktopTestRoot);
+        let protocol = RemoteDesktopProtocol::Rdp;
+        let profile = preview_remote_desktop_profile(protocol);
+        let provider = builtin_preview_provider_registry()
+            .unwrap()
+            .get_for_protocol(protocol)
+            .cloned()
+            .unwrap();
+        let worker_wake = RemoteDesktopWorkerWake::default();
+        let observed_wake = worker_wake.clone();
+        let (request_tx, request_rx) = mpsc::channel();
+        let session = cx.new(|cx| {
+            let mut session = RemoteDesktopSessionEntity::new(
+                TabId(9),
+                profile,
+                provider,
+                Some(RemoteDesktopSecret::from("release-test-secret")),
+                std::env::temp_dir().join("oxideterm-release-test-certificates.json"),
+                RemoteDesktopFrameDeliverySlot::new(),
+                window.into(),
+            );
+            session.worker_wake = Some(worker_wake);
+            session.worker = Some(RemoteDesktopWorkerOwner::new(
+                request_tx,
+                thread::spawn(|| {}),
+            ));
+            session.install_release_handler(cx);
+            session
+        });
+
+        drop(session);
+        cx.update(|_cx| {});
+        cx.run_until_parked();
+
+        assert!(observed_wake.is_stopped());
+        assert!(matches!(
+            request_rx.recv().unwrap(),
+            RemoteDesktopHelperRequest::ReleaseAllInputs
+        ));
+        assert!(matches!(
+            request_rx.recv().unwrap(),
+            RemoteDesktopHelperRequest::Close
+        ));
+        assert!(request_rx.try_recv().is_err());
+    }
+
+    #[gpui::test]
+    fn session_window_handoff_resumes_delivery_without_stopping_runtime(cx: &mut TestAppContext) {
+        let first_window = cx.add_window(|_window, _cx| RemoteDesktopTestRoot);
+        let second_window = cx.add_window(|_window, _cx| RemoteDesktopTestRoot);
+        let protocol = RemoteDesktopProtocol::Rdp;
+        let profile = preview_remote_desktop_profile(protocol);
+        let provider = builtin_preview_provider_registry()
+            .unwrap()
+            .get_for_protocol(protocol)
+            .cloned()
+            .unwrap();
+        let worker_wake = RemoteDesktopWorkerWake::default();
+        let observed_wake = worker_wake.clone();
+        let session = cx.new(|_cx| {
+            let mut session = RemoteDesktopSessionEntity::new(
+                TabId(10),
+                profile,
+                provider,
+                None,
+                std::env::temp_dir().join("oxideterm-handoff-test-certificates.json"),
+                RemoteDesktopFrameDeliverySlot::new(),
+                first_window.into(),
+            );
+            session.worker_wake = Some(worker_wake);
+            session
+        });
+
+        session.update(cx, |session, _cx| {
+            session.bind_window(second_window.into());
+        });
+
+        assert!(observed_wake.take());
+        assert!(!observed_wake.is_stopped());
     }
 
     #[test]
@@ -484,7 +849,7 @@ mod tests {
         let data =
             RemoteDesktopClipboardData::new(RemoteDesktopClipboardFormat::ImageJpeg, vec![4, 5, 6]);
 
-        let item = remote_desktop_clipboard_item_from_data(&data).unwrap();
+        let item = remote_desktop_clipboard_item_from_data(data).unwrap();
 
         assert!(matches!(
             item.entries(),

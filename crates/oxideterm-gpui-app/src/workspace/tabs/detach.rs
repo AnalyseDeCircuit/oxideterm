@@ -84,12 +84,34 @@ fn tab_return_visible_insertion_index(pointer_x: f32, tab_widths: &[f32]) -> usi
     tab_widths.len()
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum DetachedTabSurfaceRoute {
+    Settings,
+    Ide(TabId),
+    Sftp(TabId),
+    Forwards(TabId),
+    Other,
+}
+
+fn detached_tab_surface_route(tab_id: TabId, kind: &TabKind) -> DetachedTabSurfaceRoute {
+    // Stateful shared surfaces must resolve the detached tab explicitly instead
+    // of consulting the main window's active-tab slot.
+    match kind {
+        TabKind::Settings => DetachedTabSurfaceRoute::Settings,
+        TabKind::Ide => DetachedTabSurfaceRoute::Ide(tab_id),
+        TabKind::Sftp => DetachedTabSurfaceRoute::Sftp(tab_id),
+        TabKind::Forwards => DetachedTabSurfaceRoute::Forwards(tab_id),
+        _ => DetachedTabSurfaceRoute::Other,
+    }
+}
+
 impl WorkspaceApp {
     pub(in crate::workspace) fn update_main_window_tabbar_drop_bounds(
         &mut self,
         window: &Window,
         titlebar_visible: bool,
         zen_mode: bool,
+        cx: &App,
     ) {
         if zen_mode {
             self.main_window_tabbar_drop_bounds = None;
@@ -108,7 +130,7 @@ impl WorkspaceApp {
             self.sidebar_width
         };
         let right_offset = if self.context_sidebar_visible() {
-            self.ai.chat.sidebar_width
+            self.ai_entity.read(cx).chat_ui().sidebar_width
         } else {
             0.0
         };
@@ -147,35 +169,50 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.detached_tabs.contains(&tab_id) {
-            return;
-        }
-        let Some(tab_index) = self.tab_index_by_id(tab_id) else {
+        let Some(tab_index) = self.tab_index_by_id(tab_id, cx) else {
             return;
         };
+        let Some(tabs::TabDetachTransition {
+            mount_id,
+            selection,
+        }) = self
+            .tab_host
+            .update(cx, |tab_host, _cx| tab_host.begin_detach_from_main(tab_id))
+        else {
+            return;
+        };
+        self.apply_main_window_active_tab_change(selection.previous, selection.current, cx);
+        let window_registration =
+            self.reserve_workspace_window(window_registry::WindowRole::Detached { tab_id });
         // Capture the source tab before it leaves the live strip. The snapshot
         // is committed only after native window creation succeeds.
-        let exiting_visual = self.tab_exit_visual(tab_index);
+        let exiting_visual = self.tab_exit_visual(tab_index, cx);
 
-        self.detached_tabs.insert(tab_id);
-        self.activate_nearest_visible_main_tab(tab_id, window, cx);
+        self.sync_active_tab_surface(cx);
+        self.focus_active_pane(window, cx);
 
-        let workspace = cx.weak_entity();
+        let session = cx.entity();
         let bounds = window.bounds();
         let entry_handoff_duration = oxideterm_gpui_ui::motion::duration(
             &self.tokens,
             oxideterm_gpui_ui::motion::MotionDuration::Overlay,
         );
         let entry_handoff_origin = entry_handoff_origin.filter(|_| self.tokens.motion.enabled);
+        // GPUI constructs and draws the detached window synchronously while
+        // this Workspace update is active, so bootstrap it from scalar values.
+        let background_cache_byte_limit = self.render_policy.image_cache_bytes;
         let open_result = cx.open_window(
             oxideterm_gpui_platform::window_options(bounds),
             move |detached_window, cx| {
                 cx.new(|cx| {
                     super::detached_tab_window::DetachedTabWindow::new(
-                        workspace,
+                        session,
                         tab_id,
+                        mount_id,
+                        window_registration,
                         entry_handoff_origin,
                         entry_handoff_duration,
+                        background_cache_byte_limit,
                         detached_window,
                         cx,
                     )
@@ -185,17 +222,64 @@ impl WorkspaceApp {
 
         match open_result {
             Ok(handle) => {
-                self.detached_tab_windows.insert(tab_id, handle.into());
+                let detached_window_handle = handle.into();
+                let window_registered =
+                    self.commit_workspace_window(window_registration, detached_window_handle, cx);
+                if !window_registered {
+                    let _ = detached_window_handle
+                        .update(cx, |_root, window, _cx| window.remove_window());
+                    if let Some(selection) = self.tab_host.update(cx, |tab_host, _cx| {
+                        tab_host.rollback_detach_to_main(tab_id, mount_id)
+                    }) {
+                        self.apply_main_window_active_tab_change(
+                            selection.previous,
+                            selection.current,
+                            cx,
+                        );
+                    }
+                    self.sync_active_tab_surface(cx);
+                    cx.notify();
+                    return;
+                }
+                let committed = self.tab_host.update(cx, |tab_host, _cx| {
+                    tab_host.commit_detach(tab_id, mount_id, detached_window_handle)
+                });
+                if !committed {
+                    // A synchronous tab cleanup can invalidate the reservation
+                    // while the native window is being constructed.
+                    let _ = detached_window_handle
+                        .update(cx, |_root, window, _cx| window.remove_window());
+                    self.release_workspace_window(
+                        window_registration,
+                        detached_window_handle.window_id(),
+                        cx,
+                    );
+                    self.sync_active_tab_surface(cx);
+                    cx.notify();
+                    return;
+                }
+                self.sync_ide_surface_mount(tab_id, cx);
+                self.sync_host_tools_lifecycle(false, cx);
+                self.bind_remote_desktop_window(tab_id, detached_window_handle, cx);
+                self.resume_remote_desktop_frame_delivery(tab_id, cx);
                 if let Some(exiting_visual) = exiting_visual {
                     self.begin_tab_visual_exit(exiting_visual, cx);
                 }
             }
             Err(_) => {
-                self.detached_tabs.remove(&tab_id);
-                self.main_window_tabs.active_tab_id = Some(tab_id);
+                self.rollback_workspace_window(window_registration);
+                if let Some(selection) = self.tab_host.update(cx, |tab_host, _cx| {
+                    tab_host.rollback_detach_to_main(tab_id, mount_id)
+                }) {
+                    self.apply_main_window_active_tab_change(
+                        selection.previous,
+                        selection.current,
+                        cx,
+                    );
+                }
             }
         }
-        self.sync_active_tab_surface();
+        self.sync_active_tab_surface(cx);
         cx.notify();
     }
 
@@ -232,13 +316,46 @@ impl WorkspaceApp {
     pub(in crate::workspace) fn return_detached_tab_to_main(
         &mut self,
         tab_id: TabId,
+        current_window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.detached_tabs.remove(&tab_id) {
-            self.detached_tab_windows.remove(&tab_id);
-            self.main_window_tabs.active_tab_id = Some(tab_id);
+        let transition = self.tab_host.update(cx, |tab_host, _cx| {
+            tab_host.return_to_main_and_select(tab_id, tabs::TabMountCloseReason::ReturnToMain)
+        });
+        if let Some(transition) = transition {
+            // Close the source shell directly; re-entering its handle from its own event fails.
+            self.apply_tab_mount_cleanup(transition.cleanup, Some(current_window), cx);
+            self.apply_main_window_active_tab_change(
+                transition.selection.previous,
+                transition.selection.current,
+                cx,
+            );
             self.detached_tab_return_drag = None;
-            self.sync_active_tab_surface();
+            self.sync_active_tab_surface(cx);
+            cx.notify();
+        }
+    }
+
+    pub(in crate::workspace) fn release_detached_tab_window(
+        &mut self,
+        tab_id: TabId,
+        mount_id: tabs::TabMountId,
+        window_registration: window_registry::WindowRegistration,
+        window_id: gpui::WindowId,
+        cx: &mut Context<Self>,
+    ) {
+        self.release_workspace_window(window_registration, window_id, cx);
+        let transition = self.tab_host.update(cx, |tab_host, _cx| {
+            tab_host.release_detached_window_and_select(tab_id, mount_id, window_id)
+        });
+        if let Some(transition) = transition {
+            self.apply_main_window_active_tab_change(
+                transition.selection.previous,
+                transition.selection.current,
+                cx,
+            );
+            self.detached_tab_return_drag = None;
+            self.sync_active_tab_surface(cx);
             cx.notify();
         }
     }
@@ -248,12 +365,34 @@ impl WorkspaceApp {
         tab_id: TabId,
         cx: &mut Context<Self>,
     ) -> bool {
-        let Some(handle) = self.detached_tab_windows.get(&tab_id).copied() else {
+        let Some(handle) = self.tab_host.read(cx).detached_window_handle(tab_id) else {
             return false;
         };
         handle
             .update(cx, |_root, window, _cx| window.activate_window())
             .is_ok()
+    }
+
+    pub(in crate::workspace) fn apply_tab_mount_cleanup(
+        &self,
+        cleanup: tabs::TabMountCleanupPlan,
+        current_window: Option<&mut Window>,
+        cx: &mut Context<Self>,
+    ) {
+        if cleanup.reason == tabs::TabMountCloseReason::DetachedWindowReleased {
+            return;
+        }
+        if let Some(handle) = cleanup.detached_window {
+            if let Some(window) = current_window
+                && window.window_handle().window_id() == handle.window_id()
+            {
+                window.remove_window();
+                return;
+            }
+            // Native window teardown is a shell concern. The mount was already
+            // removed, so its release callback is stale by construction.
+            let _ = handle.update(cx, |_root, window: &mut Window, _cx| window.remove_window());
+        }
     }
 
     fn detached_window_screen_point(window: &Window, window_point: Point<Pixels>) -> Point<Pixels> {
@@ -325,15 +464,16 @@ impl WorkspaceApp {
         .detach();
     }
 
-    fn detached_tab_return_visible_index(&self, screen_x: f32) -> Option<usize> {
+    fn detached_tab_return_visible_index(&self, screen_x: f32, cx: &App) -> Option<usize> {
         let drop_bounds = self.main_window_tabbar_drop_bounds.as_ref()?;
         let scroll_x = f32::from(-self.main_window_tabs.scroll_handle.offset().x).max(0.0);
         let pointer_x = screen_x - f32::from(drop_bounds.origin.x) + scroll_x
             - self.tokens.metrics.tabbar_leading_offset;
+        let outside_main_tabs = self.tab_host.read(cx).outside_main_tab_ids();
         let visible_widths = self
-            .tabs
+            .tabs(cx)
             .iter()
-            .filter(|tab| !self.detached_tabs.contains(&tab.id))
+            .filter(|tab| !outside_main_tabs.contains(&tab.id))
             .map(|tab| self.tab_visual_width(tab))
             .collect::<Vec<_>>();
         Some(tab_return_visible_insertion_index(
@@ -377,7 +517,7 @@ impl WorkspaceApp {
         }
 
         let was_active = drag.active;
-        let previous_placeholder = self.detached_tab_return_placeholder();
+        let previous_placeholder = self.detached_tab_return_placeholder(cx);
         drag.current_screen_x = f32::from(screen_point.x);
         drag.current_screen_y = f32::from(screen_point.y);
         let delta_x = drag.current_screen_x - drag.start_screen_x;
@@ -386,7 +526,7 @@ impl WorkspaceApp {
         // so ordinary titlebar clicks do not accidentally dock the tab.
         drag.active = delta_x.hypot(delta_y) > TAB_DRAG_THRESHOLD_PX;
         self.detached_tab_return_drag = Some(drag);
-        let next_placeholder = self.detached_tab_return_placeholder();
+        let next_placeholder = self.detached_tab_return_placeholder(cx);
         if drag.active != was_active || previous_placeholder != next_placeholder {
             // Repaint only when the pointer crosses an insertion midpoint or
             // enters/leaves the drop strip, not for every native window move.
@@ -398,7 +538,7 @@ impl WorkspaceApp {
         &mut self,
         tab_id: TabId,
         event: &MouseUpEvent,
-        window: &Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
         let screen_point = Self::detached_window_screen_point(window, event.position);
@@ -416,12 +556,12 @@ impl WorkspaceApp {
         if should_return {
             let handoff_origin = self.detached_tab_return_handoff_origin(screen_point, window);
             if let Some(visible_index) =
-                self.detached_tab_return_visible_index(f32::from(screen_point.x))
+                self.detached_tab_return_visible_index(f32::from(screen_point.x), cx)
             {
-                self.move_tab_to_visible_index(tab_id, visible_index);
+                self.move_tab_to_visible_index(tab_id, visible_index, cx);
             }
             self.begin_detached_tab_return_handoff(tab_id, handoff_origin, cx);
-            self.return_detached_tab_to_main(tab_id, cx);
+            self.return_detached_tab_to_main(tab_id, window, cx);
             true
         } else {
             cx.notify();
@@ -435,7 +575,10 @@ impl WorkspaceApp {
             .then(|| gpui::point(px(drag.current_screen_x), px(drag.current_screen_y)))
     }
 
-    pub(super) fn detached_tab_return_placeholder(&self) -> Option<DetachedTabReturnPlaceholder> {
+    pub(super) fn detached_tab_return_placeholder(
+        &self,
+        cx: &App,
+    ) -> Option<DetachedTabReturnPlaceholder> {
         let drag = self.detached_tab_return_drag?;
         let screen_point = self.detached_tab_return_drag_screen_point()?;
         let drop_bounds = self.main_window_tabbar_drop_bounds.as_ref()?;
@@ -444,7 +587,7 @@ impl WorkspaceApp {
         }
         Some(DetachedTabReturnPlaceholder {
             tab_id: drag.tab_id,
-            visible_index: self.detached_tab_return_visible_index(f32::from(screen_point.x))?,
+            visible_index: self.detached_tab_return_visible_index(f32::from(screen_point.x), cx)?,
         })
     }
 
@@ -519,10 +662,11 @@ impl WorkspaceApp {
     pub(in crate::workspace) fn render_detached_tab_return_handoff(
         &self,
         window: &Window,
+        cx: &App,
     ) -> Option<AnyElement> {
         let handoff = self.detached_tab_return_handoff?;
-        let tab = self.tab_by_id(handoff.tab_id)?;
-        let tab_index = self.tab_index_by_id(handoff.tab_id)?;
+        let tab = self.tab_by_id(handoff.tab_id, cx)?;
+        let tab_index = self.tab_index_by_id(handoff.tab_id, cx)?;
         let window_bounds = window.bounds();
         let origin = TabWindowHandoffRect {
             left: handoff.origin.screen_left - f32::from(window_bounds.origin.x),
@@ -530,16 +674,17 @@ impl WorkspaceApp {
             width: handoff.origin.width,
             height: handoff.origin.height,
         };
+        let outside_main_tabs = self.tab_host.read(cx).outside_main_tab_ids();
         let preceding_width = self
-            .tabs
+            .tabs(cx)
             .iter()
             .take(tab_index)
-            .filter(|candidate| !self.detached_tabs.contains(&candidate.id))
+            .filter(|candidate| !outside_main_tabs.contains(&candidate.id))
             .map(|candidate| self.tab_visual_width(candidate))
             .sum::<f32>();
         let target = TabWindowHandoffRect {
             left: self.tabbar_left_x() + self.tokens.metrics.tabbar_leading_offset
-                - self.tabbar_effective_scroll_x(window)
+                - self.tabbar_effective_scroll_x(window, cx)
                 + preceding_width,
             top: self
                 .main_window_tabbar_drop_bounds
@@ -564,6 +709,7 @@ impl WorkspaceApp {
     pub(in crate::workspace) fn render_tab_detach_drag_preview(
         &self,
         window: &Window,
+        cx: &App,
     ) -> Option<AnyElement> {
         let drag = self.main_window_tabs.drag.as_ref()?;
         if !drag.active || drag.mode != TabDragMode::Detach {
@@ -571,7 +717,7 @@ impl WorkspaceApp {
         }
 
         let tab_title = self
-            .tab_by_id(drag.tab_id)
+            .tab_by_id(drag.tab_id, cx)
             .map(|tab| self.tab_display_title(tab))
             .unwrap_or_else(|| "OxideTerm".to_string());
         let theme = self.tokens.ui;
@@ -669,6 +815,7 @@ impl WorkspaceApp {
         &self,
         tab_id: TabId,
         window: &Window,
+        cx: &App,
     ) -> Option<AnyElement> {
         let drag = self.detached_tab_return_drag?;
         if drag.tab_id != tab_id || !drag.active {
@@ -676,7 +823,7 @@ impl WorkspaceApp {
         }
 
         let tab_title = self
-            .tab_by_id(drag.tab_id)
+            .tab_by_id(drag.tab_id, cx)
             .map(|tab| self.tab_display_title(tab))
             .unwrap_or_else(|| "OxideTerm".to_string());
         let theme = self.tokens.ui;
@@ -775,7 +922,7 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
         let menu = self.main_window_tabs.context_menu?;
-        if self.tab_by_id(menu.tab_id).is_none() {
+        if self.tab_by_id(menu.tab_id, cx).is_none() {
             return None;
         }
         let viewport = window.viewport_size();
@@ -788,7 +935,7 @@ impl WorkspaceApp {
             TAB_CONTEXT_MENU_HEIGHT,
             TAB_CONTEXT_MENU_MARGIN,
         );
-        let detached = self.detached_tabs.contains(&menu.tab_id);
+        let detached = self.tab_host.read(cx).is_detached(menu.tab_id);
         let menu_body = context_menu_event_boundary(
             context_menu_content(&self.tokens)
                 .w(px(TAB_CONTEXT_MENU_WIDTH))
@@ -809,7 +956,7 @@ impl WorkspaceApp {
                         cx.listener(move |this, _event, window, cx| {
                             this.close_tab_context_menu();
                             if detached {
-                                this.return_detached_tab_to_main(menu.tab_id, cx);
+                                this.return_detached_tab_to_main(menu.tab_id, window, cx);
                             } else {
                                 this.detach_tab_to_window(menu.tab_id, None, window, cx);
                             }
@@ -858,6 +1005,7 @@ impl WorkspaceApp {
         &mut self,
         tab_id: TabId,
         entry_handoff_origin: Option<TabWindowHandoffOrigin>,
+        window_background: &Entity<window_shell::WorkspaceWindowBackgroundEntity>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
@@ -871,16 +1019,28 @@ impl WorkspaceApp {
                 cx,
             );
         }
-        let Some(tab) = self.tab_by_id(tab_id).cloned() else {
+        // Release TabHost's read guard before rendering without cloning the
+        // complete Tab; the pane tree is bounded to four panes.
+        let Some((title, tab_kind, root_pane)) = self.tab_by_id(tab_id, cx).map(|tab| {
+            (
+                self.tab_display_title(tab),
+                tab.kind.clone(),
+                tab.root_pane.clone(),
+            )
+        }) else {
             return self.render_detached_tab_message("OxideTerm", "tabbar.detached_tab_closed", cx);
         };
-        let title = self.tab_display_title(&tab);
         window.set_window_title(&SharedString::from(title.clone()));
 
         let content =
-            self.render_detached_tab_content(tab_id, &tab.kind, tab.root_pane.as_ref(), window, cx);
-        let content =
-            self.wrap_content_background(content, Some(tab_background_key(&tab.kind)), window, cx);
+            self.render_detached_tab_content(tab_id, &tab_kind, root_pane.as_ref(), window, cx);
+        let content = self.wrap_content_background(
+            window_background,
+            content,
+            Some(tab_background_key(&tab_kind)),
+            window,
+            cx,
+        );
         let titlebar_visible = self.window_titlebar_visible(window);
 
         let window_content = div()
@@ -894,7 +1054,7 @@ impl WorkspaceApp {
             })
             .child(div().flex_1().min_h(px(0.0)).child(content))
             .when_some(
-                self.render_detached_tab_return_drag_preview(tab_id, window),
+                self.render_detached_tab_return_drag_preview(tab_id, window, cx),
                 |root, preview| root.child(preview),
             );
         let window_content = oxideterm_gpui_ui::motion::fade_in(
@@ -928,7 +1088,7 @@ impl WorkspaceApp {
                 target,
             )
         });
-        let tab_window_modals = self.render_tab_window_modals(tab_id, &tab.kind, window, cx);
+        let tab_window_modals = self.render_tab_window_modals(tab_id, &tab_kind, window, cx);
 
         // Keep the native window base opaque while its workspace content fades in.
         div()
@@ -950,8 +1110,20 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        match detached_tab_surface_route(tab_id, kind) {
+            DetachedTabSurfaceRoute::Settings => return self.render_settings_surface(cx),
+            DetachedTabSurfaceRoute::Ide(tab_id) => {
+                return self.render_ide_surface_for_tab(tab_id, cx);
+            }
+            DetachedTabSurfaceRoute::Sftp(tab_id) => {
+                return self.render_sftp_surface_for_tab(tab_id, window, cx);
+            }
+            DetachedTabSurfaceRoute::Forwards(tab_id) => {
+                return self.render_forwards_surface_for_tab(tab_id, window, cx);
+            }
+            DetachedTabSurfaceRoute::Other => {}
+        }
         match (kind, root_pane) {
-            (TabKind::Settings, _) => self.render_settings_surface(cx),
             (TabKind::FileManager, _) => self.render_file_manager_surface(window, cx),
             (TabKind::Launcher, _) => self.render_launcher_surface(window, cx),
             (TabKind::Graphics, _) => self.render_graphics_surface(window, cx),
@@ -959,23 +1131,21 @@ impl WorkspaceApp {
             (TabKind::ConnectionPool, _) => {
                 // Detached windows can outlive the UI route that created them.
                 // Preserve compatibility by rendering the runtime overview.
-                self.active_connection_runtime_section = ConnectionRuntimeSection::Overview;
-                self.previous_connection_runtime_section = ConnectionRuntimeSection::Overview;
+                self.host_tools.update(cx, |host_tools, _cx| {
+                    host_tools.reset_runtime_section();
+                });
                 self.render_connection_runtime_surface(cx)
             }
             (TabKind::ConnectionMonitor, _) => self.render_connection_monitor_surface(cx),
             (TabKind::Topology, _) => self.render_topology_surface(cx),
             (TabKind::NotificationCenter, _) => self.render_notification_center_surface(cx),
-            (TabKind::Sftp, _) => self.render_sftp_surface_for_tab(tab_id, window, cx),
-            (TabKind::Ide, _) => self.render_ide_surface_for_tab(tab_id),
-            (TabKind::Forwards, _) => self.render_forwards_surface_for_tab(tab_id, window, cx),
             (TabKind::SessionManager, _) => self.render_session_manager_surface(window, cx),
             (TabKind::PluginManager, _) => self.render_plugin_manager_surface(cx),
             (TabKind::Plugin { plugin_id, tab_id }, _) => {
                 self.render_native_plugin_tab_surface(plugin_id, tab_id, cx)
             }
             (TabKind::CloudSync, _) => self.render_cloud_sync_surface(cx),
-            (TabKind::RemoteDesktop, _) => self.render_remote_desktop_surface(tab_id, cx),
+            (TabKind::RemoteDesktop, _) => self.render_remote_desktop_surface(tab_id, window, cx),
             (_, Some(root_pane)) => self.render_detached_terminal_surface(tab_id, root_pane, cx),
             _ => self.render_empty_workspace(cx),
         }
@@ -1025,9 +1195,7 @@ impl WorkspaceApp {
                     .on_mouse_up(
                         MouseButton::Left,
                         cx.listener(move |this, event: &MouseUpEvent, window, cx| {
-                            if this.finish_detached_tab_return_drag(tab_id, event, window, cx) {
-                                window.remove_window();
-                            }
+                            this.finish_detached_tab_return_drag(tab_id, event, window, cx);
                             cx.stop_propagation();
                         }),
                     )
@@ -1053,8 +1221,7 @@ impl WorkspaceApp {
                     .on_mouse_down(
                         MouseButton::Left,
                         cx.listener(move |this, _event, window, cx| {
-                            this.return_detached_tab_to_main(tab_id, cx);
-                            window.remove_window();
+                            this.return_detached_tab_to_main(tab_id, window, cx);
                             cx.stop_propagation();
                         }),
                     ),
@@ -1107,38 +1274,6 @@ impl WorkspaceApp {
             )
             .into_any_element()
     }
-
-    fn activate_nearest_visible_main_tab(
-        &mut self,
-        detached_tab_id: TabId,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        if self.main_window_tabs.active_tab_id != Some(detached_tab_id) {
-            return;
-        }
-        let Some(detached_index) = self.tab_index_by_id(detached_tab_id) else {
-            self.main_window_tabs.active_tab_id = None;
-            return;
-        };
-        self.main_window_tabs.active_tab_id = self
-            .tabs
-            .iter()
-            .enumerate()
-            .skip(detached_index + 1)
-            .find(|(_, tab)| !self.detached_tabs.contains(&tab.id))
-            .or_else(|| {
-                self.tabs
-                    .iter()
-                    .enumerate()
-                    .take(detached_index)
-                    .rev()
-                    .find(|(_, tab)| !self.detached_tabs.contains(&tab.id))
-            })
-            .map(|(_, tab)| tab.id);
-        self.sync_active_tab_surface();
-        self.focus_active_pane(window, cx);
-    }
 }
 
 #[cfg(test)]
@@ -1190,5 +1325,46 @@ mod tests {
         assert_eq!(tab_return_visible_insertion_index(80.0, &widths), 1);
         assert_eq!(tab_return_visible_insertion_index(200.0, &widths), 2);
         assert_eq!(tab_return_visible_insertion_index(500.0, &widths), 3);
+    }
+
+    #[test]
+    fn detached_shared_surfaces_route_without_main_active_tab_state() {
+        let tab_id = TabId(42);
+
+        assert_eq!(
+            detached_tab_surface_route(tab_id, &TabKind::Settings),
+            DetachedTabSurfaceRoute::Settings
+        );
+        assert_eq!(
+            detached_tab_surface_route(tab_id, &TabKind::Ide),
+            DetachedTabSurfaceRoute::Ide(tab_id)
+        );
+        assert_eq!(
+            detached_tab_surface_route(tab_id, &TabKind::Sftp),
+            DetachedTabSurfaceRoute::Sftp(tab_id)
+        );
+        assert_eq!(
+            detached_tab_surface_route(tab_id, &TabKind::Forwards),
+            DetachedTabSurfaceRoute::Forwards(tab_id)
+        );
+    }
+
+    #[test]
+    fn detached_return_passes_the_source_window_to_mount_cleanup() {
+        let source = include_str!("detach.rs");
+        let return_start = source
+            .find("pub(in crate::workspace) fn return_detached_tab_to_main")
+            .expect("detached return function");
+        let return_tail = &source
+            [return_start + "pub(in crate::workspace) fn return_detached_tab_to_main".len()..];
+        let return_end = return_tail
+            .find("pub(in crate::workspace) fn release_detached_tab_window")
+            .expect("detached release function");
+        let return_source = &return_tail[..return_end];
+
+        assert!(return_source.contains("current_window: &mut Window"));
+        assert!(return_source.contains(
+            "self.apply_tab_mount_cleanup(transition.cleanup, Some(current_window), cx)"
+        ));
     }
 }

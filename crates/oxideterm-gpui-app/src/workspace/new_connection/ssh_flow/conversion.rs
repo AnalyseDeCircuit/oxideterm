@@ -14,11 +14,10 @@ pub(super) fn proxy_chain_from_form(
         return Ok(None);
     }
 
+    validate_proxy_chain_form(form)?;
+
     let mut chain = Vec::new();
-    for hop in form.proxy_hops.iter().filter(|hop| hop.complete()) {
-        if hop.auth_tab == SshAuthTab::ManagedKey && hop.managed_key_id.trim().is_empty() {
-            return Err("Proxy hop managed key is required".to_string());
-        }
+    for hop in form.proxy_hops.iter_mut().filter(|hop| hop.complete()) {
         chain.push(ProxyHopConfig {
             host: hop.host.trim().to_string(),
             port: hop.port.trim().parse::<u16>().unwrap_or(22),
@@ -35,6 +34,23 @@ pub(super) fn proxy_chain_from_form(
     }
 
     Ok(Some(chain))
+}
+
+pub(super) fn validate_proxy_chain_form(form: &NewConnectionForm) -> Result<(), String> {
+    for hop in form.proxy_hops.iter().filter(|hop| hop.complete()) {
+        if hop.auth_tab == SshAuthTab::ManagedKey && hop.managed_key_id.trim().is_empty() {
+            return Err("Proxy hop managed key is required".to_string());
+        }
+        if matches!(hop.auth_tab, SshAuthTab::SshKey | SshAuthTab::Certificate)
+            && hop.key_path.trim().is_empty()
+        {
+            return Err("Proxy hop key path is required".to_string());
+        }
+        if hop.auth_tab == SshAuthTab::Certificate && hop.cert_path.trim().is_empty() {
+            return Err("Proxy hop certificate path is required".to_string());
+        }
+    }
+    Ok(())
 }
 
 pub(super) fn proxy_session_tree_endpoints(
@@ -94,24 +110,26 @@ pub(super) fn resolve_default_key_for_tree_auth(auth: &mut AuthMethod) -> Result
     }
 }
 
-pub(super) fn auth_method_from_proxy_hop(hop: &NewConnectionProxyHop) -> AuthMethod {
+pub(super) fn auth_method_from_proxy_hop(hop: &mut NewConnectionProxyHop) -> AuthMethod {
     match hop.auth_tab {
-        SshAuthTab::Password => AuthMethod::password_secret(zeroizing_secret_clone(&hop.password)),
+        SshAuthTab::Password => {
+            AuthMethod::password_secret(take_zeroizing_secret(&mut hop.password))
+        }
         SshAuthTab::DefaultKey => {
-            AuthMethod::key_secret("", zeroizing_non_empty_secret(&hop.passphrase))
+            AuthMethod::key_secret("", take_zeroizing_non_empty_secret(&mut hop.passphrase))
         }
         SshAuthTab::SshKey => AuthMethod::key_secret(
             hop.key_path.trim().to_string(),
-            zeroizing_non_empty_secret(&hop.passphrase),
+            take_zeroizing_non_empty_secret(&mut hop.passphrase),
         ),
         SshAuthTab::ManagedKey => AuthMethod::managed_key_secret(
             hop.managed_key_id.trim().to_string(),
-            zeroizing_non_empty_secret(&hop.passphrase),
+            take_zeroizing_non_empty_secret(&mut hop.passphrase),
         ),
         SshAuthTab::Certificate => AuthMethod::certificate_secret(
             hop.key_path.trim().to_string(),
             hop.cert_path.trim().to_string(),
-            zeroizing_non_empty_secret(&hop.passphrase),
+            take_zeroizing_non_empty_secret(&mut hop.passphrase),
         ),
         SshAuthTab::Agent => AuthMethod::Agent,
         SshAuthTab::TwoFactor => AuthMethod::KeyboardInteractive,
@@ -119,44 +137,41 @@ pub(super) fn auth_method_from_proxy_hop(hop: &NewConnectionProxyHop) -> AuthMet
 }
 
 pub(super) fn form_from_runtime_config(
-    config: &SshConfig,
+    config: SshConfig,
     title: Option<&str>,
     default_group: String,
 ) -> NewConnectionForm {
-    let auth_fields = runtime_auth_form_fields(&config.auth);
-    let mut form = NewConnectionForm {
-        name: title
-            .filter(|title| !title.trim().is_empty())
-            .map(str::to_string)
-            .unwrap_or_else(|| format!("{}@{}", config.username, config.host)),
-        host: config.host.clone(),
-        port: config.port.to_string(),
-        username: config.username.clone(),
-        auth_tab: auth_fields.auth_tab,
-        password: auth_fields.password,
-        key_path: auth_fields.key_path,
-        managed_key_id: auth_fields.managed_key_id,
-        cert_path: auth_fields.cert_path,
-        passphrase: auth_fields.passphrase,
-        group: default_group,
-        post_connect_command: config.post_connect_command.clone().unwrap_or_default(),
-        agent_forwarding: config.agent_forwarding,
-        identity_agent: config.identity_agent.clone(),
-        agent_forwarding_socket: config.agent_forwarding_socket.clone(),
-        legacy_ssh_compatibility: config.legacy_ssh_compatibility,
-        save_password: auth_fields.save_password,
-        ..NewConnectionForm::default()
-    };
+    let auth_fields = runtime_auth_form_fields(config.auth);
+    let mut form = NewConnectionForm::default();
+    form.name = title
+        .filter(|title| !title.trim().is_empty())
+        .map(str::to_string)
+        .unwrap_or_else(|| format!("{}@{}", config.username, config.host));
+    form.host = config.host.clone();
+    form.port = config.port.to_string();
+    form.username = config.username.clone();
+    form.auth_tab = auth_fields.auth_tab;
+    form.password = auth_fields.password;
+    form.key_path = auth_fields.key_path;
+    form.managed_key_id = auth_fields.managed_key_id;
+    form.cert_path = auth_fields.cert_path;
+    form.passphrase = auth_fields.passphrase;
+    form.group = default_group;
+    form.post_connect_command = config.post_connect_command.clone().unwrap_or_default();
+    form.agent_forwarding = config.agent_forwarding;
+    form.identity_agent = config.identity_agent.clone();
+    form.agent_forwarding_socket = config.agent_forwarding_socket.clone();
+    form.legacy_ssh_compatibility = config.legacy_ssh_compatibility;
+    form.save_password = auth_fields.save_password;
 
-    if let Some(chain) = &config.proxy_chain {
+    if let Some(chain) = config.proxy_chain {
         form.proxy_hops = chain
-            .iter()
-            .cloned()
+            .into_iter()
             .map(proxy_hop_form_from_runtime_config)
             .collect();
         form.proxy_chain_expanded = !form.proxy_hops.is_empty();
     }
-    if let Some(proxy) = &config.upstream_proxy {
+    if let Some(proxy) = config.upstream_proxy {
         form.upstream_proxy_policy = NewConnectionUpstreamProxyPolicy::Custom;
         form.upstream_proxy_protocol = match proxy.protocol {
             UpstreamProxyProtocol::Socks5 => SavedUpstreamProxyProtocol::Socks5,
@@ -166,17 +181,21 @@ pub(super) fn form_from_runtime_config(
         form.upstream_proxy_port = proxy.port.to_string();
         form.upstream_proxy_remote_dns = proxy.remote_dns;
         form.upstream_proxy_no_proxy = proxy.no_proxy.clone();
-        if let UpstreamProxyAuth::Password { username, password } = &proxy.auth {
+        if let UpstreamProxyAuth::Password {
+            username,
+            mut password,
+        } = proxy.auth
+        {
             form.upstream_proxy_auth = NewConnectionUpstreamProxyAuth::Password;
-            form.upstream_proxy_username = username.clone();
-            form.upstream_proxy_password = password.as_str().to_string();
+            form.upstream_proxy_username = username;
+            form.upstream_proxy_password = std::mem::take(&mut *password);
         }
     }
     form
 }
 
 pub(super) fn proxy_hop_form_from_runtime_config(config: ProxyHopConfig) -> NewConnectionProxyHop {
-    let auth_fields = runtime_auth_form_fields(&config.auth);
+    let auth_fields = runtime_auth_form_fields(config.auth);
     NewConnectionProxyHop {
         saved_connection_id: String::new(),
         host: config.host,
@@ -208,11 +227,11 @@ struct RuntimeAuthFormFields {
     save_password: bool,
 }
 
-fn runtime_auth_form_fields(auth: &AuthMethod) -> RuntimeAuthFormFields {
+fn runtime_auth_form_fields(auth: AuthMethod) -> RuntimeAuthFormFields {
     match auth {
-        AuthMethod::Password { password } => RuntimeAuthFormFields {
+        AuthMethod::Password { mut password } => RuntimeAuthFormFields {
             auth_tab: SshAuthTab::Password,
-            password: password.as_str().to_string(),
+            password: std::mem::take(&mut *password),
             key_path: String::new(),
             managed_key_id: String::new(),
             cert_path: String::new(),
@@ -221,7 +240,7 @@ fn runtime_auth_form_fields(auth: &AuthMethod) -> RuntimeAuthFormFields {
         },
         AuthMethod::Key {
             key_path,
-            passphrase,
+            mut passphrase,
         } if key_path.trim().is_empty() => RuntimeAuthFormFields {
             auth_tab: SshAuthTab::DefaultKey,
             password: String::new(),
@@ -229,42 +248,45 @@ fn runtime_auth_form_fields(auth: &AuthMethod) -> RuntimeAuthFormFields {
             managed_key_id: String::new(),
             cert_path: String::new(),
             passphrase: passphrase
-                .as_ref()
-                .map(|value| value.as_str().to_string())
+                .as_mut()
+                .map(|value| std::mem::take(&mut **value))
                 .unwrap_or_default(),
             save_password: false,
         },
         AuthMethod::Key {
             key_path,
-            passphrase,
+            mut passphrase,
         } => RuntimeAuthFormFields {
             auth_tab: SshAuthTab::SshKey,
             password: String::new(),
-            key_path: key_path.clone(),
+            key_path,
             managed_key_id: String::new(),
             cert_path: String::new(),
             passphrase: passphrase
-                .as_ref()
-                .map(|value| value.as_str().to_string())
+                .as_mut()
+                .map(|value| std::mem::take(&mut **value))
                 .unwrap_or_default(),
             save_password: false,
         },
-        AuthMethod::ManagedKey { key_id, passphrase } => RuntimeAuthFormFields {
+        AuthMethod::ManagedKey {
+            key_id,
+            mut passphrase,
+        } => RuntimeAuthFormFields {
             auth_tab: SshAuthTab::ManagedKey,
             password: String::new(),
             key_path: String::new(),
             managed_key_id: key_id.clone(),
             cert_path: String::new(),
             passphrase: passphrase
-                .as_ref()
-                .map(|value| value.as_str().to_string())
+                .as_mut()
+                .map(|value| std::mem::take(&mut **value))
                 .unwrap_or_default(),
             save_password: false,
         },
         AuthMethod::Certificate {
             key_path,
             cert_path,
-            passphrase,
+            mut passphrase,
         } => RuntimeAuthFormFields {
             auth_tab: SshAuthTab::Certificate,
             password: String::new(),
@@ -272,8 +294,8 @@ fn runtime_auth_form_fields(auth: &AuthMethod) -> RuntimeAuthFormFields {
             managed_key_id: String::new(),
             cert_path: cert_path.clone(),
             passphrase: passphrase
-                .as_ref()
-                .map(|value| value.as_str().to_string())
+                .as_mut()
+                .map(|value| std::mem::take(&mut **value))
                 .unwrap_or_default(),
             save_password: false,
         },
@@ -357,7 +379,7 @@ mod runtime_save_tests {
     #[test]
     fn runtime_target_form_marks_password_for_persistence() {
         let form = form_from_runtime_config(
-            &SshConfig {
+            SshConfig {
                 host: "target.example.com".to_string(),
                 port: 22,
                 username: "deploy".to_string(),
@@ -386,7 +408,7 @@ mod runtime_save_tests {
     #[test]
     fn runtime_form_preserves_upstream_proxy_password_for_save_as() {
         let form = form_from_runtime_config(
-            &SshConfig {
+            SshConfig {
                 host: "target.example.com".to_string(),
                 port: 22,
                 username: "deploy".to_string(),
@@ -421,29 +443,29 @@ mod runtime_save_tests {
         let mut nodes = HashMap::from([
             (
                 NodeId::new("node-home"),
-                WorkspaceSshNode {
-                    saved_connection_id: Some("home".to_string()),
-                    config: SshConfig {
+                WorkspaceSshNode::new(
+                    Some("home".to_string()),
+                    &SshConfig {
                         host: "100.118.61.75".to_string(),
                         ..SshConfig::default()
                     },
-                    title: "Old Home".to_string(),
-                    terminal_ids: Vec::new(),
-                    readiness: NodeReadiness::Ready,
-                },
+                    "Old Home".to_string(),
+                    Vec::new(),
+                    NodeReadiness::Ready,
+                ),
             ),
             (
                 NodeId::new("node-prod"),
-                WorkspaceSshNode {
-                    saved_connection_id: Some("prod".to_string()),
-                    config: SshConfig {
+                WorkspaceSshNode::new(
+                    Some("prod".to_string()),
+                    &SshConfig {
                         host: "prod.example.com".to_string(),
                         ..SshConfig::default()
                     },
-                    title: "Production".to_string(),
-                    terminal_ids: Vec::new(),
-                    readiness: NodeReadiness::Ready,
-                },
+                    "Production".to_string(),
+                    Vec::new(),
+                    NodeReadiness::Ready,
+                ),
             ),
         ]);
 
@@ -456,7 +478,7 @@ mod runtime_save_tests {
         let home = nodes.get(&NodeId::new("node-home")).unwrap();
         let prod = nodes.get(&NodeId::new("node-prod")).unwrap();
         assert_eq!(home.title, "Renamed Home");
-        assert_eq!(home.config.host, "100.118.61.75");
+        assert_eq!(home.endpoint.host, "100.118.61.75");
         assert_eq!(prod.title, "Production");
     }
 }
@@ -571,10 +593,13 @@ pub(super) fn serial_profile_flow_from_terminal(
     }
 }
 
-pub(super) fn zeroizing_secret_clone(value: &str) -> zeroize::Zeroizing<String> {
-    zeroize::Zeroizing::new(value.to_string())
+pub(super) fn take_zeroizing_secret(value: &mut String) -> zeroize::Zeroizing<String> {
+    // Preserve the UI allocation while transferring it to the runtime secret owner.
+    zeroize::Zeroizing::new(std::mem::take(value))
 }
 
-pub(super) fn zeroizing_non_empty_secret(value: &str) -> Option<zeroize::Zeroizing<String>> {
-    (!value.is_empty()).then(|| zeroizing_secret_clone(value))
+pub(super) fn take_zeroizing_non_empty_secret(
+    value: &mut String,
+) -> Option<zeroize::Zeroizing<String>> {
+    (!value.is_empty()).then(|| take_zeroizing_secret(value))
 }

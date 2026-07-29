@@ -2,12 +2,14 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use std::process::Stdio;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use oxideterm_ai::{
     AiChatMessage, AiChatRole, AiChatStreamConfig, AiStreamEvent,
     provider_chat_requires_key as ai_provider_chat_requires_key, stream_chat_completion,
 };
+use oxideterm_editor_core::utf16::replace_utf16;
 use oxideterm_environment::{
     GitActionPlan as TerminalGitActionPlan, GitBranchListOutcome, GitBranchReference,
     GitCommandOutput, GitOperationKind, GitProbeKey, GitProbeOutcome, GitProbeScope,
@@ -17,9 +19,8 @@ use oxideterm_environment::{
     git_repo_root_args, git_staged_diff_patch_args, git_staged_diff_stat_args, git_status_args,
     git_worktree_list_args, infer_terminal_cwd_from_text, interpret_git_branch_list_outputs,
     interpret_git_command_outputs_with_status_and_operation, interpret_git_staged_diff_outputs,
-    parse_shell_branch_list_output, parse_shell_probe_output, parse_shell_staged_diff_output,
-    preferred_git_cwd, remote_shell_branch_list_command, remote_shell_probe_command,
-    remote_shell_staged_diff_command, shell_quote,
+    parse_shell_branch_list_output, parse_shell_staged_diff_output, preferred_git_cwd,
+    remote_shell_branch_list_command, remote_shell_staged_diff_command, shell_quote,
 };
 use oxideterm_ssh::NodeId;
 use tokio::process::Command;
@@ -28,22 +29,17 @@ use super::*;
 
 #[cfg(windows)]
 const TERMINAL_GIT_CREATE_NO_WINDOW: u32 = 0x08000000;
-const TERMINAL_GIT_PROBE_TTL_MS: u64 = 5_000;
-const TERMINAL_GIT_PROBE_TIMEOUT: Duration = Duration::from_secs(4);
+pub(super) const TERMINAL_GIT_PROBE_TTL_MS: u64 = 5_000;
+pub(super) const TERMINAL_GIT_PROBE_TIMEOUT: Duration = Duration::from_secs(4);
 const TERMINAL_GIT_BRANCH_LIST_TIMEOUT: Duration = Duration::from_secs(4);
 const TERMINAL_GIT_AI_DIFF_TIMEOUT: Duration = Duration::from_secs(6);
-const TERMINAL_GIT_REMOTE_MAX_OUTPUT: usize = 8 * 1024;
+pub(super) const TERMINAL_GIT_REMOTE_MAX_OUTPUT: usize = 8 * 1024;
 const TERMINAL_GIT_AI_DIFF_REMOTE_MAX_OUTPUT: usize = 128 * 1024;
 const TERMINAL_GIT_AI_DIFF_MAX_CHARS: usize = 24_000;
 const TERMINAL_GIT_COMMIT_SUBJECT_MAX_CHARS: usize = 96;
 
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub(in crate::workspace) enum TerminalGitDelivery {
-    Probe {
-        key: GitProbeKey,
-        generation: u64,
-        outcome: GitProbeOutcome,
-    },
     BranchList {
         key: GitProbeKey,
         generation: u64,
@@ -55,7 +51,7 @@ pub(in crate::workspace) enum TerminalGitDelivery {
     },
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Debug, Eq, PartialEq)]
 pub(in crate::workspace) enum TerminalGitAiCommitMessageOutcome {
     Ready(String),
     EmptyStagedDiff,
@@ -65,18 +61,65 @@ pub(in crate::workspace) enum TerminalGitAiCommitMessageOutcome {
     Error(String),
 }
 
+#[derive(Clone)]
+pub(in crate::workspace) struct TerminalGitCommitDraftRequest {
+    command: Arc<Mutex<Option<String>>>,
+}
+
+impl TerminalGitCommitDraftRequest {
+    fn new(command: String) -> Self {
+        Self {
+            command: Arc::new(Mutex::new(Some(command))),
+        }
+    }
+
+    pub(in crate::workspace) fn take(&self) -> Option<String> {
+        self.command.lock().ok()?.take()
+    }
+}
+
+#[derive(Debug, Eq, PartialEq)]
+pub(in crate::workspace) enum TerminalGitBranchError {
+    NotRepository,
+    GitUnavailable,
+    CwdUnavailable,
+    NodeUnavailable,
+    Message(String),
+}
+
+#[derive(Debug, Eq, PartialEq)]
+pub(in crate::workspace) enum TerminalGitAiCommitError {
+    NoStagedChanges,
+    NotRepository,
+    GitUnavailable,
+    CwdUnavailable,
+    NodeUnavailable,
+    InvalidMessage,
+    Message(String),
+}
+
+pub(in crate::workspace) struct TerminalGitAiCommitRequest {
+    config: AiChatStreamConfig,
+    provider_id: Option<String>,
+    requires_key: bool,
+    key_store: oxideterm_ai::AiProviderKeyStore,
+    api_key_not_found: String,
+    failed_to_get_key: String,
+    max_context_chars: usize,
+}
+
 #[derive(Default)]
 pub(in crate::workspace) struct TerminalGitBranchPickerState {
-    pub open: bool,
-    pub active_section: TerminalGitPanelSection,
-    pub key: Option<GitProbeKey>,
-    pub query: String,
-    pub branches: Vec<GitBranchReference>,
-    pub highlighted_branch: Option<String>,
-    pub loading: bool,
-    pub error: Option<String>,
-    pub ai_commit_loading: bool,
-    pub ai_commit_error: Option<String>,
+    open: bool,
+    active_section: TerminalGitPanelSection,
+    key: Option<GitProbeKey>,
+    query: String,
+    branches: Vec<GitBranchReference>,
+    highlighted_branch: Option<String>,
+    loading: bool,
+    error: Option<TerminalGitBranchError>,
+    ai_commit_loading: bool,
+    ai_commit_error: Option<TerminalGitAiCommitError>,
     ai_commit_generation: u64,
     generation: u64,
 }
@@ -88,7 +131,14 @@ impl TerminalGitBranchPickerState {
     }
 
     fn close(&mut self) {
+        let generation = self.generation;
+        let ai_commit_generation = self.ai_commit_generation;
         *self = Self::default();
+        // Generations belong to the Entity lifetime, not one panel mount. Keep
+        // them monotonic so a completion from a closed panel cannot match a
+        // later reopen of the same repository.
+        self.generation = generation;
+        self.ai_commit_generation = ai_commit_generation;
     }
 
     fn next_ai_commit_generation(&mut self) -> u64 {
@@ -193,75 +243,518 @@ pub(in crate::workspace) fn terminal_git_path_action_label_key(
     }
 }
 
-impl WorkspaceApp {
-    pub(in crate::workspace) fn active_terminal_git_snapshot(
-        &self,
-        cx: &mut Context<Self>,
-    ) -> Option<GitRepositorySnapshot> {
-        let key = self.active_terminal_git_key(cx)?;
-        self.terminal_git_store.snapshot(&key).cloned()
+impl WorkspaceTerminalEntity {
+    pub(in crate::workspace) fn git_panel_open(&self) -> bool {
+        self.git_panel.open
     }
 
-    pub(in crate::workspace) fn maybe_refresh_active_terminal_git(
+    pub(in crate::workspace) fn git_panel_active_section(&self) -> TerminalGitPanelSection {
+        self.git_panel.active_section
+    }
+
+    pub(in crate::workspace) fn set_git_panel_active_section(
         &mut self,
+        section: TerminalGitPanelSection,
+    ) {
+        self.git_panel.active_section = section;
+    }
+
+    pub(in crate::workspace) fn git_panel_query(&self) -> &str {
+        &self.git_panel.query
+    }
+
+    pub(in crate::workspace) fn git_panel_loading(&self) -> bool {
+        self.git_panel.loading
+    }
+
+    pub(in crate::workspace) fn git_panel_error(&self) -> Option<&TerminalGitBranchError> {
+        self.git_panel.error.as_ref()
+    }
+
+    pub(in crate::workspace) fn git_ai_commit_loading(&self) -> bool {
+        self.git_panel.ai_commit_loading
+    }
+
+    pub(in crate::workspace) fn git_ai_commit_error(&self) -> Option<&TerminalGitAiCommitError> {
+        self.git_panel.ai_commit_error.as_ref()
+    }
+
+    pub(in crate::workspace) fn set_git_panel_error(&mut self, error: TerminalGitBranchError) {
+        if self.git_panel.open {
+            self.git_panel.loading = false;
+            self.git_panel.error = Some(error);
+        }
+    }
+
+    pub(in crate::workspace) fn set_git_ai_commit_error(
+        &mut self,
+        error: TerminalGitAiCommitError,
+    ) {
+        if self.git_panel.open {
+            self.git_panel.ai_commit_loading = false;
+            self.git_panel.ai_commit_error = Some(error);
+        }
+    }
+
+    pub(in crate::workspace) fn open_git_panel(
+        &mut self,
+        key: GitProbeKey,
+        active_section: TerminalGitPanelSection,
         cx: &mut Context<Self>,
     ) {
-        let Some(key) = self.active_terminal_git_key(cx) else {
-            return;
-        };
-        let now_ms = terminal_git_now_ms();
-        if !self
-            .terminal_git_store
-            .should_probe(&key, now_ms, TERMINAL_GIT_PROBE_TTL_MS)
-        {
-            return;
-        }
-
-        let generation = self.terminal_git_store.mark_loading(key.clone(), now_ms);
-        match key.scope() {
-            GitProbeScope::Local => self.spawn_local_terminal_git_probe(key, generation),
-            GitProbeScope::SshNode(node_id) => {
-                let node_id = NodeId::new(node_id.clone());
-                self.spawn_remote_terminal_git_probe(key, generation, node_id, cx);
-            }
-        }
+        let generation = self.git_panel.next_generation();
+        self.git_panel.open = true;
+        self.git_panel.active_section = active_section;
+        self.git_panel.key = Some(key.clone());
+        self.git_panel.query.clear();
+        self.git_panel.branches.clear();
+        self.git_panel.highlighted_branch = None;
+        self.git_panel.loading = true;
+        self.git_panel.error = None;
+        self.git_panel.reset_ai_commit_message();
+        self.spawn_git_branch_list(key, generation, cx);
+        cx.notify();
     }
 
-    pub(in crate::workspace) fn poll_terminal_git_results(&mut self, cx: &mut Context<Self>) {
-        let mut changed = false;
-        while let Ok(delivery) = self.terminal_git_rx.try_recv() {
-            match delivery {
-                TerminalGitDelivery::Probe {
-                    key,
-                    generation,
-                    outcome,
-                } => {
-                    changed |= self.terminal_git_store.finish_probe(
-                        &key,
+    pub(in crate::workspace) fn close_git_panel(&mut self) -> bool {
+        let was_open = self.git_panel.open;
+        if was_open {
+            self.git_panel.close();
+        }
+        was_open
+    }
+
+    pub(in crate::workspace) fn replace_git_panel_query(
+        &mut self,
+        replacement_range: Option<std::ops::Range<usize>>,
+        text: &str,
+    ) -> bool {
+        if !self.git_panel.open {
+            return false;
+        }
+        replace_utf16(&mut self.git_panel.query, replacement_range, text);
+        self.git_panel.highlighted_branch = None;
+        self.ensure_git_branch_highlight();
+        true
+    }
+
+    pub(in crate::workspace) fn visible_git_branches(&self) -> Vec<GitBranchReference> {
+        let query = self.git_panel.query.trim().to_ascii_lowercase();
+        self.git_panel
+            .branches
+            .iter()
+            .filter(|branch| {
+                query.is_empty() || branch.name().to_ascii_lowercase().contains(&query)
+            })
+            .cloned()
+            .collect()
+    }
+
+    pub(in crate::workspace) fn git_query_checkout_candidate(&self) -> Option<String> {
+        let query = self.git_panel.query.trim();
+        if !git_action_arg_is_valid(query)
+            || self
+                .git_panel
+                .branches
+                .iter()
+                .any(|branch| branch.name() == query)
+        {
+            return None;
+        }
+        Some(query.to_string())
+    }
+
+    pub(in crate::workspace) fn git_query_rebase_candidate(
+        &self,
+        current_branch: Option<&str>,
+    ) -> Option<String> {
+        let query = self.git_panel.query.trim();
+        if !git_action_arg_is_valid(query) || current_branch == Some(query) {
+            return None;
+        }
+        Some(query.to_string())
+    }
+
+    pub(in crate::workspace) fn git_query_create_branch_candidate(&self) -> Option<String> {
+        let query = self.git_panel.query.trim();
+        if !git_action_arg_is_valid(query)
+            || self
+                .git_panel
+                .branches
+                .iter()
+                .any(|branch| branch.name() == query)
+        {
+            return None;
+        }
+        Some(query.to_string())
+    }
+
+    pub(in crate::workspace) fn git_query_remote_tracking_candidate(&self) -> Option<String> {
+        let query = self.git_panel.query.trim();
+        if !git_action_arg_is_valid(query) || !query.contains('/') {
+            return None;
+        }
+        self.git_panel
+            .branches
+            .iter()
+            .all(|branch| branch.name() != query)
+            .then(|| query.to_string())
+    }
+
+    pub(in crate::workspace) fn git_branch_highlighted(&self, branch_name: &str) -> bool {
+        self.git_panel.highlighted_branch.as_deref() == Some(branch_name)
+    }
+
+    pub(in crate::workspace) fn git_worktree_branch_count(&self) -> usize {
+        self.git_panel
+            .branches
+            .iter()
+            .filter(|branch| branch.worktree_path().is_some())
+            .count()
+    }
+
+    pub(in crate::workspace) fn set_git_branch_highlight(&mut self, branch_name: &str) -> bool {
+        if self.git_branch_highlighted(branch_name) {
+            return false;
+        }
+        self.git_panel.highlighted_branch = Some(branch_name.to_string());
+        true
+    }
+
+    pub(in crate::workspace) fn selected_git_branch(&self) -> Option<GitBranchReference> {
+        let visible = self.visible_git_branches();
+        self.git_panel
+            .highlighted_branch
+            .as_deref()
+            .and_then(|highlighted| {
+                visible
+                    .iter()
+                    .find(|branch| branch.name() == highlighted)
+                    .cloned()
+            })
+            .or_else(|| visible.first().cloned())
+    }
+
+    pub(in crate::workspace) fn step_git_branch_highlight(&mut self, forward: bool) {
+        let visible = self.visible_git_branches();
+        if visible.is_empty() {
+            self.git_panel.highlighted_branch = None;
+            return;
+        }
+        let current = self
+            .git_panel
+            .highlighted_branch
+            .as_deref()
+            .and_then(|highlighted| {
+                visible
+                    .iter()
+                    .position(|branch| branch.name() == highlighted)
+            });
+        let next = match (current, forward) {
+            (Some(index), true) => (index + 1).min(visible.len() - 1),
+            (Some(index), false) => index.saturating_sub(1),
+            (None, true) => 0,
+            (None, false) => visible.len() - 1,
+        };
+        self.git_panel.highlighted_branch = Some(visible[next].name().to_string());
+    }
+
+    pub(in crate::workspace) fn highlight_git_branch_edge(&mut self, last: bool) {
+        let visible = self.visible_git_branches();
+        self.git_panel.highlighted_branch = if last {
+            visible.last()
+        } else {
+            visible.first()
+        }
+        .map(|branch| branch.name().to_string());
+    }
+
+    pub(in crate::workspace) fn start_git_ai_commit_message(
+        &mut self,
+        key: GitProbeKey,
+        request: TerminalGitAiCommitRequest,
+        cx: &mut Context<Self>,
+    ) {
+        if self.git_panel.ai_commit_loading {
+            return;
+        }
+        let generation = self.git_panel.next_ai_commit_generation();
+        self.git_panel.ai_commit_loading = true;
+        self.git_panel.ai_commit_error = None;
+        let tx = self.git_action_tx.clone();
+
+        match key.scope() {
+            GitProbeScope::Local => {
+                let cwd = key.cwd().to_string();
+                self.runtime.spawn(async move {
+                    let outcome = terminal_git_generate_ai_commit_message(
+                        run_local_git_staged_diff(&cwd).await,
+                        request.config,
+                        request.provider_id,
+                        request.requires_key,
+                        request.key_store,
+                        request.api_key_not_found,
+                        request.failed_to_get_key,
+                        request.max_context_chars,
+                    )
+                    .await;
+                    let _ = tx.send(TerminalGitDelivery::AiCommitMessage {
                         generation,
                         outcome,
-                        terminal_git_now_ms(),
-                    );
-                }
+                    });
+                });
+            }
+            GitProbeScope::SshNode(node_id) => {
+                let resolved = self
+                    .node_router
+                    .resolve_connection_now(&NodeId::new(node_id.clone()));
+                let handle = match resolved {
+                    Ok(resolved) => resolved.handle,
+                    Err(_) => {
+                        self.git_panel.ai_commit_loading = false;
+                        self.git_panel.ai_commit_error =
+                            Some(TerminalGitAiCommitError::NodeUnavailable);
+                        cx.notify();
+                        return;
+                    }
+                };
+                let command = remote_shell_staged_diff_command(key.cwd());
+                self.runtime.spawn(async move {
+                    let diff_outcome = match handle
+                        .run_command_capture(
+                            &command,
+                            TERMINAL_GIT_AI_DIFF_TIMEOUT,
+                            TERMINAL_GIT_AI_DIFF_REMOTE_MAX_OUTPUT,
+                        )
+                        .await
+                    {
+                        Ok(output) => parse_shell_staged_diff_output(&output.stdout),
+                        Err(_) => GitStagedDiffOutcome::Error(
+                            oxideterm_environment::GitProbeError::new("ssh git staged diff failed"),
+                        ),
+                    };
+                    let outcome = terminal_git_generate_ai_commit_message(
+                        diff_outcome,
+                        request.config,
+                        request.provider_id,
+                        request.requires_key,
+                        request.key_store,
+                        request.api_key_not_found,
+                        request.failed_to_get_key,
+                        request.max_context_chars,
+                    )
+                    .await;
+                    let _ = tx.send(TerminalGitDelivery::AiCommitMessage {
+                        generation,
+                        outcome,
+                    });
+                });
+            }
+        }
+        cx.notify();
+    }
+
+    pub(super) fn drain_git_action_results(&mut self, cx: &mut Context<Self>) -> bool {
+        let delivery_batch =
+            delivery::drain_channel(&self.git_action_rx, delivery::USER_ACTION_DELIVERY_BUDGET);
+        let mut changed = false;
+        for delivery in delivery_batch.items {
+            match delivery {
                 TerminalGitDelivery::BranchList {
                     key,
                     generation,
                     outcome,
                 } => {
-                    changed |= self.apply_terminal_git_branch_list_result(key, generation, outcome);
+                    changed |= self.apply_git_branch_list_result(key, generation, outcome);
                 }
                 TerminalGitDelivery::AiCommitMessage {
                     generation,
                     outcome,
                 } => {
-                    changed |=
-                        self.apply_terminal_git_ai_commit_message_result(generation, outcome, cx);
+                    changed |= self.apply_git_ai_commit_message_result(generation, outcome, cx);
                 }
             }
         }
         if changed {
             cx.notify();
         }
+        delivery_batch.outcome.backlog_remaining
+    }
+
+    fn spawn_git_branch_list(&mut self, key: GitProbeKey, generation: u64, cx: &mut Context<Self>) {
+        match key.scope() {
+            GitProbeScope::Local => self.spawn_local_git_branch_list(key, generation),
+            GitProbeScope::SshNode(node_id) => {
+                let node_id = NodeId::new(node_id.clone());
+                self.spawn_remote_git_branch_list(key, generation, node_id, cx);
+            }
+        }
+    }
+
+    fn spawn_local_git_branch_list(&self, key: GitProbeKey, generation: u64) {
+        let tx = self.git_action_tx.clone();
+        let cwd = key.cwd().to_string();
+        self.runtime.spawn(async move {
+            let outcome = run_local_git_branch_list(&cwd).await;
+            let _ = tx.send(TerminalGitDelivery::BranchList {
+                key,
+                generation,
+                outcome,
+            });
+        });
+    }
+
+    fn spawn_remote_git_branch_list(
+        &mut self,
+        key: GitProbeKey,
+        generation: u64,
+        node_id: NodeId,
+        cx: &mut Context<Self>,
+    ) {
+        let resolved = self.node_router.resolve_connection_now(&node_id);
+        let handle = match resolved {
+            Ok(resolved) => resolved.handle,
+            Err(_) => {
+                self.git_panel.loading = false;
+                self.git_panel.error = Some(TerminalGitBranchError::NodeUnavailable);
+                cx.notify();
+                return;
+            }
+        };
+
+        let tx = self.git_action_tx.clone();
+        let command = remote_shell_branch_list_command(key.cwd());
+        self.runtime.spawn(async move {
+            let outcome = match handle
+                .run_command_capture(
+                    &command,
+                    TERMINAL_GIT_BRANCH_LIST_TIMEOUT,
+                    TERMINAL_GIT_REMOTE_MAX_OUTPUT,
+                )
+                .await
+            {
+                Ok(output) => parse_shell_branch_list_output(&output.stdout),
+                Err(_) => GitBranchListOutcome::Error(oxideterm_environment::GitProbeError::new(
+                    "ssh git branch list failed",
+                )),
+            };
+            let _ = tx.send(TerminalGitDelivery::BranchList {
+                key,
+                generation,
+                outcome,
+            });
+        });
+    }
+
+    fn apply_git_branch_list_result(
+        &mut self,
+        key: GitProbeKey,
+        generation: u64,
+        outcome: GitBranchListOutcome,
+    ) -> bool {
+        if !self.git_panel.open
+            || self.git_panel.key.as_ref() != Some(&key)
+            || self.git_panel.generation != generation
+        {
+            return false;
+        }
+
+        self.git_panel.loading = false;
+        match outcome {
+            GitBranchListOutcome::Ready(branches) => {
+                self.git_panel.error = None;
+                self.git_panel.highlighted_branch = branches
+                    .iter()
+                    .find(|branch| branch.current())
+                    .or_else(|| branches.first())
+                    .map(|branch| branch.name().to_string());
+                self.git_panel.branches = branches;
+            }
+            GitBranchListOutcome::NotRepository => {
+                self.git_panel.branches.clear();
+                self.git_panel.highlighted_branch = None;
+                self.git_panel.error = Some(TerminalGitBranchError::NotRepository);
+            }
+            GitBranchListOutcome::GitUnavailable => {
+                self.git_panel.branches.clear();
+                self.git_panel.highlighted_branch = None;
+                self.git_panel.error = Some(TerminalGitBranchError::GitUnavailable);
+            }
+            GitBranchListOutcome::CwdUnavailable => {
+                self.git_panel.branches.clear();
+                self.git_panel.highlighted_branch = None;
+                self.git_panel.error = Some(TerminalGitBranchError::CwdUnavailable);
+            }
+            GitBranchListOutcome::Error(error) => {
+                self.git_panel.branches.clear();
+                self.git_panel.highlighted_branch = None;
+                self.git_panel.error =
+                    Some(TerminalGitBranchError::Message(error.message().to_string()));
+            }
+        }
+        true
+    }
+
+    fn apply_git_ai_commit_message_result(
+        &mut self,
+        generation: u64,
+        outcome: TerminalGitAiCommitMessageOutcome,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if self.git_panel.ai_commit_generation != generation {
+            return false;
+        }
+
+        self.git_panel.ai_commit_loading = false;
+        match outcome {
+            TerminalGitAiCommitMessageOutcome::Ready(message) => {
+                let Some(command) = terminal_git_commit_command_from_ai_message(&message) else {
+                    self.git_panel.ai_commit_error = Some(TerminalGitAiCommitError::InvalidMessage);
+                    return true;
+                };
+                self.git_panel.close();
+                cx.emit(WorkspaceTerminalEvent::GitCommitDraftReady(
+                    TerminalGitCommitDraftRequest::new(command),
+                ));
+            }
+            TerminalGitAiCommitMessageOutcome::EmptyStagedDiff => {
+                self.git_panel.ai_commit_error = Some(TerminalGitAiCommitError::NoStagedChanges);
+            }
+            TerminalGitAiCommitMessageOutcome::NotRepository => {
+                self.git_panel.ai_commit_error = Some(TerminalGitAiCommitError::NotRepository);
+            }
+            TerminalGitAiCommitMessageOutcome::GitUnavailable => {
+                self.git_panel.ai_commit_error = Some(TerminalGitAiCommitError::GitUnavailable);
+            }
+            TerminalGitAiCommitMessageOutcome::CwdUnavailable => {
+                self.git_panel.ai_commit_error = Some(TerminalGitAiCommitError::CwdUnavailable);
+            }
+            TerminalGitAiCommitMessageOutcome::Error(message) => {
+                self.git_panel.ai_commit_error = Some(TerminalGitAiCommitError::Message(message));
+            }
+        }
+        true
+    }
+
+    fn ensure_git_branch_highlight(&mut self) {
+        let visible = self.visible_git_branches();
+        if visible
+            .iter()
+            .any(|branch| Some(branch.name()) == self.git_panel.highlighted_branch.as_deref())
+        {
+            return;
+        }
+        self.git_panel.highlighted_branch = visible.first().map(|branch| branch.name().to_string());
+    }
+}
+
+impl WorkspaceApp {
+    pub(in crate::workspace) fn active_terminal_git_snapshot(
+        &self,
+        cx: &mut Context<Self>,
+    ) -> Option<GitRepositorySnapshot> {
+        let key = self.active_terminal_git_key(cx)?;
+        self.terminal.read(cx).git_snapshot(&key)
     }
 
     pub(in crate::workspace) fn open_terminal_git_branch_picker(&mut self, cx: &mut Context<Self>) {
@@ -278,123 +771,78 @@ impl WorkspaceApp {
             TerminalGitPanelSection::Branches
         };
 
-        self.close_terminal_quick_commands_popover();
-        self.dismiss_terminal_broadcast_menu();
-        self.close_terminal_cwd_picker();
-        self.close_terminal_project_panel();
+        self.close_terminal_quick_commands_popover(cx);
+        self.dismiss_terminal_broadcast_menu(cx);
+        self.close_terminal_cwd_picker(cx);
+        self.close_terminal_project_panel(cx);
         self.terminal_command_suggestions_open = false;
         self.terminal_command_suggestion_highlighted = None;
         self.terminal_command_bar_focused = false;
         self.ime_marked_text = None;
         self.clear_ime_selection();
 
-        let generation = self.terminal_git_branch_picker.next_generation();
-        self.terminal_git_branch_picker.open = true;
-        self.terminal_git_branch_picker.active_section = active_section;
-        self.terminal_git_branch_picker.key = Some(key.clone());
-        self.terminal_git_branch_picker.query.clear();
-        self.terminal_git_branch_picker.branches.clear();
-        self.terminal_git_branch_picker.highlighted_branch = None;
-        self.terminal_git_branch_picker.loading = true;
-        self.terminal_git_branch_picker.error = None;
-        self.terminal_git_branch_picker.reset_ai_commit_message();
-        self.spawn_terminal_git_branch_list(key, generation, cx);
+        self.terminal.update(cx, |terminal, cx| {
+            terminal.open_git_panel(key, active_section, cx)
+        });
         cx.notify();
     }
 
-    pub(in crate::workspace) fn close_terminal_git_branch_picker(&mut self) -> bool {
-        let was_open = self.terminal_git_branch_picker.open;
+    pub(in crate::workspace) fn close_terminal_git_branch_picker(
+        &mut self,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let was_open = self
+            .terminal
+            .update(cx, |terminal, _cx| terminal.close_git_panel());
         if was_open {
-            self.terminal_git_branch_picker.close();
             self.ime_marked_text = None;
             self.clear_ime_selection();
         }
         was_open
     }
 
-    pub(in crate::workspace) fn visible_terminal_git_branches(&self) -> Vec<GitBranchReference> {
-        let query = self
-            .terminal_git_branch_picker
-            .query
-            .trim()
-            .to_ascii_lowercase();
-        self.terminal_git_branch_picker
-            .branches
-            .iter()
-            .filter(|branch| {
-                query.is_empty() || branch.name().to_ascii_lowercase().contains(&query)
-            })
-            .cloned()
-            .collect()
+    pub(in crate::workspace) fn visible_terminal_git_branches(
+        &self,
+        cx: &App,
+    ) -> Vec<GitBranchReference> {
+        self.terminal.read(cx).visible_git_branches()
     }
 
-    pub(in crate::workspace) fn terminal_git_query_checkout_candidate(&self) -> Option<String> {
-        let query = self.terminal_git_branch_picker.query.trim();
-        if !git_action_arg_is_valid(query) {
-            return None;
-        }
-        if self
-            .terminal_git_branch_picker
-            .branches
-            .iter()
-            .any(|branch| branch.name() == query)
-        {
-            return None;
-        }
-        Some(query.to_string())
+    pub(in crate::workspace) fn terminal_git_query_checkout_candidate(
+        &self,
+        cx: &App,
+    ) -> Option<String> {
+        self.terminal.read(cx).git_query_checkout_candidate()
     }
 
     pub(in crate::workspace) fn terminal_git_query_rebase_candidate(
         &self,
         cx: &mut Context<Self>,
     ) -> Option<String> {
-        let query = self.terminal_git_branch_picker.query.trim();
-        if !git_action_arg_is_valid(query) {
-            return None;
-        }
         let current_branch = self
             .active_terminal_git_snapshot(cx)
             .map(|snapshot| snapshot.branch.display_text().to_string());
-        if current_branch.as_deref() == Some(query) {
-            return None;
-        }
-        Some(query.to_string())
+        self.terminal
+            .read(cx)
+            .git_query_rebase_candidate(current_branch.as_deref())
     }
 
     pub(in crate::workspace) fn terminal_git_query_create_branch_candidate(
         &self,
+        cx: &App,
     ) -> Option<String> {
-        let query = self.terminal_git_branch_picker.query.trim();
-        if !git_action_arg_is_valid(query) {
-            return None;
-        }
-        if self
-            .terminal_git_branch_picker
-            .branches
-            .iter()
-            .any(|branch| branch.name() == query)
-        {
-            return None;
-        }
-        Some(query.to_string())
+        self.terminal.read(cx).git_query_create_branch_candidate()
     }
 
     pub(in crate::workspace) fn terminal_git_query_remote_tracking_candidate(
         &self,
+        cx: &App,
     ) -> Option<String> {
-        let query = self.terminal_git_branch_picker.query.trim();
-        if !git_action_arg_is_valid(query) || !query.contains('/') {
-            return None;
-        }
-        self.terminal_git_branch_picker
-            .branches
-            .iter()
-            .all(|branch| branch.name() != query)
-            .then(|| query.to_string())
+        self.terminal.read(cx).git_query_remote_tracking_candidate()
     }
 
     pub(in crate::workspace) fn checkout_terminal_git_query(&mut self, cx: &mut Context<Self>) {
-        let Some(branch_name) = self.terminal_git_query_checkout_candidate() else {
+        let Some(branch_name) = self.terminal_git_query_checkout_candidate(cx) else {
             return;
         };
         let Some(plan) = TerminalGitActionPlan::checkout_name(&branch_name) else {
@@ -422,7 +870,7 @@ impl WorkspaceApp {
         &mut self,
         cx: &mut Context<Self>,
     ) {
-        let Some(branch_name) = self.terminal_git_query_create_branch_candidate() else {
+        let Some(branch_name) = self.terminal_git_query_create_branch_candidate(cx) else {
             return;
         };
         let Some(plan) = TerminalGitActionPlan::create_branch_name(&branch_name) else {
@@ -437,7 +885,7 @@ impl WorkspaceApp {
         &mut self,
         cx: &mut Context<Self>,
     ) {
-        let Some(branch_name) = self.terminal_git_query_create_branch_candidate() else {
+        let Some(branch_name) = self.terminal_git_query_create_branch_candidate(cx) else {
             return;
         };
         let Some(plan) = TerminalGitActionPlan::rename_current_branch(&branch_name) else {
@@ -453,7 +901,7 @@ impl WorkspaceApp {
         &mut self,
         cx: &mut Context<Self>,
     ) {
-        let Some(branch_name) = self.terminal_git_query_remote_tracking_candidate() else {
+        let Some(branch_name) = self.terminal_git_query_remote_tracking_candidate(cx) else {
             return;
         };
         let Some(plan) = TerminalGitActionPlan::track_remote_branch(&branch_name) else {
@@ -475,7 +923,7 @@ impl WorkspaceApp {
             return;
         }
         if branch.current() {
-            self.close_terminal_git_branch_picker();
+            self.close_terminal_git_branch_picker(cx);
             cx.notify();
             return;
         }
@@ -521,107 +969,41 @@ impl WorkspaceApp {
         &mut self,
         cx: &mut Context<Self>,
     ) {
-        if self.terminal_git_branch_picker.ai_commit_loading {
+        if self.terminal.read(cx).git_ai_commit_loading() {
             return;
         }
 
         let Some(key) = self.active_terminal_git_key(cx) else {
-            self.terminal_git_branch_picker.ai_commit_error =
-                Some(self.i18n.t("terminal.git.ai_commit_not_repository"));
+            self.terminal.update(cx, |terminal, _cx| {
+                terminal.set_git_ai_commit_error(TerminalGitAiCommitError::NotRepository);
+            });
             cx.notify();
             return;
         };
         let config = match self.resolve_terminal_ai_inline_config() {
             Ok(config) => config,
             Err(message) => {
-                self.terminal_git_branch_picker.ai_commit_error = Some(message);
+                self.terminal.update(cx, |terminal, _cx| {
+                    terminal.set_git_ai_commit_error(TerminalGitAiCommitError::Message(message));
+                });
                 cx.notify();
                 return;
             }
         };
 
-        let generation = self.terminal_git_branch_picker.next_ai_commit_generation();
-        self.terminal_git_branch_picker.ai_commit_loading = true;
-        self.terminal_git_branch_picker.ai_commit_error = None;
-
-        let provider_id = config.provider_id.clone();
-        let requires_key = ai_provider_chat_requires_key(&config.provider_type);
-        let key_store = self.ai.models.key_store.clone();
-        let api_key_not_found = self.i18n.t("ai.model_selector.api_key_not_found");
-        let failed_to_get_key = self.i18n.t("ai.model_selector.failed_to_get_api_key");
         let context_max_chars = self.settings_store.settings().ai.context_max_chars.max(0) as usize;
-        let max_context_chars = context_max_chars.clamp(4_000, TERMINAL_GIT_AI_DIFF_MAX_CHARS);
-        let tx = self.terminal_git_tx.clone();
-
-        match key.scope() {
-            GitProbeScope::Local => {
-                let cwd = key.cwd().to_string();
-                self.forwarding_runtime.spawn(async move {
-                    let outcome = terminal_git_generate_ai_commit_message(
-                        run_local_git_staged_diff(&cwd).await,
-                        config,
-                        provider_id,
-                        requires_key,
-                        key_store,
-                        api_key_not_found,
-                        failed_to_get_key,
-                        max_context_chars,
-                    )
-                    .await;
-                    let _ = tx.send(TerminalGitDelivery::AiCommitMessage {
-                        generation,
-                        outcome,
-                    });
-                });
-            }
-            GitProbeScope::SshNode(node_id) => {
-                let resolved = self
-                    .node_router
-                    .resolve_connection_now(&NodeId::new(node_id.clone()));
-                let handle = match resolved {
-                    Ok(resolved) => resolved.handle,
-                    Err(_) => {
-                        self.terminal_git_branch_picker.ai_commit_loading = false;
-                        self.terminal_git_branch_picker.ai_commit_error =
-                            Some(self.i18n.t("terminal.git.ai_commit_node_unavailable"));
-                        cx.notify();
-                        return;
-                    }
-                };
-                let command = remote_shell_staged_diff_command(key.cwd());
-                self.forwarding_runtime.spawn(async move {
-                    let diff_outcome = match handle
-                        .run_command_capture(
-                            &command,
-                            TERMINAL_GIT_AI_DIFF_TIMEOUT,
-                            TERMINAL_GIT_AI_DIFF_REMOTE_MAX_OUTPUT,
-                        )
-                        .await
-                    {
-                        Ok(output) => parse_shell_staged_diff_output(&output.stdout),
-                        Err(_) => GitStagedDiffOutcome::Error(
-                            oxideterm_environment::GitProbeError::new("ssh git staged diff failed"),
-                        ),
-                    };
-                    let outcome = terminal_git_generate_ai_commit_message(
-                        diff_outcome,
-                        config,
-                        provider_id,
-                        requires_key,
-                        key_store,
-                        api_key_not_found,
-                        failed_to_get_key,
-                        max_context_chars,
-                    )
-                    .await;
-                    let _ = tx.send(TerminalGitDelivery::AiCommitMessage {
-                        generation,
-                        outcome,
-                    });
-                });
-            }
-        }
-        cx.notify();
+        let request = TerminalGitAiCommitRequest {
+            provider_id: config.provider_id.clone(),
+            requires_key: ai_provider_chat_requires_key(&config.provider_type),
+            config,
+            key_store: self.ai_entity.read(cx).key_store().clone(),
+            api_key_not_found: self.i18n.t("ai.model_selector.api_key_not_found"),
+            failed_to_get_key: self.i18n.t("ai.model_selector.failed_to_get_api_key"),
+            max_context_chars: context_max_chars.clamp(4_000, TERMINAL_GIT_AI_DIFF_MAX_CHARS),
+        };
+        self.terminal.update(cx, |terminal, cx| {
+            terminal.start_git_ai_commit_message(key, request, cx);
+        });
     }
 
     fn send_terminal_git_command(
@@ -630,13 +1012,17 @@ impl WorkspaceApp {
         failure_message: String,
         cx: &mut Context<Self>,
     ) {
-        let Some(pane_id) = self.active_pane_id() else {
-            self.terminal_git_branch_picker.error = Some(failure_message);
+        let Some(pane_id) = self.active_pane_id(cx) else {
+            self.terminal.update(cx, |terminal, _cx| {
+                terminal.set_git_panel_error(TerminalGitBranchError::Message(failure_message));
+            });
             cx.notify();
             return;
         };
-        let Some(pane) = self.panes.get(&pane_id).cloned() else {
-            self.terminal_git_branch_picker.error = Some(failure_message);
+        let Some(pane) = self.tab_host.read(cx).panes().get(&pane_id).cloned() else {
+            self.terminal.update(cx, |terminal, _cx| {
+                terminal.set_git_panel_error(TerminalGitBranchError::Message(failure_message));
+            });
             cx.notify();
             return;
         };
@@ -648,7 +1034,7 @@ impl WorkspaceApp {
                 pane.set_current_working_directory_from_terminal_action(cwd.to_string(), cx);
             }
         });
-        self.close_terminal_git_branch_picker();
+        self.close_terminal_git_branch_picker(cx);
         cx.notify();
     }
 
@@ -657,7 +1043,7 @@ impl WorkspaceApp {
         event: &KeyDownEvent,
         cx: &mut Context<Self>,
     ) -> bool {
-        if !self.terminal_git_branch_picker.open {
+        if !self.terminal.read(cx).git_panel_open() {
             return false;
         }
         let key = event.keystroke.key.as_str();
@@ -668,68 +1054,63 @@ impl WorkspaceApp {
 
         match key {
             "escape" => {
-                self.close_terminal_git_branch_picker();
+                self.close_terminal_git_branch_picker(cx);
                 cx.notify();
                 true
             }
             "up" | "arrowup" => {
-                if self.terminal_git_branch_picker.active_section
+                if self.terminal.read(cx).git_panel_active_section()
                     != TerminalGitPanelSection::Branches
                 {
                     return false;
                 }
-                self.step_terminal_git_branch_highlight(false);
+                self.terminal.update(cx, |terminal, _cx| {
+                    terminal.step_git_branch_highlight(false)
+                });
                 cx.notify();
                 true
             }
             "down" | "arrowdown" => {
-                if self.terminal_git_branch_picker.active_section
+                if self.terminal.read(cx).git_panel_active_section()
                     != TerminalGitPanelSection::Branches
                 {
                     return false;
                 }
-                self.step_terminal_git_branch_highlight(true);
+                self.terminal
+                    .update(cx, |terminal, _cx| terminal.step_git_branch_highlight(true));
                 cx.notify();
                 true
             }
             "home" => {
-                if self.terminal_git_branch_picker.active_section
+                if self.terminal.read(cx).git_panel_active_section()
                     != TerminalGitPanelSection::Branches
                 {
                     return false;
                 }
-                self.highlight_terminal_git_branch_edge(false);
+                self.terminal.update(cx, |terminal, _cx| {
+                    terminal.highlight_git_branch_edge(false)
+                });
                 cx.notify();
                 true
             }
             "end" => {
-                if self.terminal_git_branch_picker.active_section
+                if self.terminal.read(cx).git_panel_active_section()
                     != TerminalGitPanelSection::Branches
                 {
                     return false;
                 }
-                self.highlight_terminal_git_branch_edge(true);
+                self.terminal
+                    .update(cx, |terminal, _cx| terminal.highlight_git_branch_edge(true));
                 cx.notify();
                 true
             }
             "enter" => {
-                if self.terminal_git_branch_picker.active_section
+                if self.terminal.read(cx).git_panel_active_section()
                     != TerminalGitPanelSection::Branches
                 {
                     return false;
                 }
-                let visible = self.visible_terminal_git_branches();
-                let branch = self
-                    .terminal_git_branch_picker
-                    .highlighted_branch
-                    .as_deref()
-                    .and_then(|highlighted| {
-                        visible
-                            .iter()
-                            .find(|branch| branch.name() == highlighted)
-                            .cloned()
-                    })
-                    .or_else(|| visible.first().cloned());
+                let branch = self.terminal.read(cx).selected_git_branch();
                 if let Some(branch) = branch {
                     self.select_terminal_git_branch(branch, cx);
                 }
@@ -739,54 +1120,23 @@ impl WorkspaceApp {
         }
     }
 
-    fn step_terminal_git_branch_highlight(&mut self, forward: bool) {
-        let visible = self.visible_terminal_git_branches();
-        if visible.is_empty() {
-            self.terminal_git_branch_picker.highlighted_branch = None;
-            return;
-        }
-        let current = self
-            .terminal_git_branch_picker
-            .highlighted_branch
-            .as_deref()
-            .and_then(|highlighted| {
-                visible
-                    .iter()
-                    .position(|branch| branch.name() == highlighted)
-            });
-        let next = match (current, forward) {
-            (Some(index), true) => (index + 1).min(visible.len() - 1),
-            (Some(index), false) => index.saturating_sub(1),
-            (None, true) => 0,
-            (None, false) => visible.len() - 1,
-        };
-        self.terminal_git_branch_picker.highlighted_branch = Some(visible[next].name().to_string());
-    }
-
-    fn highlight_terminal_git_branch_edge(&mut self, last: bool) {
-        let visible = self.visible_terminal_git_branches();
-        self.terminal_git_branch_picker.highlighted_branch = if last {
-            visible.last()
-        } else {
-            visible.first()
-        }
-        .map(|branch| branch.name().to_string());
-    }
-
-    fn active_terminal_git_key(&self, cx: &mut Context<Self>) -> Option<GitProbeKey> {
+    pub(in crate::workspace) fn active_terminal_git_key(&self, cx: &App) -> Option<GitProbeKey> {
         let command_bar_settings = &self.settings_store.settings().terminal.command_bar;
         if !command_bar_settings.enabled || !command_bar_settings.git_status {
             return None;
         }
 
-        let tab = self.active_tab()?;
+        let tab = self.active_tab(cx)?;
         let tab_kind = tab.kind.clone();
         let pane_id = tab.active_pane_id?;
         let scope = match tab_kind {
             TabKind::LocalTerminal => GitProbeScope::Local,
             TabKind::SshTerminal => {
-                let session_id = self.active_terminal_session_id()?;
-                let node_id = self.terminal_ssh_nodes.get(&session_id)?;
+                let session_id = self.active_terminal_session_id(cx)?;
+                let node_id = self
+                    .workspace_runtime
+                    .read(cx)
+                    .ssh_terminal_node_id(session_id)?;
                 GitProbeScope::ssh_node(node_id.0.clone())
             }
             _ => return None,
@@ -800,12 +1150,13 @@ impl WorkspaceApp {
         &self,
         pane_id: PaneId,
         scope: &GitProbeScope,
-        cx: &mut Context<Self>,
+        cx: &App,
     ) -> Option<String> {
         let snapshot_cwd = self
             .active_terminal_cwd_snapshot(cx)
             .and_then(|snapshot| git_cwd_from_directory_snapshot(scope, &snapshot));
-        let pane = self.panes.get(&pane_id)?;
+        let tab_host = self.tab_host.read(cx);
+        let pane = tab_host.panes().get(&pane_id)?;
         let pane = pane.read(cx);
         let visible_cwd = matches!(scope, GitProbeScope::Local)
             .then(|| infer_terminal_cwd_from_text(&pane.visible_text_snapshot()))
@@ -816,246 +1167,9 @@ impl WorkspaceApp {
             GitProbeScope::SshNode(_) => cwd,
         })
     }
-
-    fn spawn_local_terminal_git_probe(&self, key: GitProbeKey, generation: u64) {
-        let tx = self.terminal_git_tx.clone();
-        let cwd = key.cwd().to_string();
-        self.forwarding_runtime.spawn(async move {
-            let outcome = run_local_git_probe(&cwd).await;
-            let _ = tx.send(TerminalGitDelivery::Probe {
-                key,
-                generation,
-                outcome,
-            });
-        });
-    }
-
-    fn spawn_remote_terminal_git_probe(
-        &mut self,
-        key: GitProbeKey,
-        generation: u64,
-        node_id: NodeId,
-        cx: &mut Context<Self>,
-    ) {
-        let resolved = self.node_router.resolve_connection_now(&node_id);
-        let handle = match resolved {
-            Ok(resolved) => resolved.handle,
-            Err(_) => {
-                let changed = self.terminal_git_store.finish_probe(
-                    &key,
-                    generation,
-                    GitProbeOutcome::Error(oxideterm_environment::GitProbeError::new(
-                        "ssh node is not ready for git probing",
-                    )),
-                    terminal_git_now_ms(),
-                );
-                if changed {
-                    cx.notify();
-                }
-                return;
-            }
-        };
-
-        let tx = self.terminal_git_tx.clone();
-        let command = remote_shell_probe_command(key.cwd());
-        self.forwarding_runtime.spawn(async move {
-            let outcome = match handle
-                .run_command_capture(
-                    &command,
-                    TERMINAL_GIT_PROBE_TIMEOUT,
-                    TERMINAL_GIT_REMOTE_MAX_OUTPUT,
-                )
-                .await
-            {
-                Ok(output) => parse_shell_probe_output(&output.stdout),
-                Err(_) => GitProbeOutcome::Error(oxideterm_environment::GitProbeError::new(
-                    "ssh git probe failed",
-                )),
-            };
-            let _ = tx.send(TerminalGitDelivery::Probe {
-                key,
-                generation,
-                outcome,
-            });
-        });
-    }
-
-    fn spawn_terminal_git_branch_list(
-        &mut self,
-        key: GitProbeKey,
-        generation: u64,
-        cx: &mut Context<Self>,
-    ) {
-        match key.scope() {
-            GitProbeScope::Local => self.spawn_local_terminal_git_branch_list(key, generation),
-            GitProbeScope::SshNode(node_id) => {
-                let node_id = NodeId::new(node_id.clone());
-                self.spawn_remote_terminal_git_branch_list(key, generation, node_id, cx);
-            }
-        }
-    }
-
-    fn spawn_local_terminal_git_branch_list(&self, key: GitProbeKey, generation: u64) {
-        let tx = self.terminal_git_tx.clone();
-        let cwd = key.cwd().to_string();
-        self.forwarding_runtime.spawn(async move {
-            let outcome = run_local_git_branch_list(&cwd).await;
-            let _ = tx.send(TerminalGitDelivery::BranchList {
-                key,
-                generation,
-                outcome,
-            });
-        });
-    }
-
-    fn spawn_remote_terminal_git_branch_list(
-        &mut self,
-        key: GitProbeKey,
-        generation: u64,
-        node_id: NodeId,
-        cx: &mut Context<Self>,
-    ) {
-        let resolved = self.node_router.resolve_connection_now(&node_id);
-        let handle = match resolved {
-            Ok(resolved) => resolved.handle,
-            Err(_) => {
-                self.terminal_git_branch_picker.loading = false;
-                self.terminal_git_branch_picker.error =
-                    Some(self.i18n.t("terminal.git.branch_node_unavailable"));
-                cx.notify();
-                return;
-            }
-        };
-
-        let tx = self.terminal_git_tx.clone();
-        let command = remote_shell_branch_list_command(key.cwd());
-        self.forwarding_runtime.spawn(async move {
-            let outcome = match handle
-                .run_command_capture(
-                    &command,
-                    TERMINAL_GIT_BRANCH_LIST_TIMEOUT,
-                    TERMINAL_GIT_REMOTE_MAX_OUTPUT,
-                )
-                .await
-            {
-                Ok(output) => parse_shell_branch_list_output(&output.stdout),
-                Err(_) => GitBranchListOutcome::Error(oxideterm_environment::GitProbeError::new(
-                    "ssh git branch list failed",
-                )),
-            };
-            let _ = tx.send(TerminalGitDelivery::BranchList {
-                key,
-                generation,
-                outcome,
-            });
-        });
-    }
-
-    fn apply_terminal_git_branch_list_result(
-        &mut self,
-        key: GitProbeKey,
-        generation: u64,
-        outcome: GitBranchListOutcome,
-    ) -> bool {
-        if !self.terminal_git_branch_picker.open
-            || self.terminal_git_branch_picker.key.as_ref() != Some(&key)
-            || self.terminal_git_branch_picker.generation != generation
-        {
-            return false;
-        }
-
-        self.terminal_git_branch_picker.loading = false;
-        match outcome {
-            GitBranchListOutcome::Ready(branches) => {
-                self.terminal_git_branch_picker.error = None;
-                self.terminal_git_branch_picker.highlighted_branch = branches
-                    .iter()
-                    .find(|branch| branch.current())
-                    .or_else(|| branches.first())
-                    .map(|branch| branch.name().to_string());
-                self.terminal_git_branch_picker.branches = branches;
-            }
-            GitBranchListOutcome::NotRepository => {
-                self.terminal_git_branch_picker.branches.clear();
-                self.terminal_git_branch_picker.highlighted_branch = None;
-                self.terminal_git_branch_picker.error =
-                    Some(self.i18n.t("terminal.git.branch_not_repository"));
-            }
-            GitBranchListOutcome::GitUnavailable => {
-                self.terminal_git_branch_picker.branches.clear();
-                self.terminal_git_branch_picker.highlighted_branch = None;
-                self.terminal_git_branch_picker.error =
-                    Some(self.i18n.t("terminal.git.branch_git_unavailable"));
-            }
-            GitBranchListOutcome::CwdUnavailable => {
-                self.terminal_git_branch_picker.branches.clear();
-                self.terminal_git_branch_picker.highlighted_branch = None;
-                self.terminal_git_branch_picker.error =
-                    Some(self.i18n.t("terminal.git.branch_cwd_unavailable"));
-            }
-            GitBranchListOutcome::Error(error) => {
-                self.terminal_git_branch_picker.branches.clear();
-                self.terminal_git_branch_picker.highlighted_branch = None;
-                self.terminal_git_branch_picker.error = Some(error.message().to_string());
-            }
-        }
-        true
-    }
-
-    fn apply_terminal_git_ai_commit_message_result(
-        &mut self,
-        generation: u64,
-        outcome: TerminalGitAiCommitMessageOutcome,
-        _cx: &mut Context<Self>,
-    ) -> bool {
-        if self.terminal_git_branch_picker.ai_commit_generation != generation {
-            return false;
-        }
-
-        self.terminal_git_branch_picker.ai_commit_loading = false;
-        match outcome {
-            TerminalGitAiCommitMessageOutcome::Ready(message) => {
-                let Some(command) = terminal_git_commit_command_from_ai_message(&message) else {
-                    self.terminal_git_branch_picker.ai_commit_error =
-                        Some(self.i18n.t("terminal.git.ai_commit_failed"));
-                    return true;
-                };
-                // The AI result becomes an editable command-bar draft. The
-                // repository mutation still happens only after the user submits it.
-                self.terminal_command_input_collapsed = false;
-                self.terminal_command_bar_focused = true;
-                self.terminal_command_bar_draft = command;
-                self.terminal_command_suggestions_open = false;
-                self.terminal_command_suggestion_highlighted = None;
-                self.ime_marked_text = None;
-                self.clear_ime_selection();
-                self.close_terminal_git_branch_picker();
-            }
-            TerminalGitAiCommitMessageOutcome::EmptyStagedDiff => {
-                self.terminal_git_branch_picker.ai_commit_error =
-                    Some(self.i18n.t("terminal.git.ai_commit_no_staged_changes"));
-            }
-            TerminalGitAiCommitMessageOutcome::NotRepository => {
-                self.terminal_git_branch_picker.ai_commit_error =
-                    Some(self.i18n.t("terminal.git.ai_commit_not_repository"));
-            }
-            TerminalGitAiCommitMessageOutcome::GitUnavailable => {
-                self.terminal_git_branch_picker.ai_commit_error =
-                    Some(self.i18n.t("terminal.git.ai_commit_git_unavailable"));
-            }
-            TerminalGitAiCommitMessageOutcome::CwdUnavailable => {
-                self.terminal_git_branch_picker.ai_commit_error =
-                    Some(self.i18n.t("terminal.git.ai_commit_cwd_unavailable"));
-            }
-            TerminalGitAiCommitMessageOutcome::Error(message) => {
-                self.terminal_git_branch_picker.ai_commit_error = Some(message);
-            }
-        }
-        true
-    }
 }
 
-async fn run_local_git_probe(cwd: &str) -> GitProbeOutcome {
+pub(super) async fn run_local_git_probe(cwd: &str) -> GitProbeOutcome {
     let root = match run_local_git_command(cwd, git_repo_root_args()).await {
         Ok(output) => output,
         Err(LocalGitProbeError::GitMissing) => return GitProbeOutcome::GitUnavailable,
@@ -1220,7 +1334,7 @@ async fn terminal_git_generate_ai_commit_message(
                 }
                 // The provider key stays inside the short-lived stream config;
                 // it is never stored in UI state, logs, or the generated prompt.
-                config.api_key = api_key;
+                config.api_key = api_key.map(oxideterm_ai::SharedAiProviderKey::new);
             }
             Err(_) if requires_key => {
                 return TerminalGitAiCommitMessageOutcome::Error(failed_to_get_key);
@@ -1340,7 +1454,7 @@ fn configure_local_git_command(command: &mut Command) {
     }
 }
 
-fn terminal_git_now_ms() -> u64 {
+pub(super) fn terminal_git_now_ms() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|duration| duration.as_millis().min(u128::from(u64::MAX)) as u64)
@@ -1499,5 +1613,14 @@ mod tests {
         let prompt = terminal_git_ai_diff_context(&context, 200);
         assert!(!prompt.contains("sk-test-secret"));
         assert!(prompt.contains("[REDACTED]"));
+    }
+
+    #[test]
+    fn commit_draft_request_is_consumed_once_across_clones() {
+        let request = TerminalGitCommitDraftRequest::new("git commit -m test".to_string());
+        let clone = request.clone();
+
+        assert_eq!(clone.take().as_deref(), Some("git commit -m test"));
+        assert!(request.take().is_none());
     }
 }

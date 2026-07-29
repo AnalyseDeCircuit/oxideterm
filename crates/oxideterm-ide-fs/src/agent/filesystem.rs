@@ -5,11 +5,31 @@ impl NodeAgentIdeFileSystem {
             router,
             registry: Arc::new(AgentRegistry::default()),
             ide_sessions: Arc::new(DashMap::new()),
+            owner_id: NEXT_IDE_OWNER_ID.fetch_add(1, Ordering::Relaxed),
             mode,
             agent_statuses: Arc::new(DashMap::new()),
             latest_agent_status: Arc::new(DashMap::new()),
             watch_subscriptions: Arc::new(DashMap::new()),
+            watch_lifecycle_locks: Arc::new(DashMap::new()),
             deploy_lock: Arc::new(Mutex::new(())),
+        }
+    }
+
+    /// Creates a stable client scope that shares backend connections while
+    /// owning independent node sessions and watch subscriptions.
+    pub fn scoped_owner(&self) -> Self {
+        Self {
+            router: self.router.clone(),
+            sftp: self.sftp.clone(),
+            registry: self.registry.clone(),
+            ide_sessions: self.ide_sessions.clone(),
+            owner_id: NEXT_IDE_OWNER_ID.fetch_add(1, Ordering::Relaxed),
+            mode: self.mode,
+            agent_statuses: self.agent_statuses.clone(),
+            latest_agent_status: self.latest_agent_status.clone(),
+            watch_subscriptions: self.watch_subscriptions.clone(),
+            watch_lifecycle_locks: self.watch_lifecycle_locks.clone(),
+            deploy_lock: self.deploy_lock.clone(),
         }
     }
 
@@ -18,7 +38,6 @@ impl NodeAgentIdeFileSystem {
         if mode == NodeAgentMode::Disabled {
             self.agent_statuses.clear();
             self.latest_agent_status.clear();
-            self.watch_subscriptions.clear();
         }
     }
 
@@ -218,8 +237,13 @@ impl NodeAgentIdeFileSystem {
         }
         let node_id = NodeId::new(node_id.into());
         let path = path.into();
-        let resolved = self
-            .acquire_ide_connection(&node_id)
+        let watch_key = IdeWatchKey::new(node_id.0.clone(), normalize_agent_watch_path(&path));
+        let lifecycle_lock = self.watch_lifecycle_lock(&watch_key);
+        let _lifecycle_guard = lifecycle_lock.lock().await;
+        let owned_watch_key = self.owned_watch_key(watch_key.clone());
+        let ide_session = self.ide_session_for_node(&node_id);
+        let resolved = ide_session
+            .acquire_connection()
             .await
             .map_err(crate::node_sftp::map_route_error)?;
         let Some(session) = self.registry.get(&resolved.connection_id) else {
@@ -235,10 +259,27 @@ impl NodeAgentIdeFileSystem {
             return Ok(None);
         }
 
-        let key = IdeWatchKey::new(node_id.0.clone(), normalize_agent_watch_path(&path));
-        if let Some(shared) = self.watch_subscriptions.get(&key)
-            && shared.connection_id == resolved.connection_id
+        if let Some(shared) = self
+            .watch_subscriptions
+            .iter()
+            .find(|entry| {
+                entry.key().watch == watch_key
+                    && entry.value().connection_id == resolved.connection_id
+            })
+            .map(|entry| entry.value().clone())
         {
+            let previous = self
+                .watch_subscriptions
+                .insert(owned_watch_key, shared.clone());
+            if let Some(previous) = previous
+                && !Arc::ptr_eq(&previous, &shared)
+                && !self
+                    .watch_subscriptions
+                    .iter()
+                    .any(|entry| Arc::ptr_eq(entry.value(), &previous))
+            {
+                previous.shutdown().await;
+            }
             return Ok(Some(IdeWatchSubscription {
                 rx: shared.events_tx.subscribe(),
             }));
@@ -248,13 +289,35 @@ impl NodeAgentIdeFileSystem {
             .watch_start(&path, ignore)
             .await
             .map_err(ide_error_from_agent_error)?;
-        let (events_tx, _) = broadcast::channel::<IdeWatchEvent>(1024);
-        let shared = Arc::new(IdeWatchShared {
-            connection_id: resolved.connection_id.clone(),
-            events_tx,
-        });
-        self.watch_subscriptions.insert(key.clone(), shared.clone());
-        spawn_watch_dispatcher(key, shared.clone(), session.subscribe_watch_events());
+        let session_key = self.session_key(&node_id.0);
+        let Some(current_session) = self.ide_sessions.get(&session_key) else {
+            // The surface can be released while watch/start is in flight.
+            // Compensate remotely, but never publish a dispatcher for the
+            // invalidated session or acquire a replacement connection.
+            let _ = session.watch_stop(&path).await;
+            return Ok(None);
+        };
+        if !Arc::ptr_eq(current_session.value(), &ide_session) {
+            drop(current_session);
+            let _ = session.watch_stop(&path).await;
+            return Ok(None);
+        }
+        let shared = Arc::new(IdeWatchShared::new(resolved.connection_id.clone()));
+        shared.start_dispatcher(watch_key, session.subscribe_watch_events());
+        let previous = self
+            .watch_subscriptions
+            .insert(owned_watch_key, shared.clone());
+        // Keep the session map read guard through publication. A concurrent
+        // release removes the session afterward and then cancels this watch.
+        drop(current_session);
+        if let Some(previous) = previous
+            && !self
+                .watch_subscriptions
+                .iter()
+                .any(|entry| Arc::ptr_eq(entry.value(), &previous))
+        {
+            previous.shutdown().await;
+        }
         Ok(Some(IdeWatchSubscription {
             rx: shared.events_tx.subscribe(),
         }))
@@ -267,20 +330,26 @@ impl NodeAgentIdeFileSystem {
     ) -> Result<(), IdeFileError> {
         let node_id = node_id.into();
         let path = path.into();
-        let key = IdeWatchKey::new(node_id.clone(), normalize_agent_watch_path(&path));
-        self.watch_subscriptions.remove(&key);
+        let watch_key = IdeWatchKey::new(&node_id, normalize_agent_watch_path(&path));
+        let lifecycle_lock = self.watch_lifecycle_lock(&watch_key);
+        let _lifecycle_guard = lifecycle_lock.lock().await;
+        let owned_watch_key = self.owned_watch_key(watch_key.clone());
+        let Some((_, shared)) = self.watch_subscriptions.remove(&owned_watch_key) else {
+            return Ok(());
+        };
+        let shared_by_other_owner = self
+            .watch_subscriptions
+            .iter()
+            .any(|entry| Arc::ptr_eq(entry.value(), &shared));
+        if shared_by_other_owner {
+            return Ok(());
+        }
+        shared.shutdown().await;
         // Tauri's IDE cleanup invalidates an existing agent/watch owner; it
         // never opens a fresh node route just to unsubscribe. Keep this path
         // cleanup-only so closing a tab or disconnecting a subtree cannot
         // revive an IDE consumer after the user intentionally tore it down.
-        let Some(connection_id) = self
-            .ide_sessions
-            .get(&node_id)
-            .and_then(|entry| entry.connection_id())
-        else {
-            return Ok(());
-        };
-        let Some(session) = self.registry.get(&connection_id) else {
+        let Some(session) = self.registry.get(&shared.connection_id) else {
             return Ok(());
         };
         session
@@ -506,35 +575,102 @@ impl NodeAgentIdeFileSystem {
         Ok(parse_grep_output(&output, &query.pattern, false))
     }
 
-    pub fn close_ide_session(&self, node_id: &str) {
-        if let Some((_, session)) = self.ide_sessions.remove(node_id) {
+    pub fn release_ide_session_for_node(&self, node_id: &str) {
+        // Each IDE surface releases only the node consumer that it owns.
+        if let Some((_, session)) = self.ide_sessions.remove(&self.session_key(node_id)) {
             session.close();
         }
+        // Remove dispatchers after invalidating the session. In-flight
+        // watch/start publication holds a session-map guard, so this ordering
+        // guarantees the final cancellation observes any late insertion.
+        self.cancel_watch_dispatchers_for_node(node_id);
     }
 
     pub fn close_all_ide_sessions(&self) {
+        // Full teardown belongs to the shared file-system owner, not one surface.
         // DashMap iteration holds shard read locks, so finish collecting keys
         // before remove acquires write locks for the same shards.
-        let node_ids = self
+        let session_keys = self
             .ide_sessions
             .iter()
             .map(|entry| entry.key().clone())
             .collect::<Vec<_>>();
-        let sessions = node_ids
+        let sessions = session_keys
             .into_iter()
-            .filter_map(|node_id| self.ide_sessions.remove(&node_id).map(|(_, session)| session))
+            .filter_map(|session_key| {
+                self.ide_sessions
+                    .remove(&session_key)
+                    .map(|(_, session)| session)
+            })
             .collect::<Vec<_>>();
         for session in sessions {
             session.close();
         }
+        self.cancel_all_watch_dispatchers();
     }
 
     pub fn release_ide_consumer(&self, node_id: &str) {
-        self.close_ide_session(node_id);
+        self.release_ide_session_for_node(node_id);
     }
 
     pub fn release_all_ide_consumers(&self) {
         self.close_all_ide_sessions();
+    }
+
+    fn cancel_watch_dispatchers_for_node(&self, node_id: &str) {
+        let watch_keys = self
+            .watch_subscriptions
+            .iter()
+            .filter(|entry| {
+                entry.key().owner_id == self.owner_id && entry.key().watch.node_id == node_id
+            })
+            .map(|entry| entry.key().clone())
+            .collect::<Vec<_>>();
+        for watch_key in watch_keys {
+            if let Some((_, shared)) = self.watch_subscriptions.remove(&watch_key) {
+                let shared_by_other_owner = self
+                    .watch_subscriptions
+                    .iter()
+                    .any(|entry| Arc::ptr_eq(entry.value(), &shared));
+                if !shared_by_other_owner {
+                    shared.cancel_now();
+                }
+            }
+        }
+    }
+
+    fn cancel_all_watch_dispatchers(&self) {
+        let watch_keys = self
+            .watch_subscriptions
+            .iter()
+            .map(|entry| entry.key().clone())
+            .collect::<Vec<_>>();
+        for watch_key in watch_keys {
+            if let Some((_, shared)) = self.watch_subscriptions.remove(&watch_key) {
+                shared.cancel_now();
+            }
+        }
+    }
+
+    fn session_key(&self, node_id: &str) -> IdeSessionKey {
+        IdeSessionKey {
+            owner_id: self.owner_id,
+            node_id: node_id.to_string(),
+        }
+    }
+
+    fn owned_watch_key(&self, watch: IdeWatchKey) -> IdeOwnedWatchKey {
+        IdeOwnedWatchKey {
+            owner_id: self.owner_id,
+            watch,
+        }
+    }
+
+    fn watch_lifecycle_lock(&self, watch_key: &IdeWatchKey) -> Arc<Mutex<()>> {
+        self.watch_lifecycle_locks
+            .entry(watch_key.clone())
+            .or_insert_with(|| Arc::new(Mutex::new(())))
+            .clone()
     }
 
     async fn ensure_ide_session_for_node(&self, node_id: &NodeId) -> Result<(), IdeFileError> {
@@ -746,8 +882,9 @@ impl NodeAgentIdeFileSystem {
     }
 
     fn ide_session_for_node(&self, node_id: &NodeId) -> Arc<IdeRemoteSessionInner> {
+        let session_key = self.session_key(&node_id.0);
         self.ide_sessions
-            .entry(node_id.0.clone())
+            .entry(session_key)
             .or_insert_with(|| {
                 Arc::new(IdeRemoteSessionInner::new(
                     node_id.clone(),
@@ -767,7 +904,7 @@ impl NodeAgentIdeFileSystem {
             .map(ToOwned::to_owned)
             .or_else(|| {
                 self.ide_sessions
-                    .get(&node_id.0)
+                    .get(&self.session_key(&node_id.0))
                     .and_then(|session| session.connection_id())
             })
             .unwrap_or_else(|| "<unresolved>".to_string());
@@ -878,27 +1015,6 @@ fn regex_escape_for_basic_grep(pattern: &str) -> String {
         escaped.push(ch);
         escaped
     })
-}
-
-fn spawn_watch_dispatcher(
-    key: IdeWatchKey,
-    shared: Arc<IdeWatchShared>,
-    mut rx: broadcast::Receiver<AgentWatchEvent>,
-) {
-    tokio::spawn(async move {
-        while let Ok(event) = rx.recv().await {
-            let event_path = normalize_agent_watch_path(&event.path);
-            if event_path != key.path
-                && !event_path.starts_with(&format!("{}/", key.path.trim_end_matches('/')))
-            {
-                continue;
-            }
-            let _ = shared.events_tx.send(IdeWatchEvent {
-                path: event.path,
-                kind: event.kind,
-            });
-        }
-    });
 }
 
 fn normalize_agent_watch_path(path: &str) -> String {

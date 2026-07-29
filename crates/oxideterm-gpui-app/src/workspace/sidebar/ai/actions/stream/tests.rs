@@ -1,9 +1,198 @@
 #[cfg(test)]
 mod ai_turn_order_tests {
-use super::*;
+    use super::*;
 
-#[test]
-fn acp_bridge_exposes_only_visible_terminal_tools() {
+    #[gpui::test]
+    fn runtime_evidence_records_are_entity_owned(cx: &mut gpui::TestAppContext) {
+        let task_runtime = Arc::new(
+            tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .expect("AI runtime"),
+        );
+        let entity = cx.new(|cx| {
+            crate::workspace::ai_state::AiWorkspaceEntity::new(
+                task_runtime,
+                oxideterm_ai::AiProviderKeyStore::new(),
+                cx,
+            )
+        });
+        entity.update(cx, |entity, _cx| {
+            let result = serde_json::json!({
+                "output": "API_KEY=supersecret123456",
+                "data": { "exitCode": 0 },
+                "meta": { "runtimeEpoch": entity.runtime_epoch() },
+            });
+            let record = entity
+                .record_ai_tool_execution_status(
+                    "conversation-a",
+                    "assistant-a",
+                    "tool-a",
+                    "run_command",
+                    r#"{"command":"codex --help API_KEY=supersecret123456"}"#,
+                    "completed",
+                    Some(&result),
+                    Some("execute"),
+                    10,
+                )
+                .expect("tool execution record");
+            let facts = entity.record_ai_tool_result_facts(&record, Some(&result), 10);
+            entity.record_ai_command_from_tool_status(
+                "run_command",
+                r#"{"command":"codex --help API_KEY=supersecret123456"}"#,
+                "completed",
+                Some(&result),
+                Some("execute"),
+            );
+
+            assert_eq!(entity.tool_execution_records.len(), 1);
+            assert!(!facts.is_empty());
+            assert_eq!(entity.tool_result_facts.len(), facts.len());
+            assert_eq!(entity.command_records().len(), 1);
+            assert_eq!(entity.cli_agent_sessions().len(), 1);
+            let retained = format!(
+                "{:?}{:?}{:?}",
+                entity.tool_execution_records,
+                entity.tool_result_facts,
+                entity.command_records()
+            );
+            assert!(!retained.contains("supersecret123456"));
+            assert!(retained.contains("[REDACTED]"));
+        });
+    }
+
+    #[test]
+    fn persisted_tool_arguments_use_key_aware_secret_redaction() {
+        let arguments = serde_json::json!({
+            "command": "curl https://example.test",
+            "apiKey": "short",
+            "headers": {
+                "Authorization": "Bearer opaque-value",
+            },
+        })
+        .to_string();
+
+        let sanitized = sanitize_ai_tool_arguments_for_persistence(&arguments);
+
+        assert!(sanitized.contains("curl https://example.test"));
+        assert!(!sanitized.contains("\"short\""));
+        assert!(!sanitized.contains("opaque-value"));
+        assert!(sanitized.contains("[REDACTED]"));
+    }
+
+    #[test]
+    fn ai_delivery_redacts_tool_payloads_and_classifies_provider_errors() {
+        let (tx, rx) = crate::workspace::delivery::ActiveDeliverySender::channel();
+        let call = AiToolCall {
+            id: "tool-secret".to_string(),
+            name: "run_command".to_string(),
+            arguments: serde_json::json!({
+                "command": "echo visible",
+                "apiKey": "short-secret",
+            })
+            .to_string(),
+        };
+
+        send_ai_tool_status_with_payload(
+            &tx,
+            1,
+            "conversation-1",
+            "assistant-1",
+            &call,
+            "completed",
+            Some(serde_json::json!({
+                "output": "export TOKEN=result-secret-value",
+            })),
+            Some("execute".to_string()),
+            Some("password=summary-secret-value".to_string()),
+            false,
+            Some("raw-secret-value".to_string()),
+            None,
+            None,
+        )
+        .expect("tool status");
+        let delivery = rx.recv().expect("tool delivery");
+        let AiStreamDeliveryEvent::ToolStatus {
+            arguments,
+            result,
+            summary,
+            raw_text,
+            ..
+        } = delivery.event
+        else {
+            panic!("expected tool status");
+        };
+        let retained = format!("{arguments}{result:?}{summary:?}{raw_text:?}");
+        assert!(!retained.contains("short-secret"));
+        assert!(!retained.contains("result-secret-value"));
+        assert!(!retained.contains("summary-secret-value"));
+        assert!(!retained.contains("raw-secret-value"));
+        assert!(retained.contains("[REDACTED]"));
+
+        send_ai_stream_delivery(
+            &tx,
+            1,
+            "conversation-1",
+            "assistant-1",
+            AiStreamDeliveryEvent::Stream(AiStreamEvent::Error(
+                "Authorization: Bearer provider-secret-value".to_string(),
+            )),
+        )
+        .expect("provider error");
+        let delivery = rx.recv().expect("error delivery");
+        assert!(matches!(
+            delivery.event,
+            AiStreamDeliveryEvent::Stream(AiStreamEvent::Error(ref error))
+                if error == "stream_failed"
+        ));
+    }
+
+    #[test]
+    fn model_visible_settings_projection_excludes_secret_bearing_configuration() {
+        let mut settings = oxideterm_settings::PersistedSettings::default();
+        settings.ai.custom_system_prompt = "private-system-prompt".to_string();
+        settings.ai.memory.content = "private-memory-content".to_string();
+        settings.ai.providers = vec![serde_json::json!({
+            "id": "private-provider",
+            "apiKey": "private-provider-key",
+        })];
+        settings.ai.mcp_servers = vec![serde_json::json!({
+            "id": "private-mcp",
+            "headers": { "Authorization": "Bearer private-mcp-token" },
+        })];
+        settings.ai.acp_agents = vec![
+            serde_json::from_value(serde_json::json!({
+                "id": "private-agent",
+                "command": "agent",
+                "args": ["--token", "private-acp-token"],
+                "env": { "AGENT_TOKEN": "private-acp-env" },
+            }))
+            .expect("ACP agent settings"),
+        ];
+
+        let projection = ai_model_visible_settings_projection(&settings);
+        let serialized = serde_json::to_string(&projection).expect("settings projection");
+
+        assert!(projection.pointer("/ai/toolUse").is_some());
+        assert!(projection.get("terminal").is_some());
+        assert!(projection.get("sftp").is_some());
+        for secret in [
+            "private-system-prompt",
+            "private-memory-content",
+            "private-provider-key",
+            "private-mcp-token",
+            "private-acp-token",
+            "private-acp-env",
+        ] {
+            assert!(!serialized.contains(secret));
+        }
+        assert!(projection.pointer("/ai/providers").is_none());
+        assert!(projection.pointer("/ai/mcpServers").is_none());
+        assert!(projection.pointer("/ai/acpAgents").is_none());
+    }
+
+    #[test]
+    fn acp_bridge_exposes_only_visible_terminal_tools() {
     let names = acp_visible_terminal_tool_definitions(true)
         .into_iter()
         .map(|definition| definition.name)
@@ -388,13 +577,13 @@ fn acp_bridge_exposes_only_visible_terminal_tools() {
         let mut config = oxideterm_ssh::SshConfig::default();
         config.host = "example.com".to_string();
         config.username = "alice".to_string();
-        let node = WorkspaceSshNode {
-            saved_connection_id: Some("conn-1".to_string()),
-            config,
-            title: "example".to_string(),
-            terminal_ids: Vec::new(),
-            readiness: NodeReadiness::Ready,
-        };
+        let node = WorkspaceSshNode::new(
+            Some("conn-1".to_string()),
+            &config,
+            "example".to_string(),
+            Vec::new(),
+            NodeReadiness::Ready,
+        );
 
         let target = ai_sftp_target_for_node(&node_id, &node, "sftp-1".to_string());
 
@@ -436,13 +625,13 @@ fn acp_bridge_exposes_only_visible_terminal_tools() {
         let mut config = oxideterm_ssh::SshConfig::default();
         config.host = "example.com".to_string();
         config.username = "alice".to_string();
-        let node = WorkspaceSshNode {
-            saved_connection_id: Some("conn-1".to_string()),
-            config,
-            title: "example".to_string(),
-            terminal_ids: Vec::new(),
-            readiness: NodeReadiness::Ready,
-        };
+        let node = WorkspaceSshNode::new(
+            Some("conn-1".to_string()),
+            &config,
+            "example".to_string(),
+            Vec::new(),
+            NodeReadiness::Ready,
+        );
 
         let target = ai_ide_workspace_target_for_node(
             &node_id,
@@ -1382,7 +1571,7 @@ fn acp_bridge_exposes_only_visible_terminal_tools() {
 
     #[test]
     fn required_tool_buffer_flushes_only_after_tool_call() {
-        let (tx, rx) = std::sync::mpsc::channel();
+        let (tx, rx) = crate::workspace::delivery::ActiveDeliverySender::channel();
         let mut assistant_content = String::new();
         let mut assistant_thinking = String::new();
         let mut buffered_content = "我已经打开了终端。".to_string();

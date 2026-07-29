@@ -2,49 +2,47 @@
 
 use super::*;
 
-use oxideterm_connection_monitor::{filesystem_capture_snapshot, filesystem_percent_severity};
+use oxideterm_connection_monitor::{filesystem_percent_severity, parse_filesystem_snapshot};
 
-impl WorkspaceApp {
-    pub(super) fn render_host_filesystems_panel(&self, cx: &mut Context<Self>) -> AnyElement {
+impl HostToolsEntity {
+    #[allow(clippy::too_many_arguments)]
+    fn render_host_filesystems_panel(
+        &self,
+        search_ime: HostToolsPlainTextImeFrame,
+        sidebar_width: f32,
+        tokens: &ThemeTokens,
+        i18n: &I18n,
+        mono_font_family: SharedString,
+        selectable_text: &SelectableTextRenderState,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let connections = self.monitor_connections();
         if connections.is_empty() {
-            return monitor_center_state(
-                self,
-                LucideIcon::HardDrive,
-                self.tokens.ui.text_muted,
-                self.i18n.t("profiler.panel.no_connection"),
+            return host_tools_center_state(
+                LucideIcon::WifiOff,
+                tokens.ui.text_muted,
+                i18n.t("profiler.panel.no_connection"),
+                selectable_text,
                 cx,
             );
         }
 
-        let selected_id = self
-            .connection_monitor
-            .selected_connection_id
+        let selected_connection_id = self.selected_connection_id_owned();
+        let selected_id = selected_connection_id
             .as_deref()
             .unwrap_or(connections[0].connection_id.as_str());
-        let snapshot = self
-            .connection_monitor
-            .host_filesystem_snapshot
-            .as_ref()
-            .filter(|_| {
-                self.connection_monitor
-                    .host_filesystem_snapshot_connection_id
-                    .as_deref()
-                    == Some(selected_id)
-            });
+        let snapshot = self.filesystem_snapshot_for(selected_id);
+        let filter = self.filesystem_filter();
+        let filesystem_search_query = self.ui.host_filesystem_search_query.clone();
         let rows = snapshot
             .map(|snapshot| {
-                visible_filesystem_rows(
-                    &snapshot.entries,
-                    &self.connection_monitor.host_filesystem_search_query,
-                    self.connection_monitor.host_filesystem_filter,
-                )
+                visible_filesystem_rows(&snapshot.entries, &filesystem_search_query, filter)
             })
             .unwrap_or_default();
         let status = snapshot
             .map(|snapshot| snapshot.status.clone())
             .unwrap_or_default();
-        self.sync_host_filesystem_list_state(&rows, selected_id);
+        self.sync_filesystem_render_rows(&rows, selected_id);
 
         div()
             .id("host-filesystems-panel")
@@ -67,86 +65,100 @@ impl WorkspaceApp {
                     .flex_col()
                     .gap_2()
                     .border_b_1()
-                    .border_color(rgba((self.tokens.ui.border << 8) | MONITOR_BORDER_ALPHA))
-                    .child(self.render_connection_switcher_row(
+                    .border_color(rgba((tokens.ui.border << 8) | MONITOR_BORDER_ALPHA))
+                    .child(self.render_connection_switcher(
                         &connections,
                         selected_id,
-                        !self.connection_monitor.host_filesystem_snapshot_polling,
+                        !self.filesystem_snapshot_in_flight(),
+                        tokens,
+                        mono_font_family.clone(),
+                        selectable_text,
                         cx,
                     ))
-                    .child(self.render_host_filesystem_search(cx))
-                    .child(self.render_host_filesystem_filter_row(cx))
+                    .child(self.render_host_filesystem_search(&search_ime, tokens, i18n, cx))
+                    .child(self.render_host_filesystem_filter_row(tokens, i18n, cx))
                     .child(self.render_host_filesystem_status_row(
                         rows.len(),
                         selected_id.to_string(),
                         status.clone(),
+                        tokens,
+                        i18n,
                         cx,
                     )),
             )
             .child(self.render_host_filesystem_list(
                 rows,
-                self.connection_monitor.host_filesystem_snapshot_polling,
+                self.filesystem_snapshot_in_flight(),
                 status,
                 selected_id,
+                sidebar_width,
+                tokens,
+                i18n,
+                mono_font_family,
+                selectable_text,
                 cx,
             ))
             .into_any_element()
     }
 
-    pub(super) fn render_host_filesystem_search(&self, cx: &mut Context<Self>) -> AnyElement {
-        let target = WorkspaceImeTarget::HostFilesystemSearch;
-        let focused = self.connection_monitor.host_filesystem_search_focused;
-        let workspace = cx.entity();
+    fn render_host_filesystem_search(
+        &self,
+        ime: &HostToolsPlainTextImeFrame,
+        tokens: &ThemeTokens,
+        i18n: &I18n,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let input = ime.input();
+        let anchor_frame = ime.clone();
         text_input_anchor_probe(
-            target.anchor_id(),
+            ime.anchor_id(),
             text_input(
-                &self.tokens,
+                tokens,
                 TextInputView {
-                    value: &self.connection_monitor.host_filesystem_search_query,
-                    placeholder: self.i18n.t("sidebar.host_filesystems.search_placeholder"),
-                    focused,
-                    caret_visible: self.new_connection_caret_visible,
+                    value: &self.ui.host_filesystem_search_query,
+                    placeholder: i18n.t("sidebar.host_filesystems.search_placeholder"),
+                    focused: self.ui.input_is_focused(input),
+                    caret_visible: ime.caret_visible(),
                     secret: false,
                     selected_all: false,
-                    selected_range: self.ime_selected_range_for_target(target),
-                    marked_text: self.marked_text_for_target(target),
+                    selected_range: ime.selected_range(),
+                    marked_text: ime.marked_text(),
                 },
             )
             .h(px(34.0))
             .cursor(CursorStyle::IBeam)
             .on_mouse_down(
                 MouseButton::Left,
-                cx.listener(move |this, event: &MouseDownEvent, window, cx| {
-                    this.connection_monitor.host_filesystem_search_focused = true;
-                    this.connection_monitor.host_process_search_focused = false;
-                    this.connection_monitor.host_process_renice_focused = false;
-                    this.connection_monitor.host_docker_search_focused = false;
-                    this.connection_monitor.host_service_search_focused = false;
-                    this.connection_monitor.host_log_search_focused = false;
-                    this.connection_monitor.host_tmux_search_focused = false;
-                    this.connection_monitor.host_port_search_focused = false;
-                    this.connection_monitor.host_schedule_search_focused = false;
-                    this.connection_monitor.host_package_search_focused = false;
-                    this.ime_marked_text = None;
-                    this.new_connection_caret_visible = true;
-                    window.focus(&this.focus_handle, cx);
-                    this.begin_ime_selection_from_mouse_down(target, event, window, cx);
+                cx.listener(move |host_tools, event: &MouseDownEvent, window, cx| {
+                    host_tools.ui.focus_input(input);
+                    // Window-owned IME selection crosses the Entity boundary once.
+                    window.dispatch_action(
+                        Box::new(HostToolsWindowRequest::new(
+                            HostToolsWindowIntent::BeginPlainTextImeSelection {
+                                input,
+                                event: event.clone(),
+                            },
+                        )),
+                        cx,
+                    );
                     cx.stop_propagation();
                 }),
-            )
-            .on_mouse_move(cx.listener(|this, event: &MouseMoveEvent, window, cx| {
-                this.update_ime_selection_drag_from_mouse_move(event, window, cx);
-            })),
-            move |anchor, _window, cx| {
-                let _ = workspace.update(cx, |this, cx| {
-                    this.update_text_input_anchor(anchor, cx);
-                });
+            ),
+            move |anchor, _window, _cx| {
+                anchor_frame.update_anchor(anchor);
             },
         )
         .into_any_element()
     }
+}
 
-    pub(super) fn render_host_filesystem_filter_row(&self, cx: &mut Context<Self>) -> AnyElement {
+impl HostToolsEntity {
+    fn render_host_filesystem_filter_row(
+        &self,
+        tokens: &ThemeTokens,
+        i18n: &I18n,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let mut row = div()
             .id("host-filesystem-filter-scroll")
             .flex()
@@ -164,51 +176,53 @@ impl WorkspaceApp {
             FilesystemFilter::LargeItems,
             FilesystemFilter::Blocks,
         ] {
-            row = row.child(self.render_host_filesystem_filter_chip(filter, cx));
+            row = row.child(self.render_host_filesystem_filter_chip(filter, tokens, i18n, cx));
         }
         row.into_any_element()
     }
 
-    pub(super) fn render_host_filesystem_filter_chip(
+    fn render_host_filesystem_filter_chip(
         &self,
         filter: FilesystemFilter,
+        tokens: &ThemeTokens,
+        i18n: &I18n,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let active = self.connection_monitor.host_filesystem_filter == filter;
-        self.host_tools_filter_chip(active)
-            .child(self.i18n.t(filesystem_filter_label_key(filter)))
+        let active = self.filesystem_filter() == filter;
+        host_filesystem_filter_chip(active, tokens)
+            .child(i18n.t(filesystem_filter_label_key(filter)))
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |this, _event, _window, cx| {
-                    if this.connection_monitor.host_filesystem_filter != filter {
-                        this.connection_monitor.host_filesystem_filter = filter;
-                        this.connection_monitor.host_filesystem_expanded_index = None;
-                    }
-                    cx.notify();
+                    this.select_filesystem_filter(filter, cx);
                     cx.stop_propagation();
                 }),
             )
             .into_any_element()
     }
+}
 
-    pub(super) fn render_host_filesystem_status_row(
+impl HostToolsEntity {
+    fn render_host_filesystem_status_row(
         &self,
         visible_count: usize,
         selected_id: String,
         status: ResourceFilesystemStatus,
+        tokens: &ThemeTokens,
+        i18n: &I18n,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let theme = self.tokens.ui;
+        let theme = tokens.ui;
         let capability_label = match status {
             ResourceFilesystemStatus::Available {
                 capability: FilesystemCommandCapability::Full,
                 ..
-            } => self.i18n.t("sidebar.host_filesystems.capability.full"),
+            } => i18n.t("sidebar.host_filesystems.capability.full"),
             ResourceFilesystemStatus::Available {
                 capability: FilesystemCommandCapability::Partial,
                 ..
-            } => self.i18n.t("sidebar.host_filesystems.capability.partial"),
-            _ => self.i18n.t("sidebar.host_filesystems.capability.unknown"),
+            } => i18n.t("sidebar.host_filesystems.capability.partial"),
+            _ => i18n.t("sidebar.host_filesystems.capability.unknown"),
         };
         div()
             .flex()
@@ -221,7 +235,7 @@ impl WorkspaceApp {
             .child(div().min_w_0().flex_1().truncate().child(format!(
                 "{} {} · {}",
                 visible_count,
-                self.i18n.t("sidebar.host_filesystems.count_suffix"),
+                i18n.t("sidebar.host_filesystems.count_suffix"),
                 capability_label
             )))
             .child(
@@ -230,7 +244,8 @@ impl WorkspaceApp {
                     .flex()
                     .items_center()
                     .gap_1()
-                    .child(self.workspace_tooltip_icon_button(
+                    .child(host_tools_tooltip_icon_button(
+                        tokens,
                         LucideIcon::Terminal,
                         13.0,
                         rgb(theme.text),
@@ -242,107 +257,116 @@ impl WorkspaceApp {
                             idle_opacity: 1.0,
                             ..oxideterm_gpui_ui::button::IconButtonOptions::compact(24.0)
                         },
-                        self.i18n.t("sidebar.host_filesystems.actions.diagnostic"),
+                        i18n.t("sidebar.host_filesystems.actions.diagnostic"),
                         "host-filesystem-diagnostic",
                         true,
                         cx.listener({
                             let selected_id = selected_id.clone();
-                            move |this, _event, window, cx| {
-                                this.open_host_filesystem_diagnostic_terminal(
+                            let i18n = i18n.clone();
+                            move |host_tools, _event, window, cx| {
+                                host_tools.dispatch_host_filesystem_diagnostic(
                                     selected_id.clone(),
+                                    &i18n,
                                     window,
                                     cx,
                                 );
                                 cx.stop_propagation();
                             }
                         }),
-                        cx.entity(),
                     ))
-                    .child(self.workspace_tooltip_icon_button(
+                    .child(host_tools_tooltip_icon_button(
+                        tokens,
                         LucideIcon::RefreshCw,
                         13.0,
                         rgb(theme.text),
                         oxideterm_gpui_ui::button::IconButtonOptions {
                             size: 24.0,
-                            disabled: self.connection_monitor.host_filesystem_snapshot_polling,
+                            disabled: self.filesystem_snapshot_in_flight(),
                             has_background: true,
                             background: Some(rgb(theme.bg_hover)),
                             hover_background: Some(rgb(theme.bg_panel)),
                             idle_opacity: 1.0,
                             ..oxideterm_gpui_ui::button::IconButtonOptions::compact(24.0)
                         },
-                        self.i18n.t("sidebar.host_filesystems.actions.refresh"),
+                        i18n.t("sidebar.host_filesystems.actions.refresh"),
                         "host-filesystem-refresh",
                         true,
-                        cx.listener(move |this, _event, _window, cx| {
-                            this.request_host_filesystems_snapshot(
-                                selected_id.clone(),
-                                HostSnapshotFeedback::Toast,
-                                cx,
-                            );
+                        cx.listener(move |host_tools, _event, _window, cx| {
+                            host_tools
+                                .request_active_tool_snapshot(HostSnapshotFeedback::Toast, cx);
                             cx.stop_propagation();
                         }),
-                        cx.entity(),
                     )),
             )
             .into_any_element()
     }
 
-    pub(super) fn render_host_filesystem_list(
+    #[allow(clippy::too_many_arguments)]
+    fn render_host_filesystem_list(
         &self,
         rows: Vec<ResourceFilesystemEntry>,
         loading: bool,
         status: ResourceFilesystemStatus,
         selected_id: &str,
+        sidebar_width: f32,
+        tokens: &ThemeTokens,
+        i18n: &I18n,
+        mono_font_family: SharedString,
+        selectable_text: &SelectableTextRenderState,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         if loading && rows.is_empty() {
-            return monitor_center_state(
-                self,
+            return host_tools_center_state(
                 LucideIcon::HardDrive,
-                self.tokens.ui.text_muted,
-                self.i18n.t("sidebar.host_filesystems.loading"),
+                tokens.ui.text_muted,
+                i18n.t("sidebar.host_filesystems.loading"),
+                selectable_text,
                 cx,
             );
         }
         match status {
             ResourceFilesystemStatus::Unavailable => {
-                return monitor_center_state(
-                    self,
+                return host_tools_center_state(
                     LucideIcon::HardDrive,
-                    self.tokens.ui.text_muted,
-                    self.i18n.t("sidebar.host_filesystems.unavailable"),
+                    tokens.ui.text_muted,
+                    i18n.t("sidebar.host_filesystems.unavailable"),
+                    selectable_text,
                     cx,
                 );
             }
             ResourceFilesystemStatus::Error { message } => {
-                return monitor_center_state(
-                    self,
+                return host_tools_center_state(
                     LucideIcon::AlertTriangle,
                     MONITOR_RED,
-                    self.i18n_replace("sidebar.host_filesystems.error", &[("error", message)]),
+                    host_filesystem_i18n_replace(
+                        i18n,
+                        "sidebar.host_filesystems.error",
+                        &[("error", message)],
+                    ),
+                    selectable_text,
                     cx,
                 );
             }
             ResourceFilesystemStatus::Unknown | ResourceFilesystemStatus::Available { .. } => {}
         }
         if rows.is_empty() {
-            return monitor_center_state(
-                self,
+            return host_tools_center_state(
                 LucideIcon::HardDrive,
-                self.tokens.ui.text_muted,
-                self.i18n.t("sidebar.host_filesystems.empty"),
+                tokens.ui.text_muted,
+                i18n.t("sidebar.host_filesystems.empty"),
+                selectable_text,
                 cx,
             );
         }
 
         let rows = Arc::new(rows);
         let selected_id = Arc::new(selected_id.to_string());
-        let state = self.connection_monitor.host_filesystem_list_state.clone();
+        let state = self.filesystem_list_state();
         let spec = TauriVirtualListSpec::new(px(HOST_FILESYSTEM_LIST_ESTIMATED_ROW_HEIGHT), 8);
-        let workspace = cx.entity();
-        let show_context_columns =
-            self.ai.chat.sidebar_width >= HOST_FILESYSTEM_CONTEXT_COLUMNS_MIN_WIDTH;
+        let host_tools = cx.entity();
+        let tokens = *tokens;
+        let i18n = i18n.clone();
+        let show_context_columns = sidebar_width >= HOST_FILESYSTEM_CONTEXT_COLUMNS_MIN_WIDTH;
         div()
             .w_full()
             .min_w_0()
@@ -351,7 +375,7 @@ impl WorkspaceApp {
             .flex()
             .flex_col()
             .overflow_hidden()
-            .child(self.render_host_filesystem_table_header(show_context_columns))
+            .child(self.render_host_filesystem_table_header(show_context_columns, &tokens, &i18n))
             .child(
                 div()
                     .flex_1()
@@ -361,14 +385,16 @@ impl WorkspaceApp {
                         state,
                         spec,
                         move |index, _window, cx| {
-                            let rows = rows.clone();
-                            let selected_id = selected_id.clone();
-                            workspace.update(cx, |this, cx| {
-                                this.render_host_filesystem_row(
+                            let mono_font_family = mono_font_family.clone();
+                            host_tools.update(cx, |host_tools, cx| {
+                                host_tools.render_host_filesystem_row(
                                     selected_id.as_str(),
                                     index,
                                     rows.get(index).cloned(),
                                     show_context_columns,
+                                    &tokens,
+                                    &i18n,
+                                    mono_font_family,
                                     cx,
                                 )
                             })
@@ -378,11 +404,13 @@ impl WorkspaceApp {
             .into_any_element()
     }
 
-    pub(super) fn render_host_filesystem_table_header(
+    fn render_host_filesystem_table_header(
         &self,
         show_context_columns: bool,
+        tokens: &ThemeTokens,
+        i18n: &I18n,
     ) -> AnyElement {
-        let theme = self.tokens.ui;
+        let theme = tokens.ui;
         div()
             .flex_none()
             .w_full()
@@ -402,14 +430,14 @@ impl WorkspaceApp {
                     .min_w_0()
                     .flex_1()
                     .truncate()
-                    .child(self.i18n.t("sidebar.host_filesystems.columns.path")),
+                    .child(i18n.t("sidebar.host_filesystems.columns.path")),
             )
             .child(
                 div()
                     .flex_none()
                     .w(px(HOST_FILESYSTEM_KIND_COLUMN_WIDTH))
                     .truncate()
-                    .child(self.i18n.t("sidebar.host_filesystems.columns.kind")),
+                    .child(i18n.t("sidebar.host_filesystems.columns.kind")),
             )
             .child(
                 div()
@@ -417,7 +445,7 @@ impl WorkspaceApp {
                     .w(px(HOST_FILESYSTEM_USAGE_COLUMN_WIDTH))
                     .flex()
                     .justify_end()
-                    .child(self.i18n.t("sidebar.host_filesystems.columns.usage")),
+                    .child(i18n.t("sidebar.host_filesystems.columns.usage")),
             )
             .child(
                 div()
@@ -425,7 +453,7 @@ impl WorkspaceApp {
                     .w(px(HOST_FILESYSTEM_INODE_COLUMN_WIDTH))
                     .flex()
                     .justify_end()
-                    .child(self.i18n.t("sidebar.host_filesystems.columns.inode")),
+                    .child(i18n.t("sidebar.host_filesystems.columns.inode")),
             )
             .when(show_context_columns, |header| {
                 header
@@ -434,7 +462,7 @@ impl WorkspaceApp {
                             .flex_none()
                             .w(px(HOST_FILESYSTEM_FS_COLUMN_WIDTH))
                             .truncate()
-                            .child(self.i18n.t("sidebar.host_filesystems.columns.fs")),
+                            .child(i18n.t("sidebar.host_filesystems.columns.fs")),
                     )
                     .child(
                         div()
@@ -442,38 +470,41 @@ impl WorkspaceApp {
                             .w(px(HOST_FILESYSTEM_SIZE_COLUMN_WIDTH))
                             .flex()
                             .justify_end()
-                            .child(self.i18n.t("sidebar.host_filesystems.columns.size")),
+                            .child(i18n.t("sidebar.host_filesystems.columns.size")),
                     )
                     .child(
                         div()
                             .flex_none()
                             .w(px(HOST_FILESYSTEM_RO_COLUMN_WIDTH))
                             .truncate()
-                            .child(self.i18n.t("sidebar.host_filesystems.columns.read_only")),
+                            .child(i18n.t("sidebar.host_filesystems.columns.read_only")),
                     )
             })
             .into_any_element()
     }
 
-    pub(super) fn render_host_filesystem_row(
+    #[allow(clippy::too_many_arguments)]
+    fn render_host_filesystem_row(
         &self,
         connection_id: &str,
         index: usize,
         entry: Option<ResourceFilesystemEntry>,
         show_context_columns: bool,
+        tokens: &ThemeTokens,
+        i18n: &I18n,
+        mono_font_family: SharedString,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let Some(entry) = entry else {
             return div().into_any_element();
         };
-        let expanded = self.connection_monitor.host_filesystem_expanded_index == Some(index);
-        let theme = self.tokens.ui;
-        let mono_font = settings_mono_font_family(self.settings_store.settings());
-        let kind = host_filesystem_kind_display(&self.i18n, &entry.kind);
-        let usage = host_filesystem_usage_label(&self.i18n, &entry);
+        let expanded = self.filesystem_expanded_index() == Some(index);
+        let theme = tokens.ui;
+        let kind = host_filesystem_kind_display(i18n, &entry.kind);
+        let usage = host_filesystem_usage_label(i18n, &entry);
         let inode = host_filesystem_percent_dash(&entry.inode_percent);
         let size = host_filesystem_size_label(&entry.size_bytes);
-        let read_only = host_filesystem_read_only_display(&self.i18n, entry.read_only);
+        let read_only = host_filesystem_read_only_display(i18n, entry.read_only);
 
         div()
             .w_full()
@@ -500,7 +531,7 @@ impl WorkspaceApp {
                             .truncate()
                             .text_size(px(HOST_PROCESS_TABLE_COMMAND_TEXT_SIZE))
                             .text_color(rgb(host_filesystem_path_color(&entry, theme.text)))
-                            .font_family(mono_font.clone())
+                            .font_family(mono_font_family.clone())
                             .child(host_filesystem_blank_dash(&entry.path)),
                     )
                     .child(
@@ -510,7 +541,7 @@ impl WorkspaceApp {
                             .truncate()
                             .text_size(px(HOST_PROCESS_TABLE_VALUE_TEXT_SIZE))
                             .text_color(rgb(theme.text_muted))
-                            .font_family(mono_font.clone())
+                            .font_family(mono_font_family.clone())
                             .child(kind),
                     )
                     .child(
@@ -525,7 +556,7 @@ impl WorkspaceApp {
                                 &entry.used_percent,
                                 theme.text_muted,
                             )))
-                            .font_family(mono_font.clone())
+                            .font_family(mono_font_family.clone())
                             .child(usage),
                     )
                     .child(
@@ -540,7 +571,7 @@ impl WorkspaceApp {
                                 &entry.inode_percent,
                                 theme.text_muted,
                             )))
-                            .font_family(mono_font.clone())
+                            .font_family(mono_font_family.clone())
                             .child(inode),
                     )
                     .when(show_context_columns, |row| {
@@ -551,7 +582,7 @@ impl WorkspaceApp {
                                 .truncate()
                                 .text_size(px(HOST_PROCESS_TABLE_VALUE_TEXT_SIZE))
                                 .text_color(rgb(theme.text_muted))
-                                .font_family(mono_font.clone())
+                                .font_family(mono_font_family.clone())
                                 .child(host_filesystem_blank_dash(&entry.fs_type)),
                         )
                         .child(
@@ -563,7 +594,7 @@ impl WorkspaceApp {
                                 .truncate()
                                 .text_size(px(HOST_PROCESS_TABLE_VALUE_TEXT_SIZE))
                                 .text_color(rgb(theme.text_muted))
-                                .font_family(mono_font.clone())
+                                .font_family(mono_font_family.clone())
                                 .child(size.clone()),
                         )
                         .child(
@@ -577,7 +608,7 @@ impl WorkspaceApp {
                                 } else {
                                     theme.text_muted
                                 }))
-                                .font_family(mono_font.clone())
+                                .font_family(mono_font_family.clone())
                                 .child(read_only.clone()),
                         )
                     }),
@@ -598,41 +629,50 @@ impl WorkspaceApp {
                             .truncate()
                             .text_size(px(HOST_PROCESS_TABLE_META_TEXT_SIZE))
                             .text_color(rgb(theme.text_muted))
-                            .font_family(mono_font)
+                            .font_family(mono_font_family.clone())
                             .child(host_filesystem_meta_label(
-                                &self.i18n,
+                                i18n,
                                 &entry,
                                 show_context_columns,
                             )),
                     )
-                    .child(self.render_host_filesystem_attention_badges(&entry))
-                    .child(self.render_host_filesystem_inline_actions(connection_id, &entry, cx)),
+                    .child(self.render_host_filesystem_attention_badges(&entry, tokens, i18n))
+                    .child(self.render_host_filesystem_inline_actions(
+                        connection_id,
+                        &entry,
+                        tokens,
+                        i18n,
+                        cx,
+                    )),
             )
             .when(expanded, |row| {
-                row.child(self.render_host_filesystem_detail(&entry))
+                row.child(self.render_host_filesystem_detail(
+                    &entry,
+                    tokens,
+                    i18n,
+                    mono_font_family,
+                ))
             })
             .on_mouse_down(
                 MouseButton::Left,
-                cx.listener(move |this, _event, _window, cx| {
-                    if this.connection_monitor.host_filesystem_expanded_index == Some(index) {
-                        this.connection_monitor.host_filesystem_expanded_index = None;
-                    } else {
-                        this.connection_monitor.host_filesystem_expanded_index = Some(index);
-                    }
-                    cx.notify();
+                cx.listener(move |host_tools, _event, _window, cx| {
+                    // Expansion is local view state and must not trigger a remote scan.
+                    host_tools.toggle_filesystem_expanded(index, cx);
                     cx.stop_propagation();
                 }),
             )
             .into_any_element()
     }
 
-    pub(super) fn render_host_filesystem_inline_actions(
+    fn render_host_filesystem_inline_actions(
         &self,
         connection_id: &str,
         entry: &ResourceFilesystemEntry,
+        tokens: &ThemeTokens,
+        i18n: &I18n,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let theme = self.tokens.ui;
+        let theme = tokens.ui;
         let path = entry.path.clone();
         div()
             .flex_none()
@@ -640,7 +680,8 @@ impl WorkspaceApp {
             .items_center()
             .justify_end()
             .gap(px(4.0))
-            .child(self.workspace_tooltip_icon_button(
+            .child(host_tools_tooltip_icon_button(
+                tokens,
                 LucideIcon::Copy,
                 12.0,
                 rgb(theme.text),
@@ -652,16 +693,16 @@ impl WorkspaceApp {
                     idle_opacity: 1.0,
                     ..oxideterm_gpui_ui::button::IconButtonOptions::compact(22.0)
                 },
-                self.i18n.t("sidebar.host_filesystems.actions.copy_path"),
+                i18n.t("sidebar.host_filesystems.actions.copy_path"),
                 "host-filesystem-copy-path",
                 true,
-                cx.listener(move |this, _event, _window, cx| {
-                    this.copy_host_filesystem_path(path.clone(), cx);
+                cx.listener(move |host_tools, _event, _window, cx| {
+                    host_tools.copy_host_filesystem_path(path.clone(), cx);
                     cx.stop_propagation();
                 }),
-                cx.entity(),
             ))
-            .child(self.workspace_tooltip_icon_button(
+            .child(host_tools_tooltip_icon_button(
+                tokens,
                 LucideIcon::Terminal,
                 12.0,
                 rgb(theme.text),
@@ -673,28 +714,31 @@ impl WorkspaceApp {
                     idle_opacity: 1.0,
                     ..oxideterm_gpui_ui::button::IconButtonOptions::compact(22.0)
                 },
-                self.i18n.t("sidebar.host_filesystems.actions.diagnostic"),
+                i18n.t("sidebar.host_filesystems.actions.diagnostic"),
                 "host-filesystem-row-diagnostic",
                 true,
                 cx.listener({
                     let connection_id = connection_id.to_string();
-                    move |this, _event, window, cx| {
-                        this.open_host_filesystem_diagnostic_terminal(
+                    let i18n = i18n.clone();
+                    move |host_tools, _event, window, cx| {
+                        host_tools.dispatch_host_filesystem_diagnostic(
                             connection_id.clone(),
+                            &i18n,
                             window,
                             cx,
                         );
                         cx.stop_propagation();
                     }
                 }),
-                cx.entity(),
             ))
             .into_any_element()
     }
 
-    pub(super) fn render_host_filesystem_attention_badges(
+    fn render_host_filesystem_attention_badges(
         &self,
         entry: &ResourceFilesystemEntry,
+        tokens: &ThemeTokens,
+        i18n: &I18n,
     ) -> AnyElement {
         let keys = filesystem_attention_label_keys(entry);
         if keys.is_empty() {
@@ -704,7 +748,7 @@ impl WorkspaceApp {
         let color = match severity {
             FilesystemEntrySeverity::Critical => MONITOR_RED,
             FilesystemEntrySeverity::Warning => MONITOR_AMBER,
-            FilesystemEntrySeverity::Normal => self.tokens.ui.text_muted,
+            FilesystemEntrySeverity::Normal => tokens.ui.text_muted,
         };
         let mut row = div()
             .flex_none()
@@ -724,22 +768,24 @@ impl WorkspaceApp {
                     .bg(rgba((color << 8) | MONITOR_TINT_ALPHA))
                     .text_size(px(10.0))
                     .text_color(rgb(color))
-                    .child(self.i18n.t(key)),
+                    .child(i18n.t(key)),
             );
         }
         row.into_any_element()
     }
 
-    pub(super) fn render_host_filesystem_detail(
+    fn render_host_filesystem_detail(
         &self,
         entry: &ResourceFilesystemEntry,
+        tokens: &ThemeTokens,
+        i18n: &I18n,
+        mono_font_family: SharedString,
     ) -> AnyElement {
-        let theme = self.tokens.ui;
-        let mono_font = settings_mono_font_family(self.settings_store.settings());
+        let theme = tokens.ui;
         div()
             .mx_3()
             .mb_2()
-            .rounded(px(self.tokens.radii.md))
+            .rounded(px(tokens.radii.md))
             .border_1()
             .border_color(rgba((theme.border << 8) | MONITOR_BORDER_ALPHA))
             .bg(rgb(theme.bg_panel))
@@ -751,136 +797,134 @@ impl WorkspaceApp {
                     .flex()
                     .flex_col()
                     .gap_1()
-                    .font_family(mono_font)
+                    .font_family(mono_font_family)
                     .text_size(px(HOST_PROCESS_DETAIL_TEXT_SIZE))
                     .text_color(rgb(theme.text))
                     .child(format!(
                         "{}: {}",
-                        self.i18n.t("sidebar.host_filesystems.columns.path"),
+                        i18n.t("sidebar.host_filesystems.columns.path"),
                         host_filesystem_blank_dash(&entry.path)
                     ))
                     .child(format!(
                         "{}: {}",
-                        self.i18n.t("sidebar.host_filesystems.columns.kind"),
-                        host_filesystem_kind_display(&self.i18n, &entry.kind)
+                        i18n.t("sidebar.host_filesystems.columns.kind"),
+                        host_filesystem_kind_display(i18n, &entry.kind)
                     ))
                     .child(format!(
                         "{}: {}",
-                        self.i18n.t("sidebar.host_filesystems.columns.device"),
+                        i18n.t("sidebar.host_filesystems.columns.device"),
                         host_filesystem_blank_dash(&entry.device)
                     ))
                     .child(format!(
                         "{}: {}",
-                        self.i18n.t("sidebar.host_filesystems.columns.fs"),
+                        i18n.t("sidebar.host_filesystems.columns.fs"),
                         host_filesystem_blank_dash(&entry.fs_type)
                     ))
                     .child(format!(
                         "{}: {}",
-                        self.i18n.t("sidebar.host_filesystems.columns.size"),
+                        i18n.t("sidebar.host_filesystems.columns.size"),
                         host_filesystem_size_label(&entry.size_bytes)
                     ))
                     .child(format!(
                         "{}: {} / {}",
-                        self.i18n
-                            .t("sidebar.host_filesystems.columns.used_available"),
+                        i18n.t("sidebar.host_filesystems.columns.used_available"),
                         host_filesystem_size_label(&entry.used_bytes),
                         host_filesystem_size_label(&entry.available_bytes)
                     ))
                     .child(format!(
                         "{}: {}",
-                        self.i18n.t("sidebar.host_filesystems.columns.usage"),
+                        i18n.t("sidebar.host_filesystems.columns.usage"),
                         host_filesystem_percent_dash(&entry.used_percent)
                     ))
                     .child(format!(
                         "{}: {} / {} / {}",
-                        self.i18n.t("sidebar.host_filesystems.columns.inode"),
+                        i18n.t("sidebar.host_filesystems.columns.inode"),
                         host_filesystem_blank_dash(&entry.inode_used),
                         host_filesystem_blank_dash(&entry.inode_available),
                         host_filesystem_percent_dash(&entry.inode_percent)
                     ))
                     .child(format!(
                         "{}: {}",
-                        self.i18n.t("sidebar.host_filesystems.columns.read_only"),
-                        host_filesystem_read_only_display(&self.i18n, entry.read_only)
+                        i18n.t("sidebar.host_filesystems.columns.read_only"),
+                        host_filesystem_read_only_display(i18n, entry.read_only)
                     ))
                     .child(format!(
                         "{}: {}",
-                        self.i18n.t("sidebar.host_filesystems.columns.attention"),
-                        host_filesystem_attention_summary(&self.i18n, entry)
+                        i18n.t("sidebar.host_filesystems.columns.attention"),
+                        host_filesystem_attention_summary(i18n, entry)
                     ))
                     .child(format!(
                         "{}: {}",
-                        self.i18n.t("sidebar.host_filesystems.columns.source"),
+                        i18n.t("sidebar.host_filesystems.columns.source"),
                         host_filesystem_blank_dash(&entry.source)
                     ))
                     .child(format!(
                         "{}: {}",
-                        self.i18n.t("sidebar.host_filesystems.columns.detail"),
+                        i18n.t("sidebar.host_filesystems.columns.detail"),
                         host_filesystem_blank_dash(&entry.detail)
                     ))
                     .child(div().pt_2().whitespace_nowrap().child(format!(
                         "{}: {}",
-                        self.i18n.t("sidebar.host_filesystems.columns.options"),
+                        i18n.t("sidebar.host_filesystems.columns.options"),
                         host_filesystem_blank_dash(&entry.options)
                     ))),
             )
             .into_any_element()
     }
 
-    pub(super) fn sync_host_filesystem_list_state(
-        &self,
-        rows: &[ResourceFilesystemEntry],
-        selected_id: &str,
-    ) {
-        let signatures = rows
-            .iter()
-            .map(filesystem_row_signature)
-            .collect::<Vec<_>>();
-        let identity = format!(
-            "host-filesystems:{selected_id}:{}:{}:{}",
-            self.connection_monitor.host_filesystem_search_query,
-            self.connection_monitor.host_filesystem_filter as u8,
-            self.connection_monitor
-                .host_filesystem_expanded_index
-                .unwrap_or(usize::MAX)
-        );
-        sync_tauri_variable_list_state_by_signatures(
-            &self.connection_monitor.host_filesystem_list_state,
-            &mut self
-                .connection_monitor
-                .host_filesystem_list_cache
-                .borrow_mut(),
-            &identity,
-            &signatures,
-            TauriVirtualListSpec::new(px(HOST_FILESYSTEM_LIST_ESTIMATED_ROW_HEIGHT), 8),
-        );
+    fn copy_host_filesystem_path(&mut self, path: String, cx: &mut Context<Self>) {
+        cx.write_to_clipboard(ClipboardItem::new_string(path.clone()));
+        cx.emit(HostToolsEvent::ShowNotice(
+            HostToolsNotice::FilesystemPathCopied { path },
+        ));
+        cx.notify();
     }
 
-    pub(super) fn host_filesystem_snapshot_command(
+    fn dispatch_host_filesystem_diagnostic(
         &self,
-        connection_id: &str,
-    ) -> (
-        oxideterm_connection_monitor::FilesystemCaptureCommand,
-        String,
+        connection_id: String,
+        i18n: &I18n,
+        window: &mut Window,
+        cx: &mut Context<Self>,
     ) {
-        let os_type = self
-            .ssh_registry
-            .get(connection_id)
-            .and_then(|handle| handle.remote_env().map(|env| env.os_type))
-            .unwrap_or_else(|| "Unknown".to_string());
-        (build_filesystem_snapshot_command(&os_type), os_type)
+        // Only the fixed OS-specific builder output may become a terminal command.
+        let command = self.filesystem_diagnostic_command(&connection_id);
+        window.dispatch_action(
+            Box::new(HostToolsWindowRequest::new(
+                HostToolsWindowIntent::OpenExistingNodeTerminal {
+                    connection_id,
+                    command,
+                    title: i18n.t("sidebar.host_filesystems.diagnostic_title"),
+                    opened_notice: i18n.t("sidebar.host_filesystems.toast.diagnostic_opened"),
+                    missing_notice: i18n.t("sidebar.host_filesystems.toast.exec_terminal_missing"),
+                },
+            )),
+            cx,
+        );
     }
+}
 
-    pub(super) fn host_filesystem_diagnostic_command(
-        &self,
-        connection_id: &str,
-    ) -> (String, String) {
-        let os_type = self
-            .ssh_registry
-            .get(connection_id)
-            .and_then(|handle| handle.remote_env().map(|env| env.os_type))
-            .unwrap_or_else(|| "Unknown".to_string());
-        (build_filesystem_diagnostic_command(&os_type), os_type)
+impl WorkspaceApp {
+    pub(super) fn render_host_filesystems_panel(&self, cx: &mut Context<Self>) -> AnyElement {
+        let tokens = self.tokens;
+        let i18n = &self.i18n;
+        let mono_font_family = settings_mono_font_family(self.settings_store.settings());
+        let selectable_text = self.selectable_text_render_state(cx);
+        let search_ime = self
+            .host_tools_plain_text_ime_frame(HostToolsTextInput::FilesystemSearch, cx)
+            .expect("filesystem search is a non-secret Host Tools input");
+        let sidebar_width = self.ai_entity.read(cx).chat_ui().sidebar_width;
+        self.host_tools.update(cx, |host_tools, cx| {
+            host_tools.render_host_filesystems_panel(
+                search_ime,
+                sidebar_width,
+                &tokens,
+                i18n,
+                mono_font_family,
+                &selectable_text,
+                cx,
+            )
+        })
     }
 
     pub(in crate::workspace) fn handle_host_filesystem_search_key(
@@ -888,11 +932,18 @@ impl WorkspaceApp {
         event: &KeyDownEvent,
         cx: &mut Context<Self>,
     ) -> bool {
-        if !self.connection_monitor.host_filesystem_search_focused {
+        if !self
+            .host_tools
+            .read(cx)
+            .ui
+            .input_is_focused(HostToolsTextInput::FilesystemSearch)
+        {
             return false;
         }
         if event.keystroke.key.as_str() == "escape" && !event.keystroke.modifiers.platform {
-            self.connection_monitor.host_filesystem_search_focused = false;
+            self.host_tools.update(cx, |host_tools, _cx| {
+                host_tools.ui.clear_input_focus();
+            });
             self.ime_marked_text = None;
             self.clear_ime_selection();
             cx.notify();
@@ -900,306 +951,232 @@ impl WorkspaceApp {
         }
         false
     }
+}
 
-    pub(super) fn request_host_filesystems_snapshot_for_selected_connection(
-        &mut self,
-        cx: &mut Context<Self>,
-    ) {
-        let connections = self.monitor_connections();
-        let Some(connection_id) = self
-            .connection_monitor
-            .selected_connection_id
-            .clone()
-            .or_else(|| {
-                connections
-                    .first()
-                    .map(|connection| connection.connection_id.clone())
-            })
-        else {
-            return;
-        };
-        self.request_host_filesystems_snapshot(connection_id, HostSnapshotFeedback::Silent, cx);
+impl HostToolsEntity {
+    fn sync_filesystem_render_rows(&self, rows: &[ResourceFilesystemEntry], selected_id: &str) {
+        let signatures = rows
+            .iter()
+            .map(filesystem_row_signature)
+            .collect::<Vec<_>>();
+        let identity = format!(
+            "host-filesystems:{selected_id}:{}:{}:{}",
+            self.ui.host_filesystem_search_query,
+            self.filesystem_filter() as u8,
+            self.filesystem_expanded_index().unwrap_or(usize::MAX)
+        );
+        self.sync_filesystem_list_signatures(&identity, &signatures);
     }
 
-    pub(super) fn request_host_filesystems_snapshot(
+    pub(super) fn filesystem_snapshot_for(
+        &self,
+        connection_id: &str,
+    ) -> Option<&ResourceFilesystemSnapshot> {
+        self.host_filesystems.snapshot.as_ref().filter(|_| {
+            self.host_filesystems.snapshot_connection_id.as_deref() == Some(connection_id)
+        })
+    }
+
+    pub(super) fn filesystem_snapshot_in_flight(&self) -> bool {
+        self.host_filesystems.snapshot_in_flight
+    }
+
+    pub(in crate::workspace::connection_monitor) fn filesystem_filter(&self) -> FilesystemFilter {
+        self.host_filesystems.filter
+    }
+
+    pub(super) fn filesystem_list_state(&self) -> ListState {
+        self.host_filesystems.list_state.clone()
+    }
+
+    pub(in crate::workspace::connection_monitor) fn filesystem_expanded_index(
+        &self,
+    ) -> Option<usize> {
+        self.host_filesystems.expanded_index
+    }
+
+    pub(in crate::workspace::connection_monitor) fn select_filesystem_filter(
+        &mut self,
+        filter: FilesystemFilter,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if self.host_filesystems.filter == filter {
+            return false;
+        }
+        self.host_filesystems.filter = filter;
+        self.host_filesystems.expanded_index = None;
+        cx.notify();
+        true
+    }
+
+    pub(in crate::workspace::connection_monitor) fn toggle_filesystem_expanded(
+        &mut self,
+        index: usize,
+        cx: &mut Context<Self>,
+    ) {
+        self.host_filesystems.expanded_index =
+            (self.host_filesystems.expanded_index != Some(index)).then_some(index);
+        cx.notify();
+    }
+
+    pub(super) fn sync_filesystem_list_signatures(&self, identity: &str, signatures: &[u64]) {
+        sync_tauri_variable_list_state_by_signatures(
+            &self.host_filesystems.list_state,
+            &mut self.host_filesystems.list_cache.borrow_mut(),
+            identity,
+            signatures,
+            TauriVirtualListSpec::new(px(HOST_FILESYSTEM_LIST_ESTIMATED_ROW_HEIGHT), 8),
+        );
+    }
+
+    pub(super) fn filesystem_diagnostic_command(&self, connection_id: &str) -> String {
+        let os_type = self
+            .connection_os_type(connection_id)
+            .unwrap_or_else(|| "Unknown".to_string());
+        build_filesystem_diagnostic_command(&os_type)
+    }
+
+    pub(in crate::workspace::connection_monitor) fn request_filesystem_snapshot(
         &mut self,
         connection_id: String,
         feedback: HostSnapshotFeedback,
+        monitoring_enabled: bool,
+        runtime: tokio::runtime::Handle,
+        failure_fallback: String,
         cx: &mut Context<Self>,
-    ) {
-        if !self.host_tool_monitoring_enabled(ContextSidebarTool::Filesystems) {
-            return;
+    ) -> Vec<HostToolsNotice> {
+        if !monitoring_enabled {
+            return Vec::new();
         }
-        if self.connection_monitor.host_filesystem_snapshot_polling {
-            if feedback.should_toast() {
-                self.push_host_filesystem_toast(
-                    self.i18n
-                        .t("sidebar.host_filesystems.toast.snapshot_already_running"),
-                    TerminalNoticeVariant::Warning,
-                );
-            }
-            return;
+        if self.host_filesystems.snapshot_in_flight {
+            return feedback
+                .should_toast()
+                .then_some(HostToolsNotice::FilesystemSnapshotAlreadyRunning)
+                .into_iter()
+                .collect();
         }
-        let Some(handle) = self.ssh_registry.get(&connection_id) else {
-            if feedback.should_toast() {
-                self.push_host_filesystem_toast(
-                    self.i18n
-                        .t("sidebar.host_filesystems.toast.connection_missing"),
-                    TerminalNoticeVariant::Error,
-                );
-            }
-            cx.notify();
-            return;
+        let Some(os_type) = self.connection_os_type(&connection_id) else {
+            return feedback
+                .should_toast()
+                .then_some(HostToolsNotice::FilesystemConnectionMissing)
+                .into_iter()
+                .collect();
         };
-        let (command, os_type) = self.host_filesystem_snapshot_command(&connection_id);
+        let command = build_filesystem_snapshot_command(&os_type);
+        let mut notices = Vec::new();
         if feedback.should_toast() && command.capability == FilesystemCommandCapability::Partial {
-            self.push_host_filesystem_toast(
-                self.i18n_replace(
-                    "sidebar.host_filesystems.toast.partial_support",
-                    &[("os", os_type)],
-                ),
-                TerminalNoticeVariant::Warning,
-            );
+            notices.push(HostToolsNotice::FilesystemPartialSupport { os_type });
         }
 
         let request = HostFilesystemSnapshotRequest {
             connection_id: connection_id.clone(),
             feedback,
+            failure_fallback,
         };
-        let (tx, rx) = std::sync::mpsc::channel();
-        self.connection_monitor
-            .host_filesystem_snapshot_connection_id = Some(connection_id);
-        self.connection_monitor.host_filesystem_snapshot_running = Some(request.clone());
-        self.connection_monitor.host_filesystem_snapshot_rx = Some(rx);
-        self.connection_monitor.host_filesystem_snapshot_polling = true;
-        self.connection_monitor.host_filesystem_last_error = None;
-        // Filesystem scans can touch du/find, so they stay manual snapshot work
-        // instead of joining the high-frequency resource profiler loop.
-        self.forwarding_runtime.handle().spawn(async move {
-            let result = handle
-                .run_command_capture(
-                    &command.command,
-                    HOST_FILESYSTEM_SNAPSHOT_TIMEOUT,
-                    HOST_FILESYSTEM_SNAPSHOT_MAX_OUTPUT_SIZE,
-                )
-                .await
-                .map_err(|error| error.to_string());
-            let _ = tx.send(HostFilesystemSnapshotDelivery { request, result });
-        });
-        cx.notify();
-    }
-
-    pub(super) fn copy_host_filesystem_path(&mut self, path: String, cx: &mut Context<Self>) {
-        cx.write_to_clipboard(ClipboardItem::new_string(path.clone()));
-        self.push_host_filesystem_toast(
-            self.i18n_replace(
-                "sidebar.host_filesystems.toast.copied_path",
-                &[("path", path)],
-            ),
-            TerminalNoticeVariant::Success,
+        self.host_filesystems.snapshot_connection_id = Some(connection_id);
+        self.host_filesystems.running = Some(request.clone());
+        self.host_filesystems.snapshot_in_flight = true;
+        // Filesystem scans may touch du/find and remain manual user work.
+        let spawned = self.spawn_filesystem_snapshot_capture(
+            command.command,
+            request,
+            HOST_FILESYSTEM_SNAPSHOT_TIMEOUT,
+            HOST_FILESYSTEM_SNAPSHOT_MAX_OUTPUT_SIZE,
+            runtime,
         );
-        cx.notify();
-    }
-
-    pub(super) fn open_host_filesystem_diagnostic_terminal(
-        &mut self,
-        connection_id: String,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        let (command, _os_type) = self.host_filesystem_diagnostic_command(&connection_id);
-        let title = self.i18n.t("sidebar.host_filesystems.diagnostic_title");
-        let Some(node_id) = self.node_router.node_id_for_connection(&connection_id) else {
-            self.push_host_filesystem_toast(
-                self.i18n
-                    .t("sidebar.host_filesystems.toast.exec_terminal_missing"),
-                TerminalNoticeVariant::Error,
-            );
-            cx.notify();
-            return;
-        };
-        let Some(node) = self.ssh_nodes.get(&node_id).cloned() else {
-            self.push_host_filesystem_toast(
-                self.i18n
-                    .t("sidebar.host_filesystems.toast.exec_terminal_missing"),
-                TerminalNoticeVariant::Error,
-            );
-            cx.notify();
-            return;
-        };
-        match self.queue_ssh_terminal_tab_for_node_with_mark_used(
-            node_id,
-            Some(command),
-            node.config,
-            title,
-            node.saved_connection_id,
-            None,
-            None,
-            window,
-            cx,
-        ) {
-            Ok(()) => self.push_host_filesystem_toast(
-                self.i18n
-                    .t("sidebar.host_filesystems.toast.diagnostic_opened"),
-                TerminalNoticeVariant::Success,
-            ),
-            Err(error) => {
-                self.push_host_filesystem_toast(error.to_string(), TerminalNoticeVariant::Error)
-            }
+        if !spawned {
+            self.host_filesystems.snapshot_in_flight = false;
+            self.host_filesystems.running = None;
+            return feedback
+                .should_toast()
+                .then_some(HostToolsNotice::FilesystemConnectionMissing)
+                .into_iter()
+                .collect();
         }
         cx.notify();
+        notices
     }
 
-    pub(in crate::workspace) fn poll_host_filesystems_snapshot_results(
+    pub(in crate::workspace::connection_monitor) fn finish_host_filesystems_snapshot(
         &mut self,
+        mut delivery: HostFilesystemSnapshotDelivery,
         cx: &mut Context<Self>,
     ) {
-        if !self.connection_monitor.host_filesystem_snapshot_polling {
-            return;
-        }
-        let Some(rx) = self.connection_monitor.host_filesystem_snapshot_rx.take() else {
-            self.connection_monitor.host_filesystem_snapshot_polling = false;
-            self.connection_monitor.host_filesystem_snapshot_running = None;
-            return;
-        };
-        match rx.try_recv() {
-            Ok(delivery) => {
-                self.finish_host_filesystems_snapshot(delivery, cx);
+        if self.host_filesystems.running.as_ref() != Some(&delivery.request) {
+            if let Ok(output) = delivery.result.as_mut() {
+                zeroize_host_snapshot_output(output);
             }
-            Err(std::sync::mpsc::TryRecvError::Empty) => {
-                self.connection_monitor.host_filesystem_snapshot_rx = Some(rx);
-            }
-            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
-                let feedback = self
-                    .connection_monitor
-                    .host_filesystem_snapshot_running
-                    .as_ref()
-                    .map(|request| request.feedback)
-                    .unwrap_or(HostSnapshotFeedback::Silent);
-                self.connection_monitor.host_filesystem_snapshot_polling = false;
-                self.connection_monitor.host_filesystem_snapshot_running = None;
-                let reason = self.i18n.t("sidebar.host_filesystems.toast.unknown_error");
-                self.connection_monitor.host_filesystem_last_error = Some(reason.clone());
-                if feedback.should_toast() {
-                    self.push_host_filesystem_toast(
-                        self.i18n_replace(
-                            "sidebar.host_filesystems.toast.snapshot_failed",
-                            &[("reason", reason)],
-                        ),
-                        TerminalNoticeVariant::Error,
-                    );
-                }
-                cx.notify();
-            }
-        }
-    }
-
-    pub(super) fn finish_host_filesystems_snapshot(
-        &mut self,
-        delivery: HostFilesystemSnapshotDelivery,
-        cx: &mut Context<Self>,
-    ) {
-        if self
-            .connection_monitor
-            .host_filesystem_snapshot_running
-            .as_ref()
-            .is_some_and(|running| running != &delivery.request)
-        {
-            cx.notify();
             return;
         }
         let feedback = delivery.request.feedback;
-        self.connection_monitor.host_filesystem_snapshot_polling = false;
-        self.connection_monitor.host_filesystem_snapshot_running = None;
-        self.connection_monitor.host_filesystem_snapshot_rx = None;
+        let failure_fallback = delivery.request.failure_fallback.clone();
+        self.host_filesystems.snapshot_in_flight = false;
+        self.host_filesystems.running = None;
         match delivery.result {
-            Ok(output) => {
-                let snapshot =
-                    filesystem_capture_snapshot(&output.stdout, &output.stderr, output.exit_code);
-                let visible_count = visible_filesystem_rows(
-                    &snapshot.entries,
-                    &self.connection_monitor.host_filesystem_search_query,
-                    self.connection_monitor.host_filesystem_filter,
-                )
-                .len();
-                match &snapshot.status {
-                    ResourceFilesystemStatus::Available { .. } => {
-                        self.connection_monitor.host_filesystem_last_error = None;
-                        if feedback.should_toast() {
-                            self.push_host_filesystem_toast(
-                                self.i18n_replace(
-                                    "sidebar.host_filesystems.toast.snapshot_loaded",
-                                    &[("count", visible_count.to_string())],
-                                ),
-                                TerminalNoticeVariant::Success,
-                            );
-                        }
-                    }
-                    ResourceFilesystemStatus::Unavailable => {
-                        self.connection_monitor.host_filesystem_last_error =
-                            Some(self.i18n.t("sidebar.host_filesystems.unavailable"));
-                        if feedback.should_toast() {
-                            self.push_host_filesystem_toast(
-                                self.i18n.t("sidebar.host_filesystems.toast.unavailable"),
-                                TerminalNoticeVariant::Warning,
-                            );
-                        }
-                    }
-                    ResourceFilesystemStatus::Error { message } => {
-                        self.connection_monitor.host_filesystem_last_error = Some(message.clone());
-                        if feedback.should_toast() {
-                            self.push_host_filesystem_toast(
-                                self.i18n_replace(
-                                    "sidebar.host_filesystems.toast.snapshot_failed",
-                                    &[("reason", message.clone())],
-                                ),
-                                TerminalNoticeVariant::Error,
-                            );
-                        }
-                    }
-                    ResourceFilesystemStatus::Unknown => {}
+            Ok(mut output) if output.exit_code.unwrap_or(0) == 0 => {
+                let mut snapshot = parse_filesystem_snapshot(&output.stdout);
+                if matches!(&snapshot.status, ResourceFilesystemStatus::Error { .. }) {
+                    snapshot.status = ResourceFilesystemStatus::Error {
+                        message: failure_fallback,
+                    };
                 }
-                self.connection_monitor
-                    .host_filesystem_snapshot_connection_id = Some(delivery.request.connection_id);
-                self.connection_monitor.host_filesystem_snapshot = Some(snapshot);
-            }
-            Err(error) => {
-                self.connection_monitor.host_filesystem_last_error = Some(error.clone());
-                self.connection_monitor
-                    .host_filesystem_snapshot_connection_id = Some(delivery.request.connection_id);
-                self.connection_monitor.host_filesystem_snapshot =
-                    Some(ResourceFilesystemSnapshot {
-                        status: ResourceFilesystemStatus::Error {
-                            message: error.clone(),
-                        },
-                        entries: Vec::new(),
-                    });
+                zeroize_host_snapshot_output(&mut output);
                 if feedback.should_toast() {
-                    self.push_host_filesystem_toast(
-                        self.i18n_replace(
-                            "sidebar.host_filesystems.toast.snapshot_failed",
-                            &[("reason", error)],
-                        ),
-                        TerminalNoticeVariant::Error,
-                    );
+                    match &snapshot.status {
+                        ResourceFilesystemStatus::Available { .. } => {
+                            cx.emit(HostToolsEvent::ShowNotice(
+                                HostToolsNotice::FilesystemSnapshotLoaded {
+                                    count: snapshot.entries.len(),
+                                },
+                            ));
+                        }
+                        ResourceFilesystemStatus::Unavailable => {
+                            cx.emit(HostToolsEvent::ShowNotice(
+                                HostToolsNotice::FilesystemUnavailable,
+                            ));
+                        }
+                        ResourceFilesystemStatus::Error { .. } => {
+                            cx.emit(HostToolsEvent::ShowNotice(
+                                HostToolsNotice::FilesystemSnapshotFailed,
+                            ));
+                        }
+                        ResourceFilesystemStatus::Unknown => {}
+                    }
+                }
+                self.host_filesystems.snapshot_connection_id = Some(delivery.request.connection_id);
+                self.host_filesystems.snapshot = Some(snapshot);
+            }
+            Ok(mut output) => {
+                zeroize_host_snapshot_output(&mut output);
+                self.host_filesystems.snapshot_connection_id = Some(delivery.request.connection_id);
+                self.host_filesystems.snapshot = Some(ResourceFilesystemSnapshot {
+                    status: ResourceFilesystemStatus::Error {
+                        message: failure_fallback,
+                    },
+                    entries: Vec::new(),
+                });
+                if feedback.should_toast() {
+                    cx.emit(HostToolsEvent::ShowNotice(
+                        HostToolsNotice::FilesystemSnapshotFailed,
+                    ));
+                }
+            }
+            Err(()) => {
+                self.host_filesystems.snapshot_connection_id = Some(delivery.request.connection_id);
+                self.host_filesystems.snapshot = Some(ResourceFilesystemSnapshot {
+                    status: ResourceFilesystemStatus::Error {
+                        message: failure_fallback,
+                    },
+                    entries: Vec::new(),
+                });
+                if feedback.should_toast() {
+                    cx.emit(HostToolsEvent::ShowNotice(
+                        HostToolsNotice::FilesystemSnapshotFailed,
+                    ));
                 }
             }
         }
         cx.notify();
-    }
-
-    pub(super) fn push_host_filesystem_toast(
-        &mut self,
-        message: String,
-        variant: TerminalNoticeVariant,
-    ) {
-        let _ = self.terminal_notice_tx.send(TerminalNotice {
-            title: message,
-            description: None,
-            status_text: None,
-            progress: None,
-            variant,
-        });
     }
 }
 
@@ -1302,6 +1279,32 @@ fn host_filesystem_percent_value(value: &str) -> u32 {
         .unwrap_or_default()
         .parse::<u32>()
         .unwrap_or(0)
+}
+
+fn host_filesystem_filter_chip(active: bool, tokens: &ThemeTokens) -> Div {
+    let theme = tokens.ui;
+    // Keep the filter styling independent from WorkspaceApp so Entity listeners
+    // can update filesystem state without a reverse workspace dependency.
+    div()
+        .flex_none()
+        .h(px(tokens.metrics.ui_button_sm_height * 0.75))
+        .px(px(tokens.spacing.two))
+        .flex()
+        .items_center()
+        .rounded(px(tokens.radii.md))
+        .cursor_pointer()
+        .bg(if active {
+            rgb(theme.bg_hover)
+        } else {
+            rgba(0x00000000)
+        })
+        .text_size(px(tokens.metrics.ui_text_xs))
+        .text_color(if active {
+            rgb(theme.text)
+        } else {
+            rgb(theme.text_muted)
+        })
+        .hover(move |chip| chip.bg(rgb(theme.bg_hover)))
 }
 
 fn host_filesystem_meta_label(

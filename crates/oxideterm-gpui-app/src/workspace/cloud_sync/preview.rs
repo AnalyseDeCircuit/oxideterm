@@ -3,20 +3,120 @@
 
 use super::*;
 
-impl WorkspaceApp {
+pub(super) struct CloudSyncUploadSelectionRow {
+    label_key: &'static str,
+    action: CloudSyncUploadSelectionAction,
+    meta: Option<String>,
+    checked: bool,
+}
+
+impl CloudSyncPageRenderer {
+    pub(super) fn render_cloud_sync_fact(
+        &self,
+        label_key: &str,
+        value: String,
+        cx: &mut App,
+    ) -> AnyElement {
+        let label = self.i18n.t(label_key).to_uppercase();
+        cloud_sync_fact_card(
+            &self.tokens,
+            self.render_display_text_with_role(
+                SelectableTextRole::PlainDocument,
+                "cloud-sync-fact-label",
+                label_key,
+                label.clone(),
+                self.tokens.ui.text_muted,
+                cx,
+            ),
+            self.render_selectable_text(
+                crate::workspace::selectable_text::selectable_text_id(
+                    "cloud-sync-fact",
+                    (&label, &value),
+                ),
+                value.clone(),
+                self.tokens.ui.text,
+                cx,
+            ),
+            cloud_sync_value_prefers_mono(&value),
+            Some(self.mono_font_family.clone()),
+        )
+    }
+
+    fn upload_selection_listener(
+        &self,
+        action: CloudSyncUploadSelectionAction,
+    ) -> impl Fn(&MouseDownEvent, &mut Window, &mut App) + 'static {
+        let cloud_sync = self.cloud_sync.clone();
+        move |_event, _window, cx| {
+            cloud_sync.update(cx, |cloud_sync, cx| {
+                if let Some(selection) = cloud_sync.view.upload_selection.as_mut() {
+                    selection.apply_action(action.clone());
+                    cx.notify();
+                }
+            });
+            cx.stop_propagation();
+        }
+    }
+
+    fn preview_selection_listener(
+        &self,
+        action: CloudSyncPreviewSelectionAction,
+    ) -> impl Fn(&MouseDownEvent, &mut Window, &mut App) + 'static {
+        let cloud_sync = self.cloud_sync.clone();
+        move |_event, _window, cx| {
+            cloud_sync.update(cx, |cloud_sync, cx| {
+                let connection_names = cloud_sync
+                    .view
+                    .pending_preview
+                    .as_ref()
+                    .map(cloud_sync_preview_summary)
+                    .map(|summary| summary.connection_record_names())
+                    .unwrap_or_default();
+                if let Some(selection) = cloud_sync.view.preview_selection.as_mut() {
+                    selection.apply_action(action.clone(), connection_names);
+                    cx.notify();
+                }
+            });
+            cx.stop_propagation();
+        }
+    }
+
+    pub(super) fn render_pending_preview(&self, busy: bool, cx: &mut App) -> AnyElement {
+        let cloud_sync_entity = self.cloud_sync.clone();
+        cloud_sync_entity.update(cx, |cloud_sync, cx| {
+            let state = cloud_sync.controller.store.state();
+            if let Some(preview) = cloud_sync.view.pending_preview.as_ref() {
+                self.render_cloud_sync_preview(
+                    preview,
+                    state,
+                    cloud_sync.view.preview_selection.as_ref(),
+                    busy,
+                    cx,
+                )
+            } else if let Some(preview) = cloud_sync.view.upload_preview.as_ref() {
+                self.render_cloud_sync_upload_preview(
+                    preview,
+                    state,
+                    cloud_sync.view.upload_selection.as_ref(),
+                    busy,
+                    cx,
+                )
+            } else {
+                div().into_any_element()
+            }
+        })
+    }
+
     pub(super) fn render_cloud_sync_preview(
         &self,
         preview: &CloudSyncPendingPreview,
         state: &CloudSyncPersistedState,
+        current_selection: Option<&CloudSyncPreviewSelection>,
         busy: bool,
-        cx: &mut Context<Self>,
+        cx: &mut App,
     ) -> AnyElement {
         let theme = self.tokens.ui;
-        let model = cloud_sync_preview_card_model(
-            preview,
-            state,
-            self.cloud_sync.view.preview_selection.as_ref(),
-        );
+        let model = cloud_sync_preview_card_model(preview, state, current_selection);
         let title = self.render_display_text_with_role(
             SelectableTextRole::PlainDocument,
             "cloud-sync-preview-title",
@@ -40,9 +140,9 @@ impl WorkspaceApp {
             .collect::<Vec<_>>();
         let warning = model.copy.warning_key.map(|key| self.i18n.t(key));
         let mut body = Vec::new();
-        let local_snapshot = self.cloud_sync_local_snapshot(state).ok();
+        let local_snapshot = self.local_snapshot.as_ref().ok().map(Arc::as_ref);
         let apply_diff_items =
-            cloud_sync_apply_diff_items(preview, &model.selection, local_snapshot.as_ref());
+            cloud_sync_apply_diff_items(preview, &model.selection, local_snapshot);
         if !apply_diff_items.is_empty() {
             body.push(self.render_cloud_sync_section_diff_card(
                 "cloud-sync-apply-diff",
@@ -51,13 +151,14 @@ impl WorkspaceApp {
                 cx,
             ));
         }
-        let field_diff_items = cloud_sync_apply_field_diff_items(
-            preview,
-            &model.selection,
-            &self.cloud_sync_local_field_diff_snapshot(),
-        );
+        let field_diff_items =
+            cloud_sync_apply_field_diff_items(preview, &model.selection, &self.local_field_diff);
         if !field_diff_items.is_empty() {
-            body.push(self.render_cloud_sync_apply_field_diff_card(&field_diff_items, cx));
+            body.push(self.render_cloud_sync_apply_field_diff_card(
+                &field_diff_items,
+                &model.selection,
+                cx,
+            ));
         }
         if let Some(card) = self.render_cloud_sync_remote_sensitive_summary(preview, cx) {
             body.push(card);
@@ -90,34 +191,24 @@ impl WorkspaceApp {
                     model.copy.apply_label_key,
                     ButtonVariant::Default,
                     busy || !model.can_apply,
-                    cx.listener(
-                        |this: &mut WorkspaceApp,
-                         _event,
-                         _window,
-                         cx: &mut Context<WorkspaceApp>| {
-                            this.open_cloud_sync_import_confirm();
-                            this.clear_cloud_sync_select_focus();
-                            cx.stop_propagation();
-                            cx.notify();
-                        },
-                    ),
+                    self.intent_listener(CloudSyncUiIntent::ApplyPreview),
                 ),
                 self.render_cloud_sync_action_button(
                     "plugin.cloud_sync.actions.cancel_preview",
                     ButtonVariant::Outline,
                     busy,
-                    cx.listener(
-                        |this: &mut WorkspaceApp,
-                         _event,
-                         _window,
-                         cx: &mut Context<WorkspaceApp>| {
-                            this.cloud_sync.view.pending_preview = None;
-                            this.cloud_sync.view.preview_selection = None;
-                            this.clear_cloud_sync_select_focus();
+                    {
+                        let cloud_sync = self.cloud_sync.clone();
+                        move |_event, _window, cx| {
+                            cloud_sync.update(cx, |cloud_sync, cx| {
+                                cloud_sync.view.pending_preview = None;
+                                cloud_sync.view.preview_selection = None;
+                                cloud_sync.clear_select_focus();
+                                cx.notify();
+                            });
                             cx.stop_propagation();
-                            cx.notify();
-                        },
-                    ),
+                        }
+                    },
                 ),
             ]),
         )
@@ -127,8 +218,9 @@ impl WorkspaceApp {
         &self,
         remote_preview: &CloudSyncPendingPreview,
         state: &CloudSyncPersistedState,
+        upload_selection: Option<&CloudSyncUploadSelection>,
         busy: bool,
-        cx: &mut Context<Self>,
+        cx: &mut App,
     ) -> AnyElement {
         let theme = self.tokens.ui;
         let title = self.render_display_text_with_role(
@@ -139,46 +231,34 @@ impl WorkspaceApp {
             theme.text_heading,
             cx,
         );
+        let (selection_rows, raw_scope) = match upload_selection {
+            Some(selection) => (
+                Some(self.cloud_sync_upload_selection_rows(selection)),
+                selection.raw_scope(&state.sync_scope),
+            ),
+            None => (None, state.sync_scope.clone()),
+        };
         let mut body = Vec::new();
-        if let Some(selection) = self.cloud_sync.view.upload_selection.as_ref() {
-            body.push(self.render_cloud_sync_upload_selection(selection, cx));
+        if let Some(selection_rows) = selection_rows {
+            body.push(self.render_cloud_sync_upload_selection(&selection_rows, cx));
         }
-        if let Ok(local_snapshot) = self.cloud_sync_local_snapshot(state) {
-            let mut preview_state = state.clone();
-            if let CloudSyncPendingPreview::Structured(preview) = remote_preview {
-                preview_state.remote_exists = true;
-                preview_state.remote_section_revisions =
-                    Some(preview.manifest.section_revisions.clone());
-            }
-            if let Some(selection) = self.cloud_sync.view.upload_selection.as_ref() {
-                preview_state.sync_scope = selection.raw_scope(&state.sync_scope);
-            }
-            let section_diff_items =
-                self.cloud_sync_upload_diff_items_cached(&local_snapshot, &preview_state);
-            if !section_diff_items.is_empty() {
-                body.push(self.render_cloud_sync_section_diff_card(
-                    "cloud-sync-upload-preview-diff",
-                    "plugin.cloud_sync.preflight.upload_diff_title",
-                    &section_diff_items,
-                    cx,
-                ));
-            }
+        if !self.upload_diff_items.is_empty() {
+            body.push(self.render_cloud_sync_section_diff_card(
+                "cloud-sync-upload-preview-diff",
+                "plugin.cloud_sync.preflight.upload_diff_title",
+                &self.upload_diff_items,
+                cx,
+            ));
         }
-        let raw_scope = self
-            .cloud_sync
-            .view
-            .upload_selection
-            .as_ref()
-            .map(|selection| selection.raw_scope(&state.sync_scope))
-            .unwrap_or_else(|| state.sync_scope.clone());
         let scope = normalize_sync_scope(Some(&raw_scope), &[]);
-        let field_diff_items = cloud_sync_upload_field_diff_items(
-            remote_preview,
-            &self.cloud_sync_local_field_diff_snapshot(),
-            &scope,
-        );
+        let field_diff_items =
+            cloud_sync_upload_field_diff_items(remote_preview, &self.local_field_diff, &scope);
         if !field_diff_items.is_empty() {
-            body.push(self.render_cloud_sync_upload_field_diff_card(&field_diff_items, cx));
+            body.push(self.render_cloud_sync_upload_field_diff_card(
+                &field_diff_items,
+                upload_selection,
+                cx,
+            ));
         }
         let summary = cloud_sync_preview_summary(remote_preview);
         let fact_rows = if matches!(remote_preview, CloudSyncPendingPreview::Structured(_)) {
@@ -209,35 +289,24 @@ impl WorkspaceApp {
                     "plugin.cloud_sync.actions.upload_now",
                     ButtonVariant::Default,
                     busy,
-                    cx.listener(
-                        |this: &mut WorkspaceApp,
-                         _event,
-                         _window,
-                         cx: &mut Context<WorkspaceApp>| {
-                            this.cloud_sync.view.upload_preview = None;
-                            this.start_cloud_sync_upload_with_options(false, false, false, cx);
-                            this.clear_cloud_sync_select_focus();
-                            cx.stop_propagation();
-                            cx.notify();
-                        },
-                    ),
+                    self.intent_listener(CloudSyncUiIntent::StartUpload),
                 ),
                 self.render_cloud_sync_action_button(
                     "plugin.cloud_sync.actions.cancel_preview",
                     ButtonVariant::Outline,
                     busy,
-                    cx.listener(
-                        |this: &mut WorkspaceApp,
-                         _event,
-                         _window,
-                         cx: &mut Context<WorkspaceApp>| {
-                            this.cloud_sync.view.upload_preview = None;
-                            this.cloud_sync.view.upload_selection = None;
-                            this.clear_cloud_sync_select_focus();
+                    {
+                        let cloud_sync = self.cloud_sync.clone();
+                        move |_event, _window, cx| {
+                            cloud_sync.update(cx, |cloud_sync, cx| {
+                                cloud_sync.view.upload_preview = None;
+                                cloud_sync.view.upload_selection = None;
+                                cloud_sync.clear_select_focus();
+                                cx.notify();
+                            });
                             cx.stop_propagation();
-                            cx.notify();
-                        },
-                    ),
+                        }
+                    },
                 ),
             ]),
         )
@@ -246,7 +315,7 @@ impl WorkspaceApp {
     pub(super) fn render_cloud_sync_preview_impact(
         &self,
         items: &[CloudSyncPreviewImpactItem],
-        cx: &mut Context<Self>,
+        cx: &mut App,
     ) -> AnyElement {
         let title = self.render_selectable_text_scoped(
             "cloud-sync-preview-impact-title",
@@ -272,7 +341,7 @@ impl WorkspaceApp {
     pub(super) fn render_cloud_sync_remote_sensitive_summary(
         &self,
         preview: &CloudSyncPendingPreview,
-        cx: &mut Context<Self>,
+        cx: &mut App,
     ) -> Option<AnyElement> {
         let (connections, portable_secrets) = match preview {
             CloudSyncPendingPreview::Structured(preview) => {
@@ -317,8 +386,8 @@ impl WorkspaceApp {
 
     pub(super) fn render_cloud_sync_upload_selection(
         &self,
-        selection: &CloudSyncUploadSelection,
-        cx: &mut Context<Self>,
+        rows: &[CloudSyncUploadSelectionRow],
+        cx: &mut App,
     ) -> AnyElement {
         let title = self.render_selectable_text_scoped(
             "cloud-sync-upload-selection-title",
@@ -327,7 +396,26 @@ impl WorkspaceApp {
             self.tokens.ui.text_heading,
             cx,
         );
-        let rows = [
+        let mut block = div().flex().flex_col().gap(px(8.0));
+        for row in rows {
+            let action = row.action.clone();
+            block = block.child(self.render_cloud_sync_check_row(
+                self.i18n.t(row.label_key),
+                row.meta.clone(),
+                row.checked,
+                false,
+                self.upload_selection_listener(action),
+                cx,
+            ));
+        }
+        cloud_sync_status_list(&self.tokens, title, [block.into_any_element()])
+    }
+
+    fn cloud_sync_upload_selection_rows(
+        &self,
+        selection: &CloudSyncUploadSelection,
+    ) -> Vec<CloudSyncUploadSelectionRow> {
+        let row_specs = [
             (
                 "plugin.cloud_sync.settings.sync_connections",
                 CloudSyncUploadSelectionAction::ToggleConnections,
@@ -361,26 +449,18 @@ impl WorkspaceApp {
                 CloudSyncUploadSelectionAction::TogglePluginSettings,
             ),
         ];
-        let mut block = div().flex().flex_col().gap(px(8.0));
-        for (label_key, action) in rows {
-            if !self.cloud_sync_upload_section_visible(selection, &action) {
-                continue;
-            }
-            let checked = selection.is_item_checked(&action);
-            block = block.child(self.render_cloud_sync_check_row(
-                self.i18n.t(label_key),
-                self.cloud_sync_upload_selection_meta(selection, &action),
-                checked,
-                false,
-                cx.listener(move |this, _event, _window, cx| {
-                    this.apply_cloud_sync_upload_selection_action(action.clone());
-                    cx.stop_propagation();
-                    cx.notify();
-                }),
-                cx,
-            ));
-        }
-        cloud_sync_status_list(&self.tokens, title, [block.into_any_element()])
+        row_specs
+            .into_iter()
+            .filter_map(|(label_key, action)| {
+                self.cloud_sync_upload_section_visible(selection, &action)
+                    .then(|| CloudSyncUploadSelectionRow {
+                        label_key,
+                        meta: self.cloud_sync_upload_selection_meta(selection, &action),
+                        checked: selection.is_item_checked(&action),
+                        action,
+                    })
+            })
+            .collect()
     }
 
     pub(super) fn cloud_sync_upload_section_visible(
@@ -434,7 +514,7 @@ impl WorkspaceApp {
                 selection.remote_desktop_profile_item_ids.len()
             }
             CloudSyncUploadSelectionAction::ToggleSensitiveCredentials => {
-                return self.cloud_sync_upload_sensitive_summary(selection);
+                return self.upload_sensitive_summary.clone();
             }
             CloudSyncUploadSelectionAction::ToggleAppSettings => {
                 selection.selected_app_settings_sections.len()
@@ -448,10 +528,13 @@ impl WorkspaceApp {
             )
         })
     }
+}
 
+impl WorkspaceApp {
     pub(super) fn cloud_sync_upload_sensitive_summary(
         &self,
         selection: &CloudSyncUploadSelection,
+        cx: &App,
     ) -> Option<String> {
         if !selection.sync_sensitive_credentials {
             return None;
@@ -471,7 +554,12 @@ impl WorkspaceApp {
         let portable_secret_count =
             oxideterm_ai::provider_views(&self.settings_store.settings().ai.providers)
                 .into_iter()
-                .filter(|provider| self.ai.models.key_store.has_provider_key(&provider.id))
+                .filter(|provider| {
+                    self.ai_entity
+                        .read(cx)
+                        .key_store()
+                        .has_provider_key(&provider.id)
+                })
                 .count();
         let preflight = oxideterm_connections::oxide_file::preflight_export(
             &self.connection_store,
@@ -500,13 +588,15 @@ impl WorkspaceApp {
             ],
         ))
     }
+}
 
+impl CloudSyncPageRenderer {
     pub(super) fn render_cloud_sync_section_diff_card(
         &self,
         identity: &'static str,
         title_key: &'static str,
         items: &[CloudSyncSectionDiffItem],
-        cx: &mut Context<Self>,
+        cx: &mut App,
     ) -> AnyElement {
         let theme = self.tokens.ui;
         self.render_cloud_sync_section_diff_content(identity, title_key, items, false, cx)
@@ -523,7 +613,7 @@ impl WorkspaceApp {
         identity: &'static str,
         title_key: &'static str,
         items: &[CloudSyncSectionDiffItem],
-        cx: &mut Context<Self>,
+        cx: &mut App,
     ) -> AnyElement {
         self.render_cloud_sync_section_diff_content(identity, title_key, items, true, cx)
             .into_any_element()
@@ -535,7 +625,7 @@ impl WorkspaceApp {
         title_key: &'static str,
         items: &[CloudSyncSectionDiffItem],
         flat_rows: bool,
-        cx: &mut Context<Self>,
+        cx: &mut App,
     ) -> Div {
         // Preview dialogs may need their own framed block, while configuration
         // pages reuse the same content inside an existing inspector surface.
@@ -587,7 +677,7 @@ impl WorkspaceApp {
         &self,
         item: &CloudSyncSectionDiffItem,
         flat: bool,
-        cx: &mut Context<Self>,
+        cx: &mut App,
     ) -> AnyElement {
         let label = self.cloud_sync_diff_label(&item.label);
         let local_status = self
@@ -722,7 +812,7 @@ impl WorkspaceApp {
         &self,
         status: CloudSyncLocalDiffStatus,
         label: String,
-        cx: &mut Context<Self>,
+        cx: &mut App,
     ) -> AnyElement {
         self.render_cloud_sync_tone_chip(
             local_diff_tone(status),
@@ -741,7 +831,7 @@ impl WorkspaceApp {
         &self,
         status: CloudSyncRemoteDiffStatus,
         label: String,
-        cx: &mut Context<Self>,
+        cx: &mut App,
     ) -> AnyElement {
         self.render_cloud_sync_tone_chip(
             remote_diff_tone(status),
@@ -760,7 +850,7 @@ impl WorkspaceApp {
         &self,
         status: CloudSyncHealthStatus,
         label: String,
-        cx: &mut Context<Self>,
+        cx: &mut App,
     ) -> AnyElement {
         self.render_cloud_sync_tone_chip(
             health_tone(status),
@@ -791,7 +881,8 @@ impl WorkspaceApp {
     pub(super) fn render_cloud_sync_apply_field_diff_card(
         &self,
         items: &[CloudSyncFieldDiffItem],
-        cx: &mut Context<Self>,
+        selection: &CloudSyncPreviewSelection,
+        cx: &mut App,
     ) -> AnyElement {
         let title = self.render_selectable_text_scoped(
             "cloud-sync-apply-field-diff",
@@ -802,24 +893,20 @@ impl WorkspaceApp {
         );
         let rows = items
             .iter()
-            .map(|item| self.render_cloud_sync_apply_field_diff_item(item, cx));
+            .map(|item| self.render_cloud_sync_apply_field_diff_item(item, selection, cx));
         cloud_sync_status_list(&self.tokens, title, rows)
     }
 
     pub(super) fn render_cloud_sync_apply_field_diff_item(
         &self,
         item: &CloudSyncFieldDiffItem,
-        cx: &mut Context<Self>,
+        selection: &CloudSyncPreviewSelection,
+        cx: &mut App,
     ) -> AnyElement {
         let Some(action) = self.cloud_sync_apply_action_for_field_item(item) else {
             return self.render_cloud_sync_field_diff_item(item, cx);
         };
-        let checked = self
-            .cloud_sync
-            .view
-            .preview_selection
-            .as_ref()
-            .is_none_or(|selection| self.cloud_sync_apply_field_item_checked(selection, &action));
+        let checked = self.cloud_sync_apply_field_item_checked(selection, &action);
         let label = self.cloud_sync_field_diff_item_name(item);
         let meta = Some(
             self.i18n_replace(
@@ -839,11 +926,7 @@ impl WorkspaceApp {
             meta,
             checked,
             false,
-            cx.listener(move |this, _event, _window, cx| {
-                this.apply_cloud_sync_preview_selection_action(action.clone());
-                cx.stop_propagation();
-                cx.notify();
-            }),
+            self.preview_selection_listener(action),
             cx,
         )
     }
@@ -900,7 +983,8 @@ impl WorkspaceApp {
     pub(super) fn render_cloud_sync_upload_field_diff_card(
         &self,
         items: &[CloudSyncFieldDiffItem],
-        cx: &mut Context<Self>,
+        selection: Option<&CloudSyncUploadSelection>,
+        cx: &mut App,
     ) -> AnyElement {
         let title = self.render_selectable_text_scoped(
             "cloud-sync-upload-field-diff",
@@ -911,24 +995,20 @@ impl WorkspaceApp {
         );
         let rows = items
             .iter()
-            .map(|item| self.render_cloud_sync_upload_field_diff_item(item, cx));
+            .map(|item| self.render_cloud_sync_upload_field_diff_item(item, selection, cx));
         cloud_sync_status_list(&self.tokens, title, rows)
     }
 
     pub(super) fn render_cloud_sync_upload_field_diff_item(
         &self,
         item: &CloudSyncFieldDiffItem,
-        cx: &mut Context<Self>,
+        selection: Option<&CloudSyncUploadSelection>,
+        cx: &mut App,
     ) -> AnyElement {
         let Some(action) = self.cloud_sync_upload_action_for_field_item(item) else {
             return self.render_cloud_sync_field_diff_item(item, cx);
         };
-        let checked = self
-            .cloud_sync
-            .view
-            .upload_selection
-            .as_ref()
-            .is_none_or(|selection| selection.is_item_checked(&action));
+        let checked = selection.is_none_or(|selection| selection.is_item_checked(&action));
         let label = self.cloud_sync_field_diff_item_name(item);
         let meta = Some(
             self.i18n_replace(
@@ -948,11 +1028,7 @@ impl WorkspaceApp {
             meta,
             checked,
             false,
-            cx.listener(move |this, _event, _window, cx| {
-                this.apply_cloud_sync_upload_selection_action(action.clone());
-                cx.stop_propagation();
-                cx.notify();
-            }),
+            self.upload_selection_listener(action),
             cx,
         )
     }
@@ -984,7 +1060,7 @@ impl WorkspaceApp {
     pub(super) fn render_cloud_sync_field_diff_item(
         &self,
         item: &CloudSyncFieldDiffItem,
-        cx: &mut Context<Self>,
+        cx: &mut App,
     ) -> AnyElement {
         let theme = self.tokens.ui;
         let status_key = self.cloud_sync_field_diff_status_key(item.status);
@@ -1110,7 +1186,7 @@ impl WorkspaceApp {
         &self,
         summary: &CloudSyncPreviewSummary,
         selection: &CloudSyncPreviewSelection,
-        cx: &mut Context<Self>,
+        cx: &mut App,
     ) -> AnyElement {
         let mut block = div().flex().flex_col().gap(px(8.0));
         for row in selection.preview_rows(summary) {
@@ -1122,42 +1198,12 @@ impl WorkspaceApp {
                         .map(|label| self.cloud_sync_preview_selection_label(label)),
                     row.checked,
                     row.disabled,
-                    cx.listener(move |this, _event, _window, cx| {
-                        this.apply_cloud_sync_preview_selection_action(action.clone());
-                        cx.stop_propagation();
-                        cx.notify();
-                    }),
+                    self.preview_selection_listener(action),
                     cx,
                 ),
             );
         }
         block.into_any_element()
-    }
-
-    pub(super) fn apply_cloud_sync_preview_selection_action(
-        &mut self,
-        action: CloudSyncPreviewSelectionAction,
-    ) {
-        let all_connection_names = self
-            .cloud_sync
-            .view
-            .pending_preview
-            .as_ref()
-            .map(cloud_sync_preview_summary)
-            .map(|summary| summary.connection_record_names())
-            .unwrap_or_default();
-        if let Some(selection) = self.cloud_sync.view.preview_selection.as_mut() {
-            selection.apply_action(action, all_connection_names);
-        }
-    }
-
-    pub(super) fn apply_cloud_sync_upload_selection_action(
-        &mut self,
-        action: CloudSyncUploadSelectionAction,
-    ) {
-        if let Some(selection) = self.cloud_sync.view.upload_selection.as_mut() {
-            selection.apply_action(action);
-        }
     }
 
     pub(super) fn cloud_sync_preview_selection_label(
@@ -1200,7 +1246,7 @@ impl WorkspaceApp {
         checked: bool,
         disabled: bool,
         listener: impl Fn(&MouseDownEvent, &mut Window, &mut App) + 'static,
-        cx: &mut Context<Self>,
+        cx: &mut App,
     ) -> AnyElement {
         let theme = self.tokens.ui;
         let label_key = label.clone();
@@ -1239,7 +1285,7 @@ impl WorkspaceApp {
     pub(super) fn render_cloud_sync_forward_details(
         &self,
         details: &[CloudSyncForwardDetail],
-        cx: &mut Context<Self>,
+        cx: &mut App,
     ) -> AnyElement {
         let mut block = self.render_cloud_sync_preview_block(
             self.i18n
@@ -1261,7 +1307,7 @@ impl WorkspaceApp {
         action: &'static str,
         records: &[CloudSyncPreviewRecord],
         selection: &CloudSyncPreviewSelection,
-        cx: &mut Context<Self>,
+        cx: &mut App,
     ) -> AnyElement {
         let model = cloud_sync_preview_record_group_model(action, records, selection);
         let mut block = self.render_cloud_sync_preview_block(self.i18n.t(model.title_key), cx);
@@ -1279,22 +1325,24 @@ impl WorkspaceApp {
                         meta,
                         checked,
                         disabled,
-                        cx.listener(
-                            move |this: &mut WorkspaceApp,
-                                  _event,
-                                  _window,
-                                  cx: &mut Context<WorkspaceApp>| {
-                                if let Some(selection) =
-                                    this.cloud_sync.view.preview_selection.as_mut()
-                                {
-                                    if !selection.selected_connection_names.remove(&name) {
-                                        selection.selected_connection_names.insert(name.clone());
+                        {
+                            let cloud_sync = self.cloud_sync.clone();
+                            move |_event, _window, cx| {
+                                cloud_sync.update(cx, |cloud_sync, cx| {
+                                    if let Some(selection) =
+                                        cloud_sync.view.preview_selection.as_mut()
+                                    {
+                                        if !selection.selected_connection_names.remove(&name) {
+                                            selection
+                                                .selected_connection_names
+                                                .insert(name.clone());
+                                        }
+                                        cx.notify();
                                     }
-                                }
+                                });
                                 cx.stop_propagation();
-                                cx.notify();
-                            },
-                        ),
+                            }
+                        },
                         cx,
                     ));
                 }
@@ -1310,11 +1358,7 @@ impl WorkspaceApp {
         block.into_any_element()
     }
 
-    pub(super) fn render_cloud_sync_preview_block(
-        &self,
-        title: String,
-        cx: &mut Context<Self>,
-    ) -> gpui::Div {
+    pub(super) fn render_cloud_sync_preview_block(&self, title: String, cx: &mut App) -> gpui::Div {
         let theme = self.tokens.ui;
         cloud_sync_preview_block(
             &self.tokens,
@@ -1332,7 +1376,7 @@ impl WorkspaceApp {
         &self,
         title: String,
         meta: Option<String>,
-        cx: &mut Context<Self>,
+        cx: &mut App,
     ) -> AnyElement {
         let theme = self.tokens.ui;
         let mono = cloud_sync_value_prefers_mono(&title);
@@ -1355,7 +1399,7 @@ impl WorkspaceApp {
                 )
             }),
             mono,
-            Some(settings_mono_font_family(self.settings_store.settings())),
+            Some(self.mono_font_family.clone()),
         )
     }
 

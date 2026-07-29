@@ -1,7 +1,9 @@
 use std::{collections::HashMap, sync::Arc};
 
+use crate::workspace::ai_state::{
+    AiChatInitializationOutcome, AiChatPopover, AiWorkspaceEntity, AiWorkspaceVisibility,
+};
 use crate::workspace::ime::WorkspaceImeTarget;
-use crate::workspace::root::init::ai_chat_initialization_error;
 use crate::workspace::*;
 use gpui::{Context, Div, MouseDownEvent, Rgba, Window};
 use oxideterm_ai::stream_state::*;
@@ -15,10 +17,10 @@ use oxideterm_ai::{
     ai_detected_intent_system_prompt, ai_help_markdown as ai_help_markdown_core,
     ai_input_system_prompt, ai_orchestrator_obligation_prompt, ai_reference_context_block,
     ai_required_tool_retry_prompt, ai_should_trigger_hard_deny, ai_user_explicitly_requested_json,
-    ai_visible_suggestion_content, apply_ai_autocomplete_candidate, apply_chat_request_overrides,
-    check_model_selector_provider_online, detect_ai_intent, extract_ai_error_context,
-    generate_chat_title, infer_ai_cwd, model_max_response_tokens as ai_model_max_response_tokens,
-    model_reasoning_capability, model_selector_display_name, model_selector_truncated_label,
+    ai_visible_suggestion_content, apply_chat_request_overrides, detect_ai_intent,
+    extract_ai_error_context, generate_chat_title, infer_ai_cwd,
+    model_max_response_tokens as ai_model_max_response_tokens, model_reasoning_capability,
+    model_selector_display_name, model_selector_truncated_label,
     model_selector_visible_provider_groups, parse_ai_user_input,
     provider_chat_requires_key as ai_provider_chat_requires_key,
     provider_views as ai_provider_views, resolve_ai_policy_decision, resolve_ai_slash_command,
@@ -96,7 +98,6 @@ pub(in crate::workspace) enum AiHeaderAction {
     Settings,
 }
 
-#[derive(Clone)]
 pub(in crate::workspace) struct AiPendingChatStream {
     pub(super) conversation_id: String,
     pub(super) config: AiChatStreamConfig,
@@ -133,9 +134,11 @@ impl WorkspaceApp {
             disabled,
             loading,
             cx.listener(move |this, event, window, cx| {
-                this.ai.chat.menu_open = false;
-                this.ai.chat.conversation_list_open = false;
-                this.ai.chat.safety_menu_open = false;
+                this.ai_entity.update(cx, |ai, _cx| {
+                    ai.set_chat_popover_open(AiChatPopover::Menu, false);
+                    ai.set_chat_popover_open(AiChatPopover::ConversationList, false);
+                    ai.set_chat_popover_open(AiChatPopover::Safety, false);
+                });
                 listener(this, event, window, cx);
                 cx.stop_propagation();
                 cx.notify();

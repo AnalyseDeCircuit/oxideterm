@@ -1,64 +1,349 @@
 use super::dialog_lifecycle::sftp_i18n_count;
 use super::*;
 
-impl WorkspaceApp {
-    pub(in crate::workspace) fn dismiss_sftp_context_menu(&mut self) -> bool {
-        self.sftp_view.clear_context_menu_immediately()
+struct SftpTransferLaunch {
+    id: u64,
+    transfer_id: String,
+    node_id: NodeId,
+    direction: SftpTransferDirection,
+    is_directory: bool,
+    local_path: String,
+    remote_path: String,
+    protocol_override: Option<RemoteTransferProtocol>,
+}
+
+enum SftpConflictDecision {
+    Cancel,
+    Continue,
+    Execute {
+        pending_transfers: Vec<SftpPendingTransfer>,
+        resolved_actions: HashMap<String, SftpConflictResolution>,
+    },
+}
+
+impl SftpWorkspaceEntity {
+    pub(in crate::workspace) fn dismiss_context_menu(&mut self, cx: &mut Context<Self>) -> bool {
+        let changed = self.clear_context_menu_immediately();
+        if changed {
+            cx.notify();
+        }
+        changed
     }
 
-    pub(in crate::workspace::sftp) fn open_sftp_context_menu(
+    pub(in crate::workspace::sftp) fn open_context_menu(
         &mut self,
         pane: SftpPane,
         file: Option<SftpFileEntry>,
         x: f32,
         y: f32,
+        cx: &mut Context<Self>,
     ) {
-        self.sftp_view.active_pane = pane;
+        self.active_pane = pane;
         if let Some(file) = file.as_ref() {
             let selected = match pane {
-                SftpPane::Local => &mut self.sftp_view.local_selected,
-                SftpPane::Remote => &mut self.sftp_view.remote_selected,
+                SftpPane::Local => &mut self.local_selected,
+                SftpPane::Remote => &mut self.remote_selected,
             };
             if crate::workspace::browser_behavior::preserve_or_move_context_selection(
                 selected,
                 file.name.clone(),
             ) {
                 match pane {
-                    SftpPane::Local => self.sftp_view.local_last_selected = Some(file.name.clone()),
-                    SftpPane::Remote => {
-                        self.sftp_view.remote_last_selected = Some(file.name.clone())
-                    }
+                    SftpPane::Local => self.local_last_selected = Some(file.name.clone()),
+                    SftpPane::Remote => self.remote_last_selected = Some(file.name.clone()),
                 }
             }
         }
-        self.sftp_view.context_menu_presence.reopen();
-        self.sftp_view.context_menu_exit_generation = None;
-        self.sftp_view.context_menu = Some(SftpContextMenu { pane, file, x, y });
+        self.context_menu_presence.reopen();
+        self.context_menu_exit_generation = None;
+        self.context_menu = Some(SftpContextMenu { pane, file, x, y });
+        cx.notify();
     }
 
-    pub(in crate::workspace::sftp) fn open_sftp_rename_dialog(
+    pub(in crate::workspace::sftp) fn open_rename_dialog(
         &mut self,
         pane: SftpPane,
         old_name: String,
+        cx: &mut Context<Self>,
     ) {
-        self.sftp_view.dialog_value = old_name.clone();
-        self.sftp_view
-            .set_dialog(SftpDialog::Rename { pane, old_name });
-        self.sftp_view.focused_input = Some(SftpInput::DialogValue);
+        self.dialog_value.clone_from(&old_name);
+        self.set_dialog(SftpDialog::Rename { pane, old_name });
+        self.focused_input = Some(SftpInput::DialogValue);
+        cx.notify();
     }
 
-    pub(in crate::workspace::sftp) fn open_sftp_new_folder_dialog(&mut self, pane: SftpPane) {
-        self.sftp_view.dialog_value.clear();
-        self.sftp_view.set_dialog(SftpDialog::NewFolder { pane });
-        self.sftp_view.focused_input = Some(SftpInput::DialogValue);
+    pub(in crate::workspace::sftp) fn open_new_folder_dialog(
+        &mut self,
+        pane: SftpPane,
+        cx: &mut Context<Self>,
+    ) {
+        self.dialog_value.clear();
+        self.set_dialog(SftpDialog::NewFolder { pane });
+        self.focused_input = Some(SftpInput::DialogValue);
+        cx.notify();
     }
 
-    pub(in crate::workspace::sftp) fn extract_remote_sftp_archive(&mut self, file: SftpFileEntry) {
-        let Some(tab_id) = self.main_window_tabs.active_tab_id else {
+    fn selected_transfer_names(&self, pane: SftpPane) -> Vec<String> {
+        match pane {
+            SftpPane::Local => self.local_selected.iter().cloned().collect(),
+            SftpPane::Remote => self.remote_selected.iter().cloned().collect(),
+        }
+    }
+
+    fn pending_named_transfers(
+        &self,
+        pane: SftpPane,
+        direction: SftpTransferDirection,
+        selected_names: Vec<String>,
+    ) -> Vec<SftpPendingTransfer> {
+        let source_files = match pane {
+            SftpPane::Local => &self.local_files,
+            SftpPane::Remote => &self.remote_files,
+        };
+        selected_names
+            .into_iter()
+            .filter_map(|name| {
+                source_files
+                    .iter()
+                    .find(|file| file.name == name)
+                    .cloned()
+                    .map(|source| SftpPendingTransfer {
+                        name,
+                        direction,
+                        source,
+                        protocol_override: None,
+                    })
+            })
+            .collect()
+    }
+
+    fn transfer_conflicts(
+        &self,
+        pending_transfers: &[SftpPendingTransfer],
+    ) -> Vec<SftpConflictInfo> {
+        let Some(direction) = pending_transfers.first().map(|transfer| transfer.direction) else {
+            return Vec::new();
+        };
+        sftp_transfer_conflicts(pending_transfers, self.target_files(direction))
+    }
+
+    fn begin_transfer_conflicts(
+        &mut self,
+        conflicts: Vec<SftpConflictInfo>,
+        pending_transfers: Vec<SftpPendingTransfer>,
+        cx: &mut Context<Self>,
+    ) {
+        self.conflict_state = Some(SftpConflictState {
+            conflicts,
+            current_index: 0,
+            pending_transfers,
+            resolved_actions: HashMap::new(),
+            apply_to_all: false,
+        });
+        self.set_dialog(SftpDialog::Conflict);
+        self.clear_context_menu_immediately();
+        cx.notify();
+    }
+
+    fn target_files(&self, direction: SftpTransferDirection) -> &[SftpFileEntry] {
+        match direction {
+            SftpTransferDirection::Upload => &self.remote_files,
+            SftpTransferDirection::Download => &self.local_files,
+        }
+    }
+
+    fn prepare_transfer_launches(
+        &mut self,
+        node_id: NodeId,
+        pending_transfers: Vec<SftpPendingTransfer>,
+        resolved_actions: HashMap<String, SftpConflictResolution>,
+        configured_protocol: RemoteTransferProtocol,
+        cx: &mut Context<Self>,
+    ) -> Vec<SftpTransferLaunch> {
+        let Some(direction) = pending_transfers.first().map(|transfer| transfer.direction) else {
+            return Vec::new();
+        };
+
+        // Resolve names against the current target snapshot before mutating queue state.
+        let target_files = self.target_files(direction);
+        let mut batch = SftpTransferBatch {
+            direction,
+            total: 0,
+            success: 0,
+            failed: 0,
+            skipped: 0,
+            queued: 0,
+        };
+        let planned_transfers = pending_transfers
+            .into_iter()
+            .filter_map(|transfer| {
+                let resolution = resolved_actions.get(&transfer.name).copied();
+                if resolution == Some(SftpConflictResolution::Skip)
+                    || (resolution == Some(SftpConflictResolution::SkipOlder)
+                        && sftp_source_not_newer_than_target(&transfer, target_files))
+                {
+                    batch.skipped += 1;
+                    return None;
+                }
+                let target_name = if resolution == Some(SftpConflictResolution::Rename) {
+                    unique_sftp_conflict_name(&transfer.name, target_files)
+                } else {
+                    transfer.name.clone()
+                };
+                if transfer.source.file_type == SftpFileType::Directory {
+                    batch.queued += 1;
+                }
+                batch.total += 1;
+                Some((transfer, target_name))
+            })
+            .collect::<Vec<_>>();
+
+        let batch_id = self.next_transfer_batch_id;
+        self.next_transfer_batch_id += 1;
+        let mut launches = Vec::with_capacity(planned_transfers.len());
+        for (transfer, target_name) in planned_transfers {
+            let id = self.next_transfer_id;
+            self.next_transfer_id += 1;
+            let transfer_id = new_sftp_transfer_id(&node_id, &transfer.name);
+            let is_directory = transfer.source.file_type == SftpFileType::Directory;
+            let local_path = match direction {
+                SftpTransferDirection::Upload => transfer.source.path.clone(),
+                SftpTransferDirection::Download => join_local_path(&self.local_path, &target_name),
+            };
+            let remote_path = match direction {
+                SftpTransferDirection::Upload => join_sftp_path(&self.remote_path, &target_name),
+                SftpTransferDirection::Download => transfer.source.path,
+            };
+            let protocol = transfer.protocol_override.unwrap_or(configured_protocol);
+            self.transfers.push(SftpTransferItem {
+                id,
+                transfer_id: transfer_id.clone(),
+                batch_id: Some(batch_id),
+                node_id: node_id.clone(),
+                name: if is_directory {
+                    format!("{target_name}/")
+                } else {
+                    target_name
+                },
+                local_path: local_path.clone(),
+                remote_path: remote_path.clone(),
+                direction,
+                protocol,
+                size: transfer.source.size.max(1),
+                transferred: 0,
+                speed: 0,
+                state: SftpTransferState::Pending,
+                error: None,
+            });
+            launches.push(SftpTransferLaunch {
+                id,
+                transfer_id,
+                node_id: node_id.clone(),
+                direction,
+                is_directory,
+                local_path,
+                remote_path,
+                protocol_override: transfer.protocol_override,
+            });
+        }
+        if batch.total > 0 {
+            self.transfer_batches.insert(batch_id, batch);
+            cx.notify();
+        }
+        launches
+    }
+
+    pub(in crate::workspace::sftp) fn toggle_conflict_apply_all(&mut self, cx: &mut Context<Self>) {
+        if let Some(conflict) = self.conflict_state.as_mut() {
+            conflict.apply_to_all = !conflict.apply_to_all;
+            cx.notify();
+        }
+    }
+
+    fn resolve_transfer_conflict(
+        &mut self,
+        resolution: SftpConflictResolution,
+        cx: &mut Context<Self>,
+    ) -> SftpConflictDecision {
+        let Some(mut conflict_state) = self.conflict_state.take() else {
+            return SftpConflictDecision::Cancel;
+        };
+        if conflict_state.conflicts.is_empty() {
+            cx.notify();
+            return SftpConflictDecision::Cancel;
+        }
+
+        let current_index = conflict_state.current_index;
+        if conflict_state.apply_to_all {
+            for conflict in conflict_state.conflicts.iter().skip(current_index) {
+                conflict_state
+                    .resolved_actions
+                    .insert(conflict.file_name.clone(), resolution);
+            }
+            cx.notify();
+            return SftpConflictDecision::Execute {
+                pending_transfers: conflict_state.pending_transfers,
+                resolved_actions: conflict_state.resolved_actions,
+            };
+        }
+
+        if let Some(conflict) = conflict_state.conflicts.get(current_index) {
+            conflict_state
+                .resolved_actions
+                .insert(conflict.file_name.clone(), resolution);
+        }
+        if current_index + 1 < conflict_state.conflicts.len() {
+            conflict_state.current_index += 1;
+            conflict_state.apply_to_all = false;
+            self.conflict_state = Some(conflict_state);
+            self.set_dialog(SftpDialog::Conflict);
+            cx.notify();
+            SftpConflictDecision::Continue
+        } else {
+            cx.notify();
+            SftpConflictDecision::Execute {
+                pending_transfers: conflict_state.pending_transfers,
+                resolved_actions: conflict_state.resolved_actions,
+            }
+        }
+    }
+
+    fn cancel_transfer_conflicts(&mut self, cx: &mut Context<Self>) {
+        if self.conflict_state.take().is_some() {
+            cx.notify();
+        }
+    }
+
+    pub(in crate::workspace::sftp) fn complete_transfer_batch_item(
+        &mut self,
+        batch_id: u64,
+        state: SftpTransferState,
+    ) -> Option<SftpTransferBatch> {
+        let batch = self.transfer_batches.get_mut(&batch_id)?;
+        match state {
+            SftpTransferState::Completed => batch.success += 1,
+            SftpTransferState::Error => batch.failed += 1,
+            _ => return None,
+        }
+        if batch.success + batch.failed < batch.total {
+            return None;
+        }
+        self.transfer_batches.remove(&batch_id)
+    }
+}
+
+impl WorkspaceApp {
+    pub(in crate::workspace::sftp) fn extract_remote_sftp_archive(
+        &mut self,
+        file: SftpFileEntry,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(tab_id) = self.active_tab_id(cx) else {
             self.push_sftp_toast(
                 self.i18n.t("sftp.toast.extract_failed"),
                 None,
                 TerminalNoticeVariant::Error,
+                cx,
             );
             return;
         };
@@ -67,10 +352,11 @@ impl WorkspaceApp {
                 self.i18n.t("sftp.toast.extract_failed"),
                 None,
                 TerminalNoticeVariant::Error,
+                cx,
             );
             return;
         };
-        let remote_directory = self.sftp_view.remote_path.clone();
+        let remote_directory = self.sftp_view.read(cx).remote_path.clone();
         let archive_path = if file.path.is_empty() {
             join_sftp_path(&remote_directory, &file.name)
         } else {
@@ -87,13 +373,14 @@ impl WorkspaceApp {
                     self.i18n.t("sftp.toast.unsupported_archive"),
                     Some(file.name),
                     TerminalNoticeVariant::Error,
+                    cx,
                 );
                 return;
             }
         };
 
         let router = self.node_router.clone();
-        let tx = self.sftp_worker_tx.clone();
+        let tx = self.sftp_view.read(cx).worker_sender();
         let runtime = self.forwarding_runtime.clone();
         let toast = SftpMutationToast {
             success_title: self.i18n.t("sftp.toast.extract_complete"),
@@ -125,19 +412,18 @@ impl WorkspaceApp {
                 toast: Some(toast),
             });
         });
-        self.dismiss_sftp_context_menu();
+        self.sftp_view
+            .update(cx, |sftp, cx| sftp.dismiss_context_menu(cx));
     }
 
     pub(in crate::workspace::sftp) fn queue_sftp_transfers(
         &mut self,
         pane: SftpPane,
         direction: SftpTransferDirection,
+        cx: &mut Context<Self>,
     ) {
-        let selected = match pane {
-            SftpPane::Local => self.sftp_view.local_selected.clone(),
-            SftpPane::Remote => self.sftp_view.remote_selected.clone(),
-        };
-        self.queue_sftp_named_transfers(pane, direction, selected.into_iter().collect());
+        let selected = self.sftp_view.read(cx).selected_transfer_names(pane);
+        self.queue_sftp_named_transfers(pane, direction, selected, cx);
     }
 
     pub(in crate::workspace::sftp) fn queue_sftp_named_transfers(
@@ -145,8 +431,9 @@ impl WorkspaceApp {
         pane: SftpPane,
         direction: SftpTransferDirection,
         selected_names: Vec<String>,
+        cx: &mut Context<Self>,
     ) {
-        let Some(tab_id) = self.main_window_tabs.active_tab_id else {
+        let Some(tab_id) = self.active_tab_id(cx) else {
             return;
         };
         let Some(node_id) = self.sftp_tab_nodes.get(&tab_id).cloned() else {
@@ -155,43 +442,24 @@ impl WorkspaceApp {
         if selected_names.is_empty() {
             return;
         }
-        let source_files = match pane {
-            SftpPane::Local => self.sftp_view.local_files.clone(),
-            SftpPane::Remote => self.sftp_view.remote_files.clone(),
-        };
-        let pending_transfers = selected_names
-            .into_iter()
-            .filter_map(|name| {
-                source_files
-                    .iter()
-                    .find(|file| file.name == name)
-                    .cloned()
-                    .map(|source| SftpPendingTransfer {
-                        name,
-                        direction,
-                        source,
-                        protocol_override: None,
-                    })
-            })
-            .collect::<Vec<_>>();
+        let pending_transfers =
+            self.sftp_view
+                .read(cx)
+                .pending_named_transfers(pane, direction, selected_names);
         if pending_transfers.is_empty() {
             return;
         }
 
-        let target_files = self.sftp_target_files_for_direction(direction);
         let conflict_action = self.settings_store.settings().sftp.conflict_action;
-        let conflicts = sftp_transfer_conflicts(&pending_transfers, &target_files);
+        let conflicts = self
+            .sftp_view
+            .read(cx)
+            .transfer_conflicts(&pending_transfers);
         if !conflicts.is_empty() && conflict_action == oxideterm_settings::ConflictAction::Ask {
-            self.sftp_view.conflict_state = Some(SftpConflictState {
-                conflicts,
-                current_index: 0,
-                pending_transfers,
-                resolved_actions: HashMap::new(),
-                apply_to_all: false,
+            self.sftp_view.update(cx, |sftp, cx| {
+                sftp.begin_transfer_conflicts(conflicts, pending_transfers, cx);
             });
-            self.sftp_view.set_dialog(SftpDialog::Conflict);
-            self.dismiss_sftp_context_menu();
-            self.clear_sftp_selection(pane);
+            self.clear_sftp_selection(pane, cx);
             return;
         }
 
@@ -204,15 +472,16 @@ impl WorkspaceApp {
                 )
             })
             .collect::<HashMap<_, _>>();
-        self.execute_sftp_pending_transfers(node_id, pending_transfers, resolved_actions);
-        self.clear_sftp_selection(pane);
+        self.execute_sftp_pending_transfers(node_id, pending_transfers, resolved_actions, cx);
+        self.clear_sftp_selection(pane, cx);
     }
 
     pub(in crate::workspace::sftp) fn queue_sftp_external_upload_paths(
         &mut self,
         paths: &[std::path::PathBuf],
+        cx: &mut Context<Self>,
     ) {
-        let Some(tab_id) = self.main_window_tabs.active_tab_id else {
+        let Some(tab_id) = self.active_tab_id(cx) else {
             return;
         };
         let Some(node_id) = self.sftp_tab_nodes.get(&tab_id).cloned() else {
@@ -261,20 +530,17 @@ impl WorkspaceApp {
         if pending_transfers.is_empty() {
             return;
         }
-        let conflicts = sftp_transfer_conflicts(&pending_transfers, &self.sftp_view.remote_files);
+        let conflicts = self
+            .sftp_view
+            .read(cx)
+            .transfer_conflicts(&pending_transfers);
         if !conflicts.is_empty()
             && self.settings_store.settings().sftp.conflict_action
                 == oxideterm_settings::ConflictAction::Ask
         {
-            self.sftp_view.conflict_state = Some(SftpConflictState {
-                conflicts,
-                current_index: 0,
-                pending_transfers,
-                resolved_actions: HashMap::new(),
-                apply_to_all: false,
+            self.sftp_view.update(cx, |sftp, cx| {
+                sftp.begin_transfer_conflicts(conflicts, pending_transfers, cx);
             });
-            self.sftp_view.set_dialog(SftpDialog::Conflict);
-            self.dismiss_sftp_context_menu();
             return;
         }
 
@@ -288,17 +554,7 @@ impl WorkspaceApp {
                 )
             })
             .collect::<HashMap<_, _>>();
-        self.execute_sftp_pending_transfers(node_id, pending_transfers, resolved_actions);
-    }
-
-    fn sftp_target_files_for_direction(
-        &self,
-        direction: SftpTransferDirection,
-    ) -> Vec<SftpFileEntry> {
-        match direction {
-            SftpTransferDirection::Upload => self.sftp_view.remote_files.clone(),
-            SftpTransferDirection::Download => self.sftp_view.local_files.clone(),
-        }
+        self.execute_sftp_pending_transfers(node_id, pending_transfers, resolved_actions, cx);
     }
 
     pub(in crate::workspace::sftp) fn execute_sftp_pending_transfers(
@@ -306,205 +562,83 @@ impl WorkspaceApp {
         node_id: NodeId,
         pending_transfers: Vec<SftpPendingTransfer>,
         resolved_actions: HashMap<String, SftpConflictResolution>,
+        cx: &mut Context<Self>,
     ) {
-        let Some(direction) = pending_transfers.first().map(|transfer| transfer.direction) else {
-            return;
-        };
-        let target_files = self.sftp_target_files_for_direction(direction);
-        let batch_id = self.sftp_view.next_transfer_batch_id;
-        self.sftp_view.next_transfer_batch_id += 1;
-        let mut batch = SftpTransferBatch {
-            direction,
-            total: 0,
-            success: 0,
-            failed: 0,
-            skipped: 0,
-            queued: 0,
-        };
-        for transfer in pending_transfers {
-            let resolution = resolved_actions.get(&transfer.name).copied();
-            if resolution == Some(SftpConflictResolution::Skip) {
-                batch.skipped += 1;
-                continue;
-            }
-            if resolution == Some(SftpConflictResolution::SkipOlder)
-                && sftp_source_not_newer_than_target(&transfer, &target_files)
-            {
-                batch.skipped += 1;
-                continue;
-            }
-            let target_name = if resolution == Some(SftpConflictResolution::Rename) {
-                unique_sftp_conflict_name(&transfer.name, &target_files)
-            } else {
-                transfer.name.clone()
-            };
-            if transfer.source.file_type == SftpFileType::Directory {
-                batch.queued += 1;
-            }
-            batch.total += 1;
-            self.queue_sftp_pending_transfer(
-                node_id.clone(),
-                transfer,
-                target_name,
-                Some(batch_id),
-            );
-        }
-        if batch.total > 0 {
-            self.sftp_view.transfer_batches.insert(batch_id, batch);
-        }
-    }
-
-    fn queue_sftp_pending_transfer(
-        &mut self,
-        node_id: NodeId,
-        transfer: SftpPendingTransfer,
-        target_name: String,
-        batch_id: Option<u64>,
-    ) {
-        let direction = transfer.direction;
-        let is_directory = transfer.source.file_type == SftpFileType::Directory;
-        let id = self.sftp_view.next_transfer_id;
-        self.sftp_view.next_transfer_id += 1;
-        let transfer_id = new_sftp_transfer_id(&node_id, &transfer.name);
-        let size = transfer.source.size.max(1);
-        let local_path = match direction {
-            SftpTransferDirection::Upload => transfer.source.path.clone(),
-            SftpTransferDirection::Download => {
-                join_local_path(&self.sftp_view.local_path, &target_name)
-            }
-        };
-        let remote_path = match direction {
-            SftpTransferDirection::Upload => {
-                join_sftp_path(&self.sftp_view.remote_path, &target_name)
-            }
-            SftpTransferDirection::Download => transfer.source.path,
-        };
-        self.sftp_view.transfers.push(SftpTransferItem {
-            id,
-            transfer_id: transfer_id.clone(),
-            batch_id,
-            node_id: node_id.clone(),
-            name: if is_directory {
-                format!("{target_name}/")
-            } else {
-                target_name
-            },
-            local_path: local_path.clone(),
-            remote_path: remote_path.clone(),
-            direction,
-            protocol: transfer.protocol_override.unwrap_or_else(|| {
-                configured_transfer_protocol(self.settings_store.settings().sftp.transfer_protocol)
-            }),
-            size,
-            transferred: 0,
-            speed: 0,
-            state: SftpTransferState::Pending,
-            error: None,
+        let configured_protocol =
+            configured_transfer_protocol(self.settings_store.settings().sftp.transfer_protocol);
+        let launches = self.sftp_view.update(cx, |sftp, cx| {
+            sftp.prepare_transfer_launches(
+                node_id,
+                pending_transfers,
+                resolved_actions,
+                configured_protocol,
+                cx,
+            )
         });
-        self.spawn_sftp_transfer_task(
-            id,
-            transfer_id,
-            node_id,
-            direction,
-            is_directory,
-            local_path,
-            remote_path,
-            None,
-            transfer.protocol_override,
-        );
-    }
-
-    pub(in crate::workspace::sftp) fn toggle_sftp_conflict_apply_all(&mut self) {
-        if let Some(conflict) = self.sftp_view.conflict_state.as_mut() {
-            conflict.apply_to_all = !conflict.apply_to_all;
+        for launch in launches {
+            // The entity owns queue state; the workspace retains only the runtime launch adapter.
+            self.spawn_sftp_transfer_task(
+                launch.id,
+                launch.transfer_id,
+                launch.node_id,
+                launch.direction,
+                launch.is_directory,
+                launch.local_path,
+                launch.remote_path,
+                None,
+                launch.protocol_override,
+                cx,
+            );
         }
     }
 
     pub(in crate::workspace::sftp) fn resolve_sftp_transfer_conflict(
         &mut self,
         resolution: SftpConflictResolution,
+        cx: &mut Context<Self>,
     ) {
-        let Some(mut conflict_state) = self.sftp_view.conflict_state.clone() else {
-            return;
-        };
-        let Some(tab_id) = self.main_window_tabs.active_tab_id else {
-            self.cancel_sftp_transfer_conflicts();
+        let Some(tab_id) = self.active_tab_id(cx) else {
+            self.cancel_sftp_transfer_conflicts(cx);
             return;
         };
         let Some(node_id) = self.sftp_tab_nodes.get(&tab_id).cloned() else {
-            self.cancel_sftp_transfer_conflicts();
+            self.cancel_sftp_transfer_conflicts(cx);
             return;
         };
-        if conflict_state.conflicts.is_empty() {
-            self.cancel_sftp_transfer_conflicts();
-            return;
-        }
-
-        let current_index = conflict_state.current_index;
-        if conflict_state.apply_to_all {
-            for conflict in conflict_state.conflicts.iter().skip(current_index) {
-                conflict_state
-                    .resolved_actions
-                    .insert(conflict.file_name.clone(), resolution);
+        match self.sftp_view.update(cx, |sftp, cx| {
+            sftp.resolve_transfer_conflict(resolution, cx)
+        }) {
+            SftpConflictDecision::Cancel => self.close_sftp_dialog(cx),
+            SftpConflictDecision::Continue => {}
+            SftpConflictDecision::Execute {
+                pending_transfers,
+                resolved_actions,
+            } => {
+                self.close_sftp_dialog(cx);
+                self.execute_sftp_pending_transfers(
+                    node_id,
+                    pending_transfers,
+                    resolved_actions,
+                    cx,
+                );
             }
-            self.sftp_view.conflict_state = None;
-            self.close_sftp_dialog();
-            self.execute_sftp_pending_transfers(
-                node_id,
-                conflict_state.pending_transfers,
-                conflict_state.resolved_actions,
-            );
-            return;
-        }
-
-        if let Some(conflict) = conflict_state.conflicts.get(current_index) {
-            conflict_state
-                .resolved_actions
-                .insert(conflict.file_name.clone(), resolution);
-        }
-
-        if current_index + 1 < conflict_state.conflicts.len() {
-            conflict_state.current_index += 1;
-            conflict_state.apply_to_all = false;
-            self.sftp_view.conflict_state = Some(conflict_state);
-            self.sftp_view.set_dialog(SftpDialog::Conflict);
-        } else {
-            self.sftp_view.conflict_state = None;
-            self.close_sftp_dialog();
-            self.execute_sftp_pending_transfers(
-                node_id,
-                conflict_state.pending_transfers,
-                conflict_state.resolved_actions,
-            );
         }
     }
 
-    pub(in crate::workspace::sftp) fn cancel_sftp_transfer_conflicts(&mut self) {
-        self.sftp_view.conflict_state = None;
-        self.close_sftp_dialog();
-    }
-
-    pub(in crate::workspace::sftp) fn update_sftp_transfer_batch_toast(
+    pub(in crate::workspace::sftp) fn cancel_sftp_transfer_conflicts(
         &mut self,
-        batch_id: u64,
-        state: SftpTransferState,
+        cx: &mut Context<Self>,
     ) {
-        let Some(batch) = self.sftp_view.transfer_batches.get_mut(&batch_id) else {
-            return;
-        };
-        match state {
-            SftpTransferState::Completed => batch.success += 1,
-            SftpTransferState::Error => batch.failed += 1,
-            _ => return,
-        }
+        self.sftp_view
+            .update(cx, |sftp, cx| sftp.cancel_transfer_conflicts(cx));
+        self.close_sftp_dialog(cx);
+    }
 
-        if batch.success + batch.failed < batch.total {
-            return;
-        }
-
-        let Some(batch) = self.sftp_view.transfer_batches.remove(&batch_id) else {
-            return;
-        };
+    pub(in crate::workspace::sftp) fn show_sftp_transfer_batch_toast(
+        &self,
+        batch: SftpTransferBatch,
+        cx: &App,
+    ) {
         let is_upload = batch.direction == SftpTransferDirection::Upload;
         let only_queued_directory_transfers =
             batch.queued > 0 && batch.queued == batch.success && batch.failed == 0;
@@ -530,6 +664,7 @@ impl WorkspaceApp {
                 },
                 Some(description),
                 TerminalNoticeVariant::Success,
+                cx,
             );
         } else if batch.failed > 0 && batch.success == 0 {
             self.push_sftp_toast(
@@ -543,6 +678,7 @@ impl WorkspaceApp {
                     batch.failed,
                 )),
                 TerminalNoticeVariant::Error,
+                cx,
             );
         } else if batch.success > 0 || batch.failed > 0 {
             self.push_sftp_toast(
@@ -558,6 +694,7 @@ impl WorkspaceApp {
                     batch.skipped,
                 )),
                 TerminalNoticeVariant::Error,
+                cx,
             );
         }
     }

@@ -4,7 +4,11 @@ use super::*;
 pub(in crate::workspace) struct ActiveSessionSidebarRow {
     node_id: NodeId,
     parent_id: Option<NodeId>,
-    node: WorkspaceSshNode,
+    saved_connection_id: Option<String>,
+    title: String,
+    host: String,
+    username: String,
+    port: u16,
     node_view: ActiveSessionNode,
     depth: usize,
     is_last: bool,
@@ -21,6 +25,42 @@ fn session_status_can_remove_from_sidebar(status: ActiveSessionStatus) -> bool {
 }
 
 impl WorkspaceApp {
+    fn queue_ssh_terminal_tab_for_sidebar_node(
+        &mut self,
+        node_id: NodeId,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Result<()> {
+        let title = self
+            .ssh_nodes
+            .get(&node_id)
+            .map(|node| node.title.clone())
+            .ok_or_else(|| anyhow::anyhow!("SSH node {} not found", node_id.0))?;
+        if self.node_is_ready_for_terminal(&node_id) {
+            return self.queue_ssh_terminal_tab_for_existing_node(node_id, None, title, window, cx);
+        }
+
+        let config = self
+            .node_router
+            .node_runtime_snapshot(&node_id)
+            .map(|snapshot| snapshot.config)
+            .ok_or_else(|| anyhow::anyhow!("SSH node {} has no runtime config", node_id.0))?;
+        let saved_connection_id = self
+            .ssh_nodes
+            .get(&node_id)
+            .and_then(|node| node.saved_connection_id.clone());
+        // Keep secret-bearing config out of virtual rows and retained listeners.
+        // A disconnected node copies it only at the explicit connect action.
+        self.queue_ssh_terminal_tab_for_node(
+            node_id,
+            config,
+            title,
+            saved_connection_id,
+            window,
+            cx,
+        )
+    }
+
     pub(in crate::workspace) fn render_active_sessions_sidebar_content(
         &mut self,
         cx: &mut Context<Self>,
@@ -34,7 +74,7 @@ impl WorkspaceApp {
             return self.render_empty_sessions_sidebar_content(cx);
         }
 
-        self.sync_active_session_sidebar_list_state(&rows, ActiveSessionSidebarViewMode::Tree);
+        self.sync_active_session_sidebar_list_state(&rows, ActiveSessionSidebarViewMode::Tree, cx);
         let state = self.active_session_sidebar_list_state.clone();
         let spec = self.active_session_sidebar_list_spec(ActiveSessionSidebarViewMode::Tree);
         let workspace = cx.entity();
@@ -67,6 +107,7 @@ impl WorkspaceApp {
         self.sync_active_session_sidebar_list_state(
             &visible_rows,
             ActiveSessionSidebarViewMode::Focus,
+            cx,
         );
 
         let state = self.active_session_sidebar_list_state.clone();
@@ -134,7 +175,11 @@ impl WorkspaceApp {
                 Some(ActiveSessionSidebarRow {
                     node_id,
                     parent_id: flat_node.parent_id.map(NodeId::new),
-                    node,
+                    saved_connection_id: node.saved_connection_id.clone(),
+                    title: node.title.clone(),
+                    host: node.endpoint.host.clone(),
+                    username: node.endpoint.username.clone(),
+                    port: node.endpoint.port,
                     node_view,
                     depth: flat_node.depth as usize,
                     is_last: flat_node.is_last_child,
@@ -151,10 +196,11 @@ impl WorkspaceApp {
         &mut self,
         rows: &[ActiveSessionSidebarRow],
         view_mode: ActiveSessionSidebarViewMode,
+        cx: &App,
     ) {
         let signatures = rows
             .iter()
-            .map(|row| self.active_session_sidebar_row_signature(row, view_mode))
+            .map(|row| self.active_session_sidebar_row_signature(row, view_mode, cx))
             .collect::<Vec<_>>();
         sync_tauri_variable_list_state_by_signatures(
             &self.active_session_sidebar_list_state,
@@ -186,14 +232,7 @@ impl WorkspaceApp {
         };
         div()
             .px_1()
-            .child(self.render_active_session_node(
-                row.node_id,
-                row.node,
-                row.node_view,
-                row.depth,
-                row.is_last,
-                cx,
-            ))
+            .child(self.render_active_session_node(row, cx))
             .into_any_element()
     }
 
@@ -201,6 +240,7 @@ impl WorkspaceApp {
         &self,
         row: &ActiveSessionSidebarRow,
         view_mode: ActiveSessionSidebarViewMode,
+        cx: &App,
     ) -> u64 {
         let mut hasher = DefaultHasher::new();
         // This virtual row owns the node header plus expanded action/terminal
@@ -208,9 +248,8 @@ impl WorkspaceApp {
         view_mode.hash(&mut hasher);
         row.node_id.hash(&mut hasher);
         row.parent_id.hash(&mut hasher);
-        row.node.title.hash(&mut hasher);
-        row.node.config.port.hash(&mut hasher);
-        row.node.terminal_ids.hash(&mut hasher);
+        row.title.hash(&mut hasher);
+        row.port.hash(&mut hasher);
         row.node_view.title.hash(&mut hasher);
         row.node_view.terminal_ids.hash(&mut hasher);
         format!("{:?}", row.node_view.status()).hash(&mut hasher);
@@ -220,7 +259,7 @@ impl WorkspaceApp {
         self.expanded_ssh_nodes
             .contains(&row.node_id)
             .hash(&mut hasher);
-        self.has_active_reconnect_job(&row.node_id)
+        self.has_active_reconnect_job(&row.node_id, cx)
             .hash(&mut hasher);
         (self.active_ssh_node_id.as_ref() == Some(&row.node_id)).hash(&mut hasher);
         hasher.finish()
@@ -593,10 +632,7 @@ impl WorkspaceApp {
             ActiveSessionStatus::Active | ActiveSessionStatus::Connected
         );
         let connecting = matches!(row.node_view.status(), ActiveSessionStatus::Connecting);
-        let subtitle = format!(
-            "{}@{}:{}",
-            row.node.config.username, row.node.config.host, row.node.config.port
-        );
+        let subtitle = format!("{}@{}:{}", row.username, row.host, row.port);
         let terminal_count = row.node_view.terminal_ids.len();
         let has_children = row.has_children;
         let action_label = self.i18n.t("sessions.actions.connect");
@@ -742,9 +778,6 @@ impl WorkspaceApp {
                     })
                     .when(!connected && !connecting, |row_el| {
                         let node_id = row.node_id.clone();
-                        let config = row.node.config.clone();
-                        let title = row.node.title.clone();
-                        let saved_connection_id = row.node.saved_connection_id.clone();
                         row_el.child(
                             div()
                                 .rounded(px(self.tokens.radii.md))
@@ -766,11 +799,8 @@ impl WorkspaceApp {
                                 .on_mouse_down(
                                     MouseButton::Left,
                                     cx.listener(move |this, _event, window, cx| {
-                                        let _ = this.queue_ssh_terminal_tab_for_node(
+                                        let _ = this.queue_ssh_terminal_tab_for_sidebar_node(
                                             node_id.clone(),
-                                            config.clone(),
-                                            title.clone(),
-                                            saved_connection_id.clone(),
                                             window,
                                             cx,
                                         );
@@ -814,7 +844,7 @@ impl WorkspaceApp {
         }
 
         if selected
-            && !self.has_active_reconnect_job(&row.node_id)
+            && !self.has_active_reconnect_job(&row.node_id, cx)
             && session_status_can_remove_from_sidebar(row.node_view.status())
         {
             let node_id = row.node_id.clone();
@@ -842,7 +872,7 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
-        let active = self.active_terminal_session_id() == Some(session_id);
+        let active = self.active_terminal_session_id(cx) == Some(session_id);
         let text_color = if active {
             theme.accent
         } else {
@@ -928,23 +958,14 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> Vec<AnyElement> {
         let node_id = row.node_id.clone();
-        let config = row.node.config.clone();
-        let title = row.node.title.clone();
-        let saved_connection_id = row.node.saved_connection_id.clone();
         vec![
             self.render_active_session_focus_action_chip(
                 LucideIcon::Plus,
                 self.i18n.t("sessions.tree.actions.new_terminal"),
                 SessionActionVariant::Primary,
                 cx.listener(move |this, _event, window, cx| {
-                    let _ = this.queue_ssh_terminal_tab_for_node(
-                        node_id.clone(),
-                        config.clone(),
-                        title.clone(),
-                        saved_connection_id.clone(),
-                        window,
-                        cx,
-                    );
+                    let _ =
+                        this.queue_ssh_terminal_tab_for_sidebar_node(node_id.clone(), window, cx);
                     cx.stop_propagation();
                 }),
                 cx,
@@ -1024,13 +1045,13 @@ impl WorkspaceApp {
 
     pub(in crate::workspace) fn render_active_session_node(
         &self,
-        node_id: NodeId,
-        node: WorkspaceSshNode,
-        node_view: ActiveSessionNode,
-        node_depth: usize,
-        is_last: bool,
+        row: ActiveSessionSidebarRow,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        let node_id = row.node_id;
+        let node_view = row.node_view;
+        let node_depth = row.depth;
+        let is_last = row.is_last;
         let expanded = self.expanded_ssh_nodes.contains(&node_id);
         let selected = self.active_ssh_node_id.as_ref() == Some(&node_id);
         let status = self.session_node_status(node_view.status());
@@ -1038,7 +1059,7 @@ impl WorkspaceApp {
         let mut children = Vec::new();
 
         if expanded {
-            if self.has_active_reconnect_job(&node_id) {
+            if self.has_active_reconnect_job(&node_id, cx) {
                 let listener = cx.listener({
                     let node_id = node_id.clone();
                     move |this, _event, _window, cx| {
@@ -1061,15 +1082,9 @@ impl WorkspaceApp {
             ) {
                 let listener = cx.listener({
                     let node_id = node_id.clone();
-                    let config = node.config.clone();
-                    let title = node.title.clone();
-                    let saved_connection_id = node.saved_connection_id.clone();
                     move |this, _event, window, cx| {
-                        let _ = this.queue_ssh_terminal_tab_for_node(
+                        let _ = this.queue_ssh_terminal_tab_for_sidebar_node(
                             node_id.clone(),
-                            config.clone(),
-                            title.clone(),
-                            saved_connection_id.clone(),
                             window,
                             cx,
                         );
@@ -1136,7 +1151,10 @@ impl WorkspaceApp {
                     listener,
                     cx,
                 ));
-                if self.can_save_runtime_node_as_connection(&node_id, &node) {
+                if self.can_save_runtime_node_as_connection(
+                    &node_id,
+                    row.saved_connection_id.as_deref(),
+                ) {
                     let listener = cx.listener({
                         let node_id = node_id.clone();
                         move |this, _event, window, cx| {
@@ -1198,15 +1216,9 @@ impl WorkspaceApp {
             } else if matches!(node_view.status(), ActiveSessionStatus::Error) {
                 let listener = cx.listener({
                     let node_id = node_id.clone();
-                    let config = node.config.clone();
-                    let title = node.title.clone();
-                    let saved_connection_id = node.saved_connection_id.clone();
                     move |this, _event, window, cx| {
-                        let _ = this.queue_ssh_terminal_tab_for_node(
+                        let _ = this.queue_ssh_terminal_tab_for_sidebar_node(
                             node_id.clone(),
-                            config.clone(),
-                            title.clone(),
-                            saved_connection_id.clone(),
                             window,
                             cx,
                         );
@@ -1224,7 +1236,7 @@ impl WorkspaceApp {
                 ));
                 let listener = cx.listener({
                     let node_id = node_id.clone();
-                    let saved_connection_id = node.saved_connection_id;
+                    let saved_connection_id = row.saved_connection_id.clone();
                     move |this, _event, window, cx| {
                         if let Some(saved_connection_id) = saved_connection_id.as_deref() {
                             this.open_saved_connection_reconnect_editor(
@@ -1267,15 +1279,9 @@ impl WorkspaceApp {
             } else if matches!(node_view.status(), ActiveSessionStatus::Idle) {
                 let listener = cx.listener({
                     let node_id = node_id.clone();
-                    let config = node.config.clone();
-                    let title = node.title.clone();
-                    let saved_connection_id = node.saved_connection_id;
                     move |this, _event, window, cx| {
-                        let _ = this.queue_ssh_terminal_tab_for_node(
+                        let _ = this.queue_ssh_terminal_tab_for_sidebar_node(
                             node_id.clone(),
-                            config.clone(),
-                            title.clone(),
-                            saved_connection_id.clone(),
                             window,
                             cx,
                         );
@@ -1330,12 +1336,12 @@ impl WorkspaceApp {
     pub(in crate::workspace) fn can_save_runtime_node_as_connection(
         &self,
         node_id: &NodeId,
-        node: &WorkspaceSshNode,
+        saved_connection_id: Option<&str>,
     ) -> bool {
-        if node.saved_connection_id.is_some() {
+        if saved_connection_id.is_some() {
             return false;
         }
-        let Some(snapshot) = self.node_runtime_store.snapshot(node_id) else {
+        let Some(snapshot) = self.node_router.node_metadata(node_id) else {
             return true;
         };
         // ManualPreset/Restored are already saved-connection materializations,
@@ -1527,7 +1533,7 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
-        let active = self.active_terminal_session_id() == Some(session_id);
+        let active = self.active_terminal_session_id(cx) == Some(session_id);
         let text = self
             .i18n
             .t("sessions.focused_list.terminal")

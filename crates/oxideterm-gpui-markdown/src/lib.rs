@@ -56,7 +56,7 @@ pub use model::MarkdownDocument;
 pub use options::MarkdownOptions;
 pub use render::{MarkdownCodeBlockActions, MarkdownMermaidZoomHandler};
 
-use gpui::{AnyElement, ElementId, Entity, Render, ScrollHandle};
+use gpui::{AnyElement, ElementId, ScrollHandle};
 use oxideterm_theme::ThemeTokens;
 
 pub type MarkdownVirtualListScrollHandle = ScrollHandle;
@@ -81,37 +81,28 @@ pub fn markdown_with_options(
 }
 
 /// Parse and render markdown with block-level virtual scrolling.
-pub fn markdown_virtual_with_options<V>(
-    view: Entity<V>,
+pub fn markdown_virtual_with_options(
     id: impl Into<ElementId>,
     tokens: &ThemeTokens,
     source: &str,
     opts: &MarkdownOptions,
     scroll_handle: &MarkdownVirtualListScrollHandle,
-) -> AnyElement
-where
-    V: Render,
-{
+) -> AnyElement {
     let document = parser::parse(source);
-    render::render_document_virtual(view, id, &document, tokens, opts, scroll_handle)
+    render::render_document_virtual(id, &document, tokens, opts, scroll_handle)
 }
 
 /// Parse and render virtualized markdown with caller-provided code-block actions.
-pub fn markdown_virtual_with_code_actions<V>(
-    view: Entity<V>,
+pub fn markdown_virtual_with_code_actions(
     id: impl Into<ElementId>,
     tokens: &ThemeTokens,
     source: &str,
     opts: &MarkdownOptions,
     scroll_handle: &MarkdownVirtualListScrollHandle,
     code_actions: &render::MarkdownCodeBlockActions,
-) -> AnyElement
-where
-    V: Render,
-{
+) -> AnyElement {
     let document = parser::parse(source);
     render::render_document_virtual_with_code_actions(
-        view,
         id,
         &document,
         tokens,

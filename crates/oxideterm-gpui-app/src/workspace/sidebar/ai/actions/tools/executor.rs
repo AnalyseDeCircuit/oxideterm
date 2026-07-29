@@ -65,25 +65,32 @@ impl AiOrchestratorRuntimeSnapshot {
         let key_decision = oxideterm_ai::resolve_chat_embedding_api_key(
             &provider.id,
             config.provider_id.as_deref(),
-            config.api_key.clone(),
+            config.api_key.as_ref(),
             oxideterm_ai::ai_embedding_requires_api_key(&provider),
             resolved.mode,
         );
+        let loaded_api_key = match &key_decision {
+            oxideterm_ai::AiChatEmbeddingApiKeyDecision::LoadProviderKey(provider_id) => self
+                .ai_key_store
+                .get_provider_key(provider_id)
+                .ok()
+                .flatten()
+                .filter(|key| !key.trim().is_empty())
+                .map(oxideterm_ai::SharedAiProviderKey::new),
+            _ => None,
+        };
         let api_key = match key_decision {
             oxideterm_ai::AiChatEmbeddingApiKeyDecision::NoKey => None,
             oxideterm_ai::AiChatEmbeddingApiKeyDecision::UseKey(key) => Some(key),
-            oxideterm_ai::AiChatEmbeddingApiKeyDecision::LoadProviderKey(provider_id) => self
-                .ai_key_store
-                .get_provider_key(&provider_id)
-                .ok()
-                .flatten()
-                .filter(|key| !key.trim().is_empty()),
+            oxideterm_ai::AiChatEmbeddingApiKeyDecision::LoadProviderKey(_) => {
+                loaded_api_key.as_ref()
+            }
             oxideterm_ai::AiChatEmbeddingApiKeyDecision::Skip => None,
         };
         if oxideterm_ai::ai_embedding_requires_api_key(&provider) && api_key.is_none() {
             return None;
         }
-        oxideterm_ai::embed_texts(&provider, api_key, &resolved.model, vec![query.to_string()])
+        oxideterm_ai::embed_query_text(&provider, api_key, &resolved.model, query)
             .await
             .ok()
             .and_then(|vectors| vectors.into_iter().next())
@@ -652,8 +659,8 @@ impl AiOrchestratorRuntimeSnapshot {
         if resource == "settings" {
             let section = args.get("section").and_then(serde_json::Value::as_str);
             let data = section
-                .and_then(|section| self.settings_state.get(section).cloned())
-                .unwrap_or_else(|| self.settings_state.clone());
+                .and_then(|section| self.model_visible_settings.get(section).cloned())
+                .unwrap_or_else(|| self.model_visible_settings.clone());
             return self
                 .ok(
                     section
@@ -1294,7 +1301,7 @@ impl AiOrchestratorRuntimeSnapshot {
         }
         let mut data = match scope {
             "targets" => ai_targets_state(&self.targets, &self.runtime_epoch),
-            "settings" => self.settings_summary.clone(),
+            "settings" => self.model_visible_settings.clone(),
             "connections" => ai_connections_state(&self.targets, &self.runtime_epoch),
             "transfers" => ai_transfers_state(&self.sftp_transfer_manager, &self.runtime_epoch),
             "health" => ai_health_state(self),
@@ -2163,7 +2170,7 @@ pub(in crate::workspace) fn make_ai_state_version(
 
 pub(in crate::workspace) async fn execute_ai_tool(
     snapshot: &AiOrchestratorRuntimeSnapshot,
-    ui_tx: &std::sync::mpsc::Sender<AiStreamDelivery>,
+    ui_tx: &AiStreamDeliverySender,
     generation: u64,
     conversation_id: &str,
     assistant_id: &str,

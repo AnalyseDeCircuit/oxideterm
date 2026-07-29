@@ -145,9 +145,9 @@ impl WorkspaceApp {
                         .get(index)
                         .and_then(|provider| ai_provider_string(provider, "name"))
                         .unwrap_or_else(|| _name.clone());
-                    this.ai_settings_dialog_presence.reopen();
-                    this.settings_page
-                        .request_ai_provider_remove(provider_id, provider_name);
+                    this.ai_entity.update(cx, |ai, cx| {
+                        ai.open_provider_remove_confirm(provider_id, provider_name, cx);
+                    });
                     this.reset_standard_confirm_focus();
                 }
                 cx.stop_propagation();
@@ -206,7 +206,7 @@ impl WorkspaceApp {
         provider: &AiProviderView,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let refreshing = self.ai.models.refreshing.contains(&provider.id);
+        let refreshing = self.ai_entity.read(cx).model_is_refreshing(&provider.id);
         let provider_for_refresh = provider.clone();
         let mut options = ToolbarButtonOptions::compact_text(
             ButtonVariant::Ghost,
@@ -298,11 +298,11 @@ impl WorkspaceApp {
                     value: display_value,
                     placeholder,
                     focused,
-                    caret_visible: self.new_connection_caret_visible,
+                    caret_visible: self.input_caret.visible(),
                     secret: false,
                     selected_all: false,
-                    selected_range: self.ime_selected_range_for_target(target),
-                    marked_text: self.marked_text_for_target(target),
+                    selected_range: self.ime_selected_range_for_target(target, cx),
+                    marked_text: self.marked_text_for_target(target, cx),
                 },
             )
             .w_full()
@@ -313,7 +313,7 @@ impl WorkspaceApp {
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |this, event: &gpui::MouseDownEvent, window, cx| {
-                    let current = this.current_settings_input_value(input);
+                    let current = this.current_settings_input_value(input, cx);
                     this.focus_settings_input(input, current, cx);
                     this.ime_marked_text = None;
                     window.focus(&this.focus_handle, cx);

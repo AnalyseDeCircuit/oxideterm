@@ -86,284 +86,13 @@ impl WorkspaceApp {
             .into_any_element()
     }
 
-    pub(super) fn render_connection_pool_monitor(&self, cx: &mut Context<Self>) -> AnyElement {
-        let theme = self.tokens.ui;
-        if let Some(error) = &self.connection_monitor.pool_error {
-            return monitor_center_state(
-                self,
-                LucideIcon::AlertTriangle,
-                MONITOR_RED,
-                error.clone(),
-                cx,
-            );
-        }
-        let Some(stats) = self.connection_monitor.pool_stats.as_ref() else {
-            return monitor_center_state(
-                self,
-                LucideIcon::RefreshCw,
-                theme.text_muted,
-                self.i18n.t("connections.monitor.loading"),
-                cx,
-            );
-        };
-
-        let idle_timeout_label = if stats.idle_timeout_secs == 0 {
-            self.i18n.t("connections.monitor.idle_timeout_never")
-        } else {
-            self.i18n
-                .t("connections.monitor.idle_timeout")
-                .replace("{{min}}", &(stats.idle_timeout_secs / 60).to_string())
-        };
-        let capacity = if stats.pool_capacity == 0 {
-            "∞".to_string()
-        } else {
-            stats.pool_capacity.to_string()
-        };
-        let capacity_label = self
-            .i18n
-            .t("connections.monitor.capacity")
-            .replace("{{capacity}}", &capacity);
-
-        div()
-            .flex()
-            .flex_col()
-            .gap_4()
-            .p_4()
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .justify_between()
-                    .child(
-                        div()
-                            .text_size(px(14.0))
-                            .font_weight(gpui::FontWeight::SEMIBOLD)
-                            .child(self.render_display_text_with_role(
-                                SelectableTextRole::PlainDocument,
-                                "topology-monitor-header",
-                                "title",
-                                self.i18n.t("connections.monitor.title"),
-                                theme.text,
-                                cx,
-                            )),
-                    )
-                    .child(
-                        div()
-                            .flex()
-                            .items_center()
-                            .gap_2()
-                            .text_size(px(12.0))
-                            .text_color(rgb(theme.text_muted))
-                            .child(Self::render_lucide_icon(
-                                LucideIcon::Clock,
-                                14.0,
-                                rgb(theme.text_muted),
-                            ))
-                            .child(idle_timeout_label)
-                            .child("•")
-                            .child(capacity_label),
-                    ),
-            )
-            .child(
-                div()
-                    .grid()
-                    .grid_cols(4)
-                    .gap_2()
-                    .child(self.render_pool_stat_card(
-                        self.i18n.t("connections.monitor.active"),
-                        stats.active_connections,
-                        LucideIcon::Activity,
-                        if stats.active_connections > 0 {
-                            MONITOR_EMERALD_DARK
-                        } else {
-                            theme.text_muted
-                        },
-                        cx,
-                    ))
-                    .child(self.render_pool_stat_card(
-                        self.i18n.t("connections.monitor.idle"),
-                        stats.idle_connections,
-                        LucideIcon::Link2,
-                        if stats.idle_connections > 0 {
-                            MONITOR_BLUE
-                        } else {
-                            theme.text_muted
-                        },
-                        cx,
-                    ))
-                    .child(self.render_pool_stat_card(
-                        self.i18n.t("connections.monitor.reconnecting"),
-                        stats.reconnecting_connections,
-                        LucideIcon::RefreshCw,
-                        if stats.reconnecting_connections > 0 {
-                            MONITOR_AMBER
-                        } else {
-                            theme.text_muted
-                        },
-                        cx,
-                    ))
-                    .child(self.render_pool_stat_card(
-                        self.i18n.t("connections.monitor.link_down"),
-                        stats.link_down_connections,
-                        LucideIcon::AlertTriangle,
-                        if stats.link_down_connections > 0 {
-                            MONITOR_RED
-                        } else {
-                            theme.text_muted
-                        },
-                        cx,
-                    )),
-            )
-            .child(
-                div()
-                    .grid()
-                    .grid_cols(3)
-                    .gap_2()
-                    .child(self.render_pool_stat_card(
-                        self.i18n.t("connections.monitor.terminals"),
-                        stats.total_terminals,
-                        LucideIcon::Terminal,
-                        if stats.total_terminals > 0 {
-                            MONITOR_EMERALD_DARK
-                        } else {
-                            theme.text_muted
-                        },
-                        cx,
-                    ))
-                    .child(self.render_pool_stat_card(
-                        self.i18n.t("connections.monitor.sftp"),
-                        stats.total_sftp_sessions,
-                        LucideIcon::FolderSync,
-                        if stats.total_sftp_sessions > 0 {
-                            MONITOR_BLUE
-                        } else {
-                            theme.text_muted
-                        },
-                        cx,
-                    ))
-                    .child(self.render_pool_stat_card(
-                        self.i18n.t("connections.monitor.forwards"),
-                        stats.total_forwards,
-                        LucideIcon::ArrowLeftRight,
-                        if stats.total_forwards > 0 {
-                            MONITOR_BLUE
-                        } else {
-                            theme.text_muted
-                        },
-                        cx,
-                    )),
-            )
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .justify_between()
-                    .pt_3()
-                    .border_t_1()
-                    .border_color(rgba((theme.border << 8) | MONITOR_BORDER_ALPHA))
-                    .text_size(px(12.0))
-                    .text_color(rgb(theme.text_muted))
-                    .child(
-                        self.i18n
-                            .t("connections.monitor.summary")
-                            .replace("{{total}}", &stats.total_connections.to_string())
-                            .replace("{{refs}}", &stats.total_ref_count.to_string()),
-                    )
-                    .child(
-                        div()
-                            .flex()
-                            .items_center()
-                            .gap_1()
-                            .child(Self::render_lucide_icon(
-                                LucideIcon::RefreshCw,
-                                12.0,
-                                rgb(theme.text_muted),
-                            ))
-                            .child(self.render_display_text_with_role(
-                                SelectableTextRole::PlainDocument,
-                                "topology-monitor-header",
-                                "live",
-                                self.i18n.t("connections.monitor.live"),
-                                theme.text_muted,
-                                cx,
-                            )),
-                    ),
-            )
-            .into_any_element()
-    }
-
-    pub(super) fn render_pool_stat_card(
-        &self,
-        label: String,
-        value: usize,
-        icon: LucideIcon,
-        color: u32,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let theme = self.tokens.ui;
-        let background = if color == theme.text_muted {
-            rgba((theme.bg_hover << 8) | 0x4d)
-        } else {
-            rgba((color << 8) | MONITOR_TINT_ALPHA)
-        };
-        oxideterm_gpui_ui::semantic_surface(
-            &self.tokens,
-            oxideterm_gpui_ui::SurfaceOptions::new(oxideterm_gpui_ui::SurfaceKind::InsetGroup)
-                .padding(oxideterm_gpui_ui::SurfacePadding::None),
-        )
-        // Runtime stat cards use a value tint as their semantic signal, while
-        // the shared surface keeps radius and future border policy aligned.
-        .bg(background)
-        .p_3()
-        .shadow_sm()
-        .flex()
-        .flex_col()
-        .child(
-            div()
-                .flex()
-                .items_center()
-                .gap_2()
-                .child(Self::render_lucide_icon(icon, 16.0, rgb(color)))
-                .child(
-                    div()
-                        .text_size(px(12.0))
-                        .text_color(rgb(theme.text_muted))
-                        .child(self.render_selectable_display_text(
-                            "connection-pool-stat-label",
-                            &label,
-                            label.clone(),
-                            theme.text_muted,
-                            cx,
-                        )),
-                ),
-        )
-        .child(
-            div()
-                .mt_1()
-                .flex()
-                .items_baseline()
-                .gap_1()
-                .text_size(px(24.0))
-                .font_weight(gpui::FontWeight::BOLD)
-                .text_color(rgb(color))
-                .child(self.render_selectable_display_text(
-                    "connection-pool-stat-value",
-                    &label,
-                    value.to_string(),
-                    color,
-                    cx,
-                )),
-        )
-        .into_any_element()
-    }
-
     fn render_connection_topology(
         &self,
         has_background: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
-        let Some(snapshot) = self.connection_monitor.topology_snapshot.as_ref() else {
+        let Some(snapshot) = self.host_tools.read(cx).topology_snapshot() else {
             return monitor_center_state(
                 self,
                 LucideIcon::RefreshCw,
@@ -372,7 +101,7 @@ impl WorkspaceApp {
                 cx,
             );
         };
-        let layout = ConnectionTopologyLayout::from_snapshot(snapshot);
+        let layout = ConnectionTopologyLayout::from_snapshot(&snapshot);
         if layout.nodes.is_empty() {
             return div()
                 .size_full()
@@ -407,50 +136,58 @@ impl WorkspaceApp {
         }
 
         let edges = layout.edges.clone();
-        let transform = self.connection_monitor.topology_transform;
+        let (transform, topology_dragging, topology_menu) = {
+            let host_tools = self.host_tools.read(cx);
+            (
+                host_tools.topology_transform(),
+                host_tools.topology_dragging(),
+                host_tools.topology_menu(),
+            )
+        };
         let mut graph = div()
             .relative()
             .size_full()
             .overflow_hidden()
             .bg(connection_monitor_surface_bg(theme.bg, has_background))
             .rounded(px(self.tokens.radii.lg))
-            .cursor(if self.connection_monitor.topology_drag.is_some() {
+            .cursor(if topology_dragging {
                 CursorStyle::ClosedHand
             } else {
                 CursorStyle::OpenHand
             })
             .on_scroll_wheel(cx.listener(|this, event: &ScrollWheelEvent, _window, cx| {
-                let zoom_changed = this.zoom_topology_graph(event);
-                let menu_changed = this.connection_monitor.dismiss_topology_menu();
+                let host_tools = this.host_tools.clone();
+                host_tools.update(cx, |host_tools, cx| {
+                    host_tools.zoom_topology_graph(event, cx);
+                    host_tools.dismiss_topology_menu(cx);
+                });
                 cx.stop_propagation();
-                if zoom_changed || menu_changed {
-                    cx.notify();
-                }
             }))
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(|this, event: &MouseDownEvent, _window, cx| {
-                    this.connection_monitor.dismiss_topology_menu();
-                    this.connection_monitor.topology_drag = Some(TopologyDragState {
-                        last_x: f32::from(event.position.x),
-                        last_y: f32::from(event.position.y),
+                    let host_tools = this.host_tools.clone();
+                    host_tools.update(cx, |host_tools, cx| {
+                        host_tools.dismiss_topology_menu(cx);
+                        host_tools.begin_topology_drag(event, cx);
                     });
                     cx.stop_propagation();
-                    cx.notify();
                 }),
             )
             .on_mouse_move(cx.listener(|this, event: &MouseMoveEvent, _window, cx| {
-                if this.pan_topology_graph(event) {
+                let host_tools = this.host_tools.clone();
+                if host_tools.update(cx, |host_tools, cx| {
+                    host_tools.pan_topology_graph(event, cx)
+                }) {
                     cx.stop_propagation();
-                    cx.notify();
                 }
             }))
             .on_mouse_up(
                 MouseButton::Left,
                 cx.listener(|this, _event: &MouseUpEvent, _window, cx| {
-                    if this.connection_monitor.topology_drag.take().is_some() {
+                    let host_tools = this.host_tools.clone();
+                    if host_tools.update(cx, |host_tools, cx| host_tools.end_topology_drag(cx)) {
                         cx.stop_propagation();
-                        cx.notify();
                     }
                 }),
             )
@@ -605,7 +342,7 @@ impl WorkspaceApp {
             graph = graph.child(self.render_topology_graph_node(node, transform, cx));
         }
 
-        if let Some(menu) = self.connection_monitor.topology_menu.clone() {
+        if let Some(menu) = topology_menu {
             // Topology node actions are a context menu, not a graph child popover:
             // keep outside pointer and Esc dismissal on the same workspace menu
             // owner as FileManager/SFTP/session menus.
@@ -735,11 +472,16 @@ impl WorkspaceApp {
                     let node = node;
                     move |this, event: &MouseDownEvent, window, cx| {
                         if event.click_count >= 2 {
-                            this.open_topology_node_menu(&node, window);
+                            let node_id =
+                                this.node_router.node_id_for_connection(&node.connection_id);
+                            this.host_tools.update(cx, |host_tools, cx| {
+                                host_tools.open_topology_node_menu(node_id, &node, window, cx);
+                            });
                         }
-                        this.connection_monitor.topology_drag = None;
+                        this.host_tools.update(cx, |host_tools, cx| {
+                            host_tools.end_topology_drag(cx);
+                        });
                         cx.stop_propagation();
-                        cx.notify();
                     }
                 }),
             )
@@ -791,15 +533,11 @@ impl WorkspaceApp {
                         let node_id = node_id.clone();
                         move |this, _event, window, cx| {
                             if let Some(node_id) = node_id.clone()
-                                && let Some(node) = this.ssh_nodes.get(&node_id).cloned()
+                                && let Some(title) =
+                                    this.ssh_nodes.get(&node_id).map(|node| node.title.clone())
                             {
-                                let _ = this.queue_ssh_terminal_tab_for_node(
-                                    node_id,
-                                    node.config,
-                                    node.title,
-                                    node.saved_connection_id,
-                                    window,
-                                    cx,
+                                let _ = this.queue_ssh_terminal_tab_for_existing_node(
+                                    node_id, None, title, window, cx,
                                 );
                             }
                         }
@@ -948,23 +686,53 @@ impl WorkspaceApp {
                 hover_background: Some(rgba((theme.accent << 8) | 0x1a)),
                 hover_text_color: Some(rgb(theme.text)),
             },
-            |this| {
-                this.connection_monitor.dismiss_topology_menu();
+            |_this| {
+                // The menu helper does not receive a GPUI context. The action
+                // listener below closes the Entity-owned menu before routing.
             },
-            listener,
+            move |this, event, window, cx| {
+                this.host_tools.update(cx, |host_tools, cx| {
+                    host_tools.dismiss_topology_menu(cx);
+                });
+                listener(this, event, window, cx);
+            },
             cx,
         )
         .into_any_element()
     }
+}
 
-    fn zoom_topology_graph(&mut self, event: &ScrollWheelEvent) -> bool {
+impl HostToolsEntity {
+    pub(super) fn topology_transform(&self) -> TopologyTransform {
+        self.topology_transform
+    }
+
+    pub(super) fn topology_dragging(&self) -> bool {
+        self.topology_drag.is_some()
+    }
+
+    pub(super) fn topology_menu(&self) -> Option<TopologyNodeMenuState> {
+        self.topology_menu.clone()
+    }
+
+    pub(in crate::workspace) fn dismiss_topology_menu(&mut self, cx: &mut Context<Self>) -> bool {
+        // The menu contains only node display metadata and remains local to the
+        // Host Tools Entity across main-tab and detached-window renderers.
+        let changed = self.topology_menu.take().is_some();
+        if changed {
+            cx.notify();
+        }
+        changed
+    }
+
+    fn zoom_topology_graph(&mut self, event: &ScrollWheelEvent, cx: &mut Context<Self>) -> bool {
         let delta = event.delta.pixel_delta(px(16.0));
         let vertical = f32::from(delta.y);
         if vertical == 0.0 {
             return false;
         }
 
-        let old = self.connection_monitor.topology_transform;
+        let old = self.topology_transform;
         let wheel_factor = (1.0 - vertical * 0.001).clamp(0.85, 1.15);
         let next_k = (old.k * wheel_factor).clamp(TOPOLOGY_ZOOM_MIN, TOPOLOGY_ZOOM_MAX);
         if (next_k - old.k).abs() < f32::EPSILON {
@@ -975,16 +743,25 @@ impl WorkspaceApp {
         let cursor_y = f32::from(event.position.y);
         let graph_x = (cursor_x - old.x) / old.k;
         let graph_y = (cursor_y - old.y) / old.k;
-        self.connection_monitor.topology_transform = TopologyTransform {
+        self.topology_transform = TopologyTransform {
             x: cursor_x - graph_x * next_k,
             y: cursor_y - graph_y * next_k,
             k: next_k,
         };
+        cx.notify();
         true
     }
 
-    fn pan_topology_graph(&mut self, event: &MouseMoveEvent) -> bool {
-        let Some(drag) = self.connection_monitor.topology_drag else {
+    fn begin_topology_drag(&mut self, event: &MouseDownEvent, cx: &mut Context<Self>) {
+        self.topology_drag = Some(TopologyDragState {
+            last_x: f32::from(event.position.x),
+            last_y: f32::from(event.position.y),
+        });
+        cx.notify();
+    }
+
+    fn pan_topology_graph(&mut self, event: &MouseMoveEvent, cx: &mut Context<Self>) -> bool {
+        let Some(drag) = self.topology_drag else {
             return false;
         };
         if !event.dragging() {
@@ -998,18 +775,32 @@ impl WorkspaceApp {
         if dx == 0.0 && dy == 0.0 {
             return false;
         }
-        self.connection_monitor.topology_transform.x += dx;
-        self.connection_monitor.topology_transform.y += dy;
-        self.connection_monitor.topology_drag = Some(TopologyDragState {
+        self.topology_transform.x += dx;
+        self.topology_transform.y += dy;
+        self.topology_drag = Some(TopologyDragState {
             last_x: x,
             last_y: y,
         });
+        cx.notify();
         true
     }
 
-    fn open_topology_node_menu(&mut self, node: &TopologyLayoutNode, window: &Window) {
-        let transform = self.connection_monitor.topology_transform;
-        let node_id = self.node_router.node_id_for_connection(&node.connection_id);
+    fn end_topology_drag(&mut self, cx: &mut Context<Self>) -> bool {
+        let changed = self.topology_drag.take().is_some();
+        if changed {
+            cx.notify();
+        }
+        changed
+    }
+
+    fn open_topology_node_menu(
+        &mut self,
+        node_id: Option<NodeId>,
+        node: &TopologyLayoutNode,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) {
+        let transform = self.topology_transform;
         let window_bounds = window.inner_window_bounds().get_bounds();
         let max_x = (f32::from(window_bounds.size.width) - TOPOLOGY_MENU_WIDTH).max(0.0);
         let max_y = (f32::from(window_bounds.size.height) - TOPOLOGY_MENU_MAX_HEIGHT).max(0.0);
@@ -1023,7 +814,7 @@ impl WorkspaceApp {
             .min(max_y)
             .max(0.0);
 
-        self.connection_monitor.topology_menu = Some(TopologyNodeMenuState {
+        self.topology_menu = Some(TopologyNodeMenuState {
             node_id,
             name: node.name.clone(),
             host: node.host.clone(),
@@ -1031,5 +822,73 @@ impl WorkspaceApp {
             x,
             y,
         });
+        cx.notify();
+    }
+}
+
+impl WorkspaceApp {
+    pub(super) fn render_pool_stat_card(
+        &self,
+        label: String,
+        value: usize,
+        icon: LucideIcon,
+        color: u32,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let theme = self.tokens.ui;
+        let background = if color == theme.text_muted {
+            rgba((theme.bg_hover << 8) | 0x4d)
+        } else {
+            rgba((color << 8) | MONITOR_TINT_ALPHA)
+        };
+        oxideterm_gpui_ui::semantic_surface(
+            &self.tokens,
+            oxideterm_gpui_ui::SurfaceOptions::new(oxideterm_gpui_ui::SurfaceKind::InsetGroup)
+                .padding(oxideterm_gpui_ui::SurfacePadding::None),
+        )
+        // Runtime stat cards use a value tint as their semantic signal, while
+        // the shared surface keeps radius and future border policy aligned.
+        .bg(background)
+        .p_3()
+        .shadow_sm()
+        .flex()
+        .flex_col()
+        .child(
+            div()
+                .flex()
+                .items_center()
+                .gap_2()
+                .child(Self::render_lucide_icon(icon, 16.0, rgb(color)))
+                .child(
+                    div()
+                        .text_size(px(12.0))
+                        .text_color(rgb(theme.text_muted))
+                        .child(self.render_selectable_display_text(
+                            "connection-pool-stat-label",
+                            &label,
+                            label.clone(),
+                            theme.text_muted,
+                            cx,
+                        )),
+                ),
+        )
+        .child(
+            div()
+                .mt_1()
+                .flex()
+                .items_baseline()
+                .gap_1()
+                .text_size(px(24.0))
+                .font_weight(gpui::FontWeight::BOLD)
+                .text_color(rgb(color))
+                .child(self.render_selectable_display_text(
+                    "connection-pool-stat-value",
+                    &label,
+                    value.to_string(),
+                    color,
+                    cx,
+                )),
+        )
+        .into_any_element()
     }
 }

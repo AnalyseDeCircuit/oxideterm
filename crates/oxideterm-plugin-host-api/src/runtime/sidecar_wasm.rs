@@ -25,6 +25,33 @@ pub fn installed_wasm_sidecar_binary_path(settings_path: &Path) -> PathBuf {
     wasm_sidecar_install_dir(settings_path).join(WASM_SIDECAR_BINARY)
 }
 
+struct SidecarPluginRequestOwner(PluginRequest);
+
+impl std::ops::Deref for SidecarPluginRequestOwner {
+    type Target = PluginRequest;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl Drop for SidecarPluginRequestOwner {
+    fn drop(&mut self) {
+        self.0.zeroize_sensitive_host_call_args();
+    }
+}
+
+struct SidecarResponseEnvelopeOwner(SidecarWasmResponseEnvelope);
+
+impl Drop for SidecarResponseEnvelopeOwner {
+    fn drop(&mut self) {
+        for message in &mut self.0.messages {
+            message.zeroize_sensitive_host_call_args();
+        }
+        self.0.response.zeroize_sensitive_payload();
+    }
+}
+
 pub struct NativeSidecarWasmPluginRuntime {
     sidecar_path: PathBuf,
     plugin_dir: PathBuf,
@@ -164,12 +191,13 @@ impl NativeSidecarWasmPluginRuntime {
                 "Wasm runtime sidecar stdin is not available",
             )
         })?;
-        let mut line = serde_json::to_vec(&request).map_err(|error| {
+        let request = SidecarPluginRequestOwner(request);
+        let mut line = Zeroizing::new(serde_json::to_vec(&*request).map_err(|error| {
             PluginError::protocol(
                 "wasm_sidecar_request_encode_failed",
                 format!("Cannot encode Wasm sidecar request: {error}"),
             )
-        })?;
+        })?);
         line.push(b'\n');
         stdin.write_all(&line).await.map_err(|error| {
             PluginError::runtime(
@@ -190,7 +218,7 @@ impl NativeSidecarWasmPluginRuntime {
         request_id: &str,
         timeout: Duration,
     ) -> Result<PluginResponse, PluginError> {
-        let mut line = String::new();
+        let mut line = Zeroizing::new(String::new());
         // One response envelope carries both the response and its outbound messages.
         let read = {
             let stdout = self.stdout.as_mut().ok_or_else(|| {
@@ -231,16 +259,38 @@ impl NativeSidecarWasmPluginRuntime {
                     format!("Cannot decode Wasm sidecar response: {error}"),
                 )
             })?;
-        if envelope.response.request_id != request_id {
+        let mut envelope = SidecarResponseEnvelopeOwner(envelope);
+        if envelope.0.response.request_id != request_id {
             return Err(PluginError::protocol(
                 "wasm_sidecar_response_request_mismatch",
                 format!("Wasm sidecar response request id mismatch; expected \"{request_id}\""),
             ));
         }
-        for message in envelope.messages {
+        let mut messages = std::mem::take(&mut envelope.0.messages);
+        if messages
+            .iter()
+            .any(|message| message.host_call_sensitivity().is_sensitive())
+        {
+            // Sidecar host calls cannot receive the synchronous response used by
+            // process plugins. Clear the entire batch before rejecting it.
+            for message in &mut messages {
+                message.zeroize_sensitive_host_call_args();
+            }
+            return Err(PluginError::protocol(
+                "wasm_sidecar_sensitive_host_call_unsupported",
+                "Wasm sidecar cannot emit a sensitive host call",
+            ));
+        }
+        for message in messages {
+            let supervisor_message = message.clone_public().ok_or_else(|| {
+                PluginError::protocol(
+                    "sensitive_host_call_clone_rejected",
+                    "Sensitive host calls cannot enter the Wasm sidecar audit path",
+                )
+            })?;
             let effect = self
                 .supervisor
-                .handle_outbound_message(message.clone())
+                .handle_outbound_message(supervisor_message)
                 .map_err(|error| {
                     PluginError::protocol(
                         "wasm_sidecar_outbound_rejected",
@@ -250,7 +300,10 @@ impl NativeSidecarWasmPluginRuntime {
             self.outbound_messages.push_back(message);
             self.outbound_effects.push_back(effect);
         }
-        Ok(envelope.response)
+        Ok(std::mem::replace(
+            &mut envelope.0.response,
+            PluginResponse::ok(String::new(), Value::Null),
+        ))
     }
 
     fn record_runtime_error(&mut self, error: PluginError) -> PluginError {

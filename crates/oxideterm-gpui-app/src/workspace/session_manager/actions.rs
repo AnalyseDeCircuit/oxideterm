@@ -89,14 +89,15 @@ impl WorkspaceApp {
         (roots, children)
     }
 
-    pub(super) fn toggle_session_group_expanded(&mut self, group: &str) {
-        if self.session_manager.expanded_groups.contains(group) {
-            self.session_manager.expanded_groups.remove(group);
-        } else {
-            self.session_manager
-                .expanded_groups
-                .insert(group.to_string());
-        }
+    pub(super) fn toggle_session_group_expanded(&mut self, group: &str, cx: &mut Context<Self>) {
+        self.session_manager.update(cx, |session_manager, cx| {
+            if session_manager.expanded_groups.contains(group) {
+                session_manager.expanded_groups.remove(group);
+            } else {
+                session_manager.expanded_groups.insert(group.to_string());
+            }
+            cx.notify();
+        });
     }
 
     pub(super) fn connection_info_by_id(&self, id: &str) -> Option<ConnectionInfo> {
@@ -106,8 +107,14 @@ impl WorkspaceApp {
             .find(|conn| conn.id == id)
     }
 
-    pub(in crate::workspace) fn close_session_row_menus(&mut self) -> bool {
-        close_session_menu_state(&mut self.session_manager)
+    pub(in crate::workspace) fn close_session_row_menus(&mut self, cx: &mut Context<Self>) -> bool {
+        self.session_manager.update(cx, |session_manager, cx| {
+            let changed = close_session_menu_state(session_manager);
+            if changed {
+                cx.notify();
+            }
+            changed
+        })
     }
 
     pub(super) fn open_session_manager_row_action_menu(
@@ -119,109 +126,157 @@ impl WorkspaceApp {
     ) {
         // One shared floating-menu owner prevents row actions from overlapping
         // the sort, view-mode, or batch-move popovers.
-        self.close_session_row_menus();
-        self.session_manager.row_action_menu = Some(SessionManagerRowActionMenu { target, x, y });
-        cx.notify();
+        self.session_manager.update(cx, |session_manager, cx| {
+            close_session_menu_state(session_manager);
+            session_manager.row_action_menu = Some(SessionManagerRowActionMenu { target, x, y });
+            cx.notify();
+        });
     }
 
-    pub(super) fn toggle_session_view_mode_menu(&mut self) {
-        let was_open = self.session_manager.view_mode_menu_open;
-        self.close_session_row_menus();
-        if !was_open {
-            // The view-mode selector is root-mounted and positioned from its
-            // cached trigger bounds, so opening only needs to claim menu owner.
-            self.session_manager.view_mode_menu_open = true;
-        }
+    pub(super) fn toggle_session_view_mode_menu(&mut self, cx: &mut Context<Self>) {
+        self.session_manager.update(cx, |session_manager, cx| {
+            let was_open = session_manager.view_mode_menu_open;
+            close_session_menu_state(session_manager);
+            if !was_open {
+                // The view-mode selector is root-mounted and positioned from its
+                // cached trigger bounds, so opening only needs to claim menu owner.
+                session_manager.view_mode_menu_open = true;
+            }
+            cx.notify();
+        });
     }
 
-    pub(super) fn toggle_session_sort_menu(&mut self) {
-        let was_open = self.session_manager.sort_menu_open;
-        self.close_session_row_menus();
-        if !was_open {
-            // Sort uses the same root-mounted anchored menu as view mode; keep
-            // positioning separate from pointer coordinates to avoid drift.
-            self.session_manager.sort_menu_open = true;
-        }
+    pub(super) fn toggle_session_sort_menu(&mut self, cx: &mut Context<Self>) {
+        self.session_manager.update(cx, |session_manager, cx| {
+            let was_open = session_manager.sort_menu_open;
+            close_session_menu_state(session_manager);
+            if !was_open {
+                // Sort uses the same root-mounted anchored menu as view mode; keep
+                // positioning separate from pointer coordinates to avoid drift.
+                session_manager.sort_menu_open = true;
+            }
+            cx.notify();
+        });
     }
 
-    pub(super) fn set_session_sort_field(&mut self, field: SessionSortField) {
-        if self.session_manager.sort_field == field {
-            self.session_manager.sort_direction = self.session_manager.sort_direction.toggled();
-        } else {
-            self.session_manager.sort_field = field;
-            self.session_manager.sort_direction = field.default_direction();
-        }
+    pub(super) fn set_session_sort_field(
+        &mut self,
+        field: SessionSortField,
+        cx: &mut Context<Self>,
+    ) {
+        self.session_manager.update(cx, |session_manager, cx| {
+            if session_manager.sort_field == field {
+                session_manager.sort_direction = session_manager.sort_direction.toggled();
+            } else {
+                session_manager.sort_field = field;
+                session_manager.sort_direction = field.default_direction();
+            }
+            cx.notify();
+        });
     }
 
-    pub(super) fn toggle_session_selection(&mut self, target: SessionManagerSelectionTarget) {
-        if self.session_manager.selected_items.contains(&target) {
-            self.session_manager.selected_items.remove(&target);
-        } else {
-            self.session_manager.selected_items.insert(target);
-        }
+    pub(super) fn toggle_session_selection(
+        &mut self,
+        target: SessionManagerSelectionTarget,
+        cx: &mut Context<Self>,
+    ) {
+        self.session_manager.update(cx, |session_manager, cx| {
+            if session_manager.selected_items.contains(&target) {
+                session_manager.selected_items.remove(&target);
+            } else {
+                session_manager.selected_items.insert(target);
+            }
+            cx.notify();
+        });
     }
 
-    pub(in crate::workspace) fn clear_session_selection_for_invisible_rows(&mut self) {
+    pub(in crate::workspace) fn clear_session_selection_for_invisible_rows(
+        &mut self,
+        cx: &mut Context<Self>,
+    ) {
         let visible_items = self
-            .session_manager_display_items()
+            .session_manager_display_items(cx)
             .into_iter()
             .filter_map(|item| item.selection_target())
             .collect::<HashSet<_>>();
-        self.session_manager
-            .selected_items
-            .retain(|target| visible_items.contains(target));
+        self.session_manager.update(cx, |session_manager, cx| {
+            let previous_count = session_manager.selected_items.len();
+            session_manager
+                .selected_items
+                .retain(|target| visible_items.contains(target));
+            if session_manager.selected_items.len() != previous_count {
+                cx.notify();
+            }
+        });
     }
 
     pub(super) fn create_session_group(&mut self, cx: &mut Context<Self>) {
-        let name = self.session_manager.new_group_name.trim().to_string();
+        let name = self
+            .session_manager
+            .read(cx)
+            .new_group_name
+            .trim()
+            .to_string();
         match self.connection_store.create_group(name.clone()) {
             Ok(()) => {
-                self.session_manager.selected_group = Some(name);
-                expand_group_path(
-                    self.session_manager
-                        .selected_group
-                        .as_deref()
-                        .unwrap_or_default(),
-                    &mut self.session_manager.expanded_groups,
-                );
-                self.session_manager.show_new_group = false;
-                self.session_manager.focused_input = None;
-                self.session_manager.focused_basic_dialog_footer_action = None;
-                self.session_manager.status =
-                    Some(self.i18n.t("sessionManager.toast.group_created"));
+                let status = self.i18n.t("sessionManager.toast.group_created");
+                self.session_manager.update(cx, |session_manager, cx| {
+                    session_manager.selected_group = Some(name);
+                    expand_group_path(
+                        session_manager
+                            .selected_group
+                            .as_deref()
+                            .unwrap_or_default(),
+                        &mut session_manager.expanded_groups,
+                    );
+                    session_manager.show_new_group = false;
+                    session_manager.focused_input = None;
+                    session_manager.focused_basic_dialog_footer_action = None;
+                    session_manager.status = Some(status);
+                    cx.notify();
+                });
                 self.queue_cloud_sync_dirty_refresh(cx);
             }
             Err(error) => {
-                self.session_manager.status = Some(format!(
+                let status = format!(
                     "{}: {error}",
                     self.i18n.t("sessionManager.toast.create_group_failed")
-                ));
+                );
+                self.session_manager.update(cx, |session_manager, cx| {
+                    session_manager.set_status(Some(status), cx)
+                });
             }
         }
-        cx.notify();
     }
 
     #[allow(dead_code)]
     pub(super) fn delete_connection(&mut self, id: &str, cx: &mut Context<Self>) {
         if let Err(error) = self.connection_store.delete(id) {
-            self.session_manager.status = Some(error.to_string());
+            let status = error.to_string();
+            self.session_manager.update(cx, |session_manager, cx| {
+                session_manager.set_status(Some(status), cx)
+            });
         } else {
             // Tauri deletes owner-bound saved forwards with the saved connection
             // so sync/import cannot later resurrect forwards for a missing owner.
-            if let Err(error) = self.forwarding_registry.delete_owned_forwards(id) {
-                self.session_manager.status = Some(error.to_string());
-                cx.notify();
+            if let Err(error) = self.forwarding_service.registry().delete_owned_forwards(id) {
+                let status = error.to_string();
+                self.session_manager.update(cx, |session_manager, cx| {
+                    session_manager.set_status(Some(status), cx);
+                });
                 return;
             }
             self.release_ide_runtime_for_saved_connection(id, cx);
-            self.session_manager
-                .selected_items
-                .remove(&SessionManagerSelectionTarget::Connection(id.to_string()));
-            self.session_manager.status =
-                Some(self.i18n.t("sessionManager.toast.connection_deleted"));
+            let status = self.i18n.t("sessionManager.toast.connection_deleted");
+            self.session_manager.update(cx, |session_manager, cx| {
+                session_manager
+                    .selected_items
+                    .remove(&SessionManagerSelectionTarget::Connection(id.to_string()));
+                session_manager.status = Some(status);
+                cx.notify();
+            });
             self.queue_cloud_sync_dirty_refresh(cx);
         }
-        cx.notify();
     }
 
     pub(super) fn request_delete_connection(&mut self, id: &str, cx: &mut Context<Self>) {
@@ -230,12 +285,14 @@ impl WorkspaceApp {
         };
         // Tauri snapshots the row payload before opening useConfirm; native
         // keeps the same target stable while the dialog is open.
-        self.session_manager.delete_confirm = Some(SessionManagerDeleteConfirm::Single {
-            id: conn.id,
-            name: conn.name,
+        self.session_manager.update(cx, |session_manager, cx| {
+            close_session_menu_state(session_manager);
+            session_manager.delete_confirm = Some(SessionManagerDeleteConfirm::Single {
+                id: conn.id,
+                name: conn.name,
+            });
+            cx.notify();
         });
-        self.close_session_row_menus();
-        cx.notify();
     }
 
     pub(super) fn request_delete_serial_profile(&mut self, id: &str, cx: &mut Context<Self>) {
@@ -248,12 +305,14 @@ impl WorkspaceApp {
         else {
             return;
         };
-        self.session_manager.delete_confirm = Some(SessionManagerDeleteConfirm::SerialProfile {
-            id: profile.id,
-            name: profile.name,
+        self.session_manager.update(cx, |session_manager, cx| {
+            close_session_menu_state(session_manager);
+            session_manager.delete_confirm = Some(SessionManagerDeleteConfirm::SerialProfile {
+                id: profile.id,
+                name: profile.name,
+            });
+            cx.notify();
         });
-        self.close_session_row_menus();
-        cx.notify();
     }
 
     pub(super) fn request_delete_telnet_profile(&mut self, id: &str, cx: &mut Context<Self>) {
@@ -265,11 +324,14 @@ impl WorkspaceApp {
         else {
             return;
         };
-        self.session_manager.delete_confirm = Some(SessionManagerDeleteConfirm::TelnetProfile {
-            id: id.to_string(),
-            name: profile.name.clone(),
+        let profile_name = profile.name.clone();
+        self.session_manager.update(cx, |session_manager, cx| {
+            session_manager.delete_confirm = Some(SessionManagerDeleteConfirm::TelnetProfile {
+                id: id.to_string(),
+                name: profile_name,
+            });
+            cx.notify();
         });
-        cx.notify();
     }
 
     pub(super) fn request_delete_remote_desktop_profile(
@@ -280,18 +342,21 @@ impl WorkspaceApp {
         let Some(profile) = self.connection_store.get_remote_desktop_profile(id) else {
             return;
         };
-        self.session_manager.delete_confirm =
-            Some(SessionManagerDeleteConfirm::RemoteDesktopProfile {
-                id: profile.id.clone(),
-                name: profile.name.clone(),
-            });
-        self.close_session_row_menus();
-        cx.notify();
+        let confirm = SessionManagerDeleteConfirm::RemoteDesktopProfile {
+            id: profile.id.clone(),
+            name: profile.name.clone(),
+        };
+        self.session_manager.update(cx, |session_manager, cx| {
+            close_session_menu_state(session_manager);
+            session_manager.delete_confirm = Some(confirm);
+            cx.notify();
+        });
     }
 
     pub(super) fn request_delete_selected_connections(&mut self, cx: &mut Context<Self>) {
         let targets = self
             .session_manager
+            .read(cx)
             .selected_items
             .iter()
             .cloned()
@@ -301,19 +366,29 @@ impl WorkspaceApp {
         }
         // Batch delete follows Tauri's confirm closure and freezes the selected
         // ids at the time the destructive action is requested.
-        self.session_manager.delete_confirm = Some(SessionManagerDeleteConfirm::Batch { targets });
-        self.session_manager.show_batch_move = false;
-        self.close_session_row_menus();
-        cx.notify();
+        self.session_manager.update(cx, |session_manager, cx| {
+            close_session_menu_state(session_manager);
+            session_manager.delete_confirm = Some(SessionManagerDeleteConfirm::Batch { targets });
+            cx.notify();
+        });
     }
 
     pub(super) fn cancel_session_manager_delete(&mut self, cx: &mut Context<Self>) {
-        self.session_manager.delete_confirm = None;
-        cx.notify();
+        self.session_manager.update(cx, |session_manager, cx| {
+            session_manager.delete_confirm = None;
+            cx.notify();
+        });
     }
 
     pub(super) fn confirm_session_manager_delete(&mut self, cx: &mut Context<Self>) {
-        let Some(confirm) = self.session_manager.delete_confirm.take() else {
+        let confirm = self.session_manager.update(cx, |session_manager, cx| {
+            let confirm = session_manager.delete_confirm.take();
+            if confirm.is_some() {
+                cx.notify();
+            }
+            confirm
+        });
+        let Some(confirm) = confirm else {
             return;
         };
         match confirm {
@@ -334,71 +409,75 @@ impl WorkspaceApp {
     }
 
     pub(super) fn delete_serial_profile(&mut self, id: &str, cx: &mut Context<Self>) {
-        match self.connection_store.delete_serial_profile(id) {
-            Ok(true) => {
-                self.session_manager.status =
-                    Some(self.i18n.t("sessionManager.serial_profiles.delete"));
-                self.queue_cloud_sync_dirty_refresh(cx);
-            }
-            Ok(false) => {
-                self.session_manager.status =
-                    Some(self.i18n.t("sessionManager.serial_profiles.delete_failed"));
-            }
-            Err(error) => {
-                self.session_manager.status = Some(format!(
+        let (status, changed) = match self.connection_store.delete_serial_profile(id) {
+            Ok(true) => (self.i18n.t("sessionManager.serial_profiles.delete"), true),
+            Ok(false) => (
+                self.i18n.t("sessionManager.serial_profiles.delete_failed"),
+                false,
+            ),
+            Err(error) => (
+                format!(
                     "{}: {error}",
                     self.i18n.t("sessionManager.serial_profiles.delete_failed")
-                ));
-            }
+                ),
+                false,
+            ),
+        };
+        self.session_manager.update(cx, |session_manager, cx| {
+            session_manager.set_status(Some(status), cx)
+        });
+        if changed {
+            self.queue_cloud_sync_dirty_refresh(cx);
         }
-        cx.notify();
     }
 
     pub(super) fn delete_telnet_profile(&mut self, id: &str, cx: &mut Context<Self>) {
-        match self.connection_store.delete_telnet_profile(id) {
-            Ok(true) => {
-                self.session_manager.status =
-                    Some(self.i18n.t("sessionManager.telnet_profiles.delete"));
-            }
-            Ok(false) => {
-                self.session_manager.status =
-                    Some(self.i18n.t("sessionManager.telnet_profiles.delete_failed"));
-            }
+        let status = match self.connection_store.delete_telnet_profile(id) {
+            Ok(true) => self.i18n.t("sessionManager.telnet_profiles.delete"),
+            Ok(false) => self.i18n.t("sessionManager.telnet_profiles.delete_failed"),
             Err(error) => {
-                self.session_manager.status = Some(format!(
+                format!(
                     "{}: {error}",
                     self.i18n.t("sessionManager.telnet_profiles.delete_failed")
-                ));
+                )
             }
-        }
-        cx.notify();
+        };
+        self.session_manager.update(cx, |session_manager, cx| {
+            session_manager.set_status(Some(status), cx)
+        });
     }
 
     pub(super) fn delete_remote_desktop_profile(&mut self, id: &str, cx: &mut Context<Self>) {
-        match self.connection_store.delete_remote_desktop_profile(id) {
-            Ok(true) => {
-                self.session_manager.selected_items.remove(
-                    &SessionManagerSelectionTarget::RemoteDesktop(id.to_string()),
-                );
-                self.session_manager.status =
-                    Some(self.i18n.t("sessionManager.remote_desktop_profiles.delete"));
-                self.queue_cloud_sync_dirty_refresh(cx);
-            }
-            Ok(false) => {
-                self.session_manager.status = Some(
-                    self.i18n
-                        .t("sessionManager.remote_desktop_profiles.delete_failed"),
-                );
-            }
-            Err(error) => {
-                self.session_manager.status = Some(format!(
+        let (status, deleted) = match self.connection_store.delete_remote_desktop_profile(id) {
+            Ok(true) => (
+                self.i18n.t("sessionManager.remote_desktop_profiles.delete"),
+                true,
+            ),
+            Ok(false) => (
+                self.i18n
+                    .t("sessionManager.remote_desktop_profiles.delete_failed"),
+                false,
+            ),
+            Err(error) => (
+                format!(
                     "{}: {error}",
                     self.i18n
-                        .t("sessionManager.remote_desktop_profiles.delete_failed")
-                ));
+                        .t("sessionManager.remote_desktop_profiles.delete_failed"),
+                ),
+                false,
+            ),
+        };
+        self.session_manager.update(cx, |session_manager, cx| {
+            if deleted {
+                session_manager.selected_items.remove(
+                    &SessionManagerSelectionTarget::RemoteDesktop(id.to_string()),
+                );
             }
+            session_manager.set_status(Some(status), cx);
+        });
+        if deleted {
+            self.queue_cloud_sync_dirty_refresh(cx);
         }
-        cx.notify();
     }
 
     pub(super) fn open_saved_serial_profile(
@@ -430,13 +509,15 @@ impl WorkspaceApp {
                 self.queue_cloud_sync_dirty_refresh(cx);
             }
             Err(error) => {
-                self.session_manager.status = Some(format!(
+                let status = format!(
                     "{}: {error}",
                     self.i18n.t("sessionManager.serial_profiles.open_failed")
-                ));
+                );
+                self.session_manager.update(cx, |session_manager, cx| {
+                    session_manager.set_status(Some(status), cx)
+                });
             }
         }
-        cx.notify();
     }
 
     pub(super) fn open_saved_telnet_profile(
@@ -463,13 +544,15 @@ impl WorkspaceApp {
                 let _ = self.connection_store.mark_telnet_profile_used(id);
             }
             Err(error) => {
-                self.session_manager.status = Some(format!(
+                let status = format!(
                     "{}: {error}",
                     self.i18n.t("sessionManager.telnet_profiles.open_failed")
-                ));
+                );
+                self.session_manager.update(cx, |session_manager, cx| {
+                    session_manager.set_status(Some(status), cx)
+                });
             }
         }
-        cx.notify();
     }
 
     pub(super) fn open_saved_remote_desktop_profile(
@@ -490,12 +573,14 @@ impl WorkspaceApp {
                 .map(SecretString::into_zeroizing)
                 .map(RemoteDesktopSecret::from),
             Err(error) => {
-                self.session_manager.status = Some(format!(
+                let status = format!(
                     "{}: {error}",
                     self.i18n
                         .t("sessionManager.remote_desktop_profiles.open_failed")
-                ));
-                cx.notify();
+                );
+                self.session_manager.update(cx, |session_manager, cx| {
+                    session_manager.set_status(Some(status), cx)
+                });
                 return;
             }
         };
@@ -505,20 +590,22 @@ impl WorkspaceApp {
             // Synced and imported assets intentionally omit device-local credentials.
             // Reopen the regular form so the user can authenticate on this device.
             self.open_new_connection_form(window, cx);
-            if let Some(form) = self.new_connection_form.as_mut() {
-                form.transport = NewConnectionTransport::Rdp;
-                form.name = saved.name;
-                form.host = saved.host;
-                form.port = saved.port.to_string();
-                form.username = saved.username.unwrap_or_default();
-                form.group = saved.group.unwrap_or_default();
-                form.remote_desktop_session_options = saved.session_options;
-                form.error = Some(
-                    self.i18n
-                        .t("modals.new_connection.remote_desktop_password_required"),
-                );
-                form.focused_field = NewConnectionField::Password;
-            }
+            let password_required = self
+                .i18n
+                .t("modals.new_connection.remote_desktop_password_required");
+            self.update_connection_form_state(cx, |state| {
+                if let Some(form) = state.form.as_mut() {
+                    form.transport = NewConnectionTransport::Rdp;
+                    form.name = saved.name;
+                    form.host = saved.host;
+                    form.port = saved.port.to_string();
+                    form.username = saved.username.unwrap_or_default();
+                    form.group = saved.group.unwrap_or_default();
+                    form.remote_desktop_session_options = saved.session_options;
+                    form.error = Some(password_required);
+                    form.focused_field = NewConnectionField::Password;
+                }
+            });
             return;
         }
         let profile = RemoteDesktopConnectionProfile {
@@ -535,7 +622,6 @@ impl WorkspaceApp {
         self.open_remote_desktop_connection_tab(profile, password, window, cx);
         let _ = self.connection_store.mark_remote_desktop_profile_used(id);
         self.queue_cloud_sync_dirty_refresh(cx);
-        cx.notify();
     }
 
     pub(super) fn open_saved_remote_desktop_profile_editor(
@@ -552,10 +638,8 @@ impl WorkspaceApp {
             return;
         };
         self.open_new_connection_form(window, cx);
-        self.new_connection_form = Some(form_from_remote_desktop_profile(
-            &saved,
-            self.i18n.t("ssh.form.ungrouped"),
-        ));
+        let form = form_from_remote_desktop_profile(&saved, self.i18n.t("ssh.form.ungrouped"));
+        self.update_connection_form_state(cx, |state| state.replace_with_new_form(form));
         cx.notify();
     }
 
@@ -570,9 +654,15 @@ impl WorkspaceApp {
                 SessionManagerSelectionTarget::Connection(id) => {
                     if self.connection_store.delete(&id).unwrap_or(false) {
                         // Keep batch delete aligned with the single-delete command path.
-                        if let Err(error) = self.forwarding_registry.delete_owned_forwards(&id) {
-                            self.session_manager.status = Some(error.to_string());
-                            cx.notify();
+                        if let Err(error) = self
+                            .forwarding_service
+                            .registry()
+                            .delete_owned_forwards(&id)
+                        {
+                            let status = error.to_string();
+                            self.session_manager.update(cx, |session_manager, cx| {
+                                session_manager.set_status(Some(status), cx);
+                            });
                             return;
                         }
                         self.release_ide_runtime_for_saved_connection(&id, cx);
@@ -590,13 +680,16 @@ impl WorkspaceApp {
                 }
             }
         }
-        self.session_manager.selected_items.clear();
-        self.session_manager.show_batch_move = false;
-        self.session_manager.status = Some(connections_deleted_label(&self.i18n, deleted));
+        let status = connections_deleted_label(&self.i18n, deleted);
+        self.session_manager.update(cx, |session_manager, cx| {
+            session_manager.selected_items.clear();
+            session_manager.show_batch_move = false;
+            session_manager.status = Some(status);
+            cx.notify();
+        });
         if deleted > 0 {
             self.queue_cloud_sync_dirty_refresh(cx);
         }
-        cx.notify();
     }
 
     pub(super) fn duplicate_connection(
@@ -619,16 +712,13 @@ impl WorkspaceApp {
         form.focused_field = NewConnectionField::Name;
         form.field_focused = true;
 
-        self.prepare_modal_interaction_boundary();
-        self.new_connection_form = Some(form);
-        self.drill_down_parent_node_id = None;
-        self.editing_saved_connection_id = None;
-        self.editing_saved_connection_connect_after_save_node_id = None;
-        self.duplicating_saved_connection_id = Some(id.to_string());
-        self.saved_connection_prompt_action = None;
-        self.close_session_row_menus();
-        self.close_new_connection_select();
-        self.new_connection_caret_visible = true;
+        self.prepare_modal_interaction_boundary(cx);
+        self.update_connection_form_state(cx, |state| {
+            state.replace_with_new_form(form);
+            state.duplicating_saved_connection_id = Some(id.to_string());
+        });
+        self.close_session_row_menus(cx);
+        self.show_active_input_caret(cx);
         self.needs_active_pane_focus = false;
         window.focus(&self.focus_handle, cx);
         cx.notify();
@@ -641,8 +731,10 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) {
         let Some(conn) = self.connection_store.get(id).cloned() else {
-            self.session_manager.status = Some(self.i18n.t("sessionManager.toast.test_failed"));
-            cx.notify();
+            let status = self.i18n.t("sessionManager.toast.test_failed");
+            self.session_manager.update(cx, |session_manager, cx| {
+                session_manager.set_status(Some(status), cx)
+            });
             return;
         };
         let Some(config) = oxideterm_session_adapter::ssh_config_from_saved_connection(
@@ -663,7 +755,6 @@ impl WorkspaceApp {
             return;
         };
         self.start_ssh_test_flow(config, conn.name, cx);
-        cx.notify();
     }
 
     pub(super) fn move_selected_connections(
@@ -673,6 +764,7 @@ impl WorkspaceApp {
     ) {
         let targets = self
             .session_manager
+            .read(cx)
             .selected_items
             .iter()
             .cloned()
@@ -691,20 +783,25 @@ impl WorkspaceApp {
             group,
         ) {
             Ok(count) => {
-                self.session_manager.status = Some(connections_moved_label(
-                    &self.i18n,
-                    count,
-                    group_label(&self.i18n, group),
-                ));
-                self.session_manager.selected_items.clear();
-                self.session_manager.show_batch_move = false;
+                let status =
+                    connections_moved_label(&self.i18n, count, group_label(&self.i18n, group));
+                self.session_manager.update(cx, |session_manager, cx| {
+                    session_manager.status = Some(status);
+                    session_manager.selected_items.clear();
+                    session_manager.show_batch_move = false;
+                    cx.notify();
+                });
                 if count > 0 {
                     self.queue_cloud_sync_dirty_refresh(cx);
                 }
             }
-            Err(error) => self.session_manager.status = Some(error.to_string()),
+            Err(error) => {
+                let status = error.to_string();
+                self.session_manager.update(cx, |session_manager, cx| {
+                    session_manager.set_status(Some(status), cx)
+                });
+            }
         }
-        cx.notify();
     }
 }
 

@@ -10,7 +10,6 @@
 use std::{
     collections::BTreeMap,
     fmt,
-    sync::mpsc::Sender,
     time::{Duration, Instant},
 };
 
@@ -71,6 +70,21 @@ pub enum CloudSyncDelivery {
     GoogleOauthFinished(CloudSyncActionResult<()>),
 }
 
+/// Sends Cloud Sync worker results without prescribing how the UI is woken.
+///
+/// The GPUI app implements this trait with an active-delivery sender so worker
+/// completion wakes the owning Entity immediately. Tests and non-GPUI callers
+/// may continue to use a standard channel.
+pub trait CloudSyncDeliverySink: Clone + Send + Sync + 'static {
+    fn send(&self, delivery: CloudSyncDelivery) -> Result<(), CloudSyncDelivery>;
+}
+
+impl CloudSyncDeliverySink for std::sync::mpsc::Sender<CloudSyncDelivery> {
+    fn send(&self, delivery: CloudSyncDelivery) -> Result<(), CloudSyncDelivery> {
+        std::sync::mpsc::Sender::send(self, delivery).map_err(|error| error.0)
+    }
+}
+
 #[derive(Debug)]
 pub struct CloudSyncActionResult<T> {
     pub result: Result<T, String>,
@@ -117,7 +131,7 @@ pub enum CloudSyncApplyOutcome {
 }
 
 pub async fn deliver_cloud_sync_check(
-    tx: Sender<CloudSyncDelivery>,
+    tx: impl CloudSyncDeliverySink,
     service: CloudSyncOperationService,
     settings: CloudSyncSettings,
     hints: BTreeMap<String, bool>,
@@ -142,7 +156,7 @@ pub async fn deliver_cloud_sync_check(
 }
 
 pub async fn deliver_cloud_sync_github_oauth(
-    tx: Sender<CloudSyncDelivery>,
+    tx: impl CloudSyncDeliverySink,
     client_id: String,
     hints: BTreeMap<String, bool>,
 ) {
@@ -194,7 +208,7 @@ pub async fn deliver_cloud_sync_github_oauth(
 }
 
 pub async fn deliver_cloud_sync_microsoft_oauth(
-    tx: Sender<CloudSyncDelivery>,
+    tx: impl CloudSyncDeliverySink,
     client_id: String,
     hints: BTreeMap<String, bool>,
 ) {
@@ -253,7 +267,7 @@ pub async fn deliver_cloud_sync_microsoft_oauth(
 }
 
 pub async fn deliver_cloud_sync_google_oauth(
-    tx: Sender<CloudSyncDelivery>,
+    tx: impl CloudSyncDeliverySink,
     client_id: String,
     hints: BTreeMap<String, bool>,
 ) {
@@ -355,7 +369,7 @@ pub async fn deliver_cloud_sync_google_oauth(
 
 #[allow(clippy::too_many_arguments)]
 pub async fn deliver_cloud_sync_upload(
-    tx: Sender<CloudSyncDelivery>,
+    tx: impl CloudSyncDeliverySink,
     service: CloudSyncOperationService,
     connection_store: ConnectionStore,
     forwarding_registry: ForwardingRegistry,
@@ -402,7 +416,7 @@ pub async fn deliver_cloud_sync_upload(
 }
 
 pub async fn deliver_cloud_sync_upload_preview(
-    tx: Sender<CloudSyncDelivery>,
+    tx: impl CloudSyncDeliverySink,
     service: CloudSyncOperationService,
     connection_store: ConnectionStore,
     settings: CloudSyncSettings,
@@ -450,7 +464,7 @@ pub async fn deliver_cloud_sync_upload_preview(
 }
 
 pub async fn deliver_cloud_sync_pull_preview(
-    tx: Sender<CloudSyncDelivery>,
+    tx: impl CloudSyncDeliverySink,
     service: CloudSyncOperationService,
     connection_store: ConnectionStore,
     settings: CloudSyncSettings,
@@ -498,7 +512,7 @@ pub async fn deliver_cloud_sync_pull_preview(
 }
 
 pub async fn deliver_cloud_sync_restore_backup_preview(
-    tx: Sender<CloudSyncDelivery>,
+    tx: impl CloudSyncDeliverySink,
     connection_store: ConnectionStore,
     settings: CloudSyncSettings,
     hints: BTreeMap<String, bool>,
@@ -555,7 +569,7 @@ pub async fn deliver_cloud_sync_restore_backup_preview(
 
 #[allow(clippy::too_many_arguments)]
 pub async fn deliver_cloud_sync_apply_preview(
-    tx: Sender<CloudSyncDelivery>,
+    tx: impl CloudSyncDeliverySink,
     service: CloudSyncOperationService,
     mut connection_store: ConnectionStore,
     forwarding_registry: ForwardingRegistry,
@@ -723,7 +737,7 @@ fn filter_structured_preview_for_selection(
 }
 
 fn read_apply_sync_password(
-    tx: &Sender<CloudSyncDelivery>,
+    tx: &impl CloudSyncDeliverySink,
     settings: &CloudSyncSettings,
     provider: &mut CloudSyncKeychainSecretProvider,
     preview: &CloudSyncPendingPreview,
@@ -917,7 +931,7 @@ fn hex_value(byte: u8) -> Option<u8> {
 }
 
 fn send_action_result<T>(
-    tx: Sender<CloudSyncDelivery>,
+    tx: impl CloudSyncDeliverySink,
     wrap: impl FnOnce(CloudSyncActionResult<T>) -> CloudSyncDelivery,
     result: Result<T, String>,
     provider: &CloudSyncKeychainSecretProvider,

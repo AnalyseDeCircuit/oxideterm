@@ -6,160 +6,117 @@ pub(in crate::workspace) const CLI_COMPANION_COMMAND_NAME: &str = "oxideterm";
 pub(in crate::workspace) const LEGACY_CLI_COMPANION_COMMAND_NAME: &str = "oxt";
 pub(in crate::workspace) const CLI_COMPANION_RESOURCE_DIR: &str = "cli-bin";
 
-impl WorkspaceApp {
-    pub(in crate::workspace) fn refresh_cli_companion_status(&mut self, cx: &mut Context<Self>) {
-        if self.settings_page.cli_companion_loading {
-            return;
+impl SettingsWorkspaceEntity {
+    pub(in crate::workspace) fn cli_companion_snapshot(&self) -> CliCompanionSnapshot {
+        CliCompanionSnapshot {
+            status: self.cli_companion_status.clone(),
+            loading: self.cli_companion_loading,
+            error: self.cli_companion_error.clone(),
+        }
+    }
+
+    pub(in crate::workspace) fn cli_companion_error(&self) -> Option<&str> {
+        self.cli_companion_error.as_deref()
+    }
+
+    pub(in crate::workspace) fn cli_companion_needs_refresh(&self) -> bool {
+        self.cli_companion_status.is_none() && !self.cli_companion_loading
+    }
+
+    pub(in crate::workspace) fn start_cli_companion_operation(
+        &mut self,
+        operation: CliCompanionOperation,
+        runtime: Arc<tokio::runtime::Runtime>,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if self.cli_companion_loading {
+            return false;
         }
 
-        self.settings_page.set_cli_companion_loading(true);
-        let runtime = self.forwarding_runtime.clone();
-        cx.spawn(async move |weak, cx| {
+        self.cli_companion_loading = true;
+        self.cli_companion_task = Some(cx.spawn(async move |settings, cx| {
             let result = runtime
-                .spawn_blocking(cli_companion_status)
+                .spawn_blocking(move || run_cli_companion_operation(operation))
                 .await
                 .map_err(|error| error.to_string())
-                .and_then(|status| status);
-            let _ = weak.update(cx, |this, cx| {
-                match result {
-                    Ok(status) => this.settings_page.set_cli_companion_status(status),
-                    Err(error) => this.settings_page.set_cli_companion_error(error),
-                }
-                cx.notify();
+                .and_then(|result| result);
+            let _ = settings.update(cx, |settings, cx| {
+                settings.finish_cli_companion_operation(operation, result, cx);
             });
-        })
-        .detach();
+        }));
         cx.notify();
+        true
+    }
+
+    fn finish_cli_companion_operation(
+        &mut self,
+        operation: CliCompanionOperation,
+        result: Result<CliCompanionStatus, String>,
+        cx: &mut Context<Self>,
+    ) {
+        self.cli_companion_task = None;
+        self.cli_companion_loading = false;
+        let success = match result {
+            Ok(status) => {
+                self.cli_companion_status = Some(status);
+                self.cli_companion_error = None;
+                true
+            }
+            Err(error) => {
+                self.cli_companion_error = Some(error);
+                false
+            }
+        };
+        if operation != CliCompanionOperation::Refresh {
+            cx.emit(SettingsWorkspaceEvent::CliCompanionFinished { operation, success });
+        }
+        cx.notify();
+    }
+}
+
+fn run_cli_companion_operation(
+    operation: CliCompanionOperation,
+) -> Result<CliCompanionStatus, String> {
+    match operation {
+        CliCompanionOperation::Refresh => {}
+        CliCompanionOperation::Install => cli_companion_install()?,
+        CliCompanionOperation::Uninstall => cli_companion_uninstall()?,
+        CliCompanionOperation::UninstallLegacy => legacy_cli_companion_uninstall()?,
+        CliCompanionOperation::Migrate => cli_companion_migrate()?,
+    }
+    cli_companion_status()
+}
+
+impl WorkspaceApp {
+    pub(in crate::workspace) fn refresh_cli_companion_status(&mut self, cx: &mut Context<Self>) {
+        self.start_cli_companion_operation(CliCompanionOperation::Refresh, cx);
     }
 
     pub(in crate::workspace) fn install_cli_companion(&mut self, cx: &mut Context<Self>) {
-        if self.settings_page.cli_companion_loading {
-            return;
-        }
-
-        self.settings_page.set_cli_companion_loading(true);
-        let runtime = self.forwarding_runtime.clone();
-        let success_title = self.i18n.t("settings_view.general.cli_installed");
-        cx.spawn(async move |weak, cx| {
-            let result = runtime
-                .spawn_blocking(|| cli_companion_install().and_then(|_| cli_companion_status()))
-                .await
-                .map_err(|error| error.to_string())
-                .and_then(|status| status);
-            let _ = weak.update(cx, |this, cx| {
-                match result {
-                    Ok(status) => {
-                        this.settings_page.set_cli_companion_status(status);
-                        this.push_ai_settings_toast(success_title, TerminalNoticeVariant::Success);
-                    }
-                    Err(error) => {
-                        this.settings_page.set_cli_companion_error(error.clone());
-                        this.push_ai_settings_toast(error, TerminalNoticeVariant::Error);
-                    }
-                }
-                cx.notify();
-            });
-        })
-        .detach();
-        cx.notify();
+        self.start_cli_companion_operation(CliCompanionOperation::Install, cx);
     }
 
     pub(in crate::workspace) fn uninstall_cli_companion(&mut self, cx: &mut Context<Self>) {
-        if self.settings_page.cli_companion_loading {
-            return;
-        }
-
-        self.settings_page.set_cli_companion_loading(true);
-        let runtime = self.forwarding_runtime.clone();
-        let success_title = self.i18n.t("settings_view.general.cli_uninstalled");
-        cx.spawn(async move |weak, cx| {
-            let result = runtime
-                .spawn_blocking(|| cli_companion_uninstall().and_then(|_| cli_companion_status()))
-                .await
-                .map_err(|error| error.to_string())
-                .and_then(|status| status);
-            let _ = weak.update(cx, |this, cx| {
-                match result {
-                    Ok(status) => {
-                        this.settings_page.set_cli_companion_status(status);
-                        this.push_ai_settings_toast(success_title, TerminalNoticeVariant::Success);
-                    }
-                    Err(error) => {
-                        this.settings_page.set_cli_companion_error(error.clone());
-                        this.push_ai_settings_toast(error, TerminalNoticeVariant::Error);
-                    }
-                }
-                cx.notify();
-            });
-        })
-        .detach();
-        cx.notify();
+        self.start_cli_companion_operation(CliCompanionOperation::Uninstall, cx);
     }
 
     pub(in crate::workspace) fn uninstall_legacy_cli_companion(&mut self, cx: &mut Context<Self>) {
-        if self.settings_page.cli_companion_loading {
-            return;
-        }
-
-        self.settings_page.set_cli_companion_loading(true);
-        let runtime = self.forwarding_runtime.clone();
-        let success_title = self.i18n.t("migration.cli_legacy_uninstalled");
-        cx.spawn(async move |weak, cx| {
-            let result = runtime
-                .spawn_blocking(|| {
-                    legacy_cli_companion_uninstall().and_then(|_| cli_companion_status())
-                })
-                .await
-                .map_err(|error| error.to_string())
-                .and_then(|status| status);
-            let _ = weak.update(cx, |this, cx| {
-                match result {
-                    Ok(status) => {
-                        this.settings_page.set_cli_companion_status(status);
-                        this.push_ai_settings_toast(success_title, TerminalNoticeVariant::Success);
-                    }
-                    Err(error) => {
-                        this.settings_page.set_cli_companion_error(error.clone());
-                        this.push_ai_settings_toast(error, TerminalNoticeVariant::Error);
-                    }
-                }
-                cx.notify();
-            });
-        })
-        .detach();
-        cx.notify();
+        self.start_cli_companion_operation(CliCompanionOperation::UninstallLegacy, cx);
     }
 
     pub(in crate::workspace) fn migrate_cli_companion(&mut self, cx: &mut Context<Self>) {
-        if self.settings_page.cli_companion_loading {
-            return;
-        }
+        self.start_cli_companion_operation(CliCompanionOperation::Migrate, cx);
+    }
 
-        self.settings_page.set_cli_companion_loading(true);
+    fn start_cli_companion_operation(
+        &mut self,
+        operation: CliCompanionOperation,
+        cx: &mut Context<Self>,
+    ) {
         let runtime = self.forwarding_runtime.clone();
-        let success_title = self.i18n.t("migration.cli_migrated");
-        cx.spawn(async move |weak, cx| {
-            let result = runtime
-                .spawn_blocking(|| cli_companion_migrate().and_then(|_| cli_companion_status()))
-                .await
-                .map_err(|error| error.to_string())
-                .and_then(|status| status);
-            let _ = weak.update(cx, |this, cx| {
-                match result {
-                    Ok(status) => {
-                        this.settings_page.set_cli_companion_status(status);
-                        this.push_ai_settings_toast(success_title, TerminalNoticeVariant::Success);
-                    }
-                    Err(error) => {
-                        this.settings_page.set_cli_companion_error(error.clone());
-                        this.push_ai_settings_toast(error, TerminalNoticeVariant::Error);
-                    }
-                }
-                cx.notify();
-            });
-        })
-        .detach();
-        cx.notify();
+        self.settings_workspace.update(cx, |settings, cx| {
+            settings.start_cli_companion_operation(operation, runtime, cx);
+        });
     }
 
     pub(in crate::workspace) fn cli_companion_action_button(
@@ -468,10 +425,15 @@ pub(in crate::workspace) fn host_target_triple() -> &'static str {
 
 #[cfg(test)]
 mod cli_companion_tests {
+    use std::sync::Arc;
+
+    use gpui::{AppContext, TestAppContext};
+
     use super::{
-        CLI_COMPANION_COMMAND_NAME, LEGACY_CLI_COMPANION_COMMAND_NAME,
-        cli_companion_migrate_at_paths, cli_install_path, cli_path_present,
-        installed_cli_matches_bundle, legacy_cli_install_path, remove_managed_cli,
+        CLI_COMPANION_COMMAND_NAME, CliCompanionOperation, LEGACY_CLI_COMPANION_COMMAND_NAME,
+        SettingsWorkspaceEntity, cli_companion_migrate_at_paths, cli_install_path,
+        cli_path_present, installed_cli_matches_bundle, legacy_cli_install_path,
+        remove_managed_cli,
     };
 
     pub(in crate::workspace) fn temp_test_dir(name: &str) -> std::path::PathBuf {
@@ -616,5 +578,42 @@ mod cli_companion_tests {
         assert!(cli_companion_migrate_at_paths(&bundle_path, &install_path, &legacy_path).is_err());
         assert!(legacy_path.exists());
         let _ = std::fs::remove_dir_all(temp_dir);
+    }
+
+    #[gpui::test]
+    fn cli_companion_operation_state_and_task_are_entity_owned(cx: &mut TestAppContext) {
+        let entity = cx.new(SettingsWorkspaceEntity::new);
+        let runtime = Arc::new(
+            tokio::runtime::Builder::new_multi_thread()
+                .worker_threads(1)
+                .enable_all()
+                .build()
+                .expect("test runtime"),
+        );
+
+        entity.update(cx, |settings, cx| {
+            assert!(settings.start_cli_companion_operation(
+                CliCompanionOperation::Refresh,
+                runtime.clone(),
+                cx,
+            ));
+            assert!(settings.cli_companion_loading);
+            assert!(settings.cli_companion_task.is_some());
+            assert!(!settings.start_cli_companion_operation(
+                CliCompanionOperation::Install,
+                runtime,
+                cx,
+            ));
+
+            // Cancel the read-only probe before directly testing completion state.
+            settings.cli_companion_task = None;
+            settings.finish_cli_companion_operation(
+                CliCompanionOperation::Refresh,
+                Err("unavailable".to_string()),
+                cx,
+            );
+            assert!(!settings.cli_companion_loading);
+            assert_eq!(settings.cli_companion_error.as_deref(), Some("unavailable"));
+        });
     }
 }

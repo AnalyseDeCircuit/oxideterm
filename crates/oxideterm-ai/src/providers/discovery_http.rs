@@ -14,27 +14,29 @@ pub(crate) async fn fetch_provider_models_payload(
     let provider_type = provider.provider_type.as_str();
     match provider_type {
         "anthropic" => {
-            let api_key = api_key_required_ref(provider_type, api_key)?;
+            let api_key =
+                api_key_required_ref(provider_type, api_key.map(|api_key| api_key.as_str()))?;
             // The key is owned by Zeroizing until the request is built. Reqwest
             // must copy it into an HTTP header to match Tauri's provider API
             // request path, and native never persists this value in settings.
             let body = send_text(
                 client
                     .get(provider_models_url(provider_type, &provider.base_url)?)
-                    .header("x-api-key", api_key.as_str())
+                    .header("x-api-key", api_key)
                     .header("anthropic-version", ANTHROPIC_VERSION),
             )
             .await?;
             parse_provider_json(&body, "Anthropic model list")
         }
         "gemini" => {
-            let api_key = api_key_required_ref(provider_type, api_key)?;
+            let api_key =
+                api_key_required_ref(provider_type, api_key.map(|api_key| api_key.as_str()))?;
             // Keep the API key out of our own URL strings; reqwest owns the
             // query parameter only for the outgoing request.
             let body = send_text(
                 client
                     .get(gemini_models_url(&provider.base_url)?)
-                    .query(&[("key", api_key.as_str())]),
+                    .query(&[("key", api_key)]),
             )
             .await?;
             parse_provider_json(&body, "Gemini model list")
@@ -187,8 +189,8 @@ fn parse_openai_compatible_error(body: &str) -> Option<String> {
 
 pub(crate) fn api_key_required_ref<'a>(
     provider_type: &str,
-    api_key: Option<&'a Zeroizing<String>>,
-) -> Result<&'a Zeroizing<String>> {
+    api_key: Option<&'a str>,
+) -> Result<&'a str> {
     api_key
         .filter(|key| !key.trim().is_empty())
         .ok_or_else(|| anyhow!("missing API key for {provider_type}"))

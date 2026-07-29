@@ -187,28 +187,29 @@ impl WorkspaceApp {
         &self,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
-        let player = self.terminal_cast_player.as_ref()?;
+        let search_target = WorkspaceImeTarget::TerminalCastSearch;
+        let search_marked = self.marked_text_for_target(search_target, cx);
+        let player = self.terminal.read(cx).cast_render_snapshot()?;
         const PLAYER_PANEL_ALPHA: u32 = 0xf2;
         const PLAYER_BORDER_ALPHA: u32 = 0x99;
         let theme = self.tokens.ui;
-        let recording = player.playback.recording();
-        let position = player.playback.position();
-        let duration = recording.duration;
+        let position = player.position;
+        let duration = player.duration;
         let progress = if duration <= 0.0 {
             0.0
         } else {
             (position / duration).clamp(0.0, 1.0) as f32
         };
-        let search_target = WorkspaceImeTarget::TerminalCastSearch;
-        let search_marked = self.marked_text_for_target(search_target);
         let search_empty = player.search_query.is_empty() && search_marked.is_none();
         let search_text = if search_empty {
             self.i18n.t("terminal.recording.search_placeholder")
         } else {
             player.search_query.clone()
         };
-        let search_results = player.playback.search(&player.search_query);
-        let pane = player.pane.clone();
+        let search_results = player.search_results;
+        let search_result_count = search_results.len();
+        let search_results_empty = search_results.is_empty();
+        let pane = player.pane;
         let workspace = cx.entity();
         Some(
             div()
@@ -251,7 +252,7 @@ impl WorkspaceApp {
                                                 .truncate()
                                                 .text_size(px(14.0))
                                                 .text_color(rgb(theme.text))
-                                                .child(recording.file_name.clone()),
+                                                .child(player.file_name),
                                         )
                                         .child(
                                             div()
@@ -263,7 +264,7 @@ impl WorkspaceApp {
                                                 .text_color(rgb(theme.text_muted))
                                                 .child(format!(
                                                     "{}x{}",
-                                                    recording.width, recording.height
+                                                    player.width, player.height
                                                 )),
                                         ),
                                 )
@@ -284,16 +285,9 @@ impl WorkspaceApp {
                                         .on_mouse_down(
                                             MouseButton::Left,
                                             cx.listener(|this, _event, window, cx| {
-                                                if let Some(player) =
-                                                    this.terminal_cast_player.as_mut()
-                                                {
-                                                    player.search_visible = !player.search_visible;
-                                                    player.search_focused = player.search_visible;
-                                                    if !player.search_visible {
-                                                        player.search_query.clear();
-                                                        this.update_terminal_cast_search(cx);
-                                                    }
-                                                }
+                                                this.terminal.update(cx, |terminal, cx| {
+                                                    terminal.toggle_cast_search(cx);
+                                                });
                                                 this.terminal_command_bar_focused = false;
                                                 this.ime_marked_text = None;
 window.focus(&this.focus_handle, cx);
@@ -318,7 +312,7 @@ window.focus(&this.focus_handle, cx);
                                         .when(!player.search_query.is_empty(), |label| {
                                             label.child(format!(
                                                 "{} {}",
-                                                search_results.len(),
+                                                search_result_count,
                                                 self.i18n.t("terminal.recording.matches")
                                             ))
                                         }),
@@ -394,13 +388,9 @@ window.focus(&this.focus_handle, cx);
                                                         MouseButton::Left,
                                                         cx.listener(
                                                             move |this, event: &gpui::MouseDownEvent, window, cx| {
-                                                                if let Some(player) = this
-                                                                    .terminal_cast_player
-                                                                    .as_mut()
-                                                                {
-                                                                    player.search_focused = true;
-                                                                    player.search_visible = true;
-                                                                }
+                                                                this.terminal.update(cx, |terminal, _cx| {
+                                                                    terminal.focus_cast_search();
+                                                                });
                                                                 this.terminal_command_bar_focused =
                                                                     false;
                                                                 this.ime_marked_text = None;
@@ -443,7 +433,7 @@ window.focus(&this.focus_handle, cx);
                                                                 |input| {
                                                                     input.child(text_caret(
                                                                         &self.tokens,
-                                                                        self.new_connection_caret_visible,
+                                                                        self.input_caret.visible(),
                                                                     ))
                                                                 },
                                                             ),
@@ -462,7 +452,7 @@ window.focus(&this.focus_handle, cx);
                                                         .text_color(rgb(theme.text_muted))
                                                         .child(format!(
                                                             "{} {}",
-                                                            search_results.len(),
+                                                            search_result_count,
                                                             self.i18n
                                                                 .t("terminal.recording.matches")
                                                         )),
@@ -482,7 +472,7 @@ window.focus(&this.focus_handle, cx);
                                     .bg(rgba((theme.bg_panel << 8) | 0x99))
                                     .px(px(16.0))
                                     .py(px(8.0))
-                                    .when(search_results.is_empty(), |panel| {
+                                    .when(search_results_empty, |panel| {
                                         panel.child(
                                             div()
                                                 .text_size(px(12.0))
@@ -493,11 +483,12 @@ window.focus(&this.focus_handle, cx);
                                                 ),
                                         )
                                     })
-                                    .when(!search_results.is_empty(), |panel| {
+                                    .when(!search_results_empty, |panel| {
                                         panel.child(div().flex().flex_col().gap(px(2.0)).children(
-                                            search_results.iter().map(|result| {
+                                            search_results.into_iter().map(|result| {
                                                 let at = result.at;
-                                                let snippet = result.snippet.clone();
+                                                let seek_ratio = at / duration.max(1.0);
+                                                let snippet = result.snippet;
                                                 div()
                                                     .h(px(22.0))
                                                     .flex()
@@ -513,18 +504,10 @@ window.focus(&this.focus_handle, cx);
                                                         MouseButton::Left,
                                                         cx.listener(
                                                             move |this, _event, _window, cx| {
-                                                                if let Some(player) =
-                                                                    &this.terminal_cast_player
-                                                                {
-                                                                    this.seek_terminal_cast(
-                                                                        at / player
-                                                                            .playback
-                                                                            .recording()
-                                                                            .duration
-                                                                            .max(1.0),
-                                                                        cx,
-                                                                    );
-                                                                }
+                                                                this.seek_terminal_cast(
+                                                                    seek_ratio,
+                                                                    cx,
+                                                                );
                                                                 cx.stop_propagation();
                                                             },
                                                         ),
@@ -593,7 +576,9 @@ window.focus(&this.focus_handle, cx);
                                             MouseButton::Left,
                                             cx.listener(
                                                 |this, event: &MouseDownEvent, _window, cx| {
-                                                    this.terminal_cast_seek_dragging = true;
+                                                    this.terminal.update(cx, |terminal, _cx| {
+                                                        terminal.begin_cast_seek_drag();
+                                                    });
                                                     this.apply_terminal_cast_seek_from_x(
                                                         f32::from(event.position.x),
                                                         cx,
@@ -638,7 +623,7 @@ window.focus(&this.focus_handle, cx);
                                                 .items_center()
                                                 .gap(px(8.0))
                                                 .child(self.terminal_cast_player_button(
-                                                    if player.playback.playing() {
+                                                    if player.playing {
                                                         LucideIcon::Pause
                                                     } else {
                                                         LucideIcon::Play
@@ -651,7 +636,7 @@ window.focus(&this.focus_handle, cx);
                                                 ))
                                                 .child(self.terminal_cast_speed_button(
                                                     "0.5x",
-                                                    player.playback.speed() == 0.5,
+                                                    player.speed == 0.5,
                                                     cx.listener(|this, _event, _window, cx| {
                                                         this.set_terminal_cast_speed(0.5, cx);
                                                         cx.stop_propagation();
@@ -659,7 +644,7 @@ window.focus(&this.focus_handle, cx);
                                                 ))
                                                 .child(self.terminal_cast_speed_button(
                                                     "1x",
-                                                    player.playback.speed() == 1.0,
+                                                    player.speed == 1.0,
                                                     cx.listener(|this, _event, _window, cx| {
                                                         this.set_terminal_cast_speed(1.0, cx);
                                                         cx.stop_propagation();
@@ -667,7 +652,7 @@ window.focus(&this.focus_handle, cx);
                                                 ))
                                                 .child(self.terminal_cast_speed_button(
                                                     "2x",
-                                                    player.playback.speed() == 2.0,
+                                                    player.speed == 2.0,
                                                     cx.listener(|this, _event, _window, cx| {
                                                         this.set_terminal_cast_speed(2.0, cx);
                                                         cx.stop_propagation();
@@ -682,40 +667,14 @@ window.focus(&this.focus_handle, cx);
                                                 .child(self.terminal_cast_text_button(
                                                     "-10s",
                                                     cx.listener(|this, _event, _window, cx| {
-                                                        if let Some(player) =
-                                                            &this.terminal_cast_player
-                                                        {
-                                                            let target = (player
-                                                                .playback
-                                                                .position()
-                                                                - 10.0)
-                                                                / player
-                                                                    .playback
-                                                                    .recording()
-                                                                    .duration
-                                                                    .max(1.0);
-                                                            this.seek_terminal_cast(target, cx);
-                                                        }
+                                                        this.seek_terminal_cast_by_seconds(-10.0, cx);
                                                         cx.stop_propagation();
                                                     }),
                                                 ))
                                                 .child(self.terminal_cast_text_button(
                                                     "+10s",
                                                     cx.listener(|this, _event, _window, cx| {
-                                                        if let Some(player) =
-                                                            &this.terminal_cast_player
-                                                        {
-                                                            let target = (player
-                                                                .playback
-                                                                .position()
-                                                                + 10.0)
-                                                                / player
-                                                                    .playback
-                                                                    .recording()
-                                                                    .duration
-                                                                    .max(1.0);
-                                                            this.seek_terminal_cast(target, cx);
-                                                        }
+                                                        this.seek_terminal_cast_by_seconds(10.0, cx);
                                                         cx.stop_propagation();
                                                     }),
                                                 )),

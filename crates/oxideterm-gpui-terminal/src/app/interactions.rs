@@ -14,7 +14,8 @@ use unicode_width::UnicodeWidthStr;
 
 use super::{
     FreeTypeDragAction, FreeTypeDragState, PendingTerminalEditorClipboard, ScrollbarDrag,
-    ScrollbarGeometry, TerminalContextMenu, TerminalPane, command_mark_ui_available,
+    ScrollbarGeometry, TerminalContextMenu, TerminalPane, TerminalPaneEvent,
+    command_mark_ui_available,
 };
 use crate::command_facts::TerminalAutosuggestInputState;
 use crate::terminal_ui::*;
@@ -90,6 +91,7 @@ impl TerminalPane {
             // after Workspace confirms the active scope has one fillable
             // credential and mirrors that as the visible inline hint.
             self.privilege_prompt_submit_requested = true;
+            cx.emit(TerminalPaneEvent::PrivilegePromptSubmitRequested);
             cx.notify();
             return true;
         }

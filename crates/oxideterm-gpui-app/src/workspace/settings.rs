@@ -12,49 +12,43 @@ use oxideterm_settings::{
     create_default_highlight_rule, is_gpui_preview_version, reindex_highlight_rules,
 };
 use oxideterm_settings_model::{
-    AI_MODEL_REFRESH_MISSING_API_KEY, AcpAgentPreset, AiMcpServerDraft, AiModelRefreshDelivery,
-    AiProviderModelChipItem, AiProviderModelPanel, AiSettingsPage, AiSettingsSection,
-    AiToolPolicyGroup, CliCompanionStatus, KNOWLEDGE_EMBEDDING_BATCH_SIZE, KnowledgeDeleteTarget,
-    KnowledgeExternalEdit, SETTINGS_SECTION_HEADER_ITEM_COUNT, SettingsDynamicSectionCounts,
-    SettingsInputDraftApply, TERMINAL_THEME_COLOR_FIELDS, ThemeColorField, ThemeEditorSection,
-    ThemeEditorState, UI_THEME_COLOR_FIELDS, ai_add_acp_agent, ai_add_acp_agent_preset,
+    AcpAgentPreset, AiProviderModelChipItem, AiProviderModelPanel, AiSettingsPage,
+    AiToolPolicyGroup, CliCompanionStatus, KnowledgeDeleteTarget,
+    SETTINGS_SECTION_HEADER_ITEM_COUNT, SettingsDynamicSectionCounts, SettingsInputDraftApply,
+    TERMINAL_THEME_COLOR_FIELDS, ThemeColorField, ThemeEditorSection, ThemeEditorState,
+    UI_THEME_COLOR_FIELDS, ai_add_acp_agent, ai_add_acp_agent_preset,
     ai_context_max_chars_label_key, ai_context_visible_lines_label_key, ai_delete_acp_agent,
-    ai_mcp_auth_mode_value, ai_mcp_clean_record, ai_mcp_configs, ai_mcp_draft_input_value,
-    ai_mcp_draft_valid, ai_mcp_server_signature, ai_mcp_split_args, ai_mcp_transport_label,
-    ai_mcp_transport_value, ai_model_context_window_panels,
+    ai_mcp_configs, ai_mcp_server_signature, ai_mcp_transport_label,
+    ai_model_context_window_panels,
     ai_model_context_window_row as ai_model_context_window_row_model, ai_provider_card_signature,
     ai_provider_model_chip_rows, ai_provider_model_row_signature, ai_provider_views,
     ai_tool_auto_approve_total_count, ai_tool_auto_approved_count, ai_tool_policy_groups,
-    ai_update_provider, app_ui_colors_to_colors, apply_ai_mcp_draft_input,
-    apply_cloud_sync_form_input_draft, apply_persisted_settings_input_draft,
-    cloud_sync_form_input_value, current_time_millis, custom_theme_display_name,
-    delete_custom_theme_from_settings, editor_terminal_theme, editor_ui_colors,
-    import_custom_theme, import_knowledge_file, is_custom_theme_id, parse_color_hex,
-    persisted_settings_input_value, plugin_setting_draft_to_value, plugin_setting_input_value,
-    reconnect_attempt_label, reconnect_base_delay_options, reconnect_delay_label,
-    reconnect_max_attempt_options, reconnect_max_delay_options, save_theme_editor_to_settings,
-    set_ai_user_context_window, settings_multiline_line_ranges, settings_multiline_line_selection,
+    ai_update_provider, apply_cloud_sync_form_input_owned, apply_persisted_settings_input_draft,
+    cloud_sync_form_input_value_ref, current_time_millis, custom_theme_display_name,
+    delete_custom_theme_from_settings, editor_terminal_theme, editor_ui_colors, is_custom_theme_id,
+    parse_color_hex, persisted_settings_input_value, plugin_setting_draft_to_value,
+    plugin_setting_input_value, reconnect_attempt_label, reconnect_base_delay_options,
+    reconnect_delay_label, reconnect_max_attempt_options, reconnect_max_delay_options,
+    save_theme_editor_snapshot_to_settings, set_ai_user_context_window,
+    settings_multiline_line_ranges, settings_multiline_line_selection,
     settings_section_list_identity as settings_model_section_list_identity,
     settings_section_list_item_count as settings_model_section_list_item_count,
-    terminal_theme_to_colors, theme_editor_from_settings, toggle_string_set,
+    take_cloud_sync_form_input_value, theme_editor_from_settings,
 };
 use oxideterm_ssh::{HostKeyStatus, UpstreamProxyConfig, probe_upstream_proxy_route};
 use oxideterm_theme::BUILT_IN_THEMES;
 
-use super::ime::WorkspaceImeTarget;
 use super::*;
+use super::{ai_state::AiSettingsViewSection, ime::WorkspaceImeTarget};
 use oxideterm_ai::{
-    AI_PROVIDER_TEMPLATES, AiProviderKeyDisplayState, AiProviderRefreshKeyPolicy, AiProviderView,
+    AI_PROVIDER_TEMPLATES, AiProviderKeyDisplayState, AiProviderView,
     add_provider_from_template as ai_add_provider_from_template,
-    apply_provider_model_refresh as ai_apply_provider_model_refresh, fetch_provider_models,
-    generated_provider_id, provider_id as ai_provider_id,
-    provider_key_display_state as ai_provider_key_display_state,
-    provider_refresh_key_policy as ai_provider_refresh_key_policy,
+    apply_provider_model_refresh as ai_apply_provider_model_refresh, generated_provider_id,
+    provider_id as ai_provider_id, provider_key_display_state as ai_provider_key_display_state,
     provider_string as ai_provider_string,
     provider_template_by_type as ai_provider_template_by_type, provider_view as ai_provider_view,
     remove_provider_at_with_scoped_settings as ai_remove_provider_at_with_scoped_settings,
     set_active_provider_selection as ai_set_active_provider_selection,
-    take_provider_key_secret as ai_take_provider_key_secret,
 };
 use oxideterm_connections::{
     ConnectionImportApplyRequest, ConnectionImportDuplicateStrategy, ConnectionImportPreview,
@@ -125,9 +119,9 @@ pub(in crate::workspace) fn settings_dialog_transition(
     animation_id: &'static str,
     backdrop: Div,
     form: Div,
-    presence: oxideterm_gpui_ui::motion::ExitPresence,
+    phase: oxideterm_gpui_ui::motion::ExitPhase,
 ) -> AnyElement {
-    let is_visible = presence.phase() == oxideterm_gpui_ui::motion::ExitPhase::Visible;
+    let is_visible = phase == oxideterm_gpui_ui::motion::ExitPhase::Visible;
     backdrop
         .child(oxideterm_gpui_ui::motion::form_transition(
             tokens,
@@ -174,6 +168,17 @@ mod cards;
 mod cli_companion;
 mod connections_page;
 mod controls;
+mod entity;
+pub(in crate::workspace) use entity::{
+    BackgroundGalleryOperationResult, CliCompanionOperation, CliCompanionSnapshot,
+    ConnectionImportSnapshot, DataDirectoryConfirm, DataDirectoryOperationResult,
+    KeybindingFileOperationResult, KeybindingRecordingFooterAction, KeybindingRecordingKeyAction,
+    KeybindingResetConfirmKeyAction, LaunchAtLoginError, ManagedKeyDialogSnapshot,
+    NetworkProxyPasswordSnapshot, NetworkProxyTestSnapshot, PortablePasswordDialogSnapshot,
+    PortableStatusRefresh, PrivilegeCredentialDraft, PrivilegeCredentialSnapshot,
+    SettingsNavigationDraftAction, SettingsWorkspaceEntity, SettingsWorkspaceEvent,
+    SettingsWorkspaceToast, SshConfigImportSnapshot, ThemeEditorOperationResult, ThemeImportResult,
+};
 mod general_terminal_pages;
 pub(in crate::workspace) use general_terminal_pages::SETTINGS_TERMINAL_CUSTOM_FONT_INPUT_WIDTH;
 mod highlight;
@@ -206,10 +211,14 @@ use network_page::{
     network_proxy_protocol_label,
 };
 use pages::settings_keybinding_scope_matches;
-pub(in crate::workspace) use remote_shell_integration::RemoteShellIntegrationUiState;
+pub(in crate::workspace) use remote_shell_integration::{
+    RemoteShellIntegrationAction, RemoteShellIntegrationCardSnapshot,
+    RemoteShellIntegrationConfirmSnapshot, RemoteShellIntegrationConfirmSource,
+    RemoteShellIntegrationGateOutcome, RemoteShellIntegrationNotice,
+    RemoteShellIntegrationRuntimeState,
+};
 pub(in crate::workspace) use update::{
-    NativeUpdateDelivery, NativeUpdateUiState, native_update_progress_hint,
-    native_update_progress_ratio,
+    NativeUpdateRenderState, native_update_progress_hint, native_update_progress_ratio,
 };
 
 fn settings_tab_lucide(icon: SettingsTabIcon) -> LucideIcon {

@@ -15,7 +15,7 @@ impl WorkspaceApp {
         let operation = snapshot
             .as_ref()
             .and_then(|snapshot| snapshot.status.operation());
-        let active_section = match (self.terminal_git_branch_picker.active_section, operation) {
+        let active_section = match (self.terminal.read(cx).git_panel_active_section(), operation) {
             (TerminalGitPanelSection::Resolve, None) => TerminalGitPanelSection::Changes,
             (section, _) => section,
         };
@@ -222,7 +222,9 @@ impl WorkspaceApp {
         .on_mouse_down(
             MouseButton::Left,
             cx.listener(move |this, _event, _window, cx| {
-                this.terminal_git_branch_picker.active_section = section;
+                this.terminal.update(cx, |terminal, _cx| {
+                    terminal.set_git_panel_active_section(section);
+                });
                 cx.stop_propagation();
                 cx.notify();
             }),
@@ -234,13 +236,17 @@ impl WorkspaceApp {
         &self,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let visible_branches = self.visible_terminal_git_branches();
-        let query_checkout_candidate = self.terminal_git_query_checkout_candidate();
-        let query_create_candidate = self.terminal_git_query_create_branch_candidate();
-        let query_remote_tracking_candidate = self.terminal_git_query_remote_tracking_candidate();
+        let visible_branches = self.visible_terminal_git_branches(cx);
+        let query_checkout_candidate = self.terminal_git_query_checkout_candidate(cx);
+        let query_create_candidate = self.terminal_git_query_create_branch_candidate(cx);
+        let query_remote_tracking_candidate = self.terminal_git_query_remote_tracking_candidate(cx);
         let query_rebase_candidate = self.terminal_git_query_rebase_candidate(cx);
-        let loading = self.terminal_git_branch_picker.loading;
-        let error = self.terminal_git_branch_picker.error.clone();
+        let loading = self.terminal.read(cx).git_panel_loading();
+        let error = self
+            .terminal
+            .read(cx)
+            .git_panel_error()
+            .map(|error| self.terminal_git_branch_error_message(error));
 
         // Branch search owns branch keyboard navigation; other sections only run explicit actions.
         let mut section = div()
@@ -985,12 +991,7 @@ impl WorkspaceApp {
                 self.render_terminal_git_data_hint(snapshot.branch.display_text().to_string())
             }),
             TerminalGitRepositoryAction::WorktreeList => {
-                let count = self
-                    .terminal_git_branch_picker
-                    .branches
-                    .iter()
-                    .filter(|branch| branch.worktree_path().is_some())
-                    .count();
+                let count = self.terminal.read(cx).git_worktree_branch_count();
                 (count > 0).then(|| {
                     self.render_terminal_git_icon_count_chip(
                         LucideIcon::FolderOpen,
@@ -1177,13 +1178,17 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
-        let loading = self.terminal_git_branch_picker.ai_commit_loading;
+        let loading = self.terminal.read(cx).git_ai_commit_loading();
         let label = if loading {
             self.i18n.t("terminal.git.ai_commit_generating")
         } else {
             self.i18n.t("terminal.git.action_ai_commit_message")
         };
-        let error = self.terminal_git_branch_picker.ai_commit_error.clone();
+        let error = self
+            .terminal
+            .read(cx)
+            .git_ai_commit_error()
+            .map(|error| self.terminal_git_ai_commit_error_message(error));
         let text_color = if loading {
             rgb(theme.text_muted)
         } else if error.is_some() {
@@ -1250,19 +1255,22 @@ impl WorkspaceApp {
     pub(super) fn render_terminal_git_branch_search(&self, cx: &mut Context<Self>) -> AnyElement {
         let target = WorkspaceImeTarget::TerminalGitBranchSearch;
         let workspace = cx.entity();
+        let selected_range = self.ime_selected_range_for_target(target, cx);
+        let marked_text = self.marked_text_for_target(target, cx);
+        let terminal = self.terminal.read(cx);
         text_input_anchor_probe(
             target.anchor_id(),
             text_input(
                 &self.tokens,
                 TextInputView {
-                    value: &self.terminal_git_branch_picker.query,
+                    value: terminal.git_panel_query(),
                     placeholder: self.i18n.t("terminal.git.search_branches"),
-                    focused: self.terminal_git_branch_picker.open,
-                    caret_visible: self.new_connection_caret_visible,
+                    focused: terminal.git_panel_open(),
+                    caret_visible: self.input_caret.visible(),
                     secret: false,
                     selected_all: false,
-                    selected_range: self.ime_selected_range_for_target(target),
-                    marked_text: self.marked_text_for_target(target),
+                    selected_range,
+                    marked_text,
                 },
             )
             .h(px(32.0))
@@ -1297,11 +1305,7 @@ impl WorkspaceApp {
     ) -> AnyElement {
         let theme = self.tokens.ui;
         let branch_name = branch.name().to_string();
-        let highlighted = self
-            .terminal_git_branch_picker
-            .highlighted_branch
-            .as_deref()
-            .is_some_and(|name| name == branch.name());
+        let highlighted = self.terminal.read(cx).git_branch_highlighted(branch.name());
         let current = branch.current();
         let worktree_path = branch.worktree_path().map(str::to_string);
         let linked_worktree = worktree_path.is_some() && !current;
@@ -1353,14 +1357,9 @@ impl WorkspaceApp {
             .on_mouse_move(cx.listener({
                 let branch_name = branch_name;
                 move |this, _event: &MouseMoveEvent, _window, cx| {
-                    if this
-                        .terminal_git_branch_picker
-                        .highlighted_branch
-                        .as_deref()
-                        != Some(branch_name.as_str())
-                    {
-                        this.terminal_git_branch_picker.highlighted_branch =
-                            Some(branch_name.clone());
+                    if this.terminal.update(cx, |terminal, _cx| {
+                        terminal.set_git_branch_highlight(&branch_name)
+                    }) {
                         cx.notify();
                     }
                 }
@@ -1429,6 +1428,48 @@ impl WorkspaceApp {
             .text_color(rgba(0xfca5a5ff))
             .child(message)
             .into_any_element()
+    }
+
+    fn terminal_git_branch_error_message(&self, error: &TerminalGitBranchError) -> String {
+        match error {
+            TerminalGitBranchError::NotRepository => {
+                self.i18n.t("terminal.git.branch_not_repository")
+            }
+            TerminalGitBranchError::GitUnavailable => {
+                self.i18n.t("terminal.git.branch_git_unavailable")
+            }
+            TerminalGitBranchError::CwdUnavailable => {
+                self.i18n.t("terminal.git.branch_cwd_unavailable")
+            }
+            TerminalGitBranchError::NodeUnavailable => {
+                self.i18n.t("terminal.git.branch_node_unavailable")
+            }
+            TerminalGitBranchError::Message(message) => message.clone(),
+        }
+    }
+
+    fn terminal_git_ai_commit_error_message(&self, error: &TerminalGitAiCommitError) -> String {
+        match error {
+            TerminalGitAiCommitError::NoStagedChanges => {
+                self.i18n.t("terminal.git.ai_commit_no_staged_changes")
+            }
+            TerminalGitAiCommitError::NotRepository => {
+                self.i18n.t("terminal.git.ai_commit_not_repository")
+            }
+            TerminalGitAiCommitError::GitUnavailable => {
+                self.i18n.t("terminal.git.ai_commit_git_unavailable")
+            }
+            TerminalGitAiCommitError::CwdUnavailable => {
+                self.i18n.t("terminal.git.ai_commit_cwd_unavailable")
+            }
+            TerminalGitAiCommitError::NodeUnavailable => {
+                self.i18n.t("terminal.git.ai_commit_node_unavailable")
+            }
+            TerminalGitAiCommitError::InvalidMessage => {
+                self.i18n.t("terminal.git.ai_commit_failed")
+            }
+            TerminalGitAiCommitError::Message(message) => message.clone(),
+        }
     }
 
     pub(super) fn terminal_git_branch_picker_left(&self) -> f32 {

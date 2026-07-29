@@ -831,6 +831,7 @@
     "enable_success": "{{name}} を有効化しました。",
     "disable_success": "{{name}} を無効化しました。",
     "load_failed_default": "プラグインの読み込みに失敗しました。",
+    "runtime_failure": "プラグインのランタイム処理に失敗しました。",
     "error_copied": "プラグインエラーをコピーしました。",
     "open_dir_create_failed": "プラグインディレクトリを作成できませんでした: {{message}}",
     "open_dir_failed": "プラグインディレクトリを開けませんでした: {{message}}",
@@ -1176,7 +1177,7 @@
     "vnc_legacy_security_description": "この方式はサーバー ID を保護せず、通信を傍受される可能性があります。信頼できる保護されたネットワークでのみ続行してください。",
     "vnc_security_method": "セキュリティ方式：{{method}}",
     "vnc_continue_anyway": "続行する",
-    "certificate_save_failed": "証明書の信頼情報を保存できませんでした：{{error}}",
-    "clipboard_file_failed": "クリップボードのファイルを受信できませんでした：{{error}}"
+    "certificate_save_failed": "証明書の信頼情報を保存できませんでした",
+    "clipboard_file_failed": "クリップボードのファイルを受信できませんでした"
   }
 }

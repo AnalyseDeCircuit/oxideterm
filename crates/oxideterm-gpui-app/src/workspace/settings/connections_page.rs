@@ -10,6 +10,596 @@ pub(in crate::workspace) const SSH_KEY_HEADER_TEXT_BASIS: f32 = 320.0; // Let lo
 pub(in crate::workspace) const SSH_CONFIG_IMPORT_DIALOG_WIDTH: f32 = 720.0;
 pub(in crate::workspace) const SSH_CONFIG_IMPORT_DIALOG_HEIGHT: f32 = 560.0;
 
+struct ManagedKeyFileImportRequest {
+    path: String,
+    name: Option<String>,
+    passphrase: Option<SecretString>,
+}
+
+struct ManagedKeyPasteImportRequest {
+    // The private key moves from the Entity into the store boundary exactly once.
+    private_key: SecretString,
+    name: Option<String>,
+    passphrase: Option<SecretString>,
+}
+
+impl SettingsWorkspaceEntity {
+    pub(in crate::workspace) fn ssh_config_import_snapshot(&self) -> SshConfigImportSnapshot {
+        SshConfigImportSnapshot {
+            open: self.ssh_config_import_dialog_open,
+            selected_hosts: self.ssh_config_selected_hosts.clone(),
+            status: self.connection_import_status.clone(),
+            presence: self.ssh_config_import_dialog_presence,
+        }
+    }
+
+    pub(in crate::workspace) fn ssh_config_import_dialog_open(&self) -> bool {
+        self.ssh_config_import_dialog_open
+    }
+
+    pub(in crate::workspace) fn ssh_config_import_dialog_phase(
+        &self,
+    ) -> oxideterm_gpui_ui::motion::ExitPhase {
+        self.ssh_config_import_dialog_presence.phase()
+    }
+
+    pub(in crate::workspace) fn open_ssh_config_import_dialog(&mut self, cx: &mut Context<Self>) {
+        // Each visit starts from the current scanned host set instead of
+        // carrying selections or status from another import surface.
+        self.ssh_config_import_dialog_exit_task = None;
+        self.ssh_config_selected_hosts.clear();
+        self.connection_import_status = None;
+        self.ssh_config_import_dialog_presence.reopen();
+        self.ssh_config_import_dialog_open = true;
+        cx.notify();
+    }
+
+    pub(in crate::workspace) fn close_ssh_config_import_dialog(
+        &mut self,
+        delay: std::time::Duration,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(generation) = self.ssh_config_import_dialog_presence.begin_exit() else {
+            return;
+        };
+        self.ssh_config_import_dialog_exit_task = None;
+        if delay.is_zero() {
+            self.finish_ssh_config_import_dialog_exit(generation, cx);
+            return;
+        }
+        self.ssh_config_import_dialog_exit_task = Some(cx.spawn(async move |settings, cx| {
+            gpui::Timer::after(delay).await;
+            let _ = settings.update(cx, |settings, cx| {
+                settings.finish_ssh_config_import_dialog_exit(generation, cx);
+            });
+        }));
+        cx.notify();
+    }
+
+    fn finish_ssh_config_import_dialog_exit(&mut self, generation: u64, cx: &mut Context<Self>) {
+        self.ssh_config_import_dialog_exit_task = None;
+        if self
+            .ssh_config_import_dialog_presence
+            .finish_exit(generation)
+        {
+            self.ssh_config_import_dialog_open = false;
+            self.ssh_config_import_dialog_presence.reopen();
+            cx.notify();
+        }
+    }
+
+    pub(in crate::workspace) fn toggle_ssh_config_host(
+        &mut self,
+        alias: String,
+        cx: &mut Context<Self>,
+    ) {
+        if !self.ssh_config_selected_hosts.insert(alias.clone()) {
+            self.ssh_config_selected_hosts.remove(&alias);
+        }
+        cx.notify();
+    }
+
+    pub(in crate::workspace) fn clear_ssh_config_host_selection(&mut self, cx: &mut Context<Self>) {
+        self.ssh_config_selected_hosts.clear();
+        cx.notify();
+    }
+
+    pub(in crate::workspace) fn set_selected_ssh_config_hosts(
+        &mut self,
+        hosts: HashSet<String>,
+        cx: &mut Context<Self>,
+    ) {
+        self.ssh_config_selected_hosts = hosts;
+        cx.notify();
+    }
+
+    pub(in crate::workspace) fn selected_ssh_config_hosts(&self) -> Vec<String> {
+        self.ssh_config_selected_hosts.iter().cloned().collect()
+    }
+
+    pub(in crate::workspace) fn set_connection_import_status(
+        &mut self,
+        status: Option<String>,
+        cx: &mut Context<Self>,
+    ) {
+        self.connection_import_status = status;
+        cx.notify();
+    }
+
+    pub(in crate::workspace) fn connection_import_snapshot(&self) -> ConnectionImportSnapshot {
+        ConnectionImportSnapshot {
+            source: self.connection_import_source,
+            paths: self.connection_import_paths.clone(),
+            preview: self.connection_import_preview.clone(),
+            selected_draft_ids: self.selected_connection_import_drafts.clone(),
+            duplicate_strategy: self.connection_import_duplicate_strategy,
+            status: self.connection_import_status.clone(),
+        }
+    }
+
+    pub(in crate::workspace) fn connection_import_source(&self) -> ConnectionImportSource {
+        self.connection_import_source
+    }
+
+    pub(in crate::workspace) fn connection_import_duplicate_strategy(
+        &self,
+    ) -> ConnectionImportDuplicateStrategy {
+        self.connection_import_duplicate_strategy
+    }
+
+    pub(in crate::workspace) fn connection_import_list_signature(
+        &self,
+    ) -> (
+        bool,
+        &'static str,
+        usize,
+        Option<usize>,
+        usize,
+        &'static str,
+    ) {
+        (
+            self.connection_import_status.is_some(),
+            self.connection_import_source.tag(),
+            self.connection_import_paths.len(),
+            self.connection_import_preview
+                .as_ref()
+                .map(|preview| preview.drafts.len()),
+            self.selected_connection_import_drafts.len(),
+            self.connection_import_duplicate_strategy.tag(),
+        )
+    }
+
+    pub(in crate::workspace) fn set_connection_import_source(
+        &mut self,
+        source: ConnectionImportSource,
+        cx: &mut Context<Self>,
+    ) {
+        if self.connection_import_source == source {
+            return;
+        }
+        self.connection_import_source = source;
+        self.connection_import_paths.clear();
+        self.clear_connection_import_preview();
+        self.connection_import_status = None;
+        cx.notify();
+    }
+
+    pub(in crate::workspace) fn set_connection_import_duplicate_strategy(
+        &mut self,
+        strategy: ConnectionImportDuplicateStrategy,
+        cx: &mut Context<Self>,
+    ) {
+        if self.connection_import_duplicate_strategy != strategy {
+            self.connection_import_duplicate_strategy = strategy;
+            cx.notify();
+        }
+    }
+
+    pub(in crate::workspace) fn start_connection_import_path_picker(
+        &mut self,
+        selected_paths: impl std::future::Future<Output = Option<Vec<String>>> + 'static,
+        cx: &mut Context<Self>,
+    ) {
+        // Retaining the task keeps picker completion owned by the settings surface.
+        self.connection_import_path_picker_task = Some(cx.spawn(async move |settings, cx| {
+            let selected_paths = selected_paths.await.filter(|paths| !paths.is_empty());
+            let _ = settings.update(cx, |settings, cx| {
+                settings.connection_import_path_picker_task = None;
+                if let Some(paths) = selected_paths {
+                    settings.connection_import_paths = paths;
+                    settings.clear_connection_import_preview();
+                    settings.connection_import_status = None;
+                    cx.notify();
+                }
+            });
+        }));
+    }
+
+    pub(in crate::workspace) fn connection_import_preview_request(
+        &self,
+    ) -> Option<(ConnectionImportSource, Vec<String>)> {
+        (!self.connection_import_paths.is_empty()).then(|| {
+            (
+                self.connection_import_source,
+                self.connection_import_paths.clone(),
+            )
+        })
+    }
+
+    pub(in crate::workspace) fn apply_connection_import_preview(
+        &mut self,
+        result: Result<ConnectionImportPreview, String>,
+        cx: &mut Context<Self>,
+    ) {
+        match result {
+            Ok(preview) => {
+                self.selected_connection_import_drafts = preview
+                    .drafts
+                    .iter()
+                    .filter(|draft| draft.importable && !draft.duplicate)
+                    .map(|draft| draft.id.clone())
+                    .collect();
+                self.connection_import_preview = Some(preview);
+                self.connection_import_status = None;
+            }
+            Err(status) => self.connection_import_status = Some(status),
+        }
+        cx.notify();
+    }
+
+    pub(in crate::workspace) fn toggle_connection_import_draft(
+        &mut self,
+        draft_id: String,
+        cx: &mut Context<Self>,
+    ) {
+        if !self
+            .selected_connection_import_drafts
+            .insert(draft_id.clone())
+        {
+            self.selected_connection_import_drafts.remove(&draft_id);
+        }
+        cx.notify();
+    }
+
+    pub(in crate::workspace) fn toggle_all_connection_import_drafts(
+        &mut self,
+        all_selected: bool,
+        cx: &mut Context<Self>,
+    ) {
+        if all_selected {
+            self.selected_connection_import_drafts.clear();
+        } else if let Some(preview) = self.connection_import_preview.as_ref() {
+            self.selected_connection_import_drafts = preview
+                .drafts
+                .iter()
+                .filter(|draft| draft.importable)
+                .map(|draft| draft.id.clone())
+                .collect();
+        }
+        cx.notify();
+    }
+
+    pub(in crate::workspace) fn connection_import_apply_request(
+        &self,
+    ) -> Option<ConnectionImportApplyRequest> {
+        if self.selected_connection_import_drafts.is_empty()
+            || self.connection_import_paths.is_empty()
+        {
+            return None;
+        }
+        Some(ConnectionImportApplyRequest {
+            source: self.connection_import_source,
+            paths: self.connection_import_paths.clone(),
+            selected_draft_ids: self
+                .selected_connection_import_drafts
+                .iter()
+                .cloned()
+                .collect(),
+            duplicate_strategy: self.connection_import_duplicate_strategy,
+            target_group: non_empty_trimmed(&self.connection_import_target_group),
+        })
+    }
+
+    fn clear_connection_import_preview(&mut self) {
+        self.connection_import_preview = None;
+        self.selected_connection_import_drafts.clear();
+    }
+
+    pub(in crate::workspace) fn managed_key_status(&self) -> Option<&str> {
+        self.managed_key_status.as_deref()
+    }
+
+    pub(in crate::workspace) fn clear_managed_key_status(&mut self, cx: &mut Context<Self>) {
+        if self.managed_key_status.take().is_some() {
+            cx.notify();
+        }
+    }
+
+    pub(in crate::workspace) fn managed_key_dialog_snapshot(
+        &self,
+    ) -> Option<ManagedKeyDialogSnapshot> {
+        let presence = self.managed_key_dialog_presence;
+        match self.managed_key_dialog.as_ref()? {
+            SettingsManagedKeyDialog::ImportFile => Some(ManagedKeyDialogSnapshot::ImportFile {
+                file_path: self.managed_key_file_path.clone(),
+                file_name: self.managed_key_file_name.clone(),
+                presence,
+            }),
+            SettingsManagedKeyDialog::Paste => Some(ManagedKeyDialogSnapshot::Paste {
+                name: self.managed_key_paste_name.clone(),
+                // The view needs only validation state; plaintext remains in the Entity.
+                private_key_present: !self.managed_key_paste_private_key.trim().is_empty(),
+                presence,
+            }),
+            SettingsManagedKeyDialog::Rename { .. } => Some(ManagedKeyDialogSnapshot::Rename {
+                name: self.managed_key_rename_name.clone(),
+                presence,
+            }),
+            SettingsManagedKeyDialog::Delete { key, usage } => {
+                Some(ManagedKeyDialogSnapshot::Delete {
+                    key: key.clone(),
+                    usage: usage.clone(),
+                    presence,
+                })
+            }
+        }
+    }
+
+    pub(in crate::workspace) fn managed_key_dialog_open(&self) -> bool {
+        self.managed_key_dialog.is_some()
+    }
+
+    pub(in crate::workspace) fn managed_key_dialog_phase(
+        &self,
+    ) -> oxideterm_gpui_ui::motion::ExitPhase {
+        self.managed_key_dialog_presence.phase()
+    }
+
+    pub(in crate::workspace) fn open_managed_key_import_file_dialog(
+        &mut self,
+        cx: &mut Context<Self>,
+    ) {
+        self.managed_key_dialog_exit_task = None;
+        self.clear_managed_key_dialog_drafts();
+        self.managed_key_status = None;
+        self.managed_key_dialog_presence.reopen();
+        self.managed_key_dialog = Some(SettingsManagedKeyDialog::ImportFile);
+        cx.notify();
+    }
+
+    pub(in crate::workspace) fn open_managed_key_paste_dialog(&mut self, cx: &mut Context<Self>) {
+        self.managed_key_dialog_exit_task = None;
+        self.clear_managed_key_dialog_drafts();
+        self.managed_key_status = None;
+        self.managed_key_dialog_presence.reopen();
+        self.managed_key_dialog = Some(SettingsManagedKeyDialog::Paste);
+        cx.notify();
+    }
+
+    pub(in crate::workspace) fn open_managed_key_rename_dialog(
+        &mut self,
+        key_id: String,
+        key_name: String,
+        cx: &mut Context<Self>,
+    ) {
+        self.managed_key_dialog_exit_task = None;
+        self.clear_managed_key_dialog_drafts();
+        self.managed_key_rename_name = key_name;
+        self.managed_key_dialog_presence.reopen();
+        self.managed_key_dialog = Some(SettingsManagedKeyDialog::Rename { key_id });
+        cx.notify();
+    }
+
+    pub(in crate::workspace) fn open_managed_key_delete_dialog(
+        &mut self,
+        key: ManagedSshKeyInfo,
+        usage: ManagedSshKeyUsage,
+        cx: &mut Context<Self>,
+    ) {
+        self.managed_key_dialog_exit_task = None;
+        self.clear_managed_key_dialog_drafts();
+        self.managed_key_dialog_presence.reopen();
+        self.managed_key_dialog = Some(SettingsManagedKeyDialog::Delete { key, usage });
+        cx.notify();
+    }
+
+    pub(in crate::workspace) fn close_managed_key_dialog(
+        &mut self,
+        delay: std::time::Duration,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(generation) = self.managed_key_dialog_presence.begin_exit() else {
+            return;
+        };
+        self.managed_key_dialog_exit_task = None;
+        if delay.is_zero() {
+            self.finish_managed_key_dialog_exit(generation, cx);
+            return;
+        }
+        self.managed_key_dialog_exit_task = Some(cx.spawn(async move |settings, cx| {
+            gpui::Timer::after(delay).await;
+            let _ = settings.update(cx, |settings, cx| {
+                settings.finish_managed_key_dialog_exit(generation, cx);
+            });
+        }));
+        cx.notify();
+    }
+
+    fn finish_managed_key_dialog_exit(&mut self, generation: u64, cx: &mut Context<Self>) {
+        self.managed_key_dialog_exit_task = None;
+        if self.managed_key_dialog_presence.finish_exit(generation) {
+            self.managed_key_dialog = None;
+            self.clear_managed_key_dialog_drafts();
+            self.managed_key_dialog_presence.reopen();
+            cx.notify();
+        }
+    }
+
+    fn clear_managed_key_dialog_drafts(&mut self) {
+        self.managed_key_file_picker_task = None;
+        self.managed_key_file_path.clear();
+        self.managed_key_file_name.clear();
+        zeroize::Zeroize::zeroize(&mut *self.managed_key_file_passphrase);
+        self.managed_key_paste_name.clear();
+        zeroize::Zeroize::zeroize(&mut *self.managed_key_paste_private_key);
+        zeroize::Zeroize::zeroize(&mut *self.managed_key_paste_passphrase);
+        self.managed_key_rename_name.clear();
+        if self
+            .settings_focused_input
+            .is_some_and(is_managed_key_input)
+        {
+            self.settings_focused_input = None;
+        }
+    }
+
+    pub(in crate::workspace) fn set_managed_key_import_file(
+        &mut self,
+        path: String,
+        default_name: String,
+        cx: &mut Context<Self>,
+    ) {
+        if !matches!(
+            self.managed_key_dialog,
+            Some(SettingsManagedKeyDialog::ImportFile)
+        ) {
+            return;
+        }
+        self.managed_key_file_path = path;
+        if self.managed_key_file_name.trim().is_empty() {
+            self.managed_key_file_name = default_name;
+        }
+        self.managed_key_status = None;
+        cx.notify();
+    }
+
+    pub(in crate::workspace) fn start_managed_key_file_picker(
+        &mut self,
+        selected_file: impl std::future::Future<Output = Option<(String, String)>> + 'static,
+        cx: &mut Context<Self>,
+    ) {
+        // The picker completion must not retain or write through WorkspaceApp.
+        self.managed_key_file_picker_task = Some(cx.spawn(async move |settings, cx| {
+            let selected_file = selected_file.await;
+            let _ = settings.update(cx, |settings, cx| {
+                settings.managed_key_file_picker_task = None;
+                if let Some((path, default_name)) = selected_file {
+                    settings.set_managed_key_import_file(path, default_name, cx);
+                }
+            });
+        }));
+    }
+
+    fn take_managed_key_file_import_request(&mut self) -> Option<ManagedKeyFileImportRequest> {
+        if !matches!(
+            self.managed_key_dialog,
+            Some(SettingsManagedKeyDialog::ImportFile)
+        ) {
+            return None;
+        }
+        let path = self.managed_key_file_path.trim();
+        if path.is_empty() {
+            return None;
+        }
+        let request = ManagedKeyFileImportRequest {
+            path: path.to_string(),
+            name: optional_trimmed_string(&self.managed_key_file_name),
+            passphrase: take_optional_managed_key_secret(&mut self.managed_key_file_passphrase),
+        };
+        self.settings_focused_input = None;
+        Some(request)
+    }
+
+    fn take_managed_key_paste_import_request(&mut self) -> Option<ManagedKeyPasteImportRequest> {
+        if !matches!(
+            self.managed_key_dialog,
+            Some(SettingsManagedKeyDialog::Paste)
+        ) || self.managed_key_paste_private_key.trim().is_empty()
+        {
+            return None;
+        }
+        let private_key = std::mem::replace(
+            &mut self.managed_key_paste_private_key,
+            zeroize::Zeroizing::new(String::new()),
+        );
+        let request = ManagedKeyPasteImportRequest {
+            private_key: SecretString::from(private_key),
+            name: optional_trimmed_string(&self.managed_key_paste_name),
+            passphrase: take_optional_managed_key_secret(&mut self.managed_key_paste_passphrase),
+        };
+        self.settings_focused_input = None;
+        Some(request)
+    }
+
+    fn take_managed_key_rename_request(&mut self) -> Option<(String, String)> {
+        let SettingsManagedKeyDialog::Rename { key_id } = self.managed_key_dialog.as_ref()? else {
+            return None;
+        };
+        let name = self.managed_key_rename_name.trim();
+        if name.is_empty() {
+            return None;
+        }
+        Some((key_id.clone(), name.to_string()))
+    }
+
+    fn managed_key_delete_id(&self) -> Option<String> {
+        let SettingsManagedKeyDialog::Delete { key, .. } = self.managed_key_dialog.as_ref()? else {
+            return None;
+        };
+        Some(key.id.clone())
+    }
+
+    pub(in crate::workspace) fn finish_managed_key_action(
+        &mut self,
+        status: String,
+        success: bool,
+        cx: &mut Context<Self>,
+    ) {
+        self.managed_key_status = Some(status);
+        if success {
+            self.managed_key_dialog = None;
+            self.managed_key_dialog_exit_task = None;
+            self.clear_managed_key_dialog_drafts();
+            self.managed_key_dialog_presence.reopen();
+        }
+        cx.notify();
+    }
+}
+
+fn is_managed_key_input(input: SettingsInput) -> bool {
+    matches!(
+        input,
+        SettingsInput::ManagedKeyFilePath
+            | SettingsInput::ManagedKeyFileName
+            | SettingsInput::ManagedKeyFilePassphrase
+            | SettingsInput::ManagedKeyPasteName
+            | SettingsInput::ManagedKeyPastePrivateKey
+            | SettingsInput::ManagedKeyPastePassphrase
+            | SettingsInput::ManagedKeyRenameName
+    )
+}
+
+fn optional_trimmed_string(value: &str) -> Option<String> {
+    let trimmed = value.trim();
+    (!trimmed.is_empty()).then(|| trimmed.to_string())
+}
+
+fn take_optional_managed_key_secret(
+    value: &mut zeroize::Zeroizing<String>,
+) -> Option<SecretString> {
+    if value.trim().is_empty() {
+        zeroize::Zeroize::zeroize(&mut **value);
+        return None;
+    }
+    let owned = std::mem::replace(value, zeroize::Zeroizing::new(String::new()));
+    let trimmed = owned.trim();
+    if trimmed.len() == owned.len() {
+        return Some(SecretString::from(owned));
+    }
+    Some(SecretString::from(zeroize::Zeroizing::new(
+        trimmed.to_string(),
+    )))
+}
+
 impl WorkspaceApp {
     pub(in crate::workspace) fn settings_connections_section(
         &self,
@@ -84,7 +674,10 @@ impl WorkspaceApp {
                 Some(self.managed_ssh_key_toolbar(cx)),
             ))
             .when_some(
-                self.settings_managed_key_status.clone(),
+                self.settings_workspace
+                    .read(cx)
+                    .managed_key_status()
+                    .map(str::to_string),
                 |section, status| section.child(self.connection_status_row(status)),
             )
             .child(if self.connection_store.managed_ssh_keys().is_empty() {
@@ -208,7 +801,7 @@ impl WorkspaceApp {
                                     cx,
                                 );
                                 this.refresh_session_manager_ssh_config_hosts(cx);
-                                if this.command_palette.open {
+                                if this.command_palette.read(cx).is_open() {
                                     this.load_command_palette_ssh_config_hosts(cx);
                                 }
                             }),
@@ -295,7 +888,11 @@ impl WorkspaceApp {
         &self,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
-        if !self.settings_page.ssh_config_import_dialog_open {
+        let dialog = self
+            .settings_workspace
+            .read(cx)
+            .ssh_config_import_snapshot();
+        if !dialog.open {
             return None;
         }
 
@@ -304,7 +901,7 @@ impl WorkspaceApp {
             .iter()
             .filter(|host| !host.already_imported)
             .count();
-        let selected_count = self.settings_page.settings_selected_ssh_hosts.len();
+        let selected_count = dialog.selected_hosts.len();
         let all_selected = importable_count > 0 && selected_count == importable_count;
         let backdrop = dismissible_dialog_backdrop().on_mouse_down(
             MouseButton::Left,
@@ -332,7 +929,8 @@ impl WorkspaceApp {
             list = list.child(self.ssh_config_empty_state());
         } else {
             for host in ssh_hosts {
-                list = list.child(self.ssh_config_host_row(host, cx));
+                let selected = dialog.selected_hosts.contains(&host.alias);
+                list = list.child(self.ssh_config_host_row(host, selected, cx));
             }
         }
 
@@ -362,10 +960,9 @@ impl WorkspaceApp {
                         }),
                 )
             })
-            .when_some(
-                self.settings_page.settings_connection_status.clone(),
-                |body, status| body.child(self.connection_status_row(status)),
-            )
+            .when_some(dialog.status, |body, status| {
+                body.child(self.connection_status_row(status))
+            })
             .child(list);
 
         let form = dialog_content(&self.tokens)
@@ -410,7 +1007,7 @@ impl WorkspaceApp {
             "ssh-config-import-dialog-form",
             backdrop,
             form,
-            self.ssh_config_import_dialog_presence,
+            dialog.presence.phase(),
         ))
     }
 
@@ -428,45 +1025,24 @@ impl WorkspaceApp {
         &mut self,
         cx: &mut Context<Self>,
     ) {
-        self.ssh_config_import_dialog_presence.reopen();
-        self.settings_page.open_ssh_config_import_dialog();
+        self.settings_workspace.update(cx, |settings, cx| {
+            settings.open_ssh_config_import_dialog(cx);
+        });
         self.reset_standard_confirm_focus();
-        cx.notify();
     }
 
     pub(in crate::workspace) fn close_settings_ssh_config_import_dialog(
         &mut self,
         cx: &mut Context<Self>,
     ) {
-        let Some(generation) = self.ssh_config_import_dialog_presence.begin_exit() else {
-            return;
-        };
         self.clear_standard_confirm_focus();
         let delay = oxideterm_gpui_ui::motion::duration(
             &self.tokens,
             oxideterm_gpui_ui::motion::MotionDuration::Overlay,
         );
-        if delay.is_zero() {
-            self.settings_page.close_ssh_config_import_dialog();
-            self.ssh_config_import_dialog_presence.reopen();
-            cx.notify();
-            return;
-        }
-        cx.spawn(async move |weak, cx| {
-            gpui::Timer::after(delay).await;
-            let _ = weak.update(cx, |this, cx| {
-                if this
-                    .ssh_config_import_dialog_presence
-                    .finish_exit(generation)
-                {
-                    this.settings_page.close_ssh_config_import_dialog();
-                    this.ssh_config_import_dialog_presence.reopen();
-                    cx.notify();
-                }
-            });
-        })
-        .detach();
-        cx.notify();
+        self.settings_workspace.update(cx, |settings, cx| {
+            settings.close_ssh_config_import_dialog(delay, cx);
+        });
     }
 
     pub(in crate::workspace) fn connection_section(
@@ -566,14 +1142,11 @@ impl WorkspaceApp {
     pub(in crate::workspace) fn ssh_config_host_row(
         &self,
         host: SshConfigHost,
+        selected: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
         let alias = host.alias.clone();
-        let checked = self
-            .settings_page
-            .settings_selected_ssh_hosts
-            .contains(&alias);
         let disabled = host.already_imported;
         let detail = format!(
             "{}@{}:{}",
@@ -614,7 +1187,7 @@ impl WorkspaceApp {
                     .flex_row()
                     .items_center()
                     .gap(px(8.0))
-                    .child(self.ssh_config_checkbox(checked))
+                    .child(self.ssh_config_checkbox(selected))
                     .child(
                         div()
                             .min_w(px(0.0))
@@ -765,14 +1338,27 @@ impl WorkspaceApp {
         &self,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let mut rows = vec![self.connection_import_input_row(cx)];
+        let mut importer = self
+            .settings_workspace
+            .read(cx)
+            .connection_import_snapshot();
+        let mut rows = vec![self.connection_import_input_row(importer.source, &importer.paths, cx)];
 
-        if let Some(preview) = self.settings_connection_import_preview.clone() {
-            rows.push(self.connection_import_preview_toolbar(&preview, cx));
-            rows.push(self.connection_import_preview_list(preview, cx));
+        if let Some(preview) = importer.preview.take() {
+            rows.push(self.connection_import_preview_toolbar(
+                &preview,
+                &importer.selected_draft_ids,
+                importer.duplicate_strategy,
+                cx,
+            ));
+            rows.push(self.connection_import_preview_list(
+                preview,
+                &importer.selected_draft_ids,
+                cx,
+            ));
         }
-        if let Some(status) = self.settings_page.settings_connection_status.clone() {
-            rows.push(self.connection_status_row(status));
+        if let Some(status) = importer.status {
+            rows.push(self.connection_status_row(status.to_string()));
         }
 
         self.connection_section(
@@ -784,6 +1370,8 @@ impl WorkspaceApp {
 
     pub(in crate::workspace) fn connection_import_input_row(
         &self,
+        source: ConnectionImportSource,
+        paths: &[String],
         cx: &mut Context<Self>,
     ) -> AnyElement {
         div()
@@ -799,7 +1387,7 @@ impl WorkspaceApp {
                     .max_w_full()
                     .flex_1()
                     .flex_basis(px(CONNECTION_IMPORT_SOURCE_BASIS))
-                    .child(self.connection_import_source_picker(cx)),
+                    .child(self.connection_import_source_picker(source, cx)),
             )
             .child(
                 div()
@@ -816,18 +1404,18 @@ impl WorkspaceApp {
                             .text_color(rgb(self.tokens.ui.text))
                             .child(self.i18n.t("settings_view.connections.importers.paths")),
                     )
-                    .child(self.connection_import_path_toolbar(cx))
-                    .child(self.connection_import_path_summary()),
+                    .child(self.connection_import_path_toolbar(source, !paths.is_empty(), cx))
+                    .child(self.connection_import_path_summary(paths)),
             )
             .into_any_element()
     }
 
     pub(in crate::workspace) fn connection_import_source_picker(
         &self,
+        source: ConnectionImportSource,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let selected_label =
-            connection_import_source_label(self.settings_connection_import_source, &self.i18n);
+        let selected_label = connection_import_source_label(source, &self.i18n);
         div()
             .w_full()
             .min_w_0()
@@ -852,9 +1440,10 @@ impl WorkspaceApp {
 
     pub(in crate::workspace) fn connection_import_path_toolbar(
         &self,
+        source: ConnectionImportSource,
+        has_paths: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let has_paths = !self.settings_connection_import_paths.is_empty();
         div()
             .w_full()
             .min_w_0()
@@ -862,14 +1451,12 @@ impl WorkspaceApp {
             .flex_row()
             .flex_wrap()
             .gap(px(8.0))
-            .when(
-                connection_import_supports_files(self.settings_connection_import_source),
-                |row| row.child(self.connection_import_pick_files_button(cx)),
-            )
-            .when(
-                connection_import_supports_directory(self.settings_connection_import_source),
-                |row| row.child(self.connection_import_pick_directory_button(cx)),
-            )
+            .when(connection_import_supports_files(source), |row| {
+                row.child(self.connection_import_pick_files_button(cx))
+            })
+            .when(connection_import_supports_directory(source), |row| {
+                row.child(self.connection_import_pick_directory_button(cx))
+            })
             .child(self.connection_import_preview_button(has_paths, cx))
             .into_any_element()
     }
@@ -971,11 +1558,14 @@ impl WorkspaceApp {
         }
     }
 
-    pub(in crate::workspace) fn connection_import_path_summary(&self) -> AnyElement {
-        let summary = if self.settings_connection_import_paths.is_empty() {
+    pub(in crate::workspace) fn connection_import_path_summary(
+        &self,
+        paths: &[String],
+    ) -> AnyElement {
+        let summary = if paths.is_empty() {
             self.i18n.t("settings_view.connections.importers.no_paths")
         } else {
-            self.settings_connection_import_paths.join(" · ")
+            paths.join(" · ")
         };
         div()
             .w_full()
@@ -990,6 +1580,8 @@ impl WorkspaceApp {
     pub(in crate::workspace) fn connection_import_preview_toolbar(
         &self,
         preview: &ConnectionImportPreview,
+        selected_draft_ids: &HashSet<String>,
+        duplicate_strategy: ConnectionImportDuplicateStrategy,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let importable = preview
@@ -1002,10 +1594,7 @@ impl WorkspaceApp {
                 .drafts
                 .iter()
                 .filter(|draft| draft.importable)
-                .all(|draft| {
-                    self.settings_selected_connection_import_drafts
-                        .contains(&draft.id)
-                });
+                .all(|draft| selected_draft_ids.contains(&draft.id));
         div()
             .w_full()
             .min_w_0()
@@ -1028,11 +1617,11 @@ impl WorkspaceApp {
                     .items_center()
                     .justify_end()
                     .gap(px(8.0))
-                    .child(self.connection_import_duplicate_strategy_picker(cx))
+                    .child(self.connection_import_duplicate_strategy_picker(duplicate_strategy, cx))
                     .child(
                         self.settings_text_input_control(
                             SettingsInput::ConnectionImportTargetGroup,
-                            self.settings_connection_import_target_group.clone(),
+                            String::new(),
                             self.i18n
                                 .t("settings_view.connections.importers.target_group"),
                             192.0,
@@ -1040,7 +1629,7 @@ impl WorkspaceApp {
                         )
                         .into_any_element(),
                     )
-                    .child(self.connection_import_apply_button(cx)),
+                    .child(self.connection_import_apply_button(selected_draft_ids.len(), cx)),
             )
             .into_any_element()
     }
@@ -1080,12 +1669,10 @@ impl WorkspaceApp {
 
     pub(in crate::workspace) fn connection_import_duplicate_strategy_picker(
         &self,
+        strategy: ConnectionImportDuplicateStrategy,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let selected_label = connection_import_duplicate_strategy_label(
-            self.settings_connection_import_duplicate_strategy,
-            &self.i18n,
-        );
+        let selected_label = connection_import_duplicate_strategy_label(strategy, &self.i18n);
         // Tauri renders duplicate strategy as a compact SelectTrigger (w-36 h-8)
         // in the import preview toolbar, not as adjacent action buttons.
         self.settings_select_control_with_trigger_style(
@@ -1104,9 +1691,9 @@ impl WorkspaceApp {
 
     pub(in crate::workspace) fn connection_import_apply_button(
         &self,
+        selected_count: usize,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let selected_count = self.settings_selected_connection_import_drafts.len();
         let label = self
             .i18n
             .t("settings_view.connections.importers.import_selected")
@@ -1145,6 +1732,7 @@ impl WorkspaceApp {
     pub(in crate::workspace) fn connection_import_preview_list(
         &self,
         preview: ConnectionImportPreview,
+        selected_draft_ids: &HashSet<String>,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         if preview.drafts.is_empty() {
@@ -1176,7 +1764,8 @@ impl WorkspaceApp {
             .border_color(rgb(self.tokens.ui.border))
             .bg(self.settings_panel_background(self.tokens.ui.bg_panel));
         for draft in preview.drafts {
-            list = list.child(self.connection_import_preview_row(draft, cx));
+            let selected = selected_draft_ids.contains(&draft.id);
+            list = list.child(self.connection_import_preview_row(draft, selected, cx));
         }
         list.into_any_element()
     }
@@ -1184,11 +1773,9 @@ impl WorkspaceApp {
     pub(in crate::workspace) fn connection_import_preview_row(
         &self,
         draft: oxideterm_connections::ImportedConnectionDraft,
+        selected: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let checked = self
-            .settings_selected_connection_import_drafts
-            .contains(&draft.id);
         let disabled = !draft.importable;
         let detail = format!("{}@{}:{}", draft.username, draft.host, draft.port);
         let origin_detail = [
@@ -1223,7 +1810,7 @@ impl WorkspaceApp {
                 div()
                     .w(px(28.0))
                     .flex_none()
-                    .child(self.ssh_config_checkbox(checked)),
+                    .child(self.ssh_config_checkbox(selected)),
             )
             .child(
                 div()
@@ -1458,9 +2045,10 @@ impl WorkspaceApp {
                 ButtonVariant::Ghost,
                 cx,
                 |this, _event, _window, cx| {
-                    this.settings_managed_key_status = None;
+                    this.settings_workspace.update(cx, |settings, cx| {
+                        settings.clear_managed_key_status(cx);
+                    });
                     cx.stop_propagation();
-                    cx.notify();
                 },
             ))
             .into_any_element()
@@ -1678,27 +2266,47 @@ impl WorkspaceApp {
         &self,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
-        match self.settings_managed_key_dialog.clone()? {
-            SettingsManagedKeyDialog::ImportFile => {
-                Some(self.render_settings_managed_key_import_file_dialog(cx))
+        match self
+            .settings_workspace
+            .read(cx)
+            .managed_key_dialog_snapshot()?
+        {
+            ManagedKeyDialogSnapshot::ImportFile {
+                file_path,
+                file_name,
+                presence,
+            } => Some(self.render_settings_managed_key_import_file_dialog(
+                file_path, file_name, presence, cx,
+            )),
+            ManagedKeyDialogSnapshot::Paste {
+                name,
+                private_key_present,
+                presence,
+            } => Some(self.render_settings_managed_key_paste_dialog(
+                name,
+                private_key_present,
+                presence,
+                cx,
+            )),
+            ManagedKeyDialogSnapshot::Rename { name, presence } => {
+                Some(self.render_settings_managed_key_rename_dialog(name, presence, cx))
             }
-            SettingsManagedKeyDialog::Paste => {
-                Some(self.render_settings_managed_key_paste_dialog(cx))
-            }
-            SettingsManagedKeyDialog::Rename { key_id } => {
-                Some(self.render_settings_managed_key_rename_dialog(key_id, cx))
-            }
-            SettingsManagedKeyDialog::Delete { key, usage } => {
-                Some(self.render_settings_managed_key_delete_dialog(key, usage, cx))
-            }
+            ManagedKeyDialogSnapshot::Delete {
+                key,
+                usage,
+                presence,
+            } => Some(self.render_settings_managed_key_delete_dialog(key, usage, presence, cx)),
         }
     }
 
     pub(in crate::workspace) fn render_settings_managed_key_import_file_dialog(
         &self,
+        file_path: String,
+        file_name: String,
+        presence: oxideterm_gpui_ui::motion::ExitPresence,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let can_import = !self.settings_managed_key_file_path.trim().is_empty();
+        let can_import = !file_path.trim().is_empty();
         self.settings_managed_key_dialog_frame(
             "modals.managed_key.import_file.title",
             "modals.managed_key.import_file.description",
@@ -1706,7 +2314,7 @@ impl WorkspaceApp {
                 self.settings_managed_key_input_field(
                     "modals.managed_key.import_file.path",
                     SettingsInput::ManagedKeyFilePath,
-                    self.settings_managed_key_file_path.clone(),
+                    file_path,
                     "~/.ssh/id_ed25519".to_string(),
                     420.0,
                     cx,
@@ -1727,7 +2335,7 @@ impl WorkspaceApp {
                 self.settings_managed_key_input_field(
                     "modals.managed_key.display_name",
                     SettingsInput::ManagedKeyFileName,
-                    self.settings_managed_key_file_name.clone(),
+                    file_name,
                     "Managed SSH Key".to_string(),
                     420.0,
                     cx,
@@ -1735,7 +2343,7 @@ impl WorkspaceApp {
                 self.settings_managed_key_secret_input_field(
                     "modals.managed_key.passphrase",
                     SettingsInput::ManagedKeyFilePassphrase,
-                    self.settings_managed_key_file_passphrase.clone(),
+                    String::new(),
                     self.i18n.t("modals.managed_key.passphrase_placeholder"),
                     420.0,
                     cx,
@@ -1747,18 +2355,19 @@ impl WorkspaceApp {
             |this, _event, _window, cx| {
                 this.import_managed_key_from_file(cx);
             },
+            presence.phase(),
             cx,
         )
     }
 
     pub(in crate::workspace) fn render_settings_managed_key_paste_dialog(
         &self,
+        name: String,
+        private_key_present: bool,
+        presence: oxideterm_gpui_ui::motion::ExitPresence,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let can_import = !self
-            .settings_managed_key_paste_private_key
-            .trim()
-            .is_empty();
+        let can_import = private_key_present;
         self.settings_managed_key_dialog_frame(
             "modals.managed_key.paste.title",
             "modals.managed_key.paste.description",
@@ -1766,7 +2375,7 @@ impl WorkspaceApp {
                 self.settings_managed_key_input_field(
                     "modals.managed_key.display_name",
                     SettingsInput::ManagedKeyPasteName,
-                    self.settings_managed_key_paste_name.clone(),
+                    name,
                     "Managed SSH Key".to_string(),
                     420.0,
                     cx,
@@ -1775,7 +2384,7 @@ impl WorkspaceApp {
                 self.settings_managed_key_secret_input_field(
                     "modals.managed_key.passphrase",
                     SettingsInput::ManagedKeyPastePassphrase,
-                    self.settings_managed_key_paste_passphrase.clone(),
+                    String::new(),
                     self.i18n.t("modals.managed_key.passphrase_placeholder"),
                     420.0,
                     cx,
@@ -1787,32 +2396,35 @@ impl WorkspaceApp {
             |this, _event, _window, cx| {
                 this.import_managed_key_from_paste(cx);
             },
+            presence.phase(),
             cx,
         )
     }
 
     pub(in crate::workspace) fn render_settings_managed_key_rename_dialog(
         &self,
-        key_id: String,
+        name: String,
+        presence: oxideterm_gpui_ui::motion::ExitPresence,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let can_save = !self.settings_managed_key_rename_name.trim().is_empty();
+        let can_save = !name.trim().is_empty();
         self.settings_managed_key_dialog_frame(
             "settings_view.ssh_keys.rename_title",
             "settings_view.ssh_keys.managed_description",
             vec![self.settings_managed_key_input_field(
                 "settings_view.ssh_keys.rename_name",
                 SettingsInput::ManagedKeyRenameName,
-                self.settings_managed_key_rename_name.clone(),
+                name,
                 "Managed SSH Key".to_string(),
                 420.0,
                 cx,
             )],
             self.i18n.t("settings_view.ssh_keys.rename"),
             can_save,
-            move |this, _event, _window, cx| {
-                this.rename_managed_key(key_id.clone(), cx);
+            |this, _event, _window, cx| {
+                this.rename_managed_key(cx);
             },
+            presence.phase(),
             cx,
         )
     }
@@ -1821,6 +2433,7 @@ impl WorkspaceApp {
         &self,
         key: ManagedSshKeyInfo,
         usage: ManagedSshKeyUsage,
+        presence: oxideterm_gpui_ui::motion::ExitPresence,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let can_delete = usage.count == 0;
@@ -1855,9 +2468,10 @@ impl WorkspaceApp {
             ],
             self.i18n.t("settings_view.ssh_keys.delete"),
             can_delete,
-            move |this, _event, _window, cx| {
-                this.delete_managed_key(key.id.clone(), cx);
+            |this, _event, _window, cx| {
+                this.delete_managed_key(cx);
             },
+            presence.phase(),
             cx,
         )
     }
@@ -1870,6 +2484,7 @@ impl WorkspaceApp {
         confirm_label: String,
         can_confirm: bool,
         confirm: impl Fn(&mut Self, &MouseDownEvent, &mut Window, &mut Context<Self>) + 'static,
+        phase: oxideterm_gpui_ui::motion::ExitPhase,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let backdrop = dismissible_dialog_backdrop().on_mouse_down(
@@ -1931,7 +2546,7 @@ impl WorkspaceApp {
             "managed-key-dialog-form",
             backdrop,
             form,
-            self.managed_key_dialog_presence,
+            phase,
         )
     }
 
@@ -1939,7 +2554,7 @@ impl WorkspaceApp {
         &self,
         label_key: &str,
         input: SettingsInput,
-        value: String,
+        value: impl AsRef<str>,
         placeholder: String,
         width: f32,
         cx: &mut Context<Self>,
@@ -1963,7 +2578,7 @@ impl WorkspaceApp {
         &self,
         label_key: &str,
         input: SettingsInput,
-        value: String,
+        value: impl AsRef<str>,
         placeholder: String,
         width: f32,
         cx: &mut Context<Self>,
@@ -1988,12 +2603,13 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let input = SettingsInput::ManagedKeyPastePrivateKey;
-        let focused = self.focused_settings_input == Some(input);
-        let value = if focused {
-            self.settings_input_draft.clone()
-        } else {
-            self.settings_managed_key_paste_private_key.clone()
-        };
+        let settings = self.settings_workspace.read(cx);
+        // Keep the private key in the Entity; the multiline renderer derives
+        // only zeroizing line buffers for GPUI's owned visual text.
+        let value = settings
+            .settings_entity_input_value(input)
+            .expect("managed private-key input is owned by the Settings Entity");
+        let focused = settings.settings_entity_focused_input() == Some(input);
         let target = WorkspaceImeTarget::Settings(input);
         let workspace = cx.entity();
         let theme = self.tokens.ui;
@@ -2023,7 +2639,7 @@ impl WorkspaceApp {
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |this, event: &gpui::MouseDownEvent, window, cx| {
-                    let current = this.current_settings_input_value(input);
+                    let current = this.current_settings_input_value(input, cx);
                     this.focus_settings_input(input, current, cx);
                     this.ime_marked_text = None;
                     window.focus(&this.focus_handle, cx);
@@ -2044,14 +2660,16 @@ impl WorkspaceApp {
                 "-----BEGIN OPENSSH PRIVATE KEY-----",
                 true,
                 line_height,
+                cx,
             );
         } else {
             textarea = self.render_settings_multiline_textarea_lines(
                 textarea,
                 target,
-                &value,
+                value,
                 false,
                 line_height,
+                cx,
             );
         }
         let control =
@@ -2112,19 +2730,15 @@ impl WorkspaceApp {
         &mut self,
         cx: &mut Context<Self>,
     ) {
-        self.clear_managed_key_dialog_drafts();
-        self.settings_managed_key_status = None;
-        self.managed_key_dialog_presence.reopen();
-        self.settings_managed_key_dialog = Some(SettingsManagedKeyDialog::ImportFile);
-        cx.notify();
+        self.settings_workspace.update(cx, |settings, cx| {
+            settings.open_managed_key_import_file_dialog(cx);
+        });
     }
 
     pub(in crate::workspace) fn open_managed_key_paste_dialog(&mut self, cx: &mut Context<Self>) {
-        self.clear_managed_key_dialog_drafts();
-        self.settings_managed_key_status = None;
-        self.managed_key_dialog_presence.reopen();
-        self.settings_managed_key_dialog = Some(SettingsManagedKeyDialog::Paste);
-        cx.notify();
+        self.settings_workspace.update(cx, |settings, cx| {
+            settings.open_managed_key_paste_dialog(cx);
+        });
     }
 
     pub(in crate::workspace) fn open_managed_key_rename_dialog(
@@ -2133,11 +2747,9 @@ impl WorkspaceApp {
         key_name: String,
         cx: &mut Context<Self>,
     ) {
-        self.clear_managed_key_dialog_drafts();
-        self.settings_managed_key_rename_name = key_name;
-        self.managed_key_dialog_presence.reopen();
-        self.settings_managed_key_dialog = Some(SettingsManagedKeyDialog::Rename { key_id });
-        cx.notify();
+        self.settings_workspace.update(cx, |settings, cx| {
+            settings.open_managed_key_rename_dialog(key_id, key_name, cx);
+        });
     }
 
     pub(in crate::workspace) fn open_managed_key_delete_dialog(
@@ -2147,74 +2759,23 @@ impl WorkspaceApp {
     ) {
         match self.connection_store.managed_ssh_key_usage(&key.id) {
             Ok(usage) => {
-                self.managed_key_dialog_presence.reopen();
-                self.settings_managed_key_dialog =
-                    Some(SettingsManagedKeyDialog::Delete { key, usage });
+                self.settings_workspace.update(cx, |settings, cx| {
+                    settings.open_managed_key_delete_dialog(key, usage, cx);
+                });
             }
-            Err(error) => self.set_managed_key_action_error(error),
+            Err(error) => self.set_managed_key_action_error(error, cx),
         }
-        cx.notify();
     }
 
     pub(in crate::workspace) fn close_managed_key_dialog(&mut self, cx: &mut Context<Self>) {
         self.clear_standard_confirm_focus();
-        let Some(generation) = self.managed_key_dialog_presence.begin_exit() else {
-            return;
-        };
         let delay = oxideterm_gpui_ui::motion::duration(
             &self.tokens,
             oxideterm_gpui_ui::motion::MotionDuration::Overlay,
         );
-        if delay.is_zero() {
-            self.settings_managed_key_dialog = None;
-            self.clear_managed_key_dialog_drafts();
-            self.managed_key_dialog_presence.reopen();
-            cx.notify();
-            return;
-        }
-        cx.spawn(async move |weak, cx| {
-            gpui::Timer::after(delay).await;
-            let _ = weak.update(cx, |this, cx| {
-                if this.managed_key_dialog_presence.finish_exit(generation) {
-                    this.settings_managed_key_dialog = None;
-                    this.clear_managed_key_dialog_drafts();
-                    this.managed_key_dialog_presence.reopen();
-                    cx.notify();
-                }
-            });
-        })
-        .detach();
-        cx.notify();
-    }
-
-    pub(in crate::workspace) fn clear_managed_key_dialog_drafts(&mut self) {
-        self.settings_managed_key_file_path.clear();
-        self.settings_managed_key_file_name.clear();
-        zeroize::Zeroize::zeroize(&mut self.settings_managed_key_file_passphrase);
-        self.settings_managed_key_paste_name.clear();
-        zeroize::Zeroize::zeroize(&mut self.settings_managed_key_paste_private_key);
-        zeroize::Zeroize::zeroize(&mut self.settings_managed_key_paste_passphrase);
-        self.settings_managed_key_rename_name.clear();
-        if matches!(
-            self.focused_settings_input,
-            Some(SettingsInput::ManagedKeyFilePath)
-                | Some(SettingsInput::ManagedKeyFileName)
-                | Some(SettingsInput::ManagedKeyFilePassphrase)
-                | Some(SettingsInput::ManagedKeyPasteName)
-                | Some(SettingsInput::ManagedKeyPastePrivateKey)
-                | Some(SettingsInput::ManagedKeyPastePassphrase)
-                | Some(SettingsInput::ManagedKeyRenameName)
-        ) {
-            if self
-                .focused_settings_input
-                .is_some_and(|input| input.is_secret())
-            {
-                zeroize::Zeroize::zeroize(&mut self.settings_input_draft);
-            } else {
-                self.settings_input_draft.clear();
-            }
-            self.focused_settings_input = None;
-        }
+        self.settings_workspace.update(cx, |settings, cx| {
+            settings.close_managed_key_dialog(delay, cx);
+        });
     }
 
     pub(in crate::workspace) fn pick_managed_key_import_file(&mut self, cx: &mut Context<Self>) {
@@ -2226,171 +2787,124 @@ impl WorkspaceApp {
                 self.i18n.t("modals.managed_key.import_file.browse_title"),
             )),
         });
-        cx.spawn(async move |weak, cx| {
+        let selected_file = async move {
             let Ok(Ok(Some(paths))) = receiver.await else {
-                return;
+                return None;
             };
             let Some(path) = paths.into_iter().next() else {
-                return;
+                return None;
             };
             let file_name = path
                 .file_name()
                 .and_then(|name| name.to_str())
                 .unwrap_or("Managed SSH Key")
                 .to_string();
-            let _ = weak.update(cx, |this, cx| {
-                this.settings_managed_key_file_path = path.display().to_string();
-                if this.settings_managed_key_file_name.trim().is_empty() {
-                    this.settings_managed_key_file_name = file_name;
-                }
-                cx.notify();
-            });
-        })
-        .detach();
+            Some((path.display().to_string(), file_name))
+        };
+        self.settings_workspace.update(cx, |settings, cx| {
+            settings.start_managed_key_file_picker(selected_file, cx);
+        });
     }
 
     pub(in crate::workspace) fn import_managed_key_from_file(&mut self, cx: &mut Context<Self>) {
-        let path = self.current_settings_managed_key_file_path();
-        let name = self.optional_trimmed_string(&self.settings_managed_key_file_name);
-        let passphrase =
-            self.optional_managed_key_secret(&self.settings_managed_key_file_passphrase);
-        match self
-            .connection_store
-            .create_managed_ssh_key_from_file(path.trim(), name, passphrase)
-        {
+        let Some(request) = self.settings_workspace.update(cx, |settings, _cx| {
+            settings.take_managed_key_file_import_request()
+        }) else {
+            return;
+        };
+        match self.connection_store.create_managed_ssh_key_from_file(
+            &request.path,
+            request.name,
+            request.passphrase,
+        ) {
             Ok(info) => {
-                self.settings_managed_key_status = Some(
-                    self.i18n
-                        .t("settings_view.ssh_keys.import_success")
-                        .replace("{{name}}", &info.name),
-                );
-                self.settings_managed_key_dialog = None;
-                self.clear_managed_key_dialog_drafts();
+                let status = self
+                    .i18n
+                    .t("settings_view.ssh_keys.import_success")
+                    .replace("{{name}}", &info.name);
+                self.finish_managed_key_action(status, true, cx);
                 self.queue_cloud_sync_dirty_refresh(cx);
             }
-            Err(error) => self.set_managed_key_action_error(error),
+            Err(error) => self.set_managed_key_action_error(error, cx),
         }
-        cx.notify();
     }
 
     pub(in crate::workspace) fn import_managed_key_from_paste(&mut self, cx: &mut Context<Self>) {
-        let private_key = self.current_settings_managed_key_private_key();
-        let name = self.optional_trimmed_string(&self.settings_managed_key_paste_name);
-        let passphrase =
-            self.optional_managed_key_secret(&self.settings_managed_key_paste_passphrase);
-        // Transfer the pasted private key into SecretString before clearing UI drafts.
-        let private_key_secret = SecretString::from(private_key);
+        let Some(request) = self.settings_workspace.update(cx, |settings, _cx| {
+            settings.take_managed_key_paste_import_request()
+        }) else {
+            return;
+        };
+        // The Entity moves the private key into this one-shot request without a plaintext clone.
         match self.connection_store.create_managed_ssh_key_from_text(
-            private_key_secret,
-            name,
-            passphrase,
+            request.private_key,
+            request.name,
+            request.passphrase,
         ) {
             Ok(info) => {
-                self.settings_managed_key_status = Some(
-                    self.i18n
-                        .t("settings_view.ssh_keys.import_success")
-                        .replace("{{name}}", &info.name),
-                );
-                self.settings_managed_key_dialog = None;
-                self.clear_managed_key_dialog_drafts();
+                let status = self
+                    .i18n
+                    .t("settings_view.ssh_keys.import_success")
+                    .replace("{{name}}", &info.name);
+                self.finish_managed_key_action(status, true, cx);
                 self.queue_cloud_sync_dirty_refresh(cx);
             }
-            Err(error) => self.set_managed_key_action_error(error),
+            Err(error) => self.set_managed_key_action_error(error, cx),
         }
-        cx.notify();
     }
 
-    pub(in crate::workspace) fn rename_managed_key(
-        &mut self,
-        key_id: String,
-        cx: &mut Context<Self>,
-    ) {
-        let name = self.current_settings_managed_key_rename_name();
-        match self
-            .connection_store
-            .rename_managed_ssh_key(&key_id, name.trim().to_string())
-        {
+    pub(in crate::workspace) fn rename_managed_key(&mut self, cx: &mut Context<Self>) {
+        let Some((key_id, name)) = self.settings_workspace.update(cx, |settings, _cx| {
+            settings.take_managed_key_rename_request()
+        }) else {
+            return;
+        };
+        match self.connection_store.rename_managed_ssh_key(&key_id, name) {
             Ok(info) => {
-                self.settings_managed_key_status = Some(
-                    self.i18n
-                        .t("settings_view.ssh_keys.rename_success")
-                        .replace("{{name}}", &info.name),
-                );
-                self.settings_managed_key_dialog = None;
-                self.clear_managed_key_dialog_drafts();
+                let status = self
+                    .i18n
+                    .t("settings_view.ssh_keys.rename_success")
+                    .replace("{{name}}", &info.name);
+                self.finish_managed_key_action(status, true, cx);
                 self.queue_cloud_sync_dirty_refresh(cx);
             }
-            Err(error) => self.set_managed_key_action_error(error),
+            Err(error) => self.set_managed_key_action_error(error, cx),
         }
-        cx.notify();
     }
 
-    pub(in crate::workspace) fn delete_managed_key(
-        &mut self,
-        key_id: String,
-        cx: &mut Context<Self>,
-    ) {
+    pub(in crate::workspace) fn delete_managed_key(&mut self, cx: &mut Context<Self>) {
+        let Some(key_id) = self.settings_workspace.read(cx).managed_key_delete_id() else {
+            return;
+        };
         match self.connection_store.delete_managed_ssh_key(&key_id, false) {
             Ok(result) => {
-                self.settings_managed_key_status = Some(
-                    self.i18n
-                        .t("settings_view.ssh_keys.delete_success")
-                        .replace("{{count}}", &result.deleted.to_string()),
-                );
-                self.settings_managed_key_dialog = None;
+                let status = self
+                    .i18n
+                    .t("settings_view.ssh_keys.delete_success")
+                    .replace("{{count}}", &result.deleted.to_string());
+                self.finish_managed_key_action(status, true, cx);
                 self.queue_cloud_sync_dirty_refresh(cx);
             }
-            Err(error) => self.set_managed_key_action_error(error),
+            Err(error) => self.set_managed_key_action_error(error, cx),
         }
-        cx.notify();
+    }
+
+    fn finish_managed_key_action(&mut self, status: String, success: bool, cx: &mut Context<Self>) {
+        self.settings_workspace.update(cx, |settings, cx| {
+            settings.finish_managed_key_action(status, success, cx);
+        });
     }
 
     pub(in crate::workspace) fn set_managed_key_action_error(
         &mut self,
         error: impl std::fmt::Display,
+        cx: &mut Context<Self>,
     ) {
-        self.settings_managed_key_status = Some(
-            self.i18n
-                .t("settings_view.ssh_keys.action_failed")
-                .replace("{{error}}", &error.to_string()),
-        );
-    }
-
-    pub(in crate::workspace) fn current_settings_managed_key_file_path(&self) -> String {
-        if self.focused_settings_input == Some(SettingsInput::ManagedKeyFilePath) {
-            self.settings_input_draft.clone()
-        } else {
-            self.settings_managed_key_file_path.clone()
-        }
-    }
-
-    pub(in crate::workspace) fn current_settings_managed_key_private_key(&self) -> String {
-        if self.focused_settings_input == Some(SettingsInput::ManagedKeyPastePrivateKey) {
-            self.settings_input_draft.clone()
-        } else {
-            self.settings_managed_key_paste_private_key.clone()
-        }
-    }
-
-    pub(in crate::workspace) fn current_settings_managed_key_rename_name(&self) -> String {
-        if self.focused_settings_input == Some(SettingsInput::ManagedKeyRenameName) {
-            self.settings_input_draft.clone()
-        } else {
-            self.settings_managed_key_rename_name.clone()
-        }
-    }
-
-    pub(in crate::workspace) fn optional_trimmed_string(&self, value: &str) -> Option<String> {
-        let trimmed = value.trim();
-        (!trimmed.is_empty()).then(|| trimmed.to_string())
-    }
-
-    pub(in crate::workspace) fn optional_managed_key_secret(
-        &self,
-        value: &str,
-    ) -> Option<SecretString> {
-        let trimmed = value.trim();
-        (!trimmed.is_empty()).then(|| SecretString::from(trimmed.to_string()))
+        let status = self
+            .i18n
+            .t("settings_view.ssh_keys.action_failed")
+            .replace("{{error}}", &error.to_string());
+        self.finish_managed_key_action(status, false, cx);
     }
 
     pub(in crate::workspace) fn ssh_keys_empty_state(&self) -> AnyElement {
@@ -2423,8 +2937,9 @@ impl WorkspaceApp {
         alias: String,
         cx: &mut Context<Self>,
     ) {
-        self.settings_page.toggle_ssh_host_selection(alias);
-        cx.notify();
+        self.settings_workspace.update(cx, |settings, cx| {
+            settings.toggle_ssh_config_host(alias, cx);
+        });
     }
 
     pub(in crate::workspace) fn toggle_all_settings_ssh_config_hosts(
@@ -2433,7 +2948,9 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) {
         if all_selected {
-            self.settings_page.clear_ssh_host_selection();
+            self.settings_workspace.update(cx, |settings, cx| {
+                settings.clear_ssh_config_host_selection(cx);
+            });
         } else {
             let existing_names = self
                 .connection_store
@@ -2442,16 +2959,16 @@ impl WorkspaceApp {
                 .map(|conn| conn.name.clone())
                 .collect::<HashSet<_>>();
             if let Ok(hosts) = list_ssh_config_hosts(&existing_names) {
-                self.settings_page.set_selected_ssh_hosts(
-                    hosts
-                        .into_iter()
-                        .filter(|host| !host.already_imported)
-                        .map(|host| host.alias)
-                        .collect(),
-                );
+                let selected_hosts = hosts
+                    .into_iter()
+                    .filter(|host| !host.already_imported)
+                    .map(|host| host.alias)
+                    .collect();
+                self.settings_workspace.update(cx, |settings, cx| {
+                    settings.set_selected_ssh_config_hosts(selected_hosts, cx);
+                });
             }
         }
-        cx.notify();
     }
 
     pub(in crate::workspace) fn import_settings_ssh_host(
@@ -2459,58 +2976,60 @@ impl WorkspaceApp {
         alias: String,
         cx: &mut Context<Self>,
     ) {
-        match oxideterm_connections::import_ssh_config_alias(&mut self.connection_store, &alias) {
+        let (completed, status) = match oxideterm_connections::import_ssh_config_alias(
+            &mut self.connection_store,
+            &alias,
+        ) {
             Ok(true) => {
-                self.settings_page.remove_selected_ssh_host(&alias);
-                self.settings_page.set_connection_status(Some(
-                    self.i18n
-                        .t("settings_view.errors.import_success")
-                        .replace("{{name}}", &alias),
-                ));
+                let status = self
+                    .i18n
+                    .t("settings_view.errors.import_success")
+                    .replace("{{name}}", &alias);
                 self.queue_cloud_sync_dirty_refresh(cx);
+                (true, status)
             }
-            Ok(false) => {
-                self.settings_page.set_connection_status(Some(
-                    self.i18n
-                        .t("settings_view.connections.ssh_config.batch_import_skipped")
-                        .replace("{{count}}", "1"),
-                ));
+            Ok(false) => (
+                false,
+                self.i18n
+                    .t("settings_view.connections.ssh_config.batch_import_skipped")
+                    .replace("{{count}}", "1"),
+            ),
+            Err(error) => (
+                false,
+                self.i18n
+                    .t("settings_view.errors.import_failed")
+                    .replace("{{error}}", &error.to_string()),
+            ),
+        };
+        self.settings_workspace.update(cx, |settings, cx| {
+            if completed {
+                settings.ssh_config_selected_hosts.remove(&alias);
             }
-            Err(error) => {
-                self.settings_page.set_connection_status(Some(
-                    self.i18n
-                        .t("settings_view.errors.import_failed")
-                        .replace("{{error}}", &error.to_string()),
-                ));
-            }
-        }
-        cx.notify();
+            settings.connection_import_status = Some(status);
+            cx.notify();
+        });
     }
 
     pub(in crate::workspace) fn import_selected_settings_ssh_hosts(
         &mut self,
         cx: &mut Context<Self>,
     ) {
-        let aliases = self
-            .settings_page
-            .settings_selected_ssh_hosts
-            .iter()
-            .cloned()
-            .collect::<Vec<_>>();
+        let aliases = self.settings_workspace.read(cx).selected_ssh_config_hosts();
         let mut imported = 0usize;
         let mut skipped = 0usize;
         let mut errors = Vec::new();
+        let mut completed_aliases = Vec::new();
 
         for alias in aliases {
             match oxideterm_connections::import_ssh_config_alias(&mut self.connection_store, &alias)
             {
                 Ok(true) => {
                     imported += 1;
-                    self.settings_page.remove_selected_ssh_host(&alias);
+                    completed_aliases.push(alias);
                 }
                 Ok(false) => {
                     skipped += 1;
-                    self.settings_page.remove_selected_ssh_host(&alias);
+                    completed_aliases.push(alias);
                 }
                 Err(error) => errors.push(format!("{alias}: {error}")),
             }
@@ -2534,12 +3053,17 @@ impl WorkspaceApp {
         if !errors.is_empty() {
             parts.push(errors.join(", "));
         }
-        self.settings_page
-            .set_connection_status((!parts.is_empty()).then(|| parts.join("; ")));
+        let status = (!parts.is_empty()).then(|| parts.join("; "));
+        self.settings_workspace.update(cx, |settings, cx| {
+            for alias in &completed_aliases {
+                settings.ssh_config_selected_hosts.remove(alias);
+            }
+            settings.connection_import_status = status;
+            cx.notify();
+        });
         if imported > 0 {
             self.queue_cloud_sync_dirty_refresh(cx);
         }
-        cx.notify();
     }
 
     pub(in crate::workspace) fn set_connection_import_source(
@@ -2547,14 +3071,9 @@ impl WorkspaceApp {
         source: ConnectionImportSource,
         cx: &mut Context<Self>,
     ) {
-        if self.settings_connection_import_source == source {
-            return;
-        }
-        self.settings_connection_import_source = source;
-        self.clear_connection_import_preview();
-        self.settings_connection_import_paths.clear();
-        self.settings_page.set_connection_status(None);
-        cx.notify();
+        self.settings_workspace.update(cx, |settings, cx| {
+            settings.set_connection_import_source(source, cx);
+        });
     }
 
     pub(in crate::workspace) fn pick_connection_import_paths(
@@ -2562,8 +3081,8 @@ impl WorkspaceApp {
         directories: bool,
         cx: &mut Context<Self>,
     ) {
-        let multiple = !directories
-            && self.settings_connection_import_source != ConnectionImportSource::Termius;
+        let source = self.settings_workspace.read(cx).connection_import_source();
+        let multiple = !directories && source != ConnectionImportSource::Termius;
         let prompt_key = if directories {
             "settings_view.connections.importers.choose_directory"
         } else {
@@ -2575,64 +3094,54 @@ impl WorkspaceApp {
             multiple,
             prompt: Some(SharedString::from(self.i18n.t(prompt_key))),
         });
-        cx.spawn(async move |weak, cx| {
+        let selected_paths = async move {
             let Ok(Ok(Some(paths))) = receiver.await else {
-                return;
+                return None;
             };
             let selected = paths
                 .into_iter()
                 .map(|path| path.display().to_string())
                 .collect::<Vec<_>>();
-            if selected.is_empty() {
-                return;
-            }
-            let _ = weak.update(cx, |this, cx| {
-                this.settings_connection_import_paths = selected;
-                this.clear_connection_import_preview();
-                this.settings_page.set_connection_status(None);
-                cx.notify();
-            });
-        })
-        .detach();
+            (!selected.is_empty()).then_some(selected)
+        };
+        self.settings_workspace.update(cx, |settings, cx| {
+            settings.start_connection_import_path_picker(selected_paths, cx);
+        });
     }
 
     pub(in crate::workspace) fn preview_settings_connection_import(
         &mut self,
         cx: &mut Context<Self>,
     ) {
-        if self.settings_connection_import_paths.is_empty() {
+        let Some((source, paths)) = self
+            .settings_workspace
+            .read(cx)
+            .connection_import_preview_request()
+        else {
             return;
-        }
+        };
         let existing_names = self
             .connection_store
             .connections()
             .iter()
             .map(|conn| conn.name.clone())
             .collect::<HashSet<_>>();
-        match preview_connection_import(
-            self.settings_connection_import_source,
-            &self.settings_connection_import_paths,
-            &existing_names,
-        ) {
+        match preview_connection_import(source, &paths, &existing_names) {
             Ok(preview) => {
-                self.settings_selected_connection_import_drafts = preview
-                    .drafts
-                    .iter()
-                    .filter(|draft| draft.importable && !draft.duplicate)
-                    .map(|draft| draft.id.clone())
-                    .collect();
-                self.settings_connection_import_preview = Some(preview);
-                self.settings_page.set_connection_status(None);
+                self.settings_workspace.update(cx, |settings, cx| {
+                    settings.apply_connection_import_preview(Ok(preview), cx);
+                });
             }
             Err(error) => {
-                self.settings_page.set_connection_status(Some(
-                    self.i18n
-                        .t("settings_view.connections.importers.preview_failed")
-                        .replace("{{error}}", &error.to_string()),
-                ));
+                let status = self
+                    .i18n
+                    .t("settings_view.connections.importers.preview_failed")
+                    .replace("{{error}}", &error.to_string());
+                self.settings_workspace.update(cx, |settings, cx| {
+                    settings.apply_connection_import_preview(Err(status), cx);
+                });
             }
         }
-        cx.notify();
     }
 
     pub(in crate::workspace) fn toggle_settings_connection_import_draft(
@@ -2640,14 +3149,9 @@ impl WorkspaceApp {
         draft_id: String,
         cx: &mut Context<Self>,
     ) {
-        if !self
-            .settings_selected_connection_import_drafts
-            .insert(draft_id.clone())
-        {
-            self.settings_selected_connection_import_drafts
-                .remove(&draft_id);
-        }
-        cx.notify();
+        self.settings_workspace.update(cx, |settings, cx| {
+            settings.toggle_connection_import_draft(draft_id, cx);
+        });
     }
 
     pub(in crate::workspace) fn toggle_all_settings_connection_import_drafts(
@@ -2655,38 +3159,21 @@ impl WorkspaceApp {
         all_selected: bool,
         cx: &mut Context<Self>,
     ) {
-        if all_selected {
-            self.settings_selected_connection_import_drafts.clear();
-        } else if let Some(preview) = self.settings_connection_import_preview.as_ref() {
-            self.settings_selected_connection_import_drafts = preview
-                .drafts
-                .iter()
-                .filter(|draft| draft.importable)
-                .map(|draft| draft.id.clone())
-                .collect();
-        }
-        cx.notify();
+        self.settings_workspace.update(cx, |settings, cx| {
+            settings.toggle_all_connection_import_drafts(all_selected, cx);
+        });
     }
 
     pub(in crate::workspace) fn apply_settings_connection_import(
         &mut self,
         cx: &mut Context<Self>,
     ) {
-        if self.settings_selected_connection_import_drafts.is_empty()
-            || self.settings_connection_import_paths.is_empty()
-        {
+        let Some(request) = self
+            .settings_workspace
+            .read(cx)
+            .connection_import_apply_request()
+        else {
             return;
-        }
-        let request = ConnectionImportApplyRequest {
-            source: self.settings_connection_import_source,
-            paths: self.settings_connection_import_paths.clone(),
-            selected_draft_ids: self
-                .settings_selected_connection_import_drafts
-                .iter()
-                .cloned()
-                .collect(),
-            duplicate_strategy: self.settings_connection_import_duplicate_strategy,
-            target_group: non_empty_trimmed(&self.settings_connection_import_target_group),
         };
         match apply_connection_import(&mut self.connection_store, request) {
             Ok(result) => {
@@ -2719,32 +3206,30 @@ impl WorkspaceApp {
                             .replace("{{count}}", &result.errors.len().to_string()),
                     );
                 }
-                self.settings_page
-                    .set_connection_status(Some(if parts.is_empty() {
-                        self.i18n
-                            .t("settings_view.connections.importers.no_changes")
-                    } else {
-                        parts.join(" · ")
-                    }));
+                let status = if parts.is_empty() {
+                    self.i18n
+                        .t("settings_view.connections.importers.no_changes")
+                } else {
+                    parts.join(" · ")
+                };
+                self.settings_workspace.update(cx, |settings, cx| {
+                    settings.set_connection_import_status(Some(status), cx);
+                });
                 if result.imported > 0 {
                     self.queue_cloud_sync_dirty_refresh(cx);
                 }
                 self.preview_settings_connection_import(cx);
             }
             Err(error) => {
-                self.settings_page.set_connection_status(Some(
-                    self.i18n
-                        .t("settings_view.connections.importers.apply_failed")
-                        .replace("{{error}}", &error.to_string()),
-                ));
+                let status = self
+                    .i18n
+                    .t("settings_view.connections.importers.apply_failed")
+                    .replace("{{error}}", &error.to_string());
+                self.settings_workspace.update(cx, |settings, cx| {
+                    settings.set_connection_import_status(Some(status), cx);
+                });
             }
         }
-        cx.notify();
-    }
-
-    pub(in crate::workspace) fn clear_connection_import_preview(&mut self) {
-        self.settings_connection_import_preview = None;
-        self.settings_selected_connection_import_drafts.clear();
     }
 }
 
@@ -2850,4 +3335,180 @@ pub(in crate::workspace) fn imported_auth_label(
 pub(in crate::workspace) fn non_empty_trimmed(value: &str) -> Option<String> {
     let trimmed = value.trim();
     (!trimmed.is_empty()).then(|| trimmed.to_string())
+}
+
+#[cfg(test)]
+mod settings_connection_entity_tests {
+    use gpui::{AppContext, TestAppContext};
+
+    use super::*;
+
+    #[gpui::test]
+    fn managed_key_paste_request_moves_secrets_out_of_entity(cx: &mut TestAppContext) {
+        let settings = cx.new(SettingsWorkspaceEntity::new);
+        settings.update(cx, |settings, cx| {
+            settings.open_managed_key_paste_dialog(cx);
+            assert!(
+                settings.focus_settings_entity_input(SettingsInput::ManagedKeyPastePrivateKey, cx)
+            );
+            assert!(settings.replace_settings_entity_input(
+                SettingsInput::ManagedKeyPastePrivateKey,
+                None,
+                "private-key-material",
+                cx,
+            ));
+            assert!(
+                settings.focus_settings_entity_input(SettingsInput::ManagedKeyPastePassphrase, cx)
+            );
+            assert!(settings.replace_settings_entity_input(
+                SettingsInput::ManagedKeyPastePassphrase,
+                None,
+                " key-passphrase ",
+                cx,
+            ));
+            let private_key_allocation = settings.managed_key_paste_private_key.as_ptr();
+
+            // Submission moves each secret into the one-shot store request.
+            let request = settings
+                .take_managed_key_paste_import_request()
+                .expect("paste request");
+            assert_eq!(request.private_key.expose_secret(), "private-key-material");
+            assert_eq!(
+                request.private_key.expose_secret().as_ptr(),
+                private_key_allocation
+            );
+            assert_eq!(
+                request.passphrase.as_ref().map(SecretString::expose_secret),
+                Some("key-passphrase")
+            );
+            assert!(settings.managed_key_paste_private_key.is_empty());
+            assert!(settings.managed_key_paste_passphrase.is_empty());
+            assert_eq!(settings.settings_entity_focused_input(), None);
+        });
+    }
+
+    #[gpui::test]
+    fn closing_managed_key_dialog_clears_entity_owned_drafts(cx: &mut TestAppContext) {
+        let settings = cx.new(SettingsWorkspaceEntity::new);
+        settings.update(cx, |settings, cx| {
+            settings.open_managed_key_import_file_dialog(cx);
+            assert!(
+                settings.focus_settings_entity_input(SettingsInput::ManagedKeyFilePassphrase, cx)
+            );
+            assert!(settings.replace_settings_entity_input(
+                SettingsInput::ManagedKeyFilePassphrase,
+                None,
+                "secret-passphrase",
+                cx,
+            ));
+
+            settings.close_managed_key_dialog(std::time::Duration::ZERO, cx);
+
+            assert!(settings.managed_key_dialog.is_none());
+            assert!(settings.managed_key_file_passphrase.is_empty());
+            assert_eq!(settings.settings_entity_focused_input(), None);
+            assert!(settings.managed_key_dialog_exit_task.is_none());
+        });
+    }
+
+    #[gpui::test]
+    fn managed_key_file_picker_completion_and_cancellation_are_entity_owned(
+        cx: &mut TestAppContext,
+    ) {
+        let settings = cx.new(SettingsWorkspaceEntity::new);
+        settings.update(cx, |settings, cx| {
+            settings.open_managed_key_import_file_dialog(cx);
+            settings.start_managed_key_file_picker(
+                std::future::ready(Some(("/tmp/id_ed25519".into(), "id_ed25519".into()))),
+                cx,
+            );
+            assert!(settings.managed_key_file_picker_task.is_some());
+        });
+
+        cx.run_until_parked();
+
+        settings.update(cx, |settings, cx| {
+            assert_eq!(settings.managed_key_file_path, "/tmp/id_ed25519");
+            assert_eq!(settings.managed_key_file_name, "id_ed25519");
+            assert!(settings.managed_key_file_picker_task.is_none());
+
+            settings.start_managed_key_file_picker(std::future::pending(), cx);
+            assert!(settings.managed_key_file_picker_task.is_some());
+            settings.close_managed_key_dialog(std::time::Duration::ZERO, cx);
+            assert!(settings.managed_key_file_picker_task.is_none());
+        });
+    }
+
+    #[gpui::test]
+    fn ssh_config_dialog_owns_selection_status_and_exit_lifecycle(cx: &mut TestAppContext) {
+        let settings = cx.new(SettingsWorkspaceEntity::new);
+        settings.update(cx, |settings, cx| {
+            settings
+                .ssh_config_selected_hosts
+                .insert("stale-host".into());
+            settings.connection_import_status = Some("stale-status".into());
+
+            settings.open_ssh_config_import_dialog(cx);
+
+            assert!(settings.ssh_config_import_dialog_open);
+            assert!(settings.ssh_config_selected_hosts.is_empty());
+            assert!(settings.connection_import_status.is_none());
+
+            settings.toggle_ssh_config_host("host-a".into(), cx);
+            assert!(settings.ssh_config_selected_hosts.contains("host-a"));
+
+            settings.close_ssh_config_import_dialog(std::time::Duration::ZERO, cx);
+            assert!(!settings.ssh_config_import_dialog_open);
+            assert!(settings.ssh_config_import_dialog_exit_task.is_none());
+        });
+    }
+
+    #[gpui::test]
+    fn connection_import_state_input_and_picker_completion_are_entity_owned(
+        cx: &mut TestAppContext,
+    ) {
+        let settings = cx.new(SettingsWorkspaceEntity::new);
+        settings.update(cx, |settings, cx| {
+            settings.set_connection_import_source(ConnectionImportSource::Xshell, cx);
+            settings.set_connection_import_duplicate_strategy(
+                ConnectionImportDuplicateStrategy::Rename,
+                cx,
+            );
+            assert!(
+                settings
+                    .focus_settings_entity_input(SettingsInput::ConnectionImportTargetGroup, cx,)
+            );
+            assert!(settings.replace_settings_entity_input(
+                SettingsInput::ConnectionImportTargetGroup,
+                None,
+                "imported",
+                cx,
+            ));
+            settings.start_connection_import_path_picker(
+                std::future::ready(Some(vec!["/tmp/connections.ini".into()])),
+                cx,
+            );
+            assert!(settings.connection_import_path_picker_task.is_some());
+        });
+
+        cx.run_until_parked();
+
+        cx.read(|cx| {
+            let settings = settings.read(cx);
+            assert_eq!(
+                settings.connection_import_source,
+                ConnectionImportSource::Xshell
+            );
+            assert_eq!(
+                settings.connection_import_duplicate_strategy,
+                ConnectionImportDuplicateStrategy::Rename
+            );
+            assert_eq!(settings.connection_import_target_group, "imported");
+            assert_eq!(
+                settings.connection_import_paths,
+                ["/tmp/connections.ini".to_string()]
+            );
+            assert!(settings.connection_import_path_picker_task.is_none());
+        });
+    }
 }

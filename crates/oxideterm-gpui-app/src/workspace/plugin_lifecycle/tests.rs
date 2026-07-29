@@ -340,7 +340,7 @@ fn sync_oxide_host_calls_export_validate_and_preview_without_workspace_mutation(
         }
     );
 
-    let (progress_tx, progress_rx) = mpsc::channel();
+    let (progress_tx, progress_rx) = delivery::ActiveDeliverySender::channel();
     let export_response = native_plugin_sync_response(
         "com.example.demo",
         plugin_runtime::PluginHostCall {
@@ -442,14 +442,17 @@ fn sync_import_oxide_args_and_core_import_match_tauri_defaults() {
         OxideExportOptions::default(),
     )
     .unwrap();
+    let mut import_args = serde_json::json!({
+        "fileData": bytes,
+        "password": "StrongPass!123",
+        "conflictStrategy": "rename",
+        "selectedPluginIds": []
+    });
+    let password_buffer = import_args["password"].as_str().unwrap().as_ptr();
     let (parsed_bytes, password, options) =
-        native_plugin_sync_import_oxide_args(&serde_json::json!({
-            "fileData": bytes,
-            "password": "StrongPass!123",
-            "conflictStrategy": "rename",
-            "selectedPluginIds": []
-        }))
-        .unwrap();
+        native_plugin_sync_import_oxide_args(&mut import_args).unwrap();
+    assert_eq!(password.as_ptr(), password_buffer);
+    assert!(import_args["password"].is_null());
     assert!(options.oxide_options.import_forwards);
     assert!(!options.oxide_options.import_portable_secrets);
     assert!(options.import_app_settings);
@@ -519,19 +522,21 @@ fn sync_plugin_settings_export_filters_selected_plugins_and_revisions() {
         },
     ];
 
+    let mut export_args = serde_json::json!({
+        "connectionIds": [],
+        "password": "StrongPass!123",
+        "includePluginSettings": true,
+        "selectedPluginIds": ["com.example.demo"]
+    });
     let response = native_plugin_sync_export_oxide_response(
         "com.example.demo",
         "sync-plugin-export-1".to_string(),
         &connection_store,
         &plugin_settings,
-        &serde_json::json!({
-            "connectionIds": [],
-            "password": "StrongPass!123",
-            "includePluginSettings": true,
-            "selectedPluginIds": ["com.example.demo"]
-        }),
+        &mut export_args,
         None,
     );
+    assert!(export_args["password"].is_null());
     let plugin_runtime::PluginResponseResult::Ok { value } = response.result else {
         panic!("expected sync.exportOxide to include selected plugin settings");
     };
@@ -1244,7 +1249,7 @@ fn progress_effect_updates_host_owned_toast_payload() {
 
 #[test]
 fn show_progress_returnable_host_api_creates_host_owned_reporter() {
-    let (progress_tx, progress_rx) = mpsc::channel();
+    let (progress_tx, progress_rx) = delivery::ActiveDeliverySender::channel();
     let response = native_plugin_show_progress_response(
         "com.example.demo",
         plugin_runtime::PluginHostCall {
@@ -1281,7 +1286,8 @@ fn show_progress_returnable_host_api_creates_host_owned_reporter() {
 
 #[test]
 fn show_confirm_returnable_host_api_resolves_user_choice() {
-    let (confirm_tx, confirm_rx) = mpsc::channel::<NativePluginConfirmRequest>();
+    let (confirm_tx, confirm_rx) =
+        delivery::ActiveDeliverySender::<NativePluginConfirmRequest>::channel();
     let handle = std::thread::spawn(move || {
         let request = confirm_rx.recv().unwrap();
         assert_eq!(request.plugin_id, "com.example.demo");
@@ -1316,7 +1322,8 @@ fn show_confirm_returnable_host_api_resolves_user_choice() {
 
 #[test]
 fn show_confirm_returnable_host_api_rejects_missing_description() {
-    let (confirm_tx, _confirm_rx) = mpsc::channel();
+    let (confirm_tx, _confirm_rx) =
+        delivery::ActiveDeliverySender::<NativePluginConfirmRequest>::channel();
     let response = native_plugin_show_confirm_response(
         "com.example.demo",
         plugin_runtime::PluginHostCall {
@@ -1968,7 +1975,7 @@ fn session_connection_state_maps_link_down_to_tauri_status() {
         ws_endpoint: None,
     };
     assert_eq!(
-        native_plugin_session_connection_state(&state, 0),
+        native_plugin_session_connection_state(&state.readiness, state.error.as_deref(), 0),
         "link-down"
     );
 }

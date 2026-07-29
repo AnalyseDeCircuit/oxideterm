@@ -108,6 +108,25 @@ impl RemoteDesktopFrameQueue {
         RemoteDesktopFrameQueuePush::RecoveryRequired
     }
 
+    fn retain_latest_frame_only(&mut self) -> bool {
+        if self.frames.is_empty()
+            || (self.frames.len() == 1
+                && self
+                    .frames
+                    .front()
+                    .is_some_and(|event| matches!(event, RemoteDesktopHelperEvent::Frame { .. })))
+        {
+            return false;
+        }
+
+        // A hidden surface cannot safely preserve an unbounded sparse-delta
+        // history. Drop it and request one new base frame from the live worker.
+        self.frames.clear();
+        self.queued_dirty_bytes = 0;
+        self.awaiting_base_frame = true;
+        true
+    }
+
     pub fn pop_front(&mut self) -> Option<RemoteDesktopHelperEvent> {
         let event = self.frames.pop_front()?;
         if matches!(event, RemoteDesktopHelperEvent::FrameUpdate { .. }) {
@@ -128,11 +147,23 @@ impl RemoteDesktopFrameQueue {
     }
 }
 
-#[derive(Clone, Default)]
+#[derive(Clone)]
 pub struct RemoteDesktopFrameDeliverySlot {
     queue: Arc<Mutex<RemoteDesktopFrameQueue>>,
     ready_queued: Arc<AtomicBool>,
+    visible: Arc<AtomicBool>,
     last_presented_at: Arc<Mutex<Option<Instant>>>,
+}
+
+impl Default for RemoteDesktopFrameDeliverySlot {
+    fn default() -> Self {
+        Self {
+            queue: Arc::new(Mutex::new(RemoteDesktopFrameQueue::default())),
+            ready_queued: Arc::new(AtomicBool::new(false)),
+            visible: Arc::new(AtomicBool::new(true)),
+            last_presented_at: Arc::new(Mutex::new(None)),
+        }
+    }
 }
 
 impl RemoteDesktopFrameDeliverySlot {
@@ -145,13 +176,21 @@ impl RemoteDesktopFrameDeliverySlot {
             let Ok(mut queue) = self.queue.lock() else {
                 return RemoteDesktopFrameDeliveryDecision::default();
             };
-            queue.push(event)
+            let queue_push = queue.push(event);
+            if !self.is_visible() && queue.retain_latest_frame_only() {
+                RemoteDesktopFrameQueuePush::RecoveryRequired
+            } else {
+                queue_push
+            }
         };
 
         let recovery_required = queue_push == RemoteDesktopFrameQueuePush::RecoveryRequired;
-        if queue_push == RemoteDesktopFrameQueuePush::AwaitingRecovery
-            || (recovery_required && !self.has_queued_frame_events())
-        {
+        let recovery_has_no_frame = recovery_required && !self.has_queued_frame_events();
+        if recovery_has_no_frame {
+            // The recovery base must be able to publish a fresh ready notice.
+            self.ready_queued.store(false, Ordering::Release);
+        }
+        if queue_push == RemoteDesktopFrameQueuePush::AwaitingRecovery || recovery_has_no_frame {
             return RemoteDesktopFrameDeliveryDecision {
                 frame_ready: false,
                 recovery_required,
@@ -173,6 +212,27 @@ impl RemoteDesktopFrameDeliverySlot {
             .lock()
             .map(|queue| !queue.is_empty())
             .unwrap_or(false)
+    }
+
+    pub fn set_visible(&self, visible: bool) -> bool {
+        self.visible.store(visible, Ordering::Release);
+        let recovery_required = if visible {
+            false
+        } else {
+            self.queue
+                .lock()
+                .map(|mut queue| queue.retain_latest_frame_only())
+                .unwrap_or(false)
+        };
+        if !self.has_queued_frame_events() {
+            // A dropped hidden delta tail must not suppress the next base-frame wake.
+            self.ready_queued.store(false, Ordering::Release);
+        }
+        recovery_required
+    }
+
+    pub fn is_visible(&self) -> bool {
+        self.visible.load(Ordering::Acquire)
     }
 
     pub fn complete_delivery(&self) -> bool {
@@ -333,5 +393,67 @@ mod tests {
         let delay = slot.next_frame_ready_delay();
         assert!(delay > Duration::ZERO);
         assert!(delay <= FRAME_PRESENTATION_INTERVAL);
+    }
+
+    #[test]
+    fn hidden_slot_requests_recovery_for_sparse_deltas_and_keeps_one_latest_frame() {
+        let slot = RemoteDesktopFrameDeliverySlot::new();
+        slot.set_visible(false);
+
+        let decision = slot.push(update_at(0));
+        assert!(decision.recovery_required);
+        assert!(!decision.frame_ready);
+        assert!(!slot.has_queued_frame_events());
+
+        let size = RemoteDesktopSize {
+            width: 3,
+            height: 1,
+        };
+        let base = RemoteDesktopHelperEvent::Frame {
+            frame: RemoteDesktopFrame::new(size, RemoteDesktopFrameFormat::Rgba8, vec![0; 12]),
+        };
+        assert!(slot.push(base).frame_ready);
+        assert!(
+            !slot
+                .push(RemoteDesktopHelperEvent::FrameUpdate {
+                    update: RemoteDesktopFrameUpdate::new(
+                        size,
+                        RemoteDesktopRect::new(2, 0, 1, 1),
+                        RemoteDesktopFrameFormat::Rgba8,
+                        vec![2, 0, 0, 0xff],
+                    ),
+                })
+                .frame_ready
+        );
+
+        let Some(RemoteDesktopHelperEvent::Frame { frame }) = slot.take() else {
+            panic!("hidden slot should retain one composed base frame");
+        };
+        assert_eq!(&frame.bytes[8..12], &[2, 0, 0, 0xff]);
+        assert!(slot.take().is_none());
+    }
+
+    #[test]
+    fn visibility_transition_resets_a_dropped_frame_notice() {
+        let slot = RemoteDesktopFrameDeliverySlot::new();
+        assert!(slot.push(update_at(0)).frame_ready);
+
+        assert!(slot.set_visible(false));
+        assert!(!slot.has_queued_frame_events());
+        assert!(
+            slot.push(RemoteDesktopHelperEvent::Frame {
+                frame: RemoteDesktopFrame::new(
+                    RemoteDesktopSize {
+                        width: 1,
+                        height: 1,
+                    },
+                    RemoteDesktopFrameFormat::Rgba8,
+                    vec![1, 2, 3, 4],
+                ),
+            })
+            .frame_ready
+        );
+        slot.set_visible(true);
+        assert!(slot.is_visible());
     }
 }

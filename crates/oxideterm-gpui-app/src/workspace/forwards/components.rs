@@ -345,7 +345,7 @@ impl WorkspaceApp {
                                 self.tokens.ui.text_muted,
                                 has_background,
                                 move |this, _event, _window, cx| {
-                                    this.dismiss_detected_port(dismiss_port);
+                                    this.dismiss_detected_port(dismiss_port, cx);
                                     cx.notify();
                                     cx.stop_propagation();
                                 },
@@ -365,8 +365,8 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
-        let visible_ports: Vec<DetectedPort> = self
-            .forwarding_view
+        let forwarding_view = self.forwarding.read(cx).view();
+        let visible_ports: Vec<DetectedPort> = forwarding_view
             .detected_ports
             .iter()
             .filter(|port| port.port != 22)
@@ -398,7 +398,7 @@ impl WorkspaceApp {
                     .child(self.render_forwards_section_title(
                         self.i18n.t("forwards.detection.remotePorts"),
                     ))
-                    .when(!self.forwarding_view.detected_ports.is_empty(), |header| {
+                    .when(!forwarding_view.detected_ports.is_empty(), |header| {
                         header.child(
                             div()
                                 .text_size(px(self.tokens.metrics.ui_text_xs))
@@ -452,13 +452,11 @@ impl WorkspaceApp {
                             .rounded_b(px(rounded_shell_child_radius(self.tokens.radii.lg)))
                             .text_size(px(self.tokens.metrics.ui_text_xs))
                             .text_color(rgb(theme.text_muted))
-                            .child(if self.forwarding_view.port_scan_pending {
+                            .child(if forwarding_view.port_scan_pending {
                                 self.i18n.t("forwards.detection.scanning")
-                            } else if let Some(error) =
-                                self.forwarding_view.port_scan_error.as_ref()
-                            {
+                            } else if let Some(error) = forwarding_view.port_scan_error.as_ref() {
                                 error.clone()
-                            } else if self.forwarding_view.has_scanned_ports {
+                            } else if forwarding_view.has_scanned_ports {
                                 self.i18n.t("forwards.detection.noPorts")
                             } else {
                                 self.i18n.t("forwards.detection.scanning")

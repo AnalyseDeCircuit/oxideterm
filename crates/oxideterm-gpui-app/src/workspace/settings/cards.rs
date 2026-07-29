@@ -1,5 +1,8 @@
 use super::*;
 
+// Match the browser slider debounce while keeping exactly one retained task.
+const BACKGROUND_BLUR_COMMIT_DELAY: Duration = Duration::from_millis(150);
+
 impl WorkspaceApp {
     pub(in crate::workspace) fn settings_select_trigger(
         &self,
@@ -472,18 +475,19 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let pages = TerminalSettingsPage::all();
+        let route = self.settings_workspace.read(cx).route_snapshot();
         let active_index = pages
             .iter()
-            .position(|page| *page == self.settings_page.terminal_page)
+            .position(|page| *page == route.terminal_page)
             .unwrap_or(0);
         let previous_index = pages
             .iter()
-            .position(|page| *page == self.settings_page.previous_terminal_page)
+            .position(|page| *page == route.previous_terminal_page)
             .unwrap_or(active_index);
         let mut items = Vec::with_capacity(pages.len());
         for (page_index, page) in pages.iter().enumerate() {
             let page_id = *page;
-            let active = self.settings_page.terminal_page == page_id;
+            let active = route.terminal_page == page_id;
             let item = oxideterm_gpui_ui::segmented_control_item(
                 &self.tokens,
                 self.i18n.t(page_id.label_key()),
@@ -492,8 +496,10 @@ impl WorkspaceApp {
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |this, _event, _window, cx| {
-                    if this.settings_page.terminal_page != page_id {
-                        this.settings_page.set_terminal_page(page_id);
+                    let changed = this
+                        .settings_workspace
+                        .update(cx, |settings, cx| settings.set_terminal_page(page_id, cx));
+                    if changed {
                         this.begin_user_segmented_control_transition(
                             selection_motion::TERMINAL_SETTINGS_SWITCHER_ID,
                             page_index,
@@ -525,18 +531,19 @@ impl WorkspaceApp {
 
     pub(in crate::workspace) fn ai_page_switcher(&self, cx: &mut Context<Self>) -> AnyElement {
         let pages = AiSettingsPage::all();
+        let route = self.settings_workspace.read(cx).route_snapshot();
         let active_index = pages
             .iter()
-            .position(|page| *page == self.settings_page.ai_page)
+            .position(|page| *page == route.ai_page)
             .unwrap_or(0);
         let previous_index = pages
             .iter()
-            .position(|page| *page == self.settings_page.previous_ai_page)
+            .position(|page| *page == route.previous_ai_page)
             .unwrap_or(active_index);
         let mut items = Vec::with_capacity(pages.len());
         for (page_index, page) in pages.iter().enumerate() {
             let page_id = *page;
-            let active = self.settings_page.ai_page == page_id;
+            let active = route.ai_page == page_id;
             let item = oxideterm_gpui_ui::segmented_control_item(
                 &self.tokens,
                 self.i18n.t(page_id.label_key()),
@@ -545,8 +552,10 @@ impl WorkspaceApp {
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |this, _event, _window, cx| {
-                    if this.settings_page.ai_page != page_id {
-                        this.settings_page.set_ai_page(page_id);
+                    let changed = this
+                        .settings_workspace
+                        .update(cx, |settings, cx| settings.set_ai_page(page_id, cx));
+                    if changed {
                         this.begin_user_segmented_control_transition(
                             selection_motion::AI_SETTINGS_SWITCHER_ID,
                             page_index,
@@ -585,7 +594,7 @@ impl WorkspaceApp {
             .open_settings_select
             .is_some_and(|select| select.anchor_id() == anchor.id)
             || matches!(
-                (self.open_new_connection_select, anchor.id),
+                (self.connection_form_state(cx).open_select, anchor.id),
                 (
                     Some(NewConnectionSelect::Group),
                     SelectAnchorId::NewConnectionGroup
@@ -631,7 +640,7 @@ impl WorkspaceApp {
                 )
             )
             || matches!(
-                (self.cloud_sync.view.open_select, anchor.id),
+                (self.cloud_sync.read(cx).view.open_select, anchor.id),
                 (
                     Some(crate::workspace::cloud_sync::CloudSyncSelect::Backend),
                     SelectAnchorId::CloudSyncBackend
@@ -653,22 +662,23 @@ impl WorkspaceApp {
                     | SelectAnchorId::AiReasoningMenu
                     | SelectAnchorId::AiSafetyMenu
                     | SelectAnchorId::AiContextPopover
-            ) && self.has_ai_sidebar_floating_overlay())
+            ) && self.has_ai_sidebar_floating_overlay(cx))
             || (anchor.id == SelectAnchorId::TerminalBroadcastMenu
-                && self.terminal_broadcast_menu_open)
+                && self.terminal.read(cx).broadcast_menu_open())
             || (anchor.id == SelectAnchorId::TerminalCommandBar
-                && self.terminal_quick_commands_open)
-            || (anchor.id == SelectAnchorId::TerminalCwdMenu && self.terminal_cwd_picker.open)
+                && self.terminal.read(cx).quick_commands.is_open())
+            || (anchor.id == SelectAnchorId::TerminalCwdMenu
+                && self.terminal.read(cx).cwd_picker_open())
             || (anchor.id == SelectAnchorId::TerminalGitBranchMenu
-                && self.terminal_git_branch_picker.open)
+                && self.terminal.read(cx).git_panel_open())
             || (anchor.id == SelectAnchorId::TerminalProjectMenu
-                && self.terminal_project_panel.open)
+                && self.terminal.read(cx).project_panel_open())
             || (anchor.id == SelectAnchorId::SessionManagerViewMode
-                && self.session_manager.view_mode_menu_open)
+                && self.session_manager.read(cx).view_mode_menu_open)
             || (anchor.id == SelectAnchorId::SessionManagerSort
-                && self.session_manager.sort_menu_open)
+                && self.session_manager.read(cx).sort_menu_open)
             || (anchor.id == SelectAnchorId::SessionManagerBatchMove
-                && self.session_manager.show_batch_move)
+                && self.session_manager.read(cx).show_batch_move)
             || self
                 .settings_slider_drag
                 .is_some_and(|slider| settings_slider_anchor_id(slider) == anchor.id);
@@ -719,6 +729,74 @@ impl WorkspaceApp {
         event: &KeyDownEvent,
         cx: &mut Context<Self>,
     ) -> bool {
+        if let Some(input) = self
+            .settings_workspace
+            .read(cx)
+            .settings_entity_focused_input()
+        {
+            let key = event.keystroke.key.as_str();
+            let modifiers = event.keystroke.modifiers;
+            match key {
+                "escape" | "enter" => {
+                    self.settings_workspace.update(cx, |settings, cx| {
+                        settings.blur_settings_entity_input(cx);
+                    });
+                    self.clear_ime_selection();
+                    self.show_active_input_caret(cx);
+                    return true;
+                }
+                "backspace" | "delete" if !modifiers.platform && !modifiers.control => {
+                    self.settings_workspace.update(cx, |settings, cx| {
+                        settings.pop_settings_entity_input(input, cx);
+                    });
+                    return true;
+                }
+                _ => return true,
+            }
+        }
+        if let Some(input) = self.ai_entity.read(cx).focused_settings_input() {
+            let key = event.keystroke.key.as_str();
+            let modifiers = event.keystroke.modifiers;
+            match key {
+                "tab" if input.is_ai_mcp() && self.ai_entity.read(cx).mcp_dialog_is_open() => {
+                    if let Some(browser_behavior::ModalFooterInputKeyAction::FocusFooter(action)) =
+                        browser_behavior::modal_footer_input_key_action(
+                            key,
+                            event.keystroke.modifiers.shift,
+                            &CONFIRM_DIALOG_FOOTER_ACTIONS,
+                            true,
+                            true,
+                            self.standard_confirm_focus_owner(),
+                            ConfirmDialogAction::Cancel,
+                            None,
+                        )
+                    {
+                        self.ai_entity.update(cx, |ai, cx| {
+                            ai.blur_settings_input(cx);
+                        });
+                        self.set_standard_confirm_focus(action);
+                        self.show_active_input_caret(cx);
+                        cx.notify();
+                    }
+                    return true;
+                }
+                "escape" | "enter" => {
+                    self.ai_entity.update(cx, |ai, cx| {
+                        ai.blur_settings_input(cx);
+                    });
+                    self.clear_ime_selection();
+                    self.show_active_input_caret(cx);
+                    return true;
+                }
+                "backspace" | "delete" if !modifiers.platform && !modifiers.control => {
+                    self.ai_entity.update(cx, |ai, cx| {
+                        ai.pop_settings_input(input, cx);
+                    });
+                    return true;
+                }
+                _ => return true,
+            }
+        }
         let Some(input) = self.focused_settings_input else {
             return false;
         };
@@ -726,32 +804,6 @@ impl WorkspaceApp {
         let modifiers = event.keystroke.modifiers;
 
         match key {
-            "tab" if self.ai.models.mcp_add_dialog.is_some() && input.is_ai_mcp() => {
-                // Tauri MCP add dialog lets Tab leave the active input and enter
-                // the DialogFooter. GPUI settings inputs are manually owned, so
-                // delegate the input-to-footer edge to the shared browser model.
-                if let Some(browser_behavior::ModalFooterInputKeyAction::FocusFooter(action)) =
-                    browser_behavior::modal_footer_input_key_action(
-                        key,
-                        event.keystroke.modifiers.shift,
-                        &CONFIRM_DIALOG_FOOTER_ACTIONS,
-                        true,
-                        true,
-                        self.standard_confirm_focus_owner(),
-                        ConfirmDialogAction::Cancel,
-                        None,
-                    )
-                {
-                    self.focused_settings_input = None;
-                    self.clear_settings_input_draft(input);
-                    self.set_standard_confirm_focus(action);
-                    self.new_connection_caret_visible = true;
-                    cx.notify();
-                    return true;
-                }
-
-                false
-            }
             "escape"
                 if input == SettingsInput::TerminalCommandSpecsJson
                     && self.terminal_command_specs_editor_open =>
@@ -759,13 +811,22 @@ impl WorkspaceApp {
                 // This input belongs to a workspace modal, so Escape dismisses
                 // the editor instead of leaving an unfocused modal behind.
                 self.close_terminal_command_specs_editor(cx);
-                self.new_connection_caret_visible = true;
+                self.show_active_input_caret(cx);
                 true
             }
             "escape" => {
-                self.focused_settings_input = None;
-                self.clear_settings_input_draft(input);
-                self.new_connection_caret_visible = true;
+                if matches!(
+                    input,
+                    SettingsInput::AppLockCurrentPassword
+                        | SettingsInput::AppLockNewPassword
+                        | SettingsInput::AppLockConfirmPassword
+                ) {
+                    self.commit_focused_app_lock_input();
+                } else {
+                    self.focused_settings_input = None;
+                    self.clear_settings_input_draft(input);
+                }
+                self.show_active_input_caret(cx);
                 cx.notify();
                 true
             }
@@ -775,9 +836,18 @@ impl WorkspaceApp {
                     self.apply_settings_input_draft(input, cx);
                     return true;
                 }
-                self.focused_settings_input = None;
-                self.clear_settings_input_draft(input);
-                self.new_connection_caret_visible = true;
+                if matches!(
+                    input,
+                    SettingsInput::AppLockCurrentPassword
+                        | SettingsInput::AppLockNewPassword
+                        | SettingsInput::AppLockConfirmPassword
+                ) {
+                    self.commit_focused_app_lock_input();
+                } else {
+                    self.focused_settings_input = None;
+                    self.clear_settings_input_draft(input);
+                }
+                self.show_active_input_caret(cx);
                 cx.notify();
                 true
             }
@@ -794,8 +864,34 @@ impl WorkspaceApp {
 
     pub(in crate::workspace) fn blur_text_inputs(&mut self, cx: &mut Context<Self>) {
         let mut changed = false;
+        if self
+            .settings_workspace
+            .update(cx, |settings, cx| settings.blur_settings_entity_input(cx))
+        {
+            self.ime_marked_text = None;
+            self.clear_ime_selection();
+            changed = true;
+        }
+        if self
+            .ai_entity
+            .update(cx, |ai, cx| ai.blur_settings_input(cx))
+        {
+            self.ime_marked_text = None;
+            self.clear_ime_selection();
+            changed = true;
+        }
         if let Some(input) = self.focused_settings_input.take() {
-            self.clear_settings_input_draft(input);
+            if matches!(
+                input,
+                SettingsInput::AppLockCurrentPassword
+                    | SettingsInput::AppLockNewPassword
+                    | SettingsInput::AppLockConfirmPassword
+            ) {
+                self.focused_settings_input = Some(input);
+                self.commit_focused_app_lock_input();
+            } else {
+                self.clear_settings_input_draft(input);
+            }
             self.ime_marked_text = None;
             self.clear_ime_selection();
             changed = true;
@@ -805,9 +901,9 @@ impl WorkspaceApp {
             self.close_settings_select();
             changed = true;
         }
-        if self.open_new_connection_select.is_some() {
+        if self.connection_form_state(cx).open_select.is_some() {
             self.ime_marked_text = None;
-            self.close_new_connection_select();
+            self.close_new_connection_select(cx);
             changed = true;
         }
         if self.terminal_command_bar_focused {
@@ -815,88 +911,121 @@ impl WorkspaceApp {
             self.ime_marked_text = None;
             changed = true;
         }
-        if let Some(player) = self.terminal_cast_player.as_mut()
-            && player.search_focused
+        if self
+            .terminal
+            .update(cx, |terminal, _cx| terminal.blur_cast_search())
         {
-            player.search_focused = false;
             self.ime_marked_text = None;
             changed = true;
         }
-        if self.terminal_quick_commands_open || self.terminal_quick_command_pending.is_some() {
-            self.close_terminal_quick_commands_popover();
+        if self.terminal.read(cx).quick_commands.has_open_or_pending() {
+            self.close_terminal_quick_commands_popover(cx);
             changed = true;
         }
-        if self.close_terminal_git_branch_picker() {
+        if self.close_terminal_git_branch_picker(cx) {
             changed = true;
         }
-        if self.session_manager.focused_input.take().is_some() {
+        if self.session_manager.update(cx, |session_manager, cx| {
+            session_manager.clear_input_focus(cx)
+        }) {
             self.ime_marked_text = None;
             changed = true;
         }
-        if self.forwarding_view.focused_input.take().is_some() {
+        if self
+            .forwarding
+            .update(cx, |forwarding, _cx| forwarding.clear_input_focus())
+        {
             self.ime_marked_text = None;
             changed = true;
         }
-        if self.file_manager.focused_input.take().is_some() {
+        if self
+            .file_manager
+            .update(cx, |file_manager, cx| file_manager.clear_input_focus(cx))
+        {
             self.ime_marked_text = None;
             changed = true;
         }
-        if self.launcher.focused_input.take().is_some() {
+        if self
+            .launcher
+            .update(cx, |launcher, cx| launcher.clear_input_focus(cx))
+        {
             self.ime_marked_text = None;
             changed = true;
         }
-        if self.graphics.focused_input.take().is_some() {
+        if self
+            .graphics
+            .update(cx, |graphics, cx| graphics.clear_input_focus(cx))
+        {
             self.ime_marked_text = None;
             changed = true;
         }
-        if self.sftp_view.focused_input.take().is_some() {
+        if self
+            .sftp_view
+            .update(cx, |sftp, cx| sftp.clear_input_focus(cx))
+        {
             self.ime_marked_text = None;
             changed = true;
         }
-        if self.ai.models.selector_search_focused || self.ai.models.selector_open {
+        if self.ai_entity.read(cx).model_selector_search_focused()
+            || self.ai_entity.read(cx).model_selector_open()
+        {
             // The AI model selector can live either in the sidebar portal or
             // inside the terminal inline panel. A generic outside blur should
             // release the searchable select without restoring inline focus.
-            self.ai.models.selector_search_focused = false;
-            self.ai.models.selector_open = false;
-            self.ai.models.selector_scope = None;
-            self.ai.models.selector_focus_origin = None;
-            self.ai.models.selector_search_query.clear();
-            self.ai.models.selector_highlighted_model = None;
+            self.ai_entity.update(cx, |ai, _cx| {
+                ai.close_model_selector();
+            });
             self.ime_marked_text = None;
             changed = true;
         }
-        if self.ai.chat.inline_panel.prompt_focused {
+        if self
+            .ai_entity
+            .read(cx)
+            .terminal_inline_panel()
+            .prompt_focused
+        {
             // The inline AI prompt is rendered inside the terminal pane rather
             // than as a normal form control, so it must explicitly join the
             // shared blur path or it remains the active IME target after an
             // outside click.
-            self.ai.chat.inline_panel.prompt_focused = false;
+            self.ai_entity.update(cx, |ai, _cx| {
+                ai.terminal_inline_panel_mut().prompt_focused = false;
+            });
             self.ime_marked_text = None;
             changed = true;
         }
-        if self.ai.chat.input_focused {
-            self.ai.chat.input_focused = false;
-            self.ai.chat.autocomplete_suppressed = true;
+        if self.ai_entity.read(cx).chat_ui().input_focused {
+            self.ai_entity.update(cx, |ai, _cx| {
+                ai.blur_chat_input(true);
+            });
             self.ime_marked_text = None;
             changed = true;
         }
-        if self.ai.chat.editing_message_focused {
-            self.ai.chat.editing_message_focused = false;
+        if self.ai_entity.read(cx).chat_ui().editing_message_focused {
+            self.ai_entity.update(cx, |ai, _cx| {
+                ai.blur_message_edit();
+            });
             self.ime_marked_text = None;
             changed = true;
         }
-        if let Some(form) = self.new_connection_form.as_mut()
-            && form.field_focused
-        {
+        let blurred_connection_form = self.update_connection_form_state(cx, |state| {
+            let Some(form) = state.form.as_mut() else {
+                return false;
+            };
+            if !form.field_focused {
+                return false;
+            }
             form.field_focused = false;
             form.selected_field = None;
+            true
+        });
+        if blurred_connection_form {
             self.ime_marked_text = None;
             changed = true;
         }
         if changed {
             self.clear_ime_selection();
-            self.new_connection_caret_visible = true;
+            self.show_active_input_caret(cx);
             cx.notify();
         }
     }
@@ -1000,16 +1129,97 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) {
         self.close_settings_select();
+        let entity_owned_input = self
+            .settings_workspace
+            .read(cx)
+            .settings_entity_input_value(input)
+            .is_some();
+        if entity_owned_input {
+            self.ai_entity.update(cx, |ai, cx| {
+                ai.blur_settings_input(cx);
+            });
+            if let Some(previous_input) = self.focused_settings_input.take() {
+                self.clear_settings_input_draft(previous_input);
+            }
+            self.settings_workspace.update(cx, |settings, cx| {
+                settings.focus_settings_entity_input(input, cx);
+            });
+            self.clear_ime_selection();
+            self.show_active_input_caret(cx);
+            cx.notify();
+            return;
+        }
+        if ai_state::AiWorkspaceEntity::owns_settings_input(input) {
+            if let Some(previous_input) = self.focused_settings_input.take() {
+                self.clear_settings_input_draft(previous_input);
+            }
+            self.settings_workspace.update(cx, |settings, cx| {
+                settings.blur_settings_entity_input(cx);
+            });
+            self.ai_entity.update(cx, |ai, cx| {
+                ai.focus_settings_input(input, cx);
+            });
+            self.clear_ime_selection();
+            self.show_active_input_caret(cx);
+            cx.notify();
+            return;
+        }
+        self.settings_workspace.update(cx, |settings, cx| {
+            settings.blur_settings_entity_input(cx);
+        });
+        self.ai_entity.update(cx, |ai, cx| {
+            ai.blur_settings_input(cx);
+        });
+        let app_lock_input = matches!(
+            input,
+            SettingsInput::AppLockCurrentPassword
+                | SettingsInput::AppLockNewPassword
+                | SettingsInput::AppLockConfirmPassword
+        );
+        let cloud_sync_input = {
+            let cloud_sync = self.cloud_sync.read(cx);
+            cloud_sync_form_input_value_ref(&cloud_sync.view.form, input).is_some()
+        };
+        if app_lock_input && self.focused_settings_input == Some(input) {
+            self.clear_ime_selection();
+            self.show_active_input_caret(cx);
+            cx.notify();
+            return;
+        }
         if let Some(previous_input) = self
             .focused_settings_input
             .filter(|previous| *previous != input)
         {
-            self.clear_settings_input_draft(previous_input);
+            if matches!(
+                previous_input,
+                SettingsInput::AppLockCurrentPassword
+                    | SettingsInput::AppLockNewPassword
+                    | SettingsInput::AppLockConfirmPassword
+            ) {
+                self.commit_focused_app_lock_input();
+            } else if self.commit_focused_cloud_sync_input(previous_input, cx) {
+                self.focused_settings_input = None;
+            } else {
+                self.clear_settings_input_draft(previous_input);
+            }
         }
         self.focused_settings_input = Some(input);
         self.clear_ime_selection();
-        self.settings_input_draft = current_value;
-        self.new_connection_caret_visible = true;
+        self.settings_input_draft = if app_lock_input {
+            // Move the active secret into the editor so only one owner exists.
+            self.take_app_lock_input_value(input).unwrap_or_default()
+        } else if cloud_sync_input {
+            // Cloud Sync form values move into the root only while it acts as
+            // the focused IME adapter. No second secret buffer is created.
+            self.cloud_sync
+                .update(cx, |cloud_sync, _cx| {
+                    take_cloud_sync_form_input_value(&mut cloud_sync.view.form, input)
+                })
+                .unwrap_or_default()
+        } else {
+            current_value
+        };
+        self.show_active_input_caret(cx);
         cx.notify();
     }
 
@@ -1027,15 +1237,14 @@ impl WorkspaceApp {
         self.settings_input_draft.clear();
     }
 
-    pub(in crate::workspace) fn apply_focused_cloud_sync_input_draft(&mut self) -> bool {
+    pub(in crate::workspace) fn apply_focused_cloud_sync_input_draft(
+        &mut self,
+        cx: &mut Context<Self>,
+    ) -> bool {
         let Some(input) = self.focused_settings_input else {
             return false;
         };
-        if !apply_cloud_sync_form_input_draft(
-            &mut self.cloud_sync.view.form,
-            input,
-            &self.settings_input_draft,
-        ) {
+        if !self.commit_focused_cloud_sync_input(input, cx) {
             return false;
         }
         // Cloud Sync configuration commits can be triggered by tab/action
@@ -1046,78 +1255,107 @@ impl WorkspaceApp {
         true
     }
 
+    fn commit_focused_cloud_sync_input(
+        &mut self,
+        input: SettingsInput,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let draft = std::mem::take(&mut self.settings_input_draft);
+        match self.cloud_sync.update(cx, |cloud_sync, cx| {
+            let result = apply_cloud_sync_form_input_owned(&mut cloud_sync.view.form, input, draft);
+            if result.is_ok() {
+                cx.notify();
+            }
+            result
+        }) {
+            Ok(()) => true,
+            Err(draft) => {
+                self.settings_input_draft = draft;
+                false
+            }
+        }
+    }
+
     pub(in crate::workspace) fn current_settings_input_value(
         &self,
         input: SettingsInput,
+        cx: &Context<Self>,
     ) -> String {
+        if input.is_secret() {
+            // Generic render/focus snapshots must never duplicate credentials.
+            // Secret owners expose masked views or move the draft at focus.
+            return String::new();
+        }
         let settings = self.settings_store.settings();
         if let Some(value) = persisted_settings_input_value(settings, input) {
             return value;
         }
-        if let Some(value) = self.settings_page.page_input_value(input) {
-            return value;
+        if let Some(value) = self.ai_entity.read(cx).settings_input_value(input) {
+            return value.to_owned();
         }
-        if let Some(value) = ai_mcp_draft_input_value(self.ai.models.mcp_add_dialog.as_ref(), input)
+        if let Some(value) = self
+            .settings_workspace
+            .read(cx)
+            .settings_entity_input_value(input)
         {
-            return value;
+            // This copy is only made at an explicit focus/action boundary;
+            // render paths borrow the Entity-owned theme draft directly.
+            return value.to_owned();
         }
-        if let Some(value) = cloud_sync_form_input_value(&self.cloud_sync.view.form, input) {
-            return value;
+        if let Some(value) =
+            cloud_sync_form_input_value_ref(&self.cloud_sync.read(cx).view.form, input)
+        {
+            // Secret fields are moved into the focused IME adapter through
+            // `focus_settings_input`; this generic snapshot path must not copy
+            // their contents.
+            return if input.is_secret() {
+                String::new()
+            } else {
+                value.to_owned()
+            };
         }
         match input {
             SettingsInput::TerminalCommandSpecsJson => {
                 self.terminal_command_specs_editor_initial_value()
             }
             SettingsInput::NativePluginInstallUrl => {
-                self.native_plugin_manager.install_url_draft.clone()
+                self.plugin_manager_state(cx).install_url_draft.clone()
             }
             SettingsInput::NativePluginInstallChecksum => {
-                self.native_plugin_manager.install_checksum_draft.clone()
+                self.plugin_manager_state(cx).install_checksum_draft.clone()
             }
             SettingsInput::NativePluginRegistryUrl => {
-                self.native_plugin_manager.registry_url_draft.clone()
+                self.plugin_manager_state(cx).registry_url_draft.clone()
             }
-            SettingsInput::PortableCurrentPassword => self.portable_current_password.clone(),
-            SettingsInput::PortableNewPassword => self.portable_new_password.clone(),
-            SettingsInput::PortableConfirmPassword => self.portable_confirm_password.clone(),
+            SettingsInput::PortableCurrentPassword
+            | SettingsInput::PortableNewPassword
+            | SettingsInput::PortableConfirmPassword => String::new(),
             SettingsInput::AppLockCurrentPassword
             | SettingsInput::AppLockNewPassword
-            | SettingsInput::AppLockConfirmPassword => self.app_lock_input_value(input).to_string(),
-            SettingsInput::ManagedKeyFilePath => self.settings_managed_key_file_path.clone(),
-            SettingsInput::ManagedKeyFileName => self.settings_managed_key_file_name.clone(),
-            SettingsInput::ManagedKeyFilePassphrase => {
-                self.settings_managed_key_file_passphrase.clone()
-            }
-            SettingsInput::ManagedKeyPasteName => self.settings_managed_key_paste_name.clone(),
-            SettingsInput::ManagedKeyPastePrivateKey => {
-                self.settings_managed_key_paste_private_key.clone()
-            }
-            SettingsInput::ManagedKeyPastePassphrase => {
-                self.settings_managed_key_paste_passphrase.clone()
-            }
-            SettingsInput::ManagedKeyRenameName => self.settings_managed_key_rename_name.clone(),
-            SettingsInput::ConnectionImportTargetGroup => {
-                self.settings_connection_import_target_group.clone()
-            }
-            SettingsInput::LocalPrivilegeLabel => self.settings_local_privilege_draft.label.clone(),
-            SettingsInput::LocalPrivilegeUsernameHint => {
-                self.settings_local_privilege_draft.username_hint.clone()
-            }
-            SettingsInput::LocalPrivilegeSecret => {
-                self.settings_local_privilege_draft.secret.clone()
-            }
-            SettingsInput::LocalPrivilegePromptPatterns => {
-                self.settings_local_privilege_draft.prompt_patterns.clone()
-            }
+            | SettingsInput::AppLockConfirmPassword => String::new(),
+            SettingsInput::ManagedKeyFilePath
+            | SettingsInput::ManagedKeyFileName
+            | SettingsInput::ManagedKeyFilePassphrase
+            | SettingsInput::ManagedKeyPasteName
+            | SettingsInput::ManagedKeyPastePrivateKey
+            | SettingsInput::ManagedKeyPastePassphrase
+            | SettingsInput::ManagedKeyRenameName
+            | SettingsInput::ConnectionImportTargetGroup => String::new(),
+            SettingsInput::LocalPrivilegeLabel
+            | SettingsInput::LocalPrivilegeUsernameHint
+            | SettingsInput::LocalPrivilegeSecret
+            | SettingsInput::LocalPrivilegePromptPatterns => String::new(),
             SettingsInput::PluginSetting(index) => self
-                .native_plugin_runtime
-                .registry
+                .plugin_entity
+                .read(cx)
+                .registry()
                 .contributions()
                 .settings
                 .get(index)
                 .and_then(|setting| {
-                    self.native_plugin_runtime
-                        .registry
+                    self.plugin_entity
+                        .read(cx)
+                        .registry()
                         .plugin_setting_value(&setting.plugin_id, &setting.definition.id)
                 })
                 .map(|value| plugin_setting_input_value(&value))
@@ -1148,146 +1386,73 @@ impl WorkspaceApp {
             SettingsInputDraftApply::Unhandled => {}
         }
 
-        if self
-            .settings_page
-            .apply_page_input_draft(input, &self.settings_input_draft)
-        {
+        if ai_state::AiWorkspaceEntity::owns_settings_input(input) {
+            // Entity-owned inputs are updated directly by the IME adapter and
+            // must not be copied into the legacy settings page model.
             cx.notify();
             return;
         }
-        if apply_cloud_sync_form_input_draft(
-            &mut self.cloud_sync.view.form,
-            input,
-            &self.settings_input_draft,
-        ) {
+        let cloud_sync_input = {
+            let cloud_sync = self.cloud_sync.read(cx);
+            cloud_sync_form_input_value_ref(&cloud_sync.view.form, input).is_some()
+        };
+        if cloud_sync_input {
+            // The root draft remains the only owner while the IME is focused;
+            // persistence moves it back through `apply_focused_*`.
             cx.notify();
             return;
         }
-        if apply_ai_mcp_draft_input(
-            self.ai.models.mcp_add_dialog.as_mut(),
-            input,
-            &self.settings_input_draft,
-        ) {
-            cx.notify();
-            return;
-        }
-
         match input {
             SettingsInput::TerminalCommandSpecsJson => {
                 cx.notify();
             }
-            SettingsInput::AiProviderApiKey(_) => {
-                cx.notify();
-            }
             SettingsInput::NativePluginInstallUrl => {
-                self.native_plugin_manager.install_url_draft =
-                    self.settings_input_draft.trim().to_string();
+                let draft = self.settings_input_draft.trim().to_string();
+                self.update_plugin_manager_state(cx, |manager| {
+                    manager.install_url_draft = draft;
+                });
                 cx.notify();
             }
             SettingsInput::NativePluginInstallChecksum => {
-                self.native_plugin_manager.install_checksum_draft =
-                    self.settings_input_draft.trim().to_string();
+                let draft = self.settings_input_draft.trim().to_string();
+                self.update_plugin_manager_state(cx, |manager| {
+                    manager.install_checksum_draft = draft;
+                });
                 cx.notify();
             }
             SettingsInput::NativePluginRegistryUrl => {
-                self.native_plugin_manager.registry_url_draft =
-                    self.settings_input_draft.trim().to_string();
+                let draft = self.settings_input_draft.trim().to_string();
+                self.update_plugin_manager_state(cx, |manager| {
+                    manager.registry_url_draft = draft;
+                });
                 cx.notify();
             }
-            SettingsInput::PortableCurrentPassword => {
-                zeroize::Zeroize::zeroize(&mut self.portable_current_password);
-                self.portable_current_password = self.settings_input_draft.clone();
-                cx.notify();
-            }
-            SettingsInput::PortableNewPassword => {
-                zeroize::Zeroize::zeroize(&mut self.portable_new_password);
-                self.portable_new_password = self.settings_input_draft.clone();
-                cx.notify();
-            }
-            SettingsInput::PortableConfirmPassword => {
-                zeroize::Zeroize::zeroize(&mut self.portable_confirm_password);
-                self.portable_confirm_password = self.settings_input_draft.clone();
-                cx.notify();
-            }
+            SettingsInput::PortableCurrentPassword
+            | SettingsInput::PortableNewPassword
+            | SettingsInput::PortableConfirmPassword => {}
             SettingsInput::AppLockCurrentPassword
             | SettingsInput::AppLockNewPassword
-            | SettingsInput::AppLockConfirmPassword => {
-                let draft = self.settings_input_draft.clone();
-                let _ = self.set_app_lock_input_value(input, &draft);
-                cx.notify();
-            }
-            SettingsInput::ManagedKeyFilePath => {
-                self.settings_managed_key_file_path = self.settings_input_draft.clone();
-                cx.notify();
-            }
-            SettingsInput::ManagedKeyFileName => {
-                self.settings_managed_key_file_name = self.settings_input_draft.clone();
-                cx.notify();
-            }
-            SettingsInput::ManagedKeyFilePassphrase => {
-                zeroize::Zeroize::zeroize(&mut self.settings_managed_key_file_passphrase);
-                self.settings_managed_key_file_passphrase = self.settings_input_draft.clone();
-                cx.notify();
-            }
-            SettingsInput::ManagedKeyPasteName => {
-                self.settings_managed_key_paste_name = self.settings_input_draft.clone();
-                cx.notify();
-            }
-            SettingsInput::ManagedKeyPastePrivateKey => {
-                zeroize::Zeroize::zeroize(&mut self.settings_managed_key_paste_private_key);
-                self.settings_managed_key_paste_private_key = self.settings_input_draft.clone();
-                cx.notify();
-            }
-            SettingsInput::ManagedKeyPastePassphrase => {
-                zeroize::Zeroize::zeroize(&mut self.settings_managed_key_paste_passphrase);
-                self.settings_managed_key_paste_passphrase = self.settings_input_draft.clone();
-                cx.notify();
-            }
-            SettingsInput::ManagedKeyRenameName => {
-                self.settings_managed_key_rename_name = self.settings_input_draft.clone();
-                cx.notify();
-            }
-            SettingsInput::ConnectionImportTargetGroup => {
-                self.settings_connection_import_target_group = self.settings_input_draft.clone();
-                cx.notify();
-            }
-            SettingsInput::LocalPrivilegeLabel => {
-                self.settings_local_privilege_draft.label = self.settings_input_draft.clone();
-                self.settings_local_privilege_error = None;
-                cx.notify();
-            }
-            SettingsInput::LocalPrivilegeUsernameHint => {
-                self.settings_local_privilege_draft.username_hint =
-                    self.settings_input_draft.clone();
-                self.settings_local_privilege_error = None;
-                cx.notify();
-            }
-            SettingsInput::LocalPrivilegeSecret => {
-                zeroize::Zeroize::zeroize(&mut self.settings_local_privilege_draft.secret);
-                self.settings_local_privilege_draft.secret = self.settings_input_draft.clone();
-                self.settings_local_privilege_error = None;
-                cx.notify();
-            }
-            SettingsInput::LocalPrivilegePromptPatterns => {
-                self.settings_local_privilege_draft.prompt_patterns =
-                    self.settings_input_draft.clone();
-                self.settings_local_privilege_error = None;
-                cx.notify();
-            }
-            SettingsInput::NetworkProxyTestHost => {
-                self.settings_network_proxy_test_host = self.settings_input_draft.clone();
-                self.settings_network_proxy_test_status = None;
-                cx.notify();
-            }
-            SettingsInput::NetworkProxyTestPort => {
-                self.settings_network_proxy_test_port = self.settings_input_draft.clone();
-                self.settings_network_proxy_test_status = None;
-                cx.notify();
-            }
+            | SettingsInput::AppLockConfirmPassword => {}
+            SettingsInput::ManagedKeyFilePath
+            | SettingsInput::ManagedKeyFileName
+            | SettingsInput::ManagedKeyFilePassphrase
+            | SettingsInput::ManagedKeyPasteName
+            | SettingsInput::ManagedKeyPastePrivateKey
+            | SettingsInput::ManagedKeyPastePassphrase
+            | SettingsInput::ManagedKeyRenameName
+            | SettingsInput::ConnectionImportTargetGroup => {}
+            SettingsInput::LocalPrivilegeLabel
+            | SettingsInput::LocalPrivilegeUsernameHint
+            | SettingsInput::LocalPrivilegeSecret
+            | SettingsInput::LocalPrivilegePromptPatterns => {}
+            SettingsInput::NetworkProxyPassword
+            | SettingsInput::NetworkProxyTestHost
+            | SettingsInput::NetworkProxyTestPort => {}
             SettingsInput::PluginSetting(index) => {
                 let Some(setting) = self
-                    .native_plugin_runtime
-                    .registry
+                    .plugin_entity
+                    .read(cx)
+                    .registry()
                     .contributions()
                     .settings
                     .get(index)
@@ -1302,9 +1467,11 @@ impl WorkspaceApp {
                 ) {
                     Ok(value) => value,
                     Err(error) => {
-                        self.native_plugin_runtime
-                            .registry
-                            .record_manager_error(setting.plugin_id.clone(), error);
+                        self.plugin_entity.update(cx, |plugins, _cx| {
+                            plugins
+                                .registry_mut()
+                                .record_manager_error(setting.plugin_id.clone(), error);
+                        });
                         cx.notify();
                         return;
                     }
@@ -1315,9 +1482,11 @@ impl WorkspaceApp {
                     value,
                     cx,
                 ) {
-                    self.native_plugin_runtime
-                        .registry
-                        .record_manager_error(setting.plugin_id.clone(), error);
+                    self.plugin_entity.update(cx, |plugins, _cx| {
+                        plugins
+                            .registry_mut()
+                            .record_manager_error(setting.plugin_id.clone(), error);
+                    });
                 }
                 cx.notify();
             }
@@ -1469,36 +1638,14 @@ impl WorkspaceApp {
             slider_pointer_percent(x - left, width, self.tokens.metrics.ui_slider_thumb_size);
         let value = (percent * 20.0).round() as i64;
         let persisted_background_blur = self.settings_store.settings().terminal.background_blur;
-        let Some(generation) = self
-            .settings_page
-            .update_background_blur_preview(persisted_background_blur, value)
-        else {
-            return;
-        };
-        cx.notify();
-
-        cx.spawn(async move |weak, cx| {
-            Timer::after(Duration::from_millis(150)).await;
-            let _ = weak.update(cx, |this, cx| {
-                this.commit_background_blur_preview(generation, cx);
-            });
-        })
-        .detach();
-    }
-
-    pub(in crate::workspace) fn commit_background_blur_preview(
-        &mut self,
-        generation: u64,
-        cx: &mut Context<Self>,
-    ) {
-        let Some(value) = self.settings_page.take_background_blur_preview(generation) else {
-            return;
-        };
-        if self.settings_store.settings().terminal.background_blur != value {
-            self.edit_settings(|settings| settings.terminal.background_blur = value, cx);
-        } else {
-            cx.notify();
-        }
+        self.settings_workspace.update(cx, |settings, cx| {
+            settings.update_background_blur_preview(
+                persisted_background_blur,
+                value,
+                BACKGROUND_BLUR_COMMIT_DELAY,
+                cx,
+            );
+        });
     }
 }
 

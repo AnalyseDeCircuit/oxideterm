@@ -7,8 +7,16 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let mut opts = self.localized_markdown_options();
-        if self.sftp_view.preview_pane == Some(SftpPane::Local)
-            && let Some(source_path) = self.sftp_view.preview_path.as_deref()
+        let (preview_pane, preview_path, markdown_scroll) = {
+            let sftp_view = self.sftp_view.read(cx);
+            (
+                sftp_view.preview_pane,
+                sftp_view.preview_path.clone(),
+                sftp_view.preview_markdown_scroll.clone(),
+            )
+        };
+        if preview_pane == Some(SftpPane::Local)
+            && let Some(source_path) = preview_path.as_deref()
         {
             // Only local previews can resolve relative markdown images directly.
             // Remote SFTP markdown needs a separate asset cache before paths are
@@ -20,12 +28,11 @@ impl WorkspaceApp {
             .size_full()
             .p(px(16.0))
             .child(markdown_virtual_with_code_actions(
-                cx.entity(),
                 "sftp-preview-markdown-virtual",
                 &self.tokens,
                 source,
                 &opts,
-                &self.sftp_view.preview_markdown_scroll,
+                &markdown_scroll,
                 &code_actions,
             ))
             .into_any_element()
@@ -38,15 +45,22 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
-        if let Some(error) = self.sftp_view.preview_font_error.as_ref() {
+        let (font_error, font_family, font_size) = {
+            let sftp_view = self.sftp_view.read(cx);
+            (
+                sftp_view.preview_font_error.clone(),
+                sftp_view.preview_font_family.clone(),
+                sftp_view.preview_font_size,
+            )
+        };
+        if let Some(error) = font_error.as_deref() {
             return self
                 .render_sftp_native_asset_status("Font", path, mime_type, error, cx)
                 .into_any_element();
         }
-        let Some(font_family) = self.sftp_view.preview_font_family.clone() else {
+        let Some(font_family) = font_family else {
             return self.render_sftp_preview_text(self.i18n.t("sftp.preview.loading"));
         };
-        let font_size = self.sftp_view.preview_font_size;
         let sample_font = SharedString::from(font_family.clone());
         div()
             .size_full()
@@ -66,10 +80,12 @@ impl WorkspaceApp {
                         "-",
                         false,
                         cx.listener(|this, _event, _window, cx| {
-                            this.sftp_view.preview_font_size =
-                                (this.sftp_view.preview_font_size - 4.0).max(8.0);
+                            this.sftp_view.update(cx, |sftp_view, cx| {
+                                sftp_view.preview_font_size =
+                                    (sftp_view.preview_font_size - 4.0).max(8.0);
+                                cx.notify();
+                            });
                             cx.stop_propagation();
-                            cx.notify();
                         }),
                     ))
                     .child(
@@ -84,10 +100,12 @@ impl WorkspaceApp {
                         "+",
                         false,
                         cx.listener(|this, _event, _window, cx| {
-                            this.sftp_view.preview_font_size =
-                                (this.sftp_view.preview_font_size + 4.0).min(120.0);
+                            this.sftp_view.update(cx, |sftp_view, cx| {
+                                sftp_view.preview_font_size =
+                                    (sftp_view.preview_font_size + 4.0).min(120.0);
+                                cx.notify();
+                            });
                             cx.stop_propagation();
-                            cx.notify();
                         }),
                     ))
                     .children([16.0, 24.0, 32.0, 48.0, 72.0].into_iter().map(|size| {
@@ -95,9 +113,11 @@ impl WorkspaceApp {
                             format!("{size:.0}"),
                             (font_size - size).abs() < f32::EPSILON,
                             cx.listener(move |this, _event, _window, cx| {
-                                this.sftp_view.preview_font_size = size;
+                                this.sftp_view.update(cx, |sftp_view, cx| {
+                                    sftp_view.preview_font_size = size;
+                                    cx.notify();
+                                });
                                 cx.stop_propagation();
-                                cx.notify();
                             }),
                         )
                     }))
@@ -116,7 +136,7 @@ impl WorkspaceApp {
                     .id("sftp-font-preview-scroll")
                     .flex_1()
                     .selectable_overflow_y_scroll(
-                        &self.selectable_text_scroll_handle("sftp-font-preview-scroll"),
+                        &self.sftp_view.read(cx).font_preview_scroll,
                     )
                     .p(px(24.0))
                     .bg(rgb(theme.bg_sunken))
@@ -257,9 +277,9 @@ impl WorkspaceApp {
             .into_any_element()
     }
 
-    pub(in crate::workspace::sftp) fn sftp_preview_uses_virtual_text(&self) -> bool {
+    pub(in crate::workspace::sftp) fn sftp_preview_uses_virtual_text(&self, cx: &App) -> bool {
         matches!(
-            self.sftp_view.preview_content.as_ref(),
+            self.sftp_view.read(cx).preview_content.as_deref(),
             Some(PreviewContent::Text { .. })
         )
     }
@@ -268,6 +288,7 @@ impl WorkspaceApp {
         &self,
         source: &str,
         language: Option<&str>,
+        cx: &App,
     ) -> AnyElement {
         let theme = self.tokens.ui;
         let opts = MarkdownOptions::from_theme(&self.tokens);
@@ -279,7 +300,7 @@ impl WorkspaceApp {
         let row_count = lines.len();
         let list_lines = lines;
         let font_family = settings_mono_font_family(self.settings_store.settings());
-        let scroll = self.sftp_view.preview_code_scroll.clone();
+        let scroll = self.sftp_view.read(cx).preview_code_scroll.clone();
         div()
             .size_full()
             .bg(rgb(theme.bg_sunken))

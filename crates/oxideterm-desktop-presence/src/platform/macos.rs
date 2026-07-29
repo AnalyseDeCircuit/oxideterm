@@ -6,7 +6,7 @@ use objc2::{MainThreadMarker, rc::Retained};
 use objc2_app_kit::{NSApplication, NSView, NSWindow};
 use raw_window_handle::RawWindowHandle;
 
-use crate::{DesktopPresenceEvent, DesktopPresenceMenu};
+use crate::{DesktopPresenceDeliverySender, DesktopPresenceMenu};
 
 static MAIN_WINDOW: AtomicUsize = AtomicUsize::new(0);
 static QUIT_REQUESTED: AtomicBool = AtomicBool::new(false);
@@ -16,7 +16,7 @@ pub(crate) fn install_for_window(
     window: &mut Window,
     cx: &App,
     _menu: DesktopPresenceMenu,
-    _tx: std::sync::mpsc::Sender<DesktopPresenceEvent>,
+    _tx: DesktopPresenceDeliverySender,
 ) -> anyhow::Result<()> {
     let ns_window = main_window(window)?;
     MAIN_WINDOW.store(ns_window as usize, Ordering::SeqCst);

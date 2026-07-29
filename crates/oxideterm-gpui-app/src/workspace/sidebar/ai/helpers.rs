@@ -11,6 +11,7 @@ impl WorkspaceApp {
         source: &str,
         options: &MarkdownOptions,
         cacheable: bool,
+        cx: &App,
     ) -> AiCachedMarkdownDocument {
         if !cacheable {
             let document = markdown_parser::parse(source);
@@ -18,10 +19,7 @@ impl WorkspaceApp {
             return AiCachedMarkdownDocument { document, layout };
         }
 
-        if let Some(cached) = self
-            .ai
-            .chat
-            .markdown_cache
+        if let Some(cached) = self.ai_entity.read(cx).chat_ui().markdown_cache
             .borrow()
             .documents
             .get(source)
@@ -33,7 +31,7 @@ impl WorkspaceApp {
         let document = markdown_parser::parse(source);
         let layout = MarkdownBlockLayout::from_document(&document, options);
         let cached = AiCachedMarkdownDocument { document, layout };
-        let mut cache = self.ai.chat.markdown_cache.borrow_mut();
+        let mut cache = self.ai_entity.read(cx).chat_ui().markdown_cache.borrow_mut();
         if !cache.documents.contains_key(source) {
             cache.insertion_order.push_back(source.to_string());
         }

@@ -29,7 +29,7 @@ pub(super) fn run_remote_desktop_worker(
     generation: u64,
     profile: RemoteDesktopConnectionProfile,
     provider: RemoteDesktopProviderManifest,
-    password: Option<RemoteDesktopSecret>,
+    password_available: bool,
     initial_size: RemoteDesktopSize,
     scale_factor: Option<u32>,
     monitor_layout: RemoteDesktopMonitorLayout,
@@ -59,7 +59,7 @@ pub(super) fn run_remote_desktop_worker(
             worker_id,
             profile,
             provider,
-            password,
+            password_available,
             initial_size,
             scale_factor,
             monitor_layout,
@@ -118,7 +118,7 @@ pub(super) fn default_remote_desktop_initial_size() -> RemoteDesktopSize {
 }
 
 pub(super) fn initial_remote_desktop_sizes_for_session(
-    session: &RemoteDesktopSession,
+    session: &RemoteDesktopSessionEntity,
 ) -> (RemoteDesktopSize, Option<RemoteDesktopSize>) {
     if let Some(viewport_size) = session.geometry.viewport_size() {
         let viewport_size = RemoteDesktopSize::clamped(viewport_size.width, viewport_size.height);

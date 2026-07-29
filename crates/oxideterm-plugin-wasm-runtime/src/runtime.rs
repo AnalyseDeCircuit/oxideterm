@@ -194,10 +194,29 @@ impl NativeWasmPluginRuntime {
         &mut self,
         messages: Vec<PluginOutboundMessage>,
     ) -> Result<(), PluginError> {
+        let mut messages = messages;
+        if messages
+            .iter()
+            .any(|message| message.host_call_sensitivity().is_sensitive())
+        {
+            for message in &mut messages {
+                message.zeroize_sensitive_host_call_args();
+            }
+            return Err(PluginError::protocol(
+                "wasm_sensitive_host_call_unsupported",
+                "Wasm runtime cannot emit a sensitive host call",
+            ));
+        }
         for message in messages {
+            let supervisor_message = message.clone_public().ok_or_else(|| {
+                PluginError::protocol(
+                    "sensitive_host_call_clone_rejected",
+                    "Sensitive host calls cannot enter the Wasm audit path",
+                )
+            })?;
             let effect = self
                 .supervisor
-                .handle_outbound_message(message.clone())
+                .handle_outbound_message(supervisor_message)
                 .map_err(|error| {
                     PluginError::protocol(
                         "wasm_outbound_rejected",

@@ -782,6 +782,39 @@ pub struct SaveConnectionRequest {
     pub post_connect_command: Option<String>,
 }
 
+/// Returns the original plaintext allocations after persistence for one runtime handoff.
+///
+/// The saved record never owns these values. Dropping this bundle zeroizes every secret.
+pub struct SavedConnectionRuntimeSecrets {
+    pub auth: Option<SecretString>,
+    pub proxy_chain: Vec<Option<SecretString>>,
+    pub upstream_proxy: Option<SecretString>,
+}
+
+impl fmt::Debug for SavedConnectionRuntimeSecrets {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("SavedConnectionRuntimeSecrets")
+            .field("auth", &self.auth.as_ref().map(|_| "[redacted secret]"))
+            .field(
+                "proxy_chain",
+                &self
+                    .proxy_chain
+                    .iter()
+                    .map(|secret| secret.as_ref().map(|_| "[redacted secret]"))
+                    .collect::<Vec<_>>(),
+            )
+            .field(
+                "upstream_proxy",
+                &self
+                    .upstream_proxy
+                    .as_ref()
+                    .map(|_| "[redacted secret]"),
+            )
+            .finish()
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ConnectionStoreData {
     #[serde(default = "default_config_version")]

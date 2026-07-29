@@ -133,6 +133,7 @@
         "invalid_nice": "Nhập giá trị nice từ -20 đến 19.",
         "connection_missing": "Kết nối đã chọn không còn khả dụng.",
         "action_failed": "Thao tác tiến trình thất bại.",
+        "action_succeeded": "Đã hoàn tất thao tác tiến trình cho PID {{pid}}.",
         "partial_support": "Quản lý tiến trình chỉ được hỗ trợ một phần trên {{os}}."
       }
     },
@@ -191,7 +192,8 @@
         "exec_opened": "Đã mở shell cho {{name}}.",
         "follow_opened": "Đang theo dõi log của {{name}}.",
         "connection_missing": "Kết nối đã chọn không còn khả dụng.",
-        "action_failed": "Thao tác Docker thất bại."
+        "action_failed": "Thao tác Docker thất bại.",
+        "action_succeeded": "Đã hoàn tất thao tác Docker cho {{name}}."
       }
     },
     "host_services": {
@@ -267,6 +269,7 @@
         "follow_opened": "Đang theo dõi nhật ký của {{name}}.",
         "connection_missing": "Kết nối đã chọn không còn khả dụng.",
         "action_failed": "Thao tác dịch vụ thất bại.",
+        "action_succeeded": "Đã hoàn tất thao tác dịch vụ cho {{name}}.",
         "partial_support": "Quản lý dịch vụ chỉ được hỗ trợ một phần trên {{os}}."
       }
     },
@@ -379,6 +382,7 @@
         "new_session_opened": "Đang mở {{name}}.",
         "action_already_running": "Một thao tác tmux đang chạy.",
         "action_failed": "Thao tác tmux thất bại.",
+        "action_succeeded": "Đã hoàn tất thao tác tmux cho {{target}}.",
         "unknown_error": "Lỗi không rõ",
         "input_required": "Nhập một giá trị trước khi tiếp tục."
       },

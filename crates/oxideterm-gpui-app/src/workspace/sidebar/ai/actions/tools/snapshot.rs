@@ -1,6 +1,32 @@
 pub(in crate::workspace) const AI_CONNECT_TARGET_TIMEOUT_TICKS: usize = 900;
 pub(in crate::workspace) const AI_CONNECT_TARGET_POLL_INTERVAL_MS: u64 = 100;
 
+pub(in crate::workspace) fn ai_model_visible_settings_projection(
+    settings: &oxideterm_settings::PersistedSettings,
+) -> serde_json::Value {
+    // Only explicitly approved, non-secret settings may cross the model boundary.
+    serde_json::json!({
+        "ai": {
+            "enabled": settings.ai.enabled,
+            "toolUse": {
+                "enabled": settings.ai.tool_use.enabled,
+                "maxRounds": settings.ai.tool_use.max_rounds,
+                "maxCallsPerRound": settings.ai.tool_use.max_calls_per_round,
+                "autoApproveTools": settings.ai.tool_use.auto_approve_tools,
+                "disabledTools": settings.ai.tool_use.disabled_tools,
+            },
+        },
+        "terminal": {
+            "renderer": settings.terminal.renderer,
+            "encoding": settings.terminal.terminal_encoding,
+        },
+        "sftp": {
+            "directoryParallelism": settings.sftp.directory_parallelism,
+            "transferProtocol": settings.sftp.transfer_protocol,
+        }
+    })
+}
+
 fn ai_target_projection(target: &AiOrchestratorTarget) -> oxideterm_ai::AiTargetProjection {
     // Runtime snapshots stay app-owned; only their content-free DTO shape crosses
     // into the AI domain projection layer.
@@ -41,7 +67,7 @@ pub(in crate::workspace) fn ai_sftp_target_for_node(
             node_id: node_id.0.clone(),
             session_id: sftp_session_id,
             connection_id: node.saved_connection_id.clone(),
-            host: node.config.host.clone(),
+            host: node.endpoint.host.clone(),
         },
     ))
 }
@@ -134,7 +160,7 @@ impl WorkspaceApp {
             });
         }
 
-        for tab in &self.tabs {
+        for tab in self.tabs(cx) {
             let mut refs = BTreeMap::new();
             refs.insert("tabId".to_string(), tab.id.0.to_string());
             if let Some(session_id) = tab.root_pane.as_ref().and_then(|root| {
@@ -154,7 +180,7 @@ impl WorkspaceApp {
                 } else {
                     tab.title.clone()
                 },
-                state: if Some(tab.id) == self.main_window_tabs.active_tab_id {
+                state: if Some(tab.id) == self.active_tab_id(cx) {
                     "connected"
                 } else {
                     "available"
@@ -190,9 +216,9 @@ impl WorkspaceApp {
                     refs.insert("sessionId".to_string(), session_id.0.to_string());
                 }
                 let mut metadata = serde_json::json!({
-                    "host": node.config.host,
-                    "port": node.config.port,
-                    "username": node.config.username,
+                    "host": node.endpoint.host,
+                    "port": node.endpoint.port,
+                    "username": node.endpoint.username,
                     "status": runtime_status,
                     "terminalIds": node.terminal_ids.iter().map(|id| id.0).collect::<Vec<_>>(),
                     "title": node.title,
@@ -210,7 +236,7 @@ impl WorkspaceApp {
                     kind: "ssh-node".to_string(),
                     label: format!(
                         "{}@{}:{}",
-                        node.config.username, node.config.host, node.config.port
+                        node.endpoint.username, node.endpoint.host, node.endpoint.port
                     ),
                     state: match node.readiness {
                         NodeReadiness::Ready => "connected",
@@ -252,34 +278,21 @@ impl WorkspaceApp {
             targets.push(ai_sftp_target_for_node(node_id, node, sftp_session_id));
         }
 
-        for (tab_id, node_id) in &self.ide_tab_nodes {
-            let Some(node) = self.ssh_nodes.get(node_id) else {
+        for ide_target in self.ide_workspace.read(cx).target_snapshots(cx) {
+            let Some(node) = self.ssh_nodes.get(&ide_target.node_id) else {
                 continue;
             };
-            let (project_root_path, project_name, active_editor_tab_id) = self
-                .ide_tab_surfaces
-                .get(tab_id)
-                .map(|surface| {
-                    surface.update(cx, |surface, _cx| {
-                        let context = surface.ai_context_snapshot();
-                        (
-                            surface.project_root_path(),
-                            context.map(|snapshot| snapshot.project_name),
-                            surface.active_editor_tab_id(),
-                        )
-                    })
-                })
-                .unwrap_or((None, None, None));
             targets.push(ai_ide_workspace_target_for_node(
-                node_id,
+                &ide_target.node_id,
                 node,
-                active_editor_tab_id,
-                project_root_path,
-                project_name,
+                ide_target.active_editor_tab_id,
+                ide_target.project_root_path,
+                ide_target.project_name,
             ));
         }
 
-        for tab in &self.tabs {
+        let tab_host = self.tab_host.read(cx);
+        for tab in self.tabs(cx) {
             let Some(root) = tab.root_pane.as_ref() else {
                 continue;
             };
@@ -289,7 +302,7 @@ impl WorkspaceApp {
                 let Some(session_id) = root.session_id_for_pane(pane_id) else {
                     continue;
                 };
-                let Some(pane) = self.panes.get(&pane_id) else {
+                let Some(pane) = tab_host.panes().get(&pane_id) else {
                     continue;
                 };
                 let serial_config = self.serial_terminal_configs.get(&session_id);
@@ -438,10 +451,8 @@ impl WorkspaceApp {
         let targets = deduped_targets;
 
         let settings = self.settings_store.settings();
-        let active_tab_ref = self
-            .main_window_tabs
-            .active_tab_id
-            .and_then(|active_tab_id| self.tabs.iter().find(|tab| tab.id == active_tab_id));
+        let active_tab_ref = self.active_tab_id(cx)
+            .and_then(|active_tab_id| self.tabs(cx).iter().find(|tab| tab.id == active_tab_id));
         let active_node_id = self
             .active_ssh_node_id
             .as_ref()
@@ -463,11 +474,9 @@ impl WorkspaceApp {
                     .and_then(|node| node.terminal_ids.first().copied())
                     .map(|session_id| session_id.0.to_string())
             });
-        let active_tab = self
-            .main_window_tabs
-            .active_tab_id
+        let active_tab = self.active_tab_id(cx)
             .and_then(|active_tab_id| {
-                self.tabs
+                self.tabs(cx)
                     .iter()
                     .find(|tab| tab.id == active_tab_id)
                     .map(|tab| {
@@ -483,8 +492,8 @@ impl WorkspaceApp {
             self.ssh_nodes.get(node_id).map(|node| {
                 serde_json::json!({
                     "id": node_id.0,
-                    "host": node.config.host,
-                    "username": node.config.username,
+                    "host": node.endpoint.host,
+                    "username": node.endpoint.username,
                     "status": match node.readiness {
                         NodeReadiness::Ready => "connected",
                         NodeReadiness::Connecting => "connecting",
@@ -495,27 +504,17 @@ impl WorkspaceApp {
                 })
             })
         });
-        let settings_summary = serde_json::json!({
-            "ai": {
-                "enabled": settings.ai.enabled,
-                "toolUse": {
-                    "enabled": settings.ai.tool_use.enabled,
-                    "maxRounds": settings.ai.tool_use.max_rounds,
-                    "maxCallsPerRound": settings.ai.tool_use.max_calls_per_round,
-                    "autoApproveTools": settings.ai.tool_use.auto_approve_tools,
-                    "disabledTools": settings.ai.tool_use.disabled_tools,
-                },
-            },
-            "terminal": {
-                "renderer": settings.terminal.renderer,
-                "encoding": settings.terminal.terminal_encoding,
-            },
-            "sftp": {
-                "directoryParallelism": settings.sftp.directory_parallelism,
-                "transferProtocol": settings.sftp.transfer_protocol,
-            }
-        });
-        let transfers = ai_transfers_state(&self.sftp_transfer_manager, &self.ai.runtime.epoch);
+        let model_visible_settings = ai_model_visible_settings_projection(settings);
+        let (runtime_epoch, agent_fs, ai_mcp_registry, ai_acp_runtime_registry) = {
+            let ai = self.ai_entity.read(cx);
+            (
+                ai.runtime_epoch().to_string(),
+                ai.agent_fs().clone(),
+                ai.mcp_registry().clone(),
+                ai.acp_runtime_registry().clone(),
+            )
+        };
+        let transfers = ai_transfers_state(&self.sftp_transfer_manager, &runtime_epoch);
         let mut ssh_node_states = std::collections::BTreeMap::<String, usize>::new();
         for node in self.ssh_nodes.values() {
             let state = match node.readiness {
@@ -546,14 +545,14 @@ impl WorkspaceApp {
         // Keep get_state(health) on the same public shape as Tauri even though
         // native derives the values from GPUI-owned stores instead of Zustand.
         let health_state = serde_json::json!({
-            "runtimeEpoch": self.ai.runtime.epoch,
+            "runtimeEpoch": runtime_epoch.as_str(),
             "tabs": {
-                "open": self.tabs.len(),
-                "activeTabId": self.main_window_tabs.active_tab_id.map(|id| id.0.to_string()),
+                "open": self.tabs(cx).len(),
+                "activeTabId": self.active_tab_id(cx).map(|id| id.0.to_string()),
             },
-            "terminalRegistry": { "entries": self.panes.len() },
+            "terminalRegistry": { "entries": self.tab_host.read(cx).panes().len() },
             "localTerminals": {
-                "count": self.visible_local_terminal_session_count() + self.detached_local_terminals.len(),
+                "count": self.visible_local_terminal_session_count(cx) + self.detached_local_terminals.len(),
             },
             "sshNodes": {
                 "total": self.ssh_nodes.len(),
@@ -574,9 +573,7 @@ impl WorkspaceApp {
             active_tab,
             active_node,
             active_session_id,
-            active_tab_id: self
-                .main_window_tabs
-                .active_tab_id
+            active_tab_id: self.active_tab_id(cx)
                 .map(|tab_id| tab_id.0.to_string()),
             active_node_id,
             memory: ai_memory_settings_json(
@@ -586,21 +583,17 @@ impl WorkspaceApp {
             health_state,
             node_router: self.node_router.clone(),
             sftp_transfer_manager: self.sftp_transfer_manager.clone(),
-            agent_fs: self.ai.runtime.agent_fs.clone(),
+            agent_fs,
             backend_runtime: self.forwarding_runtime.clone(),
-            rag_store: self.ai.knowledge.rag_store.get(),
-            ai_mcp_registry: self.ai.runtime.mcp_registry.clone(),
-            ai_acp_runtime_registry: self.ai.runtime.acp_runtime_registry.clone(),
-            ai_key_store: self.ai.models.key_store.clone(),
+            rag_store: self.ai_entity.read(cx).rag_store(),
+            ai_mcp_registry,
+            ai_acp_runtime_registry,
+            ai_key_store: self.ai_entity.read(cx).key_store().clone(),
             ai_providers: settings.ai.providers.clone(),
             ai_embedding_config: settings.ai.embedding_config.clone(),
             ai_context_window: AI_COMPACTION_DEFAULT_CONTEXT_WINDOW,
-            runtime_epoch: self.ai.runtime.epoch.clone(),
-            // Tauri read_resource(settings) exposes the settings object, while
-            // get_state(settings) returns a compact diagnostic summary.
-            settings_state: serde_json::to_value(settings)
-                .unwrap_or_else(|_| settings_summary.clone()),
-            settings_summary,
+            runtime_epoch,
+            model_visible_settings,
         }
     }
 
@@ -614,15 +607,75 @@ impl WorkspaceApp {
         snapshot
     }
 
+    pub(in crate::workspace) fn ai_acp_chat_launch(
+        &self,
+        config: &AiChatStreamConfig,
+    ) -> Result<Option<AiAcpChatLaunch>, String> {
+        if config.execution_backend != AiExecutionBackend::Acp {
+            return Ok(None);
+        }
+        let agent_id = config
+            .acp_agent_id
+            .as_deref()
+            .filter(|agent_id| !agent_id.trim().is_empty())
+            .ok_or_else(|| "No ACP agent selected for this execution profile.".to_string())?;
+        let agent = self
+            .settings_store
+            .settings()
+            .ai
+            .acp_agents
+            .iter()
+            .find(|agent| agent.id == agent_id)
+            .ok_or_else(|| format!("ACP agent `{agent_id}` is not configured."))?;
+        if !agent.enabled {
+            return Err(format!("ACP agent `{}` is disabled.", agent.id));
+        }
+
+        let agent_id = agent.id.clone();
+        let display_name = if agent.display_name.trim().is_empty() {
+            agent_id.clone()
+        } else {
+            agent.display_name.clone()
+        };
+        let session_cwd = std::env::current_dir().unwrap_or_else(|_| {
+            agent
+                .cwd
+                .as_deref()
+                .map(std::path::PathBuf::from)
+                .unwrap_or_else(|| std::path::PathBuf::from("."))
+        });
+        let host_policy = oxideterm_ai::AcpHostCapabilityPolicy {
+            fs_read_text_file: agent.capability_policy.fs_read_text_file,
+            fs_write_text_file: agent.capability_policy.fs_write_text_file,
+            terminal: agent.capability_policy.terminal,
+        };
+        // Copy token-bearing args and environment values exactly once into the
+        // zeroizing launch owner that is moved to the ACP worker.
+        let launch_config = oxideterm_ai::AcpLaunchConfig {
+            id: agent_id.clone(),
+            display_name,
+            command: agent.command.clone(),
+            args: agent.args.clone(),
+            env: agent.env.clone(),
+            cwd: agent.cwd.as_deref().map(std::path::PathBuf::from),
+        };
+        Ok(Some(AiAcpChatLaunch {
+            agent_id,
+            launch_config,
+            session_cwd,
+            host_policy,
+        }))
+    }
+
     pub(in crate::workspace) fn resolve_ai_tool_approval(
         &mut self,
         tool_call_id: String,
         approved: bool,
         cx: &mut Context<Self>,
     ) {
-        if let Some(sender) = self.ai.runtime.pending_tool_approvals.remove(&tool_call_id) {
-            let _ = sender.send(approved);
-        }
+        self.ai_entity.update(cx, |ai, _cx| {
+            ai.resolve_tool_approval(&tool_call_id, approved);
+        });
         cx.notify();
     }
 
@@ -888,7 +941,11 @@ impl WorkspaceApp {
                 };
                 // Tauri reconnects stale ssh-node targets and creates a fresh terminal;
                 // stale pane metadata must not be reported as an already-live target.
-                let Some(node) = self.ssh_nodes.get(&node_id).cloned() else {
+                let Some((title, saved_connection_id)) = self
+                    .ssh_nodes
+                    .get(&node_id)
+                    .map(|node| (node.title.clone(), node.saved_connection_id.clone()))
+                else {
                     return snapshot
                         .fail(
                             "SSH target is missing.",
@@ -898,11 +955,25 @@ impl WorkspaceApp {
                         )
                         .with_target(target);
                 };
-                let saved_connection_id = node.saved_connection_id.clone();
+                let Some(config) = self
+                    .node_router
+                    .node_runtime_snapshot(&node_id)
+                    .map(|runtime| runtime.config)
+                else {
+                    return snapshot
+                        .fail(
+                            "SSH target runtime is missing.",
+                            "missing_node_runtime",
+                            format!("No SSH runtime config exists for {}.", node_id.0),
+                            "write",
+                        )
+                        .with_target(target);
+                };
+                // Authentication config is copied only for this explicit reconnect action.
                 match self.queue_ssh_terminal_tab_for_node(
                     node_id.clone(),
-                    node.config,
-                    node.title,
+                    config,
+                    title,
                     saved_connection_id,
                     window,
                     cx,
@@ -1616,16 +1687,18 @@ impl WorkspaceApp {
         {
             Ok(next_settings) => {
                 self.edit_settings(|settings| *settings = next_settings, cx);
-                if let Some(tab) =
-                    oxideterm_gpui_settings_view::settings_tab_from_ai_section(section)
-                {
-                    self.settings_page.set_active_tab(tab);
-                }
-                if let Some(page) =
-                    oxideterm_gpui_settings_view::terminal_settings_page_from_ai_section(section)
-                {
-                    self.settings_page.set_terminal_page(page);
-                }
+                let target_tab =
+                    oxideterm_gpui_settings_view::settings_tab_from_ai_section(section);
+                let target_terminal_page =
+                    oxideterm_gpui_settings_view::terminal_settings_page_from_ai_section(section);
+                self.settings_workspace.update(cx, |settings, cx| {
+                    if let Some(tab) = target_tab {
+                        settings.set_active_tab(tab, cx);
+                    }
+                    if let Some(page) = target_terminal_page {
+                        settings.set_terminal_page(page, cx);
+                    }
+                });
                 self.open_settings_tab(window, cx);
                 snapshot
                     .ok(
@@ -1750,9 +1823,7 @@ impl WorkspaceApp {
                 .with_target(requested_target.clone()));
         }
 
-        let active_tab_id = self
-            .main_window_tabs
-            .active_tab_id
+        let active_tab_id = self.active_tab_id(cx)
             .map(|tab_id| tab_id.0.to_string());
         let refreshed = self.ai_orchestrator_snapshot(cx);
         refreshed
@@ -1803,9 +1874,7 @@ impl WorkspaceApp {
         match surface {
             "local_terminal" | "terminal" => match self.create_local_terminal_tab(window, cx) {
                 Ok(()) => {
-                    let active_tab_id = self
-                        .main_window_tabs
-                        .active_tab_id
+                    let active_tab_id = self.active_tab_id(cx)
                         .map(|tab_id| tab_id.0.to_string());
                     let refreshed = self.ai_orchestrator_snapshot(cx);
                     let target = refreshed
@@ -1850,18 +1919,20 @@ impl WorkspaceApp {
             },
             "settings" => {
                 if let Some(section) = args.get("section").and_then(serde_json::Value::as_str) {
-                    if let Some(tab) =
-                        oxideterm_gpui_settings_view::settings_tab_from_ai_section(section)
-                    {
-                        self.settings_page.set_active_tab(tab);
-                    }
-                    if let Some(page) =
+                    let target_tab =
+                        oxideterm_gpui_settings_view::settings_tab_from_ai_section(section);
+                    let target_terminal_page =
                         oxideterm_gpui_settings_view::terminal_settings_page_from_ai_section(
                             section,
-                        )
-                    {
-                        self.settings_page.set_terminal_page(page);
-                    }
+                        );
+                    self.settings_workspace.update(cx, |settings, cx| {
+                        if let Some(tab) = target_tab {
+                            settings.set_active_tab(tab, cx);
+                        }
+                        if let Some(page) = target_terminal_page {
+                            settings.set_terminal_page(page, cx);
+                        }
+                    });
                 }
                 self.open_settings_tab(window, cx);
                 snapshot
@@ -2034,12 +2105,12 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Option<(PaneId, gpui::Entity<oxideterm_gpui_terminal::TerminalPane>)> {
-        let location = self.terminal_locations.get(&session_id).copied()?;
+        let location = self.tab_host.read(cx).terminal_location(session_id)?;
         let tab_id = location.tab_id;
         let pane_id = location.pane_id;
-        let pane = self.panes.get(&pane_id)?.clone();
+        let pane = self.tab_host.read(cx).panes().get(&pane_id)?.clone();
 
-        if self.detached_tabs.contains(&tab_id) {
+        if self.tab_host.read(cx).is_outside_main_window(tab_id) {
             // The detached window already owns this pane entity. Focus that
             // owner without mounting the same terminal into the main window.
             self.focus_detached_tab_window(tab_id, cx);
@@ -2049,15 +2120,15 @@ impl WorkspaceApp {
         // AI terminal tools must act on the same pane the user can see. The
         // model may target a non-active session from context, so make that tab
         // and pane visible before writing input or reading command output.
-        self.main_window_tabs.active_tab_id = Some(tab_id);
-        if let Some(tab) = self.tab_mut_by_id(tab_id) {
-            tab.active_pane_id = Some(pane_id);
-        }
-        self.sync_active_tab_surface();
+        self.set_main_window_active_tab(Some(tab_id), cx);
+        self.tab_host.update(cx, |tab_host, _| {
+            tab_host.set_active_pane(Some(tab_id), pane_id);
+        });
+        self.sync_active_tab_surface(cx);
         self.active_surface = ActiveSurface::Terminal;
         self.needs_active_pane_focus = true;
         self.focus_active_pane(window, cx);
-        self.reveal_active_tab(window);
+        self.reveal_active_tab(window, cx);
         cx.notify();
 
         Some((pane_id, pane))

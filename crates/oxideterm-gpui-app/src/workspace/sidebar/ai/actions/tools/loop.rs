@@ -47,17 +47,19 @@ pub(in crate::workspace) async fn run_ai_chat_tool_loop(
     config: AiChatStreamConfig,
     mut history: Vec<AiChatMessage>,
     snapshot: AiOrchestratorRuntimeSnapshot,
+    acp_launch: Result<Option<AiAcpChatLaunch>, String>,
     budget_level: u8,
     generation: u64,
     conversation_id: String,
     assistant_id: String,
-    ui_tx: std::sync::mpsc::Sender<AiStreamDelivery>,
+    ui_tx: AiStreamDeliverySender,
 ) {
     if config.execution_backend == AiExecutionBackend::Acp {
         run_acp_chat_loop(
             config,
             history,
             snapshot,
+            acp_launch,
             generation,
             conversation_id,
             assistant_id,
@@ -728,7 +730,7 @@ pub(in crate::workspace) async fn run_ai_chat_tool_loop(
                 Some(&approval_args),
                 &config.tool_policy,
                 config.safety_mode,
-                config.profile_id.clone(),
+                config.profile_id.as_deref(),
             );
             let risk = ai_policy_risk_label(decision.risk).to_string();
             let summary = decision.reason_code.clone();
@@ -766,9 +768,11 @@ pub(in crate::workspace) async fn run_ai_chat_tool_loop(
                         AiStreamDeliveryEvent::ToolApprovalRequested {
                             tool_call_id: call.id.clone(),
                             name: call.name.clone(),
-                            arguments: call.arguments.clone(),
+                            arguments: sanitize_ai_tool_arguments_for_persistence(
+                                &call.arguments,
+                            ),
                             risk: risk.clone(),
-                            summary: summary.clone(),
+                            summary: oxideterm_ai::sanitize_for_ai(&summary),
                             sender: approval_tx,
                         },
                     )
@@ -1105,7 +1109,7 @@ fn acp_visible_terminal_tool_definitions(
 
 #[allow(clippy::too_many_arguments)]
 async fn execute_acp_visible_terminal_tool_on_ui(
-    ui_tx: &std::sync::mpsc::Sender<AiStreamDelivery>,
+    ui_tx: &AiStreamDeliverySender,
     generation: u64,
     conversation_id: &str,
     assistant_id: &str,
@@ -1148,8 +1152,10 @@ async fn execute_acp_visible_terminal_tool_on_ui(
 #[allow(clippy::too_many_arguments)]
 async fn handle_acp_visible_terminal_tool_call(
     call: oxideterm_acp_host_tools::AcpHostToolCall,
-    config: &AiChatStreamConfig,
-    ui_tx: &std::sync::mpsc::Sender<AiStreamDelivery>,
+    tool_policy: &oxideterm_ai::AiToolUsePolicy,
+    safety_mode: oxideterm_ai::AiPolicySafetyMode,
+    profile_id: Option<&str>,
+    ui_tx: &AiStreamDeliverySender,
     generation: u64,
     conversation_id: &str,
     assistant_id: &str,
@@ -1166,9 +1172,9 @@ async fn handle_acp_visible_terminal_tool_call(
     let decision = resolve_ai_policy_decision(
         &call.name,
         Some(&call.arguments),
-        &config.tool_policy,
-        config.safety_mode,
-        config.profile_id.clone(),
+        tool_policy,
+        safety_mode,
+        profile_id,
     );
     let risk = ai_policy_risk_label(decision.risk).to_string();
     let policy_summary = decision.reason_code.clone();
@@ -1206,9 +1212,11 @@ async fn handle_acp_visible_terminal_tool_call(
                 AiStreamDeliveryEvent::ToolApprovalRequested {
                     tool_call_id: call.id.clone(),
                     name: call.name.clone(),
-                    arguments: status_call.arguments.clone(),
+                    arguments: sanitize_ai_tool_arguments_for_persistence(
+                        &status_call.arguments,
+                    ),
                     risk: risk.clone(),
-                    summary: policy_summary.clone(),
+                    summary: oxideterm_ai::sanitize_for_ai(&policy_summary),
                     sender: approval_tx,
                 },
             )
@@ -1365,27 +1373,12 @@ pub(in crate::workspace) async fn run_acp_chat_loop(
     config: AiChatStreamConfig,
     history: Vec<AiChatMessage>,
     snapshot: AiOrchestratorRuntimeSnapshot,
+    acp_launch: Result<Option<AiAcpChatLaunch>, String>,
     generation: u64,
     conversation_id: String,
     assistant_id: String,
-    ui_tx: std::sync::mpsc::Sender<AiStreamDelivery>,
+    ui_tx: AiStreamDeliverySender,
 ) {
-    let Some(agent_id) = config
-        .acp_agent_id
-        .as_deref()
-        .filter(|agent_id| !agent_id.trim().is_empty())
-    else {
-        let _ = send_ai_stream_delivery(
-            &ui_tx,
-            generation,
-            &conversation_id,
-            &assistant_id,
-            AiStreamDeliveryEvent::Stream(AiStreamEvent::Error(
-                "No ACP agent selected for this execution profile.".to_string(),
-            )),
-        );
-        return;
-    };
     let Some(prompt) = acp_current_turn_prompt(&history) else {
         let _ = send_ai_stream_delivery(
             &ui_tx,
@@ -1398,8 +1391,10 @@ pub(in crate::workspace) async fn run_acp_chat_loop(
         );
         return;
     };
-    let agent = match acp_agent_config_from_settings(&snapshot.settings_state, agent_id) {
-        Ok(agent) => agent,
+    let launch = match acp_launch.and_then(|launch| {
+        launch.ok_or_else(|| "ACP launch configuration was not prepared.".to_string())
+    }) {
+        Ok(launch) => launch,
         Err(error) => {
             let _ = send_ai_stream_delivery(
                 &ui_tx,
@@ -1411,21 +1406,7 @@ pub(in crate::workspace) async fn run_acp_chat_loop(
             return;
         }
     };
-    if !agent.enabled {
-        let _ = send_ai_stream_delivery(
-            &ui_tx,
-            generation,
-            &conversation_id,
-            &assistant_id,
-            AiStreamDeliveryEvent::Stream(AiStreamEvent::Error(format!(
-                "ACP agent `{}` is disabled.",
-                agent.id
-            ))),
-        );
-        return;
-    }
-    let launch_config = acp_launch_config_from_agent(&agent);
-    let launcher = match oxideterm_ai::build_acp_stdio_launcher(launch_config) {
+    let launcher = match oxideterm_ai::build_acp_stdio_launcher(launch.launch_config) {
         Ok(launcher) => launcher,
         Err(error) => {
             let _ = send_ai_stream_delivery(
@@ -1438,8 +1419,9 @@ pub(in crate::workspace) async fn run_acp_chat_loop(
             return;
         }
     };
-    let session_cwd = acp_session_cwd_from_agent(&agent);
-    let host_policy = acp_host_capability_policy_from_agent(&agent);
+    let session_cwd = launch.session_cwd;
+    let host_policy = launch.host_policy;
+    let agent_id = launch.agent_id;
     let mut acp_mcp_servers = Vec::new();
     let mut host_tools_server = None;
     let mut host_tools_relay = None;
@@ -1463,7 +1445,9 @@ pub(in crate::workspace) async fn run_acp_chat_loop(
                 }
             };
         acp_mcp_servers.push(server.mcp_server());
-        let tool_config = config.clone();
+        let tool_policy = config.tool_policy;
+        let tool_safety_mode = config.safety_mode;
+        let tool_profile_id = config.profile_id;
         let tool_ui_tx = ui_tx.clone();
         let tool_conversation_id = conversation_id.clone();
         let tool_assistant_id = assistant_id.clone();
@@ -1471,7 +1455,9 @@ pub(in crate::workspace) async fn run_acp_chat_loop(
             while let Some(call) = call_rx.recv().await {
                 handle_acp_visible_terminal_tool_call(
                     call,
-                    &tool_config,
+                    &tool_policy,
+                    tool_safety_mode,
+                    tool_profile_id.as_deref(),
                     &tool_ui_tx,
                     generation,
                     &tool_conversation_id,
@@ -1642,7 +1628,7 @@ pub(in crate::workspace) async fn run_acp_chat_loop(
                     session_id: outcome.session_id,
                     session_metadata: outcome.session_metadata,
                     session_config_options: outcome.session_config_options,
-                    agent_id: agent.id.clone(),
+                    agent_id,
                 },
             )
             .is_err()
@@ -1669,52 +1655,6 @@ pub(in crate::workspace) async fn run_acp_chat_loop(
     }
 }
 
-pub(in crate::workspace) fn acp_agent_config_from_settings(
-    settings_state: &serde_json::Value,
-    agent_id: &str,
-) -> Result<oxideterm_settings::AcpAgentConfig, String> {
-    settings_state
-        .get("ai")
-        .and_then(|ai| ai.get("acpAgents"))
-        .and_then(serde_json::Value::as_array)
-        .and_then(|agents| {
-            agents
-                .iter()
-                .filter_map(|agent| {
-                    serde_json::from_value::<oxideterm_settings::AcpAgentConfig>(agent.clone()).ok()
-                })
-                .find(|agent| agent.id == agent_id)
-        })
-        .ok_or_else(|| format!("ACP agent `{agent_id}` is not configured."))
-}
-
-pub(in crate::workspace) fn acp_launch_config_from_agent(
-    agent: &oxideterm_settings::AcpAgentConfig,
-) -> oxideterm_ai::AcpLaunchConfig {
-    oxideterm_ai::AcpLaunchConfig {
-        id: agent.id.clone(),
-        display_name: if agent.display_name.trim().is_empty() {
-            agent.id.clone()
-        } else {
-            agent.display_name.clone()
-        },
-        command: agent.command.clone(),
-        args: agent.args.clone(),
-        env: agent.env.clone(),
-        cwd: agent.cwd.as_deref().map(std::path::PathBuf::from),
-    }
-}
-
-pub(in crate::workspace) fn acp_host_capability_policy_from_agent(
-    agent: &oxideterm_settings::AcpAgentConfig,
-) -> oxideterm_ai::AcpHostCapabilityPolicy {
-    oxideterm_ai::AcpHostCapabilityPolicy {
-        fs_read_text_file: agent.capability_policy.fs_read_text_file,
-        fs_write_text_file: agent.capability_policy.fs_write_text_file,
-        terminal: agent.capability_policy.terminal,
-    }
-}
-
 /// Resolves the same local ACP session directory for prompts and pre-prompt discovery.
 pub(in crate::workspace) fn acp_session_cwd_from_agent(
     agent: &oxideterm_settings::AcpAgentConfig,
@@ -1729,7 +1669,7 @@ pub(in crate::workspace) fn acp_session_cwd_from_agent(
 }
 
 pub(in crate::workspace) fn flush_ai_required_tool_buffer(
-    ui_tx: &std::sync::mpsc::Sender<AiStreamDelivery>,
+    ui_tx: &AiStreamDeliverySender,
     generation: u64,
     conversation_id: &str,
     assistant_id: &str,

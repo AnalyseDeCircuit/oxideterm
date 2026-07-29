@@ -24,11 +24,11 @@ impl WorkspaceApp {
                     value: display_value,
                     placeholder: value.clone(),
                     focused,
-                    caret_visible: self.new_connection_caret_visible,
+                    caret_visible: self.input_caret.visible(),
                     secret: false,
                     selected_all: false,
-                    selected_range: self.ime_selected_range_for_target(target),
-                    marked_text: self.marked_text_for_target(target),
+                    selected_range: self.ime_selected_range_for_target(target, cx),
+                    marked_text: self.marked_text_for_target(target, cx),
                 },
                 TextInputContentAlign::Center,
             )
@@ -40,7 +40,7 @@ impl WorkspaceApp {
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |this, event: &gpui::MouseDownEvent, window, cx| {
-                    let current = this.current_settings_input_value(input);
+                    let current = this.current_settings_input_value(input, cx);
                     this.focus_settings_input(input, current, cx);
                     this.ime_marked_text = None;
                     window.focus(&this.focus_handle, cx);
@@ -195,7 +195,7 @@ impl WorkspaceApp {
     pub(in crate::workspace) fn settings_text_input_control(
         &self,
         input: SettingsInput,
-        value: String,
+        value: impl AsRef<str>,
         placeholder: String,
         width: f32,
         cx: &mut Context<Self>,
@@ -214,7 +214,7 @@ impl WorkspaceApp {
     pub(in crate::workspace) fn settings_text_input_control_fill(
         &self,
         input: SettingsInput,
-        value: String,
+        value: impl AsRef<str>,
         placeholder: String,
         cx: &mut Context<Self>,
     ) -> AnyElement {
@@ -234,7 +234,7 @@ impl WorkspaceApp {
     pub(in crate::workspace) fn settings_secret_text_input_control(
         &self,
         input: SettingsInput,
-        value: String,
+        value: impl AsRef<str>,
         placeholder: String,
         width: f32,
         cx: &mut Context<Self>,
@@ -253,7 +253,7 @@ impl WorkspaceApp {
     pub(in crate::workspace) fn settings_secret_text_input_control_fill(
         &self,
         input: SettingsInput,
-        value: String,
+        value: impl AsRef<str>,
         placeholder: String,
         cx: &mut Context<Self>,
     ) -> AnyElement {
@@ -272,7 +272,7 @@ impl WorkspaceApp {
     pub(in crate::workspace) fn settings_text_input_control_with_align(
         &self,
         input: SettingsInput,
-        value: String,
+        value: impl AsRef<str>,
         placeholder: String,
         width: f32,
         align: TextInputContentAlign,
@@ -292,18 +292,29 @@ impl WorkspaceApp {
     pub(in crate::workspace) fn settings_text_input_control_inner(
         &self,
         input: SettingsInput,
-        value: String,
+        value: impl AsRef<str>,
         placeholder: String,
         width: Option<f32>,
         align: TextInputContentAlign,
         secret: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let focused = self.focused_settings_input == Some(input);
-        let display_value = if focused {
+        let settings_workspace = self.settings_workspace.read(cx);
+        let entity_value = settings_workspace.settings_entity_input_value(input);
+        let entity_owned = entity_value.is_some();
+        let focused = if entity_owned {
+            settings_workspace.settings_entity_focused_input() == Some(input)
+        } else {
+            self.focused_settings_input == Some(input)
+        };
+        let display_value = if let Some(entity_value) = entity_value {
+            // Borrow Entity-owned drafts for this frame instead of cloning them
+            // into root rendering snapshots, especially for secret inputs.
+            entity_value
+        } else if focused {
             self.settings_input_draft.as_str()
         } else {
-            value.as_str()
+            value.as_ref()
         };
         let target = WorkspaceImeTarget::Settings(input);
         let workspace = cx.entity();
@@ -315,13 +326,13 @@ impl WorkspaceApp {
                     value: display_value,
                     placeholder,
                     focused,
-                    caret_visible: self.new_connection_caret_visible,
+                    caret_visible: self.input_caret.visible(),
                     // Managed-key passphrases mirror Tauri password inputs; the
                     // shared settings input pipeline still owns focus and IME.
                     secret,
                     selected_all: false,
-                    selected_range: self.ime_selected_range_for_target(target),
-                    marked_text: self.marked_text_for_target(target),
+                    selected_range: self.ime_selected_range_for_target(target, cx),
+                    marked_text: self.marked_text_for_target(target, cx),
                 },
                 align,
             )
@@ -332,7 +343,7 @@ impl WorkspaceApp {
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |this, event: &gpui::MouseDownEvent, window, cx| {
-                    let current = this.current_settings_input_value(input);
+                    let current = this.current_settings_input_value(input, cx);
                     this.focus_settings_input(input, current, cx);
                     this.ime_marked_text = None;
                     window.focus(&this.focus_handle, cx);

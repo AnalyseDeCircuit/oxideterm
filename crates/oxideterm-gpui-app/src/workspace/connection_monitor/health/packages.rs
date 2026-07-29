@@ -2,47 +2,50 @@
 
 use super::*;
 
-impl WorkspaceApp {
-    pub(super) fn render_host_packages_panel(&self, cx: &mut Context<Self>) -> AnyElement {
+impl HostToolsEntity {
+    #[allow(clippy::too_many_arguments)]
+    fn render_host_packages_panel(
+        &self,
+        search_ime: HostToolsPlainTextImeFrame,
+        sidebar_width: f32,
+        tokens: &ThemeTokens,
+        i18n: &I18n,
+        mono_font_family: SharedString,
+        selectable_text: &SelectableTextRenderState,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let connections = self.monitor_connections();
         if connections.is_empty() {
-            return monitor_center_state(
-                self,
+            return host_tools_center_state(
                 LucideIcon::Archive,
-                self.tokens.ui.text_muted,
-                self.i18n.t("profiler.panel.no_connection"),
+                tokens.ui.text_muted,
+                i18n.t("profiler.panel.no_connection"),
+                selectable_text,
                 cx,
             );
         }
 
-        let selected_id = self
-            .connection_monitor
-            .selected_connection_id
+        let selected_connection_id = self.selected_connection_id_owned();
+        let selected_id = selected_connection_id
             .as_deref()
             .unwrap_or(connections[0].connection_id.as_str());
-        let snapshot = self
-            .connection_monitor
-            .host_package_snapshot
-            .as_ref()
-            .filter(|_| {
-                self.connection_monitor
-                    .host_package_snapshot_connection_id
-                    .as_deref()
-                    == Some(selected_id)
-            });
+        let snapshot = self.package_snapshot_for(selected_id);
         let rows = snapshot
+            .as_ref()
             .map(|snapshot| {
                 visible_package_rows(
                     &snapshot.entries,
-                    &self.connection_monitor.host_package_search_query,
-                    self.connection_monitor.host_package_filter,
+                    &self.ui.host_package_search_query,
+                    self.package_filter(),
                 )
             })
             .unwrap_or_default();
         let status = snapshot
+            .as_ref()
             .map(|snapshot| snapshot.status.clone())
             .unwrap_or_default();
         self.sync_host_package_list_state(&rows, selected_id);
+        let snapshot_in_flight = self.package_snapshot_in_flight();
 
         div()
             .id("host-packages-panel")
@@ -65,86 +68,98 @@ impl WorkspaceApp {
                     .flex_col()
                     .gap_2()
                     .border_b_1()
-                    .border_color(rgba((self.tokens.ui.border << 8) | MONITOR_BORDER_ALPHA))
-                    .child(self.render_connection_switcher_row(
+                    .border_color(rgba((tokens.ui.border << 8) | MONITOR_BORDER_ALPHA))
+                    .child(self.render_connection_switcher(
                         &connections,
                         selected_id,
-                        !self.connection_monitor.host_package_snapshot_polling,
+                        !snapshot_in_flight,
+                        tokens,
+                        mono_font_family.clone(),
+                        selectable_text,
                         cx,
                     ))
-                    .child(self.render_host_package_search(cx))
-                    .child(self.render_host_package_filter_row(cx))
+                    .child(self.render_host_package_search(&search_ime, tokens, i18n, cx))
+                    .child(self.render_host_package_filter_row(tokens, i18n, cx))
                     .child(self.render_host_package_status_row(
                         rows.len(),
                         selected_id.to_string(),
                         status.clone(),
+                        tokens,
+                        i18n,
                         cx,
                     )),
             )
             .child(self.render_host_package_list(
                 rows,
-                self.connection_monitor.host_package_snapshot_polling,
+                snapshot_in_flight,
                 status,
                 selected_id,
+                sidebar_width,
+                tokens,
+                i18n,
+                mono_font_family,
+                selectable_text,
                 cx,
             ))
             .into_any_element()
     }
 
-    pub(super) fn render_host_package_search(&self, cx: &mut Context<Self>) -> AnyElement {
-        let target = WorkspaceImeTarget::HostPackageSearch;
-        let focused = self.connection_monitor.host_package_search_focused;
-        let workspace = cx.entity();
+    fn render_host_package_search(
+        &self,
+        ime: &HostToolsPlainTextImeFrame,
+        tokens: &ThemeTokens,
+        i18n: &I18n,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let input = ime.input();
+        let anchor_frame = ime.clone();
         text_input_anchor_probe(
-            target.anchor_id(),
+            ime.anchor_id(),
             text_input(
-                &self.tokens,
+                tokens,
                 TextInputView {
-                    value: &self.connection_monitor.host_package_search_query,
-                    placeholder: self.i18n.t("sidebar.host_packages.search_placeholder"),
-                    focused,
-                    caret_visible: self.new_connection_caret_visible,
+                    value: &self.ui.host_package_search_query,
+                    placeholder: i18n.t("sidebar.host_packages.search_placeholder"),
+                    focused: self.ui.input_is_focused(input),
+                    caret_visible: ime.caret_visible(),
                     secret: false,
                     selected_all: false,
-                    selected_range: self.ime_selected_range_for_target(target),
-                    marked_text: self.marked_text_for_target(target),
+                    selected_range: ime.selected_range(),
+                    marked_text: ime.marked_text(),
                 },
             )
             .h(px(34.0))
             .cursor(CursorStyle::IBeam)
             .on_mouse_down(
                 MouseButton::Left,
-                cx.listener(move |this, event: &MouseDownEvent, window, cx| {
-                    this.connection_monitor.host_package_search_focused = true;
-                    this.connection_monitor.host_process_search_focused = false;
-                    this.connection_monitor.host_process_renice_focused = false;
-                    this.connection_monitor.host_docker_search_focused = false;
-                    this.connection_monitor.host_service_search_focused = false;
-                    this.connection_monitor.host_log_search_focused = false;
-                    this.connection_monitor.host_tmux_search_focused = false;
-                    this.connection_monitor.host_port_search_focused = false;
-                    this.connection_monitor.host_schedule_search_focused = false;
-                    this.connection_monitor.host_filesystem_search_focused = false;
-                    this.ime_marked_text = None;
-                    this.new_connection_caret_visible = true;
-                    window.focus(&this.focus_handle, cx);
-                    this.begin_ime_selection_from_mouse_down(target, event, window, cx);
+                cx.listener(move |host_tools, event: &MouseDownEvent, window, cx| {
+                    host_tools.ui.focus_input(input);
+                    // Shared window IME selection crosses as a data-only one-shot intent.
+                    window.dispatch_action(
+                        Box::new(HostToolsWindowRequest::new(
+                            HostToolsWindowIntent::BeginPlainTextImeSelection {
+                                input,
+                                event: event.clone(),
+                            },
+                        )),
+                        cx,
+                    );
                     cx.stop_propagation();
                 }),
-            )
-            .on_mouse_move(cx.listener(|this, event: &MouseMoveEvent, window, cx| {
-                this.update_ime_selection_drag_from_mouse_move(event, window, cx);
-            })),
-            move |anchor, _window, cx| {
-                let _ = workspace.update(cx, |this, cx| {
-                    this.update_text_input_anchor(anchor, cx);
-                });
+            ),
+            move |anchor, _window, _cx| {
+                anchor_frame.update_anchor(anchor);
             },
         )
         .into_any_element()
     }
 
-    pub(super) fn render_host_package_filter_row(&self, cx: &mut Context<Self>) -> AnyElement {
+    fn render_host_package_filter_row(
+        &self,
+        tokens: &ThemeTokens,
+        i18n: &I18n,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let mut row = div()
             .id("host-package-filter-scroll")
             .flex()
@@ -162,51 +177,72 @@ impl WorkspaceApp {
             PackageFilter::Pacman,
             PackageFilter::Brew,
         ] {
-            row = row.child(self.render_host_package_filter_chip(filter, cx));
+            row = row.child(self.render_host_package_filter_chip(filter, tokens, i18n, cx));
         }
         row.into_any_element()
     }
 
-    pub(super) fn render_host_package_filter_chip(
+    fn render_host_package_filter_chip(
         &self,
         filter: PackageFilter,
+        tokens: &ThemeTokens,
+        i18n: &I18n,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let active = self.connection_monitor.host_package_filter == filter;
-        self.host_tools_filter_chip(active)
-            .child(self.i18n.t(package_filter_label_key(filter)))
+        let active = self.package_filter() == filter;
+        let theme = tokens.ui;
+        div()
+            .flex_none()
+            .h(px(tokens.metrics.ui_button_sm_height * 0.75))
+            .px(px(tokens.spacing.two))
+            .flex()
+            .items_center()
+            .rounded(px(tokens.radii.md))
+            .cursor_pointer()
+            .bg(if active {
+                rgb(theme.bg_hover)
+            } else {
+                rgba(0x00000000)
+            })
+            .text_size(px(tokens.metrics.ui_text_xs))
+            .text_color(if active {
+                rgb(theme.text)
+            } else {
+                rgb(theme.text_muted)
+            })
+            .hover(move |chip| chip.bg(rgb(theme.bg_hover)))
+            .child(i18n.t(package_filter_label_key(filter)))
             .on_mouse_down(
                 MouseButton::Left,
-                cx.listener(move |this, _event, _window, cx| {
-                    if this.connection_monitor.host_package_filter != filter {
-                        this.connection_monitor.host_package_filter = filter;
-                        this.connection_monitor.host_package_expanded_index = None;
-                    }
-                    cx.notify();
+                cx.listener(move |host_tools, _event, _window, cx| {
+                    // Filtering changes only the local package projection.
+                    host_tools.select_package_filter(filter, cx);
                     cx.stop_propagation();
                 }),
             )
             .into_any_element()
     }
 
-    pub(super) fn render_host_package_status_row(
+    fn render_host_package_status_row(
         &self,
         visible_count: usize,
         selected_id: String,
         status: ResourcePackageStatus,
+        tokens: &ThemeTokens,
+        i18n: &I18n,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let theme = self.tokens.ui;
+        let theme = tokens.ui;
         let capability_label = match status {
             ResourcePackageStatus::Available {
                 capability: PackageCommandCapability::Full,
                 ..
-            } => self.i18n.t("sidebar.host_packages.capability.full"),
+            } => i18n.t("sidebar.host_packages.capability.full"),
             ResourcePackageStatus::Available {
                 capability: PackageCommandCapability::Partial,
                 ..
-            } => self.i18n.t("sidebar.host_packages.capability.partial"),
-            _ => self.i18n.t("sidebar.host_packages.capability.unknown"),
+            } => i18n.t("sidebar.host_packages.capability.partial"),
+            _ => i18n.t("sidebar.host_packages.capability.unknown"),
         };
         div()
             .flex()
@@ -219,93 +255,102 @@ impl WorkspaceApp {
             .child(div().min_w_0().flex_1().truncate().child(format!(
                 "{} {} · {}",
                 visible_count,
-                self.i18n.t("sidebar.host_packages.count_suffix"),
+                i18n.t("sidebar.host_packages.count_suffix"),
                 capability_label
             )))
-            .child(self.workspace_tooltip_icon_button(
+            .child(host_tools_tooltip_icon_button(
+                tokens,
                 LucideIcon::RefreshCw,
                 13.0,
                 rgb(theme.text),
                 oxideterm_gpui_ui::button::IconButtonOptions {
                     size: 24.0,
-                    disabled: self.connection_monitor.host_package_snapshot_polling,
+                    disabled: self.package_snapshot_in_flight(),
                     has_background: true,
                     background: Some(rgb(theme.bg_hover)),
                     hover_background: Some(rgb(theme.bg_panel)),
                     idle_opacity: 1.0,
                     ..oxideterm_gpui_ui::button::IconButtonOptions::compact(24.0)
                 },
-                self.i18n.t("sidebar.host_packages.actions.refresh"),
+                i18n.t("sidebar.host_packages.actions.refresh"),
                 "host-package-refresh",
                 true,
-                cx.listener(move |this, _event, _window, cx| {
-                    this.request_host_packages_snapshot(
+                cx.listener(move |host_tools, _event, _window, cx| {
+                    host_tools.request_package_snapshot_from_ui(
                         selected_id.clone(),
                         HostSnapshotFeedback::Toast,
                         cx,
                     );
                     cx.stop_propagation();
                 }),
-                cx.entity(),
             ))
             .into_any_element()
     }
 
-    pub(super) fn render_host_package_list(
+    #[allow(clippy::too_many_arguments)]
+    fn render_host_package_list(
         &self,
         rows: Vec<ResourcePackageEntry>,
         loading: bool,
         status: ResourcePackageStatus,
         selected_id: &str,
+        sidebar_width: f32,
+        tokens: &ThemeTokens,
+        i18n: &I18n,
+        mono_font_family: SharedString,
+        selectable_text: &SelectableTextRenderState,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         if loading && rows.is_empty() {
-            return monitor_center_state(
-                self,
+            return host_tools_center_state(
                 LucideIcon::Archive,
-                self.tokens.ui.text_muted,
-                self.i18n.t("sidebar.host_packages.loading"),
+                tokens.ui.text_muted,
+                i18n.t("sidebar.host_packages.loading"),
+                selectable_text,
                 cx,
             );
         }
         match status {
             ResourcePackageStatus::Unavailable => {
-                return monitor_center_state(
-                    self,
+                return host_tools_center_state(
                     LucideIcon::Archive,
-                    self.tokens.ui.text_muted,
-                    self.i18n.t("sidebar.host_packages.unavailable"),
+                    tokens.ui.text_muted,
+                    i18n.t("sidebar.host_packages.unavailable"),
+                    selectable_text,
                     cx,
                 );
             }
             ResourcePackageStatus::Error { message } => {
-                return monitor_center_state(
-                    self,
+                return host_tools_center_state(
                     LucideIcon::AlertTriangle,
                     MONITOR_RED,
-                    self.i18n_replace("sidebar.host_packages.error", &[("error", message)]),
+                    i18n.t("sidebar.host_packages.error")
+                        .replace("{{error}}", &message),
+                    selectable_text,
                     cx,
                 );
             }
             ResourcePackageStatus::Unknown | ResourcePackageStatus::Available { .. } => {}
         }
         if rows.is_empty() {
-            return monitor_center_state(
-                self,
+            return host_tools_center_state(
                 LucideIcon::Archive,
-                self.tokens.ui.text_muted,
-                self.i18n.t("sidebar.host_packages.empty"),
+                tokens.ui.text_muted,
+                i18n.t("sidebar.host_packages.empty"),
+                selectable_text,
                 cx,
             );
         }
 
         let rows = Arc::new(rows);
         let selected_id = Arc::new(selected_id.to_string());
-        let state = self.connection_monitor.host_package_list_state.clone();
+        let state = self.package_list_state();
         let spec = TauriVirtualListSpec::new(px(HOST_PACKAGE_LIST_ESTIMATED_ROW_HEIGHT), 8);
-        let workspace = cx.entity();
-        let show_context_columns =
-            self.ai.chat.sidebar_width >= HOST_PACKAGE_CONTEXT_COLUMNS_MIN_WIDTH;
+        let host_tools = cx.entity();
+        let show_context_columns = sidebar_width >= HOST_PACKAGE_CONTEXT_COLUMNS_MIN_WIDTH;
+        let row_tokens = *tokens;
+        let row_i18n = i18n.clone();
+        let row_mono_font_family = mono_font_family.clone();
         div()
             .w_full()
             .min_w_0()
@@ -314,7 +359,11 @@ impl WorkspaceApp {
             .flex()
             .flex_col()
             .overflow_hidden()
-            .child(self.render_host_package_table_header(show_context_columns))
+            .child(Self::render_host_package_table_header(
+                show_context_columns,
+                tokens,
+                i18n,
+            ))
             .child(
                 div()
                     .flex_1()
@@ -324,14 +373,15 @@ impl WorkspaceApp {
                         state,
                         spec,
                         move |index, _window, cx| {
-                            let rows = rows.clone();
-                            let selected_id = selected_id.clone();
-                            workspace.update(cx, |this, cx| {
-                                this.render_host_package_row(
+                            host_tools.update(cx, |host_tools, cx| {
+                                host_tools.render_host_package_row(
                                     selected_id.as_str(),
                                     index,
                                     rows.get(index).cloned(),
                                     show_context_columns,
+                                    &row_tokens,
+                                    &row_i18n,
+                                    row_mono_font_family.clone(),
                                     cx,
                                 )
                             })
@@ -341,11 +391,12 @@ impl WorkspaceApp {
             .into_any_element()
     }
 
-    pub(super) fn render_host_package_table_header(
-        &self,
+    fn render_host_package_table_header(
         show_context_columns: bool,
+        tokens: &ThemeTokens,
+        i18n: &I18n,
     ) -> AnyElement {
-        let theme = self.tokens.ui;
+        let theme = tokens.ui;
         div()
             .flex_none()
             .w_full()
@@ -365,28 +416,28 @@ impl WorkspaceApp {
                     .min_w_0()
                     .flex_1()
                     .truncate()
-                    .child(self.i18n.t("sidebar.host_packages.columns.package")),
+                    .child(i18n.t("sidebar.host_packages.columns.package")),
             )
             .child(
                 div()
                     .flex_none()
                     .w(px(HOST_PACKAGE_STATUS_COLUMN_WIDTH))
                     .truncate()
-                    .child(self.i18n.t("sidebar.host_packages.columns.status")),
+                    .child(i18n.t("sidebar.host_packages.columns.status")),
             )
             .child(
                 div()
                     .flex_none()
                     .w(px(HOST_PACKAGE_VERSION_COLUMN_WIDTH))
                     .truncate()
-                    .child(self.i18n.t("sidebar.host_packages.columns.installed")),
+                    .child(i18n.t("sidebar.host_packages.columns.installed")),
             )
             .child(
                 div()
                     .flex_none()
                     .w(px(HOST_PACKAGE_MANAGER_COLUMN_WIDTH))
                     .truncate()
-                    .child(self.i18n.t("sidebar.host_packages.columns.manager")),
+                    .child(i18n.t("sidebar.host_packages.columns.manager")),
             )
             .when(show_context_columns, |header| {
                 header
@@ -395,34 +446,37 @@ impl WorkspaceApp {
                             .flex_none()
                             .w(px(HOST_PACKAGE_VERSION_COLUMN_WIDTH))
                             .truncate()
-                            .child(self.i18n.t("sidebar.host_packages.columns.candidate")),
+                            .child(i18n.t("sidebar.host_packages.columns.candidate")),
                     )
                     .child(
                         div()
                             .flex_none()
                             .w(px(HOST_PACKAGE_SERVICE_COLUMN_WIDTH))
                             .truncate()
-                            .child(self.i18n.t("sidebar.host_packages.columns.service")),
+                            .child(i18n.t("sidebar.host_packages.columns.service")),
                     )
             })
             .into_any_element()
     }
 
-    pub(super) fn render_host_package_row(
+    #[allow(clippy::too_many_arguments)]
+    fn render_host_package_row(
         &self,
         connection_id: &str,
         index: usize,
         entry: Option<ResourcePackageEntry>,
         show_context_columns: bool,
+        tokens: &ThemeTokens,
+        i18n: &I18n,
+        mono_font_family: SharedString,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let Some(entry) = entry else {
             return div().into_any_element();
         };
-        let expanded = self.connection_monitor.host_package_expanded_index == Some(index);
-        let theme = self.tokens.ui;
-        let mono_font = settings_mono_font_family(self.settings_store.settings());
-        let status = host_package_status_display(&self.i18n, &entry.status);
+        let expanded = self.package_expanded_index() == Some(index);
+        let theme = tokens.ui;
+        let status = host_package_status_display(i18n, &entry.status);
         let installed = host_package_blank_dash(&entry.installed_version);
         let candidate = host_package_blank_dash(&entry.candidate_version);
         let manager = host_package_blank_dash(&entry.manager);
@@ -454,7 +508,7 @@ impl WorkspaceApp {
                             .truncate()
                             .text_size(px(HOST_PROCESS_TABLE_COMMAND_TEXT_SIZE))
                             .text_color(rgb(theme.text))
-                            .font_family(mono_font.clone())
+                            .font_family(mono_font_family.clone())
                             .child(host_package_blank_dash(&entry.name)),
                     )
                     .child(
@@ -467,7 +521,7 @@ impl WorkspaceApp {
                                 &entry.status,
                                 theme.text_muted,
                             )))
-                            .font_family(mono_font.clone())
+                            .font_family(mono_font_family.clone())
                             .child(status),
                     )
                     .child(
@@ -477,7 +531,7 @@ impl WorkspaceApp {
                             .truncate()
                             .text_size(px(HOST_PROCESS_TABLE_VALUE_TEXT_SIZE))
                             .text_color(rgb(theme.text_muted))
-                            .font_family(mono_font.clone())
+                            .font_family(mono_font_family.clone())
                             .child(installed),
                     )
                     .child(
@@ -487,7 +541,7 @@ impl WorkspaceApp {
                             .truncate()
                             .text_size(px(HOST_PROCESS_TABLE_VALUE_TEXT_SIZE))
                             .text_color(rgb(theme.text_muted))
-                            .font_family(mono_font.clone())
+                            .font_family(mono_font_family.clone())
                             .child(manager),
                     )
                     .when(show_context_columns, |row| {
@@ -498,7 +552,7 @@ impl WorkspaceApp {
                                 .truncate()
                                 .text_size(px(HOST_PROCESS_TABLE_VALUE_TEXT_SIZE))
                                 .text_color(rgb(theme.text_muted))
-                                .font_family(mono_font.clone())
+                                .font_family(mono_font_family.clone())
                                 .child(candidate.clone()),
                         )
                         .child(
@@ -508,7 +562,7 @@ impl WorkspaceApp {
                                 .truncate()
                                 .text_size(px(HOST_PROCESS_TABLE_VALUE_TEXT_SIZE))
                                 .text_color(rgb(theme.text_muted))
-                                .font_family(mono_font.clone())
+                                .font_family(mono_font_family.clone())
                                 .child(service.clone()),
                         )
                     }),
@@ -529,49 +583,66 @@ impl WorkspaceApp {
                             .truncate()
                             .text_size(px(HOST_PROCESS_TABLE_META_TEXT_SIZE))
                             .text_color(rgb(theme.text_muted))
-                            .font_family(mono_font)
-                            .child(host_package_meta_label(
-                                &self.i18n,
-                                &entry,
-                                show_context_columns,
-                            )),
+                            .font_family(mono_font_family.clone())
+                            .child(host_package_meta_label(i18n, &entry, show_context_columns)),
                     )
-                    .child(self.render_host_package_inline_actions(connection_id, &entry, cx)),
+                    .child(self.render_host_package_inline_actions(
+                        connection_id,
+                        &entry,
+                        tokens,
+                        i18n,
+                        cx,
+                    )),
             )
             .when(expanded, |row| {
-                row.child(self.render_host_package_detail(&entry))
+                row.child(Self::render_host_package_detail(
+                    &entry,
+                    tokens,
+                    i18n,
+                    mono_font_family,
+                ))
             })
             .on_mouse_down(
                 MouseButton::Left,
-                cx.listener(move |this, _event, _window, cx| {
-                    if this.connection_monitor.host_package_expanded_index == Some(index) {
-                        this.connection_monitor.host_package_expanded_index = None;
-                    } else {
-                        this.connection_monitor.host_package_expanded_index = Some(index);
-                    }
-                    cx.notify();
+                cx.listener(move |host_tools, _event, _window, cx| {
+                    // Expansion changes only Entity-owned list presentation.
+                    host_tools.toggle_package_expanded(index, cx);
                     cx.stop_propagation();
                 }),
             )
             .into_any_element()
     }
 
-    pub(super) fn render_host_package_inline_actions(
+    fn render_host_package_inline_actions(
         &self,
         connection_id: &str,
         entry: &ResourcePackageEntry,
+        tokens: &ThemeTokens,
+        i18n: &I18n,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let theme = self.tokens.ui;
+        let theme = tokens.ui;
         let package_name = entry.name.clone();
-        let inspect_entry = entry.clone();
+        let inspect_connection_id = connection_id.to_string();
+        let inspect_manager = entry.manager.clone();
+        let inspect_package_name = entry.name.clone();
+        let inspect_title = format!(
+            "{}: {}",
+            i18n.t("sidebar.host_packages.inspect_title"),
+            entry.name
+        );
+        let inspect_opened_notice = i18n
+            .t("sidebar.host_packages.toast.inspect_opened")
+            .replace("{{name}}", &entry.name);
+        let inspect_missing_notice = i18n.t("sidebar.host_packages.toast.exec_terminal_missing");
         div()
             .flex_none()
             .flex()
             .items_center()
             .justify_end()
             .gap(px(4.0))
-            .child(self.workspace_tooltip_icon_button(
+            .child(host_tools_tooltip_icon_button(
+                tokens,
                 LucideIcon::Copy,
                 12.0,
                 rgb(theme.text),
@@ -583,16 +654,16 @@ impl WorkspaceApp {
                     idle_opacity: 1.0,
                     ..oxideterm_gpui_ui::button::IconButtonOptions::compact(22.0)
                 },
-                self.i18n.t("sidebar.host_packages.actions.copy_name"),
+                i18n.t("sidebar.host_packages.actions.copy_name"),
                 "host-package-copy-name",
                 true,
-                cx.listener(move |this, _event, _window, cx| {
-                    this.copy_host_package_name(package_name.clone(), cx);
+                cx.listener(move |host_tools, _event, _window, cx| {
+                    host_tools.copy_host_package_name(package_name.clone(), cx);
                     cx.stop_propagation();
                 }),
-                cx.entity(),
             ))
-            .child(self.workspace_tooltip_icon_button(
+            .child(host_tools_tooltip_icon_button(
+                tokens,
                 LucideIcon::Terminal,
                 12.0,
                 rgb(theme.text),
@@ -604,33 +675,39 @@ impl WorkspaceApp {
                     idle_opacity: 1.0,
                     ..oxideterm_gpui_ui::button::IconButtonOptions::compact(22.0)
                 },
-                self.i18n.t("sidebar.host_packages.actions.inspect"),
+                i18n.t("sidebar.host_packages.actions.inspect"),
                 "host-package-row-inspect",
                 true,
                 cx.listener({
-                    let connection_id = connection_id.to_string();
-                    move |this, _event, window, cx| {
-                        this.open_host_package_inspect_terminal(
-                            connection_id.clone(),
-                            inspect_entry.clone(),
+                    move |host_tools, _event, window, cx| {
+                        host_tools.dispatch_host_package_inspect_terminal(
+                            inspect_connection_id.clone(),
+                            inspect_manager.clone(),
+                            inspect_package_name.clone(),
+                            inspect_title.clone(),
+                            inspect_opened_notice.clone(),
+                            inspect_missing_notice.clone(),
                             window,
                             cx,
                         );
                         cx.stop_propagation();
                     }
                 }),
-                cx.entity(),
             ))
             .into_any_element()
     }
 
-    pub(super) fn render_host_package_detail(&self, entry: &ResourcePackageEntry) -> AnyElement {
-        let theme = self.tokens.ui;
-        let mono_font = settings_mono_font_family(self.settings_store.settings());
+    fn render_host_package_detail(
+        entry: &ResourcePackageEntry,
+        tokens: &ThemeTokens,
+        i18n: &I18n,
+        mono_font_family: SharedString,
+    ) -> AnyElement {
+        let theme = tokens.ui;
         div()
             .mx_3()
             .mb_2()
-            .rounded(px(self.tokens.radii.md))
+            .rounded(px(tokens.radii.md))
             .border_1()
             .border_color(rgba((theme.border << 8) | MONITOR_BORDER_ALPHA))
             .bg(rgb(theme.bg_panel))
@@ -642,116 +719,169 @@ impl WorkspaceApp {
                     .flex()
                     .flex_col()
                     .gap_1()
-                    .font_family(mono_font)
+                    .font_family(mono_font_family)
                     .text_size(px(HOST_PROCESS_DETAIL_TEXT_SIZE))
                     .text_color(rgb(theme.text))
                     .child(format!(
                         "{}: {}",
-                        self.i18n.t("sidebar.host_packages.columns.package"),
+                        i18n.t("sidebar.host_packages.columns.package"),
                         host_package_blank_dash(&entry.name)
                     ))
                     .child(format!(
                         "{}: {}",
-                        self.i18n.t("sidebar.host_packages.columns.status"),
-                        host_package_status_display(&self.i18n, &entry.status)
+                        i18n.t("sidebar.host_packages.columns.status"),
+                        host_package_status_display(i18n, &entry.status)
                     ))
                     .child(format!(
                         "{}: {}",
-                        self.i18n.t("sidebar.host_packages.columns.manager"),
+                        i18n.t("sidebar.host_packages.columns.manager"),
                         host_package_blank_dash(&entry.manager)
                     ))
                     .child(format!(
                         "{}: {}",
-                        self.i18n.t("sidebar.host_packages.columns.installed"),
+                        i18n.t("sidebar.host_packages.columns.installed"),
                         host_package_blank_dash(&entry.installed_version)
                     ))
                     .child(format!(
                         "{}: {}",
-                        self.i18n.t("sidebar.host_packages.columns.candidate"),
+                        i18n.t("sidebar.host_packages.columns.candidate"),
                         host_package_blank_dash(&entry.candidate_version)
                     ))
                     .child(format!(
                         "{}: {}",
-                        self.i18n.t("sidebar.host_packages.columns.arch"),
+                        i18n.t("sidebar.host_packages.columns.arch"),
                         host_package_blank_dash(&entry.arch)
                     ))
                     .child(format!(
                         "{}: {}",
-                        self.i18n.t("sidebar.host_packages.columns.repository"),
+                        i18n.t("sidebar.host_packages.columns.repository"),
                         host_package_blank_dash(&entry.repository)
                     ))
                     .child(format!(
                         "{}: {}",
-                        self.i18n.t("sidebar.host_packages.columns.service"),
+                        i18n.t("sidebar.host_packages.columns.service"),
                         host_package_service_label(entry)
                     ))
                     .child(format!(
                         "{}: {}",
-                        self.i18n.t("sidebar.host_packages.columns.owner_paths"),
+                        i18n.t("sidebar.host_packages.columns.owner_paths"),
                         host_package_owner_paths_label(entry)
                     ))
                     .child(format!(
                         "{}: {}",
-                        self.i18n.t("sidebar.host_packages.columns.source"),
+                        i18n.t("sidebar.host_packages.columns.source"),
                         host_package_blank_dash(&entry.source)
                     ))
                     .child(div().pt_2().whitespace_nowrap().child(format!(
                         "{}: {}",
-                        self.i18n.t("sidebar.host_packages.columns.summary"),
+                        i18n.t("sidebar.host_packages.columns.summary"),
                         host_package_blank_dash(&entry.summary)
                     ))),
             )
             .into_any_element()
     }
 
-    pub(super) fn sync_host_package_list_state(
-        &self,
-        rows: &[ResourcePackageEntry],
-        selected_id: &str,
-    ) {
+    fn sync_host_package_list_state(&self, rows: &[ResourcePackageEntry], selected_id: &str) {
         let signatures = rows.iter().map(package_row_signature).collect::<Vec<_>>();
         let identity = format!(
             "host-packages:{selected_id}:{}:{}:{}",
-            self.connection_monitor.host_package_search_query,
-            self.connection_monitor.host_package_filter as u8,
-            self.connection_monitor
-                .host_package_expanded_index
-                .unwrap_or(usize::MAX)
+            self.ui.host_package_search_query,
+            self.package_filter() as u8,
+            self.package_expanded_index().unwrap_or(usize::MAX)
         );
-        sync_tauri_variable_list_state_by_signatures(
-            &self.connection_monitor.host_package_list_state,
-            &mut self.connection_monitor.host_package_list_cache.borrow_mut(),
-            &identity,
-            &signatures,
-            TauriVirtualListSpec::new(px(HOST_PACKAGE_LIST_ESTIMATED_ROW_HEIGHT), 8),
-        );
+        self.sync_package_list_signatures(&identity, &signatures);
     }
 
-    pub(super) fn host_package_snapshot_command(
-        &self,
-        connection_id: &str,
-    ) -> (oxideterm_connection_monitor::PackageCaptureCommand, String) {
-        let os_type = self
-            .ssh_registry
-            .get(connection_id)
-            .and_then(|handle| handle.remote_env().map(|env| env.os_type))
-            .unwrap_or_else(|| "Unknown".to_string());
-        (build_package_snapshot_command(&os_type), os_type)
+    fn request_package_snapshot_from_ui(
+        &mut self,
+        connection_id: String,
+        feedback: HostSnapshotFeedback,
+        cx: &mut Context<Self>,
+    ) {
+        let (Some(runtime), Some(messages)) =
+            (self.lifecycle_runtime.clone(), self.messages.as_ref())
+        else {
+            return;
+        };
+        for notice in self.request_package_snapshot(
+            connection_id,
+            feedback,
+            self.monitoring.packages_enabled,
+            runtime,
+            messages.package_unknown_error.clone(),
+            cx,
+        ) {
+            cx.emit(HostToolsEvent::ShowNotice(notice));
+        }
     }
 
-    pub(super) fn host_package_inspect_command(
-        &self,
-        connection_id: &str,
-        manager: &str,
-        package_name: &str,
-    ) -> Result<(oxideterm_connection_monitor::PackageInspectCommand, String), String> {
-        let os_type = self
-            .ssh_registry
-            .get(connection_id)
-            .and_then(|handle| handle.remote_env().map(|env| env.os_type))
-            .unwrap_or_else(|| "Unknown".to_string());
-        build_package_inspect_command(&os_type, manager, package_name)
-            .map(|command| (command, os_type))
+    fn copy_host_package_name(&mut self, package_name: String, cx: &mut Context<Self>) {
+        cx.write_to_clipboard(ClipboardItem::new_string(package_name.clone()));
+        cx.emit(HostToolsEvent::ShowNotice(
+            HostToolsNotice::PackageNameCopied { package_name },
+        ));
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn dispatch_host_package_inspect_terminal(
+        &mut self,
+        connection_id: String,
+        manager: String,
+        package_name: String,
+        title: String,
+        opened_notice: String,
+        missing_notice: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let command = match self.package_inspect_command(&connection_id, &manager, &package_name) {
+            Ok(command) => command,
+            Err(_) => {
+                cx.emit(HostToolsEvent::ShowNotice(
+                    HostToolsNotice::PackageInspectUnsupported {
+                        manager: host_package_blank_dash(&manager),
+                    },
+                ));
+                return;
+            }
+        };
+        // The fixed inspect command moves into the shared one-shot terminal boundary.
+        window.dispatch_action(
+            Box::new(HostToolsWindowRequest::new(
+                HostToolsWindowIntent::OpenExistingNodeTerminal {
+                    connection_id,
+                    command,
+                    title,
+                    opened_notice,
+                    missing_notice,
+                },
+            )),
+            cx,
+        );
+    }
+}
+
+impl WorkspaceApp {
+    pub(super) fn render_host_packages_panel(&self, cx: &mut Context<Self>) -> AnyElement {
+        let tokens = self.tokens;
+        let i18n = &self.i18n;
+        let mono_font_family = settings_mono_font_family(self.settings_store.settings());
+        let selectable_text = self.selectable_text_render_state(cx);
+        let search_ime = self
+            .host_tools_plain_text_ime_frame(HostToolsTextInput::PackageSearch, cx)
+            .expect("package search is a non-secret Host Tools input");
+        let sidebar_width = self.ai_entity.read(cx).chat_ui().sidebar_width;
+        self.host_tools.update(cx, |host_tools, cx| {
+            host_tools.render_host_packages_panel(
+                search_ime,
+                sidebar_width,
+                &tokens,
+                i18n,
+                mono_font_family,
+                &selectable_text,
+                cx,
+            )
+        })
     }
 
     pub(in crate::workspace) fn handle_host_package_search_key(
@@ -759,11 +889,18 @@ impl WorkspaceApp {
         event: &KeyDownEvent,
         cx: &mut Context<Self>,
     ) -> bool {
-        if !self.connection_monitor.host_package_search_focused {
+        if !self
+            .host_tools
+            .read(cx)
+            .ui
+            .input_is_focused(HostToolsTextInput::PackageSearch)
+        {
             return false;
         }
         if event.keystroke.key.as_str() == "escape" && !event.keystroke.modifiers.platform {
-            self.connection_monitor.host_package_search_focused = false;
+            self.host_tools.update(cx, |host_tools, _cx| {
+                host_tools.ui.clear_input_focus();
+            });
             self.ime_marked_text = None;
             self.clear_ime_selection();
             cx.notify();
@@ -771,343 +908,220 @@ impl WorkspaceApp {
         }
         false
     }
+}
 
-    pub(super) fn request_host_packages_snapshot_for_selected_connection(
-        &mut self,
-        cx: &mut Context<Self>,
-    ) {
-        let connections = self.monitor_connections();
-        let Some(connection_id) = self
-            .connection_monitor
-            .selected_connection_id
-            .clone()
-            .or_else(|| {
-                connections
-                    .first()
-                    .map(|connection| connection.connection_id.clone())
-            })
-        else {
-            return;
-        };
-        self.request_host_packages_snapshot(connection_id, HostSnapshotFeedback::Silent, cx);
+impl HostToolsEntity {
+    pub(super) fn package_snapshot_for(
+        &self,
+        connection_id: &str,
+    ) -> Option<&ResourcePackageSnapshot> {
+        self.host_packages
+            .snapshot
+            .as_ref()
+            .filter(|_| self.host_packages.snapshot_connection_id.as_deref() == Some(connection_id))
     }
 
-    pub(super) fn request_host_packages_snapshot(
+    pub(super) fn package_snapshot_in_flight(&self) -> bool {
+        self.host_packages.snapshot_in_flight
+    }
+
+    pub(in crate::workspace::connection_monitor) fn package_filter(&self) -> PackageFilter {
+        self.host_packages.filter
+    }
+
+    pub(super) fn package_list_state(&self) -> ListState {
+        self.host_packages.list_state.clone()
+    }
+
+    pub(in crate::workspace::connection_monitor) fn package_expanded_index(&self) -> Option<usize> {
+        self.host_packages.expanded_index
+    }
+
+    pub(in crate::workspace::connection_monitor) fn select_package_filter(
+        &mut self,
+        filter: PackageFilter,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if self.host_packages.filter == filter {
+            return false;
+        }
+        self.host_packages.filter = filter;
+        self.host_packages.expanded_index = None;
+        cx.notify();
+        true
+    }
+
+    pub(in crate::workspace::connection_monitor) fn toggle_package_expanded(
+        &mut self,
+        index: usize,
+        cx: &mut Context<Self>,
+    ) {
+        self.host_packages.expanded_index =
+            (self.host_packages.expanded_index != Some(index)).then_some(index);
+        cx.notify();
+    }
+
+    pub(super) fn sync_package_list_signatures(&self, identity: &str, signatures: &[u64]) {
+        sync_tauri_variable_list_state_by_signatures(
+            &self.host_packages.list_state,
+            &mut self.host_packages.list_cache.borrow_mut(),
+            identity,
+            signatures,
+            TauriVirtualListSpec::new(px(HOST_PACKAGE_LIST_ESTIMATED_ROW_HEIGHT), 8),
+        );
+    }
+
+    pub(super) fn package_inspect_command(
+        &self,
+        connection_id: &str,
+        manager: &str,
+        package_name: &str,
+    ) -> Result<String, String> {
+        let os_type = self
+            .connection_os_type(connection_id)
+            .unwrap_or_else(|| "Unknown".to_string());
+        build_package_inspect_command(&os_type, manager, package_name)
+            .map(|command| command.command)
+    }
+
+    pub(in crate::workspace::connection_monitor) fn request_package_snapshot(
         &mut self,
         connection_id: String,
         feedback: HostSnapshotFeedback,
+        monitoring_enabled: bool,
+        runtime: tokio::runtime::Handle,
+        failure_fallback: String,
         cx: &mut Context<Self>,
-    ) {
-        if !self.host_tool_monitoring_enabled(ContextSidebarTool::Packages) {
-            return;
+    ) -> Vec<HostToolsNotice> {
+        if !monitoring_enabled {
+            return Vec::new();
         }
-        if self.connection_monitor.host_package_snapshot_polling {
-            if feedback.should_toast() {
-                self.push_host_package_toast(
-                    self.i18n
-                        .t("sidebar.host_packages.toast.snapshot_already_running"),
-                    TerminalNoticeVariant::Warning,
-                );
-            }
-            return;
+        if self.host_packages.snapshot_in_flight {
+            return feedback
+                .should_toast()
+                .then_some(HostToolsNotice::PackageSnapshotAlreadyRunning)
+                .into_iter()
+                .collect();
         }
-        let Some(handle) = self.ssh_registry.get(&connection_id) else {
-            if feedback.should_toast() {
-                self.push_host_package_toast(
-                    self.i18n
-                        .t("sidebar.host_packages.toast.connection_missing"),
-                    TerminalNoticeVariant::Error,
-                );
-            }
-            cx.notify();
-            return;
+        let Some(os_type) = self.connection_os_type(&connection_id) else {
+            return feedback
+                .should_toast()
+                .then_some(HostToolsNotice::PackageConnectionMissing)
+                .into_iter()
+                .collect();
         };
-        let (command, _os_type) = self.host_package_snapshot_command(&connection_id);
-
+        let command = build_package_snapshot_command(&os_type);
         let request = HostPackageSnapshotRequest {
             connection_id: connection_id.clone(),
             feedback,
+            failure_fallback,
         };
-        let (tx, rx) = std::sync::mpsc::channel();
-        self.connection_monitor.host_package_snapshot_connection_id = Some(connection_id);
-        self.connection_monitor.host_package_snapshot_running = Some(request.clone());
-        self.connection_monitor.host_package_snapshot_rx = Some(rx);
-        self.connection_monitor.host_package_snapshot_polling = true;
-        self.connection_monitor.host_package_last_error = None;
-        // Package inventory is snapshot-driven and read-only. Keep it outside
-        // the metric profiler so package managers are not queried on every tick.
-        self.forwarding_runtime.handle().spawn(async move {
-            let result = handle
-                .run_command_capture(
-                    &command.command,
-                    HOST_PACKAGE_SNAPSHOT_TIMEOUT,
-                    HOST_PACKAGE_SNAPSHOT_MAX_OUTPUT_SIZE,
-                )
-                .await
-                .map_err(|error| error.to_string());
-            let _ = tx.send(HostPackageSnapshotDelivery { request, result });
-        });
-        cx.notify();
-    }
-
-    pub(super) fn copy_host_package_name(&mut self, package_name: String, cx: &mut Context<Self>) {
-        cx.write_to_clipboard(ClipboardItem::new_string(package_name.clone()));
-        self.push_host_package_toast(
-            self.i18n_replace(
-                "sidebar.host_packages.toast.copied_name",
-                &[("name", package_name)],
-            ),
-            TerminalNoticeVariant::Success,
+        self.host_packages.snapshot_connection_id = Some(connection_id);
+        self.host_packages.running = Some(request.clone());
+        self.host_packages.snapshot_in_flight = true;
+        // Package inventory is read-only manual work, not a periodic sampler.
+        let spawned = self.spawn_package_snapshot_capture(
+            command.command,
+            request,
+            HOST_PACKAGE_SNAPSHOT_TIMEOUT,
+            HOST_PACKAGE_SNAPSHOT_MAX_OUTPUT_SIZE,
+            runtime,
         );
-        cx.notify();
-    }
-
-    pub(super) fn open_host_package_inspect_terminal(
-        &mut self,
-        connection_id: String,
-        entry: ResourcePackageEntry,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        let (command, _os_type) =
-            match self.host_package_inspect_command(&connection_id, &entry.manager, &entry.name) {
-                Ok(command) => command,
-                Err(_error) => {
-                    self.push_host_package_toast(
-                        self.i18n_replace(
-                            "sidebar.host_packages.toast.inspect_unsupported",
-                            &[("manager", host_package_blank_dash(&entry.manager))],
-                        ),
-                        TerminalNoticeVariant::Error,
-                    );
-                    cx.notify();
-                    return;
-                }
-            };
-        let title = format!(
-            "{}: {}",
-            self.i18n.t("sidebar.host_packages.inspect_title"),
-            entry.name
-        );
-        let Some(node_id) = self.node_router.node_id_for_connection(&connection_id) else {
-            self.push_host_package_toast(
-                self.i18n
-                    .t("sidebar.host_packages.toast.exec_terminal_missing"),
-                TerminalNoticeVariant::Error,
-            );
-            cx.notify();
-            return;
-        };
-        let Some(node) = self.ssh_nodes.get(&node_id).cloned() else {
-            self.push_host_package_toast(
-                self.i18n
-                    .t("sidebar.host_packages.toast.exec_terminal_missing"),
-                TerminalNoticeVariant::Error,
-            );
-            cx.notify();
-            return;
-        };
-        match self.queue_ssh_terminal_tab_for_node_with_mark_used(
-            node_id,
-            Some(command.command),
-            node.config,
-            title,
-            node.saved_connection_id,
-            None,
-            None,
-            window,
-            cx,
-        ) {
-            Ok(()) => self.push_host_package_toast(
-                self.i18n_replace(
-                    "sidebar.host_packages.toast.inspect_opened",
-                    &[("name", entry.name)],
-                ),
-                TerminalNoticeVariant::Success,
-            ),
-            Err(error) => {
-                self.push_host_package_toast(error.to_string(), TerminalNoticeVariant::Error)
-            }
+        if !spawned {
+            self.host_packages.snapshot_in_flight = false;
+            self.host_packages.running = None;
+            return feedback
+                .should_toast()
+                .then_some(HostToolsNotice::PackageConnectionMissing)
+                .into_iter()
+                .collect();
         }
         cx.notify();
+        Vec::new()
     }
 
-    pub(in crate::workspace) fn poll_host_packages_snapshot_results(
+    pub(in crate::workspace::connection_monitor) fn finish_host_packages_snapshot(
         &mut self,
+        mut delivery: HostPackageSnapshotDelivery,
         cx: &mut Context<Self>,
     ) {
-        if !self.connection_monitor.host_package_snapshot_polling {
-            return;
-        }
-        let Some(rx) = self.connection_monitor.host_package_snapshot_rx.take() else {
-            self.connection_monitor.host_package_snapshot_polling = false;
-            self.connection_monitor.host_package_snapshot_running = None;
-            return;
-        };
-        match rx.try_recv() {
-            Ok(delivery) => {
-                self.finish_host_packages_snapshot(delivery, cx);
+        if self.host_packages.running.as_ref() != Some(&delivery.request) {
+            if let Ok(output) = delivery.result.as_mut() {
+                zeroize_host_snapshot_output(output);
             }
-            Err(std::sync::mpsc::TryRecvError::Empty) => {
-                self.connection_monitor.host_package_snapshot_rx = Some(rx);
-            }
-            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
-                let feedback = self
-                    .connection_monitor
-                    .host_package_snapshot_running
-                    .as_ref()
-                    .map(|request| request.feedback)
-                    .unwrap_or(HostSnapshotFeedback::Silent);
-                self.connection_monitor.host_package_snapshot_polling = false;
-                self.connection_monitor.host_package_snapshot_running = None;
-                let reason = self.i18n.t("sidebar.host_packages.toast.unknown_error");
-                self.connection_monitor.host_package_last_error = Some(reason.clone());
-                if feedback.should_toast() {
-                    self.push_host_package_toast(
-                        self.i18n_replace(
-                            "sidebar.host_packages.toast.snapshot_failed",
-                            &[("reason", reason)],
-                        ),
-                        TerminalNoticeVariant::Error,
-                    );
-                }
-                cx.notify();
-            }
-        }
-    }
-
-    pub(super) fn finish_host_packages_snapshot(
-        &mut self,
-        delivery: HostPackageSnapshotDelivery,
-        cx: &mut Context<Self>,
-    ) {
-        if self
-            .connection_monitor
-            .host_package_snapshot_running
-            .as_ref()
-            .is_some_and(|running| running != &delivery.request)
-        {
-            cx.notify();
             return;
         }
         let feedback = delivery.request.feedback;
-        self.connection_monitor.host_package_snapshot_polling = false;
-        self.connection_monitor.host_package_snapshot_running = None;
-        self.connection_monitor.host_package_snapshot_rx = None;
+        let failure_fallback = delivery.request.failure_fallback.clone();
+        self.host_packages.snapshot_in_flight = false;
+        self.host_packages.running = None;
         match delivery.result {
-            Ok(output) if output.exit_code.unwrap_or(0) == 0 => {
-                let snapshot = parse_package_snapshot(&output.stdout);
-                let visible_count = visible_package_rows(
-                    &snapshot.entries,
-                    &self.connection_monitor.host_package_search_query,
-                    self.connection_monitor.host_package_filter,
-                )
-                .len();
-                match &snapshot.status {
-                    ResourcePackageStatus::Available { .. } => {
-                        self.connection_monitor.host_package_last_error = None;
-                        if feedback.should_toast() {
-                            self.push_host_package_toast(
-                                self.i18n_replace(
-                                    "sidebar.host_packages.toast.snapshot_loaded",
-                                    &[("count", visible_count.to_string())],
-                                ),
-                                TerminalNoticeVariant::Success,
-                            );
-                        }
-                    }
-                    ResourcePackageStatus::Unavailable => {
-                        self.connection_monitor.host_package_last_error =
-                            Some(self.i18n.t("sidebar.host_packages.unavailable"));
-                        if feedback.should_toast() {
-                            self.push_host_package_toast(
-                                self.i18n.t("sidebar.host_packages.toast.unavailable"),
-                                TerminalNoticeVariant::Warning,
-                            );
-                        }
-                    }
-                    ResourcePackageStatus::Error { message } => {
-                        self.connection_monitor.host_package_last_error = Some(message.clone());
-                        if feedback.should_toast() {
-                            self.push_host_package_toast(
-                                self.i18n_replace(
-                                    "sidebar.host_packages.toast.snapshot_failed",
-                                    &[("reason", message.clone())],
-                                ),
-                                TerminalNoticeVariant::Error,
-                            );
-                        }
-                    }
-                    ResourcePackageStatus::Unknown => {}
+            Ok(mut output) if output.exit_code.unwrap_or(0) == 0 => {
+                let mut snapshot = parse_package_snapshot(&output.stdout);
+                if matches!(&snapshot.status, ResourcePackageStatus::Error { .. }) {
+                    snapshot.status = ResourcePackageStatus::Error {
+                        message: failure_fallback,
+                    };
                 }
-                self.connection_monitor.host_package_snapshot_connection_id =
-                    Some(delivery.request.connection_id);
-                self.connection_monitor.host_package_snapshot = Some(snapshot);
+                zeroize_host_snapshot_output(&mut output);
+                if feedback.should_toast() {
+                    match &snapshot.status {
+                        ResourcePackageStatus::Available { .. } => {
+                            cx.emit(HostToolsEvent::ShowNotice(
+                                HostToolsNotice::PackageSnapshotLoaded {
+                                    count: snapshot.entries.len(),
+                                },
+                            ));
+                        }
+                        ResourcePackageStatus::Unavailable => {
+                            cx.emit(HostToolsEvent::ShowNotice(
+                                HostToolsNotice::PackageUnavailable,
+                            ));
+                        }
+                        ResourcePackageStatus::Error { .. } => {
+                            cx.emit(HostToolsEvent::ShowNotice(
+                                HostToolsNotice::PackageSnapshotFailed,
+                            ));
+                        }
+                        ResourcePackageStatus::Unknown => {}
+                    }
+                }
+                self.host_packages.snapshot_connection_id = Some(delivery.request.connection_id);
+                self.host_packages.snapshot = Some(snapshot);
             }
-            Ok(output) => {
-                let reason = host_package_capture_failure_message(
-                    &output.stdout,
-                    &output.stderr,
-                    output.exit_code,
-                    self.i18n.t("sidebar.host_packages.toast.unknown_error"),
-                );
-                self.connection_monitor.host_package_last_error = Some(reason.clone());
-                self.connection_monitor.host_package_snapshot_connection_id =
-                    Some(delivery.request.connection_id);
-                self.connection_monitor.host_package_snapshot = Some(ResourcePackageSnapshot {
+            Ok(mut output) => {
+                zeroize_host_snapshot_output(&mut output);
+                self.host_packages.snapshot_connection_id = Some(delivery.request.connection_id);
+                self.host_packages.snapshot = Some(ResourcePackageSnapshot {
                     status: ResourcePackageStatus::Error {
-                        message: reason.clone(),
+                        message: failure_fallback,
                     },
                     managers: Vec::new(),
                     entries: Vec::new(),
                 });
                 if feedback.should_toast() {
-                    self.push_host_package_toast(
-                        self.i18n_replace(
-                            "sidebar.host_packages.toast.snapshot_failed",
-                            &[("reason", reason)],
-                        ),
-                        TerminalNoticeVariant::Error,
-                    );
+                    cx.emit(HostToolsEvent::ShowNotice(
+                        HostToolsNotice::PackageSnapshotFailed,
+                    ));
                 }
             }
-            Err(error) => {
-                self.connection_monitor.host_package_last_error = Some(error.clone());
-                self.connection_monitor.host_package_snapshot_connection_id =
-                    Some(delivery.request.connection_id);
-                self.connection_monitor.host_package_snapshot = Some(ResourcePackageSnapshot {
+            Err(()) => {
+                self.host_packages.snapshot_connection_id = Some(delivery.request.connection_id);
+                self.host_packages.snapshot = Some(ResourcePackageSnapshot {
                     status: ResourcePackageStatus::Error {
-                        message: error.clone(),
+                        message: failure_fallback,
                     },
                     managers: Vec::new(),
                     entries: Vec::new(),
                 });
                 if feedback.should_toast() {
-                    self.push_host_package_toast(
-                        self.i18n_replace(
-                            "sidebar.host_packages.toast.snapshot_failed",
-                            &[("reason", error)],
-                        ),
-                        TerminalNoticeVariant::Error,
-                    );
+                    cx.emit(HostToolsEvent::ShowNotice(
+                        HostToolsNotice::PackageSnapshotFailed,
+                    ));
                 }
             }
         }
         cx.notify();
-    }
-
-    pub(super) fn push_host_package_toast(
-        &mut self,
-        message: String,
-        variant: TerminalNoticeVariant,
-    ) {
-        let _ = self.terminal_notice_tx.send(TerminalNotice {
-            title: message,
-            description: None,
-            status_text: None,
-            progress: None,
-            variant,
-        });
     }
 }
 
@@ -1180,20 +1194,57 @@ fn host_package_meta_label(
     )
 }
 
-fn host_package_capture_failure_message(
-    stdout: &str,
-    stderr: &str,
-    exit_code: Option<i32>,
-    fallback: String,
-) -> String {
-    let reason = stderr
-        .lines()
-        .chain(stdout.lines())
-        .map(str::trim)
-        .find(|line| !line.is_empty())
-        .unwrap_or(fallback.as_str());
-    match exit_code {
-        Some(code) => format!("{reason} (exit {code})"),
-        None => reason.to_string(),
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use gpui::TestAppContext;
+
+    #[gpui::test]
+    fn package_copy_stays_in_entity_and_emits_structured_notice(cx: &mut TestAppContext) {
+        let (profiler_update_tx, profiler_update_rx) = tokio::sync::mpsc::unbounded_channel();
+        let entity = cx.new(|cx| {
+            HostToolsEntity::new(
+                profiler_update_tx,
+                profiler_update_rx,
+                SshConnectionRegistry::default(),
+                cx,
+            )
+        });
+        let mut events = cx.events(&entity);
+
+        entity.update(cx, |host_tools, cx| {
+            host_tools.copy_host_package_name("oxideterm-package".to_string(), cx);
+        });
+
+        assert_eq!(
+            cx.read_from_clipboard().and_then(|item| item.text()),
+            Some("oxideterm-package".to_string())
+        );
+        assert_eq!(
+            events.try_recv().unwrap(),
+            HostToolsEvent::ShowNotice(HostToolsNotice::PackageNameCopied {
+                package_name: "oxideterm-package".to_string(),
+            })
+        );
+    }
+
+    #[gpui::test]
+    fn package_filter_and_expansion_do_not_start_remote_capture(cx: &mut TestAppContext) {
+        let (profiler_update_tx, profiler_update_rx) = tokio::sync::mpsc::unbounded_channel();
+        let entity = cx.new(|cx| {
+            HostToolsEntity::new(
+                profiler_update_tx,
+                profiler_update_rx,
+                SshConnectionRegistry::default(),
+                cx,
+            )
+        });
+
+        entity.update(cx, |host_tools, cx| {
+            assert!(host_tools.select_package_filter(PackageFilter::Upgradable, cx));
+            host_tools.toggle_package_expanded(2, cx);
+            assert!(!host_tools.package_snapshot_in_flight());
+            assert!(host_tools.host_packages.running.is_none());
+        });
     }
 }

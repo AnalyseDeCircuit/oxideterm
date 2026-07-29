@@ -11,6 +11,15 @@ pub(in crate::workspace) const AI_MODEL_SELECTOR_DROPDOWN_WIDTH: f32 = 256.0; //
 pub(in crate::workspace) const AI_REASONING_MENU_WIDTH: f32 = 220.0; // Compact VS Code-style effort menu.
 pub(in crate::workspace) const AI_CONTEXT_POPOVER_WIDTH: f32 = 280.0; // Tauri-sized compact context popover.
 
+struct AiConversationListRow {
+    id: Arc<str>,
+    title: String,
+    cli_origin: bool,
+    message_count: usize,
+    updated_at_ms: i64,
+    active: bool,
+}
+
 impl WorkspaceApp {
     pub(in crate::workspace) fn update_ai_sidebar_overlay_for_window_bounds(
         &mut self,
@@ -18,7 +27,10 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) {
         let next_size = current_window_size(window);
-        let Some(previous_size) = self.ai.chat.overlay_window_size.replace(next_size) else {
+        let previous_size = self.ai_entity.update(cx, |ai, _cx| {
+            ai.replace_overlay_window_size(next_size)
+        });
+        let Some(previous_size) = previous_size else {
             return;
         };
         let dx = next_size.0 - previous_size.0;
@@ -26,7 +38,7 @@ impl WorkspaceApp {
         if dx.abs() < f32::EPSILON && dy.abs() < f32::EPSILON {
             return;
         }
-        if !self.has_ai_sidebar_floating_overlay() {
+        if !self.has_ai_sidebar_floating_overlay(cx) {
             return;
         }
 
@@ -61,7 +73,7 @@ impl WorkspaceApp {
         _window: &Window,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
-        if !self.ai_sidebar_visible() || !self.has_ai_sidebar_floating_overlay() {
+        if !self.ai_sidebar_visible() || !self.has_ai_sidebar_floating_overlay(cx) {
             return None;
         }
 
@@ -73,7 +85,7 @@ impl WorkspaceApp {
         let panel_right = f32::from(panel_anchor.bounds.right());
         let panel_width = f32::from(panel_anchor.bounds.size.width);
 
-        let (corner, anchor_x, anchor_y, popup) = if self.ai.chat.conversation_list_open {
+        let (corner, anchor_x, anchor_y, popup) = if self.ai_entity.read(cx).chat_ui().conversation_list_open {
             let top = self
                 .select_anchors
                 .get(&SelectAnchorId::AiConversationList)
@@ -88,7 +100,7 @@ impl WorkspaceApp {
                 top,
                 self.render_ai_conversation_dropdown(dropdown_width, cx),
             )
-        } else if self.ai.chat.menu_open {
+        } else if self.ai_entity.read(cx).chat_ui().menu_open {
             let anchor = self
                 .select_anchors
                 .get(&SelectAnchorId::AiChatMenu)
@@ -106,8 +118,10 @@ impl WorkspaceApp {
                 top,
                 self.render_ai_chat_menu(cx),
             )
-        } else if self.ai.models.selector_open
-            && self.ai.models.selector_scope == Some(AiModelSelectorScope::Sidebar)
+        } else if self
+            .ai_entity
+            .read(cx)
+            .model_selector_is_open(AiModelSelectorScope::Sidebar)
         {
             let anchor = self.select_anchors.get(&SelectAnchorId::AiModelSelector)?;
             (
@@ -119,9 +133,9 @@ impl WorkspaceApp {
                     panel_right,
                 ),
                 f32::from(anchor.bounds.top()) - AI_FLOATING_GAP,
-                self.render_ai_model_selector_dropdown(&self.ai_model_selector_providers(), cx),
+                self.render_ai_model_selector_dropdown(&self.ai_model_selector_providers(cx), cx),
             )
-        } else if self.ai.chat.reasoning_menu_open {
+        } else if self.ai_entity.read(cx).chat_ui().reasoning_menu_open {
             let anchor = self.select_anchors.get(&SelectAnchorId::AiReasoningMenu)?;
             (
                 Corner::BottomLeft,
@@ -134,7 +148,7 @@ impl WorkspaceApp {
                 f32::from(anchor.bounds.top()) - AI_FLOATING_GAP,
                 self.render_ai_reasoning_menu(cx)?,
             )
-        } else if self.ai.chat.safety_menu_open {
+        } else if self.ai_entity.read(cx).chat_ui().safety_menu_open {
             let anchor = self.select_anchors.get(&SelectAnchorId::AiSafetyMenu)?;
             (
                 Corner::BottomLeft,
@@ -147,7 +161,7 @@ impl WorkspaceApp {
                 f32::from(anchor.bounds.top()) - AI_FLOATING_GAP,
                 self.render_ai_safety_menu(cx),
             )
-        } else if self.ai.chat.context_popover_open {
+        } else if self.ai_entity.read(cx).chat_ui().context_popover_open {
             let anchor = self.select_anchors.get(&SelectAnchorId::AiContextPopover)?;
             // Context usage is an informational inspector rather than a menu.
             // Reduced motion keeps only opacity, while Off mounts immediately.
@@ -203,14 +217,16 @@ impl WorkspaceApp {
         )
     }
 
-    pub(in crate::workspace) fn has_ai_sidebar_floating_overlay(&self) -> bool {
-        self.ai.chat.conversation_list_open
-            || self.ai.chat.menu_open
-            || (self.ai.models.selector_open
-                && self.ai.models.selector_scope == Some(AiModelSelectorScope::Sidebar))
-            || self.ai.chat.reasoning_menu_open
-            || self.ai.chat.safety_menu_open
-            || self.ai.chat.context_popover_open
+    pub(in crate::workspace) fn has_ai_sidebar_floating_overlay(&self, cx: &App) -> bool {
+        self.ai_entity.read(cx).chat_ui().conversation_list_open
+            || self.ai_entity.read(cx).chat_ui().menu_open
+            || self
+                .ai_entity
+                .read(cx)
+                .model_selector_is_open(AiModelSelectorScope::Sidebar)
+            || self.ai_entity.read(cx).chat_ui().reasoning_menu_open
+            || self.ai_entity.read(cx).chat_ui().safety_menu_open
+            || self.ai_entity.read(cx).chat_ui().context_popover_open
     }
 
     pub(in crate::workspace) fn render_ai_conversation_dropdown(
@@ -218,10 +234,10 @@ impl WorkspaceApp {
         dropdown_width: f32,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let dropdown_height = if self.ai.chat.conversation_state.conversations.is_empty() {
+        let dropdown_height = if self.ai_entity.read(cx).conversation_state().conversations.is_empty() {
             AI_CONVERSATION_EMPTY_HEIGHT
         } else {
-            (self.ai.chat.conversation_state.conversations.len() as f32
+            (self.ai_entity.read(cx).conversation_state().conversations.len() as f32
                 * AI_CONVERSATION_ROW_HEIGHT)
                 .min(AI_CONVERSATION_MAX_HEIGHT)
         };
@@ -238,7 +254,28 @@ impl WorkspaceApp {
             // stays with the overlay and cannot scroll the message/sidebar body.
             .on_scroll_wheel(|_, _, cx| cx.stop_propagation());
 
-        if self.ai.chat.conversation_state.conversations.is_empty() {
+        let conversation_rows = {
+            let ai = self.ai_entity.read(cx);
+            let state = ai.conversation_state();
+            state
+                .conversations
+                .iter()
+                .map(|conversation| AiConversationListRow {
+                    id: Arc::from(conversation.id.as_str()),
+                    title: conversation.title.clone(),
+                    cli_origin: conversation.origin == "cli",
+                    message_count: if conversation.messages_loaded {
+                        conversation.messages.len()
+                    } else {
+                        conversation.message_count
+                    },
+                    updated_at_ms: conversation.updated_at_ms,
+                    active: state.active_conversation_id.as_deref()
+                        == Some(conversation.id.as_str()),
+                })
+                .collect::<Vec<_>>()
+        };
+        if conversation_rows.is_empty() {
             list = list.child(
                 div()
                     .p(px(16.0))
@@ -255,15 +292,8 @@ impl WorkspaceApp {
                     )),
             );
         } else {
-            let conversation_count = self.ai.chat.conversation_state.conversations.len();
-            for (index, conversation) in self
-                .ai
-                .chat
-                .conversation_state
-                .conversations
-                .iter()
-                .enumerate()
-            {
+            let conversation_count = conversation_rows.len();
+            for (index, conversation) in conversation_rows.into_iter().enumerate() {
                 list = list.child(self.render_ai_conversation_item(
                     conversation,
                     index == 0,
@@ -292,30 +322,19 @@ impl WorkspaceApp {
             .into_any_element()
     }
 
-    pub(in crate::workspace) fn render_ai_conversation_item(
+    fn render_ai_conversation_item(
         &self,
-        conversation: &AiConversation,
+        conversation: AiConversationListRow,
         is_first: bool,
         is_last: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let id = conversation.id.clone();
         let delete_id = conversation.id.clone();
-        let is_active = self
-            .ai
-            .chat
-            .conversation_state
-            .active_conversation_id
-            .as_deref()
-            == Some(conversation.id.as_str());
-        let count = if conversation.messages_loaded {
-            conversation.messages.len()
-        } else {
-            conversation.message_count
-        };
+        let id = conversation.id;
+        let is_active = conversation.active;
         let meta = format!(
             "{} · {}",
-            self.ai_messages_count_label(count),
+            self.ai_messages_count_label(conversation.message_count),
             time_label(conversation.updated_at_ms)
         );
         div()
@@ -365,7 +384,7 @@ impl WorkspaceApp {
                             .items_center()
                             .gap(px(6.0))
                             .min_w_0()
-                            .when(conversation.origin == "cli", |row| {
+                            .when(conversation.cli_origin, |row| {
                                 row.child(
                                     div()
                                         .size(px(16.0))
@@ -399,7 +418,7 @@ impl WorkspaceApp {
                                     } else {
                                         rgb(self.tokens.ui.text_muted)
                                     })
-                                    .child(conversation.title.clone()),
+                                    .child(conversation.title),
                             ),
                     )
                     .child(
@@ -431,7 +450,7 @@ impl WorkspaceApp {
                     .on_mouse_down(
                         MouseButton::Left,
                         cx.listener(move |this, _event, _window, cx| {
-                            this.delete_ai_conversation(&delete_id);
+                            this.delete_ai_conversation(delete_id.as_ref(), cx);
                             cx.stop_propagation();
                             cx.notify();
                         }),
@@ -440,7 +459,7 @@ impl WorkspaceApp {
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |this, _event, _window, cx| {
-                    this.select_ai_conversation(id.clone());
+                    this.select_ai_conversation(id.to_string(), cx);
                     cx.stop_propagation();
                     cx.notify();
                 }),
@@ -534,9 +553,9 @@ impl WorkspaceApp {
             move |this, _event, window, cx| match action {
                 AiHeaderAction::Settings => this.open_ai_settings(window, cx),
                 AiHeaderAction::NewChat => {
-                    this.ai.chat.clear_all_confirm_open = true;
-                    this.ai_clear_all_confirm_presence.reopen();
-                    this.reset_standard_confirm_focus();
+                    this.ai_entity.update(cx, |ai, cx| {
+                        ai.open_chat_confirm(ai_state::AiChatConfirmKind::ClearAll, cx);
+                    });
                 }
             },
             cx,

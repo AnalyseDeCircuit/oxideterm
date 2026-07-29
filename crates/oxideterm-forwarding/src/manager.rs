@@ -12,8 +12,8 @@ use dashmap::DashMap;
 use oxideterm_ssh::SshConnectionHandle;
 
 use crate::{
-    ForwardEvent, ForwardRule, ForwardStats, ForwardStatus, ForwardType, ForwardUpdate,
-    ForwardingError, PortDetectionSnapshot, PortDetectionTracker,
+    ForwardEvent, ForwardEventDeliverySender, ForwardRule, ForwardStats, ForwardStatus,
+    ForwardType, ForwardUpdate, ForwardingError, PortDetectionSnapshot, PortDetectionTracker,
     detection::{
         PORT_SCAN_MAX_OUTPUT_SIZE, PORT_SCAN_TIMEOUT_SECS, REMOTE_OS_PROBE_TIMEOUT_SECS,
         REMOTE_OS_PROBE_UNIX, REMOTE_OS_PROBE_WINDOWS, RemotePortScanPlatform,
@@ -26,7 +26,7 @@ use crate::{
 pub struct ForwardingManager {
     session_id: String,
     ssh_connection: Mutex<SshConnectionHandle>,
-    event_tx: Option<Sender<ForwardEvent>>,
+    event_tx: Option<ForwardEventDeliverySender>,
     remote_router: Arc<RemoteForwardRouter>,
     local_forwards: DashMap<String, LocalForward>,
     remote_forwards: DashMap<String, RemoteForward>,
@@ -34,6 +34,26 @@ pub struct ForwardingManager {
     stopped_forwards: DashMap<String, ForwardRule>,
     port_detection: Mutex<PortDetectionTracker>,
     port_scan_platform: Mutex<Option<RemotePortScanPlatform>>,
+}
+
+pub(crate) struct ForwardingStopBatch {
+    local_forwards: Vec<LocalForward>,
+    dynamic_forwards: Vec<DynamicForward>,
+    remote_forwards: Vec<RemoteForward>,
+}
+
+impl ForwardingStopBatch {
+    pub(crate) async fn stop(self) {
+        for forward in self.local_forwards {
+            let _ = forward.stop().await;
+        }
+        for forward in self.dynamic_forwards {
+            let _ = forward.stop().await;
+        }
+        for forward in self.remote_forwards {
+            let _ = forward.stop_best_effort().await;
+        }
+    }
 }
 
 impl ForwardingManager {
@@ -45,6 +65,18 @@ impl ForwardingManager {
         session_id: impl Into<String>,
         ssh_connection: SshConnectionHandle,
         event_tx: Option<Sender<ForwardEvent>>,
+    ) -> Self {
+        Self::new_with_event_delivery(
+            session_id,
+            ssh_connection,
+            event_tx.map(ForwardEventDeliverySender::new),
+        )
+    }
+
+    pub fn new_with_event_delivery(
+        session_id: impl Into<String>,
+        ssh_connection: SshConnectionHandle,
+        event_tx: Option<ForwardEventDeliverySender>,
     ) -> Self {
         Self {
             session_id: session_id.into(),
@@ -459,7 +491,7 @@ impl ForwardingManager {
         }
     }
 
-    pub async fn stop_all(&self) {
+    pub(crate) fn begin_stop_all(&self) -> ForwardingStopBatch {
         // Tauri `stop_all` drains active handles without preserving them in
         // `stopped_forwards`; only explicit per-rule stop keeps a restartable
         // stopped row. Keep native's bulk stop destructive in the same way.
@@ -494,15 +526,15 @@ impl ForwardingManager {
             })
             .collect();
 
-        for forward in local_forwards {
-            let _ = forward.stop().await;
+        ForwardingStopBatch {
+            local_forwards,
+            dynamic_forwards,
+            remote_forwards,
         }
-        for forward in dynamic_forwards {
-            let _ = forward.stop().await;
-        }
-        for forward in remote_forwards {
-            let _ = forward.stop_best_effort().await;
-        }
+    }
+
+    pub async fn stop_all(&self) {
+        self.begin_stop_all().stop().await;
     }
 
     pub async fn suspend_all_and_save_rules(&self) -> Vec<ForwardRule> {

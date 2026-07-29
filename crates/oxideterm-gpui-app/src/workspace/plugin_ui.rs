@@ -33,17 +33,17 @@ struct NativePluginUiControlState {
 pub(super) struct NativePluginUiState {
     controls: HashMap<u64, NativePluginUiControlState>,
     pub focused_input: Option<u64>,
-    open_select: Option<u64>,
+    pub(in crate::workspace) open_select: Option<u64>,
     render_generation: u64,
 }
 
 impl NativePluginUiState {
-    fn begin_surface_render(&mut self) -> u64 {
+    pub(in crate::workspace) fn begin_surface_render(&mut self) -> u64 {
         self.render_generation = self.render_generation.wrapping_add(1);
         self.render_generation
     }
 
-    fn sync_control(
+    pub(in crate::workspace) fn sync_control(
         &mut self,
         context: NativePluginUiControlContext,
         control: &plugin_host::NativePluginDeclarativeUiControl,
@@ -75,7 +75,7 @@ impl NativePluginUiState {
         key
     }
 
-    fn finish_surface_render(
+    pub(in crate::workspace) fn finish_surface_render(
         &mut self,
         plugin_id: &str,
         surface_kind: &str,
@@ -88,6 +88,33 @@ impl NativePluginUiState {
                 || state.context.surface_id != surface_id
                 || state.render_generation == render_generation
         });
+        self.clear_stale_focus();
+    }
+
+    pub(in crate::workspace) fn remove_surface(
+        &mut self,
+        plugin_id: &str,
+        surface_kind: &str,
+        surface_id: &str,
+    ) {
+        // Destroying a surface drops its zeroizing drafts immediately instead
+        // of retaining hidden password text until workspace shutdown.
+        self.controls.retain(|_, state| {
+            state.context.plugin_id != plugin_id
+                || state.context.surface_kind != surface_kind
+                || state.context.surface_id != surface_id
+        });
+        self.clear_stale_focus();
+    }
+
+    pub(in crate::workspace) fn remove_plugin(&mut self, plugin_id: &str) {
+        // Runtime deactivation invalidates every declarative surface for the plugin.
+        self.controls
+            .retain(|_, state| state.context.plugin_id != plugin_id);
+        self.clear_stale_focus();
+    }
+
+    fn clear_stale_focus(&mut self) {
         if self
             .focused_input
             .is_some_and(|key| !self.controls.contains_key(&key))
@@ -113,7 +140,7 @@ impl NativePluginUiState {
         }
     }
 
-    fn value(&self, key: u64) -> Option<serde_json::Value> {
+    pub(in crate::workspace) fn value(&self, key: u64) -> Option<serde_json::Value> {
         match &self.controls.get(&key)?.draft {
             NativePluginUiControlDraft::Text(value) => {
                 Some(serde_json::Value::String(value.to_string()))
@@ -129,7 +156,7 @@ impl NativePluginUiState {
         }
     }
 
-    fn set_value(&mut self, key: u64, value: serde_json::Value) -> bool {
+    pub(in crate::workspace) fn set_value(&mut self, key: u64, value: serde_json::Value) -> bool {
         let Some(state) = self.controls.get_mut(&key) else {
             return false;
         };
@@ -175,6 +202,21 @@ pub(super) struct NativePluginSidebarPanelSelection {
 }
 
 impl WorkspaceApp {
+    pub(in crate::workspace) fn plugin_ui_state<'a>(&self, cx: &'a App) -> &'a NativePluginUiState {
+        // IME and render adapters access the Entity-owned control state without
+        // keeping a second workspace copy of secret-bearing drafts.
+        self.plugin_entity.read(cx).ui_state()
+    }
+
+    pub(in crate::workspace) fn update_plugin_ui_state<R>(
+        &self,
+        cx: &mut Context<Self>,
+        update: impl FnOnce(&mut NativePluginUiState) -> R,
+    ) -> R {
+        self.plugin_entity
+            .update(cx, |plugins, _cx| update(plugins.ui_state_mut()))
+    }
+
     pub(super) fn open_native_plugin_tab(
         &mut self,
         plugin_id: &str,
@@ -183,12 +225,13 @@ impl WorkspaceApp {
     ) -> Result<(), String> {
         self.bootstrap_native_plugin_runtime(cx);
         let contribution = self
-            .native_plugin_runtime
-            .registry
+            .plugin_entity
+            .read(cx)
+            .registry()
             .contributions()
             .tab_contribution(plugin_id, tab_id)
             .ok_or_else(|| format!("Plugin tab \"{plugin_id}:{tab_id}\" is not declared"))?;
-        let existing_tab_id = self.tabs.iter().find_map(|tab| match &tab.kind {
+        let existing_tab_id = self.tabs(cx).iter().find_map(|tab| match &tab.kind {
             TabKind::Plugin {
                 plugin_id: existing_plugin_id,
                 tab_id: existing_tab_id,
@@ -198,27 +241,30 @@ impl WorkspaceApp {
         let tab_id_value = if let Some(existing_tab_id) = existing_tab_id {
             existing_tab_id
         } else {
-            let tab_id_value = self.alloc_tab_id();
-            self.tabs.push(Tab {
-                id: tab_id_value,
-                kind: TabKind::Plugin {
-                    plugin_id: plugin_id.to_string(),
-                    tab_id: tab_id.to_string(),
+            let tab_id_value = self.alloc_tab_id(cx);
+            self.insert_tab(
+                Tab {
+                    id: tab_id_value,
+                    kind: TabKind::Plugin {
+                        plugin_id: plugin_id.to_string(),
+                        tab_id: tab_id.to_string(),
+                    },
+                    title: contribution.definition.title,
+                    title_source: TabTitleSource::Static,
+                    root_pane: None,
+                    active_pane_id: None,
                 },
-                title: contribution.definition.title,
-                title_source: TabTitleSource::Static,
-                root_pane: None,
-                active_pane_id: None,
-            });
+                cx,
+            );
             tab_id_value
         };
         if self.focus_detached_tab_window(tab_id_value, cx) {
             return Ok(());
         }
-        self.main_window_tabs.active_tab_id = Some(tab_id_value);
+        self.set_main_window_active_tab(Some(tab_id_value), cx);
         self.active_surface = ActiveSurface::Terminal;
         self.needs_active_pane_focus = false;
-        self.persist_sidebar_settings();
+        self.persist_sidebar_settings(cx);
         cx.notify();
         Ok(())
     }
@@ -232,13 +278,15 @@ impl WorkspaceApp {
         self.bootstrap_native_plugin_runtime(cx);
         let theme = self.tokens.ui;
         let contribution = self
-            .native_plugin_runtime
-            .registry
+            .plugin_entity
+            .read(cx)
+            .registry()
             .contributions()
             .tab_contribution(plugin_id, tab_id);
         let runtime_view = self
-            .native_plugin_runtime
-            .registry
+            .plugin_entity
+            .read(cx)
+            .registry()
             .contributions()
             .runtime_tab_view(plugin_id, tab_id);
         let title = runtime_view
@@ -297,12 +345,13 @@ impl WorkspaceApp {
     ) -> AnyElement {
         self.bootstrap_native_plugin_runtime(cx);
         let theme = self.tokens.ui;
-        let Some(selection) = self.native_plugin_manager.active_sidebar_panel.as_ref() else {
+        let Some(selection) = self.plugin_manager_state(cx).active_sidebar_panel.clone() else {
             return self.render_plugin_sidebar_placeholder();
         };
         let panels = self
-            .native_plugin_runtime
-            .registry
+            .plugin_entity
+            .read(cx)
+            .registry()
             .contributions()
             .runtime_sidebar_panels();
         let Some(panel) = panels.iter().find(|panel| {
@@ -409,7 +458,8 @@ impl WorkspaceApp {
         schema: &plugin_host::NativePluginDeclarativeUiSchema,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let render_generation = self.native_plugin_ui.begin_surface_render();
+        let render_generation =
+            self.update_plugin_ui_state(cx, NativePluginUiState::begin_surface_render);
         let mut body = div()
             .w_full()
             .flex()
@@ -449,17 +499,14 @@ impl WorkspaceApp {
                 cx,
             ));
         }
-        self.native_plugin_ui.finish_surface_render(
-            plugin_id,
-            surface_kind,
-            surface_id,
-            render_generation,
-        );
+        self.update_plugin_ui_state(cx, |ui| {
+            ui.finish_surface_render(plugin_id, surface_kind, surface_id, render_generation);
+        });
         body.on_mouse_down(
             MouseButton::Left,
             cx.listener(|this, _event, _window, cx| {
-                this.blur_native_plugin_ui_input();
-                this.native_plugin_ui.open_select = None;
+                this.blur_native_plugin_ui_input(cx);
+                this.update_plugin_ui_state(cx, |ui| ui.open_select = None);
                 cx.notify();
             }),
         )
@@ -678,7 +725,7 @@ impl WorkspaceApp {
                 "native-plugin-icon-button",
                 false,
                 cx.listener(move |this, _event, _window, cx| {
-                    this.blur_native_plugin_ui_input();
+                    this.blur_native_plugin_ui_input(cx);
                     this.dispatch_native_plugin_ui_control_event(
                         context.clone(),
                         "click",
@@ -714,7 +761,7 @@ impl WorkspaceApp {
                 .on_mouse_down(
                     MouseButton::Left,
                     cx.listener(move |this, _event, _window, cx| {
-                        this.blur_native_plugin_ui_input();
+                        this.blur_native_plugin_ui_input(cx);
                         // Button activation is delivered as data to the plugin
                         // runtime; plugin code never runs on the GPUI event stack.
                         this.dispatch_native_plugin_ui_control_event(
@@ -749,25 +796,24 @@ impl WorkspaceApp {
             section_id,
             control,
         );
-        let key = self
-            .native_plugin_ui
-            .sync_control(context, control, render_generation);
-        let target = WorkspaceImeTarget::PluginControl(key);
-        let value = self
-            .native_plugin_ui
-            .text(key)
-            .unwrap_or_default()
-            .to_string();
-        let focused = self.native_plugin_ui.focused_input == Some(key);
-        let marked = self.marked_text_for_target(target).map(str::to_string);
-        let selected_range = self.ime_selected_range_for_target(target);
+        let (key, value, focused) = self.update_plugin_ui_state(cx, |ui| {
+            let key = ui.sync_control(context, control, render_generation);
+            let value = Zeroizing::new(ui.text(key).unwrap_or_default().to_string());
+            (key, value, ui.focused_input == Some(key))
+        });
+        let target = WorkspaceImeTarget::PluginControl {
+            key,
+            secret: control.kind == "password",
+        };
+        let marked = self.marked_text_for_target(target, cx).map(str::to_string);
+        let selected_range = self.ime_selected_range_for_target(target, cx);
         let input = oxideterm_gpui_ui::input::input(
             &self.tokens,
             oxideterm_gpui_ui::input::InputView {
-                value: &value,
+                value: value.as_str(),
                 placeholder: control.placeholder.clone().unwrap_or_default(),
                 focused,
-                caret_visible: self.new_connection_caret_visible,
+                caret_visible: self.input_caret.visible(),
                 input_type: if control.kind == "password" {
                     oxideterm_gpui_ui::input::InputType::Password
                 } else {
@@ -787,17 +833,19 @@ impl WorkspaceApp {
                 .on_mouse_down(
                     MouseButton::Left,
                     cx.listener(move |this, event: &MouseDownEvent, window, cx| {
-                        this.native_plugin_ui.focused_input = Some(key);
-                        this.native_plugin_ui.open_select = None;
+                        this.update_plugin_ui_state(cx, |ui| {
+                            ui.focused_input = Some(key);
+                            ui.open_select = None;
+                        });
                         this.begin_ime_selection_from_mouse_down(target, event, window, cx);
-                        this.new_connection_caret_visible = true;
+                        this.show_active_input_caret(cx);
                         cx.stop_propagation();
                         cx.notify();
                     }),
                 )
                 .on_mouse_move(
                     cx.listener(move |this, event: &MouseMoveEvent, window, cx| {
-                        if this.native_plugin_ui.focused_input == Some(key) {
+                        if this.plugin_ui_state(cx).focused_input == Some(key) {
                             this.update_ime_selection_drag_from_mouse_move(event, window, cx);
                         }
                     }),
@@ -831,15 +879,15 @@ impl WorkspaceApp {
             section_id,
             control,
         );
-        let key = self
-            .native_plugin_ui
-            .sync_control(context, control, render_generation);
-        let checked = self
-            .native_plugin_ui
-            .value(key)
-            .as_ref()
-            .and_then(serde_json::Value::as_bool)
-            .unwrap_or(false);
+        let (key, checked) = self.update_plugin_ui_state(cx, |ui| {
+            let key = ui.sync_control(context, control, render_generation);
+            let checked = ui
+                .value(key)
+                .as_ref()
+                .and_then(serde_json::Value::as_bool)
+                .unwrap_or(false);
+            (key, checked)
+        });
         let checkbox = oxideterm_gpui_ui::checkbox_with(
             &self.tokens,
             native_plugin_control_label(control, ""),
@@ -885,19 +933,19 @@ impl WorkspaceApp {
             section_id,
             control,
         );
-        let key = self
-            .native_plugin_ui
-            .sync_control(context, control, render_generation);
-        let value = self
-            .native_plugin_ui
-            .value(key)
-            .unwrap_or(serde_json::Value::Null);
+        let (key, value, open) = self.update_plugin_ui_state(cx, |ui| {
+            let key = ui.sync_control(context, control, render_generation);
+            (
+                key,
+                ui.value(key).unwrap_or(serde_json::Value::Null),
+                ui.open_select == Some(key),
+            )
+        });
         let options = control.options.clone().unwrap_or_default();
         let selected_label = options
             .iter()
             .find(|option| option.value == value)
             .map(|option| option.label.clone());
-        let open = self.native_plugin_ui.open_select == Some(key);
         let trigger = oxideterm_gpui_ui::select::select_trigger_with_focus_visible(
             &self.tokens,
             selected_label
@@ -914,13 +962,14 @@ impl WorkspaceApp {
             trigger.on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |this, _event, _window, cx| {
-                    this.blur_native_plugin_ui_input();
-                    this.native_plugin_ui.open_select =
-                        if this.native_plugin_ui.open_select == Some(key) {
+                    this.blur_native_plugin_ui_input(cx);
+                    this.update_plugin_ui_state(cx, |ui| {
+                        ui.open_select = if ui.open_select == Some(key) {
                             None
                         } else {
                             Some(key)
                         };
+                    });
                     cx.stop_propagation();
                     cx.notify();
                 }),
@@ -947,7 +996,7 @@ impl WorkspaceApp {
                     .on_mouse_down(
                         MouseButton::Left,
                         cx.listener(move |this, _event, _window, cx| {
-                            this.native_plugin_ui.open_select = None;
+                            this.update_plugin_ui_state(cx, |ui| ui.open_select = None);
                             this.set_native_plugin_ui_control_value(key, option_value.clone(), cx);
                             cx.stop_propagation();
                         }),
@@ -976,13 +1025,10 @@ impl WorkspaceApp {
             section_id,
             control,
         );
-        let key = self
-            .native_plugin_ui
-            .sync_control(context, control, render_generation);
-        let value = self
-            .native_plugin_ui
-            .value(key)
-            .unwrap_or(serde_json::Value::Null);
+        let (key, value) = self.update_plugin_ui_state(cx, |ui| {
+            let key = ui.sync_control(context, control, render_generation);
+            (key, ui.value(key).unwrap_or(serde_json::Value::Null))
+        });
         let mut group = oxideterm_gpui_ui::radio_group::radio_group(&self.tokens);
         for option in control.options.clone().unwrap_or_default() {
             let selected = option.value == value;
@@ -1028,13 +1074,10 @@ impl WorkspaceApp {
             section_id,
             control,
         );
-        let key = self
-            .native_plugin_ui
-            .sync_control(context, control, render_generation);
-        let value = self
-            .native_plugin_ui
-            .value(key)
-            .unwrap_or(serde_json::Value::Null);
+        let (key, value) = self.update_plugin_ui_state(cx, |ui| {
+            let key = ui.sync_control(context, control, render_generation);
+            (key, ui.value(key).unwrap_or(serde_json::Value::Null))
+        });
         let options = control.options.clone().unwrap_or_default();
         let active_index = options
             .iter()
@@ -1091,19 +1134,19 @@ impl WorkspaceApp {
             section_id,
             control,
         );
-        let key = self
-            .native_plugin_ui
-            .sync_control(context, control, render_generation);
+        let key = self.update_plugin_ui_state(cx, |ui| {
+            ui.sync_control(context, control, render_generation)
+        });
         let min = control.min.unwrap_or(0.0) as f32;
         let max = control.max.unwrap_or(100.0).max(f64::from(min)) as f32;
         let step = control.step.unwrap_or(1.0).max(f64::EPSILON) as f32;
         let value = self
-            .native_plugin_ui
+            .plugin_ui_state(cx)
             .value(key)
             .as_ref()
             .and_then(serde_json::Value::as_f64)
             .unwrap_or(f64::from(min)) as f32;
-        let target = WorkspaceImeTarget::PluginControl(key);
+        let target = WorkspaceImeTarget::PluginControl { key, secret: false };
         let slider = oxideterm_gpui_ui::slider::slider(
             &self.tokens,
             oxideterm_gpui_ui::slider::SliderView {
@@ -1283,18 +1326,21 @@ impl WorkspaceApp {
         value: serde_json::Value,
         cx: &mut Context<Self>,
     ) {
-        self.blur_native_plugin_ui_input();
-        let Some(context) = self.native_plugin_ui.context(key).cloned() else {
+        self.blur_native_plugin_ui_input(cx);
+        let context = self.update_plugin_ui_state(cx, |ui| {
+            let context = ui.context(key).cloned()?;
+            ui.set_value(key, value.clone()).then_some(context)
+        });
+        let Some(context) = context else {
             return;
         };
-        if self.native_plugin_ui.set_value(key, value.clone()) {
-            self.dispatch_native_plugin_ui_control_event(context, "change", value, cx);
-            cx.notify();
-        }
+        self.dispatch_native_plugin_ui_control_event(context, "change", value, cx);
+        cx.notify();
     }
 
-    fn blur_native_plugin_ui_input(&mut self) {
-        if self.native_plugin_ui.focused_input.take().is_some() {
+    fn blur_native_plugin_ui_input(&mut self, cx: &mut Context<Self>) {
+        let was_focused = self.update_plugin_ui_state(cx, |ui| ui.focused_input.take().is_some());
+        if was_focused {
             self.clear_ime_selection();
         }
     }
@@ -1304,19 +1350,17 @@ impl WorkspaceApp {
         key: u64,
         cx: &mut Context<Self>,
     ) {
-        let Some(context) = self.native_plugin_ui.context(key).cloned() else {
+        let Some(context) = self.plugin_ui_state(cx).context(key).cloned() else {
             return;
         };
         let value = if context.control_kind == "password" {
-            let Some(password) = self.native_plugin_ui.text(key) else {
+            let approved = self.native_plugin_ui_secret_event_is_approved(&context.plugin_id, cx);
+            let Some(password) = self.plugin_ui_state(cx).text(key) else {
                 return;
             };
-            native_plugin_password_event_value(
-                password,
-                self.native_plugin_ui_secret_event_is_approved(&context.plugin_id),
-            )
+            native_plugin_password_event_value(password, approved)
         } else {
-            let Some(value) = self.native_plugin_ui.value(key) else {
+            let Some(value) = self.plugin_ui_state(cx).value(key) else {
                 return;
             };
             value
@@ -1326,9 +1370,14 @@ impl WorkspaceApp {
         self.dispatch_native_plugin_ui_control_event(context, "input", value, cx);
     }
 
-    fn native_plugin_ui_secret_event_is_approved(&self, plugin_id: &str) -> bool {
-        self.native_plugin_runtime
-            .registry
+    fn native_plugin_ui_secret_event_is_approved(
+        &self,
+        plugin_id: &str,
+        cx: &Context<Self>,
+    ) -> bool {
+        self.plugin_entity
+            .read(cx)
+            .registry()
             .plugins()
             .iter()
             .find(|plugin| plugin.manifest.id == plugin_id)
@@ -1344,12 +1393,12 @@ impl WorkspaceApp {
             })
     }
 
-    pub(super) fn native_plugin_ui_control_is_visible(&self, key: u64) -> bool {
-        let Some(context) = self.native_plugin_ui.context(key) else {
+    pub(super) fn native_plugin_ui_control_is_visible(&self, key: u64, cx: &App) -> bool {
+        let Some(context) = self.plugin_ui_state(cx).context(key).cloned() else {
             return false;
         };
         match context.surface_kind.as_str() {
-            "tab" => self.active_tab().is_some_and(|tab| {
+            "tab" => self.active_tab(cx).is_some_and(|tab| {
                 matches!(
                     &tab.kind,
                     TabKind::Plugin { plugin_id, tab_id }
@@ -1359,7 +1408,7 @@ impl WorkspaceApp {
             "sidebarPanel" => {
                 self.effective_sidebar_panel_section() == SidebarSection::Extensions
                     && self
-                        .native_plugin_manager
+                        .plugin_manager_state(cx)
                         .active_sidebar_panel
                         .as_ref()
                         .is_some_and(|selection| {
@@ -1404,7 +1453,7 @@ impl WorkspaceApp {
         step: f32,
         cx: &mut Context<Self>,
     ) {
-        let Some(anchor) = self.text_input_anchors.get(&target.anchor_id()) else {
+        let Some(anchor) = self.text_input_anchors.get(target.anchor_id()) else {
             return;
         };
         let width = f32::from(anchor.bounds.size.width).max(1.0);

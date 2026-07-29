@@ -164,15 +164,18 @@ impl AiChatPersistenceStore {
         }
     }
 
-    pub fn save_state(&self, state: &AiChatState) -> Result<()> {
+    pub fn save_state(&self, state: AiChatState) -> Result<()> {
         self.save_state_with_projection_updated_at(state, Self::next_projection_persist_at())
     }
 
     pub fn save_state_with_projection_updated_at(
         &self,
-        state: &AiChatState,
+        mut state: AiChatState,
         projection_updated_at: i64,
     ) -> Result<()> {
+        // Consume the caller's snapshot so the durable redaction pass does not
+        // require another full conversation clone.
+        crate::sanitize_chat_state_for_persistence(&mut state);
         self.initialize()?;
         let write_txn = self.db.begin_write()?;
 
@@ -242,10 +245,15 @@ impl AiChatPersistenceStore {
     pub fn append_transcript_entries(
         &self,
         conversation_id: &str,
-        entries: &[PersistedTranscriptEntry],
+        mut entries: Vec<PersistedTranscriptEntry>,
     ) -> Result<()> {
         if entries.is_empty() {
             return Ok(());
+        }
+        for entry in &mut entries {
+            // Transcript payloads can include tool arguments and output, so
+            // durable storage owns the final key-aware redaction boundary.
+            entry.payload = crate::sanitize_json_for_ai(&entry.payload);
         }
         self.initialize()?;
         let write_txn = self.db.begin_write()?;
@@ -254,7 +262,7 @@ impl AiChatPersistenceStore {
             let mut transcript_index_table = write_txn.open_table(CONV_TRANSCRIPT_TABLE)?;
             let mut ids = read_index_ids(&transcript_index_table, conversation_id)?;
             let mut seen = ids.iter().cloned().collect::<HashSet<_>>();
-            for entry in entries {
+            for entry in &entries {
                 let bytes = rmp_serde::to_vec(entry)?;
                 transcript_table.insert(entry.id.as_str(), bytes.as_slice())?;
                 if seen.insert(entry.id.clone()) {
@@ -271,10 +279,15 @@ impl AiChatPersistenceStore {
     pub fn append_diagnostic_events(
         &self,
         conversation_id: &str,
-        events: &[PersistedDiagnosticEvent],
+        mut events: Vec<PersistedDiagnosticEvent>,
     ) -> Result<()> {
         if events.is_empty() {
             return Ok(());
+        }
+        for event in &mut events {
+            // Diagnostics must remain structural even when a caller supplies
+            // raw provider, command, or protocol data.
+            event.data = crate::sanitize_json_for_ai(&event.data);
         }
         self.initialize()?;
         let write_txn = self.db.begin_write()?;
@@ -283,7 +296,7 @@ impl AiChatPersistenceStore {
             let mut diagnostic_index_table = write_txn.open_table(CONV_DIAGNOSTIC_TABLE)?;
             let mut ids = read_index_ids(&diagnostic_index_table, conversation_id)?;
             let mut seen = ids.iter().cloned().collect::<HashSet<_>>();
-            for event in events {
+            for event in &events {
                 let bytes = rmp_serde::to_vec(event)?;
                 diagnostic_table.insert(event.id.as_str(), bytes.as_slice())?;
                 if seen.insert(event.id.clone()) {

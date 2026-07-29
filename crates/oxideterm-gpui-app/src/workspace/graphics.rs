@@ -1,9 +1,15 @@
 use std::{
     collections::HashMap,
-    sync::{Arc, mpsc},
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicBool, Ordering},
+        mpsc,
+    },
+    time::Duration,
 };
 
 use gpui::RenderImage;
+use oxideterm_editor_core::utf16::replace_utf16;
 use oxideterm_gpui_ui::{
     TextInputView,
     button::{
@@ -16,6 +22,7 @@ use oxideterm_wsl_graphics::{
     GraphicsSessionMode, WSL_GRAPHICS_UNAVAILABLE, WslDistro, WslGraphicsError, WslGraphicsSession,
     WslgStatus, wsl,
 };
+use tokio::sync::Notify;
 
 use super::graphics_vnc::{
     GraphicsVncFrame, GraphicsVncInput, GraphicsVncWorkerEvent, SharedGraphicsVncGeometry,
@@ -52,6 +59,8 @@ const GRAPHICS_ALPHA_10: u32 = 0x1a; // Tailwind /10.
 const GRAPHICS_ALPHA_20: u32 = 0x33; // Tailwind /20.
 const GRAPHICS_ALPHA_50: u32 = 0x80; // Tailwind /50.
 const GRAPHICS_ALPHA_90: u32 = 0xe6; // Tailwind /90.
+const GRAPHICS_WORKER_DELIVERY_BUDGET: delivery::DeliveryBudget =
+    delivery::DeliveryBudget::new(32, Duration::from_millis(6));
 
 const COMMON_APPS: &[(&str, &str)] = &[
     ("gedit", "gedit"),
@@ -124,7 +133,198 @@ pub(super) enum GraphicsWorkerResult {
     VncEvent(GraphicsVncWorkerEvent),
 }
 
-pub(super) struct GraphicsState {
+fn coalesce_adjacent_graphics_frames(
+    results: Vec<GraphicsWorkerResult>,
+) -> Vec<GraphicsWorkerResult> {
+    let mut coalesced = Vec::with_capacity(results.len());
+    for result in results {
+        match result {
+            GraphicsWorkerResult::VncEvent(GraphicsVncWorkerEvent::Frame { session_id, frame }) => {
+                let latest_frame = GraphicsWorkerResult::VncEvent(GraphicsVncWorkerEvent::Frame {
+                    session_id,
+                    frame,
+                });
+                let replaces_previous = matches!(
+                    (coalesced.last(), &latest_frame),
+                    (
+                        Some(GraphicsWorkerResult::VncEvent(GraphicsVncWorkerEvent::Frame {
+                            session_id: previous_session_id,
+                            ..
+                        })),
+                        GraphicsWorkerResult::VncEvent(GraphicsVncWorkerEvent::Frame {
+                            session_id: latest_session_id,
+                            ..
+                        })
+                    ) if previous_session_id == latest_session_id
+                );
+                if replaces_previous {
+                    // A full frame supersedes only an adjacent frame from the same session.
+                    let previous_frame_index = coalesced.len() - 1;
+                    coalesced[previous_frame_index] = latest_frame;
+                } else {
+                    coalesced.push(latest_frame);
+                }
+            }
+            other => {
+                // Lifecycle boundaries stay ordered and prevent frame coalescing across them.
+                coalesced.push(other);
+            }
+        }
+    }
+    coalesced
+}
+
+#[derive(Clone)]
+struct GraphicsWorkerWake {
+    pending: Arc<AtomicBool>,
+    stopped: Arc<AtomicBool>,
+    notification: Arc<Notify>,
+}
+
+impl Default for GraphicsWorkerWake {
+    fn default() -> Self {
+        Self {
+            pending: Arc::new(AtomicBool::new(false)),
+            stopped: Arc::new(AtomicBool::new(false)),
+            notification: Arc::new(Notify::new()),
+        }
+    }
+}
+
+impl GraphicsWorkerWake {
+    fn mark(&self) {
+        // Notify stores one permit, while pending coalesces any burst before the UI task runs.
+        self.pending.store(true, Ordering::Release);
+        self.notification.notify_one();
+    }
+
+    fn take(&self) -> bool {
+        self.pending.swap(false, Ordering::AcqRel)
+    }
+
+    fn stop(&self) {
+        self.stopped.store(true, Ordering::Release);
+        self.notification.notify_one();
+    }
+
+    fn is_stopped(&self) -> bool {
+        self.stopped.load(Ordering::Acquire)
+    }
+
+    async fn wait(&self) {
+        self.notification.notified().await;
+    }
+}
+
+#[derive(Default)]
+struct GraphicsFrameDeliveryState {
+    visible: bool,
+    latest: Option<(String, GraphicsVncFrame)>,
+}
+
+#[derive(Clone, Default)]
+struct GraphicsFrameDeliverySlot {
+    state: Arc<Mutex<GraphicsFrameDeliveryState>>,
+}
+
+impl GraphicsFrameDeliverySlot {
+    fn push(&self, session_id: String, frame: GraphicsVncFrame) -> bool {
+        let Ok(mut state) = self.state.lock() else {
+            return false;
+        };
+        // Full VNC frames supersede one another before GPUI image allocation.
+        state.latest = Some((session_id, frame));
+        state.visible
+    }
+
+    fn set_visible(&self, visible: bool) -> Option<(String, GraphicsVncFrame)> {
+        let Ok(mut state) = self.state.lock() else {
+            return None;
+        };
+        state.visible = visible;
+        if visible { state.latest.take() } else { None }
+    }
+
+    fn take_visible(&self) -> Option<(String, GraphicsVncFrame)> {
+        let Ok(mut state) = self.state.lock() else {
+            return None;
+        };
+        if state.visible {
+            state.latest.take()
+        } else {
+            None
+        }
+    }
+
+    fn clear(&self) {
+        if let Ok(mut state) = self.state.lock() {
+            state.latest = None;
+        }
+    }
+
+    fn clear_session(&self, session_id: &str) {
+        if let Ok(mut state) = self.state.lock()
+            && state
+                .latest
+                .as_ref()
+                .is_some_and(|(pending_session_id, _)| pending_session_id == session_id)
+        {
+            state.latest = None;
+        }
+    }
+
+    #[cfg(test)]
+    fn has_pending_frame(&self) -> bool {
+        self.state
+            .lock()
+            .map(|state| state.latest.is_some())
+            .unwrap_or(false)
+    }
+}
+
+#[derive(Clone)]
+struct GraphicsWorkerDelivery {
+    sender: mpsc::Sender<GraphicsWorkerResult>,
+    wake: GraphicsWorkerWake,
+    frame_slot: GraphicsFrameDeliverySlot,
+}
+
+impl GraphicsWorkerDelivery {
+    fn new(sender: mpsc::Sender<GraphicsWorkerResult>) -> Self {
+        Self {
+            sender,
+            wake: GraphicsWorkerWake::default(),
+            frame_slot: GraphicsFrameDeliverySlot::default(),
+        }
+    }
+
+    fn send(&self, result: GraphicsWorkerResult) {
+        match result {
+            GraphicsWorkerResult::VncEvent(GraphicsVncWorkerEvent::Frame { session_id, frame }) => {
+                if self.frame_slot.push(session_id, frame) {
+                    self.wake.mark();
+                }
+            }
+            other => {
+                if let GraphicsWorkerResult::VncEvent(GraphicsVncWorkerEvent::Disconnected {
+                    session_id,
+                    ..
+                }) = &other
+                {
+                    // A disconnect is a lifecycle boundary; never recover its preceding frame later.
+                    self.frame_slot.clear_session(session_id);
+                }
+                // Publish before waking so the foreground task observes the queued result.
+                if self.sender.send(other).is_ok() {
+                    self.wake.mark();
+                }
+            }
+        }
+    }
+}
+
+/// Owns WSL graphics sessions, VNC input, workers, and delivery lifecycle.
+pub(super) struct GraphicsWorkspaceEntity {
     distros: Vec<WslDistro>,
     sessions: Vec<WslGraphicsSession>,
     wslg_statuses: HashMap<String, WslgStatus>,
@@ -145,14 +345,26 @@ pub(super) struct GraphicsState {
     vnc_retired_images: Vec<Arc<RenderImage>>,
     vnc_geometry: SharedGraphicsVncGeometry,
     vnc_button_mask: u8,
-    worker_tx: mpsc::Sender<GraphicsWorkerResult>,
+    worker_delivery: GraphicsWorkerDelivery,
     worker_rx: mpsc::Receiver<GraphicsWorkerResult>,
+    backend: Arc<oxideterm_wsl_graphics::WslGraphicsState>,
+    runtime: Arc<tokio::runtime::Runtime>,
 }
 
-impl GraphicsState {
-    pub(super) fn new() -> Self {
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum GraphicsWorkspaceEvent {
+    WorkerResultsReady,
+}
+
+impl GraphicsWorkspaceEntity {
+    pub(super) fn new(
+        backend: Arc<oxideterm_wsl_graphics::WslGraphicsState>,
+        runtime: Arc<tokio::runtime::Runtime>,
+        cx: &mut Context<Self>,
+    ) -> Self {
         let (worker_tx, worker_rx) = mpsc::channel();
-        Self {
+        let worker_delivery = GraphicsWorkerDelivery::new(worker_tx);
+        let entity = Self {
             distros: Vec::new(),
             sessions: Vec::new(),
             wslg_statuses: HashMap::new(),
@@ -173,59 +385,65 @@ impl GraphicsState {
             vnc_retired_images: Vec::new(),
             vnc_geometry: SharedGraphicsVncGeometry::default(),
             vnc_button_mask: 0,
-            worker_tx,
+            worker_delivery,
             worker_rx,
+            backend,
+            runtime,
+        };
+        entity.schedule_worker_delivery(cx);
+        entity
+    }
+
+    pub(super) fn focused_input(&self) -> Option<GraphicsInput> {
+        self.focused_input
+    }
+
+    pub(super) fn input_value(&self, input: GraphicsInput) -> &str {
+        match input {
+            GraphicsInput::AppCommand => &self.app_command,
         }
+    }
+
+    pub(super) fn clear_input_focus(&mut self, cx: &mut Context<Self>) -> bool {
+        let changed = self.focused_input.take().is_some();
+        if changed {
+            cx.notify();
+        }
+        changed
+    }
+
+    pub(super) fn replace_input(
+        &mut self,
+        input: GraphicsInput,
+        replacement_range: Option<std::ops::Range<usize>>,
+        text: &str,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if self.focused_input != Some(input) {
+            return false;
+        }
+        match input {
+            GraphicsInput::AppCommand => {
+                replace_utf16(&mut self.app_command, replacement_range, text);
+            }
+        }
+        cx.notify();
+        true
     }
 }
 
-impl WorkspaceApp {
-    pub(super) fn open_graphics_tab(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let tab_id = if let Some(tab) = self.tabs.iter().find(|tab| tab.kind == TabKind::Graphics) {
-            tab.id
-        } else {
-            let tab_id = self.alloc_tab_id();
-            self.tabs.push(Tab {
-                id: tab_id,
-                kind: TabKind::Graphics,
-                title: self.i18n.t("graphics.tab_title"),
-                title_source: TabTitleSource::I18nKey("graphics.tab_title"),
-                root_pane: None,
-                active_pane_id: None,
-            });
-            tab_id
-        };
-        if self.focus_detached_tab_window(tab_id, cx) {
-            return;
-        }
-        self.main_window_tabs.active_tab_id = Some(tab_id);
-        self.active_surface = ActiveSurface::Terminal;
-        self.needs_active_pane_focus = false;
-        self.start_graphics_load_if_needed(false);
-        self.load_graphics_sessions();
-        window.focus(&self.focus_handle, cx);
-        self.reveal_active_tab(window);
-        cx.notify();
+impl Drop for GraphicsWorkspaceEntity {
+    fn drop(&mut self) {
+        // Stop the foreground waiter even if background producers still hold sender clones.
+        self.worker_delivery.wake.stop();
     }
+}
 
-    pub(super) fn render_graphics_surface(
-        &mut self,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        if self.graphics.session.is_some() || self.graphics.status != GraphicsStatus::Idle {
-            return self.render_graphics_active_surface(window, cx);
-        }
-        self.render_graphics_distro_selector(cx)
-    }
-
-    pub(super) fn poll_graphics_worker_results(
-        &mut self,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
+impl GraphicsWorkspaceEntity {
+    fn drain_worker_results(&mut self, cx: &mut Context<Self>) -> Vec<Arc<RenderImage>> {
+        let drain = delivery::drain_channel(&self.worker_rx, GRAPHICS_WORKER_DELIVERY_BUDGET);
         let mut changed = false;
-        while let Ok(result) = self.graphics.worker_rx.try_recv() {
+        for result in coalesce_adjacent_graphics_frames(drain.items) {
             match result {
                 GraphicsWorkerResult::ListSessions { result } => {
                     if let Ok(mut sessions) = result {
@@ -235,34 +453,33 @@ impl WorkspaceApp {
                                 .then_with(|| left.desktop_name.cmp(&right.desktop_name))
                                 .then_with(|| left.id.cmp(&right.id))
                         });
-                        self.graphics.sessions = sessions;
+                        self.sessions = sessions;
                         changed = true;
                     }
                 }
                 GraphicsWorkerResult::LoadDistros { generation, result } => {
-                    if generation != self.graphics.generation {
+                    if generation != self.generation {
                         continue;
                     }
-                    self.graphics.loading = false;
+                    self.loading = false;
                     match result {
                         Ok(distros) => {
-                            self.graphics.error = None;
-                            self.graphics.distros = distros;
-                            if self.graphics.selected_distro.is_none() {
-                                self.graphics.selected_distro = self
-                                    .graphics
+                            self.error = None;
+                            self.distros = distros;
+                            if self.selected_distro.is_none() {
+                                self.selected_distro = self
                                     .distros
                                     .iter()
                                     .find(|distro| distro.is_default)
-                                    .or_else(|| self.graphics.distros.first())
+                                    .or_else(|| self.distros.first())
                                     .map(|distro| distro.name.clone());
                             }
-                            self.start_graphics_wslg_detection(generation);
-                            self.load_graphics_sessions();
+                            self.start_wslg_detection(generation);
+                            self.load_sessions();
                         }
                         Err(error) => {
-                            self.graphics.error = Some(normalize_graphics_error(error));
-                            self.graphics.distros.clear();
+                            self.error = Some(normalize_graphics_error(error));
+                            self.distros.clear();
                         }
                     }
                     changed = true;
@@ -272,32 +489,32 @@ impl WorkspaceApp {
                     distro,
                     result,
                 } => {
-                    if generation != self.graphics.generation {
+                    if generation != self.generation {
                         continue;
                     }
                     if let Ok(status) = result {
-                        self.graphics.wslg_statuses.insert(distro, status);
+                        self.wslg_statuses.insert(distro, status);
                         changed = true;
                     }
                 }
                 GraphicsWorkerResult::Start { generation, result }
                 | GraphicsWorkerResult::StartApp { generation, result } => {
-                    if generation != self.graphics.generation {
+                    if generation != self.generation {
                         continue;
                     }
                     match result {
                         Ok(session) => {
-                            self.reset_graphics_vnc_viewer(true);
-                            self.graphics.error = None;
-                            self.graphics.status = GraphicsStatus::Starting;
-                            self.graphics.session = Some(session);
-                            self.load_graphics_sessions();
+                            self.reset_vnc_viewer(true);
+                            self.error = None;
+                            self.status = GraphicsStatus::Starting;
+                            self.session = Some(session);
+                            self.load_sessions();
                         }
                         Err(error) => {
-                            self.reset_graphics_vnc_viewer(true);
-                            self.graphics.status = GraphicsStatus::Error;
-                            self.graphics.error = Some(normalize_graphics_error(error));
-                            self.graphics.session = None;
+                            self.reset_vnc_viewer(true);
+                            self.status = GraphicsStatus::Error;
+                            self.error = Some(normalize_graphics_error(error));
+                            self.session = None;
                         }
                     }
                     changed = true;
@@ -307,55 +524,172 @@ impl WorkspaceApp {
                     session_id,
                     result,
                 } => {
-                    if generation != self.graphics.generation {
+                    if generation != self.generation {
                         continue;
                     }
                     if self
-                        .graphics
                         .session
                         .as_ref()
                         .is_none_or(|session| session.id == session_id)
                     {
-                        self.graphics.session = None;
-                        self.reset_graphics_vnc_viewer(true);
-                        self.graphics.status = GraphicsStatus::Idle;
-                        self.load_graphics_sessions();
+                        self.session = None;
+                        self.reset_vnc_viewer(true);
+                        self.status = GraphicsStatus::Idle;
+                        self.load_sessions();
                     }
                     if let Err(error) = result {
-                        self.graphics.error = Some(normalize_graphics_error(error));
+                        self.error = Some(normalize_graphics_error(error));
                     }
                     changed = true;
                 }
                 GraphicsWorkerResult::Reconnect { generation, result } => {
-                    if generation != self.graphics.generation {
+                    if generation != self.generation {
                         continue;
                     }
                     match result {
                         Ok(session) => {
-                            self.reset_graphics_vnc_viewer(true);
-                            self.graphics.error = None;
-                            self.graphics.status = GraphicsStatus::Starting;
-                            self.graphics.session = Some(session);
-                            self.load_graphics_sessions();
+                            self.reset_vnc_viewer(true);
+                            self.error = None;
+                            self.status = GraphicsStatus::Starting;
+                            self.session = Some(session);
+                            self.load_sessions();
                         }
                         Err(error) => {
-                            self.reset_graphics_vnc_viewer(true);
-                            self.graphics.status = GraphicsStatus::Error;
-                            self.graphics.error = Some(normalize_graphics_error(error));
+                            self.reset_vnc_viewer(true);
+                            self.status = GraphicsStatus::Error;
+                            self.error = Some(normalize_graphics_error(error));
                         }
                     }
                     changed = true;
                 }
                 GraphicsWorkerResult::VncEvent(event) => {
-                    changed |= self.apply_graphics_vnc_event(event);
+                    changed |= self.apply_vnc_event(event);
                 }
             }
         }
-        self.drop_graphics_vnc_retired_images(window, cx);
+        if let Some((session_id, frame)) = self.worker_delivery.frame_slot.take_visible() {
+            changed |= self.apply_vnc_frame(session_id, frame);
+        }
         if changed {
-            self.ensure_graphics_vnc_worker();
+            self.ensure_vnc_worker();
             cx.notify();
         }
+        if drain.outcome.backlog_remaining {
+            self.worker_delivery.wake.mark();
+        }
+        std::mem::take(&mut self.vnc_retired_images)
+    }
+
+    fn schedule_worker_delivery(&self, cx: &mut Context<Self>) {
+        let worker_wake = self.worker_delivery.wake.clone();
+        cx.spawn(async move |entity, cx| {
+            loop {
+                worker_wake.wait().await;
+                if worker_wake.is_stopped() {
+                    break;
+                }
+                if !worker_wake.take() {
+                    continue;
+                }
+                if entity
+                    .update(cx, |_graphics, cx| {
+                        // The registry retains this typed notification until a
+                        // current native window can release retired image entries.
+                        cx.emit(GraphicsWorkspaceEvent::WorkerResultsReady);
+                    })
+                    .is_err()
+                {
+                    break;
+                }
+            }
+        })
+        .detach();
+    }
+}
+
+impl gpui::EventEmitter<GraphicsWorkspaceEvent> for GraphicsWorkspaceEntity {}
+
+impl WorkspaceApp {
+    pub(in crate::workspace) fn apply_graphics_worker_results(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let retired_images = self
+            .graphics
+            .update(cx, |graphics, cx| graphics.drain_worker_results(cx));
+        for image in retired_images {
+            // Retired atlas entries must be dropped against a live window.
+            cx.drop_image(image, Some(window));
+        }
+    }
+
+    pub(super) fn open_graphics_tab(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let tab_id = if let Some(tab) = self
+            .tabs(cx)
+            .iter()
+            .find(|tab| tab.kind == TabKind::Graphics)
+        {
+            tab.id
+        } else {
+            let tab_id = self.alloc_tab_id(cx);
+            self.insert_tab(
+                Tab {
+                    id: tab_id,
+                    kind: TabKind::Graphics,
+                    title: self.i18n.t("graphics.tab_title"),
+                    title_source: TabTitleSource::I18nKey("graphics.tab_title"),
+                    root_pane: None,
+                    active_pane_id: None,
+                },
+                cx,
+            );
+            tab_id
+        };
+        if self.focus_detached_tab_window(tab_id, cx) {
+            return;
+        }
+        self.set_main_window_active_tab(Some(tab_id), cx);
+        self.active_surface = ActiveSurface::Terminal;
+        self.needs_active_pane_focus = false;
+        self.graphics.update(cx, |graphics, cx| {
+            graphics.start_graphics_load_if_needed(false);
+            graphics.load_sessions();
+            cx.notify();
+        });
+        window.focus(&self.focus_handle, cx);
+        self.reveal_active_tab(window, cx);
+        cx.notify();
+    }
+
+    pub(super) fn render_graphics_surface(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        self.graphics.update(cx, |graphics, cx| {
+            graphics.set_surface_visible(true, cx);
+        });
+        let graphics = self.graphics.read(cx);
+        if graphics.session.is_some() || graphics.status != GraphicsStatus::Idle {
+            return self.render_graphics_active_surface(window, cx);
+        }
+        self.render_graphics_distro_selector(cx)
+    }
+
+    pub(in crate::workspace) fn sync_graphics_surface_visibility(&self, cx: &mut App) {
+        let visible = self
+            .tabs(cx)
+            .iter()
+            .find(|tab| tab.kind == TabKind::Graphics)
+            .is_some_and(|tab| {
+                let tab_host = self.tab_host.read(cx);
+                (self.active_tab_id(cx) == Some(tab.id) && !tab_host.is_outside_main_window(tab.id))
+                    || tab_host.is_detached(tab.id)
+            });
+        self.graphics.update(cx, |graphics, cx| {
+            graphics.set_surface_visible(visible, cx);
+        });
     }
 
     pub(super) fn handle_graphics_key(
@@ -363,41 +697,51 @@ impl WorkspaceApp {
         event: &KeyDownEvent,
         cx: &mut Context<Self>,
     ) -> bool {
-        if self.graphics.session.is_some()
-            && self.graphics.focused_input.is_none()
+        if self.graphics.read(cx).session.is_some()
+            && self.graphics.read(cx).focused_input.is_none()
             && let Some(keysym) =
                 graphics_vnc_keysyms(&event.keystroke.key, event.keystroke.key_char.as_deref())
         {
             // VNC needs explicit press/release. GPUI routes graphics input
             // through KeyDown here, so send a short key tap for now.
-            self.send_graphics_vnc_input(GraphicsVncInput::Key { keysym, down: true });
-            self.send_graphics_vnc_input(GraphicsVncInput::Key {
-                keysym,
-                down: false,
+            self.graphics.update(cx, |graphics, _cx| {
+                graphics.send_vnc_input(GraphicsVncInput::Key { keysym, down: true });
+                graphics.send_vnc_input(GraphicsVncInput::Key {
+                    keysym,
+                    down: false,
+                });
             });
-            cx.notify();
             return true;
         }
-        if self.graphics.focused_input != Some(GraphicsInput::AppCommand)
+        if self.graphics.read(cx).focused_input != Some(GraphicsInput::AppCommand)
             || event.keystroke.modifiers.platform
         {
             return false;
         }
         match event.keystroke.key.as_str() {
             "enter" => {
-                self.start_graphics_app();
-                cx.notify();
+                self.graphics
+                    .update(cx, |graphics, cx| graphics.start_graphics_app(cx));
                 true
             }
             "escape" => {
-                self.graphics.focused_input = None;
+                self.graphics.update(cx, |graphics, cx| {
+                    graphics.focused_input = None;
+                    cx.notify();
+                });
                 self.ime_marked_text = None;
                 cx.notify();
                 true
             }
             "backspace" => {
-                let changed = self.graphics.app_command.pop().is_some()
-                    || self.ime_marked_text.take().is_some();
+                let command_changed = self.graphics.update(cx, |graphics, cx| {
+                    let changed = graphics.app_command.pop().is_some();
+                    if changed {
+                        cx.notify();
+                    }
+                    changed
+                });
+                let changed = command_changed || self.ime_marked_text.take().is_some();
                 if changed {
                     // Empty Backspace should not repaint unless it clears IME
                     // composition state.
@@ -409,49 +753,19 @@ impl WorkspaceApp {
         }
     }
 
-    pub(super) fn graphics_input_value(&self, input: GraphicsInput) -> &str {
-        match input {
-            GraphicsInput::AppCommand => &self.graphics.app_command,
-        }
-    }
-
-    pub(super) fn graphics_input_value_mut(&mut self, input: GraphicsInput) -> &mut String {
-        match input {
-            GraphicsInput::AppCommand => &mut self.graphics.app_command,
-        }
-    }
-
-    pub(super) fn shutdown_graphics_session(&mut self) {
-        let Some(session_id) = self
-            .graphics
-            .session
-            .as_ref()
-            .map(|session| session.id.clone())
-        else {
-            self.reset_graphics_vnc_viewer(true);
-            return;
-        };
-        self.graphics.generation = self.graphics.generation.saturating_add(1);
-        let generation = self.graphics.generation;
-        self.reset_graphics_vnc_viewer(true);
-        let tx = self.graphics.worker_tx.clone();
-        let backend = self.wsl_graphics.clone();
-        self.forwarding_runtime.spawn(async move {
-            let result = backend
-                .stop(&session_id)
-                .await
-                .map_err(|error| error.to_string());
-            let _ = tx.send(GraphicsWorkerResult::Stop {
-                generation,
-                session_id,
-                result,
-            });
-        });
-    }
-
     fn render_graphics_distro_selector(&self, cx: &mut Context<Self>) -> AnyElement {
         let theme = self.tokens.ui;
-        if self.graphics.loading {
+        let (loading, error, distros_empty, launch_mode, has_sessions) = {
+            let graphics = self.graphics.read(cx);
+            (
+                graphics.loading,
+                graphics.error.clone(),
+                graphics.distros.is_empty(),
+                graphics.launch_mode,
+                !graphics.sessions.is_empty(),
+            )
+        };
+        if loading {
             return self.render_graphics_center_state(
                 LucideIcon::LoaderCircle,
                 self.i18n.t("graphics.loading_distros"),
@@ -461,13 +775,13 @@ impl WorkspaceApp {
             );
         }
 
-        if let Some(error) = self.graphics.error.as_ref()
+        if let Some(error) = error.as_ref()
             && error == WSL_GRAPHICS_UNAVAILABLE
         {
             return self.render_graphics_not_available(cx);
         }
 
-        if self.graphics.distros.is_empty() && self.graphics.error.is_none() {
+        if distros_empty && error.is_none() {
             return self.render_graphics_center_state(
                 LucideIcon::Monitor,
                 self.i18n.t("graphics.no_distros"),
@@ -497,16 +811,16 @@ impl WorkspaceApp {
                             .text_size(px(18.0))
                             .font_weight(gpui::FontWeight::SEMIBOLD)
                             .text_color(rgb(theme.text))
-                            .child(self.i18n.t(match self.graphics.launch_mode {
+                            .child(self.i18n.t(match launch_mode {
                                 GraphicsLaunchMode::Desktop => "graphics.select_distro",
                                 GraphicsLaunchMode::App => "graphics.app_select_distro",
                             })),
                     )
-                    .when_some(self.graphics.error.as_ref(), |panel, error| {
+                    .when_some(error.as_ref(), |panel, error| {
                         panel.child(self.render_graphics_error_box(error))
                     })
                     .child(self.render_graphics_launch_mode(cx))
-                    .when(!self.graphics.sessions.is_empty(), |panel| {
+                    .when(has_sessions, |panel| {
                         panel.child(self.render_graphics_session_list(cx))
                     }),
             )
@@ -515,8 +829,9 @@ impl WorkspaceApp {
 
     fn render_graphics_mode_tabs(&self, cx: &mut Context<Self>) -> AnyElement {
         let theme = self.tokens.ui;
-        let desktop_active = self.graphics.launch_mode == GraphicsLaunchMode::Desktop;
-        let app_active = self.graphics.launch_mode == GraphicsLaunchMode::App;
+        let graphics = self.graphics.read(cx);
+        let desktop_active = graphics.launch_mode == GraphicsLaunchMode::Desktop;
+        let app_active = graphics.launch_mode == GraphicsLaunchMode::App;
         div()
             .grid()
             .grid_cols(2)
@@ -566,33 +881,34 @@ impl WorkspaceApp {
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |this, _event, _window, cx| {
-                    this.graphics.launch_mode = mode;
-                    this.graphics.focused_input =
-                        (mode == GraphicsLaunchMode::App).then_some(GraphicsInput::AppCommand);
-                    cx.notify();
+                    this.graphics.update(cx, |graphics, cx| {
+                        graphics.launch_mode = mode;
+                        graphics.focused_input =
+                            (mode == GraphicsLaunchMode::App).then_some(GraphicsInput::AppCommand);
+                        cx.notify();
+                    });
                 }),
             )
             .into_any_element()
     }
 
     fn render_graphics_launch_mode(&self, cx: &mut Context<Self>) -> AnyElement {
-        match self.graphics.launch_mode {
+        match self.graphics.read(cx).launch_mode {
             GraphicsLaunchMode::Desktop => self.render_graphics_desktop_mode(cx),
             GraphicsLaunchMode::App => self.render_graphics_app_mode(cx),
         }
     }
 
     fn render_graphics_desktop_mode(&self, cx: &mut Context<Self>) -> AnyElement {
+        let distros = self.graphics.read(cx).distros.clone();
         div()
             .flex()
             .flex_col()
             .gap(px(12.0))
             .child(self.render_graphics_warning(self.i18n.t("graphics.desktop_experimental"), None))
             .children(
-                self.graphics
-                    .distros
-                    .iter()
-                    .cloned()
+                distros
+                    .into_iter()
                     .map(|distro| self.render_graphics_distro_row(distro, cx)),
             )
             .into_any_element()
@@ -600,14 +916,19 @@ impl WorkspaceApp {
 
     fn render_graphics_app_mode(&self, cx: &mut Context<Self>) -> AnyElement {
         let theme = self.tokens.ui;
-        let selected_status = self
-            .graphics
-            .selected_distro
-            .as_ref()
-            .and_then(|name| self.graphics.wslg_statuses.get(name));
-        let can_start = self.graphics.selected_distro.is_some()
-            && !self.graphics.app_command.trim().is_empty()
-            && self.graphics.status != GraphicsStatus::Starting;
+        let (selected_status, can_start) = {
+            let graphics = self.graphics.read(cx);
+            (
+                graphics
+                    .selected_distro
+                    .as_ref()
+                    .and_then(|name| graphics.wslg_statuses.get(name))
+                    .cloned(),
+                graphics.selected_distro.is_some()
+                    && !graphics.app_command.trim().is_empty()
+                    && graphics.status != GraphicsStatus::Starting,
+            )
+        };
         div()
             .flex()
             .flex_col()
@@ -623,7 +944,7 @@ impl WorkspaceApp {
                     .gap(px(8.0))
                     .child(self.render_graphics_label("graphics.app_distro_label"))
                     .child(self.render_graphics_app_distro_selector(cx))
-                    .when_some(selected_status, |field, status| {
+                    .when_some(selected_status.as_ref(), |field, status| {
                         field.child(self.render_graphics_wslg_badge(Some(status)))
                     }),
             )
@@ -671,11 +992,11 @@ impl WorkspaceApp {
                 .on_mouse_down(
                     MouseButton::Left,
                     cx.listener(|this, _event, _window, cx| {
-                        if this.graphics.selected_distro.is_some()
-                            && !this.graphics.app_command.trim().is_empty()
+                        if this.graphics.read(cx).selected_distro.is_some()
+                            && !this.graphics.read(cx).app_command.trim().is_empty()
                         {
-                            this.start_graphics_app();
-                            cx.notify();
+                            this.graphics
+                                .update(cx, |graphics, cx| graphics.start_graphics_app(cx));
                         }
                     }),
                 ),
@@ -684,6 +1005,7 @@ impl WorkspaceApp {
     }
 
     fn render_graphics_session_list(&self, cx: &mut Context<Self>) -> AnyElement {
+        let sessions = self.graphics.read(cx).sessions.clone();
         div()
             .flex()
             .flex_col()
@@ -696,10 +1018,8 @@ impl WorkspaceApp {
                     .child(self.i18n.t("graphics.tab_title")),
             )
             .children(
-                self.graphics
-                    .sessions
-                    .iter()
-                    .cloned()
+                sessions
+                    .into_iter()
                     .map(|session| self.render_graphics_session_row(session, cx)),
             )
             .into_any_element()
@@ -760,8 +1080,10 @@ impl WorkspaceApp {
                 .on_mouse_down(
                     MouseButton::Left,
                     cx.listener(move |this, _event, _window, cx| {
-                        this.reconnect_graphics_session_id(reconnect_session_id.clone());
-                        cx.notify();
+                        this.graphics.update(cx, |graphics, cx| {
+                            graphics
+                                .reconnect_graphics_session_id(reconnect_session_id.clone(), cx);
+                        });
                     }),
                 ),
             )
@@ -779,8 +1101,9 @@ impl WorkspaceApp {
                 .on_mouse_down(
                     MouseButton::Left,
                     cx.listener(move |this, _event, _window, cx| {
-                        this.stop_graphics_session_id(stop_session_id.clone());
-                        cx.notify();
+                        this.graphics.update(cx, |graphics, cx| {
+                            graphics.stop_graphics_session_id(stop_session_id.clone(), cx);
+                        });
                     }),
                 ),
             )
@@ -798,7 +1121,8 @@ impl WorkspaceApp {
 
     fn render_graphics_distro_row(&self, distro: WslDistro, cx: &mut Context<Self>) -> AnyElement {
         let theme = self.tokens.ui;
-        let status = self.graphics.wslg_statuses.get(&distro.name);
+        let graphics = self.graphics.read(cx);
+        let status = graphics.wslg_statuses.get(&distro.name);
         let distro_name = distro.name.clone();
         div()
             .flex()
@@ -853,8 +1177,9 @@ impl WorkspaceApp {
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |this, _event, _window, cx| {
-                    this.start_graphics_desktop(distro_name.clone());
-                    cx.notify();
+                    this.graphics.update(cx, |graphics, cx| {
+                        graphics.start_graphics_desktop(distro_name.clone(), cx);
+                    });
                 }),
             )
             .into_any_element()
@@ -866,57 +1191,68 @@ impl WorkspaceApp {
             .flex()
             .flex_col()
             .gap(px(6.0))
-            .children(self.graphics.distros.iter().cloned().map(|distro| {
-                let selected = self.graphics.selected_distro.as_deref() == Some(&distro.name);
-                let distro_name = distro.name.clone();
-                div()
-                    .h(px(34.0))
-                    .px(px(10.0))
-                    .flex()
-                    .items_center()
-                    .gap(px(8.0))
-                    .rounded(px(self.tokens.radii.sm))
-                    .border_1()
-                    .border_color(rgb(if selected { theme.accent } else { theme.border }))
-                    .bg(if selected {
-                        rgba((theme.accent << 8) | GRAPHICS_ALPHA_10)
-                    } else {
-                        rgb(theme.bg)
-                    })
-                    .text_size(px(13.0))
-                    .text_color(rgb(theme.text))
-                    .cursor_pointer()
-                    .child(div().flex_1().truncate().child(format!(
-                        "{}{}{}",
-                        distro.name,
-                        if distro.is_default { " (Default)" } else { "" },
-                        if distro.is_running {
-                            String::new()
-                        } else {
-                            format!(" - {}", self.i18n.t("graphics.distro_stopped"))
-                        }
-                    )))
-                    .child(Self::render_lucide_icon(
-                        LucideIcon::Check,
-                        14.0,
-                        rgb(if selected { theme.accent } else { theme.bg }),
-                    ))
-                    .on_mouse_down(
-                        MouseButton::Left,
-                        cx.listener(move |this, _event, _window, cx| {
-                            this.graphics.selected_distro = Some(distro_name.clone());
-                            cx.notify();
-                        }),
-                    )
-            }))
+            .children(
+                self.graphics
+                    .read(cx)
+                    .distros
+                    .iter()
+                    .cloned()
+                    .map(|distro| {
+                        let selected =
+                            self.graphics.read(cx).selected_distro.as_deref() == Some(&distro.name);
+                        let distro_name = distro.name.clone();
+                        div()
+                            .h(px(34.0))
+                            .px(px(10.0))
+                            .flex()
+                            .items_center()
+                            .gap(px(8.0))
+                            .rounded(px(self.tokens.radii.sm))
+                            .border_1()
+                            .border_color(rgb(if selected { theme.accent } else { theme.border }))
+                            .bg(if selected {
+                                rgba((theme.accent << 8) | GRAPHICS_ALPHA_10)
+                            } else {
+                                rgb(theme.bg)
+                            })
+                            .text_size(px(13.0))
+                            .text_color(rgb(theme.text))
+                            .cursor_pointer()
+                            .child(div().flex_1().truncate().child(format!(
+                                "{}{}{}",
+                                distro.name,
+                                if distro.is_default { " (Default)" } else { "" },
+                                if distro.is_running {
+                                    String::new()
+                                } else {
+                                    format!(" - {}", self.i18n.t("graphics.distro_stopped"))
+                                }
+                            )))
+                            .child(Self::render_lucide_icon(
+                                LucideIcon::Check,
+                                14.0,
+                                rgb(if selected { theme.accent } else { theme.bg }),
+                            ))
+                            .on_mouse_down(
+                                MouseButton::Left,
+                                cx.listener(move |this, _event, _window, cx| {
+                                    this.graphics.update(cx, |graphics, cx| {
+                                        graphics.selected_distro = Some(distro_name.clone());
+                                        cx.notify();
+                                    });
+                                }),
+                            )
+                    }),
+            )
             .into_any_element()
     }
 
     fn render_graphics_app_command_input(&self, cx: &mut Context<Self>) -> AnyElement {
         let theme = self.tokens.ui;
-        let focused = self.graphics.focused_input == Some(GraphicsInput::AppCommand);
+        let graphics = self.graphics.read(cx);
+        let focused = graphics.focused_input == Some(GraphicsInput::AppCommand);
         let target = WorkspaceImeTarget::Graphics(GraphicsInput::AppCommand);
-        let marked = self.marked_text_for_target(target);
+        let marked = self.marked_text_for_target(target, cx);
         let workspace = cx.entity();
         div()
             .relative()
@@ -925,13 +1261,13 @@ impl WorkspaceApp {
                 oxideterm_gpui_ui::text_input(
                     &self.tokens,
                     TextInputView {
-                        value: &self.graphics.app_command,
+                        value: &graphics.app_command,
                         placeholder: self.i18n.t("graphics.app_command_placeholder"),
                         focused,
-                        caret_visible: self.new_connection_caret_visible,
+                        caret_visible: self.input_caret.visible(),
                         secret: false,
                         selected_all: false,
-                        selected_range: self.ime_selected_range_for_target(target),
+                        selected_range: self.ime_selected_range_for_target(target, cx),
                         marked_text: marked,
                     },
                 )
@@ -941,8 +1277,11 @@ impl WorkspaceApp {
                 .on_mouse_down(
                     MouseButton::Left,
                     cx.listener(move |this, event: &gpui::MouseDownEvent, window, cx| {
-                        this.graphics.focused_input = Some(GraphicsInput::AppCommand);
-                        this.new_connection_caret_visible = true;
+                        this.graphics.update(cx, |graphics, cx| {
+                            graphics.focused_input = Some(GraphicsInput::AppCommand);
+                            cx.notify();
+                        });
+                        this.show_active_input_caret(cx);
                         window.focus(&this.focus_handle, cx);
                         this.begin_ime_selection_from_mouse_down(target, event, window, cx);
                     }),
@@ -982,9 +1321,11 @@ impl WorkspaceApp {
         .on_mouse_down(
             MouseButton::Left,
             cx.listener(move |this, _event, _window, cx| {
-                this.graphics.app_command = command.clone();
-                this.graphics.focused_input = Some(GraphicsInput::AppCommand);
-                cx.notify();
+                this.graphics.update(cx, |graphics, cx| {
+                    graphics.app_command = command.clone();
+                    graphics.focused_input = Some(GraphicsInput::AppCommand);
+                    cx.notify();
+                });
             }),
         )
         .into_any_element()
@@ -996,11 +1337,22 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
-        self.ensure_graphics_vnc_worker();
-        self.drop_graphics_vnc_retired_images(window, cx);
-        let frame = self.graphics.vnc_frame.clone();
-        let render_image = self.graphics.vnc_render_image.clone();
-        let geometry = self.graphics.vnc_geometry.clone();
+        self.graphics
+            .update(cx, |graphics, _cx| graphics.ensure_vnc_worker());
+        let (frame_size, render_image, geometry, show_status_overlay) = {
+            let graphics = self.graphics.read(cx);
+            (
+                graphics
+                    .vnc_frame
+                    .as_ref()
+                    .map(|frame| (frame.width, frame.height)),
+                graphics.vnc_render_image.clone(),
+                graphics.vnc_geometry.clone(),
+                graphics.status != GraphicsStatus::Active
+                    || graphics.error.is_some()
+                    || graphics.session.is_none(),
+            )
+        };
         div()
             .size_full()
             .relative()
@@ -1009,83 +1361,101 @@ impl WorkspaceApp {
             .child(
                 div()
                     .size_full()
-                    .child(graphics_vnc_canvas(frame, render_image, geometry, 0x000000))
+                    .child(graphics_vnc_canvas(
+                        frame_size,
+                        render_image,
+                        geometry,
+                        0x000000,
+                    ))
                     .on_mouse_down(
                         MouseButton::Left,
                         cx.listener(|this, event: &MouseDownEvent, _window, cx| {
-                            this.send_graphics_vnc_pointer(
-                                event.position,
-                                Some((MouseButton::Left, true)),
-                            );
+                            this.graphics.update(cx, |graphics, _cx| {
+                                graphics.send_vnc_pointer(
+                                    event.position,
+                                    Some((MouseButton::Left, true)),
+                                );
+                            });
                             cx.stop_propagation();
                         }),
                     )
                     .on_mouse_down(
                         MouseButton::Right,
                         cx.listener(|this, event: &MouseDownEvent, _window, cx| {
-                            this.send_graphics_vnc_pointer(
-                                event.position,
-                                Some((MouseButton::Right, true)),
-                            );
+                            this.graphics.update(cx, |graphics, _cx| {
+                                graphics.send_vnc_pointer(
+                                    event.position,
+                                    Some((MouseButton::Right, true)),
+                                );
+                            });
                             cx.stop_propagation();
                         }),
                     )
                     .on_mouse_down(
                         MouseButton::Middle,
                         cx.listener(|this, event: &MouseDownEvent, _window, cx| {
-                            this.send_graphics_vnc_pointer(
-                                event.position,
-                                Some((MouseButton::Middle, true)),
-                            );
+                            this.graphics.update(cx, |graphics, _cx| {
+                                graphics.send_vnc_pointer(
+                                    event.position,
+                                    Some((MouseButton::Middle, true)),
+                                );
+                            });
                             cx.stop_propagation();
                         }),
                     )
                     .on_mouse_up(
                         MouseButton::Left,
                         cx.listener(|this, event: &MouseUpEvent, _window, cx| {
-                            this.send_graphics_vnc_pointer(
-                                event.position,
-                                Some((MouseButton::Left, false)),
-                            );
+                            this.graphics.update(cx, |graphics, _cx| {
+                                graphics.send_vnc_pointer(
+                                    event.position,
+                                    Some((MouseButton::Left, false)),
+                                );
+                            });
                             cx.stop_propagation();
                         }),
                     )
                     .on_mouse_up(
                         MouseButton::Right,
                         cx.listener(|this, event: &MouseUpEvent, _window, cx| {
-                            this.send_graphics_vnc_pointer(
-                                event.position,
-                                Some((MouseButton::Right, false)),
-                            );
+                            this.graphics.update(cx, |graphics, _cx| {
+                                graphics.send_vnc_pointer(
+                                    event.position,
+                                    Some((MouseButton::Right, false)),
+                                );
+                            });
                             cx.stop_propagation();
                         }),
                     )
                     .on_mouse_up(
                         MouseButton::Middle,
                         cx.listener(|this, event: &MouseUpEvent, _window, cx| {
-                            this.send_graphics_vnc_pointer(
-                                event.position,
-                                Some((MouseButton::Middle, false)),
-                            );
+                            this.graphics.update(cx, |graphics, _cx| {
+                                graphics.send_vnc_pointer(
+                                    event.position,
+                                    Some((MouseButton::Middle, false)),
+                                );
+                            });
                             cx.stop_propagation();
                         }),
                     )
                     .on_mouse_move(cx.listener(|this, event: &MouseMoveEvent, _window, cx| {
-                        this.send_graphics_vnc_pointer(event.position, None);
+                        this.graphics.update(cx, |graphics, _cx| {
+                            graphics.send_vnc_pointer(event.position, None);
+                        });
                         cx.stop_propagation();
                     }))
                     .on_scroll_wheel(cx.listener(|this, event: &ScrollWheelEvent, _window, cx| {
-                        this.send_graphics_vnc_scroll(event.position, &event.delta);
+                        this.graphics.update(cx, |graphics, _cx| {
+                            graphics.send_vnc_scroll(event.position, &event.delta);
+                        });
                         cx.stop_propagation();
                     })),
             )
             .child(self.render_graphics_toolbar(window, cx))
-            .when(
-                self.graphics.status != GraphicsStatus::Active
-                    || self.graphics.error.is_some()
-                    || self.graphics.session.is_none(),
-                |surface| surface.child(self.render_graphics_status_overlay(cx)),
-            )
+            .when(show_status_overlay, |surface| {
+                surface.child(self.render_graphics_status_overlay(cx))
+            })
             .child(
                 div()
                     .absolute()
@@ -1106,7 +1476,8 @@ impl WorkspaceApp {
 
     fn render_graphics_toolbar(&self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let theme = self.tokens.ui;
-        let session = self.graphics.session.as_ref();
+        let session = self.graphics.read(cx).session.clone();
+        let session_missing = session.is_none();
         div()
             .absolute()
             .top(px(GRAPHICS_TOOLBAR_TOP))
@@ -1134,9 +1505,14 @@ impl WorkspaceApp {
                             .font_weight(gpui::FontWeight::MEDIUM)
                             .text_color(rgb(theme.text))
                             .truncate()
-                            .child(session.map(graphics_session_title).unwrap_or_default()),
+                            .child(
+                                session
+                                    .as_ref()
+                                    .map(graphics_session_title)
+                                    .unwrap_or_default(),
+                            ),
                     )
-                    .when_some(session, |meta, session| {
+                    .when_some(session.as_ref(), |meta, session| {
                         meta.child(
                             div()
                                 .flex()
@@ -1156,7 +1532,7 @@ impl WorkspaceApp {
             .child(self.render_graphics_toolbar_button(
                 "graphics.reconnect",
                 ButtonVariant::Secondary,
-                self.graphics.session.is_none(),
+                session_missing,
                 GraphicsToolbarAction::Reconnect,
                 window,
                 cx,
@@ -1172,7 +1548,7 @@ impl WorkspaceApp {
             .child(self.render_graphics_toolbar_button(
                 "graphics.stop",
                 ButtonVariant::Destructive,
-                self.graphics.session.is_none(),
+                session_missing,
                 GraphicsToolbarAction::Stop,
                 window,
                 cx,
@@ -1206,12 +1582,17 @@ impl WorkspaceApp {
             cx.listener(move |this, _event, window, cx| {
                 match action {
                     GraphicsToolbarAction::Reconnect => {
-                        if this.graphics.session.is_some() {
-                            this.reconnect_graphics_session();
+                        if this.graphics.read(cx).session.is_some() {
+                            this.graphics.update(cx, |graphics, cx| {
+                                graphics.reconnect_graphics_session(cx);
+                            });
                         }
                     }
                     GraphicsToolbarAction::Fullscreen => window.toggle_fullscreen(),
-                    GraphicsToolbarAction::Stop => this.stop_graphics_session(),
+                    GraphicsToolbarAction::Stop => {
+                        this.graphics
+                            .update(cx, |graphics, cx| graphics.stop_graphics_session(cx));
+                    }
                 }
                 cx.notify();
             }),
@@ -1221,7 +1602,8 @@ impl WorkspaceApp {
 
     fn render_graphics_status_overlay(&self, cx: &mut Context<Self>) -> AnyElement {
         let theme = self.tokens.ui;
-        let (icon, text, color) = match self.graphics.status {
+        let graphics = self.graphics.read(cx);
+        let (icon, text, color) = match graphics.status {
             GraphicsStatus::Starting => (
                 LucideIcon::LoaderCircle,
                 self.i18n.t("graphics.starting"),
@@ -1234,7 +1616,7 @@ impl WorkspaceApp {
             ),
             GraphicsStatus::Error => (
                 LucideIcon::AlertCircle,
-                self.graphics
+                graphics
                     .error
                     .clone()
                     .unwrap_or_else(|| self.i18n.t("graphics.error")),
@@ -1284,9 +1666,9 @@ impl WorkspaceApp {
                     )
                     .when(
                         matches!(
-                            self.graphics.status,
+                            graphics.status,
                             GraphicsStatus::Disconnected | GraphicsStatus::Error
-                        ) && self.graphics.session.is_some(),
+                        ) && graphics.session.is_some(),
                         |overlay| {
                             overlay.child(
                                 button_with(
@@ -1302,8 +1684,9 @@ impl WorkspaceApp {
                                 .on_mouse_down(
                                     MouseButton::Left,
                                     cx.listener(|this, _event, _window, cx| {
-                                        this.reconnect_graphics_session();
-                                        cx.notify();
+                                        this.graphics.update(cx, |graphics, cx| {
+                                            graphics.reconnect_graphics_session(cx);
+                                        });
                                     }),
                                 ),
                             )
@@ -1361,8 +1744,10 @@ impl WorkspaceApp {
                             .on_mouse_down(
                                 MouseButton::Left,
                                 cx.listener(|this, _event, _window, cx| {
-                                    this.start_graphics_load_if_needed(true);
-                                    cx.notify();
+                                    this.graphics.update(cx, |graphics, cx| {
+                                        graphics.start_graphics_load_if_needed(true);
+                                        cx.notify();
+                                    });
                                 }),
                             ),
                         )
@@ -1539,47 +1924,57 @@ impl WorkspaceApp {
             })
             .into_any_element()
     }
+}
+
+impl GraphicsWorkspaceEntity {
+    fn set_surface_visible(&mut self, visible: bool, cx: &mut Context<Self>) -> bool {
+        let pending_frame = self.worker_delivery.frame_slot.set_visible(visible);
+        let Some((session_id, frame)) = pending_frame else {
+            return false;
+        };
+        // Visibility resumes only presentation; the session and VNC worker survive hiding.
+        let changed = self.apply_vnc_frame(session_id, frame);
+        if changed {
+            cx.notify();
+        }
+        changed
+    }
 
     fn start_graphics_load_if_needed(&mut self, force: bool) {
-        if self.graphics.loading || (!force && !self.graphics.distros.is_empty()) {
+        if self.loading || (!force && !self.distros.is_empty()) {
             return;
         }
-        self.graphics.generation = self.graphics.generation.saturating_add(1);
-        let generation = self.graphics.generation;
-        self.graphics.loading = true;
-        self.graphics.error = None;
-        let tx = self.graphics.worker_tx.clone();
-        self.forwarding_runtime.spawn(async move {
+        self.generation = self.generation.saturating_add(1);
+        let generation = self.generation;
+        self.loading = true;
+        self.error = None;
+        let delivery = self.worker_delivery.clone();
+        self.runtime.spawn(async move {
             let result = wsl::list_distros().map_err(|error| error.to_string());
-            let _ = tx.send(GraphicsWorkerResult::LoadDistros { generation, result });
+            delivery.send(GraphicsWorkerResult::LoadDistros { generation, result });
         });
     }
 
-    fn load_graphics_sessions(&self) {
-        let tx = self.graphics.worker_tx.clone();
-        let backend = self.wsl_graphics.clone();
-        self.forwarding_runtime.spawn(async move {
+    fn load_sessions(&self) {
+        let delivery = self.worker_delivery.clone();
+        let backend = self.backend.clone();
+        self.runtime.spawn(async move {
             let result = Ok::<_, String>(backend.list_sessions().await);
-            let _ = tx.send(GraphicsWorkerResult::ListSessions { result });
+            delivery.send(GraphicsWorkerResult::ListSessions { result });
         });
     }
 
-    fn start_graphics_wslg_detection(&self, generation: u64) {
-        for distro in self
-            .graphics
-            .distros
-            .iter()
-            .filter(|distro| distro.is_running)
-        {
-            let tx = self.graphics.worker_tx.clone();
-            let backend = self.wsl_graphics.clone();
+    fn start_wslg_detection(&self, generation: u64) {
+        for distro in self.distros.iter().filter(|distro| distro.is_running) {
+            let delivery = self.worker_delivery.clone();
+            let backend = self.backend.clone();
             let distro_name = distro.name.clone();
-            self.forwarding_runtime.spawn(async move {
+            self.runtime.spawn(async move {
                 let result = backend
                     .detect_wslg(&distro_name)
                     .await
                     .map_err(|error| error.to_string());
-                let _ = tx.send(GraphicsWorkerResult::DetectWslg {
+                delivery.send(GraphicsWorkerResult::DetectWslg {
                     generation,
                     distro: distro_name,
                     result,
@@ -1588,294 +1983,317 @@ impl WorkspaceApp {
         }
     }
 
-    fn start_graphics_desktop(&mut self, distro: String) {
-        if self.graphics.status == GraphicsStatus::Starting {
+    fn start_graphics_desktop(&mut self, distro: String, cx: &mut Context<Self>) {
+        if self.status == GraphicsStatus::Starting {
             return;
         }
-        self.graphics.generation = self.graphics.generation.saturating_add(1);
-        let generation = self.graphics.generation;
-        self.graphics.status = GraphicsStatus::Starting;
-        self.graphics.error = None;
-        self.graphics.session = None;
-        self.reset_graphics_vnc_viewer(true);
-        let tx = self.graphics.worker_tx.clone();
-        let backend = self.wsl_graphics.clone();
-        self.forwarding_runtime.spawn(async move {
+        self.generation = self.generation.saturating_add(1);
+        let generation = self.generation;
+        self.status = GraphicsStatus::Starting;
+        self.error = None;
+        self.session = None;
+        self.reset_vnc_viewer(true);
+        let delivery = self.worker_delivery.clone();
+        let backend = self.backend.clone();
+        self.runtime.spawn(async move {
             let result = backend
                 .start_desktop(distro)
                 .await
                 .map_err(|error| error.to_string());
-            let _ = tx.send(GraphicsWorkerResult::Start { generation, result });
+            delivery.send(GraphicsWorkerResult::Start { generation, result });
         });
+        cx.notify();
     }
 
-    fn start_graphics_app(&mut self) {
-        if self.graphics.status == GraphicsStatus::Starting {
+    fn start_graphics_app(&mut self, cx: &mut Context<Self>) {
+        if self.status == GraphicsStatus::Starting {
             return;
         }
-        let Some(distro) = self.graphics.selected_distro.clone() else {
+        let Some(distro) = self.selected_distro.clone() else {
             return;
         };
-        let argv = split_graphics_app_command(&self.graphics.app_command);
+        let argv = split_graphics_app_command(&self.app_command);
         if argv.is_empty() {
             return;
         }
-        self.graphics.generation = self.graphics.generation.saturating_add(1);
-        let generation = self.graphics.generation;
-        self.graphics.status = GraphicsStatus::Starting;
-        self.graphics.error = None;
-        self.graphics.session = None;
-        self.reset_graphics_vnc_viewer(true);
-        let tx = self.graphics.worker_tx.clone();
-        let backend = self.wsl_graphics.clone();
-        self.forwarding_runtime.spawn(async move {
+        self.generation = self.generation.saturating_add(1);
+        let generation = self.generation;
+        self.status = GraphicsStatus::Starting;
+        self.error = None;
+        self.session = None;
+        self.reset_vnc_viewer(true);
+        let delivery = self.worker_delivery.clone();
+        let backend = self.backend.clone();
+        self.runtime.spawn(async move {
             let result = backend
                 .start_app(distro, argv, None, None)
                 .await
                 .map_err(|error| error.to_string());
-            let _ = tx.send(GraphicsWorkerResult::StartApp { generation, result });
+            delivery.send(GraphicsWorkerResult::StartApp { generation, result });
         });
+        cx.notify();
     }
 
-    fn stop_graphics_session(&mut self) {
-        if self.graphics.session.is_some() {
-            self.shutdown_graphics_session();
-        } else {
-            self.graphics.status = GraphicsStatus::Idle;
-            self.graphics.error = None;
-            self.reset_graphics_vnc_viewer(true);
-        }
-    }
-
-    fn stop_graphics_session_id(&mut self, session_id: String) {
-        if self
-            .graphics
-            .session
-            .as_ref()
-            .is_some_and(|session| session.id == session_id)
-        {
-            self.shutdown_graphics_session();
+    pub(super) fn shutdown_graphics_session(&mut self, cx: &mut Context<Self>) {
+        let Some(session_id) = self.session.as_ref().map(|session| session.id.clone()) else {
+            self.reset_vnc_viewer(true);
+            cx.notify();
             return;
-        }
-        let tx = self.graphics.worker_tx.clone();
-        let backend = self.wsl_graphics.clone();
-        self.forwarding_runtime.spawn(async move {
+        };
+        self.generation = self.generation.saturating_add(1);
+        let generation = self.generation;
+        self.reset_vnc_viewer(true);
+        let delivery = self.worker_delivery.clone();
+        let backend = self.backend.clone();
+        self.runtime.spawn(async move {
             let result = backend
                 .stop(&session_id)
                 .await
                 .map_err(|error| error.to_string());
-            let _ = tx.send(GraphicsWorkerResult::ListSessions {
+            delivery.send(GraphicsWorkerResult::Stop {
+                generation,
+                session_id,
+                result,
+            });
+        });
+        cx.notify();
+    }
+
+    fn stop_graphics_session(&mut self, cx: &mut Context<Self>) {
+        if self.session.is_some() {
+            self.shutdown_graphics_session(cx);
+        } else {
+            self.status = GraphicsStatus::Idle;
+            self.error = None;
+            self.reset_vnc_viewer(true);
+            cx.notify();
+        }
+    }
+
+    fn stop_graphics_session_id(&mut self, session_id: String, cx: &mut Context<Self>) {
+        if self
+            .session
+            .as_ref()
+            .is_some_and(|session| session.id == session_id)
+        {
+            self.shutdown_graphics_session(cx);
+            return;
+        }
+        let delivery = self.worker_delivery.clone();
+        let backend = self.backend.clone();
+        self.runtime.spawn(async move {
+            let result = backend
+                .stop(&session_id)
+                .await
+                .map_err(|error| error.to_string());
+            delivery.send(GraphicsWorkerResult::ListSessions {
                 result: result.map(|_| Vec::new()),
             });
             let sessions = backend.list_sessions().await;
-            let _ = tx.send(GraphicsWorkerResult::ListSessions {
+            delivery.send(GraphicsWorkerResult::ListSessions {
                 result: Ok(sessions),
             });
         });
+        cx.notify();
     }
 
-    fn reconnect_graphics_session(&mut self) {
-        let Some(session_id) = self
-            .graphics
-            .session
-            .as_ref()
-            .map(|session| session.id.clone())
-        else {
+    fn reconnect_graphics_session(&mut self, cx: &mut Context<Self>) {
+        let Some(session_id) = self.session.as_ref().map(|session| session.id.clone()) else {
             return;
         };
-        self.graphics.generation = self.graphics.generation.saturating_add(1);
-        let generation = self.graphics.generation;
-        self.graphics.status = GraphicsStatus::Starting;
-        self.graphics.error = None;
-        self.reset_graphics_vnc_viewer(true);
-        let tx = self.graphics.worker_tx.clone();
-        let backend = self.wsl_graphics.clone();
-        self.forwarding_runtime.spawn(async move {
+        self.generation = self.generation.saturating_add(1);
+        let generation = self.generation;
+        self.status = GraphicsStatus::Starting;
+        self.error = None;
+        self.reset_vnc_viewer(true);
+        let delivery = self.worker_delivery.clone();
+        let backend = self.backend.clone();
+        self.runtime.spawn(async move {
             let result = backend
                 .reconnect(&session_id)
                 .await
                 .map_err(|error| error.to_string());
-            let _ = tx.send(GraphicsWorkerResult::Reconnect { generation, result });
+            delivery.send(GraphicsWorkerResult::Reconnect { generation, result });
         });
+        cx.notify();
     }
 
-    fn reconnect_graphics_session_id(&mut self, session_id: String) {
-        self.graphics.generation = self.graphics.generation.saturating_add(1);
-        let generation = self.graphics.generation;
-        self.graphics.status = GraphicsStatus::Starting;
-        self.graphics.error = None;
-        self.reset_graphics_vnc_viewer(true);
-        let tx = self.graphics.worker_tx.clone();
-        let backend = self.wsl_graphics.clone();
-        self.forwarding_runtime.spawn(async move {
+    fn reconnect_graphics_session_id(&mut self, session_id: String, cx: &mut Context<Self>) {
+        self.generation = self.generation.saturating_add(1);
+        let generation = self.generation;
+        self.status = GraphicsStatus::Starting;
+        self.error = None;
+        self.reset_vnc_viewer(true);
+        let delivery = self.worker_delivery.clone();
+        let backend = self.backend.clone();
+        self.runtime.spawn(async move {
             let result = backend
                 .reconnect(&session_id)
                 .await
                 .map_err(|error| error.to_string());
-            let _ = tx.send(GraphicsWorkerResult::Reconnect { generation, result });
+            delivery.send(GraphicsWorkerResult::Reconnect { generation, result });
         });
+        cx.notify();
     }
 
-    fn apply_graphics_vnc_event(&mut self, event: GraphicsVncWorkerEvent) -> bool {
+    fn apply_vnc_event(&mut self, event: GraphicsVncWorkerEvent) -> bool {
         match event {
             GraphicsVncWorkerEvent::Connected { session_id } => {
-                if !self.graphics_session_matches(&session_id) {
+                if !self.session_matches(&session_id) {
                     return false;
                 }
-                self.graphics.status = GraphicsStatus::Active;
-                self.graphics.error = None;
+                self.status = GraphicsStatus::Active;
+                self.error = None;
                 true
             }
             GraphicsVncWorkerEvent::Frame { session_id, frame } => {
-                if !self.graphics_session_matches(&session_id) {
-                    return false;
-                }
-                if let Some(render_image) = frame.render_image() {
-                    let old_image = self.graphics.vnc_render_image.replace(render_image);
-                    self.retire_graphics_vnc_image(old_image);
-                }
-                self.graphics.vnc_frame = Some(frame);
-                self.graphics.status = GraphicsStatus::Active;
-                self.graphics.error = None;
-                true
+                self.apply_vnc_frame(session_id, frame)
             }
             GraphicsVncWorkerEvent::Disconnected { session_id, reason } => {
-                if !self.graphics_session_matches(&session_id) {
+                if !self.session_matches(&session_id) {
                     return false;
                 }
-                self.graphics.vnc_session_id = None;
-                self.graphics.vnc_input = None;
-                self.graphics.vnc_stop = None;
-                self.graphics.vnc_button_mask = 0;
-                let old_image = self.graphics.vnc_render_image.take();
-                self.retire_graphics_vnc_image(old_image);
+                self.vnc_session_id = None;
+                self.vnc_input = None;
+                self.vnc_stop = None;
+                self.vnc_button_mask = 0;
+                self.vnc_frame = None;
+                self.worker_delivery.frame_slot.clear();
+                let old_image = self.vnc_render_image.take();
+                self.retire_vnc_image(old_image);
                 if let Some(reason) = reason {
-                    self.graphics.status = GraphicsStatus::Error;
-                    self.graphics.error = Some(normalize_graphics_error(reason));
+                    self.status = GraphicsStatus::Error;
+                    self.error = Some(normalize_graphics_error(reason));
                 } else {
-                    self.graphics.status = GraphicsStatus::Disconnected;
+                    self.status = GraphicsStatus::Disconnected;
                 }
                 true
             }
         }
     }
 
-    fn retire_graphics_vnc_image(&mut self, image: Option<Arc<RenderImage>>) {
+    fn apply_vnc_frame(&mut self, session_id: String, frame: GraphicsVncFrame) -> bool {
+        if !self.session_matches(&session_id) {
+            return false;
+        }
+        if let Some(render_image) = frame.render_image() {
+            let old_image = self.vnc_render_image.replace(render_image);
+            self.retire_vnc_image(old_image);
+        }
+        self.vnc_frame = Some(frame);
+        self.status = GraphicsStatus::Active;
+        self.error = None;
+        true
+    }
+
+    fn retire_vnc_image(&mut self, image: Option<Arc<RenderImage>>) {
         if let Some(image) = image {
-            self.graphics.vnc_retired_images.push(image);
+            self.vnc_retired_images.push(image);
+            // Wake the entity-owned cleanup path even when retirement came from a UI action.
+            self.worker_delivery.wake.mark();
         }
     }
 
-    fn drop_graphics_vnc_retired_images(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        for image in std::mem::take(&mut self.graphics.vnc_retired_images) {
-            // The WSL graphics VNC preview replaces full-frame RenderImage
-            // values frequently; dropping the Arc alone does not evict GPUI's
-            // sprite atlas entry.
-            cx.drop_image(image, Some(window));
-        }
-    }
-
-    fn graphics_session_matches(&self, session_id: &str) -> bool {
-        self.graphics
-            .session
+    fn session_matches(&self, session_id: &str) -> bool {
+        self.session
             .as_ref()
             .is_some_and(|session| session.id == session_id)
     }
 
-    fn reset_graphics_vnc_viewer(&mut self, clear_frame: bool) {
+    fn reset_vnc_viewer(&mut self, clear_frame: bool) {
         // The native VNC worker is a viewer concern: the WSL graphics crate owns
         // VNC/server processes, while GPUI owns the client connection and input
         // routing. Always stop the viewer before switching sessions.
-        if let Some(stop) = self.graphics.vnc_stop.take() {
+        if let Some(stop) = self.vnc_stop.take() {
             let _ = stop.send(());
         }
-        self.graphics.vnc_session_id = None;
-        self.graphics.vnc_input = None;
-        self.graphics.vnc_button_mask = 0;
-        self.graphics.vnc_geometry.clear();
+        self.vnc_session_id = None;
+        self.vnc_input = None;
+        self.vnc_button_mask = 0;
+        self.vnc_geometry.clear();
         if clear_frame {
-            self.graphics.vnc_frame = None;
-            let image = self.graphics.vnc_render_image.take();
-            self.retire_graphics_vnc_image(image);
+            self.worker_delivery.frame_slot.clear();
+            self.vnc_frame = None;
+            let image = self.vnc_render_image.take();
+            self.retire_vnc_image(image);
         }
     }
 
-    fn ensure_graphics_vnc_worker(&mut self) {
-        let Some(session) = self.graphics.session.clone() else {
-            self.reset_graphics_vnc_viewer(true);
+    fn ensure_vnc_worker(&mut self) {
+        let Some(session) = self.session.clone() else {
+            self.reset_vnc_viewer(true);
             return;
         };
-        if self.graphics.vnc_session_id.as_deref() == Some(session.id.as_str())
-            && self.graphics.vnc_input.is_some()
-        {
+        if self.vnc_session_id.as_deref() == Some(session.id.as_str()) && self.vnc_input.is_some() {
             return;
         }
 
-        self.reset_graphics_vnc_viewer(true);
+        self.reset_vnc_viewer(true);
         let (input_tx, input_rx) = tokio::sync::mpsc::unbounded_channel();
         let (stop_tx, stop_rx) = tokio::sync::oneshot::channel();
-        let event_tx = self.graphics.worker_tx.clone();
+        let event_delivery = self.worker_delivery.clone();
         let session_id = session.id.clone();
         let vnc_port = session.vnc_port;
-        self.graphics.vnc_session_id = Some(session_id.clone());
-        self.graphics.vnc_input = Some(input_tx);
-        self.graphics.vnc_stop = Some(stop_tx);
-        self.forwarding_runtime.spawn(async move {
+        self.vnc_session_id = Some(session_id.clone());
+        self.vnc_input = Some(input_tx);
+        self.vnc_stop = Some(stop_tx);
+        self.runtime.spawn(async move {
             run_graphics_vnc_worker(session_id, vnc_port, input_rx, stop_rx, move |event| {
-                let _ = event_tx.send(GraphicsWorkerResult::VncEvent(event));
+                event_delivery.send(GraphicsWorkerResult::VncEvent(event));
             })
             .await;
         });
     }
 
-    fn send_graphics_vnc_input(&mut self, input: GraphicsVncInput) -> bool {
-        self.graphics
-            .vnc_input
+    fn send_vnc_input(&mut self, input: GraphicsVncInput) -> bool {
+        self.vnc_input
             .as_ref()
             .is_some_and(|sender| sender.send(input).is_ok())
     }
 
-    fn send_graphics_vnc_pointer(
+    fn send_vnc_pointer(
         &mut self,
         position: Point<Pixels>,
         button_update: Option<(MouseButton, bool)>,
     ) -> bool {
-        let Some((x, y)) = self.graphics.vnc_geometry.pointer(position) else {
+        let Some((x, y)) = self.vnc_geometry.pointer(position) else {
             return false;
         };
         if let Some((button, pressed)) = button_update {
             let mask = vnc_button_mask(button);
             if pressed {
-                self.graphics.vnc_button_mask |= mask;
+                self.vnc_button_mask |= mask;
             } else {
-                self.graphics.vnc_button_mask &= !mask;
+                self.vnc_button_mask &= !mask;
             }
         }
-        self.send_graphics_vnc_input(GraphicsVncInput::Pointer {
+        self.send_vnc_input(GraphicsVncInput::Pointer {
             x,
             y,
-            buttons: self.graphics.vnc_button_mask,
+            buttons: self.vnc_button_mask,
         })
     }
 
-    fn send_graphics_vnc_scroll(&mut self, position: Point<Pixels>, delta: &gpui::ScrollDelta) {
-        let Some((x, y)) = self.graphics.vnc_geometry.pointer(position) else {
+    fn send_vnc_scroll(&mut self, position: Point<Pixels>, delta: &gpui::ScrollDelta) {
+        let Some((x, y)) = self.vnc_geometry.pointer(position) else {
             return;
         };
         for mask in vnc_scroll_masks(delta) {
-            let _ = self.send_graphics_vnc_input(GraphicsVncInput::Pointer {
+            let _ = self.send_vnc_input(GraphicsVncInput::Pointer {
                 x,
                 y,
-                buttons: self.graphics.vnc_button_mask | mask,
+                buttons: self.vnc_button_mask | mask,
             });
-            let _ = self.send_graphics_vnc_input(GraphicsVncInput::Pointer {
+            let _ = self.send_vnc_input(GraphicsVncInput::Pointer {
                 x,
                 y,
-                buttons: self.graphics.vnc_button_mask,
+                buttons: self.vnc_button_mask,
             });
         }
     }
+}
 
+impl WorkspaceApp {
     fn graphics_canvas_diagnostics_text(&self) -> String {
         let backend = if self.detected_graphics.driver_name.is_empty() {
             format!("{:?}", self.detected_graphics.kind)
@@ -1918,5 +2336,279 @@ fn normalize_graphics_error(error: String) -> String {
         WSL_GRAPHICS_UNAVAILABLE.to_string()
     } else {
         error
+    }
+}
+
+#[cfg(test)]
+mod delivery_tests {
+    use gpui::TestAppContext;
+
+    use super::*;
+
+    fn test_graphics_session(session_id: &str) -> WslGraphicsSession {
+        WslGraphicsSession {
+            id: session_id.to_string(),
+            vnc_port: 5900,
+            distro: "test-distro".to_string(),
+            desktop_name: "Test Desktop".to_string(),
+            mode: GraphicsSessionMode::Desktop,
+        }
+    }
+
+    fn test_graphics_frame(marker: u8) -> GraphicsVncFrame {
+        GraphicsVncFrame {
+            width: 1,
+            height: 1,
+            bgra: vec![marker, 0, 0, u8::MAX],
+        }
+    }
+
+    #[test]
+    fn worker_delivery_marks_wake_after_enqueue() {
+        let (sender, receiver) = mpsc::channel();
+        let delivery = GraphicsWorkerDelivery::new(sender);
+
+        delivery.send(GraphicsWorkerResult::ListSessions {
+            result: Ok(Vec::new()),
+        });
+
+        assert!(delivery.wake.take());
+        assert!(matches!(
+            receiver.try_recv(),
+            Ok(GraphicsWorkerResult::ListSessions { result: Ok(sessions) }) if sessions.is_empty()
+        ));
+    }
+
+    #[test]
+    fn worker_wake_coalesces_bursts_and_stops_explicitly() {
+        let wake = GraphicsWorkerWake::default();
+
+        wake.mark();
+        wake.mark();
+
+        assert!(wake.take());
+        assert!(!wake.take());
+        wake.stop();
+        assert!(wake.is_stopped());
+    }
+
+    #[test]
+    fn adjacent_frames_coalesce_without_crossing_lifecycle_boundaries() {
+        let session_id = "graphics-session".to_string();
+        let results = vec![
+            GraphicsWorkerResult::VncEvent(GraphicsVncWorkerEvent::Connected {
+                session_id: session_id.clone(),
+            }),
+            GraphicsWorkerResult::VncEvent(GraphicsVncWorkerEvent::Frame {
+                session_id: session_id.clone(),
+                frame: GraphicsVncFrame {
+                    width: 1,
+                    height: 1,
+                    bgra: vec![1, 0, 0, 0],
+                },
+            }),
+            GraphicsWorkerResult::VncEvent(GraphicsVncWorkerEvent::Frame {
+                session_id: session_id.clone(),
+                frame: GraphicsVncFrame {
+                    width: 1,
+                    height: 1,
+                    bgra: vec![2, 0, 0, 0],
+                },
+            }),
+            GraphicsWorkerResult::VncEvent(GraphicsVncWorkerEvent::Disconnected {
+                session_id,
+                reason: None,
+            }),
+        ];
+
+        let coalesced = coalesce_adjacent_graphics_frames(results);
+
+        assert_eq!(coalesced.len(), 3);
+        assert!(matches!(
+            &coalesced[1],
+            GraphicsWorkerResult::VncEvent(GraphicsVncWorkerEvent::Frame { frame, .. })
+                if frame.bgra == vec![2, 0, 0, 0]
+        ));
+    }
+
+    #[gpui::test]
+    fn visible_hidden_frames_resume_only_the_latest_frame(cx: &mut TestAppContext) {
+        let runtime = Arc::new(tokio::runtime::Runtime::new().expect("graphics test runtime"));
+        let graphics = cx.new(|cx| {
+            GraphicsWorkspaceEntity::new(
+                Arc::new(oxideterm_wsl_graphics::WslGraphicsState::new()),
+                runtime,
+                cx,
+            )
+        });
+        let (input_tx, _input_rx) = tokio::sync::mpsc::unbounded_channel();
+        graphics.update(cx, |graphics, cx| {
+            graphics.session = Some(test_graphics_session("graphics-session"));
+            graphics.vnc_session_id = Some("graphics-session".to_string());
+            graphics.vnc_input = Some(input_tx);
+            graphics.set_surface_visible(true, cx);
+            graphics
+                .worker_delivery
+                .send(GraphicsWorkerResult::VncEvent(
+                    GraphicsVncWorkerEvent::Frame {
+                        session_id: "graphics-session".to_string(),
+                        frame: test_graphics_frame(1),
+                    },
+                ));
+            assert!(graphics.worker_delivery.wake.take());
+            let _ = graphics.drain_worker_results(cx);
+        });
+        let visible_image = graphics.read_with(cx, |graphics, _cx| {
+            assert_eq!(
+                graphics.vnc_frame.as_ref().map(|frame| frame.bgra[0]),
+                Some(1)
+            );
+            graphics
+                .vnc_render_image
+                .clone()
+                .expect("visible frame image")
+        });
+
+        graphics.update(cx, |graphics, cx| {
+            graphics.set_surface_visible(false, cx);
+            for marker in [2, 3] {
+                graphics
+                    .worker_delivery
+                    .send(GraphicsWorkerResult::VncEvent(
+                        GraphicsVncWorkerEvent::Frame {
+                            session_id: "graphics-session".to_string(),
+                            frame: test_graphics_frame(marker),
+                        },
+                    ));
+            }
+            assert!(!graphics.worker_delivery.wake.take());
+            assert!(graphics.worker_delivery.frame_slot.has_pending_frame());
+            assert_eq!(
+                graphics.vnc_frame.as_ref().map(|frame| frame.bgra[0]),
+                Some(1)
+            );
+            assert!(Arc::ptr_eq(
+                graphics
+                    .vnc_render_image
+                    .as_ref()
+                    .expect("retained visible image"),
+                &visible_image
+            ));
+
+            assert!(graphics.set_surface_visible(true, cx));
+            assert!(!graphics.worker_delivery.frame_slot.has_pending_frame());
+            assert_eq!(
+                graphics.vnc_frame.as_ref().map(|frame| frame.bgra[0]),
+                Some(3)
+            );
+            assert!(!Arc::ptr_eq(
+                graphics
+                    .vnc_render_image
+                    .as_ref()
+                    .expect("resumed frame image"),
+                &visible_image
+            ));
+            assert!(graphics.session.is_some());
+            assert!(graphics.vnc_input.is_some());
+        });
+    }
+
+    #[gpui::test]
+    fn hidden_surface_delivery_and_release_lifecycle_are_entity_owned(cx: &mut TestAppContext) {
+        let runtime = Arc::new(tokio::runtime::Runtime::new().expect("graphics test runtime"));
+        let graphics = cx.new(|cx| {
+            GraphicsWorkspaceEntity::new(
+                Arc::new(oxideterm_wsl_graphics::WslGraphicsState::new()),
+                runtime,
+                cx,
+            )
+        });
+        let _subscription = graphics.update(cx, |_, cx| {
+            cx.subscribe(
+                &graphics,
+                |graphics, _, event: &GraphicsWorkspaceEvent, cx| match event {
+                    GraphicsWorkspaceEvent::WorkerResultsReady => {
+                        let _ = graphics.drain_worker_results(cx);
+                    }
+                },
+            )
+        });
+        let wake = graphics.update(cx, |graphics, _cx| graphics.worker_delivery.wake.clone());
+        graphics.update(cx, |graphics, _cx| {
+            graphics.generation = 9;
+            graphics.worker_delivery.send(GraphicsWorkerResult::Start {
+                generation: 9,
+                result: Err("test graphics failure".to_string()),
+            });
+        });
+
+        // No graphics page is rendered; the entity still applies reliable completion.
+        cx.run_until_parked();
+        graphics.read_with(cx, |graphics, _cx| {
+            assert_eq!(graphics.status, GraphicsStatus::Error);
+            assert_eq!(graphics.error.as_deref(), Some("test graphics failure"));
+        });
+
+        let (input_tx, mut input_rx) = tokio::sync::mpsc::unbounded_channel();
+        graphics.update(cx, |graphics, cx| {
+            graphics.session = Some(test_graphics_session("hidden-session"));
+            graphics.vnc_session_id = Some("hidden-session".to_string());
+            graphics.vnc_input = Some(input_tx);
+            graphics.status = GraphicsStatus::Starting;
+            graphics.set_surface_visible(false, cx);
+            graphics
+                .worker_delivery
+                .send(GraphicsWorkerResult::VncEvent(
+                    GraphicsVncWorkerEvent::Connected {
+                        session_id: "hidden-session".to_string(),
+                    },
+                ));
+        });
+        cx.run_until_parked();
+        graphics.update(cx, |graphics, _cx| {
+            assert_eq!(graphics.status, GraphicsStatus::Active);
+            assert!(graphics.send_vnc_input(GraphicsVncInput::Key {
+                keysym: 0x61,
+                down: true,
+            }));
+            graphics
+                .worker_delivery
+                .send(GraphicsWorkerResult::VncEvent(
+                    GraphicsVncWorkerEvent::Frame {
+                        session_id: "hidden-session".to_string(),
+                        frame: test_graphics_frame(7),
+                    },
+                ));
+            assert!(!graphics.worker_delivery.wake.take());
+            assert!(graphics.worker_delivery.frame_slot.has_pending_frame());
+            graphics
+                .worker_delivery
+                .send(GraphicsWorkerResult::VncEvent(
+                    GraphicsVncWorkerEvent::Disconnected {
+                        session_id: "hidden-session".to_string(),
+                        reason: Some("test disconnect".to_string()),
+                    },
+                ));
+        });
+        assert!(matches!(
+            input_rx.try_recv(),
+            Ok(GraphicsVncInput::Key {
+                keysym: 0x61,
+                down: true
+            })
+        ));
+        cx.run_until_parked();
+        graphics.read_with(cx, |graphics, _cx| {
+            assert_eq!(graphics.status, GraphicsStatus::Error);
+            assert_eq!(graphics.error.as_deref(), Some("test disconnect"));
+            assert!(graphics.session.is_some());
+            assert!(graphics.vnc_render_image.is_none());
+            assert!(!graphics.worker_delivery.frame_slot.has_pending_frame());
+            assert!(!wake.is_stopped());
+        });
+
+        drop(graphics);
+        cx.update(|_cx| {});
+        assert!(wake.is_stopped());
     }
 }

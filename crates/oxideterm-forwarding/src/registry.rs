@@ -1,24 +1,44 @@
 // Copyright (C) 2026 AnalyseDeCircuit
 // SPDX-License-Identifier: GPL-3.0-only
 
-use std::{collections::HashSet, sync::Arc, sync::mpsc::Sender};
+use std::{
+    collections::HashSet,
+    sync::{
+        Arc,
+        atomic::{AtomicU8, Ordering},
+        mpsc::Sender,
+    },
+    time::Duration,
+};
 
 use dashmap::DashMap;
 use oxideterm_ssh::SshConnectionHandle;
 
 use crate::{
-    ApplySavedForwardsSyncSnapshotResult, ForwardEvent, ForwardRule, ForwardingError,
-    ForwardingManager, OwnedForwardImportRecord, PersistedForward, PortDetectionProfiler,
-    PortDetectionSnapshot, SavedForwardCheckpoint, SavedForwardError, SavedForwardStore,
-    SavedForwardsSyncSnapshot,
+    ApplySavedForwardsSyncSnapshotResult, ForwardEvent, ForwardEventDeliverySender, ForwardRule,
+    ForwardingError, ForwardingManager, OwnedForwardImportRecord, PersistedForward,
+    PortDetectionProfiler, PortDetectionSnapshot, SavedForwardCheckpoint, SavedForwardError,
+    SavedForwardStore, SavedForwardsSyncSnapshot,
 };
+
+const REGISTRY_RUNNING: u8 = 0;
+const REGISTRY_SHUTTING_DOWN: u8 = 1;
+const REGISTRY_STOPPED: u8 = 2;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ForwardingShutdownReport {
+    pub started: bool,
+    pub completed: bool,
+    pub stopped_managers: usize,
+}
 
 #[derive(Clone, Debug, Default)]
 pub struct ForwardingRegistry {
     managers: Arc<DashMap<String, Arc<ForwardingManager>>>,
     port_profilers: Arc<DashMap<String, Arc<PortDetectionProfiler>>>,
-    event_tx: Option<Sender<ForwardEvent>>,
+    event_tx: Option<ForwardEventDeliverySender>,
     saved_store: Option<Arc<SavedForwardStore>>,
+    shutdown_state: Arc<AtomicU8>,
 }
 
 impl ForwardingRegistry {
@@ -32,15 +52,21 @@ impl ForwardingRegistry {
             port_profilers: Arc::new(DashMap::new()),
             event_tx: None,
             saved_store: Some(Arc::new(saved_store)),
+            shutdown_state: Arc::new(AtomicU8::new(REGISTRY_RUNNING)),
         }
     }
 
     pub fn new_with_event_sender(event_tx: Sender<ForwardEvent>) -> Self {
+        Self::new_with_event_delivery(ForwardEventDeliverySender::new(event_tx))
+    }
+
+    pub fn new_with_event_delivery(event_tx: ForwardEventDeliverySender) -> Self {
         Self {
             managers: Arc::new(DashMap::new()),
             port_profilers: Arc::new(DashMap::new()),
             event_tx: Some(event_tx),
             saved_store: None,
+            shutdown_state: Arc::new(AtomicU8::new(REGISTRY_RUNNING)),
         }
     }
 
@@ -48,11 +74,22 @@ impl ForwardingRegistry {
         event_tx: Sender<ForwardEvent>,
         saved_store: SavedForwardStore,
     ) -> Self {
+        Self::new_with_event_delivery_and_store(
+            ForwardEventDeliverySender::new(event_tx),
+            saved_store,
+        )
+    }
+
+    pub fn new_with_event_delivery_and_store(
+        event_tx: ForwardEventDeliverySender,
+        saved_store: SavedForwardStore,
+    ) -> Self {
         Self {
             managers: Arc::new(DashMap::new()),
             port_profilers: Arc::new(DashMap::new()),
             event_tx: Some(event_tx),
             saved_store: Some(Arc::new(saved_store)),
+            shutdown_state: Arc::new(AtomicU8::new(REGISTRY_RUNNING)),
         }
     }
 
@@ -66,7 +103,7 @@ impl ForwardingRegistry {
             .entry(session_id.clone())
             .and_modify(|manager| manager.replace_ssh_connection(ssh_connection.clone()))
             .or_insert_with(|| {
-                Arc::new(ForwardingManager::new_with_event_sender(
+                Arc::new(ForwardingManager::new_with_event_delivery(
                     session_id,
                     ssh_connection,
                     self.event_tx.clone(),
@@ -79,6 +116,10 @@ impl ForwardingRegistry {
         self.managers
             .get(session_id)
             .map(|manager| manager.value().clone())
+    }
+
+    pub fn accepts_new_work(&self) -> bool {
+        self.shutdown_state.load(Ordering::Acquire) == REGISTRY_RUNNING
     }
 
     pub async fn register_or_rebind(
@@ -191,7 +232,7 @@ impl ForwardingRegistry {
             self.port_profilers
                 .entry(connection_id.clone())
                 .or_insert_with(|| {
-                    Arc::new(PortDetectionProfiler::spawn(
+                    Arc::new(PortDetectionProfiler::spawn_with_event_delivery(
                         connection_id,
                         ssh_connection,
                         event_tx,
@@ -284,6 +325,70 @@ impl ForwardingRegistry {
         // registry map. Keep native from retaining stale manager -> SSH handle
         // ownership after all listeners/profilers have been stopped.
         self.managers.clear();
+    }
+
+    /// Stops all session-owned forwarding work once within a caller-defined bound.
+    pub async fn shutdown(&self, grace_period: Duration) -> ForwardingShutdownReport {
+        if self
+            .shutdown_state
+            .compare_exchange(
+                REGISTRY_RUNNING,
+                REGISTRY_SHUTTING_DOWN,
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            )
+            .is_err()
+        {
+            return ForwardingShutdownReport {
+                started: false,
+                completed: self.shutdown_state.load(Ordering::Acquire) == REGISTRY_STOPPED,
+                stopped_managers: 0,
+            };
+        }
+
+        let profilers = self
+            .port_profilers
+            .iter()
+            .map(|entry| entry.value().clone())
+            .collect::<Vec<_>>();
+        self.port_profilers.clear();
+        for profiler in profilers {
+            profiler.stop();
+        }
+
+        let session_ids = self
+            .managers
+            .iter()
+            .map(|entry| entry.key().clone())
+            .collect::<Vec<_>>();
+        let managers = session_ids
+            .iter()
+            .filter_map(|session_id| self.managers.remove(session_id).map(|(_, manager)| manager))
+            .collect::<Vec<_>>();
+        let stopped_managers = managers.len();
+        // Drain every manager synchronously before the deadline starts. If the
+        // async grace period expires, dropping the batches still closes local
+        // listeners and unregisters remote router targets.
+        let stop_batches = managers
+            .iter()
+            .map(|manager| manager.begin_stop_all())
+            .collect::<Vec<_>>();
+        let completed = tokio::time::timeout(grace_period, async move {
+            for batch in stop_batches {
+                // Managers enforce local -> dynamic -> remote teardown ordering.
+                batch.stop().await;
+            }
+        })
+        .await
+        .is_ok();
+
+        self.shutdown_state
+            .store(REGISTRY_STOPPED, Ordering::Release);
+        ForwardingShutdownReport {
+            started: true,
+            completed,
+            stopped_managers,
+        }
     }
 
     pub fn session_ids(&self) -> Vec<String> {
@@ -538,6 +643,46 @@ mod tests {
 
         registry.stop_all().await;
 
+        assert!(registry.session_ids().is_empty());
+    }
+
+    #[tokio::test]
+    async fn session_shutdown_stops_registered_managers_exactly_once() {
+        let registry = ForwardingRegistry::new();
+        registry.register(
+            "node:a",
+            test_handle(
+                "first.example",
+                ConnectionConsumer::PortForward("node:a".into()),
+            ),
+        );
+        registry.register(
+            "node:b",
+            test_handle(
+                "second.example",
+                ConnectionConsumer::PortForward("node:b".into()),
+            ),
+        );
+
+        let first = registry.shutdown(Duration::from_millis(300)).await;
+        let second = registry.shutdown(Duration::from_millis(300)).await;
+
+        assert_eq!(
+            first,
+            ForwardingShutdownReport {
+                started: true,
+                completed: true,
+                stopped_managers: 2,
+            }
+        );
+        assert_eq!(
+            second,
+            ForwardingShutdownReport {
+                started: false,
+                completed: true,
+                stopped_managers: 0,
+            }
+        );
         assert!(registry.session_ids().is_empty());
     }
 }

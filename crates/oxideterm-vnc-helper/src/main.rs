@@ -451,6 +451,9 @@ fn run_vnc_session(
                 break;
             }
         };
+        // The VNC handshake has consumed the credential by this point. Release
+        // the zeroizing owner before the long-lived framebuffer loop starts.
+        drop(password);
         control.clear_attempt();
         send_event(
             &writer,

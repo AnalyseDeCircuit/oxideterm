@@ -3,11 +3,9 @@ impl WorkspaceApp {
         &self,
         provider: &AiProviderView,
         model: &str,
+        cx: &App,
     ) -> AiReasoningLevel {
-        if let Some(value) = self
-            .ai
-            .chat
-            .conversation_state
+        if let Some(value) = self.ai_entity.read(cx).conversation_state()
             .active_conversation()
             .and_then(|conversation| {
                 ai_conversation_reasoning_effort(conversation, &provider.id, model)
@@ -50,8 +48,8 @@ impl WorkspaceApp {
         if capability.levels.is_empty() {
             return None;
         }
-        let selected = self.active_ai_reasoning_level(provider, &model);
-        let open = self.ai.chat.reasoning_menu_open;
+        let selected = self.active_ai_reasoning_level(provider, &model, cx);
+        let open = self.ai_entity.read(cx).chat_ui().reasoning_menu_open;
         let trigger = div()
             .flex()
             .flex_none()
@@ -82,9 +80,11 @@ impl WorkspaceApp {
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(|this, _event, _window, cx| {
-                    let next_open = !this.ai.chat.reasoning_menu_open;
-                    this.close_ai_sidebar_popovers();
-                    this.ai.chat.reasoning_menu_open = next_open;
+                    let next_open = !this.ai_entity.read(cx).chat_ui().reasoning_menu_open;
+                    this.close_ai_sidebar_popovers(cx);
+                    this.ai_entity.update(cx, |ai, _cx| {
+                        ai.set_chat_popover_open(AiChatPopover::Reasoning, next_open);
+                    });
                     cx.stop_propagation();
                     cx.notify();
                 }),
@@ -115,7 +115,7 @@ impl WorkspaceApp {
         if capability.levels.is_empty() {
             return None;
         }
-        let selected = self.active_ai_reasoning_level(provider, &model);
+        let selected = self.active_ai_reasoning_level(provider, &model, cx);
         let mut levels = vec![AiReasoningLevel::Auto];
         levels.extend(capability.levels);
         let mut menu = div()
@@ -253,7 +253,7 @@ impl WorkspaceApp {
                     .on_mouse_down(
                         MouseButton::Left,
                         cx.listener(|this, _event, window, cx| {
-                            this.close_ai_model_selector();
+                            this.close_ai_model_selector(cx);
                             this.open_ai_settings(window, cx);
                             cx.stop_propagation();
                         }),
@@ -285,9 +285,9 @@ impl WorkspaceApp {
             let model_for_click = model.clone();
             let provider_id = provider.id.clone();
             let highlighted = self
-                .ai
-                .models
-                .selector_highlighted_model
+                .ai_entity
+                .read(cx)
+                .model_selector_highlight()
                 .as_ref()
                 .is_some_and(|(id, highlighted_model)| {
                     id == &provider.id && highlighted_model == &model
@@ -311,10 +311,11 @@ impl WorkspaceApp {
                     let model_for_hover = model_for_click.clone();
                     cx.listener(move |this, _event: &MouseMoveEvent, _window, cx| {
                         let next = Some((provider_id.clone(), model_for_hover.clone()));
-                        if this.ai.models.selector_highlighted_model != next {
+                        if this.ai_entity.update(cx, |ai, _cx| {
+                            ai.set_model_selector_highlight(next)
+                        }) {
                             // Pointer hover and keyboard navigation share the
                             // same active-item state, matching Radix menu focus.
-                            this.ai.models.selector_highlighted_model = next;
                             cx.notify();
                         }
                     })
@@ -327,7 +328,9 @@ impl WorkspaceApp {
                             model_for_click.clone(),
                             cx,
                         );
-                        this.ai.models.selector_highlighted_model = None;
+                        this.ai_entity.update(cx, |ai, _cx| {
+                            ai.set_model_selector_highlight(None);
+                        });
                         cx.stop_propagation();
                     }),
                 ),
@@ -343,14 +346,14 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let mut panel = ai_model_selector_models_panel(&self.tokens);
-        let session_state = self.active_ai_acp_session_state(&agent_id);
-        let config_options = self.ai_acp_model_options_for_agent(&agent_id);
+        let session_state = self.active_ai_acp_session_state(&agent_id, cx);
+        let config_options = self.ai_acp_model_options_for_agent(&agent_id, cx);
         let model_option = config_options
             .as_ref()
             .and_then(|options| oxideterm_ai::acp_model_config_option(options));
         let Some(option) = model_option.filter(|option| !option.choices.is_empty()) else {
             let provider_id = Self::ai_acp_provider_id(&agent_id);
-            let label = self.ai_acp_agent_model_fallback_label(&agent_id);
+            let label = self.ai_acp_agent_model_fallback_label(&agent_id, cx);
             let active = self.ai_active_model_selector_provider_id().as_deref()
                 == Some(provider_id.as_str());
             let row = ai_model_selector_model_row(
@@ -366,7 +369,7 @@ impl WorkspaceApp {
                     )
                 }),
             );
-            if self.ai_acp_model_discovery_is_pending(&agent_id) {
+            if self.ai_acp_model_discovery_is_pending(&agent_id, cx) {
                 return panel.child(row.opacity(0.7)).into_any_element();
             }
             return panel
@@ -401,9 +404,9 @@ impl WorkspaceApp {
         {
             let active = Some(choice.value_id.as_str()) == selected_value_id;
             let highlighted = self
-                .ai
-                .models
-                .selector_highlighted_model
+                .ai_entity
+                .read(cx)
+                .model_selector_highlight()
                 .as_ref()
                 .is_some_and(|(id, model)| {
                     id == &Self::ai_acp_provider_id(&agent_id) && model == &choice.label
@@ -431,8 +434,9 @@ impl WorkspaceApp {
                     let choice_label = choice_label.clone();
                     cx.listener(move |this, _event: &MouseMoveEvent, _window, cx| {
                         let next = Some((provider_id.clone(), choice_label.clone()));
-                        if this.ai.models.selector_highlighted_model != next {
-                            this.ai.models.selector_highlighted_model = next;
+                        if this.ai_entity.update(cx, |ai, _cx| {
+                            ai.set_model_selector_highlight(next)
+                        }) {
                             cx.notify();
                         }
                     })
@@ -446,7 +450,9 @@ impl WorkspaceApp {
                             choice_value_id.clone(),
                             cx,
                         );
-                        this.ai.models.selector_highlighted_model = None;
+                        this.ai_entity.update(cx, |ai, _cx| {
+                            ai.set_model_selector_highlight(None);
+                        });
                         cx.stop_propagation();
                     }),
                 ),

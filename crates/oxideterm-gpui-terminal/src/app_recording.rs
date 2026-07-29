@@ -22,6 +22,7 @@ impl TerminalPane {
             options,
         ));
         self.set_recording_output_events_enabled(true);
+        cx.emit(TerminalPaneEvent::RecordingStatusChanged);
         cx.notify();
     }
 
@@ -29,6 +30,7 @@ impl TerminalPane {
         if let Some(recorder) = self.recorder.as_mut() {
             recorder.pause();
             self.set_recording_output_events_enabled(false);
+            cx.emit(TerminalPaneEvent::RecordingStatusChanged);
             cx.notify();
         }
     }
@@ -37,6 +39,7 @@ impl TerminalPane {
         if let Some(recorder) = self.recorder.as_mut() {
             recorder.resume();
             self.set_recording_output_events_enabled(true);
+            cx.emit(TerminalPaneEvent::RecordingStatusChanged);
             cx.notify();
         }
     }
@@ -44,6 +47,7 @@ impl TerminalPane {
     pub fn discard_recording(&mut self, cx: &mut Context<Self>) {
         if self.recorder.take().is_some() {
             self.set_recording_output_events_enabled(false);
+            cx.emit(TerminalPaneEvent::RecordingStatusChanged);
             cx.notify();
         }
     }
@@ -51,6 +55,7 @@ impl TerminalPane {
     pub fn stop_recording(&mut self, cx: &mut Context<Self>) -> Option<String> {
         let recorder = self.recorder.take()?;
         self.set_recording_output_events_enabled(false);
+        cx.emit(TerminalPaneEvent::RecordingStatusChanged);
         cx.notify();
         Some(recorder.stop())
     }

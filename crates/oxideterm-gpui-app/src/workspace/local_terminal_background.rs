@@ -14,22 +14,22 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(active_index) = self.active_tab_index() else {
+        let Some(active_index) = self.active_tab_index(cx) else {
             return;
         };
-        if self.tabs[active_index].kind != TabKind::LocalTerminal {
+        if self.tabs(cx)[active_index].kind != TabKind::LocalTerminal {
             return;
         }
-        let Some(active_pane_id) = self.tabs[active_index].active_pane_id else {
+        let Some(active_pane_id) = self.tabs(cx)[active_index].active_pane_id else {
             return;
         };
-        let Some(root_pane) = self.tabs[active_index].root_pane.as_ref().cloned() else {
+        let Some(root_pane) = self.tabs(cx)[active_index].root_pane.as_ref().cloned() else {
             return;
         };
         let Some(session_id) = root_pane.session_id_for_pane(active_pane_id) else {
             return;
         };
-        let Some(pane) = self.panes.get(&active_pane_id).cloned() else {
+        let Some(pane) = self.tab_host.read(cx).panes().get(&active_pane_id).cloned() else {
             return;
         };
 
@@ -64,6 +64,7 @@ impl WorkspaceApp {
             self.i18n.t("local_shell.toast.detached"),
             Some(self.i18n_replace("local_shell.toast.detached_desc", &[("shell", title)])),
             TerminalNoticeVariant::Success,
+            cx,
         );
         cx.notify();
     }
@@ -93,6 +94,7 @@ impl WorkspaceApp {
             ),
             None,
             TerminalNoticeVariant::Success,
+            cx,
         );
         cx.notify();
     }
@@ -104,18 +106,12 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.remove_terminal_pane(&active_pane_id);
+        self.remove_terminal_pane(&active_pane_id, cx);
 
-        let tab = &mut self.tabs[active_index];
-        let Some(root_pane) = tab.root_pane.as_mut() else {
-            return;
-        };
-        if let Some(next_active) = root_pane.close_pane(active_pane_id) {
-            if let Some(replacement) = root_pane.single_child_replacement() {
-                tab.root_pane = Some(replacement);
-            }
-            tab.active_pane_id = Some(next_active);
-        }
+        let tab_id = self.tabs(cx)[active_index].id;
+        self.tab_host.update(cx, |tab_host, _| {
+            tab_host.close_pane(tab_id, active_pane_id);
+        });
         self.needs_active_pane_focus = true;
         self.focus_active_pane(window, cx);
     }
@@ -126,31 +122,32 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let old_active_tab_id = self.main_window_tabs.active_tab_id;
-        let removed_was_active = self.tabs.get(index).map(|tab| tab.id) == old_active_tab_id;
-        let tab = self.tabs.remove(index);
+        let Some(TabRemovalTransition {
+            tab,
+            mount_cleanup,
+            previous_active_tab_id,
+            next_active_tab_id,
+        }) = self
+            .tab_host
+            .update(cx, |tab_host, _cx| tab_host.remove_tab_at(index))
+        else {
+            return;
+        };
+        self.apply_tab_mount_cleanup(mount_cleanup, Some(window), cx);
         let mut pane_ids = Vec::new();
         if let Some(root_pane) = &tab.root_pane {
             root_pane.collect_pane_ids(&mut pane_ids);
         }
         for pane_id in pane_ids {
-            self.remove_terminal_pane(&pane_id);
+            self.remove_terminal_pane(&pane_id, cx);
         }
-        self.main_window_tabs.active_tab_id = if self.tabs.is_empty() {
-            None
-        } else if !removed_was_active
-            && old_active_tab_id.is_some_and(|tab_id| self.tabs.iter().any(|tab| tab.id == tab_id))
-        {
-            old_active_tab_id
-        } else {
-            Some(self.tabs[index.min(self.tabs.len() - 1)].id)
-        };
-        self.sync_active_tab_surface();
+        self.apply_main_window_active_tab_change(previous_active_tab_id, next_active_tab_id, cx);
+        self.sync_active_tab_surface(cx);
         self.needs_active_pane_focus = self
-            .active_tab()
+            .active_tab(cx)
             .is_some_and(|tab| matches!(tab.kind, TabKind::LocalTerminal | TabKind::SshTerminal));
         self.focus_active_pane(window, cx);
-        self.reveal_active_tab(window);
+        self.reveal_active_tab(window, cx);
     }
 
     pub(super) fn attach_detached_local_terminal_session(
@@ -162,8 +159,8 @@ impl WorkspaceApp {
         let Some(detached) = self.detached_local_terminals.remove(&session_id) else {
             return;
         };
-        let tab_id = self.alloc_tab_id();
-        let pane_id = self.alloc_pane_id();
+        let tab_id = self.alloc_tab_id(cx);
+        let pane_id = self.alloc_pane_id(cx);
         let title = detached.title.clone();
         let preferences =
             self.prepare_terminal_preferences_for_tab_kind(&TabKind::LocalTerminal, cx);
@@ -173,29 +170,33 @@ impl WorkspaceApp {
                 .expect("failed to resume detached local terminal pane")
         });
 
-        self.register_terminal_pane(pane_id, detached.session_id, pane.clone(), cx);
+        self.register_terminal_pane(pane_id, detached.session_id, pane.clone(), window, cx);
         self.refresh_native_plugin_terminal_hooks(cx);
-        self.tabs.push(Tab {
-            id: tab_id,
-            kind: TabKind::LocalTerminal,
-            title: title.clone(),
-            title_source: TabTitleSource::Static,
-            root_pane: Some(PaneNode::leaf(pane_id, detached.session_id)),
-            active_pane_id: Some(pane_id),
-        });
-        self.bind_terminal_location(tab_id, pane_id, detached.session_id);
-        self.main_window_tabs.active_tab_id = Some(tab_id);
+        self.insert_tab(
+            Tab {
+                id: tab_id,
+                kind: TabKind::LocalTerminal,
+                title: title.clone(),
+                title_source: TabTitleSource::Static,
+                root_pane: Some(PaneNode::leaf(pane_id, detached.session_id)),
+                active_pane_id: Some(pane_id),
+            },
+            cx,
+        );
+        self.bind_terminal_location(tab_id, pane_id, detached.session_id, cx);
+        self.set_main_window_active_tab(Some(tab_id), cx);
         self.active_surface = ActiveSurface::Terminal;
         self.needs_active_pane_focus = true;
         if self.detached_local_terminals.is_empty() {
             self.detached_local_terminals_popover_open = false;
         }
         pane.update(cx, |pane, cx| pane.focus(window, cx));
-        self.reveal_active_tab(window);
+        self.reveal_active_tab(window, cx);
         self.push_command_palette_toast(
             self.i18n.t("local_shell.toast.attached"),
             Some(title),
             TerminalNoticeVariant::Success,
+            cx,
         );
         cx.notify();
     }
@@ -214,8 +215,8 @@ impl WorkspaceApp {
         cx.notify();
     }
 
-    pub(super) fn visible_local_terminal_session_count(&self) -> usize {
-        self.tabs
+    pub(super) fn visible_local_terminal_session_count(&self, cx: &App) -> usize {
+        self.tabs(cx)
             .iter()
             .filter(|tab| tab.kind == TabKind::LocalTerminal)
             .map(|tab| tab.root_pane.as_ref().map_or(0, PaneNode::pane_count))

@@ -1,7 +1,7 @@
 use super::*;
 
-// Update state stays owned by the live workspace; this module only maps that
-// state into the persistent prompt and the on-demand release-notes overlay.
+// The settings Entity owns updater state; the workspace only maps its narrow
+// render projection into window-scoped notification and release-note overlays.
 const NATIVE_UPDATE_RELEASE_NOTES_WIDTH: f32 = 760.0;
 const NATIVE_UPDATE_RELEASE_NOTES_HEIGHT: f32 = 720.0;
 
@@ -62,20 +62,39 @@ impl WorkspaceApp {
         if !self.native_update_notification_open
             || self.version_migration.open
             || self.onboarding.open
-            || self.settings_page.legal_notice_open
-            || self.native_update_release_notes_open
+            || self
+                .overlay
+                .read(cx)
+                .confirm_snapshot()
+                .is_some_and(|snapshot| {
+                    matches!(snapshot.kind, WorkspaceOverlayConfirmKind::LegalNotice)
+                })
+            || self
+                .overlay
+                .read(cx)
+                .confirm_snapshot()
+                .is_some_and(|snapshot| {
+                    matches!(
+                        snapshot.kind,
+                        WorkspaceOverlayConfirmKind::NativeUpdateReleaseNotes
+                    )
+                })
         {
             return None;
         }
 
-        let (title, status_text, progress, variant) = match &self.native_update_state {
-            NativeUpdateUiState::Available(_) => (
+        let update_state = self
+            .settings_workspace
+            .read(cx)
+            .native_update_render_state();
+        let (title, status_text, progress, variant) = match &update_state {
+            NativeUpdateRenderState::Available { .. } => (
                 self.i18n.t("settings_view.help.update_available"),
                 None,
                 None,
                 ToastVariant::Default,
             ),
-            NativeUpdateUiState::Downloading(status) => (
+            NativeUpdateRenderState::Downloading(status) => (
                 self.i18n.t("settings_view.help.downloading"),
                 status.as_ref().map(native_update_progress_hint),
                 status
@@ -85,26 +104,26 @@ impl WorkspaceApp {
                     .or(Some(0.0)),
                 ToastVariant::Default,
             ),
-            NativeUpdateUiState::Verifying(status) => (
+            NativeUpdateRenderState::Verifying(status) => (
                 self.i18n.t("settings_view.help.verifying"),
                 status.as_ref().map(native_update_progress_hint),
                 Some(100.0),
                 ToastVariant::Default,
             ),
-            NativeUpdateUiState::Downloaded(_) => (
+            NativeUpdateRenderState::Downloaded => (
                 self.i18n.t("settings_view.help.update_downloaded"),
                 None,
                 None,
                 ToastVariant::Success,
             ),
-            NativeUpdateUiState::Installing(plan) => (
+            NativeUpdateRenderState::Installing(summary) => (
                 self.i18n.t("settings_view.help.installing"),
-                plan.as_ref().map(|plan| plan.summary.clone()),
+                summary.clone(),
                 None,
                 ToastVariant::Default,
             ),
-            NativeUpdateUiState::InstallFinished(outcome) => {
-                let (title_key, variant) = match outcome.status {
+            NativeUpdateRenderState::InstallFinished { status, message } => {
+                let (title_key, variant) = match status {
                     oxideterm_update::NativeInstallStatus::ManualActionRequired => (
                         "settings_view.help.update_downloaded",
                         ToastVariant::Warning,
@@ -118,28 +137,23 @@ impl WorkspaceApp {
                         ToastVariant::Success,
                     ),
                 };
-                (
-                    self.i18n.t(title_key),
-                    Some(outcome.message.clone()),
-                    None,
-                    variant,
-                )
+                (self.i18n.t(title_key), Some(message.clone()), None, variant)
             }
-            NativeUpdateUiState::Error(error) => (
+            NativeUpdateRenderState::Error(error) => (
                 self.i18n.t("settings_view.help.update_error"),
                 (!error.is_empty()).then(|| error.clone()),
                 None,
                 ToastVariant::Error,
             ),
-            NativeUpdateUiState::Idle
-            | NativeUpdateUiState::Checking
-            | NativeUpdateUiState::UpToDate => return None,
+            NativeUpdateRenderState::Idle
+            | NativeUpdateRenderState::Checking
+            | NativeUpdateRenderState::UpToDate => return None,
         };
 
         let description = self
-            .native_update_package
-            .as_ref()
-            .map(|package| format!("v{} → v{}", package.current_version, package.version));
+            .settings_workspace
+            .read(cx)
+            .native_update_package_description();
         let actions = self.render_native_update_notification_actions(cx);
         let workspace = cx.entity();
 
@@ -171,10 +185,9 @@ impl WorkspaceApp {
     ) -> Option<AnyElement> {
         let mut actions = Vec::new();
         let has_release_notes = self
-            .native_update_package
-            .as_ref()
-            .and_then(|package| package.body.as_deref())
-            .is_some_and(|body| !body.trim().is_empty());
+            .settings_workspace
+            .read(cx)
+            .native_update_has_release_notes();
 
         if has_release_notes {
             actions.push(self.native_update_notification_action(
@@ -185,20 +198,26 @@ impl WorkspaceApp {
             ));
         }
 
-        let primary_action = match &self.native_update_state {
-            NativeUpdateUiState::Available(_) => Some((
+        let update_state = self
+            .settings_workspace
+            .read(cx)
+            .native_update_render_state();
+        let primary_action = match update_state {
+            NativeUpdateRenderState::Available { .. } => Some((
                 NativeUpdateNotificationAction::Download,
                 "settings_view.help.download_update",
             )),
-            NativeUpdateUiState::Downloading(_) | NativeUpdateUiState::Verifying(_) => Some((
-                NativeUpdateNotificationAction::Cancel,
-                "settings_view.help.cancel",
-            )),
-            NativeUpdateUiState::Downloaded(_) => Some((
+            NativeUpdateRenderState::Downloading(_) | NativeUpdateRenderState::Verifying(_) => {
+                Some((
+                    NativeUpdateNotificationAction::Cancel,
+                    "settings_view.help.cancel",
+                ))
+            }
+            NativeUpdateRenderState::Downloaded => Some((
                 NativeUpdateNotificationAction::Install,
                 "settings_view.help.install_update",
             )),
-            NativeUpdateUiState::Error(_) => Some((
+            NativeUpdateRenderState::Error(_) => Some((
                 NativeUpdateNotificationAction::Retry,
                 "settings_view.help.retry",
             )),
@@ -264,53 +283,30 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) {
         let has_release_notes = self
-            .native_update_package
-            .as_ref()
-            .and_then(|package| package.body.as_deref())
-            .is_some_and(|body| !body.trim().is_empty());
+            .settings_workspace
+            .read(cx)
+            .native_update_has_release_notes();
         if !has_release_notes {
             return;
         }
 
         self.native_update_release_notes_scroll = MarkdownVirtualListScrollHandle::new();
-        self.native_update_release_notes_presence.reopen();
-        self.native_update_release_notes_open = true;
-        cx.notify();
+        self.overlay.update(cx, |overlay, cx| {
+            overlay.open_confirm(WorkspaceOverlayConfirmKind::NativeUpdateReleaseNotes, cx);
+        });
     }
 
     pub(in crate::workspace) fn close_native_update_release_notes(
         &mut self,
         cx: &mut Context<Self>,
     ) {
-        let Some(generation) = self.native_update_release_notes_presence.begin_exit() else {
-            return;
-        };
         let delay = oxideterm_gpui_ui::motion::duration(
             &self.tokens,
             oxideterm_gpui_ui::motion::MotionDuration::Overlay,
         );
-        if delay.is_zero() {
-            self.native_update_release_notes_open = false;
-            self.native_update_release_notes_presence.reopen();
-            cx.notify();
-            return;
-        }
-
-        cx.spawn(async move |weak, cx| {
-            Timer::after(delay).await;
-            let _ = weak.update(cx, |this, cx| {
-                if this
-                    .native_update_release_notes_presence
-                    .finish_exit(generation)
-                {
-                    this.native_update_release_notes_open = false;
-                    this.native_update_release_notes_presence.reopen();
-                    cx.notify();
-                }
-            });
-        })
-        .detach();
-        cx.notify();
+        self.overlay.update(cx, |overlay, cx| {
+            overlay.begin_confirm_exit(false, delay, cx);
+        });
     }
 
     pub(in crate::workspace) fn handle_native_update_release_notes_key(
@@ -318,33 +314,59 @@ impl WorkspaceApp {
         event: &KeyDownEvent,
         cx: &mut Context<Self>,
     ) -> bool {
-        if !self.native_update_release_notes_open
-            || event.keystroke.key.as_str() != "escape"
-            || event.keystroke.modifiers.platform
-        {
+        let Some(snapshot) = self.overlay.read(cx).confirm_snapshot() else {
+            return false;
+        };
+        if !matches!(
+            snapshot.kind,
+            WorkspaceOverlayConfirmKind::NativeUpdateReleaseNotes
+        ) {
             return false;
         }
-        self.close_native_update_release_notes(cx);
-        true
+        if snapshot.phase == oxideterm_gpui_ui::motion::ExitPhase::Exiting {
+            return true;
+        }
+        let key_action = self.overlay.update(cx, |overlay, cx| {
+            overlay.handle_confirm_key(
+                event.keystroke.key.as_str(),
+                event.keystroke.modifiers.shift,
+                event.keystroke.modifiers.platform || event.keystroke.modifiers.control,
+                cx,
+            )
+        });
+        match key_action {
+            Some(
+                WorkspaceOverlayConfirmKeyAction::Cancel
+                | WorkspaceOverlayConfirmKeyAction::Confirm,
+            ) => {
+                self.close_native_update_release_notes(cx);
+                true
+            }
+            Some(WorkspaceOverlayConfirmKeyAction::Handled) => true,
+            None => false,
+        }
     }
 
     pub(in crate::workspace) fn render_native_update_release_notes_dialog(
         &self,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let package = self.native_update_package.as_ref();
-        let release_body = package
-            .and_then(|package| package.body.as_deref())
-            .filter(|body| !body.trim().is_empty())
-            .map(str::to_owned)
-            .unwrap_or_else(|| self.i18n.t("settings_view.help.no_changelog"));
-        let description = package.map(|package| {
-            package
-                .date
-                .as_ref()
-                .map(|date| format!("v{} · {date}", package.version))
-                .unwrap_or_else(|| format!("v{}", package.version))
-        });
+        let Some(snapshot) = self.overlay.read(cx).confirm_snapshot() else {
+            return div().into_any_element();
+        };
+        if !matches!(
+            snapshot.kind,
+            WorkspaceOverlayConfirmKind::NativeUpdateReleaseNotes
+        ) {
+            return div().into_any_element();
+        }
+        let release_notes = self
+            .settings_workspace
+            .read(cx)
+            .native_update_release_notes();
+        let (release_body, description) = release_notes
+            .map(|release_notes| (release_notes.body, release_notes.description))
+            .unwrap_or_else(|| (self.i18n.t("settings_view.help.no_changelog"), None));
 
         let mut options = self.localized_markdown_options();
         options.base_font_size = self.tokens.metrics.ui_text_sm;
@@ -382,7 +404,6 @@ impl WorkspaceApp {
                         .bg(rgb(self.tokens.ui.bg))
                         .text_color(rgb(self.tokens.ui.text))
                         .child(markdown_virtual_with_code_actions(
-                            cx.entity(),
                             "native-update-release-notes-markdown",
                             &self.tokens,
                             &release_body,
@@ -409,7 +430,7 @@ impl WorkspaceApp {
             "native-update-release-notes-form",
             backdrop,
             form,
-            self.native_update_release_notes_presence,
+            snapshot.phase,
         )
     }
 }

@@ -22,7 +22,7 @@ use oxideterm_topology::{
     ConnectionTopologyConsumerSummary, ConnectionTopologyEdge, ConnectionTopologyNode,
     ConnectionTopologySnapshot, ConnectionTopologyStatus,
 };
-use parking_lot::RwLock;
+use parking_lot::{Mutex as ParkingMutex, RwLock};
 use serde::{Deserialize, Serialize};
 use tokio::runtime::Handle as TokioHandle;
 use tokio::sync::{Mutex, Notify};
@@ -217,7 +217,9 @@ struct ConnectionEntry {
     connection_id: String,
     key: String,
     config: SshConfig,
+    ownership_transition: ParkingMutex<()>,
     parent_connection_id: RwLock<Option<String>>,
+    parent_connection_consumer: RwLock<Option<ConnectionConsumer>>,
     state: RwLock<ConnectionState>,
     ref_count: AtomicU64,
     keep_alive: AtomicBool,
@@ -244,7 +246,9 @@ impl ConnectionEntry {
             connection_id: Uuid::new_v4().to_string(),
             key,
             config,
+            ownership_transition: ParkingMutex::new(()),
             parent_connection_id: RwLock::new(None),
+            parent_connection_consumer: RwLock::new(None),
             state: RwLock::new(ConnectionState::Connecting),
             ref_count: AtomicU64::new(0),
             keep_alive: AtomicBool::new(false),
@@ -404,6 +408,12 @@ impl SshConnectionHandle {
 
     pub fn key(&self) -> &str {
         &self.entry.key
+    }
+
+    pub(crate) fn config(&self) -> &SshConfig {
+        // The registry remains the sole owner of authentication material while
+        // consumers borrow non-reconnect shell settings from the live entry.
+        &self.entry.config
     }
 
     pub fn info(&self) -> ConnectionInfo {
@@ -819,9 +829,63 @@ impl SshConnectionRegistry {
             .get(connection_id)
             .map(|key| key.value().clone())?;
         let entry = self.by_key.get(&key)?.clone();
+        let _ownership_transition = entry.ownership_transition.lock();
+        if !self.connection_entry_is_registered(connection_id, &key) {
+            return None;
+        }
+        let released_parent_ownership = if parent_connection_id.is_none() {
+            entry
+                .parent_connection_consumer
+                .write()
+                .take()
+                .and_then(|parent_consumer| {
+                    entry
+                        .parent_connection_id
+                        .read()
+                        .clone()
+                        .map(|parent_id| (parent_id, parent_consumer))
+                })
+        } else {
+            None
+        };
         *entry.parent_connection_id.write() = parent_connection_id;
         entry.touch();
+        if let Some((parent_id, parent_consumer)) = released_parent_ownership {
+            self.release(&parent_id, &parent_consumer);
+        }
         Some(entry.info())
+    }
+
+    pub fn set_parent_connection_ownership(
+        &self,
+        connection_id: &str,
+        parent_connection_id: String,
+        parent_consumer: ConnectionConsumer,
+    ) -> Option<ConnectionInfo> {
+        let key = self
+            .by_id
+            .get(connection_id)
+            .map(|key| key.value().clone())?;
+        let entry = self.by_key.get(&key)?.clone();
+        let _ownership_transition = entry.ownership_transition.lock();
+        if !self.connection_entry_is_registered(connection_id, &key) {
+            return None;
+        }
+        // Parent ownership is linked under the same lifecycle lock used by retirement.
+        *entry.parent_connection_id.write() = Some(parent_connection_id);
+        *entry.parent_connection_consumer.write() = Some(parent_consumer);
+        entry.touch();
+        Some(entry.info())
+    }
+
+    fn connection_entry_is_registered(&self, connection_id: &str, key: &str) -> bool {
+        self.by_id
+            .get(connection_id)
+            .is_some_and(|registered_key| registered_key.value() == key)
+            && self
+                .by_key
+                .get(key)
+                .is_some_and(|registered_entry| registered_entry.connection_id == connection_id)
     }
 
     pub fn descendant_connection_infos(&self, root_connection_id: &str) -> Vec<ConnectionInfo> {
@@ -853,12 +917,31 @@ impl SshConnectionRegistry {
             .get(connection_id)
             .map(|key| key.value().clone())?;
         let entry = self.by_key.get(&key).map(|entry| entry.clone())?;
+        let _ownership_transition = entry.ownership_transition.lock();
+        if !self.connection_entry_is_registered(connection_id, &key) {
+            return None;
+        }
         entry.cancel_idle_timer();
         let info = entry.info();
+        let parent_ownership =
+            entry
+                .parent_connection_consumer
+                .write()
+                .take()
+                .and_then(|parent_consumer| {
+                    entry
+                        .parent_connection_id
+                        .read()
+                        .clone()
+                        .map(|parent_id| (parent_id, parent_consumer))
+                });
         if entry.connection_id == connection_id {
             self.by_key.remove(&key);
         }
         self.by_id.remove(connection_id);
+        if let Some((parent_id, parent_consumer)) = parent_ownership {
+            self.release(&parent_id, &parent_consumer);
+        }
         Some(info)
     }
 

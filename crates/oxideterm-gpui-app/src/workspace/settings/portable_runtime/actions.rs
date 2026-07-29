@@ -1,175 +1,102 @@
 use gpui::Context;
-use oxideterm_gpui_terminal::TerminalNoticeVariant;
 use zeroize::Zeroizing;
 
-use super::{PortableSettingsAction, PortableSettingsDialog, WorkspaceApp};
+use super::{
+    PortablePasswordDialogSnapshot, PortableSettingsAction, PortableSettingsDialog,
+    PortableStatusRefresh, SettingsWorkspaceEntity, SettingsWorkspaceEvent, WorkspaceApp,
+};
 
-impl WorkspaceApp {
-    pub(in crate::workspace) fn ensure_portable_settings_snapshot(
-        &mut self,
-        cx: &mut Context<Self>,
-    ) {
-        if self.portable_status_snapshot.is_none()
-            && self.portable_status_error.is_none()
-            && self.portable_exportable_secret_count.is_none()
-        {
-            self.refresh_portable_settings_snapshot(false, cx);
+impl SettingsWorkspaceEntity {
+    pub(in crate::workspace) fn portable_password_dialog_open(&self) -> bool {
+        self.portable_dialog == Some(PortableSettingsDialog::ChangePassword)
+    }
+
+    pub(in crate::workspace) fn portable_password_dialog_phase(
+        &self,
+    ) -> oxideterm_gpui_ui::motion::ExitPhase {
+        self.portable_dialog_presence.phase()
+    }
+
+    pub(in crate::workspace) fn portable_password_dialog_snapshot(
+        &self,
+    ) -> PortablePasswordDialogSnapshot {
+        PortablePasswordDialogSnapshot {
+            open: self.portable_dialog == Some(PortableSettingsDialog::ChangePassword),
+            pending: self.portable_action_pending == Some(PortableSettingsAction::ChangePassword),
+            error: self.portable_action_error.clone(),
+            // Rendering borrows the secret from the Entity and needs only this
+            // non-secret flag to enable the submit action.
+            current_password_present: !self.portable_current_password.is_empty(),
+            presence: self.portable_dialog_presence,
         }
     }
 
-    pub(in crate::workspace) fn refresh_portable_settings_snapshot(
-        &mut self,
-        force: bool,
-        cx: &mut Context<Self>,
-    ) {
-        if self.portable_settings_refresh_pending {
-            return;
-        }
-        if !force
-            && (self.portable_status_snapshot.is_some() || self.portable_status_error.is_some())
-            && self.portable_exportable_secret_count.is_some()
-        {
-            return;
-        }
-
-        self.portable_settings_refresh_pending = true;
-        let runtime = self.forwarding_runtime.clone();
-        let key_store = self.ai.models.key_store.clone();
-        let ai_providers = self.settings_store.settings().ai.providers.clone();
-
-        cx.spawn(async move |weak, cx| {
-            let result = runtime
-                .spawn_blocking(move || {
-                    let status = oxideterm_portable_runtime::portable_status_snapshot()
-                        .map_err(|error| error.to_string());
-                    let secret_count = oxideterm_ai::provider_views(&ai_providers)
-                        .into_iter()
-                        .filter(|provider| key_store.has_provider_key(&provider.id))
-                        .count();
-                    (status, secret_count)
-                })
-                .await
-                .map_err(|error| error.to_string());
-
-            let _ = weak.update(cx, |this, cx| {
-                this.portable_settings_refresh_pending = false;
-                match result {
-                    Ok((Ok(status), secret_count)) => {
-                        this.portable_status_snapshot = Some(status);
-                        this.portable_status_error = None;
-                        this.portable_exportable_secret_count = Some(secret_count);
-                    }
-                    Ok((Err(error), secret_count)) => {
-                        this.portable_status_snapshot = None;
-                        this.portable_status_error = Some(error);
-                        this.portable_exportable_secret_count = Some(secret_count);
-                    }
-                    Err(error) => {
-                        this.portable_status_snapshot = None;
-                        this.portable_status_error = Some(error);
-                    }
-                }
-                cx.notify();
-            });
-        })
-        .detach();
-    }
-
-    pub(in crate::workspace) fn open_portable_password_change_dialog(
-        &mut self,
-        cx: &mut Context<Self>,
-    ) {
-        self.portable_settings_dialog_presence.reopen();
-        self.portable_settings_dialog = Some(PortableSettingsDialog::ChangePassword);
-        self.portable_settings_action_error = None;
+    pub(in crate::workspace) fn open_portable_password_dialog(&mut self, cx: &mut Context<Self>) {
+        self.portable_dialog_exit_task = None;
+        self.portable_dialog_presence.reopen();
+        self.portable_dialog = Some(PortableSettingsDialog::ChangePassword);
+        self.portable_action_error = None;
         cx.notify();
     }
 
-    pub(in crate::workspace) fn close_portable_password_change_dialog(
+    pub(in crate::workspace) fn close_portable_password_dialog(
         &mut self,
+        delay: std::time::Duration,
         cx: &mut Context<Self>,
     ) {
-        self.focused_settings_input = None;
-        let Some(generation) = self.portable_settings_dialog_presence.begin_exit() else {
+        self.settings_focused_input = None;
+        let Some(generation) = self.portable_dialog_presence.begin_exit() else {
             return;
         };
-        let delay = oxideterm_gpui_ui::motion::duration(
-            &self.tokens,
-            oxideterm_gpui_ui::motion::MotionDuration::Overlay,
-        );
         if delay.is_zero() {
-            self.portable_settings_dialog = None;
-            self.portable_settings_action_pending = None;
-            self.portable_settings_action_error = None;
-            self.clear_portable_password_drafts();
-            self.portable_settings_dialog_presence.reopen();
-            cx.notify();
+            self.finish_portable_password_dialog_exit(generation, cx);
             return;
         }
-        cx.spawn(async move |weak, cx| {
+        self.portable_dialog_exit_task = Some(cx.spawn(async move |settings, cx| {
             gpui::Timer::after(delay).await;
-            let _ = weak.update(cx, |this, cx| {
-                if this
-                    .portable_settings_dialog_presence
-                    .finish_exit(generation)
-                {
-                    this.portable_settings_dialog = None;
-                    this.portable_settings_action_pending = None;
-                    this.portable_settings_action_error = None;
-                    this.clear_portable_password_drafts();
-                    this.portable_settings_dialog_presence.reopen();
-                    cx.notify();
-                }
+            let _ = settings.update(cx, |settings, cx| {
+                settings.finish_portable_password_dialog_exit(generation, cx);
             });
-        })
-        .detach();
+        }));
         cx.notify();
     }
 
-    pub(in crate::workspace) fn clear_portable_password_drafts(&mut self) {
-        zeroize::Zeroize::zeroize(&mut self.portable_current_password);
-        zeroize::Zeroize::zeroize(&mut self.portable_new_password);
-        zeroize::Zeroize::zeroize(&mut self.portable_confirm_password);
-        self.portable_current_password.clear();
-        self.portable_new_password.clear();
-        self.portable_confirm_password.clear();
-    }
-
-    pub(in crate::workspace) fn submit_portable_password_change(&mut self, cx: &mut Context<Self>) {
-        if self.portable_settings_action_pending.is_some() {
-            return;
+    pub(in crate::workspace) fn submit_portable_password_change(
+        &mut self,
+        runtime: std::sync::Arc<tokio::runtime::Runtime>,
+        dialog_exit_delay: std::time::Duration,
+        too_short_error: String,
+        mismatch_error: String,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if self.portable_action_pending.is_some() {
+            return false;
         }
         if self.portable_new_password.len() < 6 {
-            self.portable_settings_action_error = Some(
-                self.i18n
-                    .t("settings_view.general.portable_password_too_short"),
-            );
+            self.portable_action_error = Some(too_short_error);
             cx.notify();
-            return;
+            return false;
         }
         if self.portable_new_password != self.portable_confirm_password {
-            self.portable_settings_action_error = Some(
-                self.i18n
-                    .t("settings_view.general.portable_password_mismatch"),
-            );
+            self.portable_action_error = Some(mismatch_error);
             cx.notify();
-            return;
+            return false;
         }
 
-        let current_password = Zeroizing::new(std::mem::take(&mut self.portable_current_password));
-        let new_password = Zeroizing::new(std::mem::take(&mut self.portable_new_password));
-        zeroize::Zeroize::zeroize(&mut self.portable_confirm_password);
-        self.portable_confirm_password.clear();
-        self.settings_input_draft.clear();
-        self.focused_settings_input = None;
-        self.portable_settings_action_pending = Some(PortableSettingsAction::ChangePassword);
-        self.portable_settings_action_error = None;
+        let current_password = std::mem::replace(
+            &mut self.portable_current_password,
+            Zeroizing::new(String::new()),
+        );
+        let new_password = std::mem::replace(
+            &mut self.portable_new_password,
+            Zeroizing::new(String::new()),
+        );
+        zeroize::Zeroize::zeroize(&mut *self.portable_confirm_password);
+        self.settings_focused_input = None;
+        self.portable_action_pending = Some(PortableSettingsAction::ChangePassword);
+        self.portable_action_error = None;
 
-        let runtime = self.forwarding_runtime.clone();
-        let success_title = self
-            .i18n
-            .t("settings_view.general.portable_password_changed");
-        cx.spawn(async move |weak, cx| {
+        self.portable_action_task = Some(cx.spawn(async move |settings, cx| {
             let result = runtime
                 .spawn_blocking(move || {
                     oxideterm_portable_runtime::keystore::change_portable_keystore_password(
@@ -184,26 +111,228 @@ impl WorkspaceApp {
                 .await
                 .map_err(|error| error.to_string())
                 .and_then(|result| result);
-            let _ = weak.update(cx, |this, cx| {
-                this.portable_settings_action_pending = None;
+            let _ = settings.update(cx, |settings, cx| {
+                settings.portable_action_task = None;
+                settings.portable_action_pending = None;
                 match result {
                     Ok(()) => {
-                        this.close_portable_password_change_dialog(cx);
-                        this.portable_settings_action_error = None;
-                        this.portable_status_snapshot = None;
-                        this.portable_status_error = None;
-                        this.push_ai_settings_toast(success_title, TerminalNoticeVariant::Success);
-                        this.refresh_portable_settings_snapshot(true, cx);
+                        settings.portable_action_error = None;
+                        settings.invalidate_portable_status(cx);
+                        settings.close_portable_password_dialog(dialog_exit_delay, cx);
+                        cx.emit(SettingsWorkspaceEvent::PortablePasswordChangeFinished {
+                            success: true,
+                        });
                     }
                     Err(error) => {
-                        this.portable_settings_action_error = Some(error.clone());
-                        this.push_ai_settings_toast(error, TerminalNoticeVariant::Error);
+                        settings.portable_action_error = Some(error);
+                        cx.emit(SettingsWorkspaceEvent::PortablePasswordChangeFinished {
+                            success: false,
+                        });
                     }
                 }
                 cx.notify();
             });
-        })
-        .detach();
+        }));
         cx.notify();
+        true
+    }
+
+    pub(in crate::workspace) fn portable_action_error(&self) -> Option<&str> {
+        self.portable_action_error.as_deref()
+    }
+
+    fn finish_portable_password_dialog_exit(&mut self, generation: u64, cx: &mut Context<Self>) {
+        if !self.portable_dialog_presence.finish_exit(generation) {
+            return;
+        }
+        self.portable_dialog_exit_task = None;
+        self.portable_dialog = None;
+        self.portable_action_pending = None;
+        self.portable_action_error = None;
+        self.clear_portable_passwords();
+        self.portable_dialog_presence.reopen();
+        cx.notify();
+    }
+
+    fn clear_portable_passwords(&mut self) {
+        zeroize::Zeroize::zeroize(&mut *self.portable_current_password);
+        zeroize::Zeroize::zeroize(&mut *self.portable_new_password);
+        zeroize::Zeroize::zeroize(&mut *self.portable_confirm_password);
+    }
+}
+
+impl WorkspaceApp {
+    pub(in crate::workspace) fn ensure_portable_settings_snapshot(
+        &mut self,
+        cx: &mut Context<Self>,
+    ) {
+        self.refresh_portable_settings_snapshot(false, cx);
+    }
+
+    pub(in crate::workspace) fn refresh_portable_settings_snapshot(
+        &mut self,
+        force: bool,
+        cx: &mut Context<Self>,
+    ) {
+        let runtime = self.forwarding_runtime.clone();
+        let key_store = self.ai_entity.read(cx).key_store().clone();
+        let ai_providers = self.settings_store.settings().ai.providers.clone();
+        self.settings_workspace.update(cx, |settings, cx| {
+            settings.start_portable_status_refresh(
+                force,
+                runtime,
+                move || {
+                    let status = oxideterm_portable_runtime::portable_status_snapshot()
+                        .map_err(|error| error.to_string());
+                    let exportable_secret_count = oxideterm_ai::provider_views(&ai_providers)
+                        .into_iter()
+                        .filter(|provider| key_store.has_provider_key(&provider.id))
+                        .count();
+                    PortableStatusRefresh {
+                        status,
+                        exportable_secret_count,
+                    }
+                },
+                cx,
+            );
+        });
+    }
+
+    pub(in crate::workspace) fn open_portable_password_change_dialog(
+        &mut self,
+        cx: &mut Context<Self>,
+    ) {
+        self.ime_marked_text = None;
+        self.clear_ime_selection();
+        self.settings_workspace.update(cx, |settings, cx| {
+            settings.open_portable_password_dialog(cx)
+        });
+    }
+
+    pub(in crate::workspace) fn close_portable_password_change_dialog(
+        &mut self,
+        cx: &mut Context<Self>,
+    ) {
+        self.ime_marked_text = None;
+        self.clear_ime_selection();
+        let delay = oxideterm_gpui_ui::motion::duration(
+            &self.tokens,
+            oxideterm_gpui_ui::motion::MotionDuration::Overlay,
+        );
+        self.settings_workspace.update(cx, |settings, cx| {
+            settings.close_portable_password_dialog(delay, cx);
+        });
+    }
+
+    pub(in crate::workspace) fn submit_portable_password_change(&mut self, cx: &mut Context<Self>) {
+        let runtime = self.forwarding_runtime.clone();
+        let dialog_exit_delay = oxideterm_gpui_ui::motion::duration(
+            &self.tokens,
+            oxideterm_gpui_ui::motion::MotionDuration::Overlay,
+        );
+        let too_short_error = self
+            .i18n
+            .t("settings_view.general.portable_password_too_short");
+        let mismatch_error = self
+            .i18n
+            .t("settings_view.general.portable_password_mismatch");
+        self.settings_workspace.update(cx, |settings, cx| {
+            settings.submit_portable_password_change(
+                runtime,
+                dialog_exit_delay,
+                too_short_error,
+                mismatch_error,
+                cx,
+            );
+        });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use gpui::{AppContext, TestAppContext};
+    use oxideterm_gpui_settings_view::SettingsInput;
+
+    use super::*;
+
+    #[gpui::test]
+    fn portable_password_focus_edit_and_close_are_entity_owned(cx: &mut TestAppContext) {
+        let settings = cx.new(SettingsWorkspaceEntity::new);
+        settings.update(cx, |settings, cx| {
+            settings.open_portable_password_dialog(cx);
+            assert!(
+                settings.focus_settings_entity_input(SettingsInput::PortableCurrentPassword, cx,)
+            );
+            assert!(settings.replace_settings_entity_input(
+                SettingsInput::PortableCurrentPassword,
+                None,
+                "current-secret",
+                cx,
+            ));
+
+            let snapshot = settings.portable_password_dialog_snapshot();
+            assert!(snapshot.open);
+            assert!(snapshot.current_password_present);
+            assert_eq!(
+                settings.settings_entity_input_value(SettingsInput::PortableCurrentPassword),
+                Some("current-secret")
+            );
+            assert_eq!(
+                settings.settings_entity_focused_input(),
+                Some(SettingsInput::PortableCurrentPassword)
+            );
+
+            settings.close_portable_password_dialog(std::time::Duration::ZERO, cx);
+            let snapshot = settings.portable_password_dialog_snapshot();
+            assert!(!snapshot.open);
+            assert!(!snapshot.current_password_present);
+            assert_eq!(
+                settings.settings_entity_input_value(SettingsInput::PortableCurrentPassword),
+                Some("")
+            );
+            assert_eq!(
+                settings.settings_entity_input_value(SettingsInput::PortableNewPassword),
+                Some("")
+            );
+            assert_eq!(
+                settings.settings_entity_input_value(SettingsInput::PortableConfirmPassword),
+                Some("")
+            );
+            assert_eq!(settings.settings_entity_focused_input(), None);
+        });
+    }
+
+    #[gpui::test]
+    fn portable_password_validation_stays_inside_entity(cx: &mut TestAppContext) {
+        let settings = cx.new(SettingsWorkspaceEntity::new);
+        let runtime = Arc::new(
+            tokio::runtime::Builder::new_multi_thread()
+                .worker_threads(1)
+                .enable_all()
+                .build()
+                .expect("test runtime"),
+        );
+        settings.update(cx, |settings, cx| {
+            settings.open_portable_password_dialog(cx);
+            settings.focus_settings_entity_input(SettingsInput::PortableNewPassword, cx);
+            settings.replace_settings_entity_input(
+                SettingsInput::PortableNewPassword,
+                None,
+                "short",
+                cx,
+            );
+
+            assert!(!settings.submit_portable_password_change(
+                runtime,
+                std::time::Duration::ZERO,
+                "too short".to_string(),
+                "mismatch".to_string(),
+                cx,
+            ));
+            assert_eq!(settings.portable_action_error(), Some("too short"));
+            assert_eq!(settings.portable_action_pending, None);
+        });
     }
 }

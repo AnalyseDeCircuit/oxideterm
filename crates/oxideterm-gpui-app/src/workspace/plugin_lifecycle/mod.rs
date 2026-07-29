@@ -4,34 +4,31 @@
 use std::{
     collections::{HashMap, HashSet},
     sync::Arc,
-    sync::mpsc,
     time::Duration,
 };
 
-use gpui::{AnyElement, Context, IntoElement, KeyDownEvent, ParentElement, Timer, Window, div};
+use gpui::{
+    AnyElement, AnyWindowHandle, App, AppContext, Context, IntoElement, KeyDownEvent,
+    ParentElement, Timer, Window, div,
+};
 use oxideterm_connections::{SavedConnectionsConflictStrategy, SavedConnectionsSyncSnapshot};
 use oxideterm_gpui_terminal::{TerminalNotice, TerminalNoticeVariant};
 use oxideterm_gpui_ui::{ConfirmDialogVariant, ConfirmDialogView};
 use oxideterm_sftp::BackgroundTransferState;
 use serde_json::{Value, json};
-use zeroize::Zeroizing;
 
 use super::{
     TabKind, TelnetSessionConfig, TerminalInputInterceptor, TerminalOutputProcessor,
-    TerminalSessionId, WorkspaceApp, WorkspaceToast, plugin_host, plugin_runtime,
-    plugin_runtime::PluginResponseResult,
+    TerminalSessionId, WorkspaceApp, WorkspaceOverlayIntent, plugin_entity, plugin_host,
+    plugin_runtime,
 };
 
-mod constants;
-mod forwarding;
 mod host_api_snapshot;
 mod ide;
 mod product_host_calls;
 mod profiler;
-mod scp;
 mod secrets;
 mod settings_payload;
-mod sftp;
 mod snapshots;
 mod sync;
 mod terminal_hooks;
@@ -40,114 +37,86 @@ mod types;
 mod ui_helpers;
 mod ui_host_calls;
 
-use constants::*;
-use forwarding::*;
 use host_api_snapshot::*;
 use ide::*;
 use profiler::*;
-use scp::*;
 use secrets::*;
 use settings_payload::*;
-use sftp::*;
 use snapshots::*;
 use sync::*;
 use terminal_hooks::*;
 use terminal_queries::*;
-pub(super) use types::*;
+pub(super) use types::{
+    NativePluginConfirmDialog, NativePluginConfirmRequest, NativePluginOxideImportCoreResult,
+    NativePluginOxideImportWorkerMessage, NativePluginOxidePostImportOptions,
+    NativePluginProductUiEffect, NativePluginRuntimeDelivery, NativePluginSyncAction,
+    NativePluginSyncRequest, NativePluginTerminalAction, NativePluginTerminalRequest,
+};
 pub(super) use ui_helpers::native_plugin_theme_snapshot;
 use ui_helpers::*;
 use ui_host_calls::*;
 
 #[cfg(test)]
+use super::delivery;
+#[cfg(test)]
 use oxideterm_plugin_host_api::terminal::NativePluginTerminalNodeSnapshot;
 use oxideterm_plugin_host_api::{
     ai::*,
+    backend::*,
     catalog::{allowed_host_apis_for_capabilities, is_supported_host_api_capability},
+    forwarding::{native_plugin_forward_response, native_plugin_forward_saved_forwards},
     host_tools::*,
+    scp::native_plugin_scp_response,
+    sftp::native_plugin_sftp_response,
     transfers::*,
 };
+#[cfg(test)]
+use oxideterm_plugin_host_api::{
+    forwarding::{
+        native_plugin_forward_check_capability, native_plugin_forward_create_request,
+        native_plugin_forward_rule_snapshot,
+    },
+    sftp::{
+        native_plugin_sftp_check_capability, native_plugin_sftp_node_id_arg,
+        native_plugin_sftp_path_arg,
+    },
+};
+
+// Runtime subscription sampling is independent from Plugin Manager visibility.
+const NATIVE_PLUGIN_TRANSFER_PROGRESS_INTERVAL: Duration = Duration::from_millis(500);
+const NATIVE_PLUGIN_PROFILER_METRICS_INTERVAL: Duration = Duration::from_secs(1);
+const NATIVE_PLUGIN_TOAST_TTL: Duration = Duration::from_secs(4);
 
 impl WorkspaceApp {
-    pub(super) fn start_native_plugin_runtime_services_if_needed(
-        &mut self,
-        cx: &mut Context<Self>,
-    ) {
-        if self.native_plugin_runtime.services_started {
-            return;
-        }
-        self.native_plugin_runtime.services_started = true;
-        // Runtime request queues only need polling once a native process/WASM
-        // plugin can issue host calls; keeping them cold avoids idle startup work.
-        self.start_native_plugin_confirm_polling(cx);
-        self.start_native_plugin_terminal_polling(cx);
-        self.start_native_plugin_sync_polling(cx);
-    }
-
-    pub(super) fn start_native_plugin_confirm_polling(&mut self, cx: &mut Context<Self>) {
-        if self.native_plugin_runtime.confirm_polling {
-            return;
-        }
-        self.native_plugin_runtime.confirm_polling = true;
-        cx.spawn(async move |weak, cx| {
-            loop {
-                Timer::after(NATIVE_PLUGIN_DELIVERY_POLL_INTERVAL).await;
-                if weak
-                    .update(cx, |this, cx| {
-                        this.poll_native_plugin_confirm_requests(cx);
-                    })
-                    .is_err()
-                {
-                    break;
-                }
-            }
-        })
-        .detach();
-    }
-
-    fn poll_native_plugin_confirm_requests(&mut self, cx: &mut Context<Self>) {
-        if self.native_plugin_runtime.confirm.is_some() {
-            return;
-        }
-
-        match self.native_plugin_runtime.confirm_rx.try_recv() {
-            Ok(request) => {
-                // Tauri resolves ui.showConfirm from the window UI event bridge.
-                // Native stores only the pending response channel here; plugin
-                // code never runs in the render path.
-                self.native_plugin_runtime.confirm = Some(request.into());
-                self.native_plugin_runtime.confirm_presence.reopen();
-                self.reset_standard_confirm_focus();
-                cx.notify();
-            }
-            Err(mpsc::TryRecvError::Empty) => {}
-            Err(mpsc::TryRecvError::Disconnected) => {
-                self.native_plugin_runtime.confirm_polling = false;
-            }
+    fn promote_native_plugin_confirm(&mut self, cx: &mut Context<Self>) {
+        let promoted = self
+            .plugin_entity
+            .update(cx, |plugins, _cx| plugins.promote_confirm_request());
+        if promoted {
+            // The root retains only the shared overlay focus adapter.
+            self.reset_standard_confirm_focus();
+            cx.notify();
         }
     }
 
     fn respond_native_plugin_confirm(&mut self, confirmed: bool, cx: &mut Context<Self>) {
-        let Some(generation) = self.native_plugin_runtime.confirm_presence.begin_exit() else {
+        let Some(generation) = self
+            .plugin_entity
+            .update(cx, |plugins, _cx| plugins.begin_confirm_exit(confirmed))
+        else {
             return;
         };
-        let Some(dialog) = self.native_plugin_runtime.confirm.as_ref() else {
-            return;
-        };
-        // Resolve the plugin call once, but retain its copy until the exit frame ends.
-        dialog.respond(confirmed);
         self.clear_standard_confirm_focus();
         let delay = oxideterm_gpui_ui::motion::duration(
             &self.tokens,
             oxideterm_gpui_ui::motion::MotionDuration::Control,
         );
         if delay.is_zero() {
-            if self
-                .native_plugin_runtime
-                .confirm_presence
-                .finish_exit(generation)
-            {
-                self.native_plugin_runtime.confirm = None;
-                self.poll_native_plugin_confirm_requests(cx);
+            let promoted = self
+                .plugin_entity
+                .update(cx, |plugins, _cx| plugins.finish_confirm_exit(generation));
+            if promoted {
+                self.reset_standard_confirm_focus();
             }
             cx.notify();
             return;
@@ -155,73 +124,25 @@ impl WorkspaceApp {
         cx.spawn(async move |weak, cx| {
             Timer::after(delay).await;
             let _ = weak.update(cx, |this, cx| {
-                if this
-                    .native_plugin_runtime
-                    .confirm_presence
-                    .finish_exit(generation)
-                {
-                    this.native_plugin_runtime.confirm = None;
-                    this.poll_native_plugin_confirm_requests(cx);
-                    cx.notify();
+                let promoted = this
+                    .plugin_entity
+                    .update(cx, |plugins, _cx| plugins.finish_confirm_exit(generation));
+                if promoted {
+                    this.reset_standard_confirm_focus();
                 }
+                cx.notify();
             });
         })
         .detach();
         cx.notify();
     }
 
-    pub(super) fn start_native_plugin_terminal_polling(&mut self, cx: &mut Context<Self>) {
-        if self.native_plugin_runtime.terminal_polling {
-            return;
-        }
-        self.native_plugin_runtime.terminal_polling = true;
-        cx.spawn(async move |weak, cx| {
-            loop {
-                Timer::after(NATIVE_PLUGIN_DELIVERY_POLL_INTERVAL).await;
-                if weak
-                    .update(cx, |this, cx| {
-                        this.poll_native_plugin_terminal_requests(cx);
-                    })
-                    .is_err()
-                {
-                    break;
-                }
-            }
-        })
-        .detach();
-    }
-
-    fn poll_native_plugin_terminal_requests(&mut self, cx: &mut Context<Self>) {
-        loop {
-            match self.native_plugin_runtime.terminal_rx.try_recv() {
-                Ok(request) => self.handle_native_plugin_terminal_request(request, cx),
-                Err(mpsc::TryRecvError::Empty) => break,
-                Err(mpsc::TryRecvError::Disconnected) => {
-                    self.native_plugin_runtime.terminal_polling = false;
-                    break;
-                }
-            }
-        }
-    }
-
     fn handle_native_plugin_terminal_request(
         &mut self,
         request: NativePluginTerminalRequest,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if matches!(
-            request.action,
-            NativePluginTerminalAction::OpenTelnet { .. }
-        ) {
-            // Opening a terminal tab needs the GPUI Window; queue it for the
-            // render pass instead of constructing a pane from the runtime task.
-            self.native_plugin_runtime
-                .terminal_ui_requests
-                .push_back(request);
-            cx.notify();
-            return;
-        }
-
         let response = match request.action {
             NativePluginTerminalAction::WriteActive { text } => {
                 let ok = self.write_native_plugin_active_terminal_text(&text, cx);
@@ -235,35 +156,55 @@ impl WorkspaceApp {
                 self.clear_native_plugin_node_terminal_buffer(&node_id, cx);
                 plugin_runtime::PluginResponse::ok(request.request_id, Value::Null)
             }
-            NativePluginTerminalAction::OpenTelnet { .. } => unreachable!(),
+            NativePluginTerminalAction::OpenTelnet { host, port } => {
+                self.open_native_plugin_telnet_terminal(&request.request_id, host, port, window, cx)
+            }
         };
         let _ = request.response_tx.send(response);
     }
 
-    pub(super) fn poll_native_plugin_terminal_ui_requests(
+    pub(super) fn schedule_native_plugin_runtime_request_apply(
+        &mut self,
+        window_handle: AnyWindowHandle,
+        cx: &mut Context<Self>,
+    ) {
+        cx.spawn(async move |weak, cx| {
+            let _ = cx.update_window(window_handle, |_, window, cx| {
+                weak.update(cx, |workspace, cx| {
+                    workspace.apply_native_plugin_runtime_requests(window, cx);
+                })
+            });
+        })
+        .detach();
+    }
+
+    fn apply_native_plugin_runtime_requests(
         &mut self,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        while let Some(request) = self.native_plugin_runtime.terminal_ui_requests.pop_front() {
-            let response = match request.action {
-                NativePluginTerminalAction::OpenTelnet { host, port } => self
-                    .open_native_plugin_telnet_terminal(
-                        &request.request_id,
-                        host,
-                        port,
-                        window,
-                        cx,
-                    ),
-                _ => plugin_runtime::PluginResponse::error(
-                    request.request_id,
-                    plugin_runtime::PluginError::protocol(
-                        "invalid_terminal_ui_request",
-                        "Native plugin terminal UI queue received a non-UI request",
-                    ),
-                ),
-            };
-            let _ = request.response_tx.send(response);
+        self.promote_native_plugin_confirm(cx);
+        let terminal_batch = self
+            .plugin_entity
+            .update(cx, |plugins, _cx| plugins.take_terminal_requests());
+        let terminal_backlog = terminal_batch.outcome.backlog_remaining;
+        for request in terminal_batch.items {
+            self.handle_native_plugin_terminal_request(request, window, cx);
+        }
+
+        let sync_batch = self
+            .plugin_entity
+            .update(cx, |plugins, _cx| plugins.take_sync_requests());
+        let sync_backlog = sync_batch.outcome.backlog_remaining;
+        for request in sync_batch.items {
+            self.handle_native_plugin_sync_request(request, cx);
+        }
+
+        let product_backlog = self.apply_native_plugin_product_ui_effects(window, cx);
+        if terminal_backlog || sync_backlog || product_backlog {
+            // Continue through the Entity wake so one budgeted UI turn cannot
+            // monopolize the application thread.
+            self.plugin_entity.read(cx).mark_runtime_requests_ready();
         }
     }
 
@@ -315,40 +256,6 @@ impl WorkspaceApp {
         }
     }
 
-    pub(super) fn start_native_plugin_sync_polling(&mut self, cx: &mut Context<Self>) {
-        if self.native_plugin_runtime.sync_polling {
-            return;
-        }
-        self.native_plugin_runtime.sync_polling = true;
-        cx.spawn(async move |weak, cx| {
-            loop {
-                Timer::after(NATIVE_PLUGIN_DELIVERY_POLL_INTERVAL).await;
-                if weak
-                    .update(cx, |this, cx| {
-                        this.poll_native_plugin_sync_requests(cx);
-                    })
-                    .is_err()
-                {
-                    break;
-                }
-            }
-        })
-        .detach();
-    }
-
-    fn poll_native_plugin_sync_requests(&mut self, cx: &mut Context<Self>) {
-        loop {
-            match self.native_plugin_runtime.sync_rx.try_recv() {
-                Ok(request) => self.handle_native_plugin_sync_request(request, cx),
-                Err(mpsc::TryRecvError::Empty) => break,
-                Err(mpsc::TryRecvError::Disconnected) => {
-                    self.native_plugin_runtime.sync_polling = false;
-                    break;
-                }
-            }
-        }
-    }
-
     fn handle_native_plugin_sync_request(
         &mut self,
         request: NativePluginSyncRequest,
@@ -372,7 +279,7 @@ impl WorkspaceApp {
                 registration_id,
                 value,
             } => {
-                self.update_native_plugin_progress(&plugin_id, registration_id, value, cx);
+                self.update_native_plugin_progress(&plugin_id, &registration_id, value, cx);
                 let _ = request.response_tx.send(plugin_runtime::PluginResponse::ok(
                     request.request_id,
                     Value::Null,
@@ -384,16 +291,21 @@ impl WorkspaceApp {
                 options,
                 progress_registration_id,
                 plugin_id,
-            } => self.start_native_plugin_oxide_import(
-                plugin_id,
-                request.request_id,
-                bytes,
-                password,
-                options,
-                progress_registration_id,
-                request.response_tx,
-                cx,
-            ),
+            } => {
+                let store = self.connection_store.clone();
+                self.plugin_entity.update(cx, |plugins, _cx| {
+                    plugins.start_oxide_import(
+                        store,
+                        plugin_id,
+                        request.request_id,
+                        bytes,
+                        password,
+                        options,
+                        progress_registration_id,
+                        request.response_tx,
+                    );
+                });
+            }
         }
     }
 
@@ -423,111 +335,11 @@ impl WorkspaceApp {
         }
     }
 
-    fn start_native_plugin_oxide_import(
-        &mut self,
-        plugin_id: String,
-        request_id: String,
-        bytes: Vec<u8>,
-        password: Zeroizing<String>,
-        options: NativePluginOxideImportOptions,
-        progress_registration_id: Option<String>,
-        response_tx: mpsc::Sender<plugin_runtime::PluginResponse>,
-        cx: &mut Context<Self>,
-    ) {
-        let mut store = self.connection_store.clone();
-        let oxide_options = options.oxide_options.clone();
-        let (worker_tx, worker_rx) = mpsc::channel();
-        std::thread::spawn(move || {
-            let result = native_plugin_apply_oxide_import_core_with_progress(
-                &mut store,
-                &bytes,
-                &password,
-                oxide_options,
-                |stage, current, total| {
-                    let _ = worker_tx.send(NativePluginOxideImportWorkerMessage::Progress {
-                        stage: stage.to_string(),
-                        current,
-                        total,
-                    });
-                },
-            )
-            .map(|envelope| NativePluginOxideImportCoreResult { store, envelope });
-            let _ = worker_tx.send(NativePluginOxideImportWorkerMessage::Done(result));
-        });
-
-        cx.spawn(async move |weak, cx| {
-            loop {
-                match worker_rx.try_recv() {
-                    Ok(NativePluginOxideImportWorkerMessage::Progress {
-                        stage,
-                        current,
-                        total,
-                    }) => {
-                        if let Some(registration_id) = progress_registration_id.as_ref() {
-                            let value = native_plugin_sync_progress_value(
-                                "Importing .oxide",
-                                &stage,
-                                current,
-                                total,
-                                false,
-                            );
-                            let _ = weak.update(cx, |this, cx| {
-                                this.update_native_plugin_progress(
-                                    &plugin_id,
-                                    registration_id.clone(),
-                                    value,
-                                    cx,
-                                );
-                            });
-                        }
-                    }
-                    Ok(NativePluginOxideImportWorkerMessage::Done(result)) => {
-                        let _ = weak.update(cx, |this, cx| {
-                            let response = this
-                                .finish_native_plugin_oxide_import(request_id, result, options, cx);
-                            if let Some(registration_id) = progress_registration_id {
-                                this.update_native_plugin_progress(
-                                    &plugin_id,
-                                    registration_id,
-                                    native_plugin_sync_progress_value(
-                                        "Importing .oxide",
-                                        "complete",
-                                        1,
-                                        1,
-                                        true,
-                                    ),
-                                    cx,
-                                );
-                            }
-                            let _ = response_tx.send(response);
-                            cx.notify();
-                        });
-                        break;
-                    }
-                    Err(mpsc::TryRecvError::Empty) => {
-                        Timer::after(Duration::from_millis(33)).await;
-                    }
-                    Err(mpsc::TryRecvError::Disconnected) => {
-                        let _ = response_tx.send(plugin_runtime::PluginResponse::error(
-                            request_id,
-                            plugin_runtime::PluginError::runtime(
-                                "plugin_sync_import_interrupted",
-                                "Native plugin sync.importOxide worker stopped before completion",
-                            ),
-                        ));
-                        break;
-                    }
-                }
-            }
-        })
-        .detach();
-    }
-
     fn finish_native_plugin_oxide_import(
         &mut self,
         request_id: String,
-        result: Result<NativePluginOxideImportCoreResult, String>,
-        options: NativePluginOxideImportOptions,
+        result: Result<NativePluginOxideImportCoreResult, ()>,
+        options: NativePluginOxidePostImportOptions,
         cx: &mut Context<Self>,
     ) -> plugin_runtime::PluginResponse {
         let Ok(core) = result else {
@@ -535,9 +347,7 @@ impl WorkspaceApp {
                 request_id,
                 plugin_runtime::PluginError::runtime(
                     "plugin_sync_oxide_error",
-                    result
-                        .err()
-                        .unwrap_or_else(|| "Unknown .oxide import error".to_string()),
+                    "Native plugin .oxide import failed",
                 ),
             );
         };
@@ -553,6 +363,7 @@ impl WorkspaceApp {
                 envelope.quick_commands_json.as_deref(),
                 options.import_quick_commands,
                 native_plugin_quick_command_import_strategy(options.quick_command_strategy),
+                cx,
             );
         let imported_plugin_settings = self.apply_oxide_import_plugin_settings(
             &envelope.plugin_settings,
@@ -567,7 +378,7 @@ impl WorkspaceApp {
             options.selected_app_settings_sections.as_ref(),
             cx,
         );
-        self.apply_oxide_import_portable_secrets(&mut envelope);
+        self.apply_oxide_import_portable_secrets(&mut envelope, cx);
         self.queue_cloud_sync_dirty_refresh(cx);
 
         plugin_runtime::PluginResponse::ok(
@@ -601,7 +412,7 @@ impl WorkspaceApp {
                 )
             })
             .collect::<HashMap<_, _>>();
-        let target = native_plugin_active_terminal_target(self, &connection_states);
+        let target = native_plugin_active_terminal_target(self, &connection_states, cx);
         if target
             .get("connectionState")
             .and_then(Value::as_str)
@@ -609,7 +420,7 @@ impl WorkspaceApp {
         {
             return false;
         }
-        let Some(pane) = self.active_pane() else {
+        let Some(pane) = self.active_pane(cx) else {
             return false;
         };
         // Plugin writes are routed through the same terminal input method used
@@ -627,7 +438,7 @@ impl WorkspaceApp {
         let Some(session_id) = node.terminal_ids.first().copied() else {
             return;
         };
-        let Some(pane) = native_plugin_pane_for_session(self, session_id) else {
+        let Some(pane) = native_plugin_pane_for_session(self, session_id, cx) else {
             return;
         };
         // Tauri clearBuffer is host-side and void-returning: missing nodes are
@@ -647,16 +458,21 @@ impl WorkspaceApp {
             return false;
         };
         let terminal_count = node.terminal_ids.len();
-        let Some(runtime) = self.node_runtime_store.snapshot(&node_id) else {
+        let Some(runtime) = self.node_router.node_metadata(&node_id) else {
             return false;
         };
-        if native_plugin_session_connection_state(&runtime.state, terminal_count) != "active" {
+        if native_plugin_session_connection_state(
+            &runtime.readiness,
+            runtime.error.as_deref(),
+            terminal_count,
+        ) != "active"
+        {
             return false;
         }
         let Some(session_id) = node.terminal_ids.first().copied() else {
             return false;
         };
-        let Some(pane) = native_plugin_pane_for_session(self, session_id) else {
+        let Some(pane) = native_plugin_pane_for_session(self, session_id, cx) else {
             return false;
         };
         pane.update(cx, |pane, cx| pane.send_ai_input_bytes(text.as_bytes(), cx));
@@ -669,16 +485,20 @@ impl WorkspaceApp {
     }
 
     fn refresh_native_plugin_terminal_input_interceptors(&mut self, cx: &mut Context<Self>) {
-        let hooks = self
-            .native_plugin_runtime
-            .registry
-            .contributions()
-            .runtime_terminal_input_interceptors
-            .clone();
+        let (hooks, runtime_host) = {
+            let plugins = self.plugin_entity.read(cx);
+            (
+                plugins
+                    .registry()
+                    .contributions()
+                    .runtime_terminal_input_interceptors
+                    .clone(),
+                plugins.runtime_host(),
+            )
+        };
         let interceptor = if hooks.is_empty() {
             None
         } else {
-            let runtime_host = self.native_plugin_runtime.host.clone();
             let runtime = self.forwarding_runtime.clone();
             let host_api_resolver = native_plugin_terminal_hook_host_api_resolver();
             Some(Arc::new(move |bytes: &[u8]| {
@@ -692,7 +512,15 @@ impl WorkspaceApp {
             }) as TerminalInputInterceptor)
         };
 
-        for pane in self.panes.values() {
+        // Drop the registry borrow before updating pane entities through GPUI.
+        let panes = self
+            .tab_host
+            .read(cx)
+            .panes()
+            .values()
+            .cloned()
+            .collect::<Vec<_>>();
+        for pane in panes {
             pane.update(cx, |pane, _cx| {
                 pane.set_plugin_input_interceptor(interceptor.clone());
             });
@@ -700,16 +528,20 @@ impl WorkspaceApp {
     }
 
     fn refresh_native_plugin_terminal_output_processors(&mut self, cx: &mut Context<Self>) {
-        let hooks = self
-            .native_plugin_runtime
-            .registry
-            .contributions()
-            .runtime_terminal_output_processors
-            .clone();
+        let (hooks, runtime_host) = {
+            let plugins = self.plugin_entity.read(cx);
+            (
+                plugins
+                    .registry()
+                    .contributions()
+                    .runtime_terminal_output_processors
+                    .clone(),
+                plugins.runtime_host(),
+            )
+        };
         let processor = if hooks.is_empty() {
             None
         } else {
-            let runtime_host = self.native_plugin_runtime.host.clone();
             let runtime = self.forwarding_runtime.clone();
             let host_api_resolver = native_plugin_terminal_hook_host_api_resolver();
             Some(Arc::new(move |bytes: &[u8]| {
@@ -723,7 +555,15 @@ impl WorkspaceApp {
             }) as TerminalOutputProcessor)
         };
 
-        for pane in self.panes.values() {
+        // Drop the registry borrow before updating pane entities through GPUI.
+        let panes = self
+            .tab_host
+            .read(cx)
+            .panes()
+            .values()
+            .cloned()
+            .collect::<Vec<_>>();
+        for pane in panes {
             pane.update(cx, |pane, _cx| {
                 pane.set_plugin_output_processor(processor.clone());
             });
@@ -735,10 +575,10 @@ impl WorkspaceApp {
         event: &KeyDownEvent,
         cx: &mut Context<Self>,
     ) -> bool {
-        if self.native_plugin_runtime.confirm.is_none()
-            || self.native_plugin_runtime.confirm_presence.phase()
-                != oxideterm_gpui_ui::motion::ExitPhase::Visible
-        {
+        let plugins = self.plugin_entity.read(cx);
+        let confirm_is_visible = plugins.confirm_dialog().is_some()
+            && plugins.confirm_phase() == oxideterm_gpui_ui::motion::ExitPhase::Visible;
+        if !confirm_is_visible {
             return false;
         }
 
@@ -760,12 +600,13 @@ impl WorkspaceApp {
         &self,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
-        let dialog = self.native_plugin_runtime.confirm.as_ref()?;
+        let plugins = self.plugin_entity.read(cx);
+        let dialog = plugins.confirm_dialog()?;
         Some(
             oxideterm_gpui_ui::confirm::confirm_dialog_with_focus_motion(
                 &self.tokens,
                 "native-plugin-confirm-motion",
-                self.native_plugin_runtime.confirm_presence.phase(),
+                plugins.confirm_phase(),
                 ConfirmDialogView {
                     variant: ConfirmDialogVariant::Default,
                     title: div()
@@ -792,160 +633,32 @@ impl WorkspaceApp {
         )
     }
 
-    pub(super) fn start_native_plugin_layout_polling(&mut self, cx: &mut Context<Self>) {
-        if self.native_plugin_runtime.layout_polling {
-            return;
-        }
-        self.native_plugin_runtime.layout_polling = true;
-        cx.spawn(async move |weak, cx| {
-            loop {
-                Timer::after(NATIVE_PLUGIN_DELIVERY_POLL_INTERVAL).await;
-                if weak
-                    .update(cx, |this, cx| {
-                        this.emit_native_plugin_layout_if_changed(cx);
-                    })
-                    .is_err()
-                {
-                    break;
-                }
-            }
-        })
-        .detach();
-    }
-
-    pub(super) fn native_plugin_layout_snapshot(&self) -> Value {
+    pub(super) fn native_plugin_layout_snapshot(&self, cx: &App) -> Value {
         native_plugin_layout_snapshot(
             self.sidebar_collapsed,
-            self.main_window_tabs
-                .active_tab_id
-                .map(|tab_id| tab_id.0.to_string()),
-            self.tabs.len(),
+            self.active_tab_id(cx).map(|tab_id| tab_id.0.to_string()),
+            self.tabs(cx).len(),
         )
-    }
-
-    pub(super) fn start_native_plugin_session_polling(&mut self, cx: &mut Context<Self>) {
-        if self.native_plugin_runtime.session_polling {
-            return;
-        }
-        self.native_plugin_runtime.session_polling = true;
-        cx.spawn(async move |weak, cx| {
-            loop {
-                Timer::after(NATIVE_PLUGIN_DELIVERY_POLL_INTERVAL).await;
-                if weak
-                    .update(cx, |this, cx| {
-                        this.emit_native_plugin_sessions_if_changed(cx);
-                    })
-                    .is_err()
-                {
-                    break;
-                }
-            }
-        })
-        .detach();
     }
 
     pub(super) fn native_plugin_session_tree_snapshot(&self) -> Value {
         json!(self.native_plugin_session_tree_snapshot_values())
     }
 
-    pub(super) fn start_native_plugin_saved_forwards_polling(&mut self, cx: &mut Context<Self>) {
-        if self.native_plugin_runtime.saved_forwards_polling {
-            return;
-        }
-        self.native_plugin_runtime.saved_forwards_polling = true;
-        cx.spawn(async move |weak, cx| {
-            loop {
-                Timer::after(NATIVE_PLUGIN_DELIVERY_POLL_INTERVAL).await;
-                if weak
-                    .update(cx, |this, cx| {
-                        this.emit_native_plugin_saved_forwards_if_changed(cx);
-                    })
-                    .is_err()
-                {
-                    break;
-                }
-            }
-        })
-        .detach();
-    }
-
     pub(super) fn native_plugin_saved_forwards_snapshot(&self) -> Value {
-        native_plugin_forward_saved_forwards(&self.forwarding_registry)
+        native_plugin_forward_saved_forwards(self.forwarding_service.registry())
             .unwrap_or_else(|_| json!([]))
-    }
-
-    pub(super) fn start_native_plugin_transfer_polling(&mut self, cx: &mut Context<Self>) {
-        if self.native_plugin_runtime.transfer_polling {
-            return;
-        }
-        self.native_plugin_runtime.transfer_polling = true;
-        cx.spawn(async move |weak, cx| {
-            loop {
-                Timer::after(NATIVE_PLUGIN_DELIVERY_POLL_INTERVAL).await;
-                if weak
-                    .update(cx, |this, cx| {
-                        this.emit_native_plugin_transfers_if_changed(cx);
-                    })
-                    .is_err()
-                {
-                    break;
-                }
-            }
-        })
-        .detach();
     }
 
     pub(super) fn native_plugin_transfer_snapshot(&self) -> Value {
         native_plugin_transfer_snapshot_array(&self.sftp_transfer_manager, None)
     }
 
-    pub(super) fn start_native_plugin_profiler_polling(&mut self, cx: &mut Context<Self>) {
-        if self.native_plugin_runtime.profiler_polling {
-            return;
-        }
-        self.native_plugin_runtime.profiler_polling = true;
-        cx.spawn(async move |weak, cx| {
-            loop {
-                Timer::after(NATIVE_PLUGIN_DELIVERY_POLL_INTERVAL).await;
-                if weak
-                    .update(cx, |this, cx| {
-                        this.emit_native_plugin_profiler_if_changed(cx);
-                    })
-                    .is_err()
-                {
-                    break;
-                }
-            }
-        })
-        .detach();
-    }
-
-    pub(super) fn native_plugin_profiler_snapshot(&self) -> Value {
+    pub(super) fn native_plugin_profiler_snapshot(&self, cx: &mut Context<Self>) -> Value {
         native_plugin_profiler_snapshot_array(
-            &self.connection_monitor.profiler_registry,
+            self.host_tools.read(cx).profiler_registry(),
             &native_plugin_profiler_node_connection_ids(self),
         )
-    }
-
-    pub(super) fn start_native_plugin_ide_polling(&mut self, cx: &mut Context<Self>) {
-        if self.native_plugin_runtime.ide_polling {
-            return;
-        }
-        self.native_plugin_runtime.ide_polling = true;
-        cx.spawn(async move |weak, cx| {
-            loop {
-                Timer::after(NATIVE_PLUGIN_DELIVERY_POLL_INTERVAL).await;
-                if weak
-                    .update(cx, |this, cx| {
-                        this.emit_native_plugin_ide_if_changed(cx);
-                    })
-                    .is_err()
-                {
-                    break;
-                }
-            }
-        })
-        .detach();
     }
 
     pub(super) fn native_plugin_ide_snapshot(&self, cx: &mut Context<Self>) -> Value {
@@ -961,56 +674,14 @@ impl WorkspaceApp {
             })
     }
 
-    pub(super) fn start_native_plugin_ai_polling(&mut self, cx: &mut Context<Self>) {
-        if self.native_plugin_runtime.ai_polling {
-            return;
-        }
-        self.native_plugin_runtime.ai_polling = true;
-        cx.spawn(async move |weak, cx| {
-            loop {
-                Timer::after(NATIVE_PLUGIN_DELIVERY_POLL_INTERVAL).await;
-                if weak
-                    .update(cx, |this, cx| {
-                        this.emit_native_plugin_ai_if_changed(cx);
-                    })
-                    .is_err()
-                {
-                    break;
-                }
-            }
-        })
-        .detach();
-    }
-
-    pub(super) fn native_plugin_ai_snapshot(&self) -> Value {
+    pub(super) fn native_plugin_ai_snapshot(&self, cx: &App) -> Value {
         let settings = self.settings_store.settings();
         native_plugin_ai_snapshot_value(
-            &self.ai.chat.conversation_state,
+            &self.ai_entity.read(cx).conversation_state(),
             &settings.ai.providers,
             settings.ai.active_provider_id.as_deref(),
             &settings.ai.model_context_windows,
         )
-    }
-
-    pub(super) fn start_native_plugin_event_log_polling(&mut self, cx: &mut Context<Self>) {
-        if self.native_plugin_runtime.event_log_polling {
-            return;
-        }
-        self.native_plugin_runtime.event_log_polling = true;
-        cx.spawn(async move |weak, cx| {
-            loop {
-                Timer::after(NATIVE_PLUGIN_DELIVERY_POLL_INTERVAL).await;
-                if weak
-                    .update(cx, |this, cx| {
-                        this.emit_native_plugin_event_log_entries(cx);
-                    })
-                    .is_err()
-                {
-                    break;
-                }
-            }
-        })
-        .detach();
     }
 
     pub(super) fn native_plugin_last_event_log_id(&self) -> u64 {
@@ -1023,72 +694,141 @@ impl WorkspaceApp {
     }
 
     pub(super) fn refresh_native_plugin_event_polling(&mut self, cx: &mut Context<Self>) {
+        let mut samples = Vec::new();
         if self.has_native_plugin_subscription(
             super::plugin_host::NATIVE_PLUGIN_UI_LAYOUT_CHANGED_EVENT,
+            cx,
         ) {
-            self.native_plugin_runtime.layout_snapshot = self.native_plugin_layout_snapshot();
-            self.start_native_plugin_layout_polling(cx);
+            samples.push((
+                plugin_entity::PluginSubscriptionSample::Layout,
+                self.native_plugin_layout_snapshot(cx),
+            ));
         }
         if self.has_native_plugin_subscription(
             super::plugin_host::NATIVE_PLUGIN_SESSION_TREE_CHANGED_EVENT,
+            cx,
         ) || self.has_native_plugin_subscription(
             super::plugin_host::NATIVE_PLUGIN_SESSION_NODE_STATE_CHANGED_EVENT,
+            cx,
         ) {
-            self.native_plugin_runtime.session_tree_snapshot =
-                self.native_plugin_session_tree_snapshot();
-            self.start_native_plugin_session_polling(cx);
+            samples.push((
+                plugin_entity::PluginSubscriptionSample::Sessions,
+                self.native_plugin_session_tree_snapshot(),
+            ));
         }
         if self.has_native_plugin_subscription(
             super::plugin_host::NATIVE_PLUGIN_FORWARD_SAVED_FORWARDS_CHANGED_EVENT,
+            cx,
         ) {
-            self.native_plugin_runtime.saved_forwards_snapshot =
-                self.native_plugin_saved_forwards_snapshot();
-            self.start_native_plugin_saved_forwards_polling(cx);
+            samples.push((
+                plugin_entity::PluginSubscriptionSample::SavedForwards,
+                self.native_plugin_saved_forwards_snapshot(),
+            ));
         }
         if self.has_native_plugin_subscription(
             super::plugin_host::NATIVE_PLUGIN_TRANSFER_PROGRESS_EVENT,
+            cx,
         ) || self.has_native_plugin_subscription(
             super::plugin_host::NATIVE_PLUGIN_TRANSFER_COMPLETE_EVENT,
-        ) || self
-            .has_native_plugin_subscription(super::plugin_host::NATIVE_PLUGIN_TRANSFER_ERROR_EVENT)
-        {
-            self.native_plugin_runtime.transfer_snapshot = self.native_plugin_transfer_snapshot();
-            self.start_native_plugin_transfer_polling(cx);
+            cx,
+        ) || self.has_native_plugin_subscription(
+            super::plugin_host::NATIVE_PLUGIN_TRANSFER_ERROR_EVENT,
+            cx,
+        ) {
+            samples.push((
+                plugin_entity::PluginSubscriptionSample::Transfers,
+                self.native_plugin_transfer_snapshot(),
+            ));
         }
         if self.has_native_plugin_subscription(
             super::plugin_host::NATIVE_PLUGIN_PROFILER_METRICS_EVENT,
+            cx,
         ) {
-            self.native_plugin_runtime.profiler_snapshot = self.native_plugin_profiler_snapshot();
-            self.start_native_plugin_profiler_polling(cx);
+            samples.push((
+                plugin_entity::PluginSubscriptionSample::Profiler,
+                self.native_plugin_profiler_snapshot(cx),
+            ));
+        }
+        if self.has_native_plugin_subscription(
+            super::plugin_host::NATIVE_PLUGIN_IDE_FILE_OPEN_EVENT,
+            cx,
+        ) || self.has_native_plugin_subscription(
+            super::plugin_host::NATIVE_PLUGIN_IDE_FILE_CLOSE_EVENT,
+            cx,
+        ) || self.has_native_plugin_subscription(
+            super::plugin_host::NATIVE_PLUGIN_IDE_ACTIVE_FILE_CHANGED_EVENT,
+            cx,
+        ) {
+            samples.push((
+                plugin_entity::PluginSubscriptionSample::Ide,
+                self.native_plugin_ide_snapshot(cx),
+            ));
         }
         if self
-            .has_native_plugin_subscription(super::plugin_host::NATIVE_PLUGIN_IDE_FILE_OPEN_EVENT)
-            || self.has_native_plugin_subscription(
-                super::plugin_host::NATIVE_PLUGIN_IDE_FILE_CLOSE_EVENT,
-            )
-            || self.has_native_plugin_subscription(
-                super::plugin_host::NATIVE_PLUGIN_IDE_ACTIVE_FILE_CHANGED_EVENT,
-            )
+            .has_native_plugin_subscription(super::plugin_host::NATIVE_PLUGIN_AI_MESSAGE_EVENT, cx)
         {
-            self.native_plugin_runtime.ide_snapshot = self.native_plugin_ide_snapshot(cx);
-            self.start_native_plugin_ide_polling(cx);
+            samples.push((
+                plugin_entity::PluginSubscriptionSample::Ai,
+                self.native_plugin_ai_snapshot(cx),
+            ));
         }
-        if self.has_native_plugin_subscription(super::plugin_host::NATIVE_PLUGIN_AI_MESSAGE_EVENT) {
-            self.native_plugin_runtime.ai_snapshot = self.native_plugin_ai_snapshot();
-            self.start_native_plugin_ai_polling(cx);
+        let event_log_last_id = self
+            .has_native_plugin_subscription(
+                super::plugin_host::NATIVE_PLUGIN_EVENT_LOG_ENTRY_EVENT,
+                cx,
+            )
+            .then(|| self.native_plugin_last_event_log_id());
+        if event_log_last_id.is_some() {
+            samples.push((
+                plugin_entity::PluginSubscriptionSample::EventLog,
+                Value::Null,
+            ));
         }
-        if self
-            .has_native_plugin_subscription(super::plugin_host::NATIVE_PLUGIN_EVENT_LOG_ENTRY_EVENT)
-        {
-            self.native_plugin_runtime.event_log_last_id = self.native_plugin_last_event_log_id();
-            self.start_native_plugin_event_log_polling(cx);
+        self.plugin_entity.update(cx, move |plugins, cx| {
+            plugins.configure_subscription_samples(samples, event_log_last_id, cx);
+        });
+    }
+
+    pub(in crate::workspace) fn sample_native_plugin_subscriptions(
+        &mut self,
+        cx: &mut Context<Self>,
+    ) {
+        let sample_kinds = self.plugin_entity.read(cx).subscription_samples();
+        for kind in sample_kinds {
+            match kind {
+                plugin_entity::PluginSubscriptionSample::Layout => {
+                    self.emit_native_plugin_layout_if_changed(cx)
+                }
+                plugin_entity::PluginSubscriptionSample::Sessions => {
+                    self.emit_native_plugin_sessions_if_changed(cx)
+                }
+                plugin_entity::PluginSubscriptionSample::SavedForwards => {
+                    self.emit_native_plugin_saved_forwards_if_changed(cx)
+                }
+                plugin_entity::PluginSubscriptionSample::Transfers => {
+                    self.emit_native_plugin_transfers_if_changed(cx)
+                }
+                plugin_entity::PluginSubscriptionSample::Profiler => {
+                    self.emit_native_plugin_profiler_if_changed(cx)
+                }
+                plugin_entity::PluginSubscriptionSample::Ide => {
+                    self.emit_native_plugin_ide_if_changed(cx)
+                }
+                plugin_entity::PluginSubscriptionSample::Ai => {
+                    self.emit_native_plugin_ai_if_changed(cx)
+                }
+                plugin_entity::PluginSubscriptionSample::EventLog => {
+                    self.emit_native_plugin_event_log_entries(cx)
+                }
+            }
         }
     }
 
-    fn has_native_plugin_subscription(&self, event_name: &str) -> bool {
+    fn has_native_plugin_subscription(&self, event_name: &str, cx: &App) -> bool {
         !self
-            .native_plugin_runtime
-            .registry
+            .plugin_entity
+            .read(cx)
+            .registry()
             .contributions()
             .runtime_event_subscriptions_for(event_name)
             .is_empty()
@@ -1114,27 +854,27 @@ impl WorkspaceApp {
             })
             .collect::<HashMap<_, _>>();
         native_plugin_session_tree_from_nodes(
-            self.node_runtime_store.export_snapshot().nodes,
+            self.node_router.node_metadata_snapshots(),
             &titles,
             &terminal_ids,
         )
     }
 
     fn emit_native_plugin_layout_if_changed(&mut self, cx: &mut Context<Self>) {
-        let layout = self.native_plugin_layout_snapshot();
-        if layout == self.native_plugin_runtime.layout_snapshot {
+        let layout = self.native_plugin_layout_snapshot(cx);
+        let (previous, layout) = self.plugin_entity.update(cx, |plugins, _cx| {
+            plugins.update_subscription_snapshot(
+                plugin_entity::PluginSubscriptionSample::Layout,
+                layout,
+            )
+        });
+        if previous.is_none() {
             return;
         }
-
-        self.native_plugin_runtime.layout_snapshot = layout.clone();
-        let has_subscribers = !self
-            .native_plugin_runtime
-            .registry
-            .contributions()
-            .runtime_event_subscriptions_for(
-                super::plugin_host::NATIVE_PLUGIN_UI_LAYOUT_CHANGED_EVENT,
-            )
-            .is_empty();
+        let has_subscribers = self.has_native_plugin_subscription(
+            super::plugin_host::NATIVE_PLUGIN_UI_LAYOUT_CHANGED_EVENT,
+            cx,
+        );
         if has_subscribers {
             // Tauri onLayoutChange compares the serialized layout snapshot
             // before invoking callbacks. Native keeps that same edge-triggered
@@ -1149,23 +889,23 @@ impl WorkspaceApp {
 
     fn emit_native_plugin_sessions_if_changed(&mut self, cx: &mut Context<Self>) {
         let tree = self.native_plugin_session_tree_snapshot();
-        if tree == self.native_plugin_runtime.session_tree_snapshot {
-            return;
-        }
-
-        let previous_states =
-            native_plugin_session_state_map(&self.native_plugin_runtime.session_tree_snapshot);
-        let next_states = native_plugin_session_state_map(&tree);
-        self.native_plugin_runtime.session_tree_snapshot = tree.clone();
-
-        let has_tree_subscribers = !self
-            .native_plugin_runtime
-            .registry
-            .contributions()
-            .runtime_event_subscriptions_for(
-                super::plugin_host::NATIVE_PLUGIN_SESSION_TREE_CHANGED_EVENT,
+        let (previous_tree, tree) = self.plugin_entity.update(cx, |plugins, _cx| {
+            plugins.update_subscription_snapshot(
+                plugin_entity::PluginSubscriptionSample::Sessions,
+                tree,
             )
-            .is_empty();
+        });
+        let Some(previous_tree) = previous_tree else {
+            return;
+        };
+
+        let previous_states = native_plugin_session_state_map(&previous_tree);
+        let next_states = native_plugin_session_state_map(&tree);
+
+        let has_tree_subscribers = self.has_native_plugin_subscription(
+            super::plugin_host::NATIVE_PLUGIN_SESSION_TREE_CHANGED_EVENT,
+            cx,
+        );
         if has_tree_subscribers {
             // Tauri's onTreeChange callback receives the full frozen tree after
             // each Zustand nodes update. Native emits the same tree payload
@@ -1177,14 +917,10 @@ impl WorkspaceApp {
             );
         }
 
-        let has_node_state_subscribers = !self
-            .native_plugin_runtime
-            .registry
-            .contributions()
-            .runtime_event_subscriptions_for(
-                super::plugin_host::NATIVE_PLUGIN_SESSION_NODE_STATE_CHANGED_EVENT,
-            )
-            .is_empty();
+        let has_node_state_subscribers = self.has_native_plugin_subscription(
+            super::plugin_host::NATIVE_PLUGIN_SESSION_NODE_STATE_CHANGED_EVENT,
+            cx,
+        );
         if has_node_state_subscribers {
             let mut node_ids = previous_states
                 .keys()
@@ -1215,19 +951,20 @@ impl WorkspaceApp {
 
     fn emit_native_plugin_saved_forwards_if_changed(&mut self, cx: &mut Context<Self>) {
         let saved_forwards = self.native_plugin_saved_forwards_snapshot();
-        if saved_forwards == self.native_plugin_runtime.saved_forwards_snapshot {
+        let (previous, saved_forwards) = self.plugin_entity.update(cx, |plugins, _cx| {
+            plugins.update_subscription_snapshot(
+                plugin_entity::PluginSubscriptionSample::SavedForwards,
+                saved_forwards,
+            )
+        });
+        if previous.is_none() {
             return;
         }
-        self.native_plugin_runtime.saved_forwards_snapshot = saved_forwards.clone();
 
-        let has_subscribers = !self
-            .native_plugin_runtime
-            .registry
-            .contributions()
-            .runtime_event_subscriptions_for(
-                super::plugin_host::NATIVE_PLUGIN_FORWARD_SAVED_FORWARDS_CHANGED_EVENT,
-            )
-            .is_empty();
+        let has_subscribers = self.has_native_plugin_subscription(
+            super::plugin_host::NATIVE_PLUGIN_FORWARD_SAVED_FORWARDS_CHANGED_EVENT,
+            cx,
+        );
         if has_subscribers {
             // Tauri's onSavedForwardsChange listener receives the current
             // frozen saved-forward list after the backend update event. Native
@@ -1242,32 +979,30 @@ impl WorkspaceApp {
 
     fn emit_native_plugin_transfers_if_changed(&mut self, cx: &mut Context<Self>) {
         let transfers = self.native_plugin_transfer_snapshot();
-        let previous_states =
-            native_plugin_transfer_state_map(&self.native_plugin_runtime.transfer_snapshot);
+        let (previous_transfers, transfers) = self.plugin_entity.update(cx, |plugins, _cx| {
+            plugins.update_subscription_snapshot(
+                plugin_entity::PluginSubscriptionSample::Transfers,
+                transfers,
+            )
+        });
+        let previous_states = previous_transfers
+            .as_ref()
+            .map(native_plugin_transfer_state_map)
+            .unwrap_or_default();
         let next_states = native_plugin_transfer_state_map(&transfers);
-        let changed = transfers != self.native_plugin_runtime.transfer_snapshot;
-        if changed {
-            self.native_plugin_runtime.transfer_snapshot = transfers.clone();
-        }
+        let changed = previous_transfers.is_some();
 
-        let has_progress_subscribers = !self
-            .native_plugin_runtime
-            .registry
-            .contributions()
-            .runtime_event_subscriptions_for(
-                super::plugin_host::NATIVE_PLUGIN_TRANSFER_PROGRESS_EVENT,
-            )
-            .is_empty();
+        let has_progress_subscribers = self.has_native_plugin_subscription(
+            super::plugin_host::NATIVE_PLUGIN_TRANSFER_PROGRESS_EVENT,
+            cx,
+        );
         if has_progress_subscribers
-            && native_plugin_transfer_progress_due(
-                self.native_plugin_runtime.transfer_progress_last_emitted,
-                NATIVE_PLUGIN_TRANSFER_PROGRESS_INTERVAL,
-            )
+            && self.plugin_entity.update(cx, |plugins, _cx| {
+                plugins.transfer_progress_due(NATIVE_PLUGIN_TRANSFER_PROGRESS_INTERVAL)
+            })
         {
             // Tauri's transfer progress bridge is throttled to 500ms. Native keeps
             // the same throttle while polling the backend-owned SFTP transfer map.
-            self.native_plugin_runtime.transfer_progress_last_emitted =
-                Some(std::time::Instant::now());
             for transfer in
                 native_plugin_transfer_values_by_state(&transfers, BackgroundTransferState::Active)
             {
@@ -1283,14 +1018,10 @@ impl WorkspaceApp {
             return;
         }
 
-        let has_complete_subscribers = !self
-            .native_plugin_runtime
-            .registry
-            .contributions()
-            .runtime_event_subscriptions_for(
-                super::plugin_host::NATIVE_PLUGIN_TRANSFER_COMPLETE_EVENT,
-            )
-            .is_empty();
+        let has_complete_subscribers = self.has_native_plugin_subscription(
+            super::plugin_host::NATIVE_PLUGIN_TRANSFER_COMPLETE_EVENT,
+            cx,
+        );
         if has_complete_subscribers {
             for transfer in native_plugin_transfer_transition_values(
                 &transfers,
@@ -1306,12 +1037,10 @@ impl WorkspaceApp {
             }
         }
 
-        let has_error_subscribers = !self
-            .native_plugin_runtime
-            .registry
-            .contributions()
-            .runtime_event_subscriptions_for(super::plugin_host::NATIVE_PLUGIN_TRANSFER_ERROR_EVENT)
-            .is_empty();
+        let has_error_subscribers = self.has_native_plugin_subscription(
+            super::plugin_host::NATIVE_PLUGIN_TRANSFER_ERROR_EVENT,
+            cx,
+        );
         if has_error_subscribers {
             for transfer in native_plugin_transfer_transition_values(
                 &transfers,
@@ -1329,26 +1058,33 @@ impl WorkspaceApp {
     }
 
     fn emit_native_plugin_profiler_if_changed(&mut self, cx: &mut Context<Self>) {
-        let metrics = self.native_plugin_profiler_snapshot();
-        if metrics == self.native_plugin_runtime.profiler_snapshot {
+        let metrics = self.native_plugin_profiler_snapshot(cx);
+        let (previous_metrics, metrics) = self.plugin_entity.update(cx, |plugins, _cx| {
+            plugins.update_subscription_snapshot(
+                plugin_entity::PluginSubscriptionSample::Profiler,
+                metrics,
+            )
+        });
+        let Some(previous_metrics) = previous_metrics else {
             return;
-        }
-        let previous_timestamps =
-            native_plugin_profiler_timestamp_map(&self.native_plugin_runtime.profiler_snapshot);
+        };
+        let previous_timestamps = native_plugin_profiler_timestamp_map(&previous_metrics);
         let next_timestamps = native_plugin_profiler_timestamp_map(&metrics);
-        self.native_plugin_runtime.profiler_snapshot = metrics.clone();
 
         let subscriptions = self
-            .native_plugin_runtime
-            .registry
+            .plugin_entity
+            .read(cx)
+            .registry()
             .contributions()
             .runtime_event_subscriptions_for(
                 super::plugin_host::NATIVE_PLUGIN_PROFILER_METRICS_EVENT,
             );
-        if subscriptions.is_empty() || !native_plugin_profiler_metrics_due(self) {
+        let metrics_due = self.plugin_entity.update(cx, |plugins, _cx| {
+            plugins.runtime_profiler_metrics_due(NATIVE_PLUGIN_PROFILER_METRICS_INTERVAL)
+        });
+        if subscriptions.is_empty() || !metrics_due {
             return;
         }
-        self.native_plugin_runtime.profiler_last_emitted = Some(std::time::Instant::now());
 
         for entry in native_plugin_profiler_changed_metric_entries(
             &metrics,
@@ -1388,15 +1124,16 @@ impl WorkspaceApp {
 
     fn emit_native_plugin_ide_if_changed(&mut self, cx: &mut Context<Self>) {
         let next = self.native_plugin_ide_snapshot(cx);
-        if next == self.native_plugin_runtime.ide_snapshot {
+        let (previous, next) = self.plugin_entity.update(cx, |plugins, _cx| {
+            plugins.update_subscription_snapshot(plugin_entity::PluginSubscriptionSample::Ide, next)
+        });
+        let Some(previous) = previous else {
             return;
-        }
-        let previous_files = native_plugin_ide_file_map(&self.native_plugin_runtime.ide_snapshot);
+        };
+        let previous_files = native_plugin_ide_file_map(&previous);
         let next_files = native_plugin_ide_file_map(&next);
-        let previous_active =
-            native_plugin_ide_active_file_path(&self.native_plugin_runtime.ide_snapshot);
+        let previous_active = native_plugin_ide_active_file_path(&previous);
         let next_active = native_plugin_ide_active_file_path(&next);
-        self.native_plugin_runtime.ide_snapshot = next.clone();
 
         for (path, file) in &next_files {
             if !previous_files.contains_key(path) {
@@ -1429,13 +1166,14 @@ impl WorkspaceApp {
     }
 
     fn emit_native_plugin_ai_if_changed(&mut self, cx: &mut Context<Self>) {
-        let next = self.native_plugin_ai_snapshot();
-        if next == self.native_plugin_runtime.ai_snapshot {
+        let next = self.native_plugin_ai_snapshot(cx);
+        let (previous, next) = self.plugin_entity.update(cx, |plugins, _cx| {
+            plugins.update_subscription_snapshot(plugin_entity::PluginSubscriptionSample::Ai, next)
+        });
+        let Some(previous) = previous else {
             return;
-        }
-        let previous_counts =
-            native_plugin_ai_message_count_map(&self.native_plugin_runtime.ai_snapshot);
-        self.native_plugin_runtime.ai_snapshot = next.clone();
+        };
+        let previous_counts = native_plugin_ai_message_count_map(&previous);
 
         for event in native_plugin_ai_new_message_events(&next, &previous_counts) {
             // AI message events intentionally omit message content; plugins can
@@ -1449,7 +1187,10 @@ impl WorkspaceApp {
     }
 
     fn emit_native_plugin_event_log_entries(&mut self, cx: &mut Context<Self>) {
-        let last_seen = self.native_plugin_runtime.event_log_last_id;
+        let next_last_id = self.native_plugin_last_event_log_id();
+        let last_seen = self.plugin_entity.update(cx, |plugins, _cx| {
+            plugins.advance_event_log_last_id(next_last_id)
+        });
         let new_entries = self
             .notification_center
             .event_log
@@ -1458,19 +1199,14 @@ impl WorkspaceApp {
             .filter(|entry| entry.id > last_seen)
             .cloned()
             .collect::<Vec<_>>();
-        self.native_plugin_runtime.event_log_last_id = self.native_plugin_last_event_log_id();
         if new_entries.is_empty() {
             return;
         }
 
-        let has_subscribers = !self
-            .native_plugin_runtime
-            .registry
-            .contributions()
-            .runtime_event_subscriptions_for(
-                super::plugin_host::NATIVE_PLUGIN_EVENT_LOG_ENTRY_EVENT,
-            )
-            .is_empty();
+        let has_subscribers = self.has_native_plugin_subscription(
+            super::plugin_host::NATIVE_PLUGIN_EVENT_LOG_ENTRY_EVENT,
+            cx,
+        );
         if has_subscribers {
             for entry in new_entries {
                 // Tauri's onEntry subscription only invokes callbacks for
@@ -1486,214 +1222,97 @@ impl WorkspaceApp {
     }
 
     pub(super) fn bootstrap_native_plugin_runtime(&mut self, cx: &mut Context<Self>) {
-        let process_plans = self
-            .native_plugin_runtime
-            .registry
-            .process_activation_plans();
-        let wasm_plans = self.native_plugin_runtime.registry.wasm_activation_plans();
-        if process_plans.is_empty() && wasm_plans.is_empty() {
-            return;
-        }
-        self.start_native_plugin_runtime_services_if_needed(cx);
-
-        for plan in &process_plans {
-            let _ = self
-                .native_plugin_runtime
-                .registry
-                .mark_runtime_loading(&plan.plugin_id);
-        }
-        for plan in &wasm_plans {
-            let _ = self
-                .native_plugin_runtime
-                .registry
-                .mark_runtime_loading(&plan.plugin_id);
-        }
-
-        let (tx, rx) = mpsc::channel();
-        let host = self.native_plugin_runtime.host.clone();
         let host_api_resolver = self.native_plugin_host_api_resolver(cx);
         let wasm_sidecar_path =
             plugin_runtime::installed_wasm_sidecar_binary_path(self.settings_store.path());
         let wasm_sidecar_path = wasm_sidecar_path.is_file().then_some(wasm_sidecar_path);
-        self.forwarding_runtime.spawn(async move {
-            let mut host = host.lock().await;
-            host.set_wasm_sidecar_path(wasm_sidecar_path);
-            host.set_host_api_resolver(host_api_resolver);
-            // Tauri initializePluginSystem() loads enabled plugins sequentially.
-            // Native keeps that ordering for process/WASM runtimes so
-            // registration side effects are deterministic without executing JS
-            // modules or WebViews.
-            for plan in process_plans {
-                let plugin_id = plan.plugin_id.clone();
-                let result = match native_plugin_permissions(&plan.manifest, true) {
-                    Ok(permissions) => {
-                        host.activate_process_plugin(
-                            plan.manifest,
-                            plan.install_dir,
-                            plan.entry,
-                            permissions,
-                            NATIVE_PLUGIN_LIFECYCLE_TIMEOUT,
-                        )
-                        .await
-                    }
-                    Err(error) => Err(error),
-                };
-                if tx
-                    .send(NativePluginRuntimeDelivery::Activation { plugin_id, result })
-                    .is_err()
-                {
-                    return;
-                }
-            }
-            for plan in wasm_plans {
-                let plugin_id = plan.plugin_id.clone();
-                let result = match native_plugin_permissions(&plan.manifest, false) {
-                    Ok(permissions) => {
-                        host.activate_wasm_plugin(
-                            plan.manifest,
-                            plan.install_dir,
-                            plan.entry,
-                            permissions,
-                            NATIVE_PLUGIN_LIFECYCLE_TIMEOUT,
-                        )
-                        .await
-                    }
-                    Err(error) => Err(error),
-                };
-                if tx
-                    .send(NativePluginRuntimeDelivery::Activation { plugin_id, result })
-                    .is_err()
-                {
-                    return;
-                }
-            }
-            let _ = tx.send(NativePluginRuntimeDelivery::Finished);
+        let _started = self.plugin_entity.update(cx, |plugins, _cx| {
+            plugins.start_runtime_bootstrap(host_api_resolver, wasm_sidecar_path)
         });
-
-        cx.spawn(async move |weak, cx| {
-            loop {
-                Timer::after(NATIVE_PLUGIN_DELIVERY_POLL_INTERVAL).await;
-                let mut finished = false;
-                while let Ok(delivery) = rx.try_recv() {
-                    if matches!(delivery, NativePluginRuntimeDelivery::Finished) {
-                        finished = true;
-                    }
-                    if weak
-                        .update(cx, |workspace, cx| {
-                            workspace.handle_native_plugin_runtime_delivery(delivery, cx);
-                        })
-                        .is_err()
-                    {
-                        return;
-                    }
-                }
-                if finished {
-                    break;
-                }
-            }
-        })
-        .detach();
+        cx.notify();
     }
 
-    fn handle_native_plugin_runtime_delivery(
+    pub(in crate::workspace) fn apply_native_plugin_runtime_intents(
         &mut self,
-        delivery: NativePluginRuntimeDelivery,
         cx: &mut Context<Self>,
     ) {
-        match delivery {
-            NativePluginRuntimeDelivery::Activation { plugin_id, result } => {
-                self.handle_native_plugin_activation_result(plugin_id, result, cx);
-            }
-            NativePluginRuntimeDelivery::CommandDispatch { plugin_id, result } => {
-                self.handle_native_plugin_command_dispatch_result(plugin_id, result, cx);
-            }
-            NativePluginRuntimeDelivery::EventDispatch { plugin_id, result } => {
-                self.handle_native_plugin_event_dispatch_result(plugin_id, result, cx);
-            }
-            NativePluginRuntimeDelivery::Finished => {
-                cx.notify();
+        let intents = self
+            .plugin_entity
+            .update(cx, |plugins, _cx| plugins.take_runtime_intents());
+        for intent in intents {
+            match intent {
+                plugin_entity::PluginRuntimeIntent::ApplyEffects {
+                    plugin_id,
+                    effects,
+                    refresh,
+                } => {
+                    for effect in effects {
+                        self.handle_native_plugin_outbound_effect(&plugin_id, effect, cx);
+                    }
+                    self.refresh_native_plugin_event_polling(cx);
+                    match refresh {
+                        plugin_entity::PluginRuntimeAdapterRefresh::TerminalHooks => {
+                            self.refresh_native_plugin_terminal_hooks(cx)
+                        }
+                        plugin_entity::PluginRuntimeAdapterRefresh::TerminalInputInterceptors => {
+                            self.refresh_native_plugin_terminal_input_interceptors(cx)
+                        }
+                        plugin_entity::PluginRuntimeAdapterRefresh::All => {
+                            self.refresh_native_plugin_terminal_hooks(cx);
+                            self.refresh_native_plugin_terminal_input_interceptors(cx);
+                        }
+                    }
+                }
+                plugin_entity::PluginRuntimeIntent::StateChanged => {}
             }
         }
+        cx.notify();
     }
 
-    fn handle_native_plugin_activation_result(
+    pub(in crate::workspace) fn apply_native_plugin_oxide_import_intents(
         &mut self,
-        plugin_id: String,
-        result: Result<plugin_runtime::NativePluginRuntimeActivation, plugin_runtime::PluginError>,
         cx: &mut Context<Self>,
     ) {
-        let activation = match result {
-            Ok(activation) => activation,
-            Err(error) => {
-                // Keep actionable runtime codes in the persisted error so the
-                // plugin manager can render recovery actions after restart.
-                let message = if error.code == plugin_runtime::WASM_RUNTIME_NOT_INSTALLED_CODE {
-                    format!("{}: {}", error.code, error.message)
-                } else {
-                    error.message
-                };
-                let _ = self
-                    .native_plugin_runtime
-                    .registry
-                    .mark_runtime_error(&plugin_id, message);
-                cx.notify();
-                return;
-            }
-        };
-
-        if activation.plugin_id != plugin_id {
-            let _ = self.native_plugin_runtime.registry.mark_runtime_error(
-                &plugin_id,
-                format!(
-                    "Runtime activated plugin \"{}\" while loading \"{}\"",
-                    activation.plugin_id, plugin_id
-                ),
-            );
-            cx.notify();
-            return;
-        }
-
-        for message in &activation.messages {
-            if let Err(error) = self
-                .native_plugin_runtime
-                .registry
-                .apply_runtime_outbound_message(&plugin_id, message)
-            {
-                self.native_plugin_runtime
-                    .registry
-                    .cleanup_runtime_plugin_contributions(&plugin_id);
-                let _ = self
-                    .native_plugin_runtime
-                    .registry
-                    .mark_runtime_error(&plugin_id, error);
-                cx.notify();
-                return;
+        let intents = self
+            .plugin_entity
+            .update(cx, |plugins, _cx| plugins.take_oxide_import_intents());
+        for intent in intents {
+            match intent {
+                plugin_entity::PluginOxideImportIntent::Progress {
+                    plugin_id,
+                    registration_id,
+                    value,
+                } => {
+                    self.update_native_plugin_progress(&plugin_id, &registration_id, value, cx);
+                }
+                plugin_entity::PluginOxideImportIntent::Complete {
+                    plugin_id,
+                    progress_registration_id,
+                    request_id,
+                    result,
+                    options,
+                    response_tx,
+                } => {
+                    let response =
+                        self.finish_native_plugin_oxide_import(request_id, result, options, cx);
+                    if let Some(registration_id) = progress_registration_id {
+                        self.update_native_plugin_progress(
+                            &plugin_id,
+                            &registration_id,
+                            native_plugin_sync_progress_value(
+                                "Importing .oxide",
+                                "complete",
+                                1,
+                                1,
+                                true,
+                            ),
+                            cx,
+                        );
+                    }
+                    let _ = response_tx.send(response);
+                }
             }
         }
-
-        match &activation.response.result {
-            PluginResponseResult::Ok { .. } => {
-                let _ = self
-                    .native_plugin_runtime
-                    .registry
-                    .mark_runtime_active(&plugin_id);
-            }
-            PluginResponseResult::Error { error } => {
-                self.native_plugin_runtime
-                    .registry
-                    .cleanup_runtime_plugin_contributions(&plugin_id);
-                let _ = self
-                    .native_plugin_runtime
-                    .registry
-                    .mark_runtime_error(&plugin_id, error.message.clone());
-            }
-        }
-
-        for effect in activation.effects {
-            self.handle_native_plugin_outbound_effect(&plugin_id, effect, cx);
-        }
-        self.refresh_native_plugin_event_polling(cx);
-        self.refresh_native_plugin_terminal_hooks(cx);
         cx.notify();
     }
 
@@ -1703,50 +1322,10 @@ impl WorkspaceApp {
         command: String,
         cx: &mut Context<Self>,
     ) {
-        let host = self.native_plugin_runtime.host.clone();
         let host_api_resolver = self.native_plugin_host_api_resolver(cx);
-        let (tx, rx) = mpsc::channel();
-        self.forwarding_runtime.spawn({
-            let plugin_id = plugin_id;
-            let command = command;
-            async move {
-                let mut host = host.lock().await;
-                host.set_host_api_resolver(host_api_resolver);
-                let result = host
-                    .dispatch_command(
-                        &plugin_id,
-                        command,
-                        serde_json::Value::Null,
-                        NATIVE_PLUGIN_LIFECYCLE_TIMEOUT,
-                    )
-                    .await;
-                let _ = tx.send(NativePluginRuntimeDelivery::CommandDispatch { plugin_id, result });
-                let _ = tx.send(NativePluginRuntimeDelivery::Finished);
-            }
+        self.plugin_entity.update(cx, |plugins, _cx| {
+            plugins.start_runtime_command(plugin_id, command, host_api_resolver);
         });
-        cx.spawn(async move |weak, cx| {
-            loop {
-                Timer::after(NATIVE_PLUGIN_DELIVERY_POLL_INTERVAL).await;
-                let mut finished = false;
-                while let Ok(delivery) = rx.try_recv() {
-                    if matches!(delivery, NativePluginRuntimeDelivery::Finished) {
-                        finished = true;
-                    }
-                    if weak
-                        .update(cx, |workspace, cx| {
-                            workspace.handle_native_plugin_runtime_delivery(delivery, cx);
-                        })
-                        .is_err()
-                    {
-                        return;
-                    }
-                }
-                if finished {
-                    break;
-                }
-            }
-        })
-        .detach();
     }
 
     pub(super) fn dispatch_runtime_plugin_keybinding(
@@ -1760,8 +1339,9 @@ impl WorkspaceApp {
             return false;
         };
         let Some(keybinding) = self
-            .native_plugin_runtime
-            .registry
+            .plugin_entity
+            .read(cx)
+            .registry()
             .contributions()
             .runtime_keybinding_for_normalized_key(&normalized_keybinding)
             .cloned()
@@ -1774,106 +1354,6 @@ impl WorkspaceApp {
         // associated with the host-owned registration.
         self.dispatch_native_plugin_command(keybinding.plugin_id, keybinding.command, cx);
         true
-    }
-
-    fn handle_native_plugin_command_dispatch_result(
-        &mut self,
-        plugin_id: String,
-        result: Result<
-            plugin_runtime::NativePluginRuntimeCommandDispatch,
-            plugin_runtime::PluginError,
-        >,
-        cx: &mut Context<Self>,
-    ) {
-        let dispatch = match result {
-            Ok(dispatch) => dispatch,
-            Err(error) => {
-                self.native_plugin_runtime.registry.record_manager_error(
-                    plugin_id,
-                    format!("Native plugin command dispatch failed: {}", error.message),
-                );
-                cx.notify();
-                return;
-            }
-        };
-
-        for message in &dispatch.messages {
-            if let Err(error) = self
-                .native_plugin_runtime
-                .registry
-                .apply_runtime_outbound_message(&dispatch.plugin_id, message)
-            {
-                self.native_plugin_runtime.registry.record_manager_error(
-                    dispatch.plugin_id.clone(),
-                    format!("Native plugin command contribution update failed: {error}"),
-                );
-            }
-        }
-        if let PluginResponseResult::Error { error } = &dispatch.response.result {
-            self.native_plugin_runtime.registry.record_manager_error(
-                dispatch.plugin_id.clone(),
-                format!(
-                    "Native plugin command \"{}\" failed: {}",
-                    dispatch.command, error.message
-                ),
-            );
-        }
-        for effect in dispatch.effects {
-            self.handle_native_plugin_outbound_effect(&dispatch.plugin_id, effect, cx);
-        }
-        self.refresh_native_plugin_event_polling(cx);
-        self.refresh_native_plugin_terminal_hooks(cx);
-        cx.notify();
-    }
-
-    fn handle_native_plugin_event_dispatch_result(
-        &mut self,
-        plugin_id: String,
-        result: Result<
-            plugin_runtime::NativePluginRuntimeEventDispatch,
-            plugin_runtime::PluginError,
-        >,
-        cx: &mut Context<Self>,
-    ) {
-        let dispatch = match result {
-            Ok(dispatch) => dispatch,
-            Err(error) => {
-                self.native_plugin_runtime.registry.record_manager_error(
-                    plugin_id,
-                    format!("Native plugin event dispatch failed: {}", error.message),
-                );
-                cx.notify();
-                return;
-            }
-        };
-
-        for message in &dispatch.messages {
-            if let Err(error) = self
-                .native_plugin_runtime
-                .registry
-                .apply_runtime_outbound_message(&dispatch.plugin_id, message)
-            {
-                self.native_plugin_runtime.registry.record_manager_error(
-                    dispatch.plugin_id.clone(),
-                    format!("Native plugin event contribution update failed: {error}"),
-                );
-            }
-        }
-        if let PluginResponseResult::Error { error } = &dispatch.response.result {
-            self.native_plugin_runtime.registry.record_manager_error(
-                dispatch.plugin_id.clone(),
-                format!(
-                    "Native plugin event \"{}\" failed: {}",
-                    dispatch.event.name, error.message
-                ),
-            );
-        }
-        for effect in dispatch.effects {
-            self.handle_native_plugin_outbound_effect(&dispatch.plugin_id, effect, cx);
-        }
-        self.refresh_native_plugin_event_polling(cx);
-        self.refresh_native_plugin_terminal_input_interceptors(cx);
-        cx.notify();
     }
 
     pub(super) fn emit_native_plugin_event_to_subscribers(
@@ -1893,8 +1373,9 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) {
         let subscriptions = self
-            .native_plugin_runtime
-            .registry
+            .plugin_entity
+            .read(cx)
+            .registry()
             .contributions()
             .runtime_event_subscriptions_for(event_name);
         for subscription in subscriptions {
@@ -1927,48 +1408,14 @@ impl WorkspaceApp {
         payload: serde_json::Value,
         cx: &mut Context<Self>,
     ) {
-        let host = self.native_plugin_runtime.host.clone();
         let host_api_resolver = self.native_plugin_host_api_resolver(cx);
-        let (tx, rx) = mpsc::channel();
         let event = plugin_runtime::PluginEvent {
             name: event_name.to_string(),
             payload,
         };
-        self.forwarding_runtime.spawn({
-            let plugin_id = plugin_id;
-            async move {
-                let mut host = host.lock().await;
-                host.set_host_api_resolver(host_api_resolver);
-                let result = host
-                    .dispatch_event(&plugin_id, event, NATIVE_PLUGIN_LIFECYCLE_TIMEOUT)
-                    .await;
-                let _ = tx.send(NativePluginRuntimeDelivery::EventDispatch { plugin_id, result });
-                let _ = tx.send(NativePluginRuntimeDelivery::Finished);
-            }
+        self.plugin_entity.update(cx, |plugins, _cx| {
+            plugins.start_runtime_event(plugin_id, event, host_api_resolver);
         });
-        cx.spawn(async move |weak, cx| {
-            loop {
-                Timer::after(NATIVE_PLUGIN_DELIVERY_POLL_INTERVAL).await;
-                let mut finished = false;
-                while let Ok(delivery) = rx.try_recv() {
-                    if matches!(delivery, NativePluginRuntimeDelivery::Finished) {
-                        finished = true;
-                    }
-                    if weak
-                        .update(cx, |workspace, cx| {
-                            workspace.handle_native_plugin_runtime_delivery(delivery, cx);
-                        })
-                        .is_err()
-                    {
-                        return;
-                    }
-                }
-                if finished {
-                    break;
-                }
-            }
-        })
-        .detach();
     }
 
     fn native_plugin_host_api_resolver(
@@ -1976,18 +1423,16 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> plugin_runtime::NativeHostApiResolver {
         let snapshot = native_plugin_host_api_snapshot_from_workspace(self, cx);
-        let confirm_tx = self.native_plugin_runtime.confirm_tx.clone();
-        let terminal_tx = self.native_plugin_runtime.terminal_tx.clone();
-        let sync_tx = self.native_plugin_runtime.sync_tx.clone();
+        let request_senders = self.plugin_entity.read(cx).runtime_request_senders();
         let sftp_router = self.node_router.clone();
         let sftp_runtime = self.forwarding_runtime.clone();
-        let forwarding_registry = self.forwarding_registry.clone();
+        let forwarding_registry = self.forwarding_service.registry().clone();
         let forwarding_runtime = self.forwarding_runtime.clone();
         let transfer_manager = self.sftp_transfer_manager.clone();
-        let profiler_registry = self.connection_monitor.profiler_registry.clone();
+        let profiler_registry = self.host_tools.read(cx).profiler_registry().clone();
         let profiler_node_connection_ids = native_plugin_profiler_node_connection_ids(self);
         let ide_snapshot = self.native_plugin_ide_snapshot(cx);
-        let ai_snapshot = self.native_plugin_ai_snapshot();
+        let ai_snapshot = self.native_plugin_ai_snapshot(cx);
         let forward_valid_owner_connection_ids = self
             .connection_store
             .connections()
@@ -2000,7 +1445,8 @@ impl WorkspaceApp {
             self.connection_store.export_saved_connections_snapshot();
         let sync_local_metadata = self.connection_store.local_sync_metadata();
         let sync_saved_forwards_revision = self
-            .forwarding_registry
+            .forwarding_service
+            .registry()
             .export_saved_forwards_snapshot()
             .ok()
             .map(|snapshot| snapshot.revision);
@@ -2009,10 +1455,11 @@ impl WorkspaceApp {
                 .unwrap_or_default();
         let sync_plugin_settings_revisions =
             native_plugin_settings_revision_map(&sync_plugin_settings);
-        let plugin_secret_store = self.ai.models.key_store.clone();
+        let plugin_secret_store = self.ai_entity.read(cx).key_store().clone();
         let telnet_transport_plugins = self
-            .native_plugin_runtime
-            .registry
+            .plugin_entity
+            .read(cx)
+            .registry()
             .contributions()
             .terminal_transports
             .iter()
@@ -2039,14 +1486,14 @@ impl WorkspaceApp {
                 return Some(native_plugin_show_progress_response(
                     &plugin_id,
                     call,
-                    Some(&sync_tx),
+                    Some(&request_senders.sync),
                 ));
             }
             if call.namespace == "ui" && call.method == "showConfirm" {
                 return Some(native_plugin_show_confirm_response(
                     &plugin_id,
                     call,
-                    &confirm_tx,
+                    &request_senders.confirm,
                 ));
             }
             if call.namespace == "secrets" {
@@ -2094,7 +1541,7 @@ impl WorkspaceApp {
                     sync_saved_forwards_revision.as_deref(),
                     &sync_plugin_settings,
                     &sync_plugin_settings_revisions,
-                    Some(&sync_tx),
+                    Some(&request_senders.sync),
                 ));
             }
             if call.namespace == "transfers" {
@@ -2134,7 +1581,10 @@ impl WorkspaceApp {
                     "writeToActive" | "writeToNode" | "clearBuffer"
                 )
             {
-                return Some(native_plugin_terminal_response(call, &terminal_tx));
+                return Some(native_plugin_terminal_response(
+                    call,
+                    &request_senders.terminal,
+                ));
             }
             if call.namespace == "terminal" && call.method == "openTelnet" {
                 if !telnet_transport_plugins.contains(&plugin_id) {
@@ -2146,7 +1596,10 @@ impl WorkspaceApp {
                         ),
                     ));
                 }
-                return Some(native_plugin_terminal_response(call, &terminal_tx));
+                return Some(native_plugin_terminal_response(
+                    call,
+                    &request_senders.terminal,
+                ));
             }
             native_plugin_returnable_host_api_response(&snapshot, &plugin_id, call)
         })
@@ -2168,7 +1621,7 @@ impl WorkspaceApp {
             plugin_runtime::PluginOutboundEffect::Progress {
                 registration_id,
                 value,
-            } => self.update_native_plugin_progress(plugin_id, registration_id, value, cx),
+            } => self.update_native_plugin_progress(plugin_id, &registration_id, value, cx),
             _ => {}
         }
     }
@@ -2247,8 +1700,8 @@ impl WorkspaceApp {
             return;
         }
         match (namespace, method) {
-            ("ui", "showToast") => self.push_native_plugin_toast(plugin_id, args),
-            ("ui", "showNotification") => self.push_native_plugin_notification(plugin_id, args),
+            ("ui", "showToast") => self.push_native_plugin_toast(plugin_id, args, cx),
+            ("ui", "showNotification") => self.push_native_plugin_notification(plugin_id, args, cx),
             ("ui", "registerTabView") => self.register_native_plugin_ui_contribution(
                 plugin_id,
                 plugin_runtime::PluginRegistrationKind::Tab,
@@ -2277,16 +1730,20 @@ impl WorkspaceApp {
                 self.refresh_native_after_external_sync(plugin_id, cx)
             }
             ("events", "emit") => self.emit_native_plugin_custom_event(plugin_id, args, cx),
-            ("storage", "set") => self.set_native_plugin_storage(plugin_id, args),
-            ("storage", "remove") => self.remove_native_plugin_storage(plugin_id, args),
+            ("storage", "set") => self.set_native_plugin_storage(plugin_id, args, cx),
+            ("storage", "remove") => self.remove_native_plugin_storage(plugin_id, args, cx),
             ("settings", "set") => self.set_native_plugin_setting(plugin_id, args, cx),
             ("settings", "applySyncableSettings") => {
                 self.apply_native_plugin_syncable_settings(plugin_id, args, cx)
             }
-            _ => self.native_plugin_runtime.registry.record_manager_error(
-                plugin_id.to_string(),
-                format!("Unsupported native plugin host call \"{namespace}.{method}\""),
-            ),
+            _ => {
+                self.plugin_entity.update(cx, |plugins, _cx| {
+                    plugins.registry_mut().record_manager_error(
+                        plugin_id.to_string(),
+                        format!("Unsupported native plugin host call \"{namespace}.{method}\""),
+                    );
+                });
+            }
         }
     }
 
@@ -2301,21 +1758,28 @@ impl WorkspaceApp {
             Ok(registration) => {
                 // Runtime protocol frames and ctx.ui calls share one mutation
                 // path so manifest gates and schema validation cannot diverge.
-                if let Err(error) = self
-                    .native_plugin_runtime
-                    .registry
-                    .apply_runtime_registration(registration)
-                {
-                    self.native_plugin_runtime.registry.record_manager_error(
+                let registration_result = self.plugin_entity.update(cx, |plugins, _cx| {
+                    plugins
+                        .registry_mut()
+                        .apply_runtime_registration(registration)
+                });
+                if let Err(error) = registration_result {
+                    self.plugin_entity.update(cx, |plugins, _cx| {
+                        plugins.registry_mut().record_manager_error(
+                            plugin_id.to_string(),
+                            format!("Native plugin UI registration failed: {error}"),
+                        );
+                    });
+                }
+            }
+            Err(error) => {
+                self.plugin_entity.update(cx, |plugins, _cx| {
+                    plugins.registry_mut().record_manager_error(
                         plugin_id.to_string(),
                         format!("Native plugin UI registration failed: {error}"),
                     );
-                }
+                });
             }
-            Err(error) => self.native_plugin_runtime.registry.record_manager_error(
-                plugin_id.to_string(),
-                format!("Native plugin UI registration failed: {error}"),
-            ),
         }
         cx.notify();
     }
@@ -2327,21 +1791,30 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) {
         let Some(tab_id) = native_plugin_ui_tab_id_arg(&args) else {
-            self.native_plugin_runtime.registry.record_manager_error(
-                plugin_id.to_string(),
-                "Native plugin ui.openTab requires args.tabId".to_string(),
-            );
+            self.plugin_entity.update(cx, |plugins, _cx| {
+                plugins.registry_mut().record_manager_error(
+                    plugin_id.to_string(),
+                    "Native plugin ui.openTab requires args.tabId".to_string(),
+                );
+            });
             return;
         };
         if let Err(error) = self.open_native_plugin_tab(plugin_id, &tab_id, cx) {
-            self.native_plugin_runtime.registry.record_manager_error(
-                plugin_id.to_string(),
-                format!("Native plugin ui.openTab failed: {error}"),
-            );
+            self.plugin_entity.update(cx, |plugins, _cx| {
+                plugins.registry_mut().record_manager_error(
+                    plugin_id.to_string(),
+                    format!("Native plugin ui.openTab failed: {error}"),
+                );
+            });
         }
     }
 
-    fn push_native_plugin_toast(&mut self, plugin_id: &str, args: serde_json::Value) {
+    fn push_native_plugin_toast(
+        &mut self,
+        plugin_id: &str,
+        args: serde_json::Value,
+        cx: &mut Context<Self>,
+    ) {
         let title = args
             .get("title")
             .and_then(|value| value.as_str())
@@ -2357,22 +1830,27 @@ impl WorkspaceApp {
             .map(native_plugin_toast_variant)
             .unwrap_or(TerminalNoticeVariant::Default);
 
-        let id = self.next_workspace_toast_id();
-        self.workspace_toasts.push(WorkspaceToast {
-            id,
-            notice: TerminalNotice {
-                title: native_plugin_notice_title(plugin_id, title),
-                description,
-                status_text: None,
-                progress: None,
-                variant,
+        self.apply_workspace_overlay_intent(
+            WorkspaceOverlayIntent::Notice {
+                notice: TerminalNotice {
+                    title: native_plugin_notice_title(plugin_id, title),
+                    description,
+                    status_text: None,
+                    progress: None,
+                    variant,
+                },
+                ttl: NATIVE_PLUGIN_TOAST_TTL,
             },
-            expires_at: std::time::Instant::now() + NATIVE_PLUGIN_TOAST_TTL,
-            presence: oxideterm_gpui_ui::motion::ExitPresence::visible(),
-        });
+            cx,
+        );
     }
 
-    fn push_native_plugin_notification(&mut self, plugin_id: &str, args: serde_json::Value) {
+    fn push_native_plugin_notification(
+        &mut self,
+        plugin_id: &str,
+        args: serde_json::Value,
+        cx: &mut Context<Self>,
+    ) {
         let title = args
             .get("title")
             .and_then(|value| value.as_str())
@@ -2388,27 +1866,29 @@ impl WorkspaceApp {
             .map(native_plugin_notification_variant)
             .unwrap_or(TerminalNoticeVariant::Default);
 
-        let id = self.next_workspace_toast_id();
-        self.workspace_toasts.push(WorkspaceToast {
-            id,
-            notice: TerminalNotice {
-                title: native_plugin_notice_title(plugin_id, title),
-                description,
-                status_text: None,
-                progress: None,
-                variant,
+        self.apply_workspace_overlay_intent(
+            WorkspaceOverlayIntent::Notice {
+                notice: TerminalNotice {
+                    title: native_plugin_notice_title(plugin_id, title),
+                    description,
+                    status_text: None,
+                    progress: None,
+                    variant,
+                },
+                ttl: NATIVE_PLUGIN_TOAST_TTL,
             },
-            expires_at: std::time::Instant::now() + NATIVE_PLUGIN_TOAST_TTL,
-            presence: oxideterm_gpui_ui::motion::ExitPresence::visible(),
-        });
+            cx,
+        );
     }
 
     fn refresh_native_after_external_sync(&mut self, plugin_id: &str, cx: &mut Context<Self>) {
         if let Err(error) = self.reload_after_external_sync(cx) {
-            self.native_plugin_runtime.registry.record_manager_error(
-                plugin_id.to_string(),
-                format!("Native plugin app.refreshAfterExternalSync failed: {error}"),
-            );
+            self.plugin_entity.update(cx, |plugins, _cx| {
+                plugins.registry_mut().record_manager_error(
+                    plugin_id.to_string(),
+                    format!("Native plugin app.refreshAfterExternalSync failed: {error}"),
+                );
+            });
         }
     }
 
@@ -2422,54 +1902,78 @@ impl WorkspaceApp {
             Ok((event_key, payload)) => {
                 self.emit_native_plugin_event_to_subscribers(&event_key, payload, cx);
             }
-            Err(error) => self.native_plugin_runtime.registry.record_manager_error(
-                plugin_id.to_string(),
-                format!("Native plugin events.emit failed: {error}"),
-            ),
+            Err(error) => {
+                self.plugin_entity.update(cx, |plugins, _cx| {
+                    plugins.registry_mut().record_manager_error(
+                        plugin_id.to_string(),
+                        format!("Native plugin events.emit failed: {error}"),
+                    );
+                });
+            }
         }
     }
 
-    fn set_native_plugin_storage(&mut self, plugin_id: &str, args: serde_json::Value) {
+    fn set_native_plugin_storage(
+        &mut self,
+        plugin_id: &str,
+        args: serde_json::Value,
+        cx: &mut Context<Self>,
+    ) {
         let Some(key) = args.get("key").and_then(serde_json::Value::as_str) else {
-            self.native_plugin_runtime.registry.record_manager_error(
-                plugin_id.to_string(),
-                "Native plugin storage.set requires args.key".to_string(),
-            );
+            self.plugin_entity.update(cx, |plugins, _cx| {
+                plugins.registry_mut().record_manager_error(
+                    plugin_id.to_string(),
+                    "Native plugin storage.set requires args.key".to_string(),
+                );
+            });
             return;
         };
         let value = args
             .get("value")
             .cloned()
             .unwrap_or(serde_json::Value::Null);
-        if let Err(error) = self
-            .native_plugin_runtime
-            .registry
-            .set_plugin_storage_value(plugin_id, key, value)
-        {
-            self.native_plugin_runtime.registry.record_manager_error(
-                plugin_id.to_string(),
-                format!("Native plugin storage.set failed: {error}"),
-            );
+        let result = self.plugin_entity.update(cx, |plugins, _cx| {
+            plugins
+                .registry_mut()
+                .set_plugin_storage_value(plugin_id, key, value)
+        });
+        if let Err(error) = result {
+            self.plugin_entity.update(cx, |plugins, _cx| {
+                plugins.registry_mut().record_manager_error(
+                    plugin_id.to_string(),
+                    format!("Native plugin storage.set failed: {error}"),
+                );
+            });
         }
     }
 
-    fn remove_native_plugin_storage(&mut self, plugin_id: &str, args: serde_json::Value) {
+    fn remove_native_plugin_storage(
+        &mut self,
+        plugin_id: &str,
+        args: serde_json::Value,
+        cx: &mut Context<Self>,
+    ) {
         let Some(key) = args.get("key").and_then(serde_json::Value::as_str) else {
-            self.native_plugin_runtime.registry.record_manager_error(
-                plugin_id.to_string(),
-                "Native plugin storage.remove requires args.key".to_string(),
-            );
+            self.plugin_entity.update(cx, |plugins, _cx| {
+                plugins.registry_mut().record_manager_error(
+                    plugin_id.to_string(),
+                    "Native plugin storage.remove requires args.key".to_string(),
+                );
+            });
             return;
         };
-        if let Err(error) = self
-            .native_plugin_runtime
-            .registry
-            .remove_plugin_storage_value(plugin_id, key)
-        {
-            self.native_plugin_runtime.registry.record_manager_error(
-                plugin_id.to_string(),
-                format!("Native plugin storage.remove failed: {error}"),
-            );
+        let result = self.plugin_entity.update(cx, |plugins, _cx| {
+            plugins
+                .registry_mut()
+                .remove_plugin_storage_value(plugin_id, key)
+        });
+        if let Err(error) = result {
+            self.plugin_entity.update(cx, |plugins, _cx| {
+                plugins.registry_mut().record_manager_error(
+                    plugin_id.to_string(),
+                    format!("Native plugin storage.remove failed: {error}"),
+                );
+            });
         }
     }
 
@@ -2480,10 +1984,12 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) {
         let Some(key) = args.get("key").and_then(serde_json::Value::as_str) else {
-            self.native_plugin_runtime.registry.record_manager_error(
-                plugin_id.to_string(),
-                "Native plugin settings.set requires args.key".to_string(),
-            );
+            self.plugin_entity.update(cx, |plugins, _cx| {
+                plugins.registry_mut().record_manager_error(
+                    plugin_id.to_string(),
+                    "Native plugin settings.set requires args.key".to_string(),
+                );
+            });
             return;
         };
         let value = args
@@ -2492,10 +1998,12 @@ impl WorkspaceApp {
             .unwrap_or(serde_json::Value::Null);
         if let Err(error) = self.set_native_plugin_setting_value_and_emit(plugin_id, key, value, cx)
         {
-            self.native_plugin_runtime.registry.record_manager_error(
-                plugin_id.to_string(),
-                format!("Native plugin settings.set failed: {error}"),
-            );
+            self.plugin_entity.update(cx, |plugins, _cx| {
+                plugins.registry_mut().record_manager_error(
+                    plugin_id.to_string(),
+                    format!("Native plugin settings.set failed: {error}"),
+                );
+            });
         }
     }
 
@@ -2506,19 +2014,24 @@ impl WorkspaceApp {
         value: serde_json::Value,
         cx: &mut Context<Self>,
     ) -> Result<(), String> {
-        self.native_plugin_runtime
-            .registry
-            .set_plugin_setting_value(plugin_id, key, value)?;
+        let current_value = self.plugin_entity.update(cx, |plugins, _cx| {
+            plugins
+                .registry_mut()
+                .set_plugin_setting_value(plugin_id, key, value)?;
+            Ok::<serde_json::Value, String>(
+                plugins
+                    .registry()
+                    .plugin_setting_value(plugin_id, key)
+                    .unwrap_or(serde_json::Value::Null),
+            )
+        })?;
         self.emit_native_plugin_event_to_matching_subscribers(
             super::plugin_host::NATIVE_PLUGIN_SETTING_CHANGED_EVENT,
             Some(plugin_id),
             serde_json::json!({
                 "pluginId": plugin_id,
                 "key": key,
-                "value": self
-                    .native_plugin_runtime.registry
-                    .plugin_setting_value(plugin_id, key)
-                    .unwrap_or(serde_json::Value::Null),
+                "value": current_value,
             }),
             cx,
         );
@@ -2534,49 +2047,43 @@ impl WorkspaceApp {
         let payload = native_syncable_settings_payload_arg(args);
         let normalized = native_normalize_syncable_settings_payload(&payload);
         if let Err(error) = native_apply_syncable_settings_payload(self, &normalized.payload, cx) {
-            self.native_plugin_runtime.registry.record_manager_error(
-                plugin_id.to_string(),
-                format!("Native plugin settings.applySyncableSettings failed: {error}"),
-            );
+            self.plugin_entity.update(cx, |plugins, _cx| {
+                plugins.registry_mut().record_manager_error(
+                    plugin_id.to_string(),
+                    format!("Native plugin settings.applySyncableSettings failed: {error}"),
+                );
+            });
         }
     }
 
     fn update_native_plugin_progress(
         &mut self,
         plugin_id: &str,
-        registration_id: String,
+        registration_id: &str,
         value: serde_json::Value,
         cx: &mut Context<Self>,
     ) {
-        let progress_key = native_plugin_progress_key(plugin_id, &registration_id);
+        let progress_key = native_plugin_progress_key(plugin_id, registration_id);
         if native_plugin_progress_is_done(&value) {
-            self.dismiss_plugin_progress_toast(&progress_key, cx);
+            self.apply_workspace_overlay_intent(
+                WorkspaceOverlayIntent::DismissPluginProgress { key: progress_key },
+                cx,
+            );
             return;
         }
 
-        let notice = native_plugin_progress_notice(plugin_id, &registration_id, value);
+        let notice = native_plugin_progress_notice(plugin_id, registration_id, value);
         // Tauri plugin progress is host-owned and keyed by reporter id. Native
         // updates the same toast entry instead of appending one toast per event
         // burst, which keeps noisy process runtimes from flooding the overlay.
-        let expires_at = std::time::Instant::now() + NATIVE_PLUGIN_TOAST_TTL;
-        if let Some(toast) = self.plugin_progress_toasts.get_mut(&progress_key) {
-            toast.notice = notice;
-            toast.expires_at = expires_at;
-            if toast.presence.phase() == oxideterm_gpui_ui::motion::ExitPhase::Exiting {
-                toast.presence.reopen();
-            }
-        } else {
-            let id = self.next_workspace_toast_id();
-            self.plugin_progress_toasts.insert(
-                progress_key,
-                WorkspaceToast {
-                    id,
-                    notice,
-                    expires_at,
-                    presence: oxideterm_gpui_ui::motion::ExitPresence::visible(),
-                },
-            );
-        }
+        self.apply_workspace_overlay_intent(
+            WorkspaceOverlayIntent::PluginProgress {
+                key: progress_key,
+                notice,
+                ttl: NATIVE_PLUGIN_TOAST_TTL,
+            },
+            cx,
+        );
     }
 }
 
@@ -2589,7 +2096,7 @@ fn native_plugin_toast_variant(variant: &str) -> TerminalNoticeVariant {
     }
 }
 
-fn native_plugin_permissions(
+pub(in crate::workspace) fn native_plugin_permissions(
     manifest: &plugin_host::NativePluginManifest,
     trusted_process: bool,
 ) -> Result<plugin_runtime::PluginPermissionSet, plugin_runtime::PluginError> {

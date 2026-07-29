@@ -1,9 +1,11 @@
 use super::*;
+mod entity;
+
+pub(in crate::workspace) use entity::CommandPaletteEntity;
+use entity::CommandPaletteView;
 #[cfg(test)]
 use oxideterm_connections::is_literal_ssh_config_alias_query;
-use oxideterm_connections::{
-    list_ssh_config_hosts, resolve_ssh_config_alias, saved_connection_from_ssh_host,
-};
+use oxideterm_connections::{resolve_ssh_config_alias, saved_connection_from_ssh_host};
 use oxideterm_gpui_settings_view::{OXIDE_THEME_IDS, built_in_theme_exists, is_oxide_theme};
 use oxideterm_gpui_ui::{
     modal::{
@@ -15,7 +17,9 @@ use oxideterm_gpui_ui::{
 use oxideterm_remote_desktop::{RemoteDesktopConnectionProfile, RemoteDesktopProtocol};
 use oxideterm_ssh_launch::{format_user_host_port_target, parse_explicit_user_host_port_target};
 use oxideterm_theme::BUILT_IN_THEMES;
-use oxideterm_workspace::{command_palette_match, parse_command_palette_query};
+use oxideterm_workspace::{
+    CommandPaletteMode as PaletteMode, command_palette_match, parse_command_palette_query,
+};
 use std::borrow::Cow;
 
 const COMMAND_PALETTE_WIDTH: f32 = 560.0; // Tauri DialogContent max-w-[560px].
@@ -105,6 +109,12 @@ enum PaletteAction {
 }
 
 #[derive(Clone)]
+struct PaletteExecution {
+    id: String,
+    action: PaletteAction,
+}
+
+#[derive(Clone)]
 struct CommandSpec {
     id: &'static str,
     label_key: Cow<'static, str>,
@@ -143,69 +153,42 @@ enum ShortcutsModalVirtualRow {
 impl WorkspaceApp {
     pub(super) fn open_command_palette(&mut self, cx: &mut Context<Self>) {
         self.bootstrap_native_plugin_runtime(cx);
-        self.release_active_remote_desktop_inputs();
-        self.command_palette.open = true;
-        self.command_palette.raw_query.clear();
-        self.command_palette.mode = PaletteMode::All;
-        self.command_palette.selected_index = 0;
-        self.command_palette.error = None;
+        self.release_active_remote_desktop_inputs(cx);
+        let auto_load_hosts = self.settings_store.settings().ssh_config.auto_load_hosts;
+        let existing_names = self.command_palette_existing_connection_names();
+        self.command_palette.update(cx, |palette, cx| {
+            palette.open(auto_load_hosts, existing_names, cx);
+        });
         self.ime_marked_text = None;
-        self.command_palette.scroll_handle = UniformListScrollHandle::new();
-        self.load_command_palette_ssh_config_hosts(cx);
         cx.notify();
     }
 
     pub(super) fn close_command_palette(&mut self, cx: &mut Context<Self>) {
-        self.command_palette.open = false;
-        self.command_palette.raw_query.clear();
-        self.command_palette.mode = PaletteMode::All;
-        self.command_palette.selected_index = 0;
-        self.command_palette.error = None;
+        self.command_palette.update(cx, |palette, cx| {
+            palette.close(cx);
+        });
         self.ime_marked_text = None;
         cx.notify();
     }
 
     pub(super) fn load_command_palette_ssh_config_hosts(&mut self, cx: &mut Context<Self>) {
-        if !self.settings_store.settings().ssh_config.auto_load_hosts {
-            self.command_palette.ssh_config_hosts.clear();
-            self.command_palette.ssh_config_hosts_loading = false;
-            return;
-        }
-        self.command_palette.ssh_config_hosts_loading = true;
-        self.command_palette.error = None;
-        let runtime = self.forwarding_runtime.clone();
-        let existing_names = self
-            .connection_store
+        let auto_load_hosts = self.settings_store.settings().ssh_config.auto_load_hosts;
+        let existing_names = self.command_palette_existing_connection_names();
+        self.command_palette.update(cx, |palette, cx| {
+            palette.reload_ssh_config_hosts(auto_load_hosts, existing_names, cx);
+        });
+    }
+
+    fn command_palette_existing_connection_names(&self) -> HashSet<String> {
+        self.connection_store
             .connections()
             .iter()
             .map(|conn| conn.name.clone())
-            .collect::<HashSet<_>>();
-        cx.spawn(async move |weak, cx| {
-            let result = runtime
-                .spawn_blocking(move || list_ssh_config_hosts(&existing_names))
-                .await
-                .map_err(|error| error.to_string())
-                .and_then(|result| result.map_err(|error| error.to_string()));
-            let _ = weak.update(cx, |this, cx| {
-                this.command_palette.ssh_config_hosts_loading = false;
-                match result {
-                    Ok(hosts) => {
-                        this.command_palette.ssh_config_hosts = hosts;
-                        this.command_palette.error = None;
-                    }
-                    Err(error) => {
-                        this.command_palette.ssh_config_hosts.clear();
-                        this.command_palette.error = Some(error);
-                    }
-                }
-                cx.notify();
-            });
-        })
-        .detach();
+            .collect()
     }
 
     pub(super) fn open_shortcuts_modal(&mut self, cx: &mut Context<Self>) {
-        self.release_active_remote_desktop_inputs();
+        self.release_active_remote_desktop_inputs(cx);
         self.shortcuts_modal.open = true;
         self.shortcuts_modal.query.clear();
         self.shortcuts_modal.scroll_handle = UniformListScrollHandle::new();
@@ -233,69 +216,61 @@ impl WorkspaceApp {
                 self.execute_selected_command_palette_item(window, cx);
             }
             "arrowdown" | "down" => {
-                let count = self.filtered_command_palette_items().len();
-                if count > 0 {
-                    let next = (self.command_palette.selected_index + 1).min(count - 1);
-                    if self.command_palette.selected_index != next {
-                        // Boundary navigation is a no-op; avoid repainting the
-                        // whole palette when the browser selection would stay put.
-                        self.command_palette.selected_index = next;
-                        self.scroll_selected_command_palette_item_into_view();
-                        cx.notify();
-                    }
+                let count = self.filtered_command_palette_items(cx).len();
+                let changed = self.command_palette.update(cx, |palette, cx| {
+                    palette.move_selection_forward(count, 1, cx)
+                });
+                if changed {
+                    self.scroll_selected_command_palette_item_into_view(cx);
                 }
             }
             "arrowup" | "up" => {
-                let next = self.command_palette.selected_index.saturating_sub(1);
-                if self.command_palette.selected_index != next {
-                    self.command_palette.selected_index = next;
-                    self.scroll_selected_command_palette_item_into_view();
-                    cx.notify();
+                let count = self.filtered_command_palette_items(cx).len();
+                let changed = self.command_palette.update(cx, |palette, cx| {
+                    palette.move_selection_backward(count, 1, cx)
+                });
+                if changed {
+                    self.scroll_selected_command_palette_item_into_view(cx);
                 }
             }
             "pagedown" => {
-                let count = self.filtered_command_palette_items().len();
-                if count > 0 {
-                    let next = (self.command_palette.selected_index + 8).min(count - 1);
-                    if self.command_palette.selected_index != next {
-                        self.command_palette.selected_index = next;
-                        self.scroll_selected_command_palette_item_into_view();
-                        cx.notify();
-                    }
+                let count = self.filtered_command_palette_items(cx).len();
+                let changed = self.command_palette.update(cx, |palette, cx| {
+                    palette.move_selection_forward(count, 8, cx)
+                });
+                if changed {
+                    self.scroll_selected_command_palette_item_into_view(cx);
                 }
             }
             "pageup" => {
-                let next = self.command_palette.selected_index.saturating_sub(8);
-                if self.command_palette.selected_index != next {
-                    self.command_palette.selected_index = next;
-                    self.scroll_selected_command_palette_item_into_view();
-                    cx.notify();
+                let count = self.filtered_command_palette_items(cx).len();
+                let changed = self.command_palette.update(cx, |palette, cx| {
+                    palette.move_selection_backward(count, 8, cx)
+                });
+                if changed {
+                    self.scroll_selected_command_palette_item_into_view(cx);
                 }
             }
             "home" => {
-                if self.command_palette.selected_index != 0 {
-                    self.command_palette.selected_index = 0;
-                    self.scroll_selected_command_palette_item_into_view();
-                    cx.notify();
+                let changed = self
+                    .command_palette
+                    .update(cx, |palette, cx| palette.select_first(cx));
+                if changed {
+                    self.scroll_selected_command_palette_item_into_view(cx);
                 }
             }
             "end" => {
-                let count = self.filtered_command_palette_items().len();
-                if count > 0 {
-                    let next = count - 1;
-                    if self.command_palette.selected_index != next {
-                        self.command_palette.selected_index = next;
-                        self.scroll_selected_command_palette_item_into_view();
-                        cx.notify();
-                    }
+                let count = self.filtered_command_palette_items(cx).len();
+                let changed = self
+                    .command_palette
+                    .update(cx, |palette, cx| palette.select_last(count, cx));
+                if changed {
+                    self.scroll_selected_command_palette_item_into_view(cx);
                 }
             }
             "backspace" if !event.keystroke.modifiers.platform => {
-                if self.command_palette.raw_query.pop().is_some() {
-                    // Empty-query Backspace does not change the visible input
-                    // or mode, so the palette should not repaint.
-                    self.update_command_palette_mode_from_query(cx);
-                }
+                self.command_palette
+                    .update(cx, |palette, cx| palette.pop_query(cx));
             }
             _ => {
                 if let Some(text) = event.keystroke.key_char.as_deref()
@@ -303,32 +278,24 @@ impl WorkspaceApp {
                     && !event.keystroke.modifiers.control
                     && !text.chars().any(char::is_control)
                 {
-                    self.command_palette.raw_query.push_str(text);
-                    self.update_command_palette_mode_from_query(cx);
+                    self.command_palette
+                        .update(cx, |palette, cx| palette.push_query_text(text, cx));
                 }
             }
         }
     }
 
-    fn update_command_palette_mode_from_query(&mut self, cx: &mut Context<Self>) {
-        let (mode, _) = parse_command_palette_query(&self.command_palette.raw_query);
-        self.command_palette.mode = mode;
-        self.command_palette.selected_index = 0;
-        self.command_palette.error = None;
-        self.command_palette.scroll_handle = UniformListScrollHandle::new();
-        cx.notify();
-    }
-
-    fn scroll_selected_command_palette_item_into_view(&self) {
-        let ranked_items = self.ranked_command_palette_items();
+    fn scroll_selected_command_palette_item_into_view(&self, cx: &Context<Self>) {
+        let ranked_items = self.ranked_command_palette_items(cx);
+        let palette = self.command_palette.read(cx);
         if let Some(child_index) =
-            command_palette_scroll_child_index(&ranked_items, self.command_palette.selected_index)
+            command_palette_scroll_child_index(&ranked_items, palette.selected_index())
         {
             // Tauri cmdk reveals the selected item automatically; GPUI scroll
             // children include section headings, so we map the selected item
             // index to the actual scroll child index before requesting reveal.
             scroll_tauri_virtual_list_to_index(
-                &self.command_palette.scroll_handle,
+                palette.scroll_handle(),
                 child_index,
                 TauriVirtualListSpec::new(
                     px(COMMAND_PALETTE_VIRTUAL_ROW_HEIGHT),
@@ -342,19 +309,15 @@ impl WorkspaceApp {
     fn render_overlay_query_input(
         &self,
         target: WorkspaceImeTarget,
-        value: &str,
+        value: String,
         placeholder: String,
         text_size: f32,
         line_height: f32,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let visually_empty = value.is_empty();
-        let display = if visually_empty {
-            placeholder
-        } else {
-            value.to_string()
-        };
-        let selected_range = self.ime_selected_range_for_target(target);
+        let display = if visually_empty { placeholder } else { value };
+        let selected_range = self.ime_selected_range_for_target(target, cx);
         let selection_range = selected_range
             .as_ref()
             .filter(|range| range.start < range.end)
@@ -363,7 +326,7 @@ impl WorkspaceApp {
             .as_ref()
             .filter(|range| range.start == range.end)
             .map(|range| range.start);
-        let marked_text = self.marked_text_for_target(target).unwrap_or_default();
+        let marked_text = self.marked_text_for_target(target, cx).unwrap_or_default();
         let workspace = cx.entity();
 
         text_input_anchor_probe(
@@ -388,7 +351,7 @@ impl WorkspaceApp {
                     visually_empty,
                     selection_range,
                     caret_offset,
-                    self.new_connection_caret_visible,
+                    self.input_caret.visible(),
                 ))
                 .when(!marked_text.is_empty(), |input| {
                     input.child(
@@ -453,11 +416,14 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let items = self.filtered_command_palette_items();
-        let Some(item) = items.get(self.command_palette.selected_index).cloned() else {
+        let items = self.filtered_command_palette_items(cx);
+        let execution = self
+            .command_palette
+            .update(cx, |palette, cx| palette.take_selected_action(&items, cx));
+        let Some(execution) = execution else {
             return;
         };
-        self.execute_command_palette_item(item, window, cx);
+        self.execute_command_palette_action(execution, window, cx);
     }
 
     fn execute_command_palette_item(
@@ -466,18 +432,25 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if item.disabled {
+        let execution = self
+            .command_palette
+            .update(cx, |palette, cx| palette.take_item_action(&item, cx));
+        let Some(execution) = execution else {
             return;
-        }
-        self.record_command_palette_mru(&item.id);
-        self.command_palette.open = false;
-        self.command_palette.raw_query.clear();
-        self.command_palette.mode = PaletteMode::All;
-        self.command_palette.selected_index = 0;
-        self.command_palette.error = None;
+        };
+        self.execute_command_palette_action(execution, window, cx);
+    }
+
+    fn execute_command_palette_action(
+        &mut self,
+        execution: PaletteExecution,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.record_command_palette_mru(&execution.id, cx);
         self.ime_marked_text = None;
 
-        match item.action {
+        match execution.action {
             PaletteAction::Keybinding(action_id) => {
                 let _ = self.dispatch_keybinding_action(action_id, window, cx);
             }
@@ -544,8 +517,12 @@ impl WorkspaceApp {
                 self.dispatch_native_plugin_command(plugin_id, command, cx);
             }
             PaletteAction::PluginCommandPending => {
-                self.command_palette.error =
-                    Some("Plugin command runtime is not available yet.".to_string());
+                self.command_palette.update(cx, |palette, cx| {
+                    palette.set_error(
+                        "Plugin command runtime is not available yet.".to_string(),
+                        cx,
+                    );
+                });
             }
         }
         cx.notify();
@@ -556,14 +533,18 @@ impl WorkspaceApp {
         title: String,
         description: Option<String>,
         variant: TerminalNoticeVariant,
+        cx: &App,
     ) {
-        let _ = self.terminal_notice_tx.send(TerminalNotice {
-            title,
-            description,
-            status_text: None,
-            progress: None,
-            variant,
-        });
+        self.push_workspace_notice(
+            TerminalNotice {
+                title,
+                description,
+                status_text: None,
+                progress: None,
+                variant,
+            },
+            cx,
+        );
     }
 
     pub(super) fn i18n_replace(&self, key: &str, replacements: &[(&str, String)]) -> String {
@@ -579,7 +560,7 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let mut root_ids = self.node_router.export_tree_snapshot().root_ids;
+        let mut root_ids = self.node_router.root_node_ids();
         if root_ids.is_empty() {
             root_ids = self.ssh_nodes.keys().cloned().collect();
         }
@@ -598,28 +579,19 @@ impl WorkspaceApp {
     }
 
     pub(super) fn cancel_all_reconnects_from_palette(&mut self, cx: &mut Context<Self>) {
-        let active_jobs = self
-            .reconnect_orchestrator
-            .jobs()
-            .into_iter()
-            .filter(|job| job.ended_at.is_none())
-            .map(|job| NodeId::new(job.node_id))
-            .collect::<Vec<_>>();
+        let active_jobs = self.workspace_runtime.read(cx).active_reconnect_node_ids();
         for node_id in active_jobs {
             self.cancel_reconnect_for_node(&node_id, cx);
         }
     }
 
     pub(super) fn run_connection_health_check_from_palette(&mut self, cx: &mut Context<Self>) {
-        let summaries = self.ssh_registry.list_connection_summaries();
         let lifecycles = self
-            .terminal_endpoint_sessions
-            .values()
-            .map(|endpoint_session| endpoint_session.session.lock().lifecycle())
-            .collect::<Vec<_>>();
+            .workspace_runtime
+            .read(cx)
+            .terminal_session_lifecycles();
         let (healthy, total) = command_palette_health_counts_from_lifecycles(lifecycles.iter());
-        self.connection_monitor.pool_stats = Some(self.ssh_registry.monitor_stats());
-        self.connection_monitor.pool_summaries = summaries;
+        self.sync_host_tools_lifecycle(true, cx);
         self.push_command_palette_toast(
             self.i18n_replace(
                 "command_palette.health_result",
@@ -630,52 +602,49 @@ impl WorkspaceApp {
             ),
             None,
             TerminalNoticeVariant::Success,
+            cx,
         );
         cx.notify();
     }
 
     pub(super) fn open_reset_settings_confirm_from_palette(&mut self, cx: &mut Context<Self>) {
-        self.settings_page.set_settings_reset_confirm_open(true);
-        self.settings_reset_confirm_presence.reopen();
-        self.reset_standard_confirm_focus();
-        cx.notify();
+        self.overlay.update(cx, |overlay, cx| {
+            overlay.open_confirm(WorkspaceOverlayConfirmKind::SettingsReset, cx);
+        });
     }
 
-    pub(super) fn begin_settings_reset_confirm_exit(&mut self, cx: &mut Context<Self>) -> bool {
-        let Some(generation) = self.settings_reset_confirm_presence.begin_exit() else {
-            return false;
-        };
-        self.clear_standard_confirm_focus();
+    pub(super) fn begin_settings_reset_confirm_exit(
+        &mut self,
+        confirmed: bool,
+        cx: &mut Context<Self>,
+    ) -> bool {
         let delay = oxideterm_gpui_ui::motion::duration(
             &self.tokens,
             oxideterm_gpui_ui::motion::MotionDuration::Control,
         );
-        if delay.is_zero() {
-            self.settings_page.set_settings_reset_confirm_open(false);
-            return true;
+        let (started, effect) = self.overlay.update(cx, |overlay, cx| {
+            overlay.begin_confirm_exit(confirmed, delay, cx)
+        });
+        if matches!(effect, Some(WorkspaceOverlayConfirmEffect::ResetSettings)) {
+            self.edit_settings(|settings| *settings = PersistedSettings::default(), cx);
         }
-        // Keep the inert dialog payload mounted only until its visual exit completes.
-        cx.spawn(async move |weak, cx| {
-            Timer::after(delay).await;
-            let _ = weak.update(cx, |this, cx| {
-                if this.settings_reset_confirm_presence.finish_exit(generation) {
-                    this.settings_page.set_settings_reset_confirm_open(false);
-                    cx.notify();
-                }
-            });
-        })
-        .detach();
-        true
+        started
     }
 
     pub(super) fn render_settings_reset_confirm_dialog(
         &self,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        let Some(snapshot) = self.overlay.read(cx).confirm_snapshot() else {
+            return div().into_any_element();
+        };
+        if !matches!(snapshot.kind, WorkspaceOverlayConfirmKind::SettingsReset) {
+            return div().into_any_element();
+        }
         oxideterm_gpui_ui::confirm::confirm_dialog_with_focus_motion(
             &self.tokens,
             "settings-reset-confirm-motion",
-            self.settings_reset_confirm_presence.phase(),
+            snapshot.phase,
             ConfirmDialogView {
                 variant: ConfirmDialogVariant::Danger,
                 title: div()
@@ -693,26 +662,27 @@ impl WorkspaceApp {
                     .child(self.i18n.t("command_palette.cmd_reset_settings"))
                     .into_any_element(),
             },
-            self.standard_confirm_focus(),
+            snapshot.focused_action,
             cx.listener(|this, _event, _window, cx| {
-                this.begin_settings_reset_confirm_exit(cx);
+                this.begin_settings_reset_confirm_exit(false, cx);
                 cx.stop_propagation();
                 cx.notify();
             }),
             cx.listener(|this, _event, _window, cx| {
-                if this.begin_settings_reset_confirm_exit(cx) {
-                    this.edit_settings(|settings| *settings = PersistedSettings::default(), cx);
-                }
+                this.begin_settings_reset_confirm_exit(true, cx);
                 cx.stop_propagation();
             }),
         )
     }
 
-    fn record_command_palette_mru(&mut self, id: &str) {
+    fn record_command_palette_mru(&mut self, id: &str, cx: &mut Context<Self>) {
         self.settings_store
             .settings_mut()
             .record_command_palette_use(id);
         let _ = self.settings_store.save();
+        self.settings_workspace.update(cx, |settings, _cx| {
+            settings.acknowledge_external_store_state()
+        });
     }
 
     fn reload_window_from_palette(&mut self, cx: &mut Context<Self>) {
@@ -724,20 +694,20 @@ impl WorkspaceApp {
     fn close_active_tab_from_palette(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         // Tauri command-palette close actions call appStore.closeTab directly;
         // confirmations live in TabBar/global shortcut handlers, not here.
-        if let Some(tab_id) = self.main_window_tabs.active_tab_id {
+        if let Some(tab_id) = self.active_tab_id(cx) {
             self.close_tab_by_id(tab_id, window, cx);
         }
     }
 
     fn close_other_tabs_from_palette(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(active_tab_id) = self.main_window_tabs.active_tab_id else {
+        let Some(active_tab_id) = self.active_tab_id(cx) else {
             return;
         };
         // Tauri splits command-palette behavior from the global keybinding:
         // the shortcut closes an active split pane in terminal tabs, while the
         // palette command directly closes all tabs except the active tab.
         let tab_ids = self
-            .tabs
+            .tabs(cx)
             .iter()
             .filter(|tab| tab.id != active_tab_id)
             .map(|tab| tab.id)
@@ -748,7 +718,7 @@ impl WorkspaceApp {
     }
 
     fn close_all_tabs_from_palette(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let tab_ids = self.tabs.iter().map(|tab| tab.id).collect::<Vec<_>>();
+        let tab_ids = self.tabs(cx).iter().map(|tab| tab.id).collect::<Vec<_>>();
         for tab_id in tab_ids {
             self.close_tab_by_id(tab_id, window, cx);
         }
@@ -774,23 +744,16 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.prepare_modal_interaction_boundary();
-        self.new_connection_form = Some(NewConnectionForm {
-            name: host.clone(),
-            host,
-            port: port.to_string(),
-            username,
-            focused_field: NewConnectionField::Password,
-            group: self.i18n.t("ssh.form.ungrouped"),
-            ..NewConnectionForm::default()
-        });
-        self.drill_down_parent_node_id = None;
-        self.editing_saved_connection_id = None;
-        self.editing_saved_connection_connect_after_save_node_id = None;
-        self.duplicating_saved_connection_id = None;
-        self.saved_connection_prompt_action = None;
-        self.close_new_connection_select();
-        self.new_connection_caret_visible = true;
+        self.prepare_modal_interaction_boundary(cx);
+        let mut form = NewConnectionForm::default();
+        form.name = host.clone();
+        form.host = host;
+        form.port = port.to_string();
+        form.username = username;
+        form.focused_field = NewConnectionField::Password;
+        form.group = self.i18n.t("ssh.form.ungrouped");
+        self.update_connection_form_state(cx, |state| state.replace_with_new_form(form));
+        self.show_active_input_caret(cx);
         self.needs_active_pane_focus = false;
         window.focus(&self.focus_handle, cx);
         cx.notify();
@@ -805,27 +768,25 @@ impl WorkspaceApp {
         match resolve_ssh_config_alias(&alias) {
             Ok(Some(host)) => match saved_connection_from_ssh_host(host) {
                 Ok(conn) => {
-                    self.prepare_modal_interaction_boundary();
-                    self.new_connection_form = Some(
-                        super::session_manager::form_from_saved_connection(&conn, None),
-                    );
-                    self.drill_down_parent_node_id = None;
-                    self.editing_saved_connection_id = None;
-                    self.editing_saved_connection_connect_after_save_node_id = None;
-                    self.duplicating_saved_connection_id = None;
-                    self.saved_connection_prompt_action = None;
-                    self.close_new_connection_select();
-                    self.new_connection_caret_visible = true;
+                    self.prepare_modal_interaction_boundary(cx);
+                    let form = super::session_manager::form_from_saved_connection(&conn, None);
+                    self.update_connection_form_state(cx, |state| {
+                        state.replace_with_new_form(form);
+                    });
+                    self.show_active_input_caret(cx);
                     self.needs_active_pane_focus = false;
                     window.focus(&self.focus_handle, cx);
                 }
-                Err(error) => self.command_palette.error = Some(error.to_string()),
+                Err(error) => {
+                    self.set_command_palette_error(error.to_string(), cx);
+                }
             },
             Ok(None) => {
-                self.command_palette.error = Some(
+                self.set_command_palette_error(
                     self.i18n
                         .t("command_palette.quick_connect_alias_not_found")
                         .replace("{{alias}}", &alias),
+                    cx,
                 );
             }
             Err(error) => {
@@ -833,10 +794,15 @@ impl WorkspaceApp {
                     .i18n
                     .t("command_palette.quick_connect_resolve_failed")
                     .replace("{{alias}}", &alias);
-                self.command_palette.error = Some(format!("{message}: {error}"));
+                self.set_command_palette_error(format!("{message}: {error}"), cx);
             }
         }
         cx.notify();
+    }
+
+    fn set_command_palette_error(&mut self, error: String, cx: &mut Context<Self>) {
+        self.command_palette
+            .update(cx, |palette, cx| palette.set_error(error, cx));
     }
 
     fn step_terminal_theme(&mut self, forward: bool, cx: &mut Context<Self>) {
@@ -874,15 +840,19 @@ impl WorkspaceApp {
         self.edit_settings(|settings| settings.terminal.theme = next_theme, cx);
     }
 
-    fn filtered_command_palette_items(&self) -> Vec<PaletteItem> {
-        self.ranked_command_palette_items()
+    fn filtered_command_palette_items(&self, cx: &Context<Self>) -> Vec<PaletteItem> {
+        self.ranked_command_palette_items(cx)
             .into_iter()
             .map(|ranked| ranked.item)
             .collect()
     }
 
-    fn ranked_command_palette_items(&self) -> Vec<RankedItem> {
-        let (mode, query) = parse_command_palette_query(&self.command_palette.raw_query);
+    fn ranked_command_palette_items(&self, cx: &Context<Self>) -> Vec<RankedItem> {
+        let (raw_query, ssh_config_hosts) = {
+            let palette = self.command_palette.read(cx);
+            (palette.query().to_string(), palette.ssh_config_hosts())
+        };
+        let (mode, query) = parse_command_palette_query(&raw_query);
         let mut ranked = Vec::new();
 
         if mode == PaletteMode::All {
@@ -896,10 +866,10 @@ impl WorkspaceApp {
         }
 
         let command_items = self.command_palette_command_items();
-        let session_items = self.command_palette_session_items();
+        let session_items = self.command_palette_session_items(cx);
         let mut connection_items = self.command_palette_connection_items();
-        connection_items.extend(self.command_palette_ssh_config_items());
-        let plugin_items = self.command_palette_plugin_items();
+        connection_items.extend(self.command_palette_ssh_config_items(&ssh_config_hosts));
+        let plugin_items = self.command_palette_plugin_items(cx);
         let help_items = self.command_palette_help_items();
 
         if mode == PaletteMode::All && query.is_empty() {
@@ -1027,8 +997,8 @@ impl WorkspaceApp {
         }
     }
 
-    fn command_palette_session_items(&self) -> Vec<PaletteItem> {
-        self.tabs
+    fn command_palette_session_items(&self, cx: &App) -> Vec<PaletteItem> {
+        self.tabs(cx)
             .iter()
             .map(|tab| {
                 let detail = match tab.kind {
@@ -1097,12 +1067,14 @@ impl WorkspaceApp {
             .collect()
     }
 
-    fn command_palette_ssh_config_items(&self) -> Vec<PaletteItem> {
+    fn command_palette_ssh_config_items(
+        &self,
+        ssh_config_hosts: &[oxideterm_connections::SshConfigHost],
+    ) -> Vec<PaletteItem> {
         if !self.settings_store.settings().ssh_config.auto_load_hosts {
             return Vec::new();
         }
-        self.command_palette
-            .ssh_config_hosts
+        ssh_config_hosts
             .iter()
             .filter(|host| !host.already_imported)
             .map(|host| {
@@ -1130,8 +1102,9 @@ impl WorkspaceApp {
             .collect()
     }
 
-    fn command_palette_plugin_items(&self) -> Vec<PaletteItem> {
-        let contributions = self.native_plugin_runtime.registry.contributions();
+    fn command_palette_plugin_items(&self, cx: &Context<Self>) -> Vec<PaletteItem> {
+        let plugin_entity = self.plugin_entity.read(cx);
+        let contributions = plugin_entity.registry().contributions();
         let mut items = Vec::new();
         items.extend(contributions.api_commands.iter().map(|command| {
             // Phase 2 mirrors Tauri command registry visibility without
@@ -1237,13 +1210,10 @@ impl WorkspaceApp {
     }
 
     pub(super) fn render_command_palette(&self, cx: &mut Context<Self>) -> AnyElement {
-        let ranked_items = self.ranked_command_palette_items();
-        let (mode, _) = parse_command_palette_query(&self.command_palette.raw_query);
-        let query_text = if self.command_palette.raw_query.is_empty() {
-            self.i18n.t(command_palette_placeholder_key(mode))
-        } else {
-            self.command_palette.raw_query.clone()
-        };
+        let ranked_items = self.ranked_command_palette_items(cx);
+        let palette: CommandPaletteView = self.command_palette.read(cx).view();
+        let mode = palette.mode;
+        let query_placeholder = self.i18n.t(command_palette_placeholder_key(mode));
         let rows = Arc::new(command_palette_virtual_rows(ranked_items));
         let row_count = rows.len();
         let rows_height = (row_count as f32 * COMMAND_PALETTE_VIRTUAL_ROW_HEIGHT)
@@ -1284,8 +1254,8 @@ impl WorkspaceApp {
                             .child(div().ml(px(8.0)).flex_1().min_w_0().child(
                                 self.render_overlay_query_input(
                                     WorkspaceImeTarget::CommandPalette,
-                                    &self.command_palette.raw_query,
-                                    query_text,
+                                    palette.raw_query,
+                                    query_placeholder,
                                     14.0,
                                     20.0,
                                     cx,
@@ -1302,7 +1272,7 @@ impl WorkspaceApp {
                             .child(tauri_virtual_uniform_list(
                                 "command-palette-virtual-list",
                                 row_count,
-                                self.command_palette.scroll_handle.clone(),
+                                palette.scroll_handle.clone(),
                                 TauriVirtualListSpec::new(
                                     px(COMMAND_PALETTE_VIRTUAL_ROW_HEIGHT),
                                     COMMAND_PALETTE_VIRTUAL_OVERSCAN,
@@ -1319,7 +1289,7 @@ impl WorkspaceApp {
                                 },
                             )),
                     )
-                    .when_some(self.command_palette.error.as_ref(), |root, error| {
+                    .when_some(palette.error, |root, error| {
                         root.child(
                             div()
                                 .border_t_1()
@@ -1328,7 +1298,7 @@ impl WorkspaceApp {
                                 .py(px(8.0))
                                 .text_size(px(12.0))
                                 .text_color(rgb(self.tokens.ui.error))
-                                .child(error.clone()),
+                                .child(error),
                         )
                     })
                     .child(
@@ -1354,8 +1324,9 @@ impl WorkspaceApp {
                     ),
             );
         let palette_top = self
-            .ai
-            .chat
+            .ai_entity
+            .read(cx)
+            .chat_ui()
             .overlay_window_size
             .map(|(_, height)| height * COMMAND_PALETTE_TOP_RATIO)
             .unwrap_or(COMMAND_PALETTE_FALLBACK_TOP);
@@ -1443,7 +1414,7 @@ impl WorkspaceApp {
         index: usize,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let selected = index == self.command_palette.selected_index;
+        let selected = index == self.command_palette.read(cx).selected_index();
         let item = ranked.item.clone();
         let mut label_row = div().flex().flex_1().items_center().min_w_0().child(
             self.render_highlighted_palette_text(&ranked.item.label, &ranked.highlights, selected),
@@ -1483,10 +1454,8 @@ impl WorkspaceApp {
             .cursor(CursorStyle::PointingHand)
             .on_mouse_move(
                 cx.listener(move |this, _event: &MouseMoveEvent, _window, cx| {
-                    if this.command_palette.selected_index != index {
-                        this.command_palette.selected_index = index;
-                        cx.notify();
-                    }
+                    this.command_palette
+                        .update(cx, |palette, cx| palette.set_selected_index(index, cx));
                 }),
             )
             .on_mouse_down(
@@ -1544,22 +1513,25 @@ impl WorkspaceApp {
             CommandPaletteVirtualRow::Item { ranked, item_index } => {
                 self.render_command_palette_row(&ranked, item_index, cx)
             }
-            CommandPaletteVirtualRow::Empty => div()
-                .w_full()
-                .h(px(COMMAND_PALETTE_VIRTUAL_ROW_HEIGHT))
-                .px(px(16.0))
-                .flex()
-                .items_center()
-                .text_size(px(14.0))
-                .text_color(rgb(self.tokens.ui.text_muted))
-                .child(self.render_selectable_display_text(
-                    "command-palette-empty",
-                    &self.command_palette.raw_query,
-                    self.i18n.t("command_palette.no_results"),
-                    self.tokens.ui.text_muted,
-                    cx,
-                ))
-                .into_any_element(),
+            CommandPaletteVirtualRow::Empty => {
+                let query = self.command_palette.read(cx).query().to_string();
+                div()
+                    .w_full()
+                    .h(px(COMMAND_PALETTE_VIRTUAL_ROW_HEIGHT))
+                    .px(px(16.0))
+                    .flex()
+                    .items_center()
+                    .text_size(px(14.0))
+                    .text_color(rgb(self.tokens.ui.text_muted))
+                    .child(self.render_selectable_display_text(
+                        "command-palette-empty",
+                        &query,
+                        self.i18n.t("command_palette.no_results"),
+                        self.tokens.ui.text_muted,
+                        cx,
+                    ))
+                    .into_any_element()
+            }
         }
     }
 
@@ -1613,11 +1585,7 @@ impl WorkspaceApp {
 
     pub(super) fn render_shortcuts_modal(&self, cx: &mut Context<Self>) -> AnyElement {
         let categories = self.filtered_shortcut_categories();
-        let query_text = if self.shortcuts_modal.query.is_empty() {
-            self.i18n.t("shortcuts_modal.search_placeholder")
-        } else {
-            self.shortcuts_modal.query.clone()
-        };
+        let query_placeholder = self.i18n.t("shortcuts_modal.search_placeholder");
         let shortcut_count = categories
             .iter()
             .map(|category| category.rows.len())
@@ -1664,8 +1632,8 @@ impl WorkspaceApp {
                             ))
                             .child(self.render_overlay_query_input(
                                 WorkspaceImeTarget::ShortcutsModalSearch,
-                                &self.shortcuts_modal.query,
-                                query_text,
+                                self.shortcuts_modal.query.clone(),
+                                query_placeholder,
                                 self.tokens.metrics.ui_text_sm,
                                 20.0,
                                 cx,

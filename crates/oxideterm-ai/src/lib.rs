@@ -41,7 +41,10 @@ pub use acp::{
     run_acp_prompt_session_events, with_acp_agent_runtime, with_acp_agent_runtime_events,
 };
 pub use chat::{apply_chat_request_overrides, generate_chat_title};
-pub use context_sanitizer::{sanitize_api_messages_for_provider, sanitize_for_ai};
+pub use context_sanitizer::{
+    sanitize_api_messages_for_provider, sanitize_chat_state_for_persistence, sanitize_for_ai,
+    sanitize_json_for_ai, sanitize_json_text_for_ai,
+};
 pub use context_window::{
     ContextWindowSource, DEFAULT_CONTEXT_WINDOW, ModelContextWindowInfo,
     extract_context_window_from_model_name, model_context_window, model_context_window_info,
@@ -63,7 +66,7 @@ pub use profiles::{AiExecutionBackend, resolve_ai_reasoning_effort, tool_policy_
 pub use provider_embeddings::{
     AiChatEmbeddingApiKeyDecision, AiEmbeddingMode, AiEmbeddingProviderReason,
     ResolvedAiEmbeddingProvider, ai_embedding_requires_api_key, ai_provider_supports_embeddings,
-    embed_texts, resolve_ai_embedding_provider, resolve_chat_embedding_api_key,
+    embed_query_text, embed_texts, resolve_ai_embedding_provider, resolve_chat_embedding_api_key,
 };
 pub use providers::{
     AI_PROVIDER_TEMPLATES, active_model_selection, active_provider_view,
@@ -142,7 +145,7 @@ pub use types::{
     AiChatMessage, AiChatMessageMetadata, AiChatRole, AiChatState, AiChatStreamConfig,
     AiConversation, AiFollowUpSuggestion, AiMessageBranches, AiProviderTemplate, AiProviderView,
     AiStreamEvent, AiToolCall, AiToolChoice, AiToolDefinition, ModelSelectorProviderGroup,
-    ModelSelectorProviderProbe, ProviderModelRefresh,
+    ModelSelectorProviderProbe, ProviderModelRefresh, SharedAiProviderKey,
 };
 
 #[cfg(test)]

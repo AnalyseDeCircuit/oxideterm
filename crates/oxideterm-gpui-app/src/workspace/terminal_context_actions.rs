@@ -11,7 +11,7 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
-        let Some(active_pane) = self.active_pane() else {
+        let Some(active_pane) = self.active_pane(cx) else {
             return false;
         };
         let Some(action) = active_pane.update(cx, |pane, _cx| pane.take_context_action_request())
@@ -40,7 +40,7 @@ impl WorkspaceApp {
                     return false;
                 };
                 self.search.visible = false;
-                if self.ai.chat.inline_panel.open {
+                if self.ai_entity.read(cx).terminal_inline_panel().open {
                     self.close_terminal_ai_inline_panel(window, cx);
                 }
                 self.close_terminal_command_overlays(cx);

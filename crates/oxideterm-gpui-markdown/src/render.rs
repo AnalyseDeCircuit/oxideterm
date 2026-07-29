@@ -9,8 +9,8 @@
 use std::{ops::Range, path::PathBuf, sync::Arc};
 
 use gpui::{
-    AnyElement, App, ClipboardItem, ElementId, Entity, Font, FontFeatures, FontStyle, FontWeight,
-    Hsla, Image, InteractiveElement, IntoElement, MouseButton, ParentElement, Render, SharedString,
+    AnyElement, App, ClipboardItem, ElementId, Font, FontFeatures, FontStyle, FontWeight, Hsla,
+    Image, InteractiveElement, IntoElement, MouseButton, ParentElement, SharedString,
     StatefulInteractiveElement, StrikethroughStyle, Styled, StyledText, TextAlign, TextRun,
     UnderlineStyle, Window, div, image_cache, img, prelude::FluentBuilder, px, relative,
     retain_all,
@@ -385,40 +385,24 @@ pub fn render_document_windowed_selectable_with_code_actions(
 }
 
 /// Render a complete markdown document through a block-level virtual list.
-pub fn render_document_virtual<V>(
-    _view: Entity<V>,
+pub fn render_document_virtual(
     id: impl Into<ElementId>,
     document: &MarkdownDocument,
     tokens: &ThemeTokens,
     opts: &MarkdownOptions,
     scroll_handle: &MarkdownVirtualListScrollHandle,
-) -> AnyElement
-where
-    V: Render,
-{
-    render_document_virtual_with_code_actions(
-        _view,
-        id,
-        document,
-        tokens,
-        opts,
-        scroll_handle,
-        None,
-    )
+) -> AnyElement {
+    render_document_virtual_with_code_actions(id, document, tokens, opts, scroll_handle, None)
 }
 
-pub fn render_document_virtual_with_code_actions<V>(
-    _view: Entity<V>,
+pub fn render_document_virtual_with_code_actions(
     id: impl Into<ElementId>,
     document: &MarkdownDocument,
     tokens: &ThemeTokens,
     opts: &MarkdownOptions,
     scroll_handle: &MarkdownVirtualListScrollHandle,
     code_actions: Option<&MarkdownCodeBlockActions>,
-) -> AnyElement
-where
-    V: Render,
-{
+) -> AnyElement {
     let layout = MarkdownBlockLayout::from_document(document, opts);
     let viewport_top = markdown_scroll_top_from_gpui_offset(scroll_handle.offset().y);
     let viewport_height = f32::from(scroll_handle.bounds().size.height);

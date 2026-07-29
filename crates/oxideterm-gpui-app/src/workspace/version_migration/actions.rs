@@ -20,8 +20,10 @@ impl WorkspaceApp {
         self.version_migration.step = step;
         self.version_migration.scroll_handle = ScrollHandle::new();
         if step == 1
-            && self.settings_page.cli_companion_status.is_none()
-            && !self.settings_page.cli_companion_loading
+            && self
+                .settings_workspace
+                .read(cx)
+                .cli_companion_needs_refresh()
         {
             self.refresh_cli_companion_status(cx);
         }

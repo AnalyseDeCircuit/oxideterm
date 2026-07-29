@@ -346,8 +346,9 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let background_blur = self
-            .settings_page
-            .background_blur_preview
+            .settings_workspace
+            .read(cx)
+            .background_blur_preview()
             .unwrap_or(settings.terminal.background_blur);
         let has_background_image = settings.terminal.background_image.is_some();
         let mut rows = Vec::new();
@@ -807,11 +808,11 @@ impl WorkspaceApp {
                     value: display_value,
                     placeholder,
                     focused,
-                    caret_visible: self.new_connection_caret_visible,
+                    caret_visible: self.input_caret.visible(),
                     secret: false,
                     selected_all: false,
-                    selected_range: self.ime_selected_range_for_target(target),
-                    marked_text: self.marked_text_for_target(target),
+                    selected_range: self.ime_selected_range_for_target(target, cx),
+                    marked_text: self.marked_text_for_target(target, cx),
                 },
             )
             .w(px(width))
@@ -819,7 +820,7 @@ impl WorkspaceApp {
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |this, event: &gpui::MouseDownEvent, window, cx| {
-                    let current = this.current_settings_input_value(input);
+                    let current = this.current_settings_input_value(input, cx);
                     this.focus_settings_input(input, current, cx);
                     this.ime_marked_text = None;
                     window.focus(&this.focus_handle, cx);
@@ -957,7 +958,13 @@ impl WorkspaceApp {
         &self,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
-        let editor = self.settings_page.theme_editor.as_ref()?;
+        let (editor, editor_phase) = {
+            let settings_workspace = self.settings_workspace.read(cx);
+            (
+                settings_workspace.theme_editor_snapshot()?,
+                settings_workspace.theme_editor_phase(),
+            )
+        };
         let terminal = editor_terminal_theme(&editor.terminal_colors);
         let ui = editor_ui_colors(&editor.ui_colors);
         let title_key = if editor.edit_theme_id.is_some() {
@@ -966,8 +973,7 @@ impl WorkspaceApp {
             "settings_view.custom_theme.create_title"
         };
         let save_disabled = editor.name.trim().is_empty();
-        let form_visible =
-            self.theme_editor_presence.phase() == oxideterm_gpui_ui::motion::ExitPhase::Visible;
+        let form_visible = editor_phase == oxideterm_gpui_ui::motion::ExitPhase::Visible;
 
         let dialog = div()
             .w(px(THEME_EDITOR_MODAL_WIDTH))
@@ -1024,10 +1030,10 @@ impl WorkspaceApp {
                     .flex()
                     .flex_col()
                     .gap(px(THEME_EDITOR_BODY_GAP))
-                    .child(self.theme_editor_name_duplicate_row(editor, cx))
-                    .child(self.theme_editor_preview(editor, terminal, ui))
-                    .child(self.theme_editor_section_tabs(editor, cx))
-                    .child(self.theme_editor_color_grid(editor, cx)),
+                    .child(self.theme_editor_name_duplicate_row(&editor, cx))
+                    .child(self.theme_editor_preview(&editor, terminal, ui))
+                    .child(self.theme_editor_section_tabs(&editor, cx))
+                    .child(self.theme_editor_color_grid(&editor, cx)),
             )
             .child(
                 div()
@@ -1156,7 +1162,7 @@ impl WorkspaceApp {
             self.theme_editor_label("settings_view.custom_theme.name"),
             self.theme_editor_text_input(
                 SettingsInput::CustomThemeName,
-                editor.name.clone(),
+                &editor.name,
                 self.i18n.t("settings_view.custom_theme.name_placeholder"),
                 ThemeEditorTextInputKind::Form,
                 cx,
@@ -1273,12 +1279,11 @@ impl WorkspaceApp {
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |this, _event, _window, cx| {
-                    if let Some(editor) = this.settings_page.theme_editor.as_mut() {
-                        editor.active_section = section;
-                    }
+                    this.settings_workspace.update(cx, |settings, cx| {
+                        settings.select_theme_editor_section(section, cx);
+                    });
                     this.close_settings_select();
                     cx.stop_propagation();
-                    cx.notify();
                 }),
             )
             .into_any_element()
@@ -1290,7 +1295,7 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         if editor.active_section == ThemeEditorSection::Ui {
-            return self.theme_editor_ui_color_sections(cx);
+            return self.theme_editor_ui_color_sections(editor, cx);
         }
 
         let (fields, colors, section) = match editor.active_section {
@@ -1306,11 +1311,9 @@ impl WorkspaceApp {
 
     pub(in crate::workspace) fn theme_editor_ui_color_sections(
         &self,
+        editor: &ThemeEditorState,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let Some(editor) = self.settings_page.theme_editor.as_ref() else {
-            return div().into_any_element();
-        };
         let colors = editor.ui_colors.as_slice();
 
         div()
@@ -1350,14 +1353,10 @@ impl WorkspaceApp {
                                 ..ToolbarButtonOptions::default()
                             },
                             cx.listener(|this, _event, _window, cx| {
-                                if let Some(editor) = this.settings_page.theme_editor.as_mut() {
-                                    let ui = derive_ui_colors_from_terminal(editor_terminal_theme(
-                                        &editor.terminal_colors,
-                                    ));
-                                    editor.ui_colors = app_ui_colors_to_colors(ui);
-                                }
+                                this.settings_workspace.update(cx, |settings, cx| {
+                                    settings.derive_theme_editor_ui_colors(cx);
+                                });
                                 cx.stop_propagation();
-                                cx.notify();
                             }),
                         ),
                     ),
@@ -1452,7 +1451,11 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let parsed = parse_color_hex(&color).unwrap_or(0);
-        let focused = self.focused_settings_input == Some(input);
+        let focused = self
+            .settings_workspace
+            .read(cx)
+            .settings_entity_focused_input()
+            == Some(input);
         let label = self.i18n.t(&format!(
             "settings_view.custom_theme.colors.{}",
             field.label_key
@@ -1461,8 +1464,7 @@ impl WorkspaceApp {
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |this, _event, window, cx| {
-                    let current = this.current_settings_input_value(input);
-                    this.focus_settings_input(input, current, cx);
+                    this.focus_settings_input(input, String::new(), cx);
                     this.ime_marked_text = None;
                     window.focus(&this.focus_handle, cx);
                     cx.stop_propagation();
@@ -1472,7 +1474,7 @@ impl WorkspaceApp {
         let value_control = if focused {
             self.theme_editor_text_input(
                 input,
-                color,
+                &color,
                 "#RRGGBB".to_string(),
                 ThemeEditorTextInputKind::InlineColor,
                 cx,
@@ -1486,8 +1488,7 @@ impl WorkspaceApp {
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |this, _event, window, cx| {
-                    let current = this.current_settings_input_value(input);
-                    this.focus_settings_input(input, current, cx);
+                    this.focus_settings_input(input, String::new(), cx);
                     this.ime_marked_text = None;
                     window.focus(&this.focus_handle, cx);
                     cx.stop_propagation();
@@ -1505,17 +1506,16 @@ impl WorkspaceApp {
     pub(in crate::workspace) fn theme_editor_text_input(
         &self,
         input: SettingsInput,
-        value: String,
+        value: &str,
         placeholder: String,
         kind: ThemeEditorTextInputKind,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let focused = self.focused_settings_input == Some(input);
-        let display_value = if focused {
-            self.settings_input_draft.as_str()
-        } else {
-            value.as_str()
-        };
+        let settings_workspace = self.settings_workspace.read(cx);
+        let focused = settings_workspace.settings_entity_focused_input() == Some(input);
+        let display_value = settings_workspace
+            .settings_entity_input_value(input)
+            .unwrap_or(value);
         let target = WorkspaceImeTarget::Settings(input);
         let workspace = cx.entity();
         let control = settings_theme_editor_text_input(
@@ -1524,11 +1524,11 @@ impl WorkspaceApp {
                 value: display_value,
                 placeholder,
                 focused,
-                caret_visible: self.new_connection_caret_visible,
+                caret_visible: self.input_caret.visible(),
                 secret: false,
                 selected_all: false,
-                selected_range: self.ime_selected_range_for_target(target),
-                marked_text: self.marked_text_for_target(target),
+                selected_range: self.ime_selected_range_for_target(target, cx),
+                marked_text: self.marked_text_for_target(target, cx),
             },
             kind,
             settings_mono_font_family(self.settings_store.settings()),
@@ -1536,8 +1536,7 @@ impl WorkspaceApp {
         .on_mouse_down(
             MouseButton::Left,
             cx.listener(move |this, event: &gpui::MouseDownEvent, window, cx| {
-                let current = this.current_settings_input_value(input);
-                this.focus_settings_input(input, current, cx);
+                this.focus_settings_input(input, String::new(), cx);
                 this.ime_marked_text = None;
                 window.focus(&this.focus_handle, cx);
                 this.begin_ime_selection_from_mouse_down(target, event, window, cx);
@@ -1547,7 +1546,12 @@ impl WorkspaceApp {
         .on_mouse_down_out(cx.listener(move |this, _event, _window, cx| {
             // Settings inputs are manually focused rather than native controls.
             // Release this editor when the next pointer press lands elsewhere.
-            if this.focused_settings_input == Some(input) {
+            let is_focused = this
+                .settings_workspace
+                .read(cx)
+                .settings_entity_focused_input()
+                == Some(input);
+            if is_focused {
                 this.blur_text_inputs(cx);
             }
         }))
@@ -1599,97 +1603,52 @@ impl WorkspaceApp {
         edit_theme_id: Option<String>,
         cx: &mut Context<Self>,
     ) {
-        self.settings_page
-            .open_theme_editor(theme_editor_from_settings(
-                self.settings_store.settings(),
-                edit_theme_id,
-                self.i18n.t("settings_view.custom_theme.new_theme_name"),
-            ));
-        self.theme_editor_presence.reopen();
+        let editor = theme_editor_from_settings(
+            self.settings_store.settings(),
+            edit_theme_id,
+            self.i18n.t("settings_view.custom_theme.new_theme_name"),
+        );
+        self.settings_workspace.update(cx, |settings, cx| {
+            settings.open_theme_editor(editor, cx);
+        });
         self.close_settings_select();
         self.focused_settings_input = None;
-        cx.notify();
     }
 
     pub(in crate::workspace) fn close_theme_editor(&mut self, cx: &mut Context<Self>) {
         self.close_settings_select();
         self.focused_settings_input = None;
-        let Some(generation) = self.theme_editor_presence.begin_exit() else {
-            return;
-        };
         let delay = oxideterm_gpui_ui::motion::duration(
             &self.tokens,
             oxideterm_gpui_ui::motion::MotionDuration::Overlay,
         );
-        if delay.is_zero() {
-            self.finish_theme_editor_exit(generation);
-            cx.notify();
-            return;
-        }
-        cx.spawn(async move |weak, cx| {
-            gpui::Timer::after(delay).await;
-            let _ = weak.update(cx, |this, cx| {
-                if this.finish_theme_editor_exit(generation) {
-                    cx.notify();
-                }
-            });
-        })
-        .detach();
-        cx.notify();
-    }
-
-    fn finish_theme_editor_exit(&mut self, generation: u64) -> bool {
-        if !self.theme_editor_presence.finish_exit(generation) {
-            return false;
-        }
-        self.settings_page.close_theme_editor();
-        self.theme_editor_presence.reopen();
-        true
+        self.settings_workspace.update(cx, |settings, cx| {
+            settings.cancel_theme_editor(delay, cx);
+        });
     }
 
     pub(in crate::workspace) fn save_theme_editor(&mut self, cx: &mut Context<Self>) {
-        let Some(editor) = self.settings_page.theme_editor.clone() else {
-            return;
-        };
-        let notice_name = editor.name.trim().to_string();
-        if notice_name.is_empty() {
-            return;
-        }
-        self.edit_settings(
-            move |settings| {
-                let _ = save_theme_editor_to_settings(settings, editor);
-            },
-            cx,
-        );
-        self.close_theme_editor(cx);
+        self.close_settings_select();
         self.focused_settings_input = None;
-        self.send_settings_notice(
-            self.i18n
-                .t("settings_view.appearance.theme_import_success")
-                .replace("{{name}}", &notice_name),
-            TerminalNoticeVariant::Success,
+        let delay = oxideterm_gpui_ui::motion::duration(
+            &self.tokens,
+            oxideterm_gpui_ui::motion::MotionDuration::Overlay,
         );
-        cx.notify();
+        self.settings_workspace.update(cx, |settings, cx| {
+            settings.save_theme_editor(delay, cx);
+        });
     }
 
     pub(in crate::workspace) fn delete_theme_editor_theme(&mut self, cx: &mut Context<Self>) {
-        let Some(theme_id) = self
-            .settings_page
-            .theme_editor
-            .as_ref()
-            .and_then(|editor| editor.edit_theme_id.clone())
-        else {
-            return;
-        };
-        self.edit_settings(
-            move |settings| {
-                delete_custom_theme_from_settings(settings, &theme_id, "azurite");
-            },
-            cx,
-        );
-        self.close_theme_editor(cx);
+        self.close_settings_select();
         self.focused_settings_input = None;
-        cx.notify();
+        let delay = oxideterm_gpui_ui::motion::duration(
+            &self.tokens,
+            oxideterm_gpui_ui::motion::MotionDuration::Overlay,
+        );
+        self.settings_workspace.update(cx, |settings, cx| {
+            settings.delete_theme_editor(delay, cx);
+        });
     }
 
     pub(in crate::workspace) fn import_theme_from_file(&mut self, cx: &mut Context<Self>) {
@@ -1701,60 +1660,34 @@ impl WorkspaceApp {
                 self.i18n.t("settings_view.appearance.theme_import"),
             )),
         });
-        cx.spawn(async move |weak, cx| {
+        let selection = async move {
             let Ok(Ok(Some(paths))) = receiver.await else {
-                return;
+                return None;
             };
-            let Some(path) = paths.into_iter().next() else {
-                return;
-            };
-            let result = fs::read_to_string(&path)
-                .map_err(|err| err.to_string())
-                .and_then(|contents| import_custom_theme(&contents));
-            let _ = weak.update(cx, |this, cx| match result {
-                Ok((theme_id, name, value)) => {
-                    let selected_theme_id = theme_id.clone();
-                    this.edit_settings(
-                        move |settings| {
-                            settings
-                                .custom_themes
-                                .insert(theme_id.clone(), value.clone());
-                            settings.terminal.theme = selected_theme_id;
-                        },
-                        cx,
-                    );
-                    this.send_settings_notice(
-                        this.i18n
-                            .t("settings_view.appearance.theme_import_success")
-                            .replace("{{name}}", &name),
-                        TerminalNoticeVariant::Success,
-                    );
-                }
-                Err(error) => {
-                    this.send_settings_notice(
-                        this.i18n
-                            .t("settings_view.appearance.theme_import_error")
-                            .replace("{{error}}", &error),
-                        TerminalNoticeVariant::Error,
-                    );
-                }
-            });
-        })
-        .detach();
+            paths.into_iter().next()
+        };
+        let runtime = self.forwarding_runtime.handle().clone();
+        self.settings_workspace.update(cx, |settings, cx| {
+            settings.start_theme_import(selection, runtime, cx);
+        });
     }
 
     pub(in crate::workspace) fn send_settings_notice(
         &self,
         title: String,
         variant: TerminalNoticeVariant,
+        cx: &App,
     ) {
-        let _ = self.terminal_notice_tx.send(TerminalNotice {
-            title,
-            description: None,
-            status_text: None,
-            progress: None,
-            variant,
-        });
+        self.push_workspace_notice(
+            TerminalNotice {
+                title,
+                description: None,
+                status_text: None,
+                progress: None,
+                variant,
+            },
+            cx,
+        );
     }
 
     pub(in crate::workspace) fn appearance_background_image_slot(
@@ -1762,7 +1695,11 @@ impl WorkspaceApp {
         settings: &PersistedSettings,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let has_removable_gallery_images = self.background_images.iter().any(|image_path| {
+        let background_images = self
+            .settings_workspace
+            .read(cx)
+            .background_images_snapshot();
+        let has_removable_gallery_images = background_images.iter().any(|image_path| {
             !is_bundled_workspace_background(self.settings_store.path(), Path::new(image_path))
         });
         let actions = div()
@@ -1812,7 +1749,11 @@ impl WorkspaceApp {
         settings: &PersistedSettings,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        if self.background_images.is_empty() {
+        let background_images = self
+            .settings_workspace
+            .read(cx)
+            .background_images_snapshot();
+        if background_images.is_empty() {
             return settings_background_empty_hint(
                 &self.tokens,
                 self.i18n.t("settings_view.terminal.bg_hint"),
@@ -1820,8 +1761,7 @@ impl WorkspaceApp {
         }
 
         let current = settings.terminal.background_image.as_deref();
-        let thumbnails = self
-            .background_images
+        let thumbnails = background_images
             .iter()
             .map(|image_path| {
                 self.background_thumbnail(image_path, current == Some(image_path.as_str()), cx)
@@ -1848,62 +1788,21 @@ impl WorkspaceApp {
             .as_ref()
             .map(PathBuf::from);
         let runtime = self.forwarding_runtime.handle().clone();
-        cx.spawn(async move |weak, cx| {
+        let selection = async move {
             let Ok(Ok(Some(paths))) = receiver.await else {
-                return;
+                return None;
             };
-            let source_paths = paths
-                .into_iter()
-                .filter(|path| is_supported_background_image(path))
-                .collect::<Vec<_>>();
-            if source_paths.is_empty() {
-                return;
-            }
-            let task = runtime.spawn_blocking(move || -> Result<(Vec<String>, Option<String>)> {
-                let mut active_path = current_path
-                    .filter(|path| path.is_file() && is_supported_background_image(path.as_path()));
-                if let Some(current) = active_path.as_ref()
-                    && !is_managed_background_image(&settings_path, current)
-                {
-                    // Preserve the pre-gallery active image before selecting another one.
-                    active_path =
-                        import_background_images(&settings_path, std::slice::from_ref(current))?
-                            .into_iter()
-                            .next();
-                }
-
-                let imported = import_background_images(&settings_path, &source_paths)?;
-                if active_path.is_none() {
-                    active_path = imported.first().cloned();
-                }
-                let mut gallery = list_background_images(&settings_path)?
-                    .into_iter()
-                    .map(|path| path.to_string_lossy().to_string())
-                    .collect::<Vec<_>>();
-                let active_path = active_path.map(|path| path.to_string_lossy().to_string());
-                if let Some(active) = active_path.as_ref()
-                    && !gallery.contains(active)
-                {
-                    gallery.insert(0, active.clone());
-                }
-                Ok((gallery, active_path))
-            });
-            let result = task
-                .await
-                .map_err(|error| error.to_string())
-                .and_then(|result| result.map_err(|error| error.to_string()));
-            let _ = weak.update(cx, |this, cx| match result {
-                Ok((gallery, active_path)) => {
-                    this.background_images = gallery;
-                    this.edit_settings(
-                        move |settings| settings.terminal.background_image = active_path,
-                        cx,
-                    );
-                }
-                Err(error) => this.report_background_gallery_error(&error),
-            });
-        })
-        .detach();
+            Some(paths)
+        };
+        self.settings_workspace.update(cx, |settings, cx| {
+            settings.start_background_image_import(
+                selection,
+                settings_path,
+                current_path,
+                runtime,
+                cx,
+            );
+        });
     }
 
     pub(in crate::workspace) fn background_thumbnail(
@@ -1964,114 +1863,30 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) {
         let settings_path = self.settings_store.path().to_path_buf();
-        if is_bundled_workspace_background(&settings_path, Path::new(&image_path)) {
-            return;
-        }
-        if !is_managed_background_image(&settings_path, Path::new(&image_path)) {
-            // Compatibility paths reference user-owned files, so removing one only clears it.
-            self.background_images
-                .retain(|candidate| candidate != &image_path);
-            if self
-                .settings_store
-                .settings()
-                .terminal
-                .background_image
-                .as_deref()
-                == Some(image_path.as_str())
-            {
-                self.edit_settings(|settings| settings.terminal.background_image = None, cx);
-            } else {
-                cx.notify();
-            }
-            return;
-        }
-
         let runtime = self.forwarding_runtime.handle().clone();
-        let removed_path = image_path.clone();
-        cx.spawn(async move |weak, cx| {
-            let task = runtime.spawn_blocking(move || -> Result<Vec<String>> {
-                remove_background_image(&settings_path, Path::new(&removed_path))?;
-                Ok(list_background_images(&settings_path)?
-                    .into_iter()
-                    .map(|path| path.to_string_lossy().to_string())
-                    .collect())
-            });
-            let result = task
-                .await
-                .map_err(|error| error.to_string())
-                .and_then(|result| result.map_err(|error| error.to_string()));
-            let _ = weak.update(cx, |this, cx| match result {
-                Ok(mut gallery) => {
-                    let active_path = this
-                        .settings_store
-                        .settings()
-                        .terminal
-                        .background_image
-                        .clone()
-                        .filter(|active| active != &image_path);
-                    if let Some(active) = active_path.as_ref()
-                        && !gallery.contains(active)
-                    {
-                        gallery.insert(0, active.clone());
-                    }
-                    this.background_images = gallery;
-                    this.edit_settings(
-                        move |settings| settings.terminal.background_image = active_path,
-                        cx,
-                    );
-                }
-                Err(error) => this.report_background_gallery_error(&error),
-            });
-        })
-        .detach();
+        let current_path = self
+            .settings_store
+            .settings()
+            .terminal
+            .background_image
+            .clone();
+        self.settings_workspace.update(cx, |settings, cx| {
+            settings.remove_background_image(settings_path, image_path, current_path, runtime, cx);
+        });
     }
 
     pub(in crate::workspace) fn clear_background_image_gallery(&mut self, cx: &mut Context<Self>) {
         let settings_path = self.settings_store.path().to_path_buf();
         let runtime = self.forwarding_runtime.handle().clone();
-        cx.spawn(async move |weak, cx| {
-            let task = runtime.spawn_blocking(move || -> Result<Vec<String>> {
-                for image_path in list_background_images(&settings_path)? {
-                    if !is_bundled_workspace_background(&settings_path, &image_path) {
-                        remove_background_image(&settings_path, &image_path)?;
-                    }
-                }
-                Ok(list_background_images(&settings_path)?
-                    .into_iter()
-                    .map(|path| path.to_string_lossy().into_owned())
-                    .collect())
-            });
-            let result = task
-                .await
-                .map_err(|error| error.to_string())
-                .and_then(|result| result.map_err(|error| error.to_string()));
-            let _ = weak.update(cx, |this, cx| match result {
-                Ok(gallery) => {
-                    let active_path = this
-                        .settings_store
-                        .settings()
-                        .terminal
-                        .background_image
-                        .clone()
-                        .filter(|active| gallery.contains(active));
-                    this.background_images = gallery;
-                    this.edit_settings(
-                        move |settings| settings.terminal.background_image = active_path,
-                        cx,
-                    );
-                }
-                Err(error) => this.report_background_gallery_error(&error),
-            });
-        })
-        .detach();
-    }
-
-    fn report_background_gallery_error(&self, error: &str) {
-        eprintln!("background image gallery operation failed: {error}");
-        self.send_settings_notice(
-            self.i18n.t("settings_view.terminal.bg_operation_failed"),
-            TerminalNoticeVariant::Error,
-        );
+        let current_path = self
+            .settings_store
+            .settings()
+            .terminal
+            .background_image
+            .clone();
+        self.settings_workspace.update(cx, |settings, cx| {
+            settings.clear_background_image_gallery(settings_path, current_path, runtime, cx);
+        });
     }
 
     pub(in crate::workspace) fn appearance_background_tabs(

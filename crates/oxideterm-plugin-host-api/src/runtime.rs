@@ -24,13 +24,14 @@ use tokio::{
     process::{Child, ChildStdin, ChildStdout},
     time,
 };
+use zeroize::{Zeroize, Zeroizing};
 
 use oxideterm_plugin_manifest::NativePluginManifest;
 pub use oxideterm_plugin_protocol::{
-    PluginActivateRequest, PluginError, PluginEvent, PluginHostCall, PluginOutboundEffect,
-    PluginOutboundMessage, PluginPermissionSet, PluginProtocolEnvelope, PluginRegistration,
-    PluginRegistrationKind, PluginRequest, PluginRequestKind, PluginResponse, PluginResponseResult,
-    PluginRuntimeHealth, PluginRuntimeSupervisorState,
+    PluginActivateRequest, PluginError, PluginEvent, PluginHostCall, PluginHostCallSensitivity,
+    PluginOutboundEffect, PluginOutboundMessage, PluginPermissionSet, PluginProtocolEnvelope,
+    PluginRegistration, PluginRegistrationKind, PluginRequest, PluginRequestKind, PluginResponse,
+    PluginResponseResult, PluginRuntimeHealth, PluginRuntimeSupervisorState,
 };
 use oxideterm_plugin_registry::validate_plugin_relative_path;
 
@@ -61,7 +62,7 @@ pub trait PluginRuntimeBridge: Send {
     fn health<'a>(&'a mut self) -> PluginRuntimeFuture<'a, PluginRuntimeHealth>;
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Debug, PartialEq)]
 pub struct NativePluginRuntimeActivation {
     pub plugin_id: String,
     pub response: PluginResponse,
@@ -69,7 +70,7 @@ pub struct NativePluginRuntimeActivation {
     pub effects: Vec<PluginOutboundEffect>,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Debug, PartialEq)]
 pub struct NativePluginRuntimeCommandDispatch {
     pub plugin_id: String,
     pub command: String,
@@ -78,7 +79,7 @@ pub struct NativePluginRuntimeCommandDispatch {
     pub effects: Vec<PluginOutboundEffect>,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Debug, PartialEq)]
 pub struct NativePluginRuntimeEventDispatch {
     pub plugin_id: String,
     pub event: PluginEvent,
@@ -492,34 +493,36 @@ impl NativePluginRuntimeHost {
         // contributions are cleaned by WorkspaceApp after this call so registry
         // mutation stays on the UI thread.
         let response = if let Some(mut runtime) = self.process_runtimes.remove(plugin_id) {
-            runtime.deactivate().await?
+            runtime.deactivate().await
         } else if let Some(mut runtime) = self.sidecar_wasm_runtimes.remove(plugin_id) {
-            runtime.deactivate().await?
+            runtime.deactivate().await
         } else {
             #[cfg(feature = "wasm-runtime")]
             {
                 if let Some(mut runtime) = self.wasm_runtimes.remove(plugin_id) {
-                    runtime.deactivate().await?
+                    runtime.deactivate().await
                 } else {
-                    PluginResponse::ok(
+                    Ok(PluginResponse::ok(
                         format!("deactivate:{plugin_id}"),
                         serde_json::json!({ "state": "not-running" }),
-                    )
+                    ))
                 }
             }
             #[cfg(not(feature = "wasm-runtime"))]
             {
-                PluginResponse::ok(
+                Ok(PluginResponse::ok(
                     format!("deactivate:{plugin_id}"),
                     serde_json::json!({ "state": "not-running" }),
-                )
+                ))
             }
         };
+        // Permission snapshots must not outlive the runtime even when its
+        // deactivation callback reports an error.
         self.process_permissions.remove(plugin_id);
         self.sidecar_wasm_permissions.remove(plugin_id);
         #[cfg(feature = "wasm-runtime")]
         self.wasm_permissions.remove(plugin_id);
-        Ok(response)
+        response
     }
 }
 
@@ -544,6 +547,8 @@ use permissions::{
     validate_outbound_message_permissions,
 };
 pub use process::NativeProcessPluginRuntime;
+#[cfg(test)]
+use process::{PluginProcessFrame, decode_process_output_frame};
 pub use sidecar_wasm::{
     NativeSidecarWasmPluginRuntime, installed_wasm_sidecar_binary_path, wasm_sidecar_install_dir,
 };

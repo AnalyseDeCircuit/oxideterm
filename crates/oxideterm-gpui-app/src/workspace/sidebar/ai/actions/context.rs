@@ -22,10 +22,10 @@ impl WorkspaceApp {
         &self,
         cx: &mut Context<Self>,
     ) -> Option<String> {
-        if !self.ai.chat.include_context || !self.ai_active_terminal_context_available() {
+        if !self.ai_entity.read(cx).chat_ui().include_context || !self.ai_active_terminal_context_available(cx) {
             return None;
         }
-        if self.ai.chat.include_all_panes && self.ai_active_tab_has_split_panes() {
+        if self.ai_entity.read(cx).chat_ui().include_all_panes && self.ai_active_tab_has_split_panes(cx) {
             return self.ai_all_panes_terminal_context(cx);
         }
         self.ai_single_pane_terminal_context(cx)
@@ -58,26 +58,26 @@ impl WorkspaceApp {
         let mut parts = Vec::new();
         parts.push("## Environment".to_string());
         parts.push(format!("- Local OS: {}", ai_local_os_label()));
-        if let Some(tab) = self.active_tab() {
+        if let Some(tab) = self.active_tab(cx) {
             parts.push(format!("- Active tab: {}", ai_tab_kind_label(&tab.kind)));
         }
         if let Some(cwd) = self.ai_active_cwd(cx) {
             parts.push(format!("- Current working directory: {cwd}"));
         }
-        match self.active_tab().map(|tab| &tab.kind) {
+        match self.active_tab(cx).map(|tab| &tab.kind) {
             Some(TabKind::SshTerminal) => {
-                if let Some((session_id, node_id)) = self.ai_active_ssh_session()
+                if let Some((session_id, node_id)) = self.ai_active_ssh_session(cx)
                     && let Some(node) = self.ssh_nodes.get(&node_id)
                 {
                     parts.push(format!(
                         "- Terminal: SSH to {}@{}:{}",
-                        node.config.username, node.config.host, node.config.port
+                        node.endpoint.username, node.endpoint.host, node.endpoint.port
                     ));
                     parts.push(format!("- Active session_id: {}", session_id.0));
                 }
             }
             Some(TabKind::LocalTerminal) => {
-                if let Some(session_id) = self.ai_active_terminal_session_id() {
+                if let Some(session_id) = self.ai_active_terminal_session_id(cx) {
                     parts.push(format!("- Terminal: Local ({})", ai_local_os_label()));
                     parts.push(format!("- Active session_id: {}", session_id.0));
                 }
@@ -86,8 +86,11 @@ impl WorkspaceApp {
         }
         parts.push(String::new());
         parts.push("## Runtime State".to_string());
-        parts.push(format!("- Open tabs: {}", self.tabs.len()));
-        parts.push(format!("- Runtime terminal sessions: {}", self.panes.len()));
+        parts.push(format!("- Open tabs: {}", self.tabs(cx).len()));
+        parts.push(format!(
+            "- Runtime terminal sessions: {}",
+            self.tab_host.read(cx).panes().len()
+        ));
         parts.push(
             "- Tabs, pane ids, and terminal session ids are memory-only and do not survive an app restart/reload."
                 .to_string(),
@@ -117,7 +120,7 @@ impl WorkspaceApp {
             }
         }
 
-        if let Some((node_id, remote_path, selected_files)) = self.ai_active_sftp_context() {
+        if let Some((node_id, remote_path, selected_files)) = self.ai_active_sftp_context(cx) {
             parts.push(String::new());
             parts.push("## File Browser Context".to_string());
             parts.push(format!("- CWD: {remote_path}"));
@@ -190,7 +193,7 @@ impl WorkspaceApp {
             }
         }
         if chips.len() < 8 {
-            let mut sessions = self.ai_runtime_cli_agent_sessions(&command_records);
+            let mut sessions = self.ai_runtime_cli_agent_sessions(&command_records, cx);
             sessions.sort_by(|left, right| right.updated_at.cmp(&left.updated_at));
             for session in sessions.into_iter().take(3) {
                 chips.push(format!(
@@ -238,22 +241,26 @@ impl WorkspaceApp {
         &self,
         cx: &mut Context<Self>,
     ) -> Vec<AiRuntimeCommandRecord> {
-        let mut records = self
-            .ai
-            .runtime
-            .command_records
-            .iter()
-            .cloned()
-            .collect::<Vec<_>>();
+        let (mut records, runtime_epoch) = {
+            let ai = self.ai_entity.read(cx);
+            (
+                ai.command_records().iter().cloned().collect::<Vec<_>>(),
+                ai.runtime_epoch().to_string(),
+            )
+        };
         let mut seen = records
             .iter()
             .map(|record| record.command_id.clone())
             .collect::<HashSet<_>>();
-        for (pane_id, pane) in &self.panes {
-            let Some(session_id) = self.session_id_for_pane(*pane_id) else {
+        let tab_host = self.tab_host.read(cx);
+        for (pane_id, pane) in tab_host.panes() {
+            let Some(session_id) = self.session_id_for_pane(*pane_id, cx) else {
                 continue;
             };
-            let node_id = self.terminal_ssh_nodes.get(&session_id).cloned();
+            let node_id = self
+                .workspace_runtime
+                .read(cx)
+                .ssh_terminal_node_id(session_id);
             for record in pane.read(cx).ai_command_records() {
                 if !seen.insert(record.command_id.clone()) {
                     continue;
@@ -274,7 +281,7 @@ impl WorkspaceApp {
                     exit_code: record.exit_code.map(i64::from),
                     started_at: record.started_at as i64,
                     finished_at: record.finished_at.map(|value| value as i64),
-                    runtime_epoch: self.ai.runtime.epoch.clone(),
+                    runtime_epoch: runtime_epoch.clone(),
                     approval_mode: None,
                     risk: "execute".to_string(),
                 });
@@ -286,11 +293,12 @@ impl WorkspaceApp {
     pub(in crate::workspace) fn ai_runtime_cli_agent_sessions(
         &self,
         records: &[AiRuntimeCommandRecord],
+        cx: &mut Context<Self>,
     ) -> Vec<AiCliAgentSession> {
         let mut sessions = self
-            .ai
-            .runtime
-            .cli_agent_sessions
+            .ai_entity
+            .read(cx)
+            .cli_agent_sessions()
             .values()
             .cloned()
             .collect::<Vec<_>>();
@@ -338,8 +346,9 @@ impl WorkspaceApp {
     pub(in crate::workspace) fn session_id_for_pane(
         &self,
         pane_id: PaneId,
+        cx: &App,
     ) -> Option<TerminalSessionId> {
-        self.tabs
+        self.tabs(cx)
             .iter()
             .find_map(|tab| tab.root_pane.as_ref()?.session_id_for_pane(pane_id))
     }
@@ -348,7 +357,7 @@ impl WorkspaceApp {
         &self,
         cx: &mut Context<Self>,
     ) -> Option<String> {
-        let pane_id = self.active_pane_id()?;
+        let pane_id = self.active_pane_id(cx)?;
         let mut parts = Vec::new();
         if let Some(selection) = self.ai_terminal_pane_selection(pane_id, cx) {
             parts.push("=== SELECTED TEXT (Focus Area) ===".to_string());
@@ -377,14 +386,19 @@ impl WorkspaceApp {
         &self,
         cx: &mut Context<Self>,
     ) -> Option<String> {
-        let tab = self.active_tab()?;
-        let root = tab.root_pane.as_ref()?;
-        let terminal_type = if tab.kind == TabKind::SshTerminal {
-            "SSH"
-        } else {
-            "Local"
-        };
-        let active_pane_id = tab.active_pane_id;
+        // This low-frequency context action snapshots at most four pane nodes
+        // so terminal reads can mutably use the GPUI context without cloning a Tab.
+        let (root, active_pane_id, terminal_type) = self.active_tab(cx).and_then(|tab| {
+            Some((
+                tab.root_pane.as_ref()?.clone(),
+                tab.active_pane_id,
+                if tab.kind == TabKind::SshTerminal {
+                    "SSH"
+                } else {
+                    "Local"
+                },
+            ))
+        })?;
         let mut pane_ids = Vec::new();
         root.collect_pane_ids(&mut pane_ids);
         if pane_ids.len() <= 1 {
@@ -448,22 +462,29 @@ impl WorkspaceApp {
     }
 
     pub(in crate::workspace) fn ai_active_cwd(&self, cx: &mut Context<Self>) -> Option<String> {
-        self.active_pane_id()
+        self.active_pane_id(cx)
             .and_then(|pane_id| self.ai_terminal_pane_text(pane_id, cx))
             .and_then(|text| infer_ai_cwd(&text))
     }
 
-    pub(in crate::workspace) fn ai_active_terminal_session_id(&self) -> Option<TerminalSessionId> {
-        let tab = self.active_tab()?;
+    pub(in crate::workspace) fn ai_active_terminal_session_id(
+        &self,
+        cx: &App,
+    ) -> Option<TerminalSessionId> {
+        let tab = self.active_tab(cx)?;
         let pane_id = tab.active_pane_id?;
         tab.root_pane.as_ref()?.session_id_for_pane(pane_id)
     }
 
     pub(in crate::workspace) fn ai_active_ssh_session(
         &self,
+        cx: &App,
     ) -> Option<(TerminalSessionId, NodeId)> {
-        let session_id = self.ai_active_terminal_session_id()?;
-        let node_id = self.terminal_ssh_nodes.get(&session_id)?.clone();
+        let session_id = self.ai_active_terminal_session_id(cx)?;
+        let node_id = self
+            .workspace_runtime
+            .read(cx)
+            .ssh_terminal_node_id(session_id)?;
         Some((session_id, node_id))
     }
 
@@ -475,45 +496,42 @@ impl WorkspaceApp {
             return None;
         }
         let active_ide_tab = self
-            .active_tab()
+            .active_tab(cx)
             .and_then(|tab| (tab.kind == TabKind::Ide).then_some(tab.id));
-        active_ide_tab
-            .and_then(|tab_id| self.ide_tab_surfaces.get(&tab_id))
-            .and_then(|surface| surface.read(cx).ai_context_snapshot())
-            .or_else(|| {
-                self.ide_tab_surfaces
-                    .values()
-                    .find_map(|surface| surface.read(cx).ai_context_snapshot())
-            })
+        self.ide_workspace
+            .read(cx)
+            .ai_context_snapshot(active_ide_tab, cx)
     }
 
     pub(in crate::workspace) fn ai_active_sftp_context(
         &self,
+        cx: &App,
     ) -> Option<(NodeId, String, Vec<String>)> {
         if !self.settings_store.settings().ai.context_sources.sftp {
             return None;
         }
-        let tab_id = self.active_tab()?.id;
+        let tab_id = self.active_tab(cx)?.id;
         let node_id = self.sftp_tab_nodes.get(&tab_id)?.clone();
-        let remote_path = self.sftp_view.current_remote_path().trim().to_string();
+        let sftp = self.sftp_view.read(cx);
+        let remote_path = sftp.current_remote_path().trim().to_string();
         if remote_path.is_empty() {
             return None;
         }
-        Some((node_id, remote_path, self.sftp_view.selected_remote_files()))
+        Some((node_id, remote_path, sftp.selected_remote_files()))
     }
 
-    pub(in crate::workspace) fn ai_active_terminal_context_available(&self) -> bool {
-        let Some(tab) = self.active_tab() else {
+    pub(in crate::workspace) fn ai_active_terminal_context_available(&self, cx: &App) -> bool {
+        let Some(tab) = self.active_tab(cx) else {
             return false;
         };
         matches!(tab.kind, TabKind::LocalTerminal | TabKind::SshTerminal)
             && tab
                 .active_pane_id
-                .is_some_and(|pane_id| self.panes.contains_key(&pane_id))
+                .is_some_and(|pane_id| self.tab_host.read(cx).panes().contains_key(&pane_id))
     }
 
-    pub(in crate::workspace) fn ai_active_tab_has_split_panes(&self) -> bool {
-        self.active_tab()
+    pub(in crate::workspace) fn ai_active_tab_has_split_panes(&self, cx: &App) -> bool {
+        self.active_tab(cx)
             .filter(|tab| matches!(tab.kind, TabKind::LocalTerminal | TabKind::SshTerminal))
             .and_then(|tab| tab.root_pane.as_ref())
             .is_some_and(|root| root.pane_count() > 1)
@@ -523,8 +541,8 @@ impl WorkspaceApp {
         self.ai_active_ide_context(cx).is_some()
     }
 
-    pub(in crate::workspace) fn ai_has_sftp_context(&self) -> bool {
-        self.ai_active_sftp_context().is_some()
+    pub(in crate::workspace) fn ai_has_sftp_context(&self, cx: &App) -> bool {
+        self.ai_active_sftp_context(cx).is_some()
     }
 
     pub(in crate::workspace) fn resolve_ai_reference_content(
@@ -534,20 +552,20 @@ impl WorkspaceApp {
     ) -> Option<String> {
         match reference.reference_type.as_str() {
             "buffer" => self
-                .active_pane_id()
+                .active_pane_id(cx)
                 .and_then(|pane_id| self.ai_terminal_pane_text(pane_id, cx)),
             "selection" => self
-                .active_pane_id()
+                .active_pane_id(cx)
                 .and_then(|pane_id| self.ai_terminal_pane_selection(pane_id, cx)),
             "error" => self
-                .active_pane_id()
+                .active_pane_id(cx)
                 .and_then(|pane_id| self.ai_terminal_pane_text(pane_id, cx))
                 .and_then(|text| extract_ai_error_context(&text)),
             "pane" => self
-                .ai_pane_reference_id(reference)
+                .ai_pane_reference_id(reference, cx)
                 .and_then(|pane_id| self.ai_terminal_pane_text(pane_id, cx)),
             "cwd" => self
-                .active_pane_id()
+                .active_pane_id(cx)
                 .and_then(|pane_id| self.ai_terminal_pane_text(pane_id, cx))
                 .and_then(|text| infer_ai_cwd(&text)),
             _ => None,
@@ -557,13 +575,14 @@ impl WorkspaceApp {
     pub(in crate::workspace) fn ai_pane_reference_id(
         &self,
         reference: &AiReferenceMatch,
+        cx: &App,
     ) -> Option<PaneId> {
         let index = reference.value.as_deref()?.parse::<usize>().ok()?;
         if index == 0 {
             return None;
         }
         let mut pane_ids = Vec::new();
-        self.active_tab()?
+        self.active_tab(cx)?
             .root_pane
             .as_ref()?
             .collect_pane_ids(&mut pane_ids);
@@ -575,7 +594,9 @@ impl WorkspaceApp {
         pane_id: PaneId,
         cx: &mut Context<Self>,
     ) -> Option<String> {
-        self.panes
+        self.tab_host
+            .read(cx)
+            .panes()
             .get(&pane_id)
             .map(|pane| pane.read(cx).visible_text_snapshot())
             .filter(|text| !text.trim().is_empty())
@@ -586,7 +607,9 @@ impl WorkspaceApp {
         pane_id: PaneId,
         cx: &mut Context<Self>,
     ) -> Option<String> {
-        self.panes
+        self.tab_host
+            .read(cx)
+            .panes()
             .get(&pane_id)
             .and_then(|pane| pane.read(cx).selected_text_snapshot())
             .filter(|text| !text.trim().is_empty())

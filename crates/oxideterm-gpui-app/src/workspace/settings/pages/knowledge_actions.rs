@@ -2,75 +2,27 @@ use super::*;
 
 impl WorkspaceApp {
     pub(in crate::workspace) fn knowledge_create_collection(&mut self, cx: &mut Context<Self>) {
-        let name = self
-            .settings_page
-            .knowledge_new_collection_name
-            .trim()
-            .to_string();
-        if name.is_empty() {
+        let error_message = self
+            .i18n
+            .t("settings_view.knowledge.error_create_collection");
+        self.ai_entity.update(cx, |entity, cx| {
+            entity.create_knowledge_collection(error_message);
             cx.notify();
-            return;
-        }
-        match oxideterm_ai::rag_create_collection(
-            &self.ai.knowledge.rag_store.get(),
-            oxideterm_ai::RagCreateCollectionRequest {
-                name,
-                scope: oxideterm_ai::RagDocScopeRequest::Global,
-            },
-        ) {
-            Ok(collection) => {
-                self.settings_page
-                    .finish_knowledge_collection_create(collection.id);
-                self.settings_input_draft.clear();
-            }
-            Err(error) => {
-                self.settings_page.set_knowledge_error(error);
-            }
-        }
+        });
+        self.settings_input_draft.clear();
         cx.notify();
     }
 
     pub(in crate::workspace) fn knowledge_create_blank_document(&mut self, cx: &mut Context<Self>) {
-        let Some(collection_id) = self
-            .settings_page
-            .knowledge_selected_collection_id
-            .clone()
-            .or_else(|| {
-                oxideterm_ai::rag_list_collections(&self.ai.knowledge.rag_store.get(), None)
-                    .ok()
-                    .and_then(|collections| {
-                        collections.first().map(|collection| collection.id.clone())
-                    })
-            })
-        else {
+        let error_message = self.i18n.t("settings_view.knowledge.error_create_document");
+        let document_id = self.ai_entity.update(cx, |entity, cx| {
+            let document_id = entity.create_blank_knowledge_document(error_message);
             cx.notify();
-            return;
-        };
-        let title = self
-            .settings_page
-            .knowledge_new_document_title
-            .trim()
-            .to_string();
-        if title.is_empty() {
-            cx.notify();
-            return;
-        }
-        match oxideterm_ai::rag_create_blank_document(
-            &self.ai.knowledge.rag_store.get(),
-            oxideterm_ai::RagCreateBlankDocumentRequest {
-                collection_id,
-                title,
-                format: self.settings_page.knowledge_new_document_format.clone(),
-            },
-        ) {
-            Ok(document) => {
-                self.settings_page.finish_knowledge_document_create();
-                self.settings_input_draft.clear();
-                self.knowledge_open_external(document.id, cx);
-            }
-            Err(error) => {
-                self.settings_page.set_knowledge_error(error);
-            }
+            document_id
+        });
+        self.settings_input_draft.clear();
+        if let Some(document_id) = document_id {
+            self.knowledge_open_external(document_id, cx);
         }
         cx.notify();
     }
@@ -80,18 +32,11 @@ impl WorkspaceApp {
         collection_id: String,
         cx: &mut Context<Self>,
     ) {
-        match oxideterm_ai::rag_delete_collection(
-            &self.ai.knowledge.rag_store.get(),
-            &collection_id,
-        ) {
-            Ok(()) => {
-                self.settings_page
-                    .clear_deleted_knowledge_collection(&collection_id);
-            }
-            Err(error) => {
-                self.settings_page.set_knowledge_error(error);
-            }
-        }
+        let error_message = self.i18n.t("settings_view.knowledge.error_delete");
+        self.ai_entity.update(cx, |entity, cx| {
+            entity.delete_knowledge_collection(&collection_id, error_message);
+            cx.notify();
+        });
         cx.notify();
     }
 
@@ -100,22 +45,11 @@ impl WorkspaceApp {
         document_id: String,
         cx: &mut Context<Self>,
     ) {
-        match oxideterm_ai::rag_remove_document(&self.ai.knowledge.rag_store.get(), &document_id) {
-            Ok(()) => {
-                if self
-                    .settings_page
-                    .knowledge_external_edit
-                    .as_ref()
-                    .is_some_and(|edit| edit.doc_id == document_id)
-                {
-                    self.settings_page.clear_knowledge_external_edit();
-                }
-                self.settings_page.clear_knowledge_error();
-            }
-            Err(error) => {
-                self.settings_page.set_knowledge_error(error);
-            }
-        }
+        let error_message = self.i18n.t("settings_view.knowledge.error_delete");
+        self.ai_entity.update(cx, |entity, cx| {
+            entity.delete_knowledge_document(&document_id, error_message);
+            cx.notify();
+        });
         cx.notify();
     }
 
@@ -124,92 +58,22 @@ impl WorkspaceApp {
         collection_id: String,
         cx: &mut Context<Self>,
     ) {
-        if self.settings_page.knowledge_reindex_progress.is_some() {
+        let store = self.ai_entity.read(cx).rag_store();
+        self.ai_entity.update(cx, |entity, cx| {
+            if entity.request_knowledge_reindex(store, collection_id) {
+                entity.clear_knowledge_error();
+            }
             cx.notify();
-            return;
-        }
-        let cancel = Arc::new(AtomicBool::new(false));
-        let cancel_for_task = cancel.clone();
-        let store = self.ai.knowledge.rag_store.get();
-        let (tx, rx) = std::sync::mpsc::channel();
-        self.settings_page.start_knowledge_reindex();
-        self.ai.knowledge.reindex_cancel = Some(cancel);
-        self.ai.knowledge.reindex_rx = Some(rx);
-        self.schedule_knowledge_reindex_poll(cx);
-        self.forwarding_runtime.spawn(async move {
-            let mut last_emitted = 0usize;
-            let mut on_progress = |current: usize, total: usize| {
-                if current == total || current.saturating_sub(last_emitted) >= 10 {
-                    let _ = tx.send(KnowledgeReindexDelivery::Progress { current, total });
-                    last_emitted = current;
-                }
-            };
-            let result = oxideterm_ai::rag_reindex_collection_with_progress(
-                &store,
-                &collection_id,
-                Some(cancel_for_task.as_ref()),
-                Some(&mut on_progress),
-            );
-            let _ = tx.send(KnowledgeReindexDelivery::Finished(result));
         });
         cx.notify();
     }
 
     pub(in crate::workspace) fn knowledge_cancel_reindex(&mut self, cx: &mut Context<Self>) {
-        if let Some(cancel) = self.ai.knowledge.reindex_cancel.as_ref() {
-            cancel.store(true, Ordering::Relaxed);
-        }
+        self.ai_entity.update(cx, |entity, cx| {
+            entity.cancel_knowledge_reindex();
+            cx.notify();
+        });
         cx.notify();
-    }
-
-    pub(in crate::workspace) fn poll_knowledge_reindex_results(&mut self, cx: &mut Context<Self>) {
-        let Some(rx) = self.ai.knowledge.reindex_rx.take() else {
-            return;
-        };
-        let mut keep_rx = true;
-        while let Ok(delivery) = rx.try_recv() {
-            match delivery {
-                KnowledgeReindexDelivery::Progress { current, total } => {
-                    self.settings_page.update_knowledge_reindex(current, total);
-                }
-                KnowledgeReindexDelivery::Finished(result) => {
-                    keep_rx = false;
-                    self.settings_page.finish_knowledge_reindex();
-                    self.ai.knowledge.reindex_cancel = None;
-                    if let Err(error) = result {
-                        let message = format!(
-                            "{}: {error}",
-                            self.i18n.t("settings_view.knowledge.error_reindex")
-                        );
-                        self.push_ai_settings_toast(message, TerminalNoticeVariant::Error);
-                    } else {
-                        self.settings_page.clear_knowledge_error();
-                    }
-                }
-            }
-        }
-        if keep_rx {
-            self.ai.knowledge.reindex_rx = Some(rx);
-        }
-        cx.notify();
-    }
-
-    pub(in crate::workspace) fn schedule_knowledge_reindex_poll(&mut self, cx: &mut Context<Self>) {
-        if self.ai.knowledge.reindex_polling {
-            return;
-        }
-        self.ai.knowledge.reindex_polling = true;
-        cx.spawn(async move |weak, cx| {
-            Timer::after(Duration::from_millis(33)).await;
-            let _ = weak.update(cx, |this, cx| {
-                this.ai.knowledge.reindex_polling = false;
-                if this.ai.knowledge.reindex_rx.is_some() {
-                    this.poll_knowledge_reindex_results(cx);
-                    this.schedule_knowledge_reindex_poll(cx);
-                }
-            });
-        })
-        .detach();
     }
 
     pub(in crate::workspace) fn knowledge_import_files(
@@ -218,9 +82,6 @@ impl WorkspaceApp {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.settings_page.knowledge_import_progress.is_some() {
-            return;
-        }
         let receiver = cx.prompt_for_paths(PathPromptOptions {
             files: true,
             directories: false,
@@ -229,45 +90,17 @@ impl WorkspaceApp {
                 self.i18n.t("settings_view.knowledge.import_files"),
             )),
         });
-        let store = self.ai.knowledge.rag_store.get();
-        let error_title = self.i18n.t("settings_view.knowledge.error_import");
-        cx.spawn(async move |weak, cx| {
-            let Ok(Ok(Some(paths))) = receiver.await else {
-                return;
-            };
-            let total = paths.len();
-            if total == 0 {
-                return;
+        let paths = async move {
+            match receiver.await {
+                Ok(Ok(paths)) => paths,
+                _ => None,
             }
-            let _ = weak.update(cx, |this, cx| {
-                this.settings_page.start_knowledge_import(total);
-                cx.notify();
-            });
-            let mut result = Ok(());
-            for (index, path) in paths.iter().enumerate() {
-                result = import_knowledge_file(&store, &collection_id, path).map(|_| ());
-                let current = index + 1;
-                let failed = result.is_err();
-                let _ = weak.update(cx, |this, cx| {
-                    this.settings_page.update_knowledge_import(current, total);
-                    cx.notify();
-                });
-                if failed {
-                    break;
-                }
-            }
-            let _ = weak.update(cx, |this, cx| {
-                this.settings_page.finish_knowledge_import();
-                if let Err(error) = result {
-                    let message = format!("{error_title}: {error}");
-                    this.push_ai_settings_toast(message, TerminalNoticeVariant::Error);
-                } else {
-                    this.settings_page.clear_knowledge_error();
-                }
-                cx.notify();
-            });
-        })
-        .detach();
+        };
+        let error_message = self.i18n.t("settings_view.knowledge.error_import");
+        self.ai_entity.update(cx, |entity, cx| {
+            entity.start_knowledge_import(paths, collection_id, error_message, cx);
+        });
+        cx.notify();
     }
 
     pub(in crate::workspace) fn knowledge_generate_embeddings(
@@ -275,164 +108,76 @@ impl WorkspaceApp {
         collection_id: String,
         cx: &mut Context<Self>,
     ) {
-        if self.settings_page.knowledge_embedding_progress.is_some() {
-            return;
-        }
-        let settings = self.settings_store.settings().clone();
+        let settings = self.settings_store.settings();
         let resolved = oxideterm_ai::resolve_ai_embedding_provider(
             &settings.ai.providers,
             settings.ai.active_provider_id.as_deref(),
             settings.ai.embedding_config.as_ref(),
             None,
         );
-        let Some(provider) = resolved.provider.clone() else {
-            let message = self
-                .i18n
-                .t("settings_view.knowledge.error_no_embedding_support");
-            self.settings_page.expand_knowledge_embedding_config();
-            self.push_ai_settings_toast(message, TerminalNoticeVariant::Error);
-            cx.notify();
+        let Some(provider) = resolved.provider else {
+            self.report_knowledge_embedding_configuration_error(
+                "settings_view.knowledge.error_no_embedding_support",
+                cx,
+            );
             return;
         };
-        if resolved.reason == oxideterm_ai::AiEmbeddingProviderReason::UnsupportedProvider
-            || resolved.reason == oxideterm_ai::AiEmbeddingProviderReason::NoProvider
-        {
-            let message = self
-                .i18n
-                .t("settings_view.knowledge.error_no_embedding_support");
-            self.settings_page.expand_knowledge_embedding_config();
-            self.push_ai_settings_toast(message, TerminalNoticeVariant::Error);
-            cx.notify();
-            return;
-        }
-        if resolved.reason == oxideterm_ai::AiEmbeddingProviderReason::MissingModel {
-            let message = self
-                .i18n
-                .t("settings_view.knowledge.error_no_embedding_model");
-            self.settings_page.expand_knowledge_embedding_config();
-            self.push_ai_settings_toast(message, TerminalNoticeVariant::Error);
-            cx.notify();
-            return;
-        }
-        let store = self.ai.knowledge.rag_store.get();
-        let key_store = self.ai.models.key_store.clone();
-        let key_provider_id = provider.id.clone();
-        let key_lookup_runtime = self.forwarding_runtime.clone();
-        let requires_api_key = oxideterm_ai::ai_embedding_requires_api_key(&provider);
-        let api_key_error = self
-            .i18n
-            .t("settings_view.knowledge.error_no_embedding_api_key");
-        let error_title = self
-            .i18n
-            .t("settings_view.knowledge.error_generate_embeddings");
-        let partial_template = self
-            .i18n
-            .t("settings_view.knowledge.embedding_partial_failure");
-        let model = resolved.model;
-        cx.spawn(async move |weak, cx| {
-            let api_key = if requires_api_key {
-                let key_lookup = key_lookup_runtime
-                    .spawn_blocking(move || {
-                        key_store.get_provider_key(&key_provider_id).ok().flatten()
-                    })
-                    .await
-                    .ok()
-                    .flatten();
-                match key_lookup {
-                    Some(key) if !key.trim().is_empty() => Some(key),
-                    _ => {
-                        let _ = weak.update(cx, |this, cx| {
-                            this.settings_page.expand_knowledge_embedding_config();
-                            this.push_ai_settings_toast(
-                                api_key_error,
-                                TerminalNoticeVariant::Error,
-                            );
-                            cx.notify();
-                        });
-                        return;
-                    }
-                }
-            } else {
-                None
-            };
-            let pending =
-                match oxideterm_ai::rag_get_pending_embeddings(&store, &collection_id, Some(500)) {
-                    Ok(pending) => pending,
-                    Err(error) => {
-                        let _ = weak.update(cx, |this, cx| {
-                            let message = format!("{error_title}: {error}");
-                            this.settings_page.clear_knowledge_error();
-                            this.push_ai_settings_toast(message, TerminalNoticeVariant::Error);
-                            cx.notify();
-                        });
-                        return;
-                    }
-                };
-            if pending.is_empty() {
+        match resolved.reason {
+            oxideterm_ai::AiEmbeddingProviderReason::NoProvider
+            | oxideterm_ai::AiEmbeddingProviderReason::UnsupportedProvider => {
+                self.report_knowledge_embedding_configuration_error(
+                    "settings_view.knowledge.error_no_embedding_support",
+                    cx,
+                );
                 return;
             }
-            let total = pending.len();
-            let _ = weak.update(cx, |this, cx| {
-                this.settings_page.start_knowledge_embedding(total);
-                cx.notify();
-            });
-            let mut processed = 0usize;
-            let mut failed_count = 0usize;
-            for batch in pending.chunks(KNOWLEDGE_EMBEDDING_BATCH_SIZE) {
-                let texts = batch
-                    .iter()
-                    .map(|pending| pending.content.clone())
-                    .collect::<Vec<_>>();
-                match oxideterm_ai::embed_texts(&provider, api_key.clone(), &model, texts).await {
-                    Ok(vectors) => {
-                        let embeddings = batch
-                            .iter()
-                            .zip(vectors.into_iter())
-                            .map(|(pending, vector)| oxideterm_ai::RagEmbeddingInputRequest {
-                                chunk_id: pending.chunk_id.clone(),
-                                vector,
-                            })
-                            .collect::<Vec<_>>();
-                        if oxideterm_ai::rag_store_embeddings(
-                            &store,
-                            oxideterm_ai::RagStoreEmbeddingsRequest {
-                                embeddings,
-                                model_name: model.clone(),
-                            },
-                        )
-                        .is_err()
-                        {
-                            failed_count += batch.len();
-                        }
-                    }
-                    Err(_) => {
-                        failed_count += batch.len();
-                    }
-                }
-                processed += batch.len();
-                let _ = weak.update(cx, |this, cx| {
-                    this.settings_page
-                        .update_knowledge_embedding(processed, total);
-                    cx.notify();
-                });
+            oxideterm_ai::AiEmbeddingProviderReason::MissingModel => {
+                self.report_knowledge_embedding_configuration_error(
+                    "settings_view.knowledge.error_no_embedding_model",
+                    cx,
+                );
+                return;
             }
-            let _ = weak.update(cx, |this, cx| {
-                this.settings_page.finish_knowledge_embedding();
-                if failed_count > 0 {
-                    let detail = partial_template
-                        .replace("{{failed}}", &failed_count.to_string())
-                        .replace("{{total}}", &total.to_string());
-                    this.push_ai_settings_toast(
-                        format!("{error_title}: {detail}"),
-                        TerminalNoticeVariant::Error,
-                    );
-                } else {
-                    this.settings_page.clear_knowledge_error();
-                }
-                cx.notify();
-            });
-        })
-        .detach();
+            oxideterm_ai::AiEmbeddingProviderReason::Ready
+            | oxideterm_ai::AiEmbeddingProviderReason::MissingApiKey => {}
+        }
+        let requires_api_key = oxideterm_ai::ai_embedding_requires_api_key(&provider);
+        let missing_key_error = self
+            .i18n
+            .t("settings_view.knowledge.error_no_embedding_api_key");
+        let embedding_error = self
+            .i18n
+            .t("settings_view.knowledge.error_generate_embeddings");
+        let partial_failure_template = self
+            .i18n
+            .t("settings_view.knowledge.embedding_partial_failure");
+        self.ai_entity.update(cx, |entity, cx| {
+            entity.start_knowledge_embeddings(
+                collection_id,
+                provider,
+                resolved.model,
+                requires_api_key,
+                missing_key_error,
+                embedding_error,
+                partial_failure_template,
+                cx,
+            );
+        });
+        cx.notify();
+    }
+
+    fn report_knowledge_embedding_configuration_error(
+        &mut self,
+        message_key: &str,
+        cx: &mut Context<Self>,
+    ) {
+        let message = self.i18n.t(message_key);
+        self.ai_entity.update(cx, |entity, cx| {
+            entity.expand_knowledge_embedding_config();
+            entity.set_knowledge_error(message);
+            cx.notify();
+        });
+        cx.notify();
     }
 
     pub(in crate::workspace) fn knowledge_open_external(
@@ -440,50 +185,7 @@ impl WorkspaceApp {
         document_id: String,
         cx: &mut Context<Self>,
     ) {
-        if uuid::Uuid::parse_str(&document_id).is_err() {
-            self.settings_page
-                .set_knowledge_error(self.i18n.t("settings_view.knowledge.error_open_external"));
-            cx.notify();
-            return;
-        }
-        let docs = oxideterm_ai::rag_list_collections(&self.ai.knowledge.rag_store.get(), None)
-            .ok()
-            .into_iter()
-            .flatten()
-            .find_map(|collection| {
-                oxideterm_ai::rag_list_documents(
-                    &self.ai.knowledge.rag_store.get(),
-                    &collection.id,
-                    None,
-                    Some(500),
-                )
-                .ok()
-                .and_then(|page| {
-                    page.documents
-                        .into_iter()
-                        .find(|document| document.id == document_id)
-                })
-            });
-        let Some(document) = docs else {
-            self.settings_page
-                .set_knowledge_error(self.i18n.t("settings_view.knowledge.error_open_external"));
-            cx.notify();
-            return;
-        };
-        let content = match oxideterm_ai::rag_get_document_content(
-            &self.ai.knowledge.rag_store.get(),
-            &document_id,
-        ) {
-            Ok(content) => content,
-            Err(error) => {
-                self.settings_page.set_knowledge_error(format!(
-                    "{}: {error}",
-                    self.i18n.t("settings_view.knowledge.error_open_external")
-                ));
-                cx.notify();
-                return;
-            }
-        };
+        let error_message = self.i18n.t("settings_view.knowledge.error_open_external");
         let edit_dir = self
             .settings_store
             .path()
@@ -491,78 +193,20 @@ impl WorkspaceApp {
             .map(PathBuf::from)
             .unwrap_or_else(|| PathBuf::from("."))
             .join("rag-edit");
-        if let Err(error) = fs::create_dir_all(&edit_dir) {
-            self.settings_page.set_knowledge_error(format!(
-                "{}: {error}",
-                self.i18n.t("settings_view.knowledge.error_open_external")
-            ));
+        let prepared = self.ai_entity.update(cx, |entity, _cx| {
+            entity.prepare_knowledge_external_edit(&document_id, edit_dir, error_message.clone())
+        });
+        let Some((path, edit)) = prepared else {
             cx.notify();
             return;
-        }
-        #[cfg(unix)]
-        {
-            let permissions_result = fs::metadata(&edit_dir).and_then(|metadata| {
-                let mut permissions = metadata.permissions();
-                std::os::unix::fs::PermissionsExt::set_mode(&mut permissions, 0o700);
-                fs::set_permissions(&edit_dir, permissions)
-            });
-            if let Err(error) = permissions_result {
-                self.settings_page.set_knowledge_error(format!(
-                    "{}: {error}",
-                    self.i18n.t("settings_view.knowledge.error_open_external")
-                ));
-                cx.notify();
-                return;
-            }
-        }
-        let extension = if document.format == "plaintext" {
-            "txt"
-        } else {
-            "md"
         };
-        let path = edit_dir.join(format!("{}.{}", document.id, extension));
-        if let Err(error) = fs::write(&path, content) {
-            self.settings_page.set_knowledge_error(format!(
-                "{}: {error}",
-                self.i18n.t("settings_view.knowledge.error_open_external")
-            ));
+        // Launching the platform editor is a window adapter; document content
+        // and edit ownership remain inside the AI entity.
+        let opened = open_path_external(&path).is_ok();
+        self.ai_entity.update(cx, |entity, cx| {
+            entity.finish_knowledge_external_open(edit, opened, error_message);
             cx.notify();
-            return;
-        }
-        #[cfg(unix)]
-        {
-            let permissions_result = fs::metadata(&path).and_then(|metadata| {
-                let mut permissions = metadata.permissions();
-                std::os::unix::fs::PermissionsExt::set_mode(&mut permissions, 0o600);
-                fs::set_permissions(&path, permissions)
-            });
-            if let Err(error) = permissions_result {
-                self.settings_page.set_knowledge_error(format!(
-                    "{}: {error}",
-                    self.i18n.t("settings_view.knowledge.error_open_external")
-                ));
-                cx.notify();
-                return;
-            }
-        }
-        let opened = open_path_external(&path).map_err(|error| error.to_string());
-        match opened {
-            Ok(()) => {
-                self.settings_page
-                    .set_knowledge_external_edit(KnowledgeExternalEdit {
-                        doc_id: document.id,
-                        path,
-                        version: document.version,
-                    });
-                self.settings_page.clear_knowledge_error();
-            }
-            Err(error) => {
-                self.settings_page.set_knowledge_error(format!(
-                    "{}: {error}",
-                    self.i18n.t("settings_view.knowledge.error_open_external")
-                ));
-            }
-        }
+        });
         cx.notify();
     }
 
@@ -571,78 +215,39 @@ impl WorkspaceApp {
         notify_no_changes: bool,
         cx: &mut Context<Self>,
     ) {
-        let Some(edit) = self.settings_page.knowledge_external_edit.clone() else {
-            return;
-        };
-        let content = match fs::read_to_string(&edit.path) {
-            Ok(content) => content,
-            Err(error) => {
-                let _ = fs::remove_file(&edit.path);
-                self.settings_page.clear_knowledge_external_edit();
-                self.settings_page.set_knowledge_error(format!(
-                    "{}: {error}",
-                    self.i18n.t("settings_view.knowledge.error_sync")
-                ));
-                cx.notify();
-                return;
+        let error_message = self.i18n.t("settings_view.knowledge.error_sync");
+        let outcome = self.ai_entity.update(cx, |entity, cx| {
+            let outcome = entity.sync_knowledge_external_edit(error_message);
+            cx.notify();
+            outcome
+        });
+        match outcome {
+            ai_state::knowledge::KnowledgeExternalSyncOutcome::NoChanges if notify_no_changes => {
+                self.push_ai_settings_toast(
+                    self.i18n.t("settings_view.knowledge.doc_no_changes"),
+                    TerminalNoticeVariant::Success,
+                    cx,
+                );
             }
-        };
-        match oxideterm_ai::rag_get_document_content(
-            &self.ai.knowledge.rag_store.get(),
-            &edit.doc_id,
-        ) {
-            Ok(current) if current == content => {
-                let _ = fs::remove_file(&edit.path);
-                self.settings_page.clear_knowledge_external_edit();
-                if notify_no_changes {
-                    self.push_ai_settings_toast(
-                        self.i18n.t("settings_view.knowledge.doc_no_changes"),
-                        TerminalNoticeVariant::Success,
-                    );
-                }
-                cx.notify();
-                return;
-            }
-            Ok(_) => {}
-            Err(error) => {
-                self.settings_page.set_knowledge_error(format!(
-                    "{}: {error}",
-                    self.i18n.t("settings_view.knowledge.error_sync")
-                ));
-                cx.notify();
-                return;
-            }
-        }
-        match oxideterm_ai::rag_update_document(
-            &self.ai.knowledge.rag_store.get(),
-            &edit.doc_id,
-            content,
-            Some(edit.version),
-        ) {
-            Ok(_document) => {
-                let _ = fs::remove_file(&edit.path);
-                self.settings_page.clear_knowledge_external_edit();
-                self.settings_page.clear_knowledge_error();
+            ai_state::knowledge::KnowledgeExternalSyncOutcome::Updated => {
                 self.push_ai_settings_toast(
                     self.i18n.t("settings_view.knowledge.doc_updated"),
                     TerminalNoticeVariant::Success,
+                    cx,
                 );
             }
-            Err(error) => {
-                if error.contains("Version conflict") {
-                    self.settings_page.clear_knowledge_external_edit();
-                }
-                self.settings_page.set_knowledge_error(format!(
-                    "{}: {error}",
-                    self.i18n.t("settings_view.knowledge.error_sync")
-                ));
-            }
+            ai_state::knowledge::KnowledgeExternalSyncOutcome::NoEdit
+            | ai_state::knowledge::KnowledgeExternalSyncOutcome::NoChanges
+            | ai_state::knowledge::KnowledgeExternalSyncOutcome::Failed => {}
         }
         cx.notify();
     }
 
     pub(in crate::workspace) fn knowledge_confirm_delete(&mut self, cx: &mut Context<Self>) {
-        let Some(confirm) = self.settings_page.take_knowledge_delete_confirm() else {
+        let confirm = self
+            .ai_entity
+            .update(cx, |entity, _cx| entity.take_knowledge_delete_confirm());
+        let Some(confirm) = confirm else {
             cx.notify();
             return;
         };

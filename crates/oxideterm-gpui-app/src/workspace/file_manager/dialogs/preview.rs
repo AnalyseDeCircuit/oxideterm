@@ -13,6 +13,91 @@ fn file_manager_archive_entry_signature(entry: &LocalArchiveEntry) -> u64 {
     hasher.finish()
 }
 
+fn render_file_manager_archive_row(
+    entry: &LocalArchiveEntry,
+    index: usize,
+    has_background: bool,
+    background_panel: u32,
+    text_color: u32,
+    muted_text_color: u32,
+) -> AnyElement {
+    let depth = entry
+        .path
+        .matches('/')
+        .count()
+        .saturating_sub(usize::from(entry.is_dir));
+    div()
+        .min_h(px(28.0))
+        .px(px(12.0))
+        .flex()
+        .gap(px(8.0))
+        .items_center()
+        .bg(if index % 2 == 0 {
+            file_manager_panel_bg(background_panel, has_background, 0x33)
+        } else {
+            rgba(0)
+        })
+        .text_size(px(FILE_MANAGER_TEXT_XS))
+        .child(
+            div()
+                .flex()
+                .items_center()
+                .gap(px(6.0))
+                .pl(px((depth * 16) as f32))
+                .child(WorkspaceApp::render_lucide_icon(
+                    if entry.is_dir {
+                        LucideIcon::Folder
+                    } else {
+                        LucideIcon::File
+                    },
+                    FILE_MANAGER_ICON_SM,
+                    rgb(if entry.is_dir {
+                        FILE_MANAGER_ORANGE
+                    } else {
+                        muted_text_color
+                    }),
+                ))
+                // Archive rows are plain display text so the virtual-list
+                // closure does not retain WorkspaceApp through selection state.
+                .child(
+                    div()
+                        .truncate()
+                        .text_color(rgb(text_color))
+                        .child(entry.name.clone()),
+                ),
+        )
+        .child(
+            div()
+                .w(px(80.0))
+                .text_align(gpui::TextAlign::Right)
+                .text_color(rgb(muted_text_color))
+                .child(if entry.is_dir {
+                    "-".to_string()
+                } else {
+                    format_file_size(entry.size)
+                }),
+        )
+        .child(
+            div()
+                .w(px(80.0))
+                .text_align(gpui::TextAlign::Right)
+                .text_color(rgb(muted_text_color))
+                .child(if entry.is_dir {
+                    "-".to_string()
+                } else {
+                    format_file_size(entry.compressed_size)
+                }),
+        )
+        .child(
+            div()
+                .w(px(120.0))
+                .text_align(gpui::TextAlign::Right)
+                .text_color(rgb(muted_text_color))
+                .child(entry.modified.clone().unwrap_or_else(|| "-".to_string())),
+        )
+        .into_any_element()
+}
+
 impl WorkspaceApp {
     pub(super) fn render_file_manager_preview_dialog(
         &self,
@@ -22,7 +107,15 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let sorted_files = self.file_manager.sorted_files();
+        let (sorted_files, preview, preview_markdown_source, preview_show_metadata) = {
+            let file_manager = self.file_manager.read(cx);
+            (
+                file_manager.sorted_files(),
+                file_manager.preview.clone(),
+                file_manager.preview_markdown_source,
+                file_manager.preview_show_metadata,
+            )
+        };
         let previewable = sorted_files
             .iter()
             .filter(|file| file.file_type != LocalFileType::Directory);
@@ -32,21 +125,16 @@ impl WorkspaceApp {
             .unwrap_or(0);
         let previewable_count = previewable.count();
         let can_navigate = previewable_count > 1;
-        let preview_icon = self
-            .file_manager
-            .preview
-            .as_ref()
-            .map(preview_icon)
-            .unwrap_or(if entry.file_type == LocalFileType::Symlink {
+        let preview_icon = preview.as_deref().map(preview_icon).unwrap_or(
+            if entry.file_type == LocalFileType::Symlink {
                 LucideIcon::Link2
             } else {
                 LucideIcon::File
-            });
-        let show_markdown_toggle = matches!(
-            self.file_manager.preview,
-            Some(LocalPreview::Markdown { .. })
+            },
         );
-        let can_copy = self.file_manager.preview.as_ref().is_some_and(|preview| {
+        let show_markdown_toggle =
+            matches!(preview.as_deref(), Some(LocalPreview::Markdown { .. }));
+        let can_copy = preview.as_deref().is_some_and(|preview| {
             matches!(
                 preview,
                 LocalPreview::Text { .. } | LocalPreview::Markdown { .. }
@@ -176,29 +264,33 @@ impl WorkspaceApp {
                     })
                     .when(show_markdown_toggle, |header| {
                         header.child(self.render_file_manager_preview_button(
-                            if self.file_manager.preview_markdown_source {
+                            if preview_markdown_source {
                                 LucideIcon::Eye
                             } else {
                                 LucideIcon::Code2
                             },
-                            self.file_manager.preview_markdown_source,
+                            preview_markdown_source,
                             |this, _event, _window, cx| {
-                                this.file_manager.preview_markdown_source =
-                                    !this.file_manager.preview_markdown_source;
+                                this.file_manager.update(cx, |file_manager, cx| {
+                                    file_manager.preview_markdown_source =
+                                        !file_manager.preview_markdown_source;
+                                    cx.notify();
+                                });
                                 cx.stop_propagation();
-                                cx.notify();
                             },
                             cx,
                         ))
                     })
                     .child(self.render_file_manager_preview_button(
                         LucideIcon::Info,
-                        self.file_manager.preview_show_metadata,
+                        preview_show_metadata,
                         |this, _event, _window, cx| {
-                            this.file_manager.preview_show_metadata =
-                                !this.file_manager.preview_show_metadata;
+                            this.file_manager.update(cx, |file_manager, cx| {
+                                file_manager.preview_show_metadata =
+                                    !file_manager.preview_show_metadata;
+                                cx.notify();
+                            });
                             cx.stop_propagation();
-                            cx.notify();
                         },
                         cx,
                     ))
@@ -206,14 +298,17 @@ impl WorkspaceApp {
                         LucideIcon::ExternalLink,
                         false,
                         |this, _event, _window, cx| {
-                            if let Some(FileManagerDialog::Preview { entry }) =
-                                this.file_manager.dialog.clone()
-                            {
+                            let preview_entry = match this.file_manager.read(cx).dialog.as_ref() {
+                                Some(FileManagerDialog::Preview { entry }) => Some(entry.clone()),
+                                _ => None,
+                            };
+                            if let Some(entry) = preview_entry {
                                 if let Err(error) = open_path_external(&entry.path) {
                                     this.push_file_manager_toast(
                                         this.i18n.t("fileManager.error"),
                                         Some(error),
                                         TerminalNoticeVariant::Error,
+                                        cx,
                                     );
                                 }
                             }
@@ -238,7 +333,7 @@ impl WorkspaceApp {
                     .flex_1()
                     .min_h(px(0.0))
                     .selectable_overflow_y_scrollbar(
-                        &self.selectable_text_scroll_handle("file-manager-preview-scroll"),
+                        &self.file_manager.read(cx).preview_document_scroll,
                     )
                     .bg(file_manager_bg(self.tokens.ui.bg_sunken, has_background))
                     .child(self.render_file_manager_preview_content(
@@ -248,7 +343,7 @@ impl WorkspaceApp {
                         cx,
                     )),
             )
-            .when(self.file_manager.preview_show_metadata, |dialog| {
+            .when(preview_show_metadata, |dialog| {
                 dialog.child(self.render_file_manager_preview_metadata(has_background, cx))
             })
             .child(
@@ -280,7 +375,8 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        match self.file_manager.preview.as_ref() {
+        let preview = self.file_manager.read(cx).preview.clone();
+        match preview.as_deref() {
             Some(LocalPreview::Loading) => self.render_file_manager_preview_status(
                 LucideIcon::LoaderCircle,
                 self.i18n.t("fileManager.loadingMore"),
@@ -304,7 +400,7 @@ impl WorkspaceApp {
                     cx,
                 ),
             Some(LocalPreview::Markdown { content })
-                if self.file_manager.preview_markdown_source =>
+                if self.file_manager.read(cx).preview_markdown_source =>
             {
                 self.render_file_manager_preview_code(
                     content,
@@ -374,16 +470,18 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let zoom = self
-            .file_manager
+        let file_manager = self.file_manager.read(cx);
+        let zoom = file_manager
             .preview_image_zoom
             .clamp(FILE_MANAGER_PREVIEW_MIN_ZOOM, FILE_MANAGER_PREVIEW_MAX_ZOOM);
         let height = 560.0 * zoom;
-        let rotation = self.file_manager.preview_image_rotation.rem_euclid(360);
+        let rotation = file_manager.preview_image_rotation.rem_euclid(360);
         let image = if rotation == 0 {
             self.clear_rotated_file_manager_preview_image(window, cx);
             gpui::img(std::path::PathBuf::from(path))
-        } else if let Some(render_image) = self.rotated_file_manager_preview_image(path, rotation) {
+        } else if let Some(render_image) =
+            self.rotated_file_manager_preview_image(path, rotation, cx)
+        {
             self.drop_file_manager_preview_retired_images(window, cx);
             gpui::img(render_image)
         } else {
@@ -412,13 +510,11 @@ impl WorkspaceApp {
         &self,
         path: &str,
         rotation: i32,
+        cx: &App,
     ) -> Option<Arc<RenderImage>> {
         let rotation = rotation.rem_euclid(360);
-        if let Some(cached) = self
-            .file_manager
-            .preview_rotated_image_cache
-            .borrow()
-            .as_ref()
+        let file_manager = self.file_manager.read(cx);
+        if let Some(cached) = file_manager.preview_rotated_image_cache.borrow().as_ref()
             && cached.path == path
             && cached.rotation == rotation
         {
@@ -426,7 +522,7 @@ impl WorkspaceApp {
         }
 
         let image = rotated_local_preview_image(path, rotation)?;
-        let previous = self.file_manager.preview_rotated_image_cache.replace(Some(
+        let previous = file_manager.preview_rotated_image_cache.replace(Some(
             FileManagerRotatedPreviewImage {
                 path: path.to_string(),
                 rotation,
@@ -434,7 +530,7 @@ impl WorkspaceApp {
             },
         ));
         if let Some(previous) = previous {
-            self.file_manager
+            file_manager
                 .preview_retired_images
                 .borrow_mut()
                 .push(previous.image);
@@ -447,9 +543,14 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let previous = self.file_manager.preview_rotated_image_cache.replace(None);
+        let previous = self
+            .file_manager
+            .read(cx)
+            .preview_rotated_image_cache
+            .replace(None);
         if let Some(previous) = previous {
             self.file_manager
+                .read(cx)
                 .preview_retired_images
                 .borrow_mut()
                 .push(previous.image);
@@ -462,12 +563,14 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        for image in self
+        let retired_images = self
             .file_manager
+            .read(cx)
             .preview_retired_images
             .borrow_mut()
             .drain(..)
-        {
+            .collect::<Vec<_>>();
+        for image in retired_images {
             // Rotated local previews are rendered as GPUI atlas images; release
             // old rotations when the preview path or angle changes.
             cx.drop_image(image, Some(window));
@@ -482,7 +585,7 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
-        let snapshot = self.file_manager.preview_audio.snapshot();
+        let snapshot = self.file_manager.read(cx).preview_audio.snapshot();
         let duration = snapshot.duration.unwrap_or_default();
         let position = snapshot.position.min(duration);
         let progress = if duration.is_zero() {
@@ -595,7 +698,8 @@ impl WorkspaceApp {
                         row.child(self.render_file_manager_media_seek_button(
                             "-15s",
                             cx.listener(|this, _event, _window, cx| {
-                                let now = this.file_manager.preview_audio.snapshot().position;
+                                let now =
+                                    this.file_manager.read(cx).preview_audio.snapshot().position;
                                 this.seek_file_manager_preview_audio(
                                     now.saturating_sub(std::time::Duration::from_secs(15)),
                                     cx,
@@ -608,7 +712,8 @@ impl WorkspaceApp {
                             self.render_file_manager_media_seek_button(
                                 "+15s",
                                 cx.listener(|this, _event, _window, cx| {
-                                    let snapshot = this.file_manager.preview_audio.snapshot();
+                                    let snapshot =
+                                        this.file_manager.read(cx).preview_audio.snapshot();
                                     let Some(duration) = snapshot.duration else {
                                         return;
                                     };
@@ -662,7 +767,8 @@ impl WorkspaceApp {
         mime_type: &str,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let snapshot = self.file_manager.preview_video_surface.snapshot();
+        let video_surface = self.file_manager.read(cx).preview_video_surface.clone();
+        let snapshot = video_surface.snapshot();
         let detail = snapshot
             .error
             .unwrap_or_else(|| "Native video playback is initializing.".to_string());
@@ -671,12 +777,7 @@ impl WorkspaceApp {
                 name, path, mime_type, &detail, cx,
             )
             .into_any_element();
-        sftp_native_video_element(
-            path.to_string(),
-            self.file_manager.preview_video_surface.clone(),
-            fallback,
-        )
-        .into_any_element()
+        sftp_native_video_element(path.to_string(), video_surface, fallback).into_any_element()
     }
 
     fn render_file_manager_preview_font(
@@ -687,16 +788,24 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
-        if let Some(error) = self.file_manager.preview_font_error.as_ref() {
+        let (font_error, font_family, font_size) = {
+            let file_manager = self.file_manager.read(cx);
+            (
+                file_manager.preview_font_error.clone(),
+                file_manager.preview_font_family.clone(),
+                file_manager.preview_font_size,
+            )
+        };
+        if let Some(error) = font_error {
             return self.render_file_manager_preview_status(
                 LucideIcon::FileText,
                 self.i18n.t("fileManager.fontLoadError"),
-                Some(error.clone()),
+                Some(error),
                 false,
                 cx,
             );
         }
-        let Some(font_family) = self.file_manager.preview_font_family.clone() else {
+        let Some(font_family) = font_family else {
             return self.render_file_manager_preview_status(
                 LucideIcon::LoaderCircle,
                 self.i18n.t("fileManager.loadingFont"),
@@ -705,7 +814,6 @@ impl WorkspaceApp {
                 cx,
             );
         };
-        let font_size = self.file_manager.preview_font_size;
         let sample_font = SharedString::from(font_family.clone());
         div()
             .size_full()
@@ -726,10 +834,12 @@ impl WorkspaceApp {
                         "-",
                         false,
                         cx.listener(|this, _event, _window, cx| {
-                            this.file_manager.preview_font_size =
-                                (this.file_manager.preview_font_size - 4.0).max(8.0);
+                            this.file_manager.update(cx, |file_manager, cx| {
+                                file_manager.preview_font_size =
+                                    (file_manager.preview_font_size - 4.0).max(8.0);
+                                cx.notify();
+                            });
                             cx.stop_propagation();
-                            cx.notify();
                         }),
                         cx,
                     ))
@@ -751,10 +861,12 @@ impl WorkspaceApp {
                         "+",
                         false,
                         cx.listener(|this, _event, _window, cx| {
-                            this.file_manager.preview_font_size =
-                                (this.file_manager.preview_font_size + 4.0).min(120.0);
+                            this.file_manager.update(cx, |file_manager, cx| {
+                                file_manager.preview_font_size =
+                                    (file_manager.preview_font_size + 4.0).min(120.0);
+                                cx.notify();
+                            });
                             cx.stop_propagation();
-                            cx.notify();
                         }),
                         cx,
                     ))
@@ -763,9 +875,11 @@ impl WorkspaceApp {
                             format!("{size:.0}"),
                             (font_size - size).abs() < f32::EPSILON,
                             cx.listener(move |this, _event, _window, cx| {
-                                this.file_manager.preview_font_size = size;
+                                this.file_manager.update(cx, |file_manager, cx| {
+                                    file_manager.preview_font_size = size;
+                                    cx.notify();
+                                });
                                 cx.stop_propagation();
-                                cx.notify();
                             }),
                             cx,
                         )
@@ -789,7 +903,7 @@ impl WorkspaceApp {
                     .id("file-manager-metadata-scroll")
                     .flex_1()
                     .selectable_overflow_y_scrollbar(
-                        &self.selectable_text_scroll_handle("file-manager-metadata-scroll"),
+                        &self.file_manager.read(cx).preview_metadata_scroll,
                     )
                     .p(px(24.0))
                     .flex()
@@ -1021,6 +1135,7 @@ impl WorkspaceApp {
                                 this.i18n.t("fileManager.error"),
                                 Some(error),
                                 TerminalNoticeVariant::Error,
+                                cx,
                             );
                         }
                         cx.stop_propagation();
@@ -1041,16 +1156,16 @@ impl WorkspaceApp {
             .localized_markdown_options()
             .with_source_path(source_path);
         let code_actions = self.markdown_mermaid_actions(cx);
+        let markdown_scroll = self.file_manager.read(cx).preview_markdown_scroll.clone();
         div()
             .size_full()
             .p(px(16.0))
             .child(markdown_virtual_with_code_actions(
-                cx.entity(),
                 "file-manager-preview-markdown-virtual",
                 &self.tokens,
                 content,
                 &opts,
-                &self.file_manager.preview_markdown_scroll,
+                &markdown_scroll,
                 &code_actions,
             ))
             .into_any_element()
@@ -1083,7 +1198,7 @@ impl WorkspaceApp {
         let font_family = settings_mono_font_family(self.settings_store.settings());
         let font_size = self.settings_store.settings().terminal.font_size as f32;
         let row_height = font_size * 1.5;
-        let scroll = self.file_manager.preview_code_scroll.clone();
+        let scroll = self.file_manager.read(cx).preview_code_scroll.clone();
         div()
             .size_full()
             .bg(file_manager_bg(theme.bg_sunken, has_background))
@@ -1164,8 +1279,17 @@ impl WorkspaceApp {
         has_background: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let stream = &self.file_manager.preview_stream;
-        if stream.lines.is_empty() && stream.eof && stream.error.is_none() {
+        let (stream_language, lines, error, eof, scroll) = {
+            let file_manager = self.file_manager.read(cx);
+            (
+                file_manager.preview_stream.language.clone(),
+                Arc::new(file_manager.preview_stream.lines.clone()),
+                file_manager.preview_stream.error.clone(),
+                file_manager.preview_stream.eof,
+                file_manager.preview_code_scroll.clone(),
+            )
+        };
+        if lines.is_empty() && eof && error.is_none() {
             return self.render_file_manager_preview_text_status(
                 &self.i18n.t("fileManager.emptyFile"),
                 cx,
@@ -1174,23 +1298,17 @@ impl WorkspaceApp {
 
         let theme = self.tokens.ui;
         let opts = MarkdownOptions::from_theme(&self.tokens);
-        let language = stream
-            .language
+        let language = stream_language
             .as_deref()
             .or(language)
             .filter(|language| !language.trim().is_empty())
             .map(str::to_string)
             .unwrap_or_else(|| file_manager_preview_language_for_name(filename))
             .to_ascii_lowercase();
-        let lines = Arc::new(stream.lines.clone());
-        let error = stream.error.clone();
-        let eof = stream.eof;
         let row_count = lines.len() + usize::from(!eof || error.is_some());
         let font_family = settings_mono_font_family(self.settings_store.settings());
         let font_size = self.settings_store.settings().terminal.font_size as f32;
         let row_height = font_size * 1.5;
-        let scroll = self.file_manager.preview_code_scroll.clone();
-
         div()
             .size_full()
             .bg(file_manager_bg(theme.bg_sunken, has_background))
@@ -1359,36 +1477,46 @@ impl WorkspaceApp {
                     )),
             )
             .child(self.render_file_manager_archive_header(has_background, cx));
-        self.sync_file_manager_archive_entry_list_state(&info.entries);
-        let state = self.file_manager.preview_archive_list_state.clone();
+        self.sync_file_manager_archive_entry_list_state(&info.entries, cx);
+        let state = self
+            .file_manager
+            .read(cx)
+            .preview_archive_list_state
+            .clone();
         let spec = self.file_manager_archive_entry_list_spec();
-        let workspace = cx.entity();
+        let theme = self.tokens.ui;
         let has_background_for_rows = has_background;
         let entries = info.entries.clone();
         let list_height = entries.len() as f32 * FILE_MANAGER_ARCHIVE_ROW_HEIGHT;
         body = body.child(div().h(px(list_height)).child(tauri_virtual_list(
             state,
             spec,
-            move |index, _window, cx| {
+            move |index, _window, _cx| {
                 let Some(entry) = entries.get(index).cloned() else {
                     return div().into_any_element();
                 };
-                workspace.update(cx, |this, cx| {
-                    this.render_file_manager_archive_row(&entry, index, has_background_for_rows, cx)
-                })
+                render_file_manager_archive_row(
+                    &entry,
+                    index,
+                    has_background_for_rows,
+                    theme.bg_panel,
+                    theme.text,
+                    theme.text_muted,
+                )
             },
         )));
         body.into_any_element()
     }
 
-    fn sync_file_manager_archive_entry_list_state(&self, entries: &[LocalArchiveEntry]) {
+    fn sync_file_manager_archive_entry_list_state(&self, entries: &[LocalArchiveEntry], cx: &App) {
         let signatures = entries
             .iter()
             .map(file_manager_archive_entry_signature)
             .collect::<Vec<_>>();
+        let file_manager = self.file_manager.read(cx);
         sync_tauri_variable_list_state_by_signatures(
-            &self.file_manager.preview_archive_list_state,
-            &mut self.file_manager.preview_archive_list_cache.borrow_mut(),
+            &file_manager.preview_archive_list_state,
+            &mut file_manager.preview_archive_list_cache.borrow_mut(),
             "file-manager-archive-preview",
             &signatures,
             self.file_manager_archive_entry_list_spec(),
@@ -1465,113 +1593,13 @@ impl WorkspaceApp {
             .into_any_element()
     }
 
-    fn render_file_manager_archive_row(
-        &self,
-        entry: &LocalArchiveEntry,
-        index: usize,
-        has_background: bool,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let depth = entry
-            .path
-            .matches('/')
-            .count()
-            .saturating_sub(usize::from(entry.is_dir));
-        div()
-            .min_h(px(28.0))
-            .px(px(12.0))
-            .flex()
-            .gap(px(8.0))
-            .items_center()
-            .bg(if index % 2 == 0 {
-                file_manager_panel_bg(self.tokens.ui.bg_panel, has_background, 0x33)
-            } else {
-                rgba(0)
-            })
-            .text_size(px(FILE_MANAGER_TEXT_XS))
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap(px(6.0))
-                    .pl(px((depth * 16) as f32))
-                    .child(Self::render_lucide_icon(
-                        if entry.is_dir {
-                            LucideIcon::Folder
-                        } else {
-                            LucideIcon::File
-                        },
-                        FILE_MANAGER_ICON_SM,
-                        rgb(if entry.is_dir {
-                            FILE_MANAGER_ORANGE
-                        } else {
-                            self.tokens.ui.text_muted
-                        }),
-                    ))
-                    .child(div().truncate().child(self.render_selectable_display_text(
-                        "file-manager-archive-name",
-                        &entry.path,
-                        entry.name.clone(),
-                        self.tokens.ui.text,
-                        cx,
-                    ))),
-            )
-            .child(
-                div()
-                    .w(px(80.0))
-                    .text_align(gpui::TextAlign::Right)
-                    .text_color(rgb(self.tokens.ui.text_muted))
-                    .child(self.render_selectable_display_text(
-                        "file-manager-archive-size",
-                        &entry.path,
-                        if entry.is_dir {
-                            "-".to_string()
-                        } else {
-                            format_file_size(entry.size)
-                        },
-                        self.tokens.ui.text_muted,
-                        cx,
-                    )),
-            )
-            .child(
-                div()
-                    .w(px(80.0))
-                    .text_align(gpui::TextAlign::Right)
-                    .text_color(rgb(self.tokens.ui.text_muted))
-                    .child(self.render_selectable_display_text(
-                        "file-manager-archive-compressed",
-                        &entry.path,
-                        if entry.is_dir {
-                            "-".to_string()
-                        } else {
-                            format_file_size(entry.compressed_size)
-                        },
-                        self.tokens.ui.text_muted,
-                        cx,
-                    )),
-            )
-            .child(
-                div()
-                    .w(px(120.0))
-                    .text_align(gpui::TextAlign::Right)
-                    .text_color(rgb(self.tokens.ui.text_muted))
-                    .child(self.render_selectable_display_text(
-                        "file-manager-archive-modified",
-                        &entry.path,
-                        entry.modified.clone().unwrap_or_else(|| "-".to_string()),
-                        self.tokens.ui.text_muted,
-                        cx,
-                    )),
-            )
-            .into_any_element()
-    }
-
     fn render_file_manager_preview_metadata(
         &self,
         has_background: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let Some(metadata) = self.file_manager.preview_metadata.as_ref() else {
+        let metadata = self.file_manager.read(cx).preview_metadata.clone();
+        let Some(metadata) = metadata.as_ref() else {
             return div().into_any_element();
         };
         let mut grid = div()

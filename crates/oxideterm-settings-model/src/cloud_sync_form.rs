@@ -9,10 +9,10 @@
 use std::fmt;
 
 use oxideterm_cloud_sync::{AuthMode, BackendType, CloudSyncSettings, ConflictStrategy};
+use zeroize::{Zeroize, Zeroizing};
 
 use crate::SettingsInput;
 
-#[derive(Clone)]
 pub struct CloudSyncFormDraft {
     pub backend_type: BackendType,
     pub auth_mode: AuthMode,
@@ -44,6 +44,22 @@ pub struct CloudSyncFormDraft {
     pub secret_access_key_touched: bool,
     pub session_token_touched: bool,
     pub sync_password_touched: bool,
+}
+
+/// Owns secret edits after they cross the UI/backend boundary.
+///
+/// Values are moved out of [`CloudSyncFormDraft`] and are zeroized when this
+/// handoff is dropped. The backend may return the handoff to the form after a
+/// synchronous persistence failure without cloning any secret.
+pub struct CloudSyncSecretDraftHandoff {
+    pub token: Option<Zeroizing<String>>,
+    pub git_token: Option<Zeroizing<String>>,
+    pub basic_username: Option<Zeroizing<String>>,
+    pub basic_password: Option<Zeroizing<String>>,
+    pub access_key_id: Option<Zeroizing<String>>,
+    pub secret_access_key: Option<Zeroizing<String>>,
+    pub session_token: Option<Zeroizing<String>>,
+    pub sync_password: Option<Zeroizing<String>>,
 }
 
 impl fmt::Debug for CloudSyncFormDraft {
@@ -128,98 +144,238 @@ impl CloudSyncFormDraft {
             sync_password_touched: false,
         }
     }
+
+    pub fn take_secret_handoff(&mut self) -> CloudSyncSecretDraftHandoff {
+        // `mem::take` transfers each edited buffer without creating another
+        // allocation containing the secret.
+        CloudSyncSecretDraftHandoff {
+            token: take_touched_secret(&mut self.token, &mut self.token_touched),
+            git_token: take_touched_secret(&mut self.git_token, &mut self.git_token_touched),
+            basic_username: take_touched_secret(
+                &mut self.basic_username,
+                &mut self.basic_username_touched,
+            ),
+            basic_password: take_touched_secret(
+                &mut self.basic_password,
+                &mut self.basic_password_touched,
+            ),
+            access_key_id: take_touched_secret(
+                &mut self.access_key_id,
+                &mut self.access_key_id_touched,
+            ),
+            secret_access_key: take_touched_secret(
+                &mut self.secret_access_key,
+                &mut self.secret_access_key_touched,
+            ),
+            session_token: take_touched_secret(
+                &mut self.session_token,
+                &mut self.session_token_touched,
+            ),
+            sync_password: take_touched_secret(
+                &mut self.sync_password,
+                &mut self.sync_password_touched,
+            ),
+        }
+    }
+
+    pub fn restore_secret_handoff(&mut self, handoff: CloudSyncSecretDraftHandoff) {
+        // A failed synchronous keychain write returns ownership to the UI
+        // draft. No secret buffer is cloned during rollback.
+        restore_touched_secret(handoff.token, &mut self.token, &mut self.token_touched);
+        restore_touched_secret(
+            handoff.git_token,
+            &mut self.git_token,
+            &mut self.git_token_touched,
+        );
+        restore_touched_secret(
+            handoff.basic_username,
+            &mut self.basic_username,
+            &mut self.basic_username_touched,
+        );
+        restore_touched_secret(
+            handoff.basic_password,
+            &mut self.basic_password,
+            &mut self.basic_password_touched,
+        );
+        restore_touched_secret(
+            handoff.access_key_id,
+            &mut self.access_key_id,
+            &mut self.access_key_id_touched,
+        );
+        restore_touched_secret(
+            handoff.secret_access_key,
+            &mut self.secret_access_key,
+            &mut self.secret_access_key_touched,
+        );
+        restore_touched_secret(
+            handoff.session_token,
+            &mut self.session_token,
+            &mut self.session_token_touched,
+        );
+        restore_touched_secret(
+            handoff.sync_password,
+            &mut self.sync_password,
+            &mut self.sync_password_touched,
+        );
+    }
 }
 
-pub fn cloud_sync_form_input_value(
+impl Drop for CloudSyncFormDraft {
+    fn drop(&mut self) {
+        // UI drafts are allowed to use Strings, but their backing allocations
+        // must not retain credentials after the owning Entity is released.
+        self.token.zeroize();
+        self.git_token.zeroize();
+        self.basic_username.zeroize();
+        self.basic_password.zeroize();
+        self.access_key_id.zeroize();
+        self.secret_access_key.zeroize();
+        self.session_token.zeroize();
+        self.sync_password.zeroize();
+    }
+}
+
+fn take_touched_secret(value: &mut String, touched: &mut bool) -> Option<Zeroizing<String>> {
+    if !std::mem::take(touched) {
+        return None;
+    }
+    Some(Zeroizing::new(std::mem::take(value)))
+}
+
+fn restore_touched_secret(
+    value: Option<Zeroizing<String>>,
+    draft: &mut String,
+    touched: &mut bool,
+) {
+    let Some(mut value) = value else {
+        return;
+    };
+    *draft = std::mem::take(&mut *value);
+    *touched = true;
+}
+
+pub fn cloud_sync_form_input_value_ref(
     form: &CloudSyncFormDraft,
     input: SettingsInput,
-) -> Option<String> {
+) -> Option<&str> {
     match input {
-        SettingsInput::CloudSyncEndpoint => Some(form.endpoint.clone()),
-        SettingsInput::CloudSyncNamespace => Some(form.namespace.clone()),
-        SettingsInput::CloudSyncS3Bucket => Some(form.s3_bucket.clone()),
-        SettingsInput::CloudSyncS3Region => Some(form.s3_region.clone()),
-        SettingsInput::CloudSyncGitRepository => Some(form.git_repository.clone()),
-        SettingsInput::CloudSyncGitBranch => Some(form.git_branch.clone()),
-        SettingsInput::CloudSyncGithubOauthClientId => Some(form.github_oauth_client_id.clone()),
+        SettingsInput::CloudSyncEndpoint => Some(form.endpoint.as_str()),
+        SettingsInput::CloudSyncNamespace => Some(form.namespace.as_str()),
+        SettingsInput::CloudSyncS3Bucket => Some(form.s3_bucket.as_str()),
+        SettingsInput::CloudSyncS3Region => Some(form.s3_region.as_str()),
+        SettingsInput::CloudSyncGitRepository => Some(form.git_repository.as_str()),
+        SettingsInput::CloudSyncGitBranch => Some(form.git_branch.as_str()),
+        SettingsInput::CloudSyncGithubOauthClientId => Some(form.github_oauth_client_id.as_str()),
         SettingsInput::CloudSyncMicrosoftOauthClientId => {
-            Some(form.microsoft_oauth_client_id.clone())
+            Some(form.microsoft_oauth_client_id.as_str())
         }
-        SettingsInput::CloudSyncGoogleOauthClientId => Some(form.google_oauth_client_id.clone()),
-        SettingsInput::CloudSyncToken => Some(form.token.clone()),
-        SettingsInput::CloudSyncGitToken => Some(form.git_token.clone()),
-        SettingsInput::CloudSyncBasicUsername => Some(form.basic_username.clone()),
-        SettingsInput::CloudSyncBasicPassword => Some(form.basic_password.clone()),
-        SettingsInput::CloudSyncAccessKeyId => Some(form.access_key_id.clone()),
-        SettingsInput::CloudSyncSecretAccessKey => Some(form.secret_access_key.clone()),
-        SettingsInput::CloudSyncSessionToken => Some(form.session_token.clone()),
-        SettingsInput::CloudSyncSyncPassword => Some(form.sync_password.clone()),
-        SettingsInput::CloudSyncAutoUploadInterval => Some(form.auto_upload_interval_mins.clone()),
+        SettingsInput::CloudSyncGoogleOauthClientId => Some(form.google_oauth_client_id.as_str()),
+        SettingsInput::CloudSyncToken => Some(form.token.as_str()),
+        SettingsInput::CloudSyncGitToken => Some(form.git_token.as_str()),
+        SettingsInput::CloudSyncBasicUsername => Some(form.basic_username.as_str()),
+        SettingsInput::CloudSyncBasicPassword => Some(form.basic_password.as_str()),
+        SettingsInput::CloudSyncAccessKeyId => Some(form.access_key_id.as_str()),
+        SettingsInput::CloudSyncSecretAccessKey => Some(form.secret_access_key.as_str()),
+        SettingsInput::CloudSyncSessionToken => Some(form.session_token.as_str()),
+        SettingsInput::CloudSyncSyncPassword => Some(form.sync_password.as_str()),
+        SettingsInput::CloudSyncAutoUploadInterval => Some(form.auto_upload_interval_mins.as_str()),
         _ => None,
     }
 }
 
-pub fn apply_cloud_sync_form_input_draft(
+/// Moves an editable Cloud Sync value into the active IME adapter.
+///
+/// Secret fields must use this handoff when they receive focus so the form and
+/// the root input adapter never own duplicate credential buffers.
+pub fn take_cloud_sync_form_input_value(
     form: &mut CloudSyncFormDraft,
     input: SettingsInput,
-    draft: &str,
-) -> bool {
+) -> Option<String> {
     match input {
-        SettingsInput::CloudSyncEndpoint => form.endpoint = draft.to_string(),
-        SettingsInput::CloudSyncNamespace => form.namespace = draft.to_string(),
-        SettingsInput::CloudSyncS3Bucket => form.s3_bucket = draft.to_string(),
-        SettingsInput::CloudSyncS3Region => form.s3_region = draft.to_string(),
-        SettingsInput::CloudSyncGitRepository => form.git_repository = draft.to_string(),
-        SettingsInput::CloudSyncGitBranch => form.git_branch = draft.to_string(),
+        SettingsInput::CloudSyncEndpoint => Some(std::mem::take(&mut form.endpoint)),
+        SettingsInput::CloudSyncNamespace => Some(std::mem::take(&mut form.namespace)),
+        SettingsInput::CloudSyncS3Bucket => Some(std::mem::take(&mut form.s3_bucket)),
+        SettingsInput::CloudSyncS3Region => Some(std::mem::take(&mut form.s3_region)),
+        SettingsInput::CloudSyncGitRepository => Some(std::mem::take(&mut form.git_repository)),
+        SettingsInput::CloudSyncGitBranch => Some(std::mem::take(&mut form.git_branch)),
         SettingsInput::CloudSyncGithubOauthClientId => {
-            form.github_oauth_client_id = draft.to_string();
+            Some(std::mem::take(&mut form.github_oauth_client_id))
         }
         SettingsInput::CloudSyncMicrosoftOauthClientId => {
-            form.microsoft_oauth_client_id = draft.to_string();
+            Some(std::mem::take(&mut form.microsoft_oauth_client_id))
         }
         SettingsInput::CloudSyncGoogleOauthClientId => {
-            form.google_oauth_client_id = draft.to_string();
+            Some(std::mem::take(&mut form.google_oauth_client_id))
         }
+        SettingsInput::CloudSyncToken => Some(std::mem::take(&mut form.token)),
+        SettingsInput::CloudSyncGitToken => Some(std::mem::take(&mut form.git_token)),
+        SettingsInput::CloudSyncBasicUsername => Some(std::mem::take(&mut form.basic_username)),
+        SettingsInput::CloudSyncBasicPassword => Some(std::mem::take(&mut form.basic_password)),
+        SettingsInput::CloudSyncAccessKeyId => Some(std::mem::take(&mut form.access_key_id)),
+        SettingsInput::CloudSyncSecretAccessKey => {
+            Some(std::mem::take(&mut form.secret_access_key))
+        }
+        SettingsInput::CloudSyncSessionToken => Some(std::mem::take(&mut form.session_token)),
+        SettingsInput::CloudSyncSyncPassword => Some(std::mem::take(&mut form.sync_password)),
         SettingsInput::CloudSyncAutoUploadInterval => {
-            form.auto_upload_interval_mins = draft.to_string();
+            Some(std::mem::take(&mut form.auto_upload_interval_mins))
         }
+        _ => None,
+    }
+}
+
+/// Returns an IME-owned value to the Cloud Sync Entity without cloning it.
+pub fn apply_cloud_sync_form_input_owned(
+    form: &mut CloudSyncFormDraft,
+    input: SettingsInput,
+    draft: String,
+) -> Result<(), String> {
+    match input {
+        SettingsInput::CloudSyncEndpoint => form.endpoint = draft,
+        SettingsInput::CloudSyncNamespace => form.namespace = draft,
+        SettingsInput::CloudSyncS3Bucket => form.s3_bucket = draft,
+        SettingsInput::CloudSyncS3Region => form.s3_region = draft,
+        SettingsInput::CloudSyncGitRepository => form.git_repository = draft,
+        SettingsInput::CloudSyncGitBranch => form.git_branch = draft,
+        SettingsInput::CloudSyncGithubOauthClientId => form.github_oauth_client_id = draft,
+        SettingsInput::CloudSyncMicrosoftOauthClientId => form.microsoft_oauth_client_id = draft,
+        SettingsInput::CloudSyncGoogleOauthClientId => form.google_oauth_client_id = draft,
+        SettingsInput::CloudSyncAutoUploadInterval => form.auto_upload_interval_mins = draft,
         SettingsInput::CloudSyncToken => {
-            // Secret fields track whether the user explicitly edited them so
-            // save can preserve untouched keychain values.
-            form.token = draft.to_string();
+            form.token = draft;
             form.token_touched = true;
         }
         SettingsInput::CloudSyncGitToken => {
-            form.git_token = draft.to_string();
+            form.git_token = draft;
             form.git_token_touched = true;
         }
         SettingsInput::CloudSyncBasicUsername => {
-            form.basic_username = draft.to_string();
+            form.basic_username = draft;
             form.basic_username_touched = true;
         }
         SettingsInput::CloudSyncBasicPassword => {
-            form.basic_password = draft.to_string();
+            form.basic_password = draft;
             form.basic_password_touched = true;
         }
         SettingsInput::CloudSyncAccessKeyId => {
-            form.access_key_id = draft.to_string();
+            form.access_key_id = draft;
             form.access_key_id_touched = true;
         }
         SettingsInput::CloudSyncSecretAccessKey => {
-            form.secret_access_key = draft.to_string();
+            form.secret_access_key = draft;
             form.secret_access_key_touched = true;
         }
         SettingsInput::CloudSyncSessionToken => {
-            form.session_token = draft.to_string();
+            form.session_token = draft;
             form.session_token_touched = true;
         }
         SettingsInput::CloudSyncSyncPassword => {
-            form.sync_password = draft.to_string();
+            form.sync_password = draft;
             form.sync_password_touched = true;
         }
-        _ => return false,
+        _ => return Err(draft),
     }
-    true
+    Ok(())
 }
 
 #[cfg(test)]
@@ -231,14 +387,15 @@ mod tests {
         let settings = CloudSyncSettings::default();
         let mut draft = CloudSyncFormDraft::from_settings(&settings);
 
-        assert!(apply_cloud_sync_form_input_draft(
+        apply_cloud_sync_form_input_owned(
             &mut draft,
             SettingsInput::CloudSyncToken,
-            "token"
-        ));
+            "token".to_string(),
+        )
+        .expect("cloud sync token input");
 
         assert_eq!(
-            cloud_sync_form_input_value(&draft, SettingsInput::CloudSyncToken).as_deref(),
+            cloud_sync_form_input_value_ref(&draft, SettingsInput::CloudSyncToken),
             Some("token")
         );
         assert!(draft.token_touched);
@@ -263,5 +420,57 @@ mod tests {
         assert!(!debug.contains("s3-secret"));
         assert!(!debug.contains("session-secret"));
         assert!(!debug.contains("sync-secret"));
+    }
+
+    #[test]
+    fn secret_handoff_moves_values_and_can_restore_without_clone() {
+        let mut draft = CloudSyncFormDraft::from_settings(&CloudSyncSettings::default());
+        draft.token = "token-secret".to_string();
+        draft.token_touched = true;
+        let original_pointer = draft.token.as_ptr();
+
+        let handoff = draft.take_secret_handoff();
+
+        assert!(draft.token.is_empty());
+        assert!(!draft.token_touched);
+        assert_eq!(
+            handoff.token.as_deref().map(String::as_str),
+            Some("token-secret")
+        );
+        assert_eq!(
+            handoff.token.as_deref().map(|value| value.as_ptr()),
+            Some(original_pointer)
+        );
+
+        draft.restore_secret_handoff(handoff);
+
+        assert_eq!(draft.token, "token-secret");
+        assert!(draft.token_touched);
+        assert_eq!(draft.token.as_ptr(), original_pointer);
+    }
+
+    #[test]
+    fn focused_secret_moves_to_ime_adapter_and_back_without_clone() {
+        let mut draft = CloudSyncFormDraft::from_settings(&CloudSyncSettings::default());
+        draft.sync_password = "sync-secret".to_string();
+        let original_pointer = draft.sync_password.as_ptr();
+
+        let focused =
+            take_cloud_sync_form_input_value(&mut draft, SettingsInput::CloudSyncSyncPassword)
+                .expect("cloud sync input");
+
+        assert!(draft.sync_password.is_empty());
+        assert_eq!(focused.as_ptr(), original_pointer);
+
+        apply_cloud_sync_form_input_owned(
+            &mut draft,
+            SettingsInput::CloudSyncSyncPassword,
+            focused,
+        )
+        .expect("cloud sync input");
+
+        assert_eq!(draft.sync_password, "sync-secret");
+        assert_eq!(draft.sync_password.as_ptr(), original_pointer);
+        assert!(draft.sync_password_touched);
     }
 }

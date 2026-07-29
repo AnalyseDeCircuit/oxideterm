@@ -1,5 +1,48 @@
 use super::*;
 
+struct OxideExportPreflightRenderSnapshot {
+    connections_with_passwords: usize,
+    connections_with_keys: usize,
+    connections_with_agent: usize,
+    portable_secret_count: usize,
+    key_passphrase_count: usize,
+    managed_key_count: usize,
+    managed_key_passphrase_count: usize,
+    can_export: bool,
+    blocked_managed_key_connection_count: usize,
+    missing_key_lines: Vec<String>,
+    total_key_bytes: u64,
+}
+
+#[derive(Clone)]
+struct OxideExportSummaryLineRenderer {
+    // Warning lines are immutable for this frame and shared across visible callbacks.
+    session_manager: Entity<SessionManagerState>,
+    tokens: ThemeTokens,
+    color: u32,
+    lines: Arc<[String]>,
+}
+
+impl OxideExportSummaryLineRenderer {
+    fn render(&self, index: usize, cx: &App) -> AnyElement {
+        if self.session_manager.read(cx).oxide_export_dialog.is_none() {
+            return div().into_any_element();
+        }
+        self.lines
+            .get(index)
+            .map(|line| {
+                div()
+                    .opacity(0.8)
+                    .line_height(px(16.0))
+                    .text_size(px(self.tokens.metrics.ui_text_xs))
+                    .text_color(rgb(self.color))
+                    .child(format!("• {line}"))
+                    .into_any_element()
+            })
+            .unwrap_or_else(|| div().into_any_element())
+    }
+}
+
 pub(super) fn oxide_export_summary_line_signature(line: &str) -> u64 {
     let mut hasher = DefaultHasher::new();
     // Warning lines are visible verbatim in the compact preflight body.
@@ -68,7 +111,6 @@ impl WorkspaceApp {
 
     pub(super) fn render_oxide_export_preflight(
         &self,
-        preflight: Option<ExportPreflightResult>,
         show_card: bool,
         embed_keys: bool,
         include_passwords: bool,
@@ -97,7 +139,33 @@ impl WorkspaceApp {
                     cx,
                 )),
         );
-        let Some(preflight) = preflight.filter(|_| show_card) else {
+        let preflight = self
+            .session_manager
+            .read(cx)
+            .oxide_export_dialog
+            .as_ref()
+            .and_then(|dialog| dialog.preflight.as_ref())
+            .filter(|_| show_card)
+            .map(|preflight| OxideExportPreflightRenderSnapshot {
+                connections_with_passwords: preflight.connections_with_passwords,
+                connections_with_keys: preflight.connections_with_keys,
+                connections_with_agent: preflight.connections_with_agent,
+                portable_secret_count: preflight.portable_secret_count,
+                key_passphrase_count: preflight.key_passphrase_count,
+                managed_key_count: preflight.managed_key_count,
+                managed_key_passphrase_count: preflight.managed_key_passphrase_count,
+                can_export: preflight.can_export,
+                blocked_managed_key_connection_count: preflight
+                    .blocked_managed_key_connections
+                    .len(),
+                missing_key_lines: preflight
+                    .missing_keys
+                    .iter()
+                    .map(|(name, path)| format!("{name}: {path}"))
+                    .collect(),
+                total_key_bytes: preflight.total_key_bytes,
+            });
+        let Some(preflight) = preflight else {
             return section.into_any_element();
         };
         let mut card_children = vec![self.render_oxide_export_preflight_stats(
@@ -178,7 +246,7 @@ impl WorkspaceApp {
                 OXIDE_RED_500,
                 self.i18n.t("export.warning_managed_keys_required").replace(
                     "{{count}}",
-                    &preflight.blocked_managed_key_connections.len().to_string(),
+                    &preflight.blocked_managed_key_connection_count.to_string(),
                 ),
                 Vec::new(),
                 cx,
@@ -203,18 +271,14 @@ impl WorkspaceApp {
                 cx,
             ));
         }
-        if embed_keys && !preflight.missing_keys.is_empty() {
+        if embed_keys && !preflight.missing_key_lines.is_empty() {
             card_children.push(
                 self.render_oxide_compact_warning(
                     OXIDE_YELLOW_500,
                     self.i18n
                         .t("export.warning_missing_keys")
-                        .replace("{{count}}", &preflight.missing_keys.len().to_string()),
-                    preflight
-                        .missing_keys
-                        .iter()
-                        .map(|(name, path)| format!("{name}: {path}"))
-                        .collect(),
+                        .replace("{{count}}", &preflight.missing_key_lines.len().to_string()),
+                    preflight.missing_key_lines,
                     cx,
                 ),
             );
@@ -244,131 +308,134 @@ impl WorkspaceApp {
         section.into_any_element()
     }
 
-    pub(super) fn render_oxide_export_content_summary(
-        &self,
-        dialog: &OxideExportDialogState,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let mut items = Vec::new();
-        let connection_count = oxide_export_connection_count(dialog);
-        if connection_count > 0 {
-            items.push(
-                self.i18n
-                    .t("export.content_summary_connections")
-                    .replace("{{count}}", &connection_count.to_string()),
-            );
-        }
-        if dialog.include_forwards && !dialog.selected_forward_ids.is_empty() {
-            items.push(
-                self.i18n
-                    .t("export.content_summary_forwards")
-                    .replace("{{count}}", &dialog.selected_forward_ids.len().to_string()),
-            );
-        }
-        if dialog.include_serial_profiles {
-            items.push(
-                self.i18n
-                    .t("export.content_summary_serial_profiles")
-                    .replace(
-                        "{{count}}",
-                        &self.connection_store.serial_profiles().len().to_string(),
-                    ),
-            );
-        }
-        if dialog.include_remote_desktop_profiles {
-            items.push(
-                self.i18n
-                    .t("export.content_summary_remote_desktop_profiles")
-                    .replace(
-                        "{{count}}",
-                        &self
-                            .connection_store
-                            .remote_desktop_profiles()
-                            .len()
-                            .to_string(),
-                    ),
-            );
-        }
-        if dialog.include_app_settings && !dialog.selected_app_settings_sections.is_empty() {
-            let labels = OXIDE_APP_SETTINGS_SECTIONS
-                .iter()
-                .filter(|section| dialog.selected_app_settings_sections.contains(**section))
-                .map(|section| oxide_settings_section_label(section, &self.i18n))
-                .collect::<Vec<_>>()
-                .join(", ");
-            items.push(format!(
-                "{}: {labels}",
-                self.i18n.t("export.content_summary_app_settings")
-            ));
-        }
-        let selected_plugin_setting_count = oxide_export_selected_plugin_setting_count(dialog);
-        if dialog.include_plugin_settings && selected_plugin_setting_count > 0 {
-            items.push(
-                self.i18n
-                    .t("export.content_summary_plugin_settings")
-                    .replace("{{plugins}}", &dialog.selected_plugin_ids.len().to_string())
-                    .replace("{{count}}", &selected_plugin_setting_count.to_string()),
-            );
-        }
-        if dialog.include_portable_secrets {
-            let count = dialog
-                .preflight
-                .as_ref()
-                .map(|preflight| preflight.portable_secret_count)
-                .unwrap_or(0);
-            items.push(
-                self.i18n
-                    .t("export.content_summary_portable_secrets")
-                    .replace("{{count}}", &count.to_string()),
-            );
-        }
-        if dialog.embed_keys {
-            items.push(self.i18n.t("export.content_summary_embed_keys"));
-        }
-        if dialog.include_passwords {
-            items.push(self.i18n.t("export.content_summary_passwords"));
-        }
-        if dialog.include_key_passphrases {
-            items.push(self.i18n.t("export.content_summary_key_passphrases"));
-        }
-        if dialog.include_managed_keys {
-            if let Some(count) = dialog
-                .preflight
-                .as_ref()
-                .map(|preflight| preflight.managed_key_count)
-                .filter(|count| *count > 0)
-            {
+    pub(super) fn render_oxide_export_content_summary(&self, cx: &mut Context<Self>) -> AnyElement {
+        let items = {
+            let manager = self.session_manager.read(cx);
+            let Some(dialog) = manager.oxide_export_dialog.as_ref() else {
+                return div().into_any_element();
+            };
+            let mut items = Vec::new();
+            let connection_count = oxide_export_connection_count(dialog);
+            if connection_count > 0 {
                 items.push(
                     self.i18n
-                        .t("export.content_summary_managed_keys")
+                        .t("export.content_summary_connections")
+                        .replace("{{count}}", &connection_count.to_string()),
+                );
+            }
+            if dialog.include_forwards && !dialog.selected_forward_ids.is_empty() {
+                items.push(
+                    self.i18n
+                        .t("export.content_summary_forwards")
+                        .replace("{{count}}", &dialog.selected_forward_ids.len().to_string()),
+                );
+            }
+            if dialog.include_serial_profiles {
+                items.push(
+                    self.i18n
+                        .t("export.content_summary_serial_profiles")
+                        .replace(
+                            "{{count}}",
+                            &self.connection_store.serial_profiles().len().to_string(),
+                        ),
+                );
+            }
+            if dialog.include_remote_desktop_profiles {
+                items.push(
+                    self.i18n
+                        .t("export.content_summary_remote_desktop_profiles")
+                        .replace(
+                            "{{count}}",
+                            &self
+                                .connection_store
+                                .remote_desktop_profiles()
+                                .len()
+                                .to_string(),
+                        ),
+                );
+            }
+            if dialog.include_app_settings && !dialog.selected_app_settings_sections.is_empty() {
+                let labels = OXIDE_APP_SETTINGS_SECTIONS
+                    .iter()
+                    .filter(|section| dialog.selected_app_settings_sections.contains(**section))
+                    .map(|section| oxide_settings_section_label(section, &self.i18n))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                items.push(format!(
+                    "{}: {labels}",
+                    self.i18n.t("export.content_summary_app_settings")
+                ));
+            }
+            let selected_plugin_setting_count = oxide_export_selected_plugin_setting_count(dialog);
+            if dialog.include_plugin_settings && selected_plugin_setting_count > 0 {
+                items.push(
+                    self.i18n
+                        .t("export.content_summary_plugin_settings")
+                        .replace("{{plugins}}", &dialog.selected_plugin_ids.len().to_string())
+                        .replace("{{count}}", &selected_plugin_setting_count.to_string()),
+                );
+            }
+            if dialog.include_portable_secrets {
+                let count = dialog
+                    .preflight
+                    .as_ref()
+                    .map(|preflight| preflight.portable_secret_count)
+                    .unwrap_or(0);
+                items.push(
+                    self.i18n
+                        .t("export.content_summary_portable_secrets")
                         .replace("{{count}}", &count.to_string()),
                 );
             }
-        }
-        if dialog.include_managed_key_passphrases {
-            if let Some(count) = dialog
+            if dialog.embed_keys {
+                items.push(self.i18n.t("export.content_summary_embed_keys"));
+            }
+            if dialog.include_passwords {
+                items.push(self.i18n.t("export.content_summary_passwords"));
+            }
+            if dialog.include_key_passphrases {
+                items.push(self.i18n.t("export.content_summary_key_passphrases"));
+            }
+            if dialog.include_managed_keys {
+                if let Some(count) = dialog
+                    .preflight
+                    .as_ref()
+                    .map(|preflight| preflight.managed_key_count)
+                    .filter(|count| *count > 0)
+                {
+                    items.push(
+                        self.i18n
+                            .t("export.content_summary_managed_keys")
+                            .replace("{{count}}", &count.to_string()),
+                    );
+                }
+            }
+            if dialog.include_managed_key_passphrases {
+                if let Some(count) = dialog
+                    .preflight
+                    .as_ref()
+                    .map(|preflight| preflight.managed_key_passphrase_count)
+                    .filter(|count| *count > 0)
+                {
+                    items.push(
+                        self.i18n
+                            .t("export.content_summary_managed_key_passphrases")
+                            .replace("{{count}}", &count.to_string()),
+                    );
+                }
+            }
+            if let Some(preflight) = dialog
                 .preflight
                 .as_ref()
-                .map(|preflight| preflight.managed_key_passphrase_count)
-                .filter(|count| *count > 0)
+                .filter(|preflight| !preflight.can_export)
             {
-                items.push(
-                    self.i18n
-                        .t("export.content_summary_managed_key_passphrases")
-                        .replace("{{count}}", &count.to_string()),
-                );
+                items.push(self.i18n.t("export.warning_managed_keys_required").replace(
+                    "{{count}}",
+                    &preflight.blocked_managed_key_connections.len().to_string(),
+                ));
             }
-        }
-        if let Some(preflight) = dialog
-            .preflight
-            .as_ref()
-            .filter(|preflight| !preflight.can_export)
-        {
-            items.push(self.i18n.t("export.warning_managed_keys_required").replace(
-                "{{count}}",
-                &preflight.blocked_managed_key_connections.len().to_string(),
-            ));
-        }
+            items
+        };
         let content = if items.is_empty() {
             vec![
                 div()
@@ -412,26 +479,40 @@ impl WorkspaceApp {
         )
     }
 
-    pub(super) fn render_oxide_security_notice(
-        &self,
-        dialog: &OxideExportDialogState,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
+    pub(super) fn render_oxide_security_notice(&self, cx: &mut Context<Self>) -> AnyElement {
+        let (
+            include_app_settings,
+            include_plugin_settings,
+            selected_plugin_setting_count,
+            include_portable_secrets,
+            include_passwords,
+        ) = {
+            let manager = self.session_manager.read(cx);
+            let Some(dialog) = manager.oxide_export_dialog.as_ref() else {
+                return div().into_any_element();
+            };
+            (
+                dialog.include_app_settings,
+                dialog.include_plugin_settings,
+                oxide_export_selected_plugin_setting_count(dialog),
+                dialog.include_portable_secrets,
+                dialog.include_passwords,
+            )
+        };
         let yes_label = self.i18n.t("common.yes");
         let no_label = self.i18n.t("common.no");
-        let app_settings_label = if dialog.include_app_settings {
+        let app_settings_label = if include_app_settings {
             yes_label.as_str()
         } else {
             no_label.as_str()
         };
-        let plugin_settings_label = if dialog.include_plugin_settings
-            && oxide_export_selected_plugin_setting_count(dialog) > 0
+        let plugin_settings_label = if include_plugin_settings && selected_plugin_setting_count > 0
         {
             yes_label.as_str()
         } else {
             no_label.as_str()
         };
-        let portable_secrets_label = if dialog.include_portable_secrets {
+        let portable_secrets_label = if include_portable_secrets {
             yes_label.as_str()
         } else {
             no_label.as_str()
@@ -450,7 +531,7 @@ impl WorkspaceApp {
                 self.i18n
                     .t("export.security_portable_secrets")
                     .replace("{{portable}}", portable_secrets_label),
-                if dialog.include_passwords {
+                if include_passwords {
                     self.i18n.t("export.security_passwords_included")
                 } else {
                     self.i18n.t("export.security_passwords_excluded")
@@ -462,11 +543,15 @@ impl WorkspaceApp {
         )
     }
 
-    pub(super) fn render_oxide_export_password_input(
-        &self,
-        dialog: &OxideExportDialogState,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
+    pub(super) fn render_oxide_export_password_input(&self, cx: &mut Context<Self>) -> AnyElement {
+        let password_strength = self
+            .session_manager
+            .read(cx)
+            .oxide_export_dialog
+            .as_ref()
+            .and_then(|dialog| {
+                (!dialog.password.is_empty()).then(|| oxide_password_strength(&dialog.password))
+            });
         div()
             .flex()
             .flex_col()
@@ -486,15 +571,14 @@ impl WorkspaceApp {
             )
             .child(self.render_session_password_input(
                 SessionManagerInput::OxideExportPassword,
-                &dialog.password,
                 "至少 6 位，推荐 12 位以上并混合大小写字母、数字和符号".to_string(),
                 cx,
             ))
-            .when(!dialog.password.is_empty(), |input| {
+            .when_some(password_strength, |input, strength| {
                 input.child(
                     div()
                         .mt(px(4.0))
-                        .child(self.render_oxide_password_strength(&dialog.password, cx)),
+                        .child(self.render_oxide_password_strength(strength, cx)),
                 )
             })
             .into_any_element()
@@ -510,35 +594,30 @@ impl WorkspaceApp {
         let line_list = if lines.is_empty() {
             None
         } else {
-            self.sync_oxide_export_summary_line_list_state(&lines);
-            let state = self.oxide_export_summary_line_list_state.clone();
+            self.sync_oxide_export_summary_line_list_state(&lines, cx);
+            let state = self
+                .session_manager
+                .read(cx)
+                .oxide_export_summary_line_list_state
+                .clone();
             let spec = self.oxide_export_summary_line_list_spec();
-            let workspace = cx.entity();
-            let line_color = color;
             let item_count = lines.len();
-            let virtual_lines = lines;
+            let renderer = OxideExportSummaryLineRenderer {
+                session_manager: self.session_manager.clone(),
+                tokens: self.tokens,
+                color,
+                lines: lines.into(),
+            };
             Some(
                 div()
                     .id("oxide-export-summary-lines")
                     .h(px((item_count as f32
                         * OXIDE_EXPORT_SUMMARY_LINE_LIST_ESTIMATED_HEIGHT)
                         .min(64.0)))
-                    .selectable_overflow_y_scrollbar(
-                        &self.selectable_text_scroll_handle("oxide-export-summary-lines"),
-                    )
                     .child(tauri_virtual_list(
                         state,
                         spec,
-                        move |index, _window, cx| {
-                            let Some(line) = virtual_lines.get(index).cloned() else {
-                                return div().into_any_element();
-                            };
-                            workspace.update(cx, |this, cx| {
-                                this.render_oxide_export_summary_line_item(
-                                    index, line, line_color, cx,
-                                )
-                            })
-                        },
+                        move |index, _window, cx| renderer.render(index, cx),
                     ))
                     .into_any_element(),
             )
@@ -578,14 +657,15 @@ impl WorkspaceApp {
             .into_any_element()
     }
 
-    pub(super) fn sync_oxide_export_summary_line_list_state(&self, lines: &[String]) {
+    pub(super) fn sync_oxide_export_summary_line_list_state(&self, lines: &[String], cx: &App) {
         let signatures = lines
             .iter()
             .map(|line| oxide_export_summary_line_signature(line))
             .collect::<Vec<_>>();
+        let manager = self.session_manager.read(cx);
         sync_tauri_variable_list_state_by_signatures(
-            &self.oxide_export_summary_line_list_state,
-            &mut self.oxide_export_summary_line_list_cache.borrow_mut(),
+            &manager.oxide_export_summary_line_list_state,
+            &mut manager.oxide_export_summary_line_list_cache.borrow_mut(),
             "oxide-export-summary-lines",
             &signatures,
             self.oxide_export_summary_line_list_spec(),
@@ -599,45 +679,37 @@ impl WorkspaceApp {
         )
     }
 
-    pub(super) fn render_oxide_export_summary_line_item(
-        &self,
-        index: usize,
-        line: String,
-        color: u32,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        div()
-            .opacity(0.8)
-            .line_height(px(16.0))
-            .child(self.render_selectable_text_scoped(
-                "oxide-export-compact-warning-line",
-                index,
-                format!("• {line}"),
-                color,
-                cx,
-            ))
-            .into_any_element()
-    }
-
-    pub(super) fn render_oxide_export_footer(
-        &self,
-        dialog: &OxideExportDialogState,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let primary_label = dialog
-            .progress_stage
-            .as_ref()
-            .filter(|_| dialog.busy)
-            .map(|progress| {
-                oxide_export_progress_label(&progress.stage, dialog.embed_keys, &self.i18n)
+    pub(super) fn render_oxide_export_footer(&self, cx: &mut Context<Self>) -> AnyElement {
+        let Some((busy, no_selected_content, focused_footer_action, embed_keys, progress_stage)) =
+            ({
+                self.session_manager
+                    .read(cx)
+                    .oxide_export_dialog
+                    .as_ref()
+                    .map(|dialog| {
+                        (
+                            dialog.busy,
+                            !oxide_export_has_selected_content(dialog),
+                            dialog.focused_footer_action,
+                            dialog.embed_keys,
+                            dialog.progress_stage.clone(),
+                        )
+                    })
             })
+        else {
+            return div().into_any_element();
+        };
+        let primary_label = progress_stage
+            .as_ref()
+            .filter(|_| busy)
+            .map(|progress| oxide_export_progress_label(&progress.stage, embed_keys, &self.i18n))
             .unwrap_or_else(|| self.i18n.t("export.export"));
         self.render_oxide_footer(
-            dialog.busy,
-            !oxide_export_has_selected_content(dialog),
+            busy,
+            no_selected_content,
             String::new(),
             primary_label,
-            dialog.focused_footer_action,
+            focused_footer_action,
             |_this, _event, _window, cx| {
                 cx.stop_propagation();
             },
@@ -646,9 +718,11 @@ impl WorkspaceApp {
                 cx.stop_propagation();
             },
             |this, _event, _window, cx| {
-                this.session_manager.oxide_export_dialog = None;
-                this.session_manager.focused_input = None;
-                cx.notify();
+                this.session_manager.update(cx, |manager, cx| {
+                    manager.oxide_export_dialog = None;
+                    manager.focused_input = None;
+                    cx.notify();
+                });
                 cx.stop_propagation();
             },
             cx,

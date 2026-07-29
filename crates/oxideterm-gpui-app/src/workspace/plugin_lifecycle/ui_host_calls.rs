@@ -9,14 +9,14 @@ use super::{
     sync::native_plugin_emit_sync_progress,
     types::{NativePluginConfirmRequest, NativePluginSyncRequest},
 };
-use crate::workspace::plugin_runtime;
+use crate::workspace::{delivery, plugin_runtime};
 
 // These UI host calls bounce synchronous plugin requests into Workspace-owned
 // UI channels while preserving the JS Promise-style response shape.
 pub(super) fn native_plugin_show_confirm_response(
     plugin_id: &str,
     call: plugin_runtime::PluginHostCall,
-    confirm_tx: &mpsc::Sender<NativePluginConfirmRequest>,
+    confirm_tx: &delivery::ActiveDeliverySender<NativePluginConfirmRequest>,
 ) -> plugin_runtime::PluginResponse {
     let request_id = call.request_id.clone();
     let (title, description) = match native_plugin_confirm_args(&call.args) {
@@ -76,7 +76,7 @@ fn native_plugin_confirm_args(args: &Value) -> Result<(String, String), String> 
 pub(super) fn native_plugin_show_progress_response(
     plugin_id: &str,
     call: plugin_runtime::PluginHostCall,
-    sync_tx: Option<&mpsc::Sender<NativePluginSyncRequest>>,
+    sync_tx: Option<&delivery::ActiveDeliverySender<NativePluginSyncRequest>>,
 ) -> plugin_runtime::PluginResponse {
     let request_id = call.request_id.clone();
     let title = call

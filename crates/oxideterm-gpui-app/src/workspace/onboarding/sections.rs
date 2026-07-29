@@ -739,11 +739,12 @@ impl WorkspaceApp {
         _window: &Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let status = self.settings_page.cli_companion_status.as_ref();
+        let cli = self.settings_workspace.read(cx).cli_companion_snapshot();
+        let status = cli.status.as_ref();
         let installed = status.is_some_and(|status| status.installed);
         let bundled = status.is_some_and(|status| status.bundled);
         let needs_reinstall = status.is_some_and(|status| status.needs_reinstall);
-        let status_label = if self.settings_page.cli_companion_loading {
+        let status_label = if cli.loading {
             self.i18n.t("settings_view.general.cli_checking")
         } else if installed && needs_reinstall {
             self.i18n.t("onboarding.cli_step_reinstall_required")
@@ -756,7 +757,7 @@ impl WorkspaceApp {
         };
         let status_color = if installed && !needs_reinstall {
             self.tokens.ui.success
-        } else if self.settings_page.cli_companion_loading || needs_reinstall {
+        } else if cli.loading || needs_reinstall {
             self.tokens.ui.warning
         } else {
             self.tokens.ui.text_muted
@@ -859,7 +860,7 @@ impl WorkspaceApp {
                     )),
             )
             .child(self.onboarding_tip("onboarding.cli_step_skip_hint", &[]))
-            .when(self.settings_page.cli_companion_status.is_none(), |body| {
+            .when(cli.status.is_none(), |body| {
                 body.child(self.onboarding_clickable_card(
                     LucideIcon::RefreshCw,
                     self.i18n.t("settings_view.help.retry"),

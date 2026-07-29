@@ -1,23 +1,49 @@
 use super::super::*;
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(in crate::workspace) struct WorkspaceSshNodeEndpoint {
+    pub(in crate::workspace) host: String,
+    pub(in crate::workspace) port: u16,
+    pub(in crate::workspace) username: String,
+}
+
+impl WorkspaceSshNodeEndpoint {
+    pub(in crate::workspace) fn from_config(config: &SshConfig) -> Self {
+        // The UI mirror retains only display-safe endpoint metadata. Authentication
+        // material remains in the node runtime and live connection owners.
+        Self {
+            host: config.host.clone(),
+            port: config.port,
+            username: config.username.clone(),
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub(in crate::workspace) struct WorkspaceSshNode {
     pub(in crate::workspace) saved_connection_id: Option<String>,
-    pub(in crate::workspace) config: SshConfig,
+    pub(in crate::workspace) endpoint: WorkspaceSshNodeEndpoint,
     pub(in crate::workspace) title: String,
     pub(in crate::workspace) terminal_ids: Vec<TerminalSessionId>,
     pub(in crate::workspace) readiness: NodeReadiness,
 }
 
-#[derive(Clone, Debug)]
-pub(in crate::workspace) struct PendingSshTerminalOpen {
-    pub(in crate::workspace) node_id: NodeId,
-    pub(in crate::workspace) post_connect_command: Option<String>,
-    pub(in crate::workspace) saved_connection_id: Option<String>,
-    pub(in crate::workspace) mark_used_connection_id: Option<String>,
-    pub(in crate::workspace) save_after_open: Option<SaveConnectionRequest>,
-    pub(in crate::workspace) cleanup_node_id: Option<NodeId>,
-    pub(in crate::workspace) title: String,
+impl WorkspaceSshNode {
+    pub(in crate::workspace) fn new(
+        saved_connection_id: Option<String>,
+        config: &SshConfig,
+        title: String,
+        terminal_ids: Vec<TerminalSessionId>,
+        readiness: NodeReadiness,
+    ) -> Self {
+        Self {
+            saved_connection_id,
+            endpoint: WorkspaceSshNodeEndpoint::from_config(config),
+            title,
+            terminal_ids,
+            readiness,
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -25,31 +51,15 @@ pub(in crate::workspace) enum ReconnectWorkerResult {
     NodeConnected {
         node_id: NodeId,
         connection_id: String,
+        attempt_id: runtime_entity::NodeTransportAttemptId,
         job_id: Option<String>,
     },
     NodeConnectFailed {
         node_id: NodeId,
+        connection_id: String,
         error: String,
+        attempt_id: runtime_entity::NodeTransportAttemptId,
         job_id: Option<String>,
-    },
-    ContinueConnectionChain {
-        node_id: NodeId,
-    },
-    ContinueReconnectCascade,
-    FlushPendingReconnect {
-        generation: u64,
-    },
-    StartReconnectPipeline {
-        node_id: NodeId,
-        expected_connection_id: Option<String>,
-    },
-    RetryNodeConnect {
-        node_id: NodeId,
-        job_id: String,
-    },
-    CleanupReconnectJob {
-        node_id: NodeId,
-        started_at: SystemTime,
     },
     GraceRecovered {
         node_id: NodeId,
@@ -69,20 +79,43 @@ pub(in crate::workspace) enum ReconnectWorkerResult {
         detail: String,
         job_id: String,
     },
-    ForwardRulesRestored {
-        node_id: NodeId,
-        result: PhaseResult,
-        restored: u32,
-        detail: String,
-        job_id: String,
-        created_forwards: Vec<(String, String)>,
-        bindings: Vec<(String, String, ConnectionConsumer)>,
-    },
-    ActiveConnectionsProbed {
-        changed: usize,
-    },
     RemoteShellIntegrationGateFinished {
         node_id: NodeId,
-        result: std::result::Result<(RemoteShellIntegrationStatus, bool), String>,
+        generation: u64,
+        result: std::result::Result<(RemoteShellIntegrationStatus, bool), ()>,
     },
+    RemoteShellIntegrationMaintenanceFinished {
+        action: settings::RemoteShellIntegrationAction,
+        node_id: NodeId,
+        generation: u64,
+        result: std::result::Result<RemoteShellIntegrationStatus, ()>,
+    },
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn workspace_ssh_node_keeps_only_non_secret_endpoint_metadata() {
+        let config = SshConfig::password(
+            "runtime.example.test",
+            2202,
+            "operator",
+            "node-secret-sentinel",
+        );
+        let node = WorkspaceSshNode::new(
+            None,
+            &config,
+            "Runtime".to_string(),
+            Vec::new(),
+            NodeReadiness::Disconnected,
+        );
+
+        assert_eq!(node.endpoint.host, "runtime.example.test");
+        assert_eq!(node.endpoint.port, 2202);
+        assert_eq!(node.endpoint.username, "operator");
+        // Debug output represents the UI projection and must never retain auth material.
+        assert!(!format!("{node:?}").contains("node-secret-sentinel"));
+    }
 }

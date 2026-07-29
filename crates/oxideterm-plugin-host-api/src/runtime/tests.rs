@@ -65,6 +65,42 @@ fn protocol_envelope_rejects_unknown_version() {
 }
 
 #[test]
+fn process_decoder_classifies_sync_password_frames_before_typed_queues() {
+    let frame = decode_process_output_frame(
+        r#"{"protocolVersion":1,"payload":{"type":"callHostApi","requestId":"sync-1","namespace":"sync","method":"importOxide","args":{"password":"sensitive-value"}}}"#,
+    )
+    .unwrap();
+
+    let PluginProcessFrame::Outbound(message) = frame else {
+        panic!("sync host call should decode as an outbound message");
+    };
+    assert!(message.host_call_sensitivity().is_sensitive());
+    assert!(!format!("{message:?}").contains("sensitive-value"));
+}
+
+#[test]
+fn process_decoder_rejects_malformed_sensitive_frames() {
+    let error = decode_process_output_frame(
+        r#"{"protocolVersion":1,"payload":{"type":"callHostApi","namespace":"sync","method":"previewImport","args":{"password":"sensitive-value"}}}"#,
+    )
+    .unwrap_err();
+
+    assert_eq!(error.code, "process_outbound_decode_failed");
+    assert!(!error.message.contains("sensitive-value"));
+}
+
+#[test]
+fn process_decoder_rejects_sensitive_frames_with_unknown_version() {
+    let error = decode_process_output_frame(
+        r#"{"protocolVersion":2,"payload":{"type":"callHostApi","requestId":"sync-1","namespace":"sync","method":"exportOxide","args":{"password":"sensitive-value"}}}"#,
+    )
+    .unwrap_err();
+
+    assert_eq!(error.code, "unsupported_protocol_version");
+    assert!(!error.message.contains("sensitive-value"));
+}
+
+#[test]
 fn runtime_request_round_trips_as_versioned_json() {
     let request = PluginRequest {
         request_id: "activate-1".to_string(),
@@ -582,6 +618,22 @@ printf '%s\n' '{"protocolVersion":1,"requestId":"activate:com.example.runtime","
     assert!(registry.contributions().runtime_commands.is_empty());
 }
 
+#[tokio::test]
+async fn runtime_host_deactivation_always_releases_permission_snapshots() {
+    let mut host = NativePluginRuntimeHost::default();
+    host.process_permissions.insert(
+        "com.example.runtime".to_string(),
+        PluginPermissionSet {
+            capabilities: Vec::new(),
+            allowed_host_apis: vec!["ui.showToast".to_string()],
+        },
+    );
+
+    host.deactivate_plugin("com.example.runtime").await.unwrap();
+
+    assert!(!host.process_permissions.contains_key("com.example.runtime"));
+}
+
 #[cfg(unix)]
 #[tokio::test]
 async fn runtime_host_dispatches_registered_command_over_process_rpc() {
@@ -782,6 +834,137 @@ printf '%s\n' "{\"protocolVersion\":1,\"requestId\":\"command:demo.read\",\"payl
 
 #[cfg(unix)]
 #[tokio::test]
+async fn process_runtime_does_not_retain_secret_host_call_copies() {
+    let temp_dir = unique_temp_dir("plugin-process-secret-host-call");
+    let plugin_dir = temp_dir.join("plugin");
+    fs::create_dir_all(&plugin_dir).unwrap();
+    write_process_plugin(
+        &plugin_dir,
+        r#"#!/bin/sh
+read activate
+printf '%s\n' '{"protocolVersion":1,"requestId":"activate-test","payload":{"requestId":"activate-test","result":{"status":"ok","value":{"activated":true}}}}'
+read dispatch
+printf '%s\n' '{"protocolVersion":1,"payload":{"type":"callHostApi","requestId":"host-secret-set","namespace":"secrets","method":"set","args":{"key":"token","value":"plugin-sensitive-value"}}}'
+read host_response
+case "$host_response" in
+  *'"host-sensitive-value"'*) result='{"status":"ok","value":{"received":true}}' ;;
+  *) result='{"status":"error","error":{"code":"bad_host_response","message":"missing host value","recoverable":false}}' ;;
+esac
+printf '%s\n' "{\"protocolVersion\":1,\"requestId\":\"command:demo.secret\",\"payload\":{\"requestId\":\"command:demo.secret\",\"result\":$result}}"
+"#,
+    );
+
+    let mut runtime = NativeProcessPluginRuntime::new(
+        "com.example.runtime",
+        &plugin_dir,
+        "bin/plugin",
+        process_runtime_test_timeout(),
+    );
+    runtime.set_host_call_handler(Box::new(|call| {
+        assert_eq!(call.namespace, "secrets");
+        assert_eq!(call.method, "set");
+        assert_eq!(call.args["value"], "plugin-sensitive-value");
+        Some(PluginResponse::sensitive_ok(
+            call.request_id,
+            serde_json::json!("host-sensitive-value"),
+        ))
+    }));
+    runtime
+        .activate(PluginActivateRequest {
+            request_id: "activate-test".to_string(),
+            manifest: sample_manifest(),
+            permissions: PluginPermissionSet::default(),
+            timeout_ms: PROCESS_RUNTIME_TEST_TIMEOUT_MS,
+        })
+        .await
+        .unwrap();
+
+    let response = runtime
+        .call(PluginRequest {
+            request_id: "command:demo.secret".to_string(),
+            kind: PluginRequestKind::DispatchCommand {
+                command: "demo.secret".to_string(),
+                args: Value::Null,
+            },
+            timeout_ms: Some(2_000),
+        })
+        .await
+        .unwrap();
+
+    assert_eq!(
+        response.result,
+        PluginResponseResult::Ok {
+            value: serde_json::json!({ "received": true }),
+        }
+    );
+    // Secret frames are consumed synchronously and must never reach retained
+    // audit queues that outlive the request/response exchange.
+    assert!(runtime.drain_outbound_messages().is_empty());
+    assert!(runtime.drain_outbound_effects().is_empty());
+    runtime.kill().await.unwrap();
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn process_runtime_does_not_retain_sync_password_host_call_copies() {
+    let temp_dir = unique_temp_dir("plugin-process-sync-password-host-call");
+    let plugin_dir = temp_dir.join("plugin");
+    fs::create_dir_all(&plugin_dir).unwrap();
+    write_process_plugin(
+        &plugin_dir,
+        r#"#!/bin/sh
+read activate
+printf '%s\n' '{"protocolVersion":1,"requestId":"activate-test","payload":{"requestId":"activate-test","result":{"status":"ok","value":{"activated":true}}}}'
+read dispatch
+printf '%s\n' '{"protocolVersion":1,"payload":{"type":"callHostApi","requestId":"host-sync-import","namespace":"sync","method":"importOxide","args":{"password":"plugin-sensitive-value","fileData":[]}}}'
+read host_response
+printf '%s\n' '{"protocolVersion":1,"requestId":"command:demo.sync","payload":{"requestId":"command:demo.sync","result":{"status":"ok","value":{"received":true}}}}'
+"#,
+    );
+
+    let mut runtime = NativeProcessPluginRuntime::new(
+        "com.example.runtime",
+        &plugin_dir,
+        "bin/plugin",
+        process_runtime_test_timeout(),
+    );
+    runtime.set_host_call_handler(Box::new(|mut call| {
+        assert_eq!(call.namespace, "sync");
+        assert_eq!(call.method, "importOxide");
+        assert_eq!(call.args["password"], "plugin-sensitive-value");
+        let request_id = std::mem::take(&mut call.request_id);
+        call.zeroize_args();
+        Some(PluginResponse::ok(request_id, Value::Null))
+    }));
+    runtime
+        .activate(PluginActivateRequest {
+            request_id: "activate-test".to_string(),
+            manifest: sample_manifest(),
+            permissions: PluginPermissionSet::default(),
+            timeout_ms: PROCESS_RUNTIME_TEST_TIMEOUT_MS,
+        })
+        .await
+        .unwrap();
+
+    runtime
+        .call(PluginRequest {
+            request_id: "command:demo.sync".to_string(),
+            kind: PluginRequestKind::DispatchCommand {
+                command: "demo.sync".to_string(),
+                args: Value::Null,
+            },
+            timeout_ms: Some(2_000),
+        })
+        .await
+        .unwrap();
+
+    assert!(runtime.drain_outbound_messages().is_empty());
+    assert!(runtime.drain_outbound_effects().is_empty());
+    runtime.kill().await.unwrap();
+}
+
+#[cfg(unix)]
+#[tokio::test]
 async fn runtime_host_installs_returnable_host_call_resolver_for_commands() {
     let temp_dir = unique_temp_dir("plugin-runtime-host-returnable-host-call");
     let plugin_dir = temp_dir.join("plugin");
@@ -916,7 +1099,7 @@ printf '%s\n' '{"protocolVersion":1,"requestId":"command:com.example.runtime:dem
 
 #[cfg(unix)]
 #[tokio::test]
-async fn runtime_host_rejects_unauthorized_host_call_effects() {
+async fn runtime_host_returns_permission_error_without_retaining_sensitive_call() {
     let temp_dir = unique_temp_dir("plugin-runtime-host-denied-host-call");
     let plugin_dir = temp_dir.join("plugin");
     fs::create_dir_all(&plugin_dir).unwrap();
@@ -925,12 +1108,20 @@ async fn runtime_host_rejects_unauthorized_host_call_effects() {
         r#"#!/bin/sh
 read request
 printf '%s\n' '{"protocolVersion":1,"payload":{"type":"callHostApi","requestId":"host-1","namespace":"secrets","method":"get","args":{"key":"token"}}}'
-printf '%s\n' '{"protocolVersion":1,"requestId":"activate:com.example.runtime","payload":{"requestId":"activate:com.example.runtime","result":{"status":"ok","value":{"activated":true}}}}'
+read host_response
+case "$host_response" in
+  *'"host_api_not_allowed"'*) result='{"status":"ok","value":{"denied":true}}' ;;
+  *) result='{"status":"error","error":{"code":"missing_permission_error","message":"permission error was not returned","recoverable":false}}' ;;
+esac
+printf '%s\n' "{\"protocolVersion\":1,\"requestId\":\"activate:com.example.runtime\",\"payload\":{\"requestId\":\"activate:com.example.runtime\",\"result\":$result}}"
 "#,
     );
 
     let mut host = NativePluginRuntimeHost::default();
-    let error = host
+    host.set_host_api_resolver(Arc::new(|_, _, _| {
+        panic!("permission denial must not reach the host API resolver")
+    }));
+    let activation = host
         .activate_process_plugin(
             sample_manifest(),
             plugin_dir,
@@ -942,9 +1133,14 @@ printf '%s\n' '{"protocolVersion":1,"requestId":"activate:com.example.runtime","
             process_runtime_test_timeout(),
         )
         .await
-        .unwrap_err();
+        .unwrap();
 
-    assert_eq!(error.code, "host_api_not_allowed");
+    assert!(matches!(
+        activation.response.result,
+        PluginResponseResult::Ok { .. }
+    ));
+    assert!(activation.messages.is_empty());
+    assert!(activation.effects.is_empty());
     let health = host.deactivate_plugin("com.example.runtime").await.unwrap();
     assert!(matches!(health.result, PluginResponseResult::Ok { .. }));
 }

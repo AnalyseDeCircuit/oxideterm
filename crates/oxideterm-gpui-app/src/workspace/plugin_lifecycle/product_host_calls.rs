@@ -23,17 +23,16 @@ impl WorkspaceApp {
         match (namespace, method) {
             ("connections", "connect" | "reconnect" | "disconnect")
             | ("quickCommands", "execute") => {
-                // These effects require the current GPUI Window and are consumed
-                // at the beginning of the next workspace render pass.
-                self.native_plugin_runtime.product_ui_effects.push_back(
-                    NativePluginProductUiEffect {
+                // These effects require a live GPUI Window, so the Entity keeps
+                // them until its reliable delivery event reaches the adapter.
+                self.plugin_entity.update(cx, |plugins, _cx| {
+                    plugins.enqueue_product_ui_effect(NativePluginProductUiEffect {
                         plugin_id: plugin_id.to_string(),
                         namespace: namespace.to_string(),
                         method: method.to_string(),
                         args,
-                    },
-                );
-                cx.notify();
+                    });
+                });
             }
             ("notifications", method) => {
                 self.apply_native_plugin_notification_effect(method, &args, cx)
@@ -51,12 +50,15 @@ impl WorkspaceApp {
     }
 
     /// Consumes only effects that need a live window, preserving their product owners.
-    pub(in crate::workspace) fn poll_native_plugin_product_ui_effects(
+    pub(in crate::workspace) fn apply_native_plugin_product_ui_effects(
         &mut self,
         window: &mut Window,
         cx: &mut Context<Self>,
-    ) {
-        while let Some(effect) = self.native_plugin_runtime.product_ui_effects.pop_front() {
+    ) -> bool {
+        let (effects, backlog_remaining) = self
+            .plugin_entity
+            .update(cx, |plugins, _cx| plugins.take_product_ui_effects());
+        for effect in effects {
             match (effect.namespace.as_str(), effect.method.as_str()) {
                 ("connections", "connect") => {
                     if let Some(connection_id) = string_arg(&effect.args, "connectionId") {
@@ -65,7 +67,7 @@ impl WorkspaceApp {
                 }
                 ("connections", "reconnect") => {
                     if let Some(node_id) = string_arg(&effect.args, "nodeId") {
-                        self.ensure_node_connection_started(&NodeId::new(node_id.to_string()));
+                        self.ensure_node_connection_started(&NodeId::new(node_id.to_string()), cx);
                         cx.notify();
                     }
                 }
@@ -79,7 +81,10 @@ impl WorkspaceApp {
                 ("quickCommands", "execute") => {
                     if let Some(command_id) = string_arg(&effect.args, "id")
                         && let Some(command) = self
+                            .terminal
+                            .read(cx)
                             .quick_commands
+                            .store
                             .commands
                             .iter()
                             .find(|command| command.id == command_id)
@@ -88,12 +93,17 @@ impl WorkspaceApp {
                         self.run_quick_command(&command, window, cx);
                     }
                 }
-                _ => self.native_plugin_runtime.registry.record_manager_error(
-                    effect.plugin_id,
-                    "Unsupported queued product plugin effect".to_string(),
-                ),
+                _ => {
+                    self.plugin_entity.update(cx, |plugins, _cx| {
+                        plugins.registry_mut().record_manager_error(
+                            effect.plugin_id,
+                            "Unsupported queued product plugin effect".to_string(),
+                        );
+                    });
+                }
             }
         }
+        backlog_remaining
     }
 
     fn apply_native_plugin_notification_effect(
@@ -142,22 +152,29 @@ impl WorkspaceApp {
                 let Some(command) = string_arg(args, "command") else {
                     return;
                 };
-                self.quick_commands.upsert_command(QuickCommandDraft {
-                    id: string_arg(args, "id").map(str::to_string),
-                    name: name.to_string(),
-                    command: command.to_string(),
-                    category: string_arg(args, "category").unwrap_or("custom").to_string(),
-                    description: string_arg(args, "description")
-                        .unwrap_or_default()
-                        .to_string(),
-                    host_pattern: string_arg(args, "hostPattern")
-                        .unwrap_or_default()
-                        .to_string(),
+                self.terminal.update(cx, |terminal, _cx| {
+                    terminal
+                        .quick_commands
+                        .store
+                        .upsert_command(QuickCommandDraft {
+                            id: string_arg(args, "id").map(str::to_string),
+                            name: name.to_string(),
+                            command: command.to_string(),
+                            category: string_arg(args, "category").unwrap_or("custom").to_string(),
+                            description: string_arg(args, "description")
+                                .unwrap_or_default()
+                                .to_string(),
+                            host_pattern: string_arg(args, "hostPattern")
+                                .unwrap_or_default()
+                                .to_string(),
+                        });
                 });
             }
             "remove" => {
                 if let Some(id) = string_arg(args, "id") {
-                    self.quick_commands.delete_command(id);
+                    self.terminal.update(cx, |terminal, _cx| {
+                        terminal.quick_commands.delete_command(id)
+                    });
                 }
             }
             _ => return,
@@ -191,19 +208,10 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) {
         let requested_node_id = string_arg(&args, "nodeId").map(str::to_string);
-        let surface = requested_node_id
-            .as_deref()
-            .and_then(|node_id| {
-                self.ide_tab_surfaces.values().find_map(|surface| {
-                    surface
-                        .read(cx)
-                        .plugin_snapshot()
-                        .filter(|snapshot| snapshot.project.node_id == node_id)
-                        .map(|_| surface.clone())
-                })
-            })
-            .or_else(|| self.active_ide_surface())
-            .or_else(|| self.ide_tab_surfaces.values().next().cloned());
+        let surface = self
+            .ide_workspace
+            .read(cx)
+            .surface_for_effect(self.active_tab_id(cx), requested_node_id.as_deref());
         let Some(surface) = surface else {
             return;
         };
@@ -239,7 +247,7 @@ impl WorkspaceApp {
             }
             "selectConversation" => {
                 if let Some(id) = string_arg(&args, "conversationId") {
-                    self.select_ai_conversation(id.to_string());
+                    self.select_ai_conversation(id.to_string(), cx);
                     cx.notify();
                 }
             }
@@ -248,19 +256,22 @@ impl WorkspaceApp {
                     // Plugin text is a sensitive boundary: redact credential-like
                     // material before the existing AI workflow builds model context.
                     let content = Zeroizing::new(content.to_string());
-                    self.ai.chat.draft = oxideterm_ai::sanitize_for_ai(content.as_str());
+                    let sanitized = oxideterm_ai::sanitize_for_ai(content.as_str());
+                    self.ai_entity.update(cx, |ai, _cx| {
+                        ai.set_chat_draft(sanitized);
+                    });
                     self.send_ai_chat_draft(cx);
                 }
             }
             "cancelGeneration" => self.cancel_ai_chat_stream(cx),
             "deleteConversation" => {
                 if let Some(id) = string_arg(&args, "conversationId") {
-                    self.delete_ai_conversation(id);
+                    self.delete_ai_conversation(id, cx);
                     cx.notify();
                 }
             }
             "clearConversations" => {
-                self.clear_ai_conversations();
+                self.clear_ai_conversations(cx);
                 cx.notify();
             }
             _ => {}
@@ -287,12 +298,16 @@ impl WorkspaceApp {
                 let Some(enabled) = args.get("enabled").and_then(Value::as_bool) else {
                     return;
                 };
-                let state = self.cloud_sync.controller.store.state_mut();
-                state.settings.auto_upload_enabled = enabled;
-                if let Some(interval) = args.get("intervalMinutes").and_then(Value::as_f64) {
-                    state.settings.auto_upload_interval_mins = interval.max(5.0);
-                }
-                self.save_cloud_sync_state();
+                let interval = args.get("intervalMinutes").and_then(Value::as_f64);
+                self.cloud_sync.update(cx, |cloud_sync, cx| {
+                    let settings = &mut cloud_sync.controller.store.state_mut().settings;
+                    settings.auto_upload_enabled = enabled;
+                    if let Some(interval) = interval {
+                        settings.auto_upload_interval_mins = interval.max(5.0);
+                    }
+                    cx.notify();
+                });
+                self.save_cloud_sync_state(cx);
                 self.reschedule_cloud_sync_auto_upload(cx);
                 cx.notify();
             }

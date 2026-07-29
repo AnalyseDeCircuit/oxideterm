@@ -1,12 +1,9 @@
-use std::{
-    cell::Cell,
-    sync::mpsc::{self, TryRecvError},
-};
+use std::{cell::Cell, collections::VecDeque, sync::Arc};
 
 use crate::workspace::ime::WorkspaceImeTarget;
 use chrono::Utc;
 use gpui::prelude::*;
-use gpui::{Div, FontWeight, Rgba, point};
+use gpui::{Div, EventEmitter, FontWeight, Rgba, Task, Timer, point};
 use oxideterm_cloud_sync::{
     AuthMode, BackendType, CloudSyncSettings, CloudSyncStatus, ConflictStrategy,
     OXIDE_APP_SETTINGS_SECTION_IDS, RawSyncScope, normalize_sync_scope,
@@ -17,15 +14,12 @@ use oxideterm_cloud_sync::{
     progress::CloudSyncProgress,
     secrets::{CloudSyncKeychainSecretProvider, backend_uses_auth_mode},
     service::{CloudSyncLocalSnapshot, build_local_snapshot},
-    state::{
-        CloudSyncHistoryEntry, CloudSyncHistorySummary, CloudSyncPersistedState,
-        CloudSyncRollbackBackup,
-    },
+    state::{CloudSyncHistoryEntry, CloudSyncHistorySummary, CloudSyncPersistedState},
 };
 use oxideterm_gpui_cloud_sync::{
     CLOUD_SYNC_FIELD_REDACTED_VALUE, CLOUD_SYNC_GUIDE_STEP_KEYS, CloudSyncApplyOutcome,
     CloudSyncApplyUiOutcome, CloudSyncConfigRow, CloudSyncConfirmDescription,
-    CloudSyncCoverageDetail, CloudSyncCoverageStatus, CloudSyncDiffLabel,
+    CloudSyncCoverageDetail, CloudSyncCoverageStatus, CloudSyncDeliverySink, CloudSyncDiffLabel,
     CloudSyncErrorMessageSpec, CloudSyncFieldDiffItem, CloudSyncFieldDiffStatus,
     CloudSyncFieldMergeOutcome, CloudSyncForwardDetail, CloudSyncGuideExampleElements,
     CloudSyncHealthStatus, CloudSyncLocalDiffStatus, CloudSyncLocalFieldDiffSnapshot,
@@ -83,7 +77,7 @@ use oxideterm_gpui_ui::{
     StatusPillOptions, StatusTone, SurfaceKind, SurfaceOptions, SurfacePadding, semantic_surface,
     status_pill, status_pill_element,
 };
-use oxideterm_settings_model::CloudSyncFormDraft;
+use oxideterm_settings_model::{CloudSyncFormDraft, cloud_sync_form_input_value_ref};
 
 use super::quick_commands::QuickCommandImportStrategy;
 use super::*;
@@ -112,13 +106,53 @@ pub(super) struct CloudSyncUploadDiffCache {
     items: Vec<CloudSyncSectionDiffItem>,
 }
 
+/// Frame-scoped, read-only UI dependencies shared by Cloud Sync virtual rows.
+#[derive(Clone)]
+pub(super) struct CloudSyncListRenderProjection {
+    pub(super) tokens: ThemeTokens,
+    pub(super) i18n: I18n,
+    pub(super) selectable_text: crate::workspace::selectable_text::SelectableTextRenderState,
+    pub(super) has_background: bool,
+    pub(super) input: CloudSyncInputRenderProjection,
+    pub(super) local_snapshot: std::result::Result<Arc<CloudSyncLocalSnapshot>, Arc<str>>,
+    pub(super) local_field_diff: Arc<CloudSyncLocalFieldDiffSnapshot>,
+    pub(super) upload_diff_items: Arc<Vec<CloudSyncSectionDiffItem>>,
+    pub(super) mono_font_family: SharedString,
+    pub(super) tab_transition_active: bool,
+    pub(super) upload_sensitive_summary: Option<String>,
+}
+
+/// Contains only frame-scoped text geometry; secret text is length-preserving masked.
+#[derive(Clone, Default)]
+pub(super) struct CloudSyncInputRenderProjection {
+    pub(super) focused_input: Option<SettingsInput>,
+    pub(super) active_value: Option<String>,
+    pub(super) selected_range: Option<std::ops::Range<usize>>,
+    pub(super) marked_text: Option<String>,
+    pub(super) caret_visible: bool,
+}
+
+/// Renders Cloud Sync virtual rows without retaining the workspace root.
+#[derive(Clone)]
+pub(super) struct CloudSyncPageRenderer {
+    pub(super) cloud_sync: Entity<CloudSyncWorkspaceEntity>,
+    pub(super) render: Arc<CloudSyncListRenderProjection>,
+}
+
+impl std::ops::Deref for CloudSyncPageRenderer {
+    type Target = CloudSyncListRenderProjection;
+
+    fn deref(&self) -> &Self::Target {
+        &self.render
+    }
+}
+
 /// Owns the persisted service and asynchronous operation lifecycle for Cloud Sync.
 pub(super) struct CloudSyncControllerState {
     pub(super) store: oxideterm_cloud_sync::state::CloudSyncStateStore,
     pub(super) service: oxideterm_cloud_sync::operation::CloudSyncOperationService,
     pub(super) progress: Option<CloudSyncProgress>,
     pub(super) delivery_rx: Option<std::sync::mpsc::Receiver<CloudSyncDelivery>>,
-    pub(super) polling: bool,
     pub(super) active_action: Option<&'static str>,
     pub(super) auto_upload_generation: u64,
     pub(super) dirty_refresh_scheduled: bool,
@@ -135,7 +169,6 @@ impl CloudSyncControllerState {
             service: oxideterm_cloud_sync::operation::CloudSyncOperationService::new(),
             progress: None,
             delivery_rx: None,
-            polling: false,
             active_action: None,
             auto_upload_generation: 0,
             dirty_refresh_scheduled: false,
@@ -149,6 +182,7 @@ impl CloudSyncControllerState {
 /// Owns Cloud Sync form drafts, navigation, dialogs, previews, and virtual-list caches.
 pub(super) struct CloudSyncViewState {
     pub(super) form: CloudSyncFormDraft,
+    section_rows: Vec<CloudSyncSection>,
     pub(super) section_list_state: ListState,
     pub(super) section_list_cache: RefCell<VirtualListSignatureCache>,
     pub(super) snapshot_cache_generation: Cell<u64>,
@@ -215,6 +249,7 @@ impl CloudSyncViewState {
 
         Self {
             form: CloudSyncFormDraft::from_settings(settings),
+            section_rows: Vec::new(),
             section_list_state,
             section_list_cache: RefCell::new(VirtualListSignatureCache::default()),
             snapshot_cache_generation: Cell::new(0),
@@ -249,20 +284,336 @@ fn cloud_sync_tab_index(tab: CloudSyncTab) -> usize {
     }
 }
 
-/// Groups the Cloud Sync controller lifecycle and its ephemeral GPUI view state.
-pub(super) struct CloudSyncWorkspaceState {
-    pub(super) controller: CloudSyncControllerState,
-    pub(super) view: CloudSyncViewState,
+/// Requests root-only adapters without giving long-lived tasks a root handle.
+#[derive(Clone, Debug)]
+pub(super) enum CloudSyncWorkspaceEvent {
+    DeliveriesReady,
+    AutoUploadDue { generation: u64 },
+    DirtyRefreshDue { generation: u64 },
+    ConfirmExitFinished { presence_generation: u64 },
+    UiIntent(CloudSyncUiIntent),
 }
 
-impl CloudSyncWorkspaceState {
-    pub(super) fn new(store: oxideterm_cloud_sync::state::CloudSyncStateStore) -> Self {
+/// Typed, non-secret actions crossing from Entity-owned virtual rows to root adapters.
+#[derive(Clone, Debug)]
+pub(super) enum CloudSyncUiIntent {
+    SelectTab {
+        tab: CloudSyncTab,
+    },
+    StartGithubOauth,
+    StartMicrosoftOauth,
+    StartGoogleOauth,
+    StartUploadPreview,
+    CheckRemote,
+    PullPreview,
+    RestoreLatestBackup,
+    SaveConfiguration,
+    ApplyPreview,
+    StartUpload,
+    FinishScopeEdit,
+    BeginInputSelection {
+        input: SettingsInput,
+        event: MouseDownEvent,
+        source_window: AnyWindowHandle,
+    },
+    UpdateInputSelection {
+        event: MouseMoveEvent,
+        source_window: AnyWindowHandle,
+    },
+    UpdateInputAnchor {
+        anchor: oxideterm_gpui_ui::text_input::TextInputAnchor,
+        source_window: AnyWindowHandle,
+    },
+    UpdateSelectAnchor {
+        anchor: OverlayAnchor,
+        source_window: AnyWindowHandle,
+    },
+    ClearRollbackBackups,
+    RestoreRollbackBackup {
+        signature: u64,
+    },
+    DeleteRollbackBackup {
+        signature: u64,
+    },
+    ClearHistory,
+}
+
+/// Groups the Cloud Sync controller lifecycle and its ephemeral GPUI view state.
+pub(super) struct CloudSyncWorkspaceEntity {
+    pub(super) controller: CloudSyncControllerState,
+    pub(super) view: CloudSyncViewState,
+    delivery_wake: crate::workspace::delivery::ActiveDeliveryWake,
+    pending_deliveries: VecDeque<CloudSyncDelivery>,
+    delivery_closed: bool,
+    _delivery_task: Task<()>,
+    auto_upload_task: Option<Task<()>>,
+    dirty_refresh_task: Option<Task<()>>,
+    confirm_exit_generation: u64,
+    confirm_exit_task: Option<Task<()>>,
+}
+
+impl EventEmitter<CloudSyncWorkspaceEvent> for CloudSyncWorkspaceEntity {}
+
+impl CloudSyncWorkspaceEntity {
+    pub(super) fn new(
+        store: oxideterm_cloud_sync::state::CloudSyncStateStore,
+        cx: &mut Context<Self>,
+    ) -> Self {
         // Build the form projection before moving the loaded store into the controller.
         let view = CloudSyncViewState::new(&store.state().settings);
+        let delivery_wake = crate::workspace::delivery::ActiveDeliveryWake::default();
+        let release_wake = delivery_wake.clone();
+        cx.on_release(move |_, _| {
+            // Worker completion after window release must not retain or wake the
+            // released Cloud Sync Entity.
+            release_wake.stop();
+        })
+        .detach();
+        let task_wake = delivery_wake.clone();
+        let delivery_task = cx.spawn(async move |cloud_sync, cx| {
+            loop {
+                task_wake.wait().await;
+                let should_drain = task_wake.take();
+                let stopped = task_wake.is_stopped();
+                if should_drain {
+                    let backlog_remaining = cloud_sync
+                        .update(cx, |cloud_sync, cx| cloud_sync.drain_deliveries(cx))
+                        .unwrap_or(false);
+                    if backlog_remaining {
+                        task_wake.mark();
+                    }
+                }
+                if stopped {
+                    break;
+                }
+            }
+        });
         Self {
             controller: CloudSyncControllerState::new(store),
             view,
+            delivery_wake,
+            pending_deliveries: VecDeque::new(),
+            delivery_closed: false,
+            _delivery_task: delivery_task,
+            auto_upload_task: None,
+            dirty_refresh_task: None,
+            confirm_exit_generation: 0,
+            confirm_exit_task: None,
         }
+    }
+
+    pub(super) fn begin_delivery(
+        &mut self,
+        action: &'static str,
+        cx: &mut Context<Self>,
+    ) -> crate::workspace::delivery::ActiveDeliverySender<CloudSyncDelivery> {
+        let (sender, receiver) =
+            crate::workspace::delivery::ActiveDeliverySender::channel_with_wake(
+                self.delivery_wake.clone(),
+            );
+        self.controller.delivery_rx = Some(receiver);
+        self.controller.active_action = Some(action);
+        self.delivery_closed = false;
+        cx.notify();
+        sender
+    }
+
+    fn section_list_spec() -> TauriVirtualListSpec {
+        TauriVirtualListSpec::new(
+            px(CLOUD_SYNC_SECTION_LIST_ESTIMATED_HEIGHT),
+            CLOUD_SYNC_SECTION_LIST_OVERSCAN,
+        )
+    }
+
+    fn has_pending_preview(&self) -> bool {
+        self.view.pending_preview.is_some() || self.view.upload_preview.is_some()
+    }
+
+    fn sections(&self) -> Vec<CloudSyncSection> {
+        cloud_sync_sections(
+            self.controller.store.state(),
+            self.has_pending_preview(),
+            self.view.active_tab,
+        )
+    }
+
+    fn section_signature(&self, section: CloudSyncSection) -> u64 {
+        cloud_sync_section_signature(
+            section,
+            self.controller.store.state(),
+            &self.view.form.backend_type,
+            &self.view.form.auth_mode,
+            &self.view.form.default_conflict_strategy,
+            self.controller.delivery_rx.is_some(),
+            self.has_pending_preview(),
+            self.view.preview_selection.is_some(),
+            self.controller.progress.is_some(),
+            self.view.active_tab,
+        )
+    }
+
+    fn sync_section_rows(&mut self) {
+        let section_rows = self.sections();
+        let signatures = section_rows
+            .iter()
+            .copied()
+            .map(|section| self.section_signature(section))
+            .collect::<Vec<_>>();
+        sync_tauri_variable_list_state_by_signatures(
+            &self.view.section_list_state,
+            &mut self.view.section_list_cache.borrow_mut(),
+            "cloud-sync",
+            &signatures,
+            Self::section_list_spec(),
+        );
+        self.view.section_rows = section_rows;
+    }
+
+    fn section_at(&self, index: usize) -> Option<(CloudSyncSection, usize)> {
+        self.view
+            .section_rows
+            .get(index)
+            .copied()
+            .map(|section| (section, self.view.section_rows.len()))
+    }
+
+    fn close_select_for_scroll(&mut self, cx: &mut Context<Self>) {
+        if close_cloud_sync_select_on_container_scroll(
+            &mut self.view.open_select,
+            &mut self.view.focused_select,
+            &mut self.view.select_highlighted,
+        ) {
+            cx.notify();
+        }
+    }
+
+    pub(super) fn take_deliveries(&mut self) -> (VecDeque<CloudSyncDelivery>, bool) {
+        (
+            std::mem::take(&mut self.pending_deliveries),
+            std::mem::take(&mut self.delivery_closed),
+        )
+    }
+
+    fn drain_deliveries(&mut self, cx: &mut Context<Self>) -> bool {
+        let Some(receiver) = self.controller.delivery_rx.as_ref() else {
+            return false;
+        };
+        let batch = crate::workspace::delivery::drain_channel(
+            receiver,
+            crate::workspace::delivery::USER_ACTION_DELIVERY_BUDGET,
+        );
+        let has_deliveries = !batch.items.is_empty();
+        self.pending_deliveries.extend(batch.items);
+        if batch.disconnected {
+            self.controller.delivery_rx = None;
+            self.delivery_closed = true;
+        }
+        if has_deliveries || batch.disconnected {
+            cx.emit(CloudSyncWorkspaceEvent::DeliveriesReady);
+            cx.notify();
+        }
+        batch.outcome.backlog_remaining
+    }
+
+    pub(super) fn reschedule_auto_upload(&mut self, cx: &mut Context<Self>) {
+        self.controller.auto_upload_generation =
+            self.controller.auto_upload_generation.wrapping_add(1);
+        self.auto_upload_task.take();
+        if !self.controller.store.state().settings.auto_upload_enabled {
+            return;
+        }
+        let generation = self.controller.auto_upload_generation;
+        let interval = Duration::from_secs_f64(
+            self.controller
+                .store
+                .state()
+                .settings
+                .auto_upload_interval_mins
+                .max(5.0)
+                * 60.0,
+        );
+        self.auto_upload_task = Some(cx.spawn(async move |cloud_sync, cx| {
+            loop {
+                Timer::after(interval).await;
+                let keep_running = cloud_sync
+                    .update(cx, |cloud_sync, cx| {
+                        if cloud_sync.controller.auto_upload_generation != generation
+                            || !cloud_sync
+                                .controller
+                                .store
+                                .state()
+                                .settings
+                                .auto_upload_enabled
+                        {
+                            return false;
+                        }
+                        cx.emit(CloudSyncWorkspaceEvent::AutoUploadDue { generation });
+                        true
+                    })
+                    .unwrap_or(false);
+                if !keep_running {
+                    break;
+                }
+            }
+        }));
+    }
+
+    pub(super) fn queue_dirty_refresh(&mut self, cx: &mut Context<Self>) {
+        self.controller.dirty_refresh_generation =
+            self.controller.dirty_refresh_generation.wrapping_add(1);
+        let generation = self.controller.dirty_refresh_generation;
+        self.controller.dirty_refresh_scheduled = true;
+        self.dirty_refresh_task.take();
+        self.dirty_refresh_task = Some(cx.spawn(async move |cloud_sync, cx| {
+            Timer::after(Duration::from_millis(300)).await;
+            let _ = cloud_sync.update(cx, |cloud_sync, cx| {
+                if !cloud_sync.accept_dirty_refresh_generation(generation) {
+                    return;
+                }
+                cx.emit(CloudSyncWorkspaceEvent::DirtyRefreshDue { generation });
+            });
+        }));
+    }
+
+    fn accept_dirty_refresh_generation(&mut self, generation: u64) -> bool {
+        if self.controller.dirty_refresh_generation != generation {
+            return false;
+        }
+        self.controller.dirty_refresh_scheduled = false;
+        true
+    }
+
+    pub(super) fn schedule_confirm_exit(
+        &mut self,
+        presence_generation: u64,
+        duration: Duration,
+        cx: &mut Context<Self>,
+    ) {
+        self.confirm_exit_generation = self.confirm_exit_generation.wrapping_add(1);
+        let generation = self.confirm_exit_generation;
+        self.confirm_exit_task.take();
+        self.confirm_exit_task = Some(cx.spawn(async move |cloud_sync, cx| {
+            Timer::after(duration).await;
+            let _ = cloud_sync.update(cx, |cloud_sync, cx| {
+                if cloud_sync.confirm_exit_generation == generation {
+                    cx.emit(CloudSyncWorkspaceEvent::ConfirmExitFinished {
+                        presence_generation,
+                    });
+                }
+            });
+        }));
+    }
+
+    #[cfg(test)]
+    fn delivery_wake(&self) -> crate::workspace::delivery::ActiveDeliveryWake {
+        self.delivery_wake.clone()
+    }
+}
+
+impl CloudSyncDeliverySink for crate::workspace::delivery::ActiveDeliverySender<CloudSyncDelivery> {
+    fn send(&self, delivery: CloudSyncDelivery) -> Result<(), CloudSyncDelivery> {
+        crate::workspace::delivery::ActiveDeliverySender::send(self, delivery)
+            .map_err(|error| error.0)
     }
 }
 
@@ -389,4 +740,114 @@ fn cloud_sync_theme_border_half(color: u32, has_background: bool) -> Rgba {
 
 fn cloud_sync_theme_alpha(color: u32, alpha: u32) -> Rgba {
     rgba((color << 8) | alpha)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use gpui::TestAppContext;
+    use oxideterm_cloud_sync::progress::CloudSyncProgressStage;
+
+    fn test_cloud_sync_entity(cx: &mut TestAppContext) -> Entity<CloudSyncWorkspaceEntity> {
+        let store = oxideterm_cloud_sync::state::CloudSyncStateStore::load(
+            "target/cloud-sync-entity-test-state.json",
+        )
+        .expect("test cloud sync store");
+        cx.new(|cx| CloudSyncWorkspaceEntity::new(store, cx))
+    }
+
+    #[gpui::test]
+    fn hidden_surface_delivery_is_woken_and_retained_by_entity(cx: &mut TestAppContext) {
+        let entity = test_cloud_sync_entity(cx);
+        let sender = entity.update(cx, |cloud_sync, cx| cloud_sync.begin_delivery("check", cx));
+
+        sender
+            .send(CloudSyncDelivery::Progress(CloudSyncProgress {
+                stage: CloudSyncProgressStage::FetchMetadata,
+                current: 1.0,
+                total: 2.0,
+                message: None,
+            }))
+            .expect("delivery");
+        drop(sender);
+        cx.run_until_parked();
+
+        let (deliveries, closed) =
+            entity.update(cx, |cloud_sync, _cx| cloud_sync.take_deliveries());
+        assert_eq!(deliveries.len(), 1);
+        assert!(matches!(
+            deliveries.front(),
+            Some(CloudSyncDelivery::Progress(progress))
+                if progress.stage == CloudSyncProgressStage::FetchMetadata
+        ));
+        assert!(closed);
+    }
+
+    #[gpui::test]
+    fn entity_release_stops_delivery_waiter(cx: &mut TestAppContext) {
+        let entity = test_cloud_sync_entity(cx);
+        let wake = entity.read_with(cx, |cloud_sync, _cx| cloud_sync.delivery_wake());
+
+        drop(entity);
+        cx.update(|_cx| {});
+        cx.run_until_parked();
+
+        assert!(wake.is_stopped());
+    }
+
+    #[gpui::test]
+    fn stale_dirty_refresh_generation_cannot_complete(cx: &mut TestAppContext) {
+        let entity = test_cloud_sync_entity(cx);
+        entity.update(cx, |cloud_sync, cx| cloud_sync.queue_dirty_refresh(cx));
+        let stale_generation = entity.read_with(cx, |cloud_sync, _cx| {
+            cloud_sync.controller.dirty_refresh_generation
+        });
+        entity.update(cx, |cloud_sync, cx| cloud_sync.queue_dirty_refresh(cx));
+        let current_generation = entity.read_with(cx, |cloud_sync, _cx| {
+            cloud_sync.controller.dirty_refresh_generation
+        });
+
+        assert!(!entity.update(cx, |cloud_sync, _cx| {
+            cloud_sync.accept_dirty_refresh_generation(stale_generation)
+        }));
+        assert!(entity.update(cx, |cloud_sync, _cx| {
+            cloud_sync.accept_dirty_refresh_generation(current_generation)
+        }));
+    }
+
+    #[gpui::test]
+    fn section_list_projection_and_scroll_dismissal_are_entity_owned(cx: &mut TestAppContext) {
+        let entity = test_cloud_sync_entity(cx);
+        entity.update(cx, |cloud_sync, _cx| {
+            cloud_sync.view.set_active_tab(CloudSyncTab::Configure);
+            cloud_sync.view.open_select = Some(CloudSyncSelect::Backend);
+            cloud_sync.view.focused_select = Some(CloudSyncSelect::Backend);
+            cloud_sync.view.select_highlighted = Some((CloudSyncSelect::Backend, 2));
+            cloud_sync.sync_section_rows();
+        });
+
+        let (first_section, section_count, list_count) = entity.read_with(cx, |cloud_sync, _cx| {
+            let (first_section, section_count) =
+                cloud_sync.section_at(0).expect("configure section");
+            (
+                first_section,
+                section_count,
+                cloud_sync.view.section_list_state.item_count(),
+            )
+        });
+        assert_eq!(first_section, CloudSyncSection::Header);
+        assert_eq!(section_count, list_count);
+
+        entity.update(cx, |cloud_sync, cx| {
+            cloud_sync.close_select_for_scroll(cx);
+        });
+        entity.read_with(cx, |cloud_sync, _cx| {
+            assert_eq!(cloud_sync.view.open_select, None);
+            assert_eq!(
+                cloud_sync.view.focused_select,
+                Some(CloudSyncSelect::Backend)
+            );
+            assert_eq!(cloud_sync.view.select_highlighted, None);
+        });
+    }
 }

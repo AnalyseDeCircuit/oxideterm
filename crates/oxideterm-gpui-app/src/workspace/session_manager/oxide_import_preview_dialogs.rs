@@ -19,22 +19,173 @@ pub(super) fn oxide_import_name_group_signature(name: &str, label: &str) -> u64 
     hasher.finish()
 }
 
+#[derive(Clone, Copy)]
+pub(super) enum OxideImportNameGroup {
+    Unchanged,
+    Rename,
+    Merge,
+    Replace,
+    Skip,
+}
+
+impl OxideImportNameGroup {
+    fn item_count(self, preview: &ImportPreview) -> usize {
+        match self {
+            Self::Unchanged => preview.unchanged.len(),
+            Self::Rename => preview.will_rename.len(),
+            Self::Merge => preview.will_merge.len(),
+            Self::Replace => preview.will_replace.len(),
+            Self::Skip => preview.will_skip.len(),
+        }
+    }
+
+    fn item(self, preview: &ImportPreview, index: usize) -> Option<(String, String)> {
+        match self {
+            Self::Unchanged => preview
+                .unchanged
+                .get(index)
+                .map(|name| (name.clone(), name.clone())),
+            Self::Rename => preview.will_rename.get(index).map(|(original, renamed)| {
+                (original.clone(), format!("\"{original}\" → \"{renamed}\""))
+            }),
+            Self::Merge => preview
+                .will_merge
+                .get(index)
+                .map(|name| (name.clone(), name.clone())),
+            Self::Replace => preview
+                .will_replace
+                .get(index)
+                .map(|name| (name.clone(), name.clone())),
+            Self::Skip => preview
+                .will_skip
+                .get(index)
+                .map(|name| (name.clone(), name.clone())),
+        }
+    }
+}
+
+#[derive(Clone)]
+struct OxideImportNameGroupRenderer {
+    // ImportPreview is already shared by the dialog, so rows borrow one Arc-backed snapshot.
+    session_manager: Entity<SessionManagerState>,
+    tokens: ThemeTokens,
+    preview: Arc<ImportPreview>,
+    group: OxideImportNameGroup,
+}
+
+impl OxideImportNameGroupRenderer {
+    fn render(&self, index: usize, cx: &App) -> AnyElement {
+        let Some((name, label)) = self.group.item(&self.preview, index) else {
+            return div().into_any_element();
+        };
+        let checked = self
+            .session_manager
+            .read(cx)
+            .oxide_import_dialog
+            .as_ref()
+            .is_some_and(|dialog| dialog.selected_names.contains(&name));
+        let session_manager = self.session_manager.clone();
+        div()
+            .pb(px(4.0))
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(px(6.0))
+                    .text_size(px(self.tokens.metrics.ui_text_xs))
+                    .text_color(rgb(self.tokens.ui.text_muted))
+                    .cursor_pointer()
+                    .hover({
+                        let text = self.tokens.ui.text;
+                        move |row| row.text_color(rgb(text))
+                    })
+                    .child(WorkspaceApp::render_lucide_icon(
+                        if checked {
+                            LucideIcon::CheckSquare
+                        } else {
+                            LucideIcon::Square
+                        },
+                        14.0,
+                        if checked {
+                            rgb(self.tokens.ui.accent)
+                        } else {
+                            rgb(self.tokens.ui.text_muted)
+                        },
+                    ))
+                    .child(label)
+                    .on_mouse_down(MouseButton::Left, move |_event, _window, cx| {
+                        session_manager.update(cx, |manager, cx| {
+                            if let Some(dialog) = manager.oxide_import_dialog.as_mut() {
+                                if !dialog.selected_names.remove(&name) {
+                                    dialog.selected_names.insert(name.clone());
+                                }
+                                cx.notify();
+                            }
+                        });
+                        cx.stop_propagation();
+                    }),
+            )
+            .into_any_element()
+    }
+}
+
+#[derive(Clone)]
+struct OxideImportForwardDetailRenderer {
+    // Selection and preview lifetime stay with SessionManagerState.
+    session_manager: Entity<SessionManagerState>,
+    tokens: ThemeTokens,
+}
+
+impl OxideImportForwardDetailRenderer {
+    fn render(&self, index: usize, cx: &App) -> AnyElement {
+        let detail = self
+            .session_manager
+            .read(cx)
+            .oxide_import_dialog
+            .as_ref()
+            .and_then(|dialog| dialog.preview.as_ref())
+            .and_then(|preview| preview.forward_details.get(index))
+            .cloned();
+        detail
+            .map(|detail| {
+                div()
+                    .pb(px(4.0))
+                    .child(
+                        div()
+                            .rounded(px(self.tokens.radii.md))
+                            .bg(rgba((self.tokens.ui.bg << 8) | OXIDE_SUBCARD_BG_ALPHA))
+                            .px_2()
+                            .py(px(6.0))
+                            .text_size(px(self.tokens.metrics.ui_text_xs))
+                            .text_color(rgb(self.tokens.ui.text_muted))
+                            .child(format!(
+                                "{} · {}",
+                                detail.owner_connection_name, detail.description
+                            )),
+                    )
+                    .into_any_element()
+            })
+            .unwrap_or_else(|| div().into_any_element())
+    }
+}
+
 impl WorkspaceApp {
     pub(super) fn render_oxide_import_preview(
         &self,
-        preview: ImportPreview,
+        preview: Arc<ImportPreview>,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
-        let selected_names = self
+        let selected_count = self
             .session_manager
+            .read(cx)
             .oxide_import_dialog
             .as_ref()
-            .map(|dialog| dialog.selected_names.clone())
+            .map(|dialog| dialog.selected_names.len())
             .unwrap_or_default();
-        let selectable_names = import_preview_selectable_names(&preview);
-        let total_selectable = selectable_names.len();
-        let all_selected = total_selectable > 0 && selected_names.len() == total_selectable;
+        let total_selectable = import_preview_selectable_name_count(&preview);
+        let all_selected = total_selectable > 0 && selected_count == total_selectable;
+        let select_all_preview = Arc::clone(&preview);
 
         let mut children = vec![
             div()
@@ -78,16 +229,22 @@ impl WorkspaceApp {
                         .on_mouse_down(
                             MouseButton::Left,
                             cx.listener(move |this, _event, _window, cx| {
-                                if let Some(dialog) =
-                                    this.session_manager.oxide_import_dialog.as_mut()
-                                {
-                                    if dialog.selected_names.len() == selectable_names.len() {
-                                        dialog.selected_names.clear();
-                                    } else {
-                                        dialog.selected_names = selectable_names.clone();
+                                this.session_manager.update(cx, |manager, cx| {
+                                    if let Some(dialog) = manager.oxide_import_dialog.as_mut() {
+                                        if dialog.selected_names.len()
+                                            == import_preview_selectable_name_count(
+                                                &select_all_preview,
+                                            )
+                                        {
+                                            dialog.selected_names.clear();
+                                        } else {
+                                            dialog.selected_names = import_preview_selectable_names(
+                                                &select_all_preview,
+                                            );
+                                        }
+                                        cx.notify();
                                     }
-                                }
-                                cx.notify();
+                                });
                                 cx.stop_propagation();
                             }),
                         ),
@@ -101,8 +258,7 @@ impl WorkspaceApp {
                     (),
                     format!(
                         "将导入 {} 个连接 — 已选 {} 个",
-                        preview.total_connections,
-                        selected_names.len()
+                        preview.total_connections, selected_count
                     ),
                     theme.text,
                     cx,
@@ -110,7 +266,7 @@ impl WorkspaceApp {
                 .into_any_element(),
         ];
 
-        children.extend(self.render_oxide_import_connection_groups(&preview, cx));
+        children.extend(self.render_oxide_import_connection_groups(Arc::clone(&preview), cx));
         if preview.has_app_settings {
             children.push(self.render_oxide_import_app_settings(&preview, cx));
         }
@@ -125,6 +281,7 @@ impl WorkspaceApp {
         }
         if self
             .session_manager
+            .read(cx)
             .oxide_import_dialog
             .as_ref()
             .and_then(|dialog| dialog.metadata.as_ref())
@@ -153,91 +310,64 @@ impl WorkspaceApp {
 
     pub(super) fn render_oxide_import_connection_groups(
         &self,
-        preview: &ImportPreview,
+        preview: Arc<ImportPreview>,
         cx: &mut Context<Self>,
     ) -> Vec<AnyElement> {
         let mut groups = Vec::new();
         if !preview.unchanged.is_empty() {
-            groups.push(
-                self.render_oxide_import_name_group(
-                    "unchanged",
-                    format!("✓ {} 个连接将原样导入:", preview.unchanged.len()),
-                    OXIDE_GREEN_500,
-                    None,
-                    preview
-                        .unchanged
-                        .iter()
-                        .map(|name| (name.clone(), name.clone()))
-                        .collect(),
-                    cx,
-                ),
-            );
+            groups.push(self.render_oxide_import_name_group(
+                "unchanged",
+                format!("✓ {} 个连接将原样导入:", preview.unchanged.len()),
+                OXIDE_GREEN_500,
+                None,
+                Arc::clone(&preview),
+                OxideImportNameGroup::Unchanged,
+                cx,
+            ));
         }
         if !preview.will_rename.is_empty() {
-            groups.push(
-                self.render_oxide_import_name_group(
-                    "rename",
-                    format!("{} 个连接因名称冲突将被重命名:", preview.will_rename.len()),
-                    OXIDE_YELLOW_500,
-                    Some(LucideIcon::AlertTriangle),
-                    preview
-                        .will_rename
-                        .iter()
-                        .map(|(original, renamed)| {
-                            (original.clone(), format!("\"{original}\" → \"{renamed}\""))
-                        })
-                        .collect(),
-                    cx,
-                ),
-            );
+            groups.push(self.render_oxide_import_name_group(
+                "rename",
+                format!("{} 个连接因名称冲突将被重命名:", preview.will_rename.len()),
+                OXIDE_YELLOW_500,
+                Some(LucideIcon::AlertTriangle),
+                Arc::clone(&preview),
+                OxideImportNameGroup::Rename,
+                cx,
+            ));
         }
         if !preview.will_merge.is_empty() {
-            groups.push(
-                self.render_oxide_import_name_group(
-                    "merge",
-                    format!("{} 个连接将合并到现有连接:", preview.will_merge.len()),
-                    OXIDE_BLUE_500,
-                    Some(LucideIcon::CheckCircle),
-                    preview
-                        .will_merge
-                        .iter()
-                        .map(|name| (name.clone(), name.clone()))
-                        .collect(),
-                    cx,
-                ),
-            );
+            groups.push(self.render_oxide_import_name_group(
+                "merge",
+                format!("{} 个连接将合并到现有连接:", preview.will_merge.len()),
+                OXIDE_BLUE_500,
+                Some(LucideIcon::CheckCircle),
+                Arc::clone(&preview),
+                OxideImportNameGroup::Merge,
+                cx,
+            ));
         }
         if !preview.will_replace.is_empty() {
-            groups.push(
-                self.render_oxide_import_name_group(
-                    "replace",
-                    format!("{} 个连接将替换现有连接:", preview.will_replace.len()),
-                    OXIDE_ORANGE_500,
-                    Some(LucideIcon::AlertTriangle),
-                    preview
-                        .will_replace
-                        .iter()
-                        .map(|name| (name.clone(), name.clone()))
-                        .collect(),
-                    cx,
-                ),
-            );
+            groups.push(self.render_oxide_import_name_group(
+                "replace",
+                format!("{} 个连接将替换现有连接:", preview.will_replace.len()),
+                OXIDE_ORANGE_500,
+                Some(LucideIcon::AlertTriangle),
+                Arc::clone(&preview),
+                OxideImportNameGroup::Replace,
+                cx,
+            ));
         }
         if !preview.will_skip.is_empty() {
-            groups.push(
-                self.render_oxide_import_name_group(
-                    "skip",
-                    format!("{} 个连接将因冲突被跳过:", preview.will_skip.len()),
-                    OXIDE_SLATE_400,
-                    Some(LucideIcon::AlertTriangle),
-                    preview
-                        .will_skip
-                        .iter()
-                        .map(|name| (name.clone(), name.clone()))
-                        .collect(),
-                    cx,
-                ),
-            );
+            groups.push(self.render_oxide_import_name_group(
+                "skip",
+                format!("{} 个连接将因冲突被跳过:", preview.will_skip.len()),
+                OXIDE_SLATE_400,
+                Some(LucideIcon::AlertTriangle),
+                Arc::clone(&preview),
+                OxideImportNameGroup::Skip,
+                cx,
+            ));
         }
         groups
     }
@@ -248,36 +378,35 @@ impl WorkspaceApp {
         title: String,
         color: u32,
         icon: Option<LucideIcon>,
-        items: Vec<(String, String)>,
+        preview: Arc<ImportPreview>,
+        group: OxideImportNameGroup,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let state = self.sync_oxide_import_name_group_list_state(group_key, &items);
+        let item_count = group.item_count(&preview);
+        let signatures = (0..item_count)
+            .filter_map(|index| group.item(&preview, index))
+            .map(|(name, label)| oxide_import_name_group_signature(&name, &label))
+            .collect::<Vec<_>>();
+        let state = self.sync_oxide_import_name_group_list_state(group_key, &signatures, cx);
         let spec = self.oxide_import_name_group_list_spec();
-        let workspace = cx.entity();
-        let item_count = items.len();
         let list_height =
             (item_count as f32 * OXIDE_IMPORT_NAME_GROUP_LIST_ESTIMATED_HEIGHT).min(96.0);
-        let virtual_items = items;
-        let scroll_handle =
-            self.selectable_text_scroll_handle(format!("oxide-import-preview-section-{group_key}"));
+        let renderer = OxideImportNameGroupRenderer {
+            session_manager: self.session_manager.clone(),
+            tokens: self.tokens,
+            preview,
+            group,
+        };
         let list = div()
             .id((
                 "oxide-import-preview-section",
                 oxide_import_name_group_signature(group_key, group_key),
             ))
             .h(px(list_height))
-            .selectable_overflow_y_scrollbar(&scroll_handle)
             .child(tauri_virtual_list(
                 state,
                 spec,
-                move |index, _window, cx| {
-                    let Some((name, label)) = virtual_items.get(index).cloned() else {
-                        return div().into_any_element();
-                    };
-                    workspace.update(cx, |this, cx| {
-                        this.render_oxide_import_name_group_list_item(name, label, cx)
-                    })
-                },
+                move |index, _window, cx| renderer.render(index, cx),
             ));
 
         div()
@@ -314,14 +443,12 @@ impl WorkspaceApp {
     pub(super) fn sync_oxide_import_name_group_list_state(
         &self,
         group_key: &'static str,
-        items: &[(String, String)],
+        signatures: &[u64],
+        cx: &App,
     ) -> ListState {
-        let signatures = items
-            .iter()
-            .map(|(name, label)| oxide_import_name_group_signature(name, label))
-            .collect::<Vec<_>>();
         let state = {
-            let mut states = self.oxide_import_name_group_list_states.borrow_mut();
+            let manager = self.session_manager.read(cx);
+            let mut states = manager.oxide_import_name_group_list_states.borrow_mut();
             states
                 .entry(group_key.to_string())
                 .or_insert_with(|| {
@@ -337,13 +464,14 @@ impl WorkspaceApp {
                 .clone()
         };
         {
-            let mut caches = self.oxide_import_name_group_list_caches.borrow_mut();
+            let manager = self.session_manager.read(cx);
+            let mut caches = manager.oxide_import_name_group_list_caches.borrow_mut();
             let cache = caches.entry(group_key.to_string()).or_default();
             sync_tauri_variable_list_state_by_signatures(
                 &state,
                 cache,
                 group_key,
-                &signatures,
+                signatures,
                 self.oxide_import_name_group_list_spec(),
             );
         }
@@ -357,77 +485,6 @@ impl WorkspaceApp {
         )
     }
 
-    pub(super) fn render_oxide_import_name_group_list_item(
-        &self,
-        name: String,
-        label: String,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let checked = self
-            .session_manager
-            .oxide_import_dialog
-            .as_ref()
-            .is_some_and(|dialog| dialog.selected_names.contains(&name));
-        div()
-            .pb(px(4.0))
-            .child(self.render_oxide_import_check_line(name, label, checked, cx))
-            .into_any_element()
-    }
-
-    pub(super) fn render_oxide_import_check_line(
-        &self,
-        name: String,
-        label: String,
-        checked: bool,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        div()
-            .flex()
-            .items_center()
-            .gap(px(6.0))
-            .text_size(px(self.tokens.metrics.ui_text_xs))
-            .text_color(rgb(self.tokens.ui.text_muted))
-            .cursor_pointer()
-            .hover(|row| row.text_color(rgb(self.tokens.ui.text)))
-            .child(Self::render_lucide_icon(
-                if checked {
-                    LucideIcon::CheckSquare
-                } else {
-                    LucideIcon::Square
-                },
-                14.0,
-                if checked {
-                    rgb(self.tokens.ui.accent)
-                } else {
-                    rgb(self.tokens.ui.text_muted)
-                },
-            ))
-            // Import preview check rows toggle on row click; labels must not own mouse-down.
-            .child(self.render_display_text_with_role(
-                SelectableTextRole::NonSelectable,
-                "oxide-import-check-line",
-                name.as_str(),
-                label,
-                self.tokens.ui.text_muted,
-                cx,
-            ))
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(move |this, _event, _window, cx| {
-                    if let Some(dialog) = this.session_manager.oxide_import_dialog.as_mut() {
-                        if dialog.selected_names.contains(&name) {
-                            dialog.selected_names.remove(&name);
-                        } else {
-                            dialog.selected_names.insert(name.clone());
-                        }
-                    }
-                    cx.notify();
-                    cx.stop_propagation();
-                }),
-            )
-            .into_any_element()
-    }
-
     pub(super) fn render_oxide_import_app_settings(
         &self,
         preview: &ImportPreview,
@@ -435,6 +492,7 @@ impl WorkspaceApp {
     ) -> AnyElement {
         let import_app_settings = self
             .session_manager
+            .read(cx)
             .oxide_import_dialog
             .as_ref()
             .is_some_and(|dialog| dialog.import_app_settings);
@@ -448,16 +506,18 @@ impl WorkspaceApp {
             "导入应用设置".to_string(),
             import_app_settings,
             cx.listener(move |this, _event, _window, cx| {
-                if let Some(dialog) = this.session_manager.oxide_import_dialog.as_mut() {
-                    if dialog.import_app_settings {
-                        dialog.import_app_settings = false;
-                        dialog.selected_app_settings_sections.clear();
-                    } else {
-                        dialog.import_app_settings = true;
-                        dialog.selected_app_settings_sections = all_section_ids.clone();
+                this.session_manager.update(cx, |manager, cx| {
+                    if let Some(dialog) = manager.oxide_import_dialog.as_mut() {
+                        if dialog.import_app_settings {
+                            dialog.import_app_settings = false;
+                            dialog.selected_app_settings_sections.clear();
+                        } else {
+                            dialog.import_app_settings = true;
+                            dialog.selected_app_settings_sections = all_section_ids.clone();
+                        }
                     }
-                }
-                cx.notify();
+                    cx.notify();
+                });
                 cx.stop_propagation();
             }),
             cx,
@@ -496,16 +556,25 @@ impl WorkspaceApp {
     }
 
     pub(super) fn render_oxide_import_managed_keys(&self, cx: &mut Context<Self>) -> AnyElement {
-        let Some(dialog) = self.session_manager.oxide_import_dialog.as_ref() else {
+        let Some((count, restore_managed_keys, restore_passphrases)) = ({
+            self.session_manager
+                .read(cx)
+                .oxide_import_dialog
+                .as_ref()
+                .map(|dialog| {
+                    (
+                        dialog
+                            .metadata
+                            .as_ref()
+                            .and_then(|metadata| metadata.managed_key_count)
+                            .unwrap_or(0),
+                        dialog.restore_managed_keys,
+                        dialog.restore_managed_key_passphrases,
+                    )
+                })
+        }) else {
             return div().into_any_element();
         };
-        let count = dialog
-            .metadata
-            .as_ref()
-            .and_then(|metadata| metadata.managed_key_count)
-            .unwrap_or(0);
-        let restore_managed_keys = dialog.restore_managed_keys;
-        let restore_passphrases = dialog.restore_managed_key_passphrases;
         self.render_oxide_import_preview_subcard(vec![
             self.render_oxide_option_row(
                 self.i18n
@@ -518,13 +587,15 @@ impl WorkspaceApp {
                 },
                 restore_managed_keys,
                 cx.listener(|this, _event, _window, cx| {
-                    if let Some(dialog) = this.session_manager.oxide_import_dialog.as_mut() {
-                        dialog.restore_managed_keys = !dialog.restore_managed_keys;
-                        if !dialog.restore_managed_keys {
-                            dialog.restore_managed_key_passphrases = false;
+                    this.session_manager.update(cx, |manager, cx| {
+                        if let Some(dialog) = manager.oxide_import_dialog.as_mut() {
+                            dialog.restore_managed_keys = !dialog.restore_managed_keys;
+                            if !dialog.restore_managed_keys {
+                                dialog.restore_managed_key_passphrases = false;
+                            }
                         }
-                    }
-                    cx.notify();
+                        cx.notify();
+                    });
                     cx.stop_propagation();
                 }),
                 cx,
@@ -538,14 +609,15 @@ impl WorkspaceApp {
                             .t("modals.import.restore_managed_key_passphrases_description"),
                         restore_passphrases,
                         cx.listener(|this, _event, _window, cx| {
-                            if let Some(dialog) = this.session_manager.oxide_import_dialog.as_mut()
-                            {
-                                if dialog.restore_managed_keys {
-                                    dialog.restore_managed_key_passphrases =
-                                        !dialog.restore_managed_key_passphrases;
+                            this.session_manager.update(cx, |manager, cx| {
+                                if let Some(dialog) = manager.oxide_import_dialog.as_mut() {
+                                    if dialog.restore_managed_keys {
+                                        dialog.restore_managed_key_passphrases =
+                                            !dialog.restore_managed_key_passphrases;
+                                    }
                                 }
-                            }
-                            cx.notify();
+                                cx.notify();
+                            });
                             cx.stop_propagation();
                         }),
                         cx,
@@ -563,11 +635,13 @@ impl WorkspaceApp {
         let section_id = section.id.clone();
         let selected = self
             .session_manager
+            .read(cx)
             .oxide_import_dialog
             .as_ref()
             .is_some_and(|dialog| dialog.selected_app_settings_sections.contains(&section_id));
         let expanded = self
             .session_manager
+            .read(cx)
             .oxide_import_dialog
             .as_ref()
             .is_some_and(|dialog| dialog.expanded_app_settings_sections.contains(&section_id));
@@ -676,20 +750,20 @@ impl WorkspaceApp {
                     .on_mouse_down(
                         MouseButton::Left,
                         cx.listener(move |this, _event, _window, cx| {
-                            if let Some(dialog) =
-                                this.session_manager.oxide_import_dialog.as_mut()
-                            {
-                                if dialog.selected_app_settings_sections.contains(&section_id) {
-                                    dialog.selected_app_settings_sections.remove(&section_id);
-                                } else {
-                                    dialog
-                                        .selected_app_settings_sections
-                                        .insert(section_id.clone());
+                            this.session_manager.update(cx, |manager, cx| {
+                                if let Some(dialog) = manager.oxide_import_dialog.as_mut() {
+                                    if dialog.selected_app_settings_sections.contains(&section_id) {
+                                        dialog.selected_app_settings_sections.remove(&section_id);
+                                    } else {
+                                        dialog
+                                            .selected_app_settings_sections
+                                            .insert(section_id.clone());
+                                    }
+                                    dialog.import_app_settings =
+                                        !dialog.selected_app_settings_sections.is_empty();
                                 }
-                                dialog.import_app_settings =
-                                    !dialog.selected_app_settings_sections.is_empty();
-                            }
-                            cx.notify();
+                                cx.notify();
+                            });
                             cx.stop_propagation();
                         }),
                     ),
@@ -718,23 +792,23 @@ impl WorkspaceApp {
                             .on_mouse_down(
                                 MouseButton::Left,
                                 cx.listener(move |this, _event, _window, cx| {
-                                    if let Some(dialog) =
-                                        this.session_manager.oxide_import_dialog.as_mut()
-                                    {
-                                        if dialog
-                                            .expanded_app_settings_sections
-                                            .contains(&toggle_id)
-                                        {
-                                            dialog
+                                    this.session_manager.update(cx, |manager, cx| {
+                                        if let Some(dialog) = manager.oxide_import_dialog.as_mut() {
+                                            if dialog
                                                 .expanded_app_settings_sections
-                                                .remove(&toggle_id);
-                                        } else {
-                                            dialog
-                                                .expanded_app_settings_sections
-                                                .insert(toggle_id.clone());
+                                                .contains(&toggle_id)
+                                            {
+                                                dialog
+                                                    .expanded_app_settings_sections
+                                                    .remove(&toggle_id);
+                                            } else {
+                                                dialog
+                                                    .expanded_app_settings_sections
+                                                    .insert(toggle_id.clone());
+                                            }
                                         }
-                                    }
-                                    cx.notify();
+                                        cx.notify();
+                                    });
                                     cx.stop_propagation();
                                 }),
                             ),
@@ -792,6 +866,7 @@ impl WorkspaceApp {
     ) -> AnyElement {
         let checked = self
             .session_manager
+            .read(cx)
             .oxide_import_dialog
             .as_ref()
             .is_some_and(|dialog| dialog.import_quick_commands);
@@ -803,10 +878,12 @@ impl WorkspaceApp {
             ),
             checked,
             cx.listener(|this, _event, _window, cx| {
-                if let Some(dialog) = this.session_manager.oxide_import_dialog.as_mut() {
-                    dialog.import_quick_commands = !dialog.import_quick_commands;
-                }
-                cx.notify();
+                this.session_manager.update(cx, |manager, cx| {
+                    if let Some(dialog) = manager.oxide_import_dialog.as_mut() {
+                        dialog.import_quick_commands = !dialog.import_quick_commands;
+                    }
+                    cx.notify();
+                });
                 cx.stop_propagation();
             }),
             cx,
@@ -820,6 +897,7 @@ impl WorkspaceApp {
     ) -> AnyElement {
         let checked = self
             .session_manager
+            .read(cx)
             .oxide_import_dialog
             .as_ref()
             .is_some_and(|dialog| dialog.import_serial_profiles);
@@ -831,10 +909,12 @@ impl WorkspaceApp {
                 self.i18n.t("modals.import.toggle_serial_profiles"),
                 checked,
                 cx.listener(|this, _event, _window, cx| {
-                    if let Some(dialog) = this.session_manager.oxide_import_dialog.as_mut() {
-                        dialog.import_serial_profiles = !dialog.import_serial_profiles;
-                    }
-                    cx.notify();
+                    this.session_manager.update(cx, |manager, cx| {
+                        if let Some(dialog) = manager.oxide_import_dialog.as_mut() {
+                            dialog.import_serial_profiles = !dialog.import_serial_profiles;
+                        }
+                        cx.notify();
+                    });
                     cx.stop_propagation();
                 }),
                 cx,
@@ -849,6 +929,7 @@ impl WorkspaceApp {
     ) -> AnyElement {
         let import_plugin_settings = self
             .session_manager
+            .read(cx)
             .oxide_import_dialog
             .as_ref()
             .is_some_and(|dialog| dialog.import_plugin_settings);
@@ -860,10 +941,12 @@ impl WorkspaceApp {
             "导入插件偏好设置".to_string(),
             import_plugin_settings,
             cx.listener(|this, _event, _window, cx| {
-                if let Some(dialog) = this.session_manager.oxide_import_dialog.as_mut() {
-                    dialog.import_plugin_settings = !dialog.import_plugin_settings;
-                }
-                cx.notify();
+                this.session_manager.update(cx, |manager, cx| {
+                    if let Some(dialog) = manager.oxide_import_dialog.as_mut() {
+                        dialog.import_plugin_settings = !dialog.import_plugin_settings;
+                    }
+                    cx.notify();
+                });
                 cx.stop_propagation();
             }),
             cx,
@@ -879,6 +962,7 @@ impl WorkspaceApp {
             for (plugin_id, count) in entries {
                 let checked = self
                     .session_manager
+                    .read(cx)
                     .oxide_import_dialog
                     .as_ref()
                     .is_some_and(|dialog| dialog.selected_plugin_ids.contains(&plugin_id));
@@ -961,15 +1045,17 @@ impl WorkspaceApp {
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |this, _event, _window, cx| {
-                    if let Some(dialog) = this.session_manager.oxide_import_dialog.as_mut() {
-                        if dialog.selected_plugin_ids.contains(&plugin_id) {
-                            dialog.selected_plugin_ids.remove(&plugin_id);
-                        } else {
-                            dialog.selected_plugin_ids.insert(plugin_id.clone());
-                            dialog.import_plugin_settings = true;
+                    this.session_manager.update(cx, |manager, cx| {
+                        if let Some(dialog) = manager.oxide_import_dialog.as_mut() {
+                            if dialog.selected_plugin_ids.contains(&plugin_id) {
+                                dialog.selected_plugin_ids.remove(&plugin_id);
+                            } else {
+                                dialog.selected_plugin_ids.insert(plugin_id.clone());
+                                dialog.import_plugin_settings = true;
+                            }
                         }
-                    }
-                    cx.notify();
+                        cx.notify();
+                    });
                     cx.stop_propagation();
                 }),
             )
@@ -983,6 +1069,7 @@ impl WorkspaceApp {
     ) -> AnyElement {
         let checked = self
             .session_manager
+            .read(cx)
             .oxide_import_dialog
             .as_ref()
             .is_some_and(|dialog| dialog.import_portable_secrets);
@@ -992,10 +1079,12 @@ impl WorkspaceApp {
                 "导入便携秘密项".to_string(),
                 checked,
                 cx.listener(|this, _event, _window, cx| {
-                    if let Some(dialog) = this.session_manager.oxide_import_dialog.as_mut() {
-                        dialog.import_portable_secrets = !dialog.import_portable_secrets;
-                    }
-                    cx.notify();
+                    this.session_manager.update(cx, |manager, cx| {
+                        if let Some(dialog) = manager.oxide_import_dialog.as_mut() {
+                            dialog.import_portable_secrets = !dialog.import_portable_secrets;
+                        }
+                        cx.notify();
+                    });
                     cx.stop_propagation();
                 }),
                 cx,
@@ -1019,6 +1108,7 @@ impl WorkspaceApp {
     ) -> AnyElement {
         let checked = self
             .session_manager
+            .read(cx)
             .oxide_import_dialog
             .as_ref()
             .is_some_and(|dialog| dialog.import_forwards);
@@ -1027,19 +1117,28 @@ impl WorkspaceApp {
             "导入已保存的端口转发".to_string(),
             checked,
             cx.listener(|this, _event, _window, cx| {
-                if let Some(dialog) = this.session_manager.oxide_import_dialog.as_mut() {
-                    dialog.import_forwards = !dialog.import_forwards;
-                }
-                cx.notify();
+                this.session_manager.update(cx, |manager, cx| {
+                    if let Some(dialog) = manager.oxide_import_dialog.as_mut() {
+                        dialog.import_forwards = !dialog.import_forwards;
+                    }
+                    cx.notify();
+                });
                 cx.stop_propagation();
             }),
             cx,
         )];
         if !preview.forward_details.is_empty() {
-            self.sync_oxide_import_forward_detail_list_state(&preview.forward_details);
-            let state = self.oxide_import_forward_detail_list_state.clone();
+            self.sync_oxide_import_forward_detail_list_state(&preview.forward_details, cx);
+            let state = self
+                .session_manager
+                .read(cx)
+                .oxide_import_forward_detail_list_state
+                .clone();
             let spec = self.oxide_import_forward_detail_list_spec();
-            let workspace = cx.entity();
+            let renderer = OxideImportForwardDetailRenderer {
+                session_manager: self.session_manager.clone(),
+                tokens: self.tokens,
+            };
             let list_height = (preview.forward_details.len() as f32
                 * OXIDE_IMPORT_FORWARD_DETAIL_LIST_ESTIMATED_HEIGHT)
                 .min(112.0);
@@ -1049,25 +1148,26 @@ impl WorkspaceApp {
                 .child(tauri_virtual_list(
                     state,
                     spec,
-                    move |index, _window, cx| {
-                        workspace.update(cx, |this, cx| {
-                            this.render_oxide_import_forward_detail_item(index, cx)
-                        })
-                    },
+                    move |index, _window, cx| renderer.render(index, cx),
                 ));
             children.push(list.into_any_element());
         }
         self.render_oxide_import_preview_subcard(children)
     }
 
-    pub(super) fn sync_oxide_import_forward_detail_list_state(&self, details: &[ForwardDetail]) {
+    pub(super) fn sync_oxide_import_forward_detail_list_state(
+        &self,
+        details: &[ForwardDetail],
+        cx: &App,
+    ) {
         let signatures = details
             .iter()
             .map(oxide_import_forward_detail_signature)
             .collect::<Vec<_>>();
+        let manager = self.session_manager.read(cx);
         sync_tauri_variable_list_state_by_signatures(
-            &self.oxide_import_forward_detail_list_state,
-            &mut self.oxide_import_forward_detail_list_cache.borrow_mut(),
+            &manager.oxide_import_forward_detail_list_state,
+            &mut manager.oxide_import_forward_detail_list_cache.borrow_mut(),
             "oxide-import-forward-details",
             &signatures,
             self.oxide_import_forward_detail_list_spec(),
@@ -1079,41 +1179,6 @@ impl WorkspaceApp {
             px(OXIDE_IMPORT_FORWARD_DETAIL_LIST_ESTIMATED_HEIGHT),
             OXIDE_IMPORT_FORWARD_DETAIL_LIST_OVERSCAN,
         )
-    }
-
-    pub(super) fn render_oxide_import_forward_detail_item(
-        &self,
-        index: usize,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let Some(detail) = self
-            .session_manager
-            .oxide_import_dialog
-            .as_ref()
-            .and_then(|dialog| dialog.preview.as_ref())
-            .and_then(|preview| preview.forward_details.get(index))
-        else {
-            return div().into_any_element();
-        };
-        div()
-            .pb(px(4.0))
-            .child(
-                div()
-                    .rounded(px(self.tokens.radii.md))
-                    .bg(self.render_oxide_subcard_bg(false))
-                    .px_2()
-                    .py(px(6.0))
-                    .text_size(px(self.tokens.metrics.ui_text_xs))
-                    .text_color(rgb(self.tokens.ui.text_muted))
-                    .child(self.render_selectable_text_scoped(
-                        "oxide-import-forward-detail",
-                        index,
-                        format!("{} · {}", detail.owner_connection_name, detail.description),
-                        self.tokens.ui.text_muted,
-                        cx,
-                    )),
-            )
-            .into_any_element()
     }
 
     pub(super) fn render_oxide_import_preview_subcard(

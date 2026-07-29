@@ -7,202 +7,293 @@ impl WorkspaceApp {
         provider: AiProviderView,
         cx: &mut Context<Self>,
     ) {
-        if self.ai.models.refreshing.contains(&provider.id) {
-            cx.notify();
-            return;
-        }
-
-        self.ai.models.next_refresh_generation =
-            self.ai.models.next_refresh_generation.saturating_add(1);
-        let generation = self.ai.models.next_refresh_generation;
-        self.ai
-            .models
-            .refresh_generations
-            .insert(provider.id.clone(), generation);
-        self.ai.models.refreshing.insert(provider.id.clone());
+        self.ai_entity.update(cx, |ai, _cx| {
+            ai.request_model_refresh(index, provider);
+        });
         cx.notify();
+    }
 
-        let provider_id = provider.id.clone();
-        if self.ai.models.refresh_tx.is_none() {
-            let (tx, rx) = std::sync::mpsc::channel();
-            self.ai.models.refresh_tx = Some(tx);
-            self.ai.models.refresh_rx = Some(rx);
-        }
-        let Some(ui_tx) = self.ai.models.refresh_tx.as_ref().cloned() else {
-            return;
-        };
-        self.ai.models.refresh_pending = self.ai.models.refresh_pending.saturating_add(1);
-        let key_store = self.ai.models.key_store.clone();
-        let key_policy = ai_provider_refresh_key_policy(&provider.provider_type);
-        self.forwarding_runtime.spawn(async move {
-            let api_key = match key_policy {
-                AiProviderRefreshKeyPolicy::NoKey => None,
-                AiProviderRefreshKeyPolicy::OptionalStoredKey => tokio::task::spawn_blocking({
-                    let key_store = key_store.clone();
-                    let provider_id = provider_id.clone();
-                    move || key_store.get_provider_key(&provider_id)
-                })
-                .await
-                .ok()
-                .and_then(Result::ok)
-                .flatten(),
-                AiProviderRefreshKeyPolicy::RequiredStoredKey => {
-                    match tokio::task::spawn_blocking({
-                        let key_store = key_store.clone();
-                        let provider_id = provider_id.clone();
-                        move || key_store.get_provider_key(&provider_id)
-                    })
-                    .await
-                    {
-                        Ok(Ok(Some(key))) => Some(key),
-                        Ok(Ok(None)) => {
-                            let _ = ui_tx.send(AiModelRefreshDelivery {
-                                index,
-                                provider_id,
-                                generation,
-                                result: Err(AI_MODEL_REFRESH_MISSING_API_KEY.to_string()),
-                            });
-                            return;
+    pub(in crate::workspace) fn handle_ai_workspace_event(
+        &mut self,
+        event: &ai_state::AiWorkspaceEvent,
+        window_handle: AnyWindowHandle,
+        cx: &mut Context<Self>,
+    ) {
+        match event {
+            ai_state::AiWorkspaceEvent::AcpAgentProbeDeliveryReady => {
+                let intents = self
+                    .ai_entity
+                    .update(cx, |ai, _cx| ai.take_acp_agent_probe_intents());
+                self.edit_settings(
+                    move |settings| {
+                        for intent in intents {
+                            if let Some(agent) = settings
+                                .ai
+                                .acp_agents
+                                .iter_mut()
+                                .find(|agent| agent.id == intent.agent_id)
+                            {
+                                agent.auth.status = intent.auth_status;
+                                agent.status.state = intent.runtime_state;
+                                agent.status.last_error_kind = intent.last_error_kind;
+                            }
                         }
-                        Ok(Err(error)) => {
-                            let _ = ui_tx.send(AiModelRefreshDelivery {
-                                index,
-                                provider_id,
-                                generation,
-                                result: Err(error.to_string()),
-                            });
-                            return;
+                    },
+                    cx,
+                );
+            }
+            ai_state::AiWorkspaceEvent::AcpModelDiscoveryDeliveryReady => {
+                let intents = self
+                    .ai_entity
+                    .update(cx, |ai, _cx| ai.take_acp_model_discovery_intents());
+                for intent in intents {
+                    let conversation_exists = self
+                        .ai_entity
+                        .read(cx)
+                        .conversation_state()
+                        .conversations
+                        .iter()
+                        .any(|conversation| conversation.id == intent.conversation_id);
+                    self.ai_entity.update(cx, |ai, _cx| {
+                        ai.apply_acp_model_discovery(intent, conversation_exists);
+                    });
+                }
+                cx.notify();
+            }
+            ai_state::AiWorkspaceEvent::ChatStreamDeliveryReady => {
+                self.schedule_ai_chat_stream_delivery_apply(window_handle, cx);
+            }
+            ai_state::AiWorkspaceEvent::CompactionDeliveryReady => {
+                let deliveries = self
+                    .ai_entity
+                    .update(cx, |ai, _cx| ai.take_compaction_deliveries());
+                self.apply_ai_compaction_deliveries(deliveries, cx);
+                cx.notify();
+            }
+            ai_state::AiWorkspaceEvent::CompactionStateChanged => cx.notify(),
+            ai_state::AiWorkspaceEvent::CredentialOperationReady => {
+                let intents = self
+                    .ai_entity
+                    .update(cx, |ai, _cx| ai.take_credential_intents());
+                for intent in intents {
+                    match intent {
+                        ai_state::AiCredentialIntent::ProviderKeyStored { index, provider_id } => {
+                            if let Some(provider) = self
+                                .settings_store
+                                .settings()
+                                .ai
+                                .providers
+                                .get(index)
+                                .and_then(ai_provider_view)
+                                .filter(|provider| provider.id == provider_id)
+                            {
+                                self.refresh_ai_provider_models(index, provider, cx);
+                            }
                         }
-                        Err(error) => {
-                            let _ = ui_tx.send(AiModelRefreshDelivery {
-                                index,
-                                provider_id,
-                                generation,
-                                result: Err(error.to_string()),
-                            });
-                            return;
+                        ai_state::AiCredentialIntent::ProviderKeyRemoved => {}
+                        ai_state::AiCredentialIntent::AcpTokenStored { agent_id } => {
+                            self.edit_settings(
+                                |settings| {
+                                    if let Some(agent) = settings
+                                        .ai
+                                        .acp_agents
+                                        .iter_mut()
+                                        .find(|agent| agent.id == agent_id)
+                                    {
+                                        agent.auth.status =
+                                            oxideterm_settings::AcpAgentAuthStatus::Authenticated;
+                                        agent.auth.account_label = Some(
+                                            (!agent.display_name.trim().is_empty())
+                                                .then(|| agent.display_name.clone())
+                                                .unwrap_or_else(|| agent.id.clone()),
+                                        );
+                                    }
+                                },
+                                cx,
+                            );
+                        }
+                        ai_state::AiCredentialIntent::AcpTokenRemoved { agent_id } => {
+                            self.edit_settings(
+                                |settings| {
+                                    if let Some(agent) = settings
+                                        .ai
+                                        .acp_agents
+                                        .iter_mut()
+                                        .find(|agent| agent.id == agent_id)
+                                    {
+                                        agent.auth.status =
+                                            oxideterm_settings::AcpAgentAuthStatus::Unknown;
+                                        agent.auth.account_label = None;
+                                    }
+                                },
+                                cx,
+                            );
+                        }
+                        ai_state::AiCredentialIntent::McpServerReady { config } => {
+                            self.edit_settings(
+                                move |settings| settings.ai.mcp_servers.push(config),
+                                cx,
+                            );
+                        }
+                        ai_state::AiCredentialIntent::McpServerRemoved { server_id } => {
+                            self.edit_settings(
+                                move |settings| {
+                                    settings.ai.mcp_servers.retain(|value| {
+                                        value.get("id").and_then(serde_json::Value::as_str)
+                                            != Some(server_id.as_str())
+                                    });
+                                },
+                                cx,
+                            );
+                        }
+                        ai_state::AiCredentialIntent::Failed(failure) => {
+                            let message_key = match failure {
+                                ai_state::AiCredentialFailure::SaveProviderKey
+                                | ai_state::AiCredentialFailure::SaveAcpToken
+                                | ai_state::AiCredentialFailure::SaveMcpToken => {
+                                    "settings_view.ai.save_failed"
+                                }
+                                ai_state::AiCredentialFailure::RemoveProviderKey
+                                | ai_state::AiCredentialFailure::RemoveAcpToken => {
+                                    "settings_view.ai.remove_failed"
+                                }
+                            };
+                            // Keychain errors can include local account details.
+                            // Only a localized stable category reaches the toast.
+                            let safe_error =
+                                self.i18n.t("settings_view.ai.acp_agent_error_unknown");
+                            self.push_ai_settings_toast(
+                                self.ai_i18n_error(message_key, &safe_error),
+                                TerminalNoticeVariant::Error,
+                                cx,
+                            );
                         }
                     }
                 }
-            };
-            let result = fetch_provider_models(provider, api_key).await;
-            let result = result.map_err(|error| error.to_string());
-            let _ = ui_tx.send(AiModelRefreshDelivery {
-                index,
-                provider_id,
-                generation,
-                result,
-            });
-        });
-        self.schedule_ai_model_refresh_poll(cx);
-    }
-
-    pub(in crate::workspace) fn poll_ai_model_refresh_results(&mut self, cx: &mut Context<Self>) {
-        let Some(rx) = self.ai.models.refresh_rx.take() else {
-            return;
-        };
-        let mut keep_rx = true;
-        loop {
-            match rx.try_recv() {
-                Ok(delivery) => {
-                    self.ai.models.refresh_pending =
-                        self.ai.models.refresh_pending.saturating_sub(1);
-                    if self
-                        .ai
-                        .models
-                        .refresh_generations
-                        .get(&delivery.provider_id)
-                        != Some(&delivery.generation)
-                    {
-                        continue;
+                cx.notify();
+            }
+            ai_state::AiWorkspaceEvent::KnowledgeReindexDeliveryReady => {
+                let intents = self
+                    .ai_entity
+                    .update(cx, |ai, _cx| ai.take_knowledge_reindex_intents());
+                for intent in intents {
+                    match intent {
+                        ai_state::AiKnowledgeReindexIntent::Finished { failed } => {
+                            if failed {
+                                self.push_ai_settings_toast(
+                                    self.i18n.t("settings_view.knowledge.error_reindex"),
+                                    TerminalNoticeVariant::Error,
+                                    cx,
+                                );
+                            } else {
+                                self.ai_entity.update(cx, |entity, cx| {
+                                    entity.clear_knowledge_error();
+                                    cx.notify();
+                                });
+                            }
+                        }
                     }
-                    self.ai.models.refreshing.remove(&delivery.provider_id);
-                    match delivery.result {
-                        Ok(refresh) => {
+                }
+                cx.notify();
+            }
+            ai_state::AiWorkspaceEvent::KnowledgePageChanged => cx.notify(),
+            ai_state::AiWorkspaceEvent::McpRuntimeChanged => cx.notify(),
+            ai_state::AiWorkspaceEvent::ModelRefreshDeliveryReady => {
+                let intents = self
+                    .ai_entity
+                    .update(cx, |ai, _cx| ai.take_model_refresh_intents());
+                for intent in intents {
+                    match intent {
+                        ai_state::AiModelRefreshIntent::Updated {
+                            index,
+                            provider_id,
+                            refresh,
+                        } => {
                             self.edit_settings(
                                 |settings| {
                                     ai_apply_provider_model_refresh(
                                         &mut settings.ai.providers,
                                         &mut settings.ai.model_context_windows,
-                                        delivery.index,
-                                        &delivery.provider_id,
+                                        index,
+                                        &provider_id,
                                         refresh,
                                     );
                                 },
                                 cx,
                             );
                         }
-                        Err(error) => {
-                            if error == AI_MODEL_REFRESH_MISSING_API_KEY {
-                                self.ai
-                                    .models
-                                    .provider_key_status
-                                    .insert(delivery.provider_id.clone(), false);
-                                self.push_ai_settings_toast(
-                                    self.i18n.t("settings_view.ai.api_key_missing"),
-                                    TerminalNoticeVariant::Warning,
-                                );
-                            } else {
-                                self.push_ai_settings_toast(
-                                    self.ai_i18n_error("settings_view.ai.refresh_failed", &error),
-                                    TerminalNoticeVariant::Error,
-                                );
-                            }
-                            cx.notify();
+                        ai_state::AiModelRefreshIntent::MissingApiKey { provider_id } => {
+                            self.ai_entity.update(cx, |ai, _cx| {
+                                ai.set_provider_key_status(provider_id, false);
+                            });
+                            self.push_ai_settings_toast(
+                                self.i18n.t("settings_view.ai.api_key_missing"),
+                                TerminalNoticeVariant::Warning,
+                                cx,
+                            );
+                        }
+                        ai_state::AiModelRefreshIntent::Failed => {
+                            let safe_error =
+                                self.i18n.t("settings_view.ai.acp_agent_error_unknown");
+                            self.push_ai_settings_toast(
+                                self.ai_i18n_error("settings_view.ai.refresh_failed", &safe_error),
+                                TerminalNoticeVariant::Error,
+                                cx,
+                            );
                         }
                     }
                 }
-                Err(std::sync::mpsc::TryRecvError::Empty) => break,
-                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
-                    keep_rx = false;
-                    self.ai.models.refresh_tx = None;
-                    self.ai.models.refresh_pending = 0;
-                    break;
+                cx.notify();
+            }
+            ai_state::AiWorkspaceEvent::ProviderKeyStatusChanged
+            | ai_state::AiWorkspaceEvent::SelectorProviderStatusChanged
+            | ai_state::AiWorkspaceEvent::TerminalInlineDeliveryReady => cx.notify(),
+            ai_state::AiWorkspaceEvent::SettingsConfirmChanged => {
+                let intents = self
+                    .ai_entity
+                    .update(cx, |ai, _cx| ai.take_settings_confirm_intents());
+                for intent in intents {
+                    match intent {
+                        ai_state::AiSettingsConfirmIntent::Enable => {
+                            self.edit_settings(
+                                |settings| {
+                                    settings.ai.enabled = true;
+                                    settings.ai.enabled_confirmed = true;
+                                },
+                                cx,
+                            );
+                        }
+                        ai_state::AiSettingsConfirmIntent::RemoveProviderKey {
+                            index,
+                            provider_id,
+                        } => {
+                            self.remove_ai_provider_api_key(index, &provider_id, cx);
+                        }
+                        ai_state::AiSettingsConfirmIntent::RemoveProvider { provider_id } => {
+                            self.remove_ai_provider(&provider_id, cx);
+                        }
+                    }
                 }
+                cx.notify();
             }
         }
-        if keep_rx && self.ai.models.refresh_pending > 0 {
-            self.ai.models.refresh_rx = Some(rx);
-        } else if self.ai.models.refresh_pending == 0 {
-            self.ai.models.refresh_tx = None;
-        }
-    }
-
-    pub(in crate::workspace) fn schedule_ai_model_refresh_poll(&mut self, cx: &mut Context<Self>) {
-        if self.ai.models.refresh_polling {
-            return;
-        }
-        self.ai.models.refresh_polling = true;
-        cx.spawn(async move |weak, cx| {
-            Timer::after(Duration::from_millis(50)).await;
-            let _ = weak.update(cx, |this, cx| {
-                this.ai.models.refresh_polling = false;
-                this.poll_ai_model_refresh_results(cx);
-                if this.ai.models.refresh_pending > 0 {
-                    this.schedule_ai_model_refresh_poll(cx);
-                }
-            });
-        })
-        .detach();
     }
 
     pub(in crate::workspace) fn push_ai_settings_toast(
         &mut self,
         title: String,
         variant: TerminalNoticeVariant,
+        cx: &App,
     ) {
-        let id = self.next_workspace_toast_id();
-        self.workspace_toasts.push(WorkspaceToast {
-            id,
-            notice: TerminalNotice {
+        self.push_workspace_notice(
+            TerminalNotice {
                 title,
                 description: None,
                 status_text: None,
                 progress: None,
                 variant,
             },
-            expires_at: Instant::now() + Duration::from_secs(4),
-            presence: oxideterm_gpui_ui::motion::ExitPresence::visible(),
-        });
+            cx,
+        );
     }
 }
