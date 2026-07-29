@@ -20,7 +20,11 @@
       "start_conversation": "Unterhaltung starten",
       "start_conversation_hint": "Stellen Sie Fragen zu Shell-Befehlen, Skripten oder Terminal-Operationen.",
       "delete_conversation": "Unterhaltung löschen",
+      "rename_conversation": "Unterhaltung umbenennen",
+      "save_conversation_title": "Titel speichern",
       "messages_count": "{{count}} Nachrichten",
+      "today": "Heute",
+      "yesterday": "Gestern",
       "double_click_rename": "Doppelklicken zum Umbenennen",
       "branch_prev": "Vorherige Version",
       "branch_next": "Nächste Version"

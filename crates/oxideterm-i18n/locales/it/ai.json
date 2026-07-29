@@ -20,7 +20,11 @@
       "start_conversation": "Inizia una conversazione",
       "start_conversation_hint": "Fai domande sui comandi shell, script o ottieni aiuto con le operazioni del terminale.",
       "delete_conversation": "Elimina conversazione",
+      "rename_conversation": "Rinomina conversazione",
+      "save_conversation_title": "Salva titolo",
       "messages_count": "{{count}} messaggi",
+      "today": "Oggi",
+      "yesterday": "Ieri",
       "double_click_rename": "Doppio clic per rinominare",
       "branch_prev": "Versione precedente",
       "branch_next": "Versione successiva"

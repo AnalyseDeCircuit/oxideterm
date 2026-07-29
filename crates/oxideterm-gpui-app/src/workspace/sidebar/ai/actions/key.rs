@@ -62,6 +62,55 @@ impl WorkspaceApp {
                 }
                 _ => true,
             }
+        } else if self
+            .ai_entity
+            .read(cx)
+            .chat_ui()
+            .renaming_conversation_id
+            .is_some()
+            && self
+                .ai_entity
+                .read(cx)
+                .chat_ui()
+                .renaming_conversation_focused
+        {
+            if event.keystroke.modifiers.platform {
+                return false;
+            }
+            match event.keystroke.key.as_str() {
+                "escape" => {
+                    self.cancel_ai_conversation_rename(cx);
+                    true
+                }
+                "backspace" => {
+                    let changed = self
+                        .ai_entity
+                        .update(cx, |ai, _cx| ai.pop_conversation_rename())
+                        || self.ime_marked_text.take().is_some();
+                    if changed {
+                        cx.notify();
+                    }
+                    true
+                }
+                "enter" | "tab" => {
+                    self.save_ai_conversation_rename(cx);
+                    true
+                }
+                "space" | " "
+                    if ai_text_input_space_inserts_literal(
+                        event.keystroke.modifiers.platform,
+                        event.keystroke.modifiers.control,
+                        event.keystroke.modifiers.alt,
+                    ) =>
+                {
+                    self.insert_ai_text_input_literal_space(
+                        WorkspaceImeTarget::AiConversationRename,
+                        cx,
+                    );
+                    true
+                }
+                _ => true,
+            }
         } else if self.ai_entity.read(cx).chat_ui().editing_message_id.is_some() && self.ai_entity.read(cx).chat_ui().editing_message_focused
         {
             if event.keystroke.modifiers.platform {

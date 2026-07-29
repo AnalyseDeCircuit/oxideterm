@@ -378,6 +378,16 @@ impl AiWorkspaceEntity {
         &self.chat_ui
     }
 
+    pub(in crate::workspace) fn sidebar_keyboard_target_focused(&self) -> bool {
+        // Keep every editable AI surface in the same root key-routing contract.
+        self.chat_ui.input_focused
+            || self.chat_ui.footer_focus.is_some()
+            || (self.chat_ui.renaming_conversation_id.is_some()
+                && self.chat_ui.renaming_conversation_focused)
+            || (self.chat_ui.editing_message_id.is_some() && self.chat_ui.editing_message_focused)
+            || self.model_ui.selector_search_focused
+    }
+
     pub(in crate::workspace) fn configure_chat_surface(
         &mut self,
         sidebar_width: f32,
@@ -436,6 +446,7 @@ impl AiWorkspaceEntity {
         self.chat_ui.reasoning_menu_open = false;
         self.chat_ui.safety_menu_open = false;
         self.chat_ui.context_popover_open = false;
+        self.clear_conversation_rename();
     }
 
     pub(in crate::workspace) fn toggle_chat_context(&mut self) {
@@ -473,6 +484,22 @@ impl AiWorkspaceEntity {
         }
         replace_utf16(
             &mut self.chat_ui.editing_message_draft,
+            replacement_range,
+            text,
+        );
+        true
+    }
+
+    pub(in crate::workspace) fn replace_conversation_rename(
+        &mut self,
+        replacement_range: Option<std::ops::Range<usize>>,
+        text: &str,
+    ) -> bool {
+        if !self.chat_ui.renaming_conversation_focused {
+            return false;
+        }
+        replace_utf16(
+            &mut self.chat_ui.renaming_conversation_draft,
             replacement_range,
             text,
         );
@@ -521,6 +548,33 @@ impl AiWorkspaceEntity {
         self.chat_ui.draft.push('\n');
     }
 
+    pub(in crate::workspace) fn pop_conversation_rename(&mut self) -> bool {
+        self.chat_ui.renaming_conversation_draft.pop().is_some()
+    }
+
+    pub(in crate::workspace) fn focus_conversation_rename(&mut self) {
+        self.chat_ui.renaming_conversation_focused = true;
+        self.chat_ui.input_focused = false;
+        self.chat_ui.footer_focus = None;
+        self.chat_ui.editing_message_focused = false;
+    }
+
+    pub(in crate::workspace) fn begin_conversation_rename(
+        &mut self,
+        conversation_id: String,
+        title: String,
+    ) {
+        self.chat_ui.renaming_conversation_id = Some(conversation_id);
+        self.chat_ui.renaming_conversation_draft = title;
+        self.focus_conversation_rename();
+    }
+
+    pub(in crate::workspace) fn clear_conversation_rename(&mut self) {
+        self.chat_ui.renaming_conversation_id = None;
+        self.chat_ui.renaming_conversation_draft.clear();
+        self.chat_ui.renaming_conversation_focused = false;
+    }
+
     pub(in crate::workspace) fn pop_message_edit(&mut self) -> bool {
         self.chat_ui.editing_message_draft.pop().is_some()
     }
@@ -554,6 +608,7 @@ impl AiWorkspaceEntity {
         self.chat_ui.conversation_list_open = false;
         self.chat_ui.menu_open = false;
         self.chat_ui.safety_menu_open = false;
+        self.clear_conversation_rename();
         self.clear_message_edit();
         self.clear_chat_expansions();
         self.blur_chat_input(false);
@@ -564,6 +619,7 @@ impl AiWorkspaceEntity {
         has_conversations: bool,
     ) {
         self.clear_chat_expansions();
+        self.clear_conversation_rename();
         self.chat_ui.conversation_list_open = has_conversations;
         self.chat_ui.menu_open = false;
     }
@@ -571,6 +627,7 @@ impl AiWorkspaceEntity {
     pub(in crate::workspace) fn reset_chat_for_new_conversation(&mut self) {
         self.chat_ui.conversation_list_open = false;
         self.chat_ui.menu_open = false;
+        self.clear_conversation_rename();
         self.chat_ui.draft.clear();
         self.chat_ui.input_focused = false;
         self.chat_ui.autocomplete_index = 0;
@@ -1561,12 +1618,27 @@ impl AiWorkspaceEntity {
     pub(in crate::workspace) fn delete_conversation(&mut self, id: &str) -> bool {
         self.conversation_state.delete_conversation(id);
         self.safety_bypass_conversations.remove(id);
+        if self.chat_ui.renaming_conversation_id.as_deref() == Some(id) {
+            self.clear_conversation_rename();
+        }
         !self.conversation_state.conversations.is_empty()
+    }
+
+    pub(in crate::workspace) fn rename_conversation(
+        &mut self,
+        id: &str,
+        title: String,
+        now_ms: i64,
+    ) {
+        self.conversation_state
+            .rename_conversation(id, title, now_ms);
+        self.clear_conversation_rename();
     }
 
     pub(in crate::workspace) fn clear_conversations(&mut self) {
         self.conversation_state.clear_conversations();
         self.safety_bypass_conversations.clear();
+        self.clear_conversation_rename();
     }
 
     pub(in crate::workspace) fn set_active_conversation_safety_bypass(&mut self, bypass: bool) {
@@ -4034,6 +4106,9 @@ pub(super) struct AiChatWorkspaceState {
     pub(super) draft: String,
     pub(super) input_focused: bool,
     pub(super) footer_focus: Option<AiChatFooterAction>,
+    pub(super) renaming_conversation_id: Option<String>,
+    pub(super) renaming_conversation_draft: String,
+    pub(super) renaming_conversation_focused: bool,
     pub(super) editing_message_id: Option<String>,
     pub(super) editing_message_draft: String,
     pub(super) editing_message_focused: bool,
@@ -4095,6 +4170,9 @@ impl AiChatWorkspaceState {
             draft: String::new(),
             input_focused: false,
             footer_focus: None,
+            renaming_conversation_id: None,
+            renaming_conversation_draft: String::new(),
+            renaming_conversation_focused: false,
             editing_message_id: None,
             editing_message_draft: String::new(),
             editing_message_focused: false,
@@ -5503,6 +5581,36 @@ mod entity_tests {
 
             assert!(!entity.delete_conversation("conversation-a"));
             assert!(entity.safety_bypass_conversations().is_empty());
+        });
+    }
+
+    #[gpui::test]
+    fn conversation_rename_draft_and_commit_are_entity_owned(cx: &mut TestAppContext) {
+        let entity = cx.new(|cx| {
+            AiWorkspaceEntity::new(test_runtime(), oxideterm_ai::AiProviderKeyStore::new(), cx)
+        });
+        entity.update(cx, |entity, _cx| {
+            let conversation_id = entity.conversation_state_mut().create_conversation(
+                "conversation-a".to_string(),
+                Some("Old title".to_string()),
+                100,
+                None,
+            );
+            entity.begin_conversation_rename(conversation_id.clone(), "Old title".to_string());
+            assert!(entity.sidebar_keyboard_target_focused());
+            assert!(entity.replace_conversation_rename(Some(0..3), "New"));
+            assert_eq!(entity.chat_ui().renaming_conversation_draft, "New title");
+
+            entity.rename_conversation(&conversation_id, "New title".to_string(), 200);
+
+            assert!(!entity.sidebar_keyboard_target_focused());
+            assert!(entity.chat_ui().renaming_conversation_id.is_none());
+            assert!(
+                entity
+                    .conversation_state()
+                    .active_conversation()
+                    .is_some_and(|conversation| conversation.title == "New title")
+            );
         });
     }
 

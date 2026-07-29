@@ -20,7 +20,11 @@
       "start_conversation": "开始对话",
       "start_conversation_hint": "询问关于 Shell 命令、脚本或终端操作的问题。",
       "delete_conversation": "删除对话",
+      "rename_conversation": "重命名对话",
+      "save_conversation_title": "保存标题",
       "messages_count": "{{count}} 条消息",
+      "today": "今天",
+      "yesterday": "昨天",
       "double_click_rename": "双击重命名",
       "branch_prev": "上一版本",
       "branch_next": "下一版本"

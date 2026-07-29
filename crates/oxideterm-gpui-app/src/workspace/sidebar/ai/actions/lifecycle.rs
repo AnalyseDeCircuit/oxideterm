@@ -78,6 +78,60 @@ impl WorkspaceApp {
         });
     }
 
+    pub(in crate::workspace) fn begin_ai_conversation_rename(
+        &mut self,
+        id: String,
+        title: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let title_len = title.encode_utf16().count();
+        self.ai_entity.update(cx, |ai, _cx| {
+            ai.begin_conversation_rename(id, title);
+        });
+        self.ime_marked_text = None;
+        self.set_ime_selection_from_anchor(
+            WorkspaceImeTarget::AiConversationRename,
+            0,
+            title_len,
+        );
+        window.focus(&self.focus_handle, cx);
+        cx.notify();
+    }
+
+    pub(in crate::workspace) fn save_ai_conversation_rename(&mut self, cx: &mut Context<Self>) {
+        let (conversation_id, draft) = {
+            let ai = self.ai_entity.read(cx);
+            (
+                ai.chat_ui().renaming_conversation_id.clone(),
+                ai.chat_ui().renaming_conversation_draft.trim().to_string(),
+            )
+        };
+        let Some(conversation_id) = conversation_id else {
+            return;
+        };
+        self.ai_entity.update(cx, |ai, _cx| {
+            if draft.is_empty() {
+                ai.clear_conversation_rename();
+            } else {
+                ai.rename_conversation(&conversation_id, draft, ai_now_ms());
+                ai.persist_chat_state();
+            }
+        });
+        self.clear_ime_selection();
+        self.ime_marked_text = None;
+        cx.notify();
+    }
+
+    pub(in crate::workspace) fn cancel_ai_conversation_rename(&mut self, cx: &mut Context<Self>) {
+        self.ai_entity.update(cx, |ai, _cx| {
+            ai.clear_conversation_rename();
+        });
+        self.clear_ime_selection();
+        self.ime_marked_text = None;
+        cx.notify();
+    }
+
     pub(in crate::workspace) fn delete_ai_conversation(&mut self, id: &str, cx: &mut App) {
         let has_conversations = self.ai_entity.update(cx, |ai, _cx| {
             let has_conversations = ai.delete_conversation(id);

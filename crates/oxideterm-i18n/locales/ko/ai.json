@@ -20,7 +20,11 @@
       "start_conversation": "대화 시작하기",
       "start_conversation_hint": "셸 명령, 스크립트 또는 터미널 작업에 대해 질문하세요.",
       "delete_conversation": "대화 삭제",
+      "rename_conversation": "대화 이름 바꾸기",
+      "save_conversation_title": "제목 저장",
       "messages_count": "메시지 {{count}}개",
+      "today": "오늘",
+      "yesterday": "어제",
       "double_click_rename": "더블 클릭하여 이름 변경",
       "branch_prev": "이전 버전",
       "branch_next": "다음 버전"

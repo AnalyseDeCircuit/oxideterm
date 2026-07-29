@@ -251,10 +251,14 @@ impl ActiveWindowModalOwner {
         )
     }
 
-    fn key_route(self, _key: &str) -> ActiveWindowModalKeyRoute {
+    fn key_route(self, key: &str) -> ActiveWindowModalKeyRoute {
+        let visible = self.phase() == oxideterm_gpui_ui::motion::ExitPhase::Visible;
+        let focused_child_owns_key = visible && self == Self::AiTextEditor && key != "escape";
         ActiveWindowModalKeyRoute {
-            dispatch_owner: (self.phase() == oxideterm_gpui_ui::motion::ExitPhase::Visible)
-                .then_some(self),
+            // Document editors must receive navigation and mutation keys at
+            // their focused element; the modal keeps Escape at the capture layer.
+            dispatch_owner: (visible && !focused_child_owns_key).then_some(self),
+            consume_in_capture: !focused_child_owns_key,
         }
     }
 }
@@ -262,11 +266,12 @@ impl ActiveWindowModalOwner {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 struct ActiveWindowModalKeyRoute {
     dispatch_owner: Option<ActiveWindowModalOwner>,
+    consume_in_capture: bool,
 }
 
 impl ActiveWindowModalKeyRoute {
     fn consumes_key(self) -> bool {
-        true
+        self.consume_in_capture
     }
 }
 
@@ -1211,5 +1216,20 @@ mod tests {
         let route = owner.key_route("x");
         assert!(route.consumes_key());
         assert_eq!(route.dispatch_owner, Some(owner));
+    }
+
+    #[test]
+    fn ai_text_editor_yields_document_keys_but_captures_escape() {
+        let owner = ActiveWindowModalOwner::AiTextEditor;
+
+        for key in ["enter", "backspace", "left", "tab", "x"] {
+            let route = owner.key_route(key);
+            assert!(!route.consumes_key(), "{key} must reach the focused editor");
+            assert_eq!(route.dispatch_owner, None);
+        }
+
+        let escape = owner.key_route("escape");
+        assert!(escape.consumes_key());
+        assert_eq!(escape.dispatch_owner, Some(owner));
     }
 }

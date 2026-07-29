@@ -20,7 +20,11 @@
       "start_conversation": "会話を始める",
       "start_conversation_hint": "シェルコマンド、スクリプト、ターミナル操作についてご質問ください。",
       "delete_conversation": "会話を削除",
+      "rename_conversation": "会話名を変更",
+      "save_conversation_title": "タイトルを保存",
       "messages_count": "{{count}} 件のメッセージ",
+      "today": "今日",
+      "yesterday": "昨日",
       "double_click_rename": "ダブルクリックで名前を変更",
       "branch_prev": "前のバージョン",
       "branch_next": "次のバージョン"

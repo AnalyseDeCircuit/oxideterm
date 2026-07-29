@@ -20,7 +20,11 @@
       "start_conversation": "開始對話",
       "start_conversation_hint": "詢問有關 shell 命令、腳本或獲取終端機操作的幫助。",
       "delete_conversation": "刪除對話",
+      "rename_conversation": "重新命名對話",
+      "save_conversation_title": "儲存標題",
       "messages_count": "{{count}} 則訊息",
+      "today": "今天",
+      "yesterday": "昨天",
       "double_click_rename": "雙擊重新命名",
       "branch_prev": "上一版本",
       "branch_next": "下一版本"

@@ -135,6 +135,7 @@ pub(super) enum WorkspaceImeTarget {
     AiModelSelectorSearch,
     AiInlinePrompt,
     AiChatInput,
+    AiConversationRename,
     AiMessageEdit,
     PluginControl { key: u64, secret: bool },
     Sftp(SftpInput),
@@ -493,6 +494,7 @@ impl WorkspaceImeTarget {
             Self::AiInlinePrompt => 1_896,
             Self::AiChatInput => 1_897,
             Self::AiMessageEdit => 1_898,
+            Self::AiConversationRename => 1_899,
             Self::PluginControl { key, .. } => key.wrapping_add(10_000),
             Self::Sftp(input) => 1_900 + input.anchor_key(),
             Self::NewConnection(field) => 2_000 + field as u64,
@@ -1036,6 +1038,22 @@ impl WorkspaceApp {
             return Some(WorkspaceImeTarget::AiInlinePrompt);
         }
 
+        if self.ai_sidebar_visible()
+            && self
+                .ai_entity
+                .read(cx)
+                .chat_ui()
+                .renaming_conversation_id
+                .is_some()
+            && self
+                .ai_entity
+                .read(cx)
+                .chat_ui()
+                .renaming_conversation_focused
+        {
+            return Some(WorkspaceImeTarget::AiConversationRename);
+        }
+
         if self.ai_sidebar_visible() && self.ai_entity.read(cx).chat_ui().input_focused {
             return Some(WorkspaceImeTarget::AiChatInput);
         }
@@ -1477,6 +1495,7 @@ impl WorkspaceApp {
     fn ime_target_horizontal_padding(target: WorkspaceImeTarget, control_padding_x: f32) -> Pixels {
         match target {
             WorkspaceImeTarget::AiChatInput
+            | WorkspaceImeTarget::AiConversationRename
             | WorkspaceImeTarget::AiMessageEdit
             | WorkspaceImeTarget::Sftp(_)
             | WorkspaceImeTarget::ReadOnlyText(_) => {
@@ -1846,6 +1865,18 @@ impl WorkspaceApp {
                 .chat_ui()
                 .input_focused
                 .then(|| self.ai_entity.read(cx).chat_ui().draft.clone()),
+            WorkspaceImeTarget::AiConversationRename => self
+                .ai_entity
+                .read(cx)
+                .chat_ui()
+                .renaming_conversation_focused
+                .then(|| {
+                    self.ai_entity
+                        .read(cx)
+                        .chat_ui()
+                        .renaming_conversation_draft
+                        .clone()
+                }),
             WorkspaceImeTarget::AiMessageEdit => self
                 .ai_entity
                 .read(cx)
@@ -2687,6 +2718,15 @@ impl WorkspaceApp {
                     cx.notify();
                 }
             }
+            WorkspaceImeTarget::AiConversationRename => {
+                let changed = self.ai_entity.update(cx, |ai, _cx| {
+                    ai.replace_conversation_rename(replacement_range, text)
+                });
+                if changed {
+                    self.show_active_input_caret(cx);
+                    cx.notify();
+                }
+            }
             WorkspaceImeTarget::AiMessageEdit => {
                 let changed = self.ai_entity.update(cx, |ai, _cx| {
                     ai.replace_message_edit(replacement_range, text)
@@ -3345,6 +3385,9 @@ mod tests {
         ));
         assert!(ime_target_should_blink_caret(
             WorkspaceImeTarget::AiModelSelectorSearch
+        ));
+        assert!(ime_target_should_blink_caret(
+            WorkspaceImeTarget::AiConversationRename
         ));
         assert!(!ime_target_should_blink_caret(
             WorkspaceImeTarget::ReadOnlyText(1)

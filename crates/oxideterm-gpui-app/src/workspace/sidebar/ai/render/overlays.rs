@@ -329,14 +329,160 @@ impl WorkspaceApp {
         is_last: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        let rename_target = WorkspaceImeTarget::AiConversationRename;
+        let (is_renaming, rename_draft, rename_focused) = {
+            let ai = self.ai_entity.read(cx);
+            let chat = ai.chat_ui();
+            let is_renaming =
+                chat.renaming_conversation_id.as_deref() == Some(conversation.id.as_ref());
+            (
+                is_renaming,
+                is_renaming
+                    .then(|| chat.renaming_conversation_draft.clone())
+                    .unwrap_or_default(),
+                is_renaming && chat.renaming_conversation_focused,
+            )
+        };
+        let title = conversation.title;
+        let rename_id = conversation.id.clone();
+        let rename_title = title.clone();
         let delete_id = conversation.id.clone();
         let id = conversation.id;
         let is_active = conversation.active;
         let meta = format!(
             "{} · {}",
             self.ai_messages_count_label(conversation.message_count),
-            time_label(conversation.updated_at_ms)
+            time_label(
+                conversation.updated_at_ms,
+                &self.i18n.t("ai.chat.today"),
+                &self.i18n.t("ai.chat.yesterday"),
+            )
         );
+        let title_control = if is_renaming {
+            let input = text_input(
+                &self.tokens,
+                TextInputView {
+                    value: &rename_draft,
+                    placeholder: String::new(),
+                    focused: rename_focused,
+                    caret_visible: self.input_caret.visible(),
+                    secret: false,
+                    selected_all: false,
+                    selected_range: self.ime_selected_range_for_target(rename_target, cx),
+                    marked_text: self.marked_text_for_target(rename_target, cx),
+                },
+            )
+            .h(px(20.0))
+            .px(px(4.0))
+            .rounded(px(self.tokens.radii.sm))
+            .border_color(rgba((self.tokens.ui.accent << 8) | 0x66))
+            .bg(rgba((self.tokens.ui.bg << 8) | 0x80))
+            .text_size(px(12.0))
+            .font_weight(gpui::FontWeight::BOLD)
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(move |this, event: &gpui::MouseDownEvent, window, cx| {
+                    this.ai_entity.update(cx, |ai, _cx| {
+                        ai.focus_conversation_rename();
+                        ai.set_model_selector_search_focused(false);
+                    });
+                    this.ime_marked_text = None;
+                    window.focus(&this.focus_handle, cx);
+                    this.begin_ime_selection_from_mouse_down(
+                        rename_target,
+                        event,
+                        window,
+                        cx,
+                    );
+                    cx.stop_propagation();
+                }),
+            )
+            .on_mouse_move(cx.listener(
+                |this, event: &gpui::MouseMoveEvent, window, cx| {
+                    this.update_ime_selection_drag_from_mouse_move(event, window, cx);
+                },
+            ));
+            text_input_anchor_probe(
+                rename_target.anchor_id(),
+                input,
+                Self::deferred_ai_text_input_anchor_update(cx.entity()),
+            )
+            .into_any_element()
+        } else {
+            div()
+                // The title owns the row's remaining width so truncation
+                // preserves text instead of collapsing to an ellipsis.
+                .min_w_0()
+                .flex_1()
+                .truncate()
+                .text_size(px(12.0))
+                .font_weight(gpui::FontWeight::BOLD)
+                .text_color(if is_active {
+                    rgb(self.tokens.ui.text)
+                } else {
+                    rgb(self.tokens.ui.text_muted)
+                })
+                .child(title)
+                .into_any_element()
+        };
+        let rename_tooltip = if is_renaming {
+            self.i18n.t("ai.chat.save_conversation_title")
+        } else {
+            self.i18n.t("ai.chat.rename_conversation")
+        };
+        let rename_tooltip_label = rename_tooltip.clone();
+        let rename_tooltip_tokens = self.tokens;
+        let rename_button = div()
+            .id(format!("ai-conversation-rename-{id}"))
+            .flex_none()
+            .size(px(24.0))
+            .flex()
+            .items_center()
+            .justify_center()
+            .rounded(px(self.tokens.radii.md))
+            .text_color(rgb(self.tokens.ui.text_muted))
+            .hover(|style| {
+                style
+                    .bg(rgba((self.tokens.ui.accent << 8) | 0x1a))
+                    .text_color(rgb(self.tokens.ui.accent))
+            })
+            .child(Self::render_lucide_icon(
+                if is_renaming {
+                    LucideIcon::Check
+                } else {
+                    LucideIcon::Pencil
+                },
+                13.0,
+                if is_renaming {
+                    rgb(self.tokens.ui.accent)
+                } else {
+                    rgb(self.tokens.ui.text_muted)
+                },
+            ))
+            .tooltip(move |_window, cx| {
+                oxideterm_gpui_ui::tooltip::tooltip_view(
+                    rename_tooltip_tokens,
+                    rename_tooltip_label.clone(),
+                    None,
+                    cx,
+                )
+            })
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(move |this, _event, window, cx| {
+                    if is_renaming {
+                        this.save_ai_conversation_rename(cx);
+                    } else {
+                        this.begin_ai_conversation_rename(
+                            rename_id.to_string(),
+                            rename_title.clone(),
+                            window,
+                            cx,
+                        );
+                    }
+                    cx.stop_propagation();
+                }),
+            );
         div()
             .w_full()
             .flex_none()
@@ -400,26 +546,10 @@ impl WorkspaceApp {
                                             LucideIcon::Terminal,
                                             10.0,
                                             rgb(self.tokens.ui.text_muted),
-                                        )),
+                                    )),
                                 )
                             })
-                            .child(
-                                div()
-                                    // The title owns the row's remaining width so
-                                    // truncation preserves text instead of collapsing
-                                    // directly to an ellipsis.
-                                    .min_w_0()
-                                    .flex_1()
-                                    .truncate()
-                                    .text_size(px(12.0))
-                                    .font_weight(gpui::FontWeight::BOLD)
-                                    .text_color(if is_active {
-                                        rgb(self.tokens.ui.text)
-                                    } else {
-                                        rgb(self.tokens.ui.text_muted)
-                                    })
-                                    .child(conversation.title),
-                            ),
+                            .child(title_control),
                     )
                     .child(
                         div()
@@ -431,29 +561,37 @@ impl WorkspaceApp {
             .child(
                 div()
                     .flex_none()
-                    .size(px(24.0))
                     .flex()
                     .items_center()
-                    .justify_center()
-                    .rounded(px(self.tokens.radii.md))
-                    .text_color(rgb(self.tokens.ui.text_muted))
-                    .hover(|style| {
-                        style
-                            .bg(rgba((self.tokens.ui.error << 8) | 0x1a))
-                            .text_color(rgb(self.tokens.ui.error))
-                    })
-                    .child(Self::render_lucide_icon(
-                        LucideIcon::Trash2,
-                        13.0,
-                        rgb(self.tokens.ui.text_muted),
-                    ))
-                    .on_mouse_down(
-                        MouseButton::Left,
-                        cx.listener(move |this, _event, _window, cx| {
-                            this.delete_ai_conversation(delete_id.as_ref(), cx);
-                            cx.stop_propagation();
-                            cx.notify();
-                        }),
+                    .gap(px(2.0))
+                    .child(rename_button)
+                    .child(
+                        div()
+                            .flex_none()
+                            .size(px(24.0))
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .rounded(px(self.tokens.radii.md))
+                            .text_color(rgb(self.tokens.ui.text_muted))
+                            .hover(|style| {
+                                style
+                                    .bg(rgba((self.tokens.ui.error << 8) | 0x1a))
+                                    .text_color(rgb(self.tokens.ui.error))
+                            })
+                            .child(Self::render_lucide_icon(
+                                LucideIcon::Trash2,
+                                13.0,
+                                rgb(self.tokens.ui.text_muted),
+                            ))
+                            .on_mouse_down(
+                                MouseButton::Left,
+                                cx.listener(move |this, _event, _window, cx| {
+                                    this.delete_ai_conversation(delete_id.as_ref(), cx);
+                                    cx.stop_propagation();
+                                    cx.notify();
+                                }),
+                            ),
                     ),
             )
             .on_mouse_down(

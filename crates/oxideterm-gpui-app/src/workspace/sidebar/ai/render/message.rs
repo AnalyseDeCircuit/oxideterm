@@ -123,7 +123,11 @@ impl WorkspaceApp {
         }
         header = header.child(ai_message_time(
             &self.tokens,
-            time_label(message.timestamp_ms),
+            time_label(
+                message.timestamp_ms,
+                &self.i18n.t("ai.chat.today"),
+                &self.i18n.t("ai.chat.yesterday"),
+            ),
             user,
         ));
         let structured_parts = ai_turn_parts(message);

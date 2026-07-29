@@ -20,7 +20,11 @@
       "start_conversation": "Bắt đầu cuộc trò chuyện",
       "start_conversation_hint": "Đặt câu hỏi về lệnh shell, script hoặc các thao tác terminal.",
       "delete_conversation": "Xóa cuộc trò chuyện",
+      "rename_conversation": "Đổi tên cuộc trò chuyện",
+      "save_conversation_title": "Lưu tiêu đề",
       "messages_count": "{{count}} tin nhắn",
+      "today": "Hôm nay",
+      "yesterday": "Hôm qua",
       "double_click_rename": "Nhấp đúp để đổi tên",
       "branch_prev": "Phiên bản trước",
       "branch_next": "Phiên bản sau"

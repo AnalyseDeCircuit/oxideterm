@@ -34,6 +34,12 @@ impl WorkspaceApp {
             .on_mouse_down(MouseButton::Left, |_event, _window, cx| {
                 cx.stop_propagation();
             })
+            .on_key_down(|_event, _window, cx| {
+                // The root capture layer yields document-editing keys to the
+                // focused editor; stop them here after the editor handles them
+                // so background panes and shortcuts cannot observe the event.
+                cx.stop_propagation();
+            })
             .child(
                 dialog_header(&self.tokens)
                     .child(dialog_title(&self.tokens, self.i18n.t(title_key)))

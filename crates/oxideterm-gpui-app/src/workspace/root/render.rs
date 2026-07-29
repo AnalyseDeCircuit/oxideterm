@@ -484,9 +484,7 @@ impl WorkspaceApp {
                     window.prevent_default();
                     cx.stop_propagation();
                 } else if this.ai_sidebar_visible()
-                    && (this.ai_entity.read(cx).chat_ui().input_focused
-                        || this.ai_entity.read(cx).chat_ui().footer_focus.is_some()
-                        || this.ai_entity.read(cx).model_selector_search_focused())
+                    && this.ai_entity.read(cx).sidebar_keyboard_target_focused()
                 {
                     let _ = this.handle_ai_sidebar_key(event, cx);
                     window.prevent_default();
