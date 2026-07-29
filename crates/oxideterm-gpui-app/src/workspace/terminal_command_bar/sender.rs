@@ -148,6 +148,15 @@ impl WorkspaceApp {
         } else {
             rgba((theme.bg << 8) | TERMINAL_SENDER_COMPACT_BACKGROUND_ALPHA)
         };
+        let terminal_settings = &self.settings_store.settings().terminal;
+        let compact_editor_height =
+            oxideterm_gpui_editor::EditorMetrics::from_theme_with_editor_typography(
+                &self.tokens,
+                terminal_settings.font_size as f32,
+                terminal_settings.line_height as f32,
+            )
+            .line_height
+            .min(TERMINAL_SENDER_COMPACT_EDITOR_HEIGHT);
 
         div()
             .flex_none()
@@ -182,7 +191,9 @@ impl WorkspaceApp {
                         div()
                             .flex_1()
                             .min_w(px(0.0))
-                            .h_full()
+                            // Matching the editor box to its line box lets the
+                            // parent center text, caret, and IME geometry as one unit.
+                            .h(px(compact_editor_height))
                             .overflow_hidden()
                             .child(snapshot.editor.clone()),
                     ),
