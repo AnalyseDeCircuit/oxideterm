@@ -25,10 +25,8 @@ mod overlay;
 mod pane_tree;
 mod path_completion;
 mod plugin_entity;
-mod plugin_host;
 mod plugin_lifecycle;
 mod plugin_manager;
-mod plugin_runtime;
 mod plugin_ui;
 mod quick_commands;
 mod remote_desktop;
@@ -191,6 +189,8 @@ use oxideterm_notification_center::{
     NotificationStatus as WorkspaceNotificationStatus,
     NotificationStatusFilter as WorkspaceNotificationStatusFilter,
 };
+use oxideterm_plugin_host_api::runtime as plugin_runtime;
+use oxideterm_plugin_registry as plugin_host;
 use oxideterm_render_policy::{
     DetectedGraphics, EffectiveRenderPolicy, RenderProfile, compute_render_policy,
 };
