@@ -12,7 +12,11 @@ use std::{
         Mutex, MutexGuard,
         atomic::{AtomicBool, Ordering},
     },
+    time::Duration,
 };
+
+const FORWARDING_SESSION_SHUTTING_DOWN: &str = "workspace forwarding session is shutting down";
+const WORKSPACE_SESSION_SERVICE_SHUTDOWN_GRACE_PERIOD: Duration = Duration::from_secs(5);
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum ForwardingQuickAction {
@@ -111,6 +115,18 @@ impl ForwardingBindingState {
             self.consumers.remove(session_id);
         }
     }
+
+    fn drain(&mut self) -> Vec<(String, ConnectionConsumer)> {
+        // Final session shutdown releases every logical PortForward consumer once.
+        self.consumers.drain().map(|(_, binding)| binding).collect()
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(in crate::workspace) struct WorkspaceSessionServiceShutdownReport {
+    pub(in crate::workspace) sftp: oxideterm_sftp::SftpTransferShutdownReport,
+    pub(in crate::workspace) forwarding: oxideterm_forwarding::ForwardingShutdownReport,
+    pub(in crate::workspace) released_forwarding_bindings: usize,
 }
 
 /// Owns forwarding managers and SSH consumer bindings independently of UI mounts.
@@ -159,6 +175,43 @@ impl ForwardingRuntimeService {
 
     pub(in crate::workspace) fn registry(&self) -> &ForwardingRegistry {
         &self.registry
+    }
+
+    async fn shutdown_session_runtime(
+        &self,
+        grace_period: Duration,
+    ) -> (oxideterm_forwarding::ForwardingShutdownReport, usize) {
+        let manager_bindings = self
+            .registry
+            .session_ids()
+            .into_iter()
+            .filter_map(|session_id| {
+                self.registry.get(&session_id).map(|manager| {
+                    (
+                        manager.ssh_connection_handle().connection_id().to_string(),
+                        ConnectionConsumer::PortForward(session_id),
+                    )
+                })
+            })
+            .collect::<Vec<_>>();
+        let report = self.registry.shutdown(grace_period).await;
+        if !report.started {
+            return (report, 0);
+        }
+
+        let mut bindings = self
+            .binding_state()
+            .drain()
+            .into_iter()
+            .collect::<HashSet<_>>();
+        // A manager may exist before its worker result records the same binding.
+        bindings.extend(manager_bindings);
+        let released_bindings = bindings.len();
+        for (connection_id, consumer) in bindings {
+            // Forward listeners stop before their SSH ownership is released.
+            self.ssh_registry.release(&connection_id, &consumer);
+        }
+        (report, released_bindings)
     }
 
     pub(in crate::workspace) fn session_id_for_node(node_id: &NodeId) -> String {
@@ -471,9 +524,12 @@ impl ForwardingRuntimeService {
         let Some((session_id, connection_id, consumer)) = binding else {
             return;
         };
-        if node_is_disconnected || !self.binding_is_current(&session_id, &connection_id) {
+        if !self.registry.accepts_new_work()
+            || node_is_disconnected
+            || !self.binding_is_current(&session_id, &connection_id)
+        {
             // A late worker result cannot revive a consumer after explicit
-            // node teardown or after NodeRouter moved to another connection.
+            // session/node teardown or after NodeRouter moved to another connection.
             self.discard_binding(&session_id, &connection_id, &consumer);
             return;
         }
@@ -652,6 +708,9 @@ impl ForwardingRuntimeService {
         ),
         String,
     > {
+        if !self.registry.accepts_new_work() {
+            return Err(FORWARDING_SESSION_SHUTTING_DOWN.to_string());
+        }
         let session_id = Self::session_id_for_node(node_id);
         let manager_existed = self.registry.get(&session_id).is_some();
         let consumer = ConnectionConsumer::PortForward(session_id.clone());
@@ -661,10 +720,19 @@ impl ForwardingRuntimeService {
             .await
             .map_err(|error| error.to_string())?;
         let connection_id = resolved.connection_id.clone();
+        if !self.registry.accepts_new_work() {
+            self.node_router.release_consumer(&connection_id, &consumer);
+            return Err(FORWARDING_SESSION_SHUTTING_DOWN.to_string());
+        }
         let (manager, _restored) = self
             .registry
             .register_or_rebind(session_id.clone(), resolved.handle)
             .await;
+        if !self.registry.accepts_new_work() {
+            let _ = self.registry.remove(&session_id).await;
+            self.node_router.release_consumer(&connection_id, &consumer);
+            return Err(FORWARDING_SESSION_SHUTTING_DOWN.to_string());
+        }
 
         // Managers are node-owned. Reacquiring through NodeRouter before every
         // action prevents terminal-pane lifetime from selecting the transport.
@@ -715,6 +783,51 @@ impl ForwardingRuntimeService {
         self.bindings
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+}
+
+/// Shuts down all background services owned by one shared WorkspaceSession.
+pub(in crate::workspace) async fn shutdown_workspace_session_services(
+    sftp_transfer_manager: &oxideterm_sftp::SftpTransferManager,
+    forwarding_runtime_service: &ForwardingRuntimeService,
+    grace_period: Duration,
+) -> WorkspaceSessionServiceShutdownReport {
+    // Both owners share one wall-clock bound instead of extending window teardown serially.
+    let (sftp, (forwarding, released_forwarding_bindings)) = tokio::join!(
+        sftp_transfer_manager.shutdown_session_transfers(grace_period),
+        forwarding_runtime_service.shutdown_session_runtime(grace_period),
+    );
+    WorkspaceSessionServiceShutdownReport {
+        sftp,
+        forwarding,
+        released_forwarding_bindings,
+    }
+}
+
+/// Completes final session shutdown before its Tokio runtime field can be dropped.
+pub(in crate::workspace) fn shutdown_workspace_session_services_blocking(
+    task_runtime: &tokio::runtime::Runtime,
+    sftp_transfer_manager: &oxideterm_sftp::SftpTransferManager,
+    forwarding_runtime_service: &ForwardingRuntimeService,
+    grace_period: Duration,
+) -> WorkspaceSessionServiceShutdownReport {
+    // WorkspaceSession release runs on GPUI's owner thread, outside this Tokio runtime.
+    task_runtime.block_on(shutdown_workspace_session_services(
+        sftp_transfer_manager,
+        forwarding_runtime_service,
+        grace_period,
+    ))
+}
+
+impl WorkspaceApp {
+    pub(in crate::workspace) fn shutdown_final_session_services(&self) {
+        // This runs only from WorkspaceApp Entity release, after all window leases are gone.
+        let _ = shutdown_workspace_session_services_blocking(
+            self.forwarding_runtime.as_ref(),
+            self.sftp_transfer_manager.as_ref(),
+            &self.forwarding_service,
+            WORKSPACE_SESSION_SERVICE_SHUTDOWN_GRACE_PERIOD,
+        );
     }
 }
 
@@ -782,5 +895,31 @@ mod tests {
             state.connection_id(&session_id).as_deref(),
             Some("connection-new")
         );
+    }
+
+    #[test]
+    fn workspace_session_service_shutdown_is_exactly_once() {
+        let service = ForwardingRuntimeService::test_fixture();
+        let task_runtime = service.task_runtime.clone();
+        let transfers = oxideterm_sftp::SftpTransferManager::new();
+
+        let first = shutdown_workspace_session_services_blocking(
+            task_runtime.as_ref(),
+            &transfers,
+            &service,
+            Duration::from_millis(300),
+        );
+        let second = shutdown_workspace_session_services_blocking(
+            task_runtime.as_ref(),
+            &transfers,
+            &service,
+            Duration::from_millis(300),
+        );
+
+        assert!(first.sftp.started);
+        assert!(first.forwarding.started);
+        assert!(!second.sftp.started);
+        assert!(!second.forwarding.started);
+        assert_eq!(second.released_forwarding_bindings, 0);
     }
 }
