@@ -15,6 +15,7 @@ mod install;
 mod integrity;
 mod manifest;
 mod platform;
+mod portable_update_helper;
 mod state;
 mod version;
 mod windows_update_helper;
@@ -34,6 +35,13 @@ pub use install::{
 };
 pub use manifest::{NativeUpdateAsset, NativeUpdateManifest, NativeUpdatePackage};
 pub use platform::{InstallFlavor, PlatformTarget, current_platform_target};
+pub use portable_update_helper::{
+    PORTABLE_UPDATE_BACKUP_DIR, PORTABLE_UPDATE_HELPER_SUBCOMMAND,
+    PORTABLE_UPDATE_MANIFEST_FILENAME, PORTABLE_UPDATE_STAGING_DIR, PortableUpdateHelperOptions,
+    PortableUpdateManifest, apply_staged_portable_update, confirm_applied_portable_update,
+    execute_portable_update, parse_portable_update_helper_options,
+    portable_update_helper_arguments, portable_update_root, run_portable_update_helper,
+};
 pub use state::{
     NativeUpdateStage, PersistedUpdateState, ResumableUpdateStatus, TauriUpdaterEvent,
 };

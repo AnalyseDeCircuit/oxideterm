@@ -137,7 +137,14 @@ impl WorkspaceApp {
                         ToastVariant::Success,
                     ),
                 };
-                (self.i18n.t(title_key), Some(message.clone()), None, variant)
+                let status_text = if self.native_update_is_portable(cx)
+                    && *status == oxideterm_update::NativeInstallStatus::ReplacementScheduled
+                {
+                    None
+                } else {
+                    Some(message.clone())
+                };
+                (self.i18n.t(title_key), status_text, None, variant)
             }
             NativeUpdateRenderState::Error(error) => (
                 self.i18n.t("settings_view.help.update_error"),

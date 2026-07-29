@@ -283,7 +283,7 @@ impl WorkspaceApp {
                 "settings_view.help.portable_mode",
                 "settings_view.help.portable_mode_hint",
                 self.help_pill_badge(
-                    self.i18n.t("settings_view.help.updates_manual_only"),
+                    self.i18n.t("settings_view.help.portable_updates"),
                     self.tokens.ui.text,
                 ),
                 cx,
@@ -320,7 +320,13 @@ impl WorkspaceApp {
             .flex_col()
             .gap(px(12.0))
             .child(if is_portable {
-                self.help_portable_update_notice()
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap(px(12.0))
+                    .child(self.help_portable_update_notice())
+                    .child(self.help_update_status_area(cx))
+                    .into_any_element()
             } else if is_gpui_preview_version(env!("CARGO_PKG_VERSION"))
                 && self.settings_store.settings().general.update_channel == UpdateChannel::Stable
             {
@@ -411,14 +417,14 @@ impl WorkspaceApp {
                         16.0,
                         rgb(self.tokens.ui.warning),
                     ))
-                    .child(self.i18n.t("settings_view.help.updates_manual_only")),
+                    .child(self.i18n.t("settings_view.help.portable_updates")),
             )
             .child(
                 div()
                     .mt(px(8.0))
                     .text_size(px(self.tokens.metrics.ui_text_sm))
                     .text_color(rgb(self.tokens.ui.text_muted))
-                    .child(self.i18n.t("settings_view.help.updates_manual_only_hint")),
+                    .child(self.i18n.t("settings_view.help.portable_updates_hint")),
             )
             .into_any_element()
     }

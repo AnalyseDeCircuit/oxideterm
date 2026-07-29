@@ -229,29 +229,33 @@ fn main() {
             }
         };
 
-        #[cfg(target_os = "windows")]
-        if workspace_opened
-            && let Err(error) = confirm_windows_update_after_initial_workspace()
-        {
-            eprintln!("failed to confirm the applied Windows update: {error}");
+        if workspace_opened && let Err(error) = confirm_update_after_initial_workspace() {
+            eprintln!("failed to confirm the applied update: {error}");
         }
-        #[cfg(not(target_os = "windows"))]
-        let _ = workspace_opened;
     });
 }
 
-#[cfg(target_os = "windows")]
-fn confirm_windows_update_after_initial_workspace() -> std::io::Result<()> {
+fn confirm_update_after_initial_workspace() -> std::io::Result<()> {
     // Reaching this point confirms window and workspace construction. The old
     // files are recovery artifacts only and can now be removed without rollback.
-    let current_exe = std::env::current_exe()?;
-    let install_dir = current_exe.parent().ok_or_else(|| {
-        std::io::Error::other(format!(
-            "current executable has no install directory: {}",
-            current_exe.display()
-        ))
-    })?;
-    oxideterm_update::confirm_applied_windows_update(install_dir)
+    if let Ok(info) = oxideterm_portable_runtime::portable_info()
+        && info.is_portable
+    {
+        oxideterm_update::confirm_applied_portable_update(&info.host_dir)?;
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        let current_exe = std::env::current_exe()?;
+        let install_dir = current_exe.parent().ok_or_else(|| {
+            std::io::Error::other(format!(
+                "current executable has no install directory: {}",
+                current_exe.display()
+            ))
+        })?;
+        oxideterm_update::confirm_applied_windows_update(install_dir)?;
+    }
+    Ok(())
 }
 
 fn default_window_bounds(cx: &mut App) -> Bounds<gpui::Pixels> {

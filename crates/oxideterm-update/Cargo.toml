@@ -10,15 +10,20 @@ anyhow.workspace = true
 base64.workspace = true
 chrono.workspace = true
 futures-util.workspace = true
+flate2 = "1.1.9"
+libc.workspace = true
 minisign-verify.workspace = true
 oxideterm-settings = { path = "../oxideterm-settings" }
+oxideterm-portable-runtime = { path = "../oxideterm-portable-runtime" }
 reqwest.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
+tar = "0.4"
 thiserror.workspace = true
 tokio.workspace = true
 uuid.workspace = true
+zip.workspace = true
 
 [target.'cfg(windows)'.dependencies]
 windows = { workspace = true, features = ["Win32_Foundation", "Win32_System_RestartManager", "Win32_System_Threading"] }

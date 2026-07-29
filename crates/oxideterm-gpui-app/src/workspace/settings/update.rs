@@ -146,7 +146,10 @@ impl SettingsWorkspaceEntity {
             }
             NativeUpdateUiState::Downloaded(_) => NativeUpdateRenderState::Downloaded,
             NativeUpdateUiState::Installing(plan) => {
-                NativeUpdateRenderState::Installing(plan.as_ref().map(|plan| plan.summary.clone()))
+                NativeUpdateRenderState::Installing(plan.as_ref().and_then(|plan| {
+                    (plan.strategy != oxideterm_update::InstallStrategy::PortableReplaceArchive)
+                        .then(|| plan.summary.clone())
+                }))
             }
             NativeUpdateUiState::InstallFinished(outcome) => {
                 NativeUpdateRenderState::InstallFinished {
@@ -200,10 +203,9 @@ impl SettingsWorkspaceEntity {
 
     pub(in crate::workspace) fn schedule_automatic_native_update_check(
         &mut self,
-        is_portable: bool,
         cx: &mut Context<Self>,
     ) {
-        if is_portable || self.native_update.automatic_check_task.is_some() {
+        if self.native_update.automatic_check_task.is_some() {
             return;
         }
 
@@ -581,9 +583,23 @@ impl WorkspaceApp {
                 cx.notify();
             }
             SettingsWorkspaceEvent::ShowNativeUpdateToast(toast) => {
-                let Some(message) = settings.read(cx).native_update_message().map(str::to_owned)
-                else {
-                    return;
+                let portable_replacement = self.native_update_is_portable(cx)
+                    && matches!(
+                        settings.read(cx).native_update_render_state(),
+                        NativeUpdateRenderState::InstallFinished {
+                            status: oxideterm_update::NativeInstallStatus::ReplacementScheduled,
+                            ..
+                        }
+                    );
+                let message = if portable_replacement {
+                    self.i18n.t("settings_view.help.replacement_scheduled")
+                } else {
+                    let Some(message) =
+                        settings.read(cx).native_update_message().map(str::to_owned)
+                    else {
+                        return;
+                    };
+                    message
                 };
                 let variant = match toast {
                     SettingsWorkspaceToast::Success => TerminalNoticeVariant::Success,
@@ -874,9 +890,8 @@ impl WorkspaceApp {
         &mut self,
         cx: &mut Context<Self>,
     ) {
-        let is_portable = self.native_update_is_portable(cx);
         self.settings_workspace.update(cx, |settings, cx| {
-            settings.schedule_automatic_native_update_check(is_portable, cx);
+            settings.schedule_automatic_native_update_check(cx);
         });
     }
 

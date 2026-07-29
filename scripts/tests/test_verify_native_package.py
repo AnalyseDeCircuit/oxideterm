@@ -66,15 +66,44 @@ class PortableArchiveTests(unittest.TestCase):
             f"{root}/portable",
             f"{root}/VERSION",
             f"{root}/data/plugins/",
+            f"{root}/portable-update.json",
+            (
+                f"{root}/tools/oxideterm-update-helper.exe"
+                if executable.endswith(".exe")
+                else f"{root}/tools/oxideterm-update-helper"
+            ),
             *(f"{root}/{name}" for name in verify_native_package.REQUIRED_DOCUMENTS),
         ]
+
+    def entry_bytes(self, name: str, executable: str) -> bytes:
+        if name.endswith("VERSION"):
+            return b"2.0.0\n"
+        if name.endswith("portable-update.json"):
+            helper = (
+                "tools/oxideterm-update-helper.exe"
+                if executable.endswith(".exe")
+                else "tools/oxideterm-update-helper"
+            )
+            return (
+                "{"
+                '"formatVersion":1,'
+                f'"appExecutable":"{executable}",'
+                f'"updateHelper":"{helper}",'
+                '"managedEntries":['
+                f'"{executable}","resources","tools","portable","VERSION",'
+                '"portable-update.json"]'
+                "}"
+            ).encode()
+        return b"data"
 
     def test_windows_portable_archive_has_required_entries(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "portable.zip"
             with zipfile.ZipFile(path, "w") as archive:
                 for name in self.required_entries("OxideTerm", "oxideterm-native.exe"):
-                    archive.writestr(name, b"2.0.0\n" if name.endswith("VERSION") else b"data")
+                    archive.writestr(
+                        name, self.entry_bytes(name, "oxideterm-native.exe")
+                    )
             verify_native_package.verify_portable_archive(
                 path, "x86_64-pc-windows-msvc", "2.0.0"
             )
@@ -91,7 +120,7 @@ class PortableArchiveTests(unittest.TestCase):
                     path.mkdir(parents=True, exist_ok=True)
                 else:
                     path.parent.mkdir(parents=True, exist_ok=True)
-                    path.write_bytes(b"data")
+                    path.write_bytes(self.entry_bytes(name, "oxideterm-native"))
             archive_path = Path(directory) / "portable.tar.gz"
             with tarfile.open(archive_path, "w:gz") as archive:
                 archive.add(root / "OxideTerm", arcname="OxideTerm")
@@ -106,7 +135,10 @@ class PortableArchiveTests(unittest.TestCase):
             path = Path(directory) / "portable.zip"
             with zipfile.ZipFile(path, "w") as archive:
                 for name in self.required_entries("OxideTerm", "oxideterm-native.exe"):
-                    archive.writestr(name, b"1.9.0\n" if name.endswith("VERSION") else b"data")
+                    content = self.entry_bytes(name, "oxideterm-native.exe")
+                    archive.writestr(
+                        name, b"1.9.0\n" if name.endswith("VERSION") else content
+                    )
 
             with self.assertRaisesRegex(RuntimeError, "contains version"):
                 verify_native_package.verify_portable_archive(
@@ -122,10 +154,30 @@ class PortableArchiveTests(unittest.TestCase):
                         continue
                     archive.writestr(
                         name,
-                        b"2.0.0\n" if name.endswith("VERSION") else b"data",
+                        self.entry_bytes(name, "oxideterm-native.exe"),
                     )
 
             with self.assertRaisesRegex(RuntimeError, "data/plugins"):
+                verify_native_package.verify_portable_archive(
+                    path, "x86_64-pc-windows-msvc", "2.0.0"
+                )
+
+    def test_portable_archive_rejects_manifest_owned_user_data(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "portable.zip"
+            with zipfile.ZipFile(path, "w") as archive:
+                for name in self.required_entries(
+                    "OxideTerm", "oxideterm-native.exe"
+                ):
+                    content = self.entry_bytes(name, "oxideterm-native.exe")
+                    if name.endswith("portable-update.json"):
+                        content = content.replace(
+                            b'"portable-update.json"]',
+                            b'"portable-update.json","data"]',
+                        )
+                    archive.writestr(name, content)
+
+            with self.assertRaisesRegex(RuntimeError, "includes user data"):
                 verify_native_package.verify_portable_archive(
                     path, "x86_64-pc-windows-msvc", "2.0.0"
                 )

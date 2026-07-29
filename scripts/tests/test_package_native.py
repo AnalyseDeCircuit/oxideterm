@@ -312,6 +312,29 @@ class ReleaseDocumentTests(unittest.TestCase):
                 0,
             )
 
+    def test_portable_update_manifest_owns_only_release_entries(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            package_root = Path(directory)
+            binary = package_root / "oxideterm-native"
+            update_helper = package_root / "oxideterm-update-helper"
+
+            package_native.write_portable_update_manifest(
+                package_root, binary, update_helper
+            )
+
+            manifest = package_native.json.loads(
+                (package_root / "portable-update.json").read_text(encoding="utf-8")
+            )
+            self.assertEqual(manifest["appExecutable"], binary.name)
+            self.assertEqual(
+                manifest["updateHelper"],
+                f"tools/{update_helper.name}",
+            )
+            self.assertIn("resources", manifest["managedEntries"])
+            self.assertIn("tools", manifest["managedEntries"])
+            self.assertNotIn("data", manifest["managedEntries"])
+            self.assertNotIn("portable.json", manifest["managedEntries"])
+
 
 class ReleaseVersionTests(unittest.TestCase):
     def test_release_version_must_match_compiled_workspace_version(self) -> None:

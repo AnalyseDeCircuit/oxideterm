@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import base64
+import json
 import os
 import plistlib
 import shutil
@@ -46,12 +47,14 @@ AGENT_RESOURCE_DIR = "agents"
 AGENT_BINARY_PREFIX = "oxideterm-agent-"
 ENCODED_AGENT_SUFFIX = ".b64"
 HELPER_RESOURCE_DIR = "helpers"
-WINDOWS_UPDATE_HELPER_DIR = "tools"
+UPDATE_HELPER_DIR = "tools"
 WINDOWS_UPDATE_STAGING_DIR = "install"
 WINDOWS_UPDATE_FLAG = "OXIDETERM_UPDATE"
 PORTABLE_MARKER_FILENAME = "portable"
 PORTABLE_DATA_DIR = "data"
 PORTABLE_PLUGINS_DIR = "plugins"
+PORTABLE_UPDATE_MANIFEST_FILENAME = "portable-update.json"
+PORTABLE_UPDATE_MANIFEST_FORMAT = 1
 PACKAGE_VERSION_FILENAME = "VERSION"
 LINUX_PACKAGE_KIND_FILENAME = "PACKAGE_KIND"
 THIRD_PARTY_LICENSE_DIR = ROOT_DIR / "licenses" / "third-party"
@@ -460,7 +463,7 @@ def build_remote_desktop_helpers(target: str, target_was_explicit: bool) -> None
         build_helper(package, target, target_was_explicit)
 
 
-def build_windows_update_helper(target: str, target_was_explicit: bool) -> Path:
+def build_update_helper(target: str, target_was_explicit: bool) -> Path:
     args = [
         "cargo",
         "build",
@@ -476,7 +479,7 @@ def build_windows_update_helper(target: str, target_was_explicit: bool) -> Path:
 
     source = release_binary(target, target_was_explicit, UPDATE_HELPER_BIN)
     if not source.exists():
-        raise FileNotFoundError(f"Windows update helper binary not found: {source}")
+        raise FileNotFoundError(f"update helper binary not found: {source}")
     return source
 
 
@@ -899,7 +902,38 @@ def archive_macos_tauri_bundle(app_dir: Path, dest: Path) -> None:
         archive.add(app_dir, arcname=app_dir.name)
 
 
-def create_portable_package(binary: Path, target: str, version: str, label: str) -> None:
+def write_portable_update_manifest(
+    package_root: Path, binary: Path, update_helper: Path
+) -> None:
+    """Declare exactly which package-owned entries may be replaced in place."""
+    managed_entries = [
+        binary.name,
+        "resources",
+        *(destination_name for _source, destination_name in RELEASE_DOCUMENTS),
+        PACKAGE_VERSION_FILENAME,
+        PORTABLE_MARKER_FILENAME,
+        UPDATE_HELPER_DIR,
+        PORTABLE_UPDATE_MANIFEST_FILENAME,
+    ]
+    manifest = {
+        "formatVersion": PORTABLE_UPDATE_MANIFEST_FORMAT,
+        "appExecutable": binary.name,
+        "updateHelper": f"{UPDATE_HELPER_DIR}/{update_helper.name}",
+        "managedEntries": managed_entries,
+    }
+    (package_root / PORTABLE_UPDATE_MANIFEST_FILENAME).write_text(
+        json.dumps(manifest, indent=2) + "\n",
+        encoding="utf-8",
+    )
+
+
+def create_portable_package(
+    binary: Path,
+    update_helper: Path,
+    target: str,
+    version: str,
+    label: str,
+) -> None:
     package_root = DIST_DIR / f"OxideTerm_{version}_{label}_portable"
     if package_root.exists():
         shutil.rmtree(package_root)
@@ -908,10 +942,15 @@ def create_portable_package(binary: Path, target: str, version: str, label: str)
     binary_dest = package_root / binary.name
     shutil.copy2(binary, binary_dest)
     make_executable(binary_dest)
+    helper_dest = package_root / UPDATE_HELPER_DIR / update_helper.name
+    helper_dest.parent.mkdir(parents=True)
+    shutil.copy2(update_helper, helper_dest)
+    make_executable(helper_dest)
     copy_runtime_resources(package_root / "resources", target)
     copy_release_documents(package_root)
     write_package_version(package_root, version)
     (package_root / PORTABLE_MARKER_FILENAME).touch()
+    write_portable_update_manifest(package_root, binary, update_helper)
     # Ship the documented manual-install location and keep first launch
     # predictable even before the runtime plugin registry initializes it.
     (package_root / PORTABLE_DATA_DIR / PORTABLE_PLUGINS_DIR).mkdir(parents=True)
@@ -941,10 +980,10 @@ def stage_windows_installer_root(
     if installer_root.exists():
         shutil.rmtree(installer_root)
     (installer_root / "resources").mkdir(parents=True)
-    (installer_root / WINDOWS_UPDATE_HELPER_DIR).mkdir(parents=True)
+    (installer_root / UPDATE_HELPER_DIR).mkdir(parents=True)
 
     shutil.copy2(binary, installer_root / binary.name)
-    shutil.copy2(update_helper, installer_root / WINDOWS_UPDATE_HELPER_DIR / update_helper.name)
+    shutil.copy2(update_helper, installer_root / UPDATE_HELPER_DIR / update_helper.name)
     copy_runtime_resources(installer_root / "resources", target)
     copy_release_documents(installer_root)
     write_package_version(installer_root, version)
@@ -953,8 +992,8 @@ def stage_windows_installer_root(
 
 def create_windows_installer(
     binary: Path,
+    update_helper: Path,
     target: str,
-    target_was_explicit: bool,
     version: str,
     label: str,
     identity: ReleaseIdentity,
@@ -963,8 +1002,6 @@ def create_windows_installer(
     if not makensis:
         raise RuntimeError("makensis not found; install NSIS before packaging Windows installers")
 
-    update_helper = build_windows_update_helper(target, target_was_explicit)
-    sign_windows_file(update_helper)
     installer_root = stage_windows_installer_root(binary, target, version, label, update_helper)
     installer_path = DIST_DIR / f"OxideTerm_{version}_{label}-setup.exe"
     script_path = DIST_DIR / f"OxideTerm_{version}_{label}.nsi"
@@ -1076,10 +1113,10 @@ normal_install:
 
 update_install:
   RMDir /r "$INSTDIR\\{WINDOWS_UPDATE_STAGING_DIR}"
-  CreateDirectory "$INSTDIR\\{WINDOWS_UPDATE_HELPER_DIR}"
-  SetOutPath "$INSTDIR\\{WINDOWS_UPDATE_HELPER_DIR}"
+  CreateDirectory "$INSTDIR\\{UPDATE_HELPER_DIR}"
+  SetOutPath "$INSTDIR\\{UPDATE_HELPER_DIR}"
   SetOverwrite on
-  File "{nsis_path(installer_root / WINDOWS_UPDATE_HELPER_DIR / (UPDATE_HELPER_BIN + '.exe'))}"
+  File "{nsis_path(installer_root / UPDATE_HELPER_DIR / (UPDATE_HELPER_BIN + '.exe'))}"
   SetOutPath "$INSTDIR\\{WINDOWS_UPDATE_STAGING_DIR}"
   File /r "{nsis_path(installer_root)}\\*"
   WriteRegStr HKCU "Software\\{identity.windows_registry_key}" "InstallDir" "$INSTDIR"
@@ -1094,7 +1131,7 @@ update_install:
   IfFileExists "$DESKTOP\\{identity.app_name}.lnk" 0 legacy_shortcuts_done
   CreateShortcut "$DESKTOP\\{identity.app_name}.lnk" "$INSTDIR\\{binary.name}" "" "$INSTDIR\\resources\\icons\\icon.ico"
 legacy_shortcuts_done:
-  Exec '"$INSTDIR\\{WINDOWS_UPDATE_HELPER_DIR}\\{UPDATE_HELPER_BIN}.exe" --install-dir "$INSTDIR" --app-exe "$INSTDIR\\{binary.name}" --launch'
+  Exec '"$INSTDIR\\{UPDATE_HELPER_DIR}\\{UPDATE_HELPER_BIN}.exe" --install-dir "$INSTDIR" --app-exe "$INSTDIR\\{binary.name}" --launch'
 
 install_done:
 SectionEnd
@@ -1539,14 +1576,16 @@ def main() -> None:
     build_cli(target, target_was_explicit)
     build_remote_desktop_helpers(target, target_was_explicit)
     app_binary = build_app(target, target_was_explicit)
+    update_helper = build_update_helper(target, target_was_explicit)
     if "windows" in target:
         sign_windows_file(app_binary)
-        create_windows_installer(app_binary, target, target_was_explicit, version, label, identity)
+        sign_windows_file(update_helper)
+        create_windows_installer(app_binary, update_helper, target, version, label, identity)
     if "apple-darwin" in target:
         sign_macos_path(app_binary)
     # Every target should publish a self-contained portable artifact; Windows
     # additionally ships an NSIS installer for users who prefer installation.
-    create_portable_package(app_binary, target, version, label)
+    create_portable_package(app_binary, update_helper, target, version, label)
     if "apple-darwin" in target:
         create_macos_app(app_binary, target, version, label, identity)
     if "linux" in target:
