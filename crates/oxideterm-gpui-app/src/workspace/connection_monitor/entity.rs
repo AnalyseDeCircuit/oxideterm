@@ -2563,7 +2563,7 @@ mod tests {
         };
         let sender = entity.update(cx, |entity, _cx| {
             entity.host_logs.running = Some(request.clone());
-            entity.host_logs.polling = true;
+            entity.host_logs.snapshot_in_flight = true;
             entity.reliable_delivery_tx.clone()
         });
         let secret_marker = "Bearer should-not-reach-ui";
@@ -2586,7 +2586,7 @@ mod tests {
         cx.run_until_parked();
 
         entity.read_with(cx, |entity, _cx| {
-            assert!(!entity.host_logs.polling);
+            assert!(!entity.host_logs.snapshot_in_flight);
             let snapshot = entity.host_logs.snapshot.as_ref().unwrap();
             assert_eq!(
                 snapshot.status,
@@ -2627,7 +2627,7 @@ mod tests {
             assert_eq!(entity.port_filter(), PortFilter::Listening);
             assert_eq!(entity.port_expanded_index(), Some(2));
             entity.host_ports.running = Some(request.clone());
-            entity.host_ports.polling = true;
+            entity.host_ports.snapshot_in_flight = true;
             entity.reliable_delivery_tx.clone()
         });
         let secret_marker = "Proxy-Authorization: should-not-reach-ui";
@@ -2650,7 +2650,7 @@ mod tests {
         cx.run_until_parked();
 
         entity.read_with(cx, |entity, _cx| {
-            assert!(!entity.host_ports.polling);
+            assert!(!entity.host_ports.snapshot_in_flight);
             let snapshot = entity.host_ports.snapshot.as_ref().unwrap();
             assert_eq!(
                 snapshot.status,
@@ -2691,7 +2691,7 @@ mod tests {
             assert_eq!(entity.filesystem_filter(), FilesystemFilter::Attention);
             assert_eq!(entity.filesystem_expanded_index(), Some(3));
             entity.host_filesystems.running = Some(request.clone());
-            entity.host_filesystems.polling = true;
+            entity.host_filesystems.snapshot_in_flight = true;
             entity.reliable_delivery_tx.clone()
         });
         let secret_marker = "private-key-material-should-not-reach-ui";
@@ -2716,7 +2716,7 @@ mod tests {
         cx.run_until_parked();
 
         entity.read_with(cx, |entity, _cx| {
-            assert!(!entity.host_filesystems.polling);
+            assert!(!entity.host_filesystems.snapshot_in_flight);
             let snapshot = entity.host_filesystems.snapshot.as_ref().unwrap();
             assert_eq!(
                 snapshot.status,
@@ -2757,7 +2757,7 @@ mod tests {
             assert_eq!(entity.package_filter(), PackageFilter::Upgradable);
             assert_eq!(entity.package_expanded_index(), Some(4));
             entity.host_packages.running = Some(request.clone());
-            entity.host_packages.polling = true;
+            entity.host_packages.snapshot_in_flight = true;
             entity.reliable_delivery_tx.clone()
         });
         let secret_marker = "token-should-not-reach-package-ui";
@@ -2780,7 +2780,7 @@ mod tests {
         cx.run_until_parked();
 
         entity.read_with(cx, |entity, _cx| {
-            assert!(!entity.host_packages.polling);
+            assert!(!entity.host_packages.snapshot_in_flight);
             let snapshot = entity.host_packages.snapshot.as_ref().unwrap();
             assert_eq!(
                 snapshot.status,
@@ -2821,7 +2821,7 @@ mod tests {
             assert_eq!(entity.schedule_filter(), ScheduledTaskFilter::Failed);
             assert_eq!(entity.schedule_expanded_index(), Some(5));
             entity.host_schedules.running = Some(request.clone());
-            entity.host_schedules.polling = true;
+            entity.host_schedules.snapshot_in_flight = true;
             entity.reliable_delivery_tx.clone()
         });
         let secret_marker = "schedule-token-should-not-reach-ui";
@@ -2846,7 +2846,7 @@ mod tests {
         cx.run_until_parked();
 
         entity.read_with(cx, |entity, _cx| {
-            assert!(!entity.host_schedules.polling);
+            assert!(!entity.host_schedules.snapshot_in_flight);
             let snapshot = entity.host_schedules.snapshot.as_ref().unwrap();
             assert_eq!(
                 snapshot.status,

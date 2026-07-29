@@ -978,7 +978,7 @@ impl HostToolsEntity {
     }
 
     pub(super) fn filesystem_snapshot_polling(&self) -> bool {
-        self.host_filesystems.polling
+        self.host_filesystems.snapshot_in_flight
     }
 
     pub(in crate::workspace::connection_monitor) fn filesystem_filter(&self) -> FilesystemFilter {
@@ -1048,7 +1048,7 @@ impl HostToolsEntity {
         if !monitoring_enabled {
             return Vec::new();
         }
-        if self.host_filesystems.polling {
+        if self.host_filesystems.snapshot_in_flight {
             return feedback
                 .should_toast()
                 .then_some(HostToolsNotice::FilesystemSnapshotAlreadyRunning)
@@ -1075,7 +1075,7 @@ impl HostToolsEntity {
         };
         self.host_filesystems.snapshot_connection_id = Some(connection_id);
         self.host_filesystems.running = Some(request.clone());
-        self.host_filesystems.polling = true;
+        self.host_filesystems.snapshot_in_flight = true;
         // Filesystem scans may touch du/find and remain manual user work.
         let spawned = self.spawn_filesystem_snapshot_capture(
             command.command,
@@ -1085,7 +1085,7 @@ impl HostToolsEntity {
             runtime,
         );
         if !spawned {
-            self.host_filesystems.polling = false;
+            self.host_filesystems.snapshot_in_flight = false;
             self.host_filesystems.running = None;
             return feedback
                 .should_toast()
@@ -1110,7 +1110,7 @@ impl HostToolsEntity {
         }
         let feedback = delivery.request.feedback;
         let failure_fallback = delivery.request.failure_fallback.clone();
-        self.host_filesystems.polling = false;
+        self.host_filesystems.snapshot_in_flight = false;
         self.host_filesystems.running = None;
         match delivery.result {
             Ok(mut output) if output.exit_code.unwrap_or(0) == 0 => {

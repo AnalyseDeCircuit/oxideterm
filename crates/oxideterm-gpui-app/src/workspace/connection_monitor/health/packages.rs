@@ -922,7 +922,7 @@ impl HostToolsEntity {
     }
 
     pub(super) fn package_snapshot_polling(&self) -> bool {
-        self.host_packages.polling
+        self.host_packages.snapshot_in_flight
     }
 
     pub(in crate::workspace::connection_monitor) fn package_filter(&self) -> PackageFilter {
@@ -996,7 +996,7 @@ impl HostToolsEntity {
         if !monitoring_enabled {
             return Vec::new();
         }
-        if self.host_packages.polling {
+        if self.host_packages.snapshot_in_flight {
             return feedback
                 .should_toast()
                 .then_some(HostToolsNotice::PackageSnapshotAlreadyRunning)
@@ -1018,7 +1018,7 @@ impl HostToolsEntity {
         };
         self.host_packages.snapshot_connection_id = Some(connection_id);
         self.host_packages.running = Some(request.clone());
-        self.host_packages.polling = true;
+        self.host_packages.snapshot_in_flight = true;
         // Package inventory is read-only manual work, not a periodic sampler.
         let spawned = self.spawn_package_snapshot_capture(
             command.command,
@@ -1028,7 +1028,7 @@ impl HostToolsEntity {
             runtime,
         );
         if !spawned {
-            self.host_packages.polling = false;
+            self.host_packages.snapshot_in_flight = false;
             self.host_packages.running = None;
             return feedback
                 .should_toast()
@@ -1053,7 +1053,7 @@ impl HostToolsEntity {
         }
         let feedback = delivery.request.feedback;
         let failure_fallback = delivery.request.failure_fallback.clone();
-        self.host_packages.polling = false;
+        self.host_packages.snapshot_in_flight = false;
         self.host_packages.running = None;
         match delivery.result {
             Ok(mut output) if output.exit_code.unwrap_or(0) == 0 => {

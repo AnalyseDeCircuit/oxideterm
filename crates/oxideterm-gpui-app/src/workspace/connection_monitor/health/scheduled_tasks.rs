@@ -1394,7 +1394,7 @@ impl HostToolsEntity {
     }
 
     pub(super) fn schedule_snapshot_polling(&self) -> bool {
-        self.host_schedules.polling
+        self.host_schedules.snapshot_in_flight
     }
 
     pub(in crate::workspace::connection_monitor) fn schedule_filter(&self) -> ScheduledTaskFilter {
@@ -1525,7 +1525,7 @@ impl HostToolsEntity {
         if !monitoring_enabled {
             return Vec::new();
         }
-        if self.host_schedules.polling {
+        if self.host_schedules.snapshot_in_flight {
             return feedback
                 .should_toast()
                 .then_some(HostToolsNotice::ScheduleSnapshotAlreadyRunning)
@@ -1551,7 +1551,7 @@ impl HostToolsEntity {
         };
         self.host_schedules.snapshot_connection_id = Some(connection_id);
         self.host_schedules.running = Some(request.clone());
-        self.host_schedules.polling = true;
+        self.host_schedules.snapshot_in_flight = true;
         // Inventory scans remain manual and never join the metric sampler.
         let spawned = self.spawn_schedule_snapshot_capture(
             command.command,
@@ -1561,7 +1561,7 @@ impl HostToolsEntity {
             runtime,
         );
         if !spawned {
-            self.host_schedules.polling = false;
+            self.host_schedules.snapshot_in_flight = false;
             self.host_schedules.running = None;
             return feedback
                 .should_toast()
@@ -1586,7 +1586,7 @@ impl HostToolsEntity {
         }
         let feedback = delivery.request.feedback;
         let failure_fallback = delivery.request.failure_fallback.clone();
-        self.host_schedules.polling = false;
+        self.host_schedules.snapshot_in_flight = false;
         self.host_schedules.running = None;
         match delivery.result {
             Ok(mut output) if output.exit_code.unwrap_or(0) == 0 => {

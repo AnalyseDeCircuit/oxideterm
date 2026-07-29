@@ -769,7 +769,7 @@ impl HostToolsEntity {
     }
 
     pub(super) fn log_snapshot_polling(&self) -> bool {
-        self.host_logs.polling
+        self.host_logs.snapshot_in_flight
     }
 
     pub(super) fn log_list_state(&self) -> ListState {
@@ -818,7 +818,7 @@ impl HostToolsEntity {
         if !monitoring_enabled {
             return Vec::new();
         }
-        if self.host_logs.polling {
+        if self.host_logs.snapshot_in_flight {
             return feedback
                 .should_toast()
                 .then_some(HostToolsNotice::LogSnapshotAlreadyRunning)
@@ -866,7 +866,7 @@ impl HostToolsEntity {
         };
         self.host_logs.snapshot_connection_id = Some(connection_id);
         self.host_logs.running = Some(request.clone());
-        self.host_logs.polling = true;
+        self.host_logs.snapshot_in_flight = true;
         let spawned = self.spawn_log_snapshot_capture(
             command.command,
             request,
@@ -875,7 +875,7 @@ impl HostToolsEntity {
             runtime,
         );
         if !spawned {
-            self.host_logs.polling = false;
+            self.host_logs.snapshot_in_flight = false;
             self.host_logs.running = None;
             return feedback
                 .should_toast()
@@ -900,7 +900,7 @@ impl HostToolsEntity {
         }
         let feedback = delivery.request.feedback;
         let failure_fallback = delivery.request.failure_fallback.clone();
-        self.host_logs.polling = false;
+        self.host_logs.snapshot_in_flight = false;
         self.host_logs.running = None;
         match delivery.result {
             Ok(mut output) if output.exit_code.unwrap_or(0) == 0 => {

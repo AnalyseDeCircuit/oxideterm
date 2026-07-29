@@ -496,7 +496,7 @@ pub(super) struct HostLogsState {
     pub(super) snapshot_connection_id: Option<String>,
     pub(super) snapshot: Option<ResourceLogSnapshot>,
     pub(super) running: Option<HostLogSnapshotRequest>,
-    pub(super) polling: bool,
+    pub(super) snapshot_in_flight: bool,
     pub(super) list_state: ListState,
     pub(super) list_cache: RefCell<VirtualListSignatureCache>,
 }
@@ -509,7 +509,7 @@ impl HostLogsState {
             snapshot_connection_id: None,
             snapshot: None,
             running: None,
-            polling: false,
+            snapshot_in_flight: false,
             list_state: tauri_virtual_list_state(
                 0,
                 ListAlignment::Top,
@@ -583,7 +583,7 @@ pub(super) struct HostPortsState {
     pub(super) snapshot_connection_id: Option<String>,
     pub(super) snapshot: Option<ResourcePortSnapshot>,
     pub(super) running: Option<HostPortSnapshotRequest>,
-    pub(super) polling: bool,
+    pub(super) snapshot_in_flight: bool,
     pub(super) list_state: ListState,
     pub(super) list_cache: RefCell<VirtualListSignatureCache>,
 }
@@ -596,7 +596,7 @@ impl HostPortsState {
             snapshot_connection_id: None,
             snapshot: None,
             running: None,
-            polling: false,
+            snapshot_in_flight: false,
             list_state: tauri_virtual_list_state(
                 0,
                 ListAlignment::Top,
@@ -625,7 +625,7 @@ pub(super) struct HostSchedulesState {
     pub(super) snapshot_connection_id: Option<String>,
     pub(super) snapshot: Option<ResourceScheduledTaskSnapshot>,
     pub(super) running: Option<HostScheduleSnapshotRequest>,
-    pub(super) polling: bool,
+    pub(super) snapshot_in_flight: bool,
     pub(super) list_state: ListState,
     pub(super) list_cache: RefCell<VirtualListSignatureCache>,
     pub(super) pending_confirm: Option<HostToolConfirmState<HostScheduleActionRequest>>,
@@ -641,7 +641,7 @@ impl HostSchedulesState {
             snapshot_connection_id: None,
             snapshot: None,
             running: None,
-            polling: false,
+            snapshot_in_flight: false,
             list_state: tauri_virtual_list_state(
                 0,
                 ListAlignment::Top,
@@ -673,7 +673,7 @@ pub(super) struct HostFilesystemsState {
     pub(super) snapshot_connection_id: Option<String>,
     pub(super) snapshot: Option<ResourceFilesystemSnapshot>,
     pub(super) running: Option<HostFilesystemSnapshotRequest>,
-    pub(super) polling: bool,
+    pub(super) snapshot_in_flight: bool,
     pub(super) list_state: ListState,
     pub(super) list_cache: RefCell<VirtualListSignatureCache>,
 }
@@ -686,7 +686,7 @@ impl HostFilesystemsState {
             snapshot_connection_id: None,
             snapshot: None,
             running: None,
-            polling: false,
+            snapshot_in_flight: false,
             list_state: tauri_virtual_list_state(
                 0,
                 ListAlignment::Top,
@@ -715,7 +715,7 @@ pub(super) struct HostPackagesState {
     pub(super) snapshot_connection_id: Option<String>,
     pub(super) snapshot: Option<ResourcePackageSnapshot>,
     pub(super) running: Option<HostPackageSnapshotRequest>,
-    pub(super) polling: bool,
+    pub(super) snapshot_in_flight: bool,
     pub(super) list_state: ListState,
     pub(super) list_cache: RefCell<VirtualListSignatureCache>,
 }
@@ -728,7 +728,7 @@ impl HostPackagesState {
             snapshot_connection_id: None,
             snapshot: None,
             running: None,
-            polling: false,
+            snapshot_in_flight: false,
             list_state: tauri_virtual_list_state(
                 0,
                 ListAlignment::Top,

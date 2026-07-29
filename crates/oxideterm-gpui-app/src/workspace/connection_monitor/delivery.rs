@@ -96,7 +96,7 @@ impl HostToolsEntity {
                     continue;
                 }
                 let backlog_remaining = weak
-                    .update(cx, |entity, cx| entity.poll_sampler_deliveries(cx))
+                    .update(cx, |entity, cx| entity.drain_sampler_deliveries(cx))
                     .unwrap_or(false);
                 if backlog_remaining {
                     // One permit continues the bounded sampler queue without a timer.
@@ -109,7 +109,7 @@ impl HostToolsEntity {
         .detach();
     }
 
-    fn poll_sampler_deliveries(&mut self, cx: &mut Context<Self>) -> bool {
+    fn drain_sampler_deliveries(&mut self, cx: &mut Context<Self>) -> bool {
         let drain = workspace_delivery::drain_channel(
             &self.sampler_delivery_rx,
             workspace_delivery::LIFECYCLE_DELIVERY_BUDGET,
@@ -167,7 +167,7 @@ impl HostToolsEntity {
                     continue;
                 }
                 let backlog_remaining = weak
-                    .update(cx, |entity, cx| entity.poll_reliable_deliveries(cx))
+                    .update(cx, |entity, cx| entity.drain_reliable_deliveries(cx))
                     .unwrap_or(false);
                 if backlog_remaining {
                     delivery_wake.mark();
@@ -179,7 +179,7 @@ impl HostToolsEntity {
         .detach();
     }
 
-    fn poll_reliable_deliveries(&mut self, cx: &mut Context<Self>) -> bool {
+    fn drain_reliable_deliveries(&mut self, cx: &mut Context<Self>) -> bool {
         let drain = workspace_delivery::drain_channel(
             &self.reliable_delivery_rx,
             workspace_delivery::USER_ACTION_DELIVERY_BUDGET,

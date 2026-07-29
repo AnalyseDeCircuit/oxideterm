@@ -893,7 +893,7 @@ impl HostToolsEntity {
     }
 
     pub(super) fn port_snapshot_polling(&self) -> bool {
-        self.host_ports.polling
+        self.host_ports.snapshot_in_flight
     }
 
     pub(super) fn port_list_state(&self) -> ListState {
@@ -957,7 +957,7 @@ impl HostToolsEntity {
         if !monitoring_enabled {
             return Vec::new();
         }
-        if self.host_ports.polling {
+        if self.host_ports.snapshot_in_flight {
             return feedback
                 .should_toast()
                 .then_some(HostToolsNotice::PortSnapshotAlreadyRunning)
@@ -984,7 +984,7 @@ impl HostToolsEntity {
         };
         self.host_ports.snapshot_connection_id = Some(connection_id);
         self.host_ports.running = Some(request.clone());
-        self.host_ports.polling = true;
+        self.host_ports.snapshot_in_flight = true;
         // Port capture is a user-requested troubleshooting snapshot, not a sampler.
         let spawned = self.spawn_port_snapshot_capture(
             command.command,
@@ -994,7 +994,7 @@ impl HostToolsEntity {
             runtime,
         );
         if !spawned {
-            self.host_ports.polling = false;
+            self.host_ports.snapshot_in_flight = false;
             self.host_ports.running = None;
             return feedback
                 .should_toast()
@@ -1019,7 +1019,7 @@ impl HostToolsEntity {
         }
         let feedback = delivery.request.feedback;
         let failure_fallback = delivery.request.failure_fallback.clone();
-        self.host_ports.polling = false;
+        self.host_ports.snapshot_in_flight = false;
         self.host_ports.running = None;
         match delivery.result {
             Ok(mut output) if output.exit_code.unwrap_or(0) == 0 => {
