@@ -783,6 +783,7 @@ impl SettingsWorkspaceEntity {
         }
     }
 
+    #[cfg(any(not(target_os = "macos"), test))]
     pub(in crate::workspace) fn start_launch_at_login_operation(
         &mut self,
         operation: impl std::future::Future<Output = Result<bool, LaunchAtLoginError>> + 'static,

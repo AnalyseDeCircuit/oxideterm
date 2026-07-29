@@ -46,7 +46,12 @@ use snapshots::*;
 use sync::*;
 use terminal_hooks::*;
 use terminal_queries::*;
-pub(super) use types::*;
+pub(super) use types::{
+    NativePluginConfirmDialog, NativePluginConfirmRequest, NativePluginOxideImportCoreResult,
+    NativePluginOxideImportWorkerMessage, NativePluginOxidePostImportOptions,
+    NativePluginProductUiEffect, NativePluginRuntimeDelivery, NativePluginSyncAction,
+    NativePluginSyncRequest, NativePluginTerminalAction, NativePluginTerminalRequest,
+};
 pub(super) use ui_helpers::native_plugin_theme_snapshot;
 use ui_helpers::*;
 use ui_host_calls::*;

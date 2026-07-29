@@ -111,6 +111,7 @@ where
         true
     }
 
+    #[cfg(test)]
     pub(in crate::workspace) fn register(
         &mut self,
         role: WindowRole,
@@ -204,6 +205,7 @@ where
         })
     }
 
+    #[cfg(test)]
     pub(in crate::workspace) fn take_event(&mut self) -> Option<WindowRegistryEvent> {
         self.events.pop_front()
     }

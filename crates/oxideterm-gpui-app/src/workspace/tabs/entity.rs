@@ -50,7 +50,6 @@ pub(in crate::workspace) struct TabMountId(u64);
 /// Identifies the native window currently mounting a workspace tab.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(in crate::workspace) enum TabMount {
-    Main,
     Detached {
         mount_id: TabMountId,
         window_id: gpui::WindowId,
@@ -711,7 +710,7 @@ impl WorkspaceTabHostEntity {
         tab_id: TabId,
         reason: TabMountCloseReason,
     ) -> Option<TabMountCleanupPlan> {
-        let TabMount::Detached { handle, .. } = self.tab_mounts.get(&tab_id).copied()? else {
+        let Some(TabMount::Detached { handle, .. }) = self.tab_mounts.get(&tab_id).copied() else {
             return None;
         };
         self.tab_mounts.remove(&tab_id);
@@ -738,6 +737,7 @@ impl WorkspaceTabHostEntity {
         })
     }
 
+    #[cfg(test)]
     pub(in crate::workspace) fn release_detached_window(
         &mut self,
         tab_id: TabId,
@@ -802,11 +802,8 @@ impl WorkspaceTabHostEntity {
     }
 
     #[cfg(test)]
-    fn mount(&self, tab_id: TabId) -> TabMount {
-        self.tab_mounts
-            .get(&tab_id)
-            .copied()
-            .unwrap_or(TabMount::Main)
+    fn mount(&self, tab_id: TabId) -> Option<TabMount> {
+        self.tab_mounts.get(&tab_id).copied()
     }
 
     pub(in crate::workspace) fn is_outside_main_window(&self, tab_id: TabId) -> bool {
@@ -1542,7 +1539,7 @@ mod tests {
                     .return_to_main(tab_id, TabMountCloseReason::ReturnToMain)
                     .is_some()
             );
-            assert_eq!(tab_host.mount(tab_id), TabMount::Main);
+            assert_eq!(tab_host.mount(tab_id), None);
         });
         replacement_pane.update(cx, |_pane, cx| {
             cx.emit(TerminalPaneEvent::RecordingStatusChanged);
@@ -1890,7 +1887,7 @@ mod tests {
 
         assert!(tab_host.is_outside_main_window(tab_id));
         assert!(tab_host.rollback_detach(tab_id, mount_id));
-        assert_eq!(tab_host.mount(tab_id), TabMount::Main);
+        assert_eq!(tab_host.mount(tab_id), None);
         assert!(!tab_host.is_outside_main_window(tab_id));
         let replacement_mount_id = tab_host
             .begin_detach(tab_id)
@@ -1940,18 +1937,18 @@ mod tests {
             );
             assert_eq!(
                 tab_host.mount(tab_id),
-                TabMount::Detached {
+                Some(TabMount::Detached {
                     mount_id: second_mount_id,
                     window_id: second_window.window_id(),
                     handle: second_window,
-                }
+                })
             );
 
             let cleanup = tab_host
                 .release_detached_window(tab_id, second_mount_id, second_window.window_id())
                 .expect("current release cleanup");
             assert_eq!(cleanup.reason, TabMountCloseReason::DetachedWindowReleased);
-            assert_eq!(tab_host.mount(tab_id), TabMount::Main);
+            assert_eq!(tab_host.mount(tab_id), None);
         });
     }
 

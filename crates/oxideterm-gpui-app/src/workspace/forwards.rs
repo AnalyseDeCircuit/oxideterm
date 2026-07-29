@@ -54,9 +54,22 @@ mod runtime_service;
 mod surface;
 mod view_state;
 
-pub(in crate::workspace) use entity::*;
-pub(in crate::workspace) use reconnect::*;
-pub(in crate::workspace) use runtime_service::*;
+pub(in crate::workspace) use entity::{
+    ForwardingDeliveryIntent, ForwardingWorkspaceEntity, ForwardingWorkspaceEvent,
+};
+pub(in crate::workspace) use reconnect::{
+    cleanup_reconnect_created_forwards, forward_restore_failure_label,
+    forward_restore_key_for_rule, forward_restore_key_for_snapshot_rule,
+    forward_restore_phase_result, forward_restore_result_detail,
+    forward_rule_from_reconnect_snapshot, reconnect_forward_rule_from_rule,
+    release_reconnect_forward_bindings,
+};
+use runtime_service::{
+    ForwardingQuickAction, ForwardingRuntimeOperation, ForwardingRuntimeSnapshot,
+};
+pub(in crate::workspace) use runtime_service::{
+    ForwardingRuntimeService, ReconnectForwardRestoreRequest,
+};
 
 const FORWARDS_PAGE_PADDING: f32 = 16.0; // Tauri p-4
 const FORWARDS_SECTION_GAP: f32 = 24.0; // Tauri space-y-6
