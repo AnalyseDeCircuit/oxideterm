@@ -1773,7 +1773,7 @@ impl SettingsWorkspaceEntity {
             return true;
         }
         // The settings Entity retains the exit task so reopen and release
-        // cancel it without a WeakEntity<WorkspaceApp> completion path.
+        // cancel it without a reverse dependency on the workspace root.
         self.theme_editor_exit_task = Some(cx.spawn(async move |settings, cx| {
             Timer::after(delay).await;
             let _ = settings.update(cx, |settings, cx| {
