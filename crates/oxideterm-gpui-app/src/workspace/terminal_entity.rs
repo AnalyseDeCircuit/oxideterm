@@ -164,6 +164,10 @@ impl WorkspaceTerminalEntity {
         self.broadcast.menu_open
     }
 
+    pub(in crate::workspace) fn cast_player_open(&self) -> bool {
+        self.cast_player.is_some()
+    }
+
     pub(in crate::workspace) fn broadcast_targets_empty(&self) -> bool {
         self.broadcast.targets.is_empty()
     }

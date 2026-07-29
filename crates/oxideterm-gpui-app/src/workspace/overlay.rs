@@ -83,6 +83,20 @@ pub(in crate::workspace) enum WorkspaceOverlayConfirmKeyAction {
     Handled,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(in crate::workspace) enum WorkspaceOverlayConfirmOwnerKind {
+    SettingsReset,
+    LegalNotice,
+    NativeUpdateReleaseNotes,
+    NodeDisconnect,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(in crate::workspace) struct WorkspaceOverlayConfirmOwnerSnapshot {
+    pub(in crate::workspace) kind: WorkspaceOverlayConfirmOwnerKind,
+    pub(in crate::workspace) phase: oxideterm_gpui_ui::motion::ExitPhase,
+}
+
 #[derive(Clone, Debug)]
 struct OverlayToast {
     id: u64,
@@ -302,6 +316,30 @@ impl WorkspaceOverlayEntity {
                 kind,
                 phase: self.confirm_presence.phase(),
                 focused_action: self.confirm_focused_action,
+            })
+    }
+
+    pub(in crate::workspace) fn confirm_owner_snapshot(
+        &self,
+    ) -> Option<WorkspaceOverlayConfirmOwnerSnapshot> {
+        self.confirm
+            .as_ref()
+            .map(|confirm| WorkspaceOverlayConfirmOwnerSnapshot {
+                kind: match confirm {
+                    WorkspaceOverlayConfirmKind::SettingsReset => {
+                        WorkspaceOverlayConfirmOwnerKind::SettingsReset
+                    }
+                    WorkspaceOverlayConfirmKind::LegalNotice => {
+                        WorkspaceOverlayConfirmOwnerKind::LegalNotice
+                    }
+                    WorkspaceOverlayConfirmKind::NativeUpdateReleaseNotes => {
+                        WorkspaceOverlayConfirmOwnerKind::NativeUpdateReleaseNotes
+                    }
+                    WorkspaceOverlayConfirmKind::NodeDisconnect { .. } => {
+                        WorkspaceOverlayConfirmOwnerKind::NodeDisconnect
+                    }
+                },
+                phase: self.confirm_presence.phase(),
             })
     }
 

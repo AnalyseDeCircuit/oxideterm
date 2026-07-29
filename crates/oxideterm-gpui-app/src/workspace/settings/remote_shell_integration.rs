@@ -222,6 +222,10 @@ impl RemoteShellIntegrationRuntimeState {
         })
     }
 
+    pub(in crate::workspace) fn confirm_open(&self) -> bool {
+        self.confirm_node_id.is_some()
+    }
+
     pub(in crate::workspace) fn toggle_prompt_suppression(&mut self) {
         self.suppress_future_terminal_prompts = !self.suppress_future_terminal_prompts;
     }
@@ -350,6 +354,61 @@ impl RemoteShellIntegrationRuntimeState {
 }
 
 impl WorkspaceApp {
+    pub(in crate::workspace) fn handle_remote_shell_integration_confirm_key(
+        &mut self,
+        event: &KeyDownEvent,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if !self
+            .workspace_runtime
+            .read(cx)
+            .remote_shell_integration_confirm_open()
+        {
+            return false;
+        }
+        match self.handle_standard_confirm_key(event, cx) {
+            Some(ConfirmKeyboardAction::Cancel) => {
+                let disable_future_prompts = self.workspace_runtime.update(cx, |runtime, _cx| {
+                    runtime.cancel_remote_shell_integration_confirm()
+                });
+                if disable_future_prompts {
+                    self.edit_settings(
+                        |settings| {
+                            settings.terminal.remote_shell_integration_mode =
+                                RemoteShellIntegrationMode::Disabled;
+                        },
+                        cx,
+                    );
+                    self.remote_shell_integration_mode_changed(
+                        RemoteShellIntegrationMode::Disabled,
+                        cx,
+                    );
+                }
+                cx.notify();
+                true
+            }
+            Some(ConfirmKeyboardAction::Confirm) => {
+                let accepted = self.workspace_runtime.update(cx, |runtime, _cx| {
+                    runtime.accept_remote_shell_integration_confirm()
+                });
+                if let Some((node_id, source)) = accepted {
+                    if source == RemoteShellIntegrationConfirmSource::TerminalOpen {
+                        self.start_remote_shell_integration_terminal_gate(node_id, true, cx);
+                    } else {
+                        self.run_remote_shell_integration_action_for_node(
+                            RemoteShellIntegrationAction::Install,
+                            node_id,
+                            cx,
+                        );
+                    }
+                }
+                true
+            }
+            Some(ConfirmKeyboardAction::Handled) => true,
+            None => false,
+        }
+    }
+
     pub(in crate::workspace) fn remote_shell_integration_mode_changed(
         &mut self,
         mode: RemoteShellIntegrationMode,
@@ -374,7 +433,7 @@ impl WorkspaceApp {
     }
 
     pub(in crate::workspace) fn active_ssh_terminal_node_id(&self, cx: &App) -> Option<NodeId> {
-        let tab = self.active_tab()?;
+        let tab = self.active_tab(cx)?;
         if tab.kind != TabKind::SshTerminal {
             return None;
         }

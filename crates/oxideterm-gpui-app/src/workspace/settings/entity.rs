@@ -696,6 +696,10 @@ impl SettingsWorkspaceEntity {
         self.route.navigation_draft.as_ref().map(Arc::clone)
     }
 
+    pub(in crate::workspace) fn navigation_editor_open(&self) -> bool {
+        self.route.navigation_draft.is_some()
+    }
+
     pub(in crate::workspace) fn apply_navigation_draft_action(
         &mut self,
         action: SettingsNavigationDraftAction,
@@ -1628,6 +1632,10 @@ impl SettingsWorkspaceEntity {
     /// Shares one immutable render snapshot without copying the color arrays.
     pub(in crate::workspace) fn theme_editor_snapshot(&self) -> Option<Arc<ThemeEditorState>> {
         self.theme_editor.as_ref().map(Arc::clone)
+    }
+
+    pub(in crate::workspace) fn theme_editor_open(&self) -> bool {
+        self.theme_editor.is_some()
     }
 
     pub(in crate::workspace) fn theme_editor_phase(&self) -> oxideterm_gpui_ui::motion::ExitPhase {

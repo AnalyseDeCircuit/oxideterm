@@ -7,6 +7,16 @@ use super::{
 };
 
 impl SettingsWorkspaceEntity {
+    pub(in crate::workspace) fn portable_password_dialog_open(&self) -> bool {
+        self.portable_dialog == Some(PortableSettingsDialog::ChangePassword)
+    }
+
+    pub(in crate::workspace) fn portable_password_dialog_phase(
+        &self,
+    ) -> oxideterm_gpui_ui::motion::ExitPhase {
+        self.portable_dialog_presence.phase()
+    }
+
     pub(in crate::workspace) fn portable_password_dialog_snapshot(
         &self,
     ) -> PortablePasswordDialogSnapshot {

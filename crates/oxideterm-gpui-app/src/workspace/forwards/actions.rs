@@ -7,7 +7,75 @@ use super::{
     NodeId, NodeReadiness, PortDetectionSnapshot, TabId, TerminalNotice, TerminalNoticeVariant,
     WorkspaceApp,
 };
+use crate::workspace::ConfirmKeyboardAction;
 impl WorkspaceApp {
+    pub(in crate::workspace) fn handle_forward_edit_modal_key(
+        &mut self,
+        event: &KeyDownEvent,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if !self.forwarding.read(cx).edit_form_open() {
+            return false;
+        }
+        if self.handle_forwards_key(event, cx) {
+            return true;
+        }
+        if event.keystroke.key.as_str() == "escape" {
+            self.begin_forward_edit_form_exit(cx);
+            return true;
+        }
+        false
+    }
+
+    pub(in crate::workspace) fn handle_forward_delete_confirm_key(
+        &mut self,
+        event: &KeyDownEvent,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if !self.forwarding.read(cx).delete_confirm_open() {
+            return false;
+        }
+        match self.handle_standard_confirm_key(event, cx) {
+            Some(ConfirmKeyboardAction::Cancel) => {
+                self.forwarding
+                    .update(cx, |forwarding, _cx| forwarding.clear_pending_delete());
+                cx.notify();
+                true
+            }
+            Some(ConfirmKeyboardAction::Confirm) => {
+                let active_tab = self.active_tab(cx);
+                let Some(tab_id) = active_tab.map(|tab| tab.id) else {
+                    return true;
+                };
+                let Some(node_id) = self.forwarding.read(cx).node_for_tab(tab_id) else {
+                    return true;
+                };
+                let forward_id = self
+                    .forwarding
+                    .read(cx)
+                    .view()
+                    .pending_delete_forward
+                    .as_ref()
+                    .map(|rule| rule.id.clone());
+                self.forwarding
+                    .update(cx, |forwarding, _cx| forwarding.clear_pending_delete());
+                if let Some(forward_id) = forward_id {
+                    self.start_forward_operation(
+                        tab_id,
+                        node_id,
+                        "forwards.messages.deleted",
+                        true,
+                        ForwardingRuntimeOperation::Delete { forward_id },
+                        cx,
+                    );
+                }
+                true
+            }
+            Some(ConfirmKeyboardAction::Handled) => true,
+            None => false,
+        }
+    }
+
     pub(super) fn submit_forward_create(
         &mut self,
         tab_id: TabId,
@@ -107,7 +175,7 @@ impl WorkspaceApp {
     }
 
     pub(super) fn dismiss_detected_port(&mut self, port: u16, cx: &mut Context<Self>) {
-        if let Some(tab_id) = self.main_window_tabs.active_tab_id
+        if let Some(tab_id) = self.active_tab_id(cx)
             && let Some(node_id) = self.forwarding.read(cx).node_for_tab(tab_id)
         {
             self.forwarding.update(cx, |forwarding, _cx| {
@@ -647,7 +715,7 @@ impl WorkspaceApp {
     fn forwards_tab_is_visible(&self, tab_id: TabId, cx: &App) -> bool {
         super::forwarding_tab_mount_is_visible(
             tab_id,
-            self.main_window_tabs.active_tab_id,
+            self.active_tab_id(cx),
             self.tab_host.read(cx).is_detached(tab_id),
         )
     }

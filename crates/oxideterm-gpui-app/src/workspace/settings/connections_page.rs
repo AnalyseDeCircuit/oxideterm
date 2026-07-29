@@ -37,6 +37,12 @@ impl SettingsWorkspaceEntity {
         self.ssh_config_import_dialog_open
     }
 
+    pub(in crate::workspace) fn ssh_config_import_dialog_phase(
+        &self,
+    ) -> oxideterm_gpui_ui::motion::ExitPhase {
+        self.ssh_config_import_dialog_presence.phase()
+    }
+
     pub(in crate::workspace) fn open_ssh_config_import_dialog(&mut self, cx: &mut Context<Self>) {
         // Each visit starts from the current scanned host set instead of
         // carrying selections or status from another import surface.
@@ -337,6 +343,16 @@ impl SettingsWorkspaceEntity {
                 })
             }
         }
+    }
+
+    pub(in crate::workspace) fn managed_key_dialog_open(&self) -> bool {
+        self.managed_key_dialog.is_some()
+    }
+
+    pub(in crate::workspace) fn managed_key_dialog_phase(
+        &self,
+    ) -> oxideterm_gpui_ui::motion::ExitPhase {
+        self.managed_key_dialog_presence.phase()
     }
 
     pub(in crate::workspace) fn open_managed_key_import_file_dialog(

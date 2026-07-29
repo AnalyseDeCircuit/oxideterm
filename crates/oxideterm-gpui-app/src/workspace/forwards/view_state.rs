@@ -9,6 +9,18 @@ impl ForwardingWorkspaceEntity {
         &self.view
     }
 
+    pub(in crate::workspace) fn edit_form_open(&self) -> bool {
+        self.view.editing_forward.is_some()
+    }
+
+    pub(in crate::workspace) fn edit_form_phase(&self) -> oxideterm_gpui_ui::motion::ExitPhase {
+        self.view.edit_form_presence.phase()
+    }
+
+    pub(in crate::workspace) fn delete_confirm_open(&self) -> bool {
+        self.view.pending_delete_forward.is_some()
+    }
+
     pub(super) fn clear_error(&mut self) {
         self.view.error = None;
     }

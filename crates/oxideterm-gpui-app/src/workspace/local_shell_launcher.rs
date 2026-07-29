@@ -30,6 +30,23 @@ impl WorkspaceApp {
         cx.notify();
     }
 
+    pub(in crate::workspace) fn handle_local_shell_launcher_key(
+        &mut self,
+        event: &KeyDownEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if !self.local_shell_launcher_open {
+            return false;
+        }
+        match event.keystroke.key.as_str() {
+            "escape" => self.close_local_shell_launcher(cx),
+            "enter" => self.launch_selected_local_shell(window, cx),
+            _ => {}
+        }
+        true
+    }
+
     fn launch_selected_local_shell(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(selected_id) = self.local_shell_launcher_selected_id.clone() else {
             return;

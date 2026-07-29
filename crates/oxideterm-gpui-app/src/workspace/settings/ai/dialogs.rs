@@ -34,12 +34,6 @@ impl WorkspaceApp {
             .on_mouse_down(MouseButton::Left, |_event, _window, cx| {
                 cx.stop_propagation();
             })
-            .on_key_down(cx.listener(|this, event: &KeyDownEvent, _window, cx| {
-                if event.keystroke.key.as_str() == "escape" {
-                    this.close_ai_text_editor(false, cx);
-                    cx.stop_propagation();
-                }
-            }))
             .child(
                 dialog_header(&self.tokens)
                     .child(dialog_title(&self.tokens, self.i18n.t(title_key)))

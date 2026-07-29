@@ -57,7 +57,10 @@ impl WorkspaceApp {
         });
     }
 
-    fn close_settings_navigation_editor(&mut self, cx: &mut Context<Self>) {
+    pub(in crate::workspace) fn close_settings_navigation_editor(
+        &mut self,
+        cx: &mut Context<Self>,
+    ) {
         self.settings_workspace
             .update(cx, SettingsWorkspaceEntity::close_navigation_editor);
         self.clear_standard_confirm_focus();

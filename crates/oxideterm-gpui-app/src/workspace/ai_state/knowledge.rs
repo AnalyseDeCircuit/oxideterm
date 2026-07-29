@@ -81,6 +81,18 @@ impl AiWorkspaceEntity {
         self.knowledge_page.new_document_dialog_open
     }
 
+    pub(in crate::workspace) fn knowledge_create_dialog_phase(
+        &self,
+    ) -> oxideterm_gpui_ui::motion::ExitPhase {
+        self.knowledge_page.create_presence.phase()
+    }
+
+    pub(in crate::workspace) fn knowledge_document_dialog_phase(
+        &self,
+    ) -> oxideterm_gpui_ui::motion::ExitPhase {
+        self.knowledge_page.document_presence.phase()
+    }
+
     pub(in crate::workspace) fn knowledge_embedding_config_expanded(&self) -> bool {
         self.knowledge_page.embedding_config_expanded
     }
