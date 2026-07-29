@@ -527,7 +527,7 @@ impl WorkspaceApp {
                     .i18n
                     .t("settings_view.general.launch_at_login_approval_required"),
                 LaunchAtLoginError::OperationFailed(error)
-                | LaunchAtLoginError::TaskFailed(error) => error,
+                | LaunchAtLoginError::TaskFailed(error) => error.to_string(),
             };
             label = label.child(
                 div()
