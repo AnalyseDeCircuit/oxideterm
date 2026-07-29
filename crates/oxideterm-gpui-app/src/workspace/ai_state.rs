@@ -3060,6 +3060,7 @@ impl AiWorkspaceEntity {
                             break;
                         }
                         oxideterm_ai::AiStreamEvent::Thinking(_)
+                        | oxideterm_ai::AiStreamEvent::ProviderResponsePart { .. }
                         | oxideterm_ai::AiStreamEvent::ToolCall { .. }
                         | oxideterm_ai::AiStreamEvent::ToolCallComplete { .. } => {}
                     }

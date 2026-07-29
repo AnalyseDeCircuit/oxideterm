@@ -127,6 +127,11 @@ impl AiWorkspaceEntity {
                 });
                 AiStreamApplyOutcome::Applied
             }
+            AiStreamEvent::ProviderResponsePart { .. } => {
+                // The live tool loop consumes provider replay metadata before
+                // UI delivery; other stream surfaces intentionally ignore it.
+                AiStreamApplyOutcome::Applied
+            }
             AiStreamEvent::ToolCall {
                 id,
                 name,

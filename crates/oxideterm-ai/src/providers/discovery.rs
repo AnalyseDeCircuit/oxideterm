@@ -12,7 +12,7 @@ use crate::{
 
 use super::discovery_http::fetch_provider_models_payload;
 pub(crate) use super::discovery_http::{
-    ANTHROPIC_VERSION, api_key_required_ref, looks_like_html_response,
+    ANTHROPIC_VERSION, api_key_required_ref, gemini_api_base_url, looks_like_html_response,
     openai_compatible_candidates, parse_provider_json, url_encode_component,
 };
 pub(crate) use super::discovery_models::{parse_provider_context_windows, parse_provider_models};

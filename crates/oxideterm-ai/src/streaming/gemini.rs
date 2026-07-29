@@ -3,10 +3,11 @@ use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use crate::providers::{api_key_required_ref, url_encode_component};
+use crate::providers::{api_key_required_ref, gemini_api_base_url, url_encode_component};
 use crate::{
     AiChatMessage, AiChatRole, AiChatStreamConfig, AiReasoningLevel, AiReasoningRequestFormat,
-    AiStreamEvent, AiToolCall, AiToolChoice, AiToolDefinition, model_reasoning_capability,
+    AiStreamEvent, AiToolCall, AiToolChoice, AiToolDefinition, ai_provider_parts,
+    model_reasoning_capability,
 };
 
 use super::CHAT_STREAM_TIMEOUT;
@@ -23,11 +24,7 @@ pub(crate) async fn stream_gemini_completion(
         &config.provider_type,
         config.api_key.as_ref().map(|api_key| api_key.as_str()),
     )?;
-    let url = format!(
-        "{}/models/{}:streamGenerateContent",
-        config.base_url.trim().trim_end_matches('/'),
-        url_encode_component(&config.model)
-    );
+    let url = gemini_stream_url(&config.base_url, &config.model)?;
     let client = oxideterm_network_proxy::application_http_client_builder()
         .context("failed to apply application proxy to AI chat client")?
         .timeout(CHAT_STREAM_TIMEOUT)
@@ -57,6 +54,14 @@ pub(crate) async fn stream_gemini_completion(
     let _ = stream_sse_response(response, &events, parse_gemini_data_line).await?;
     let _ = events.send(AiStreamEvent::Done);
     Ok(())
+}
+
+fn gemini_stream_url(base_url: &str, model: &str) -> Result<String> {
+    Ok(format!(
+        "{}/models/{}:streamGenerateContent",
+        gemini_api_base_url(base_url)?,
+        url_encode_component(model)
+    ))
 }
 
 pub(crate) fn gemini_chat_body(config: &AiChatStreamConfig, messages: &[AiChatMessage]) -> Value {
@@ -138,6 +143,21 @@ pub(crate) fn gemini_chat_contents(messages: &[AiChatMessage]) -> (Option<String
     let mut contents = Vec::<Value>::new();
     let mut tool_names_by_id = HashMap::<String, String>::new();
     for message in messages {
+        if message.role == AiChatRole::Assistant
+            && let Some(parts) =
+                ai_provider_parts(message, "gemini").filter(|parts| !parts.is_empty())
+        {
+            for call in message.tool_calls.iter().filter_map(AiToolCall::from_value) {
+                tool_names_by_id.insert(call.id, call.name);
+            }
+            // Signed Gemini parts are protocol state. Replay them in their
+            // original order instead of rebuilding or merging their payloads.
+            contents.push(serde_json::json!({
+                "role": "model",
+                "parts": parts,
+            }));
+            continue;
+        }
         match message.role {
             AiChatRole::System => {
                 system_instruction = Some(match system_instruction {
@@ -270,6 +290,12 @@ pub(crate) fn parse_gemini_data_line(line: &str) -> ParsedStreamLine {
             .and_then(Value::as_array)
     {
         for part in parts {
+            // Gemini attaches thoughtSignature to the part itself. Forward the
+            // complete part before projecting its visible text or tool call.
+            events.push(AiStreamEvent::ProviderResponsePart {
+                provider_type: "gemini".to_string(),
+                part: part.clone(),
+            });
             if let Some(text) = part
                 .get("text")
                 .and_then(Value::as_str)
@@ -360,6 +386,24 @@ mod tests {
             tools: Vec::new(),
             tool_choice: AiToolChoice::Auto,
         }
+    }
+
+    #[test]
+    fn stream_url_accepts_service_and_versioned_roots() {
+        let expected = "https://generativelanguage.googleapis.com/v1beta/models/gemini-3-pro:streamGenerateContent";
+
+        assert_eq!(
+            gemini_stream_url("https://generativelanguage.googleapis.com", "gemini-3-pro").unwrap(),
+            expected
+        );
+        assert_eq!(
+            gemini_stream_url(
+                "https://generativelanguage.googleapis.com/v1beta/",
+                "gemini-3-pro"
+            )
+            .unwrap(),
+            expected
+        );
     }
 
     #[test]

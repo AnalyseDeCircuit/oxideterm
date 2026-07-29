@@ -161,6 +161,7 @@ pub(in crate::workspace) async fn run_ai_chat_tool_loop(
             tool_obligation.mode == AiOrchestratorObligationMode::Required;
         let mut pending_calls = BTreeMap::<String, AiToolCall>::new();
         let mut completed_calls = Vec::<AiToolCall>::new();
+        let mut round_provider_parts = Vec::<serde_json::Value>::new();
 
         while let Some(event) = stream_rx.recv().await {
             match event {
@@ -220,6 +221,16 @@ pub(in crate::workspace) async fn run_ai_chat_tool_loop(
                         {
                             return;
                         }
+                    }
+                }
+                AiStreamEvent::ProviderResponsePart {
+                    provider_type,
+                    part,
+                } => {
+                    if provider_type == config.provider_type {
+                        // Provider-native response parts remain inside this
+                        // live tool loop and are never written to diagnostics.
+                        round_provider_parts.push(part);
                     }
                 }
                 AiStreamEvent::ToolCall {
@@ -548,7 +559,7 @@ pub(in crate::workspace) async fn run_ai_chat_tool_loop(
                     Some(retry_attempt),
                     false,
                 );
-                history.push(AiChatMessage {
+                let mut retry_message = AiChatMessage {
                     id: format!("required-retry-assistant-{retry_attempt}"),
                     role: AiChatRole::Assistant,
                     content: if round_content.trim().is_empty() {
@@ -569,7 +580,13 @@ pub(in crate::workspace) async fn run_ai_chat_tool_loop(
                     summary_ref: None,
                     branches: None,
                     suggestions: Vec::new(),
-                });
+                };
+                set_ai_provider_parts(
+                    &mut retry_message,
+                    &config.provider_type,
+                    round_provider_parts,
+                );
+                history.push(retry_message);
                 history.push(AiChatMessage {
                     id: format!("required-retry-user-{retry_attempt}"),
                     role: AiChatRole::User,
@@ -673,7 +690,7 @@ pub(in crate::workspace) async fn run_ai_chat_tool_loop(
         }
 
         let assistant_round_id = format!("assistant-tool-round-{round_index}");
-        history.push(AiChatMessage {
+        let mut assistant_round = AiChatMessage {
             id: assistant_round_id,
             role: AiChatRole::Assistant,
             content: round_content,
@@ -693,7 +710,13 @@ pub(in crate::workspace) async fn run_ai_chat_tool_loop(
             summary_ref: None,
             branches: None,
             suggestions: Vec::new(),
-        });
+        };
+        set_ai_provider_parts(
+            &mut assistant_round,
+            &config.provider_type,
+            round_provider_parts,
+        );
+        history.push(assistant_round);
 
         let mut round_results = Vec::new();
         for call in completed_calls {

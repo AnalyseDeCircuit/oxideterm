@@ -252,6 +252,11 @@ pub struct AiChatStreamConfig {
 pub enum AiStreamEvent {
     Content(String),
     Thinking(String),
+    /// Opaque provider metadata that must survive a provider-owned replay.
+    ProviderResponsePart {
+        provider_type: String,
+        part: serde_json::Value,
+    },
     ToolCall {
         id: String,
         name: String,

@@ -326,6 +326,7 @@ impl WorkspaceApp {
                         summary.push_str(&chunk);
                     }
                     AiStreamEvent::Thinking(_)
+                    | AiStreamEvent::ProviderResponsePart { .. }
                     | AiStreamEvent::ToolCall { .. }
                     | AiStreamEvent::ToolCallComplete { .. } => {}
                     AiStreamEvent::Done => break,

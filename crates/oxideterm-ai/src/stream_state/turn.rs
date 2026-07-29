@@ -2,6 +2,48 @@
 
 use crate::{AiChatMessage, parse_ai_suggestions};
 
+const AI_PROVIDER_PARTS_KEY: &str = "providerParts";
+
+pub fn ai_provider_parts<'a>(
+    message: &'a AiChatMessage,
+    provider_type: &str,
+) -> Option<&'a [serde_json::Value]> {
+    message
+        .turn
+        .as_ref()
+        .and_then(|turn| turn.get(AI_PROVIDER_PARTS_KEY))
+        .and_then(|providers| providers.get(provider_type))
+        .and_then(serde_json::Value::as_array)
+        .map(Vec::as_slice)
+}
+
+pub fn set_ai_provider_parts(
+    message: &mut AiChatMessage,
+    provider_type: &str,
+    parts: Vec<serde_json::Value>,
+) {
+    if parts.is_empty() {
+        return;
+    }
+    ensure_ai_turn(message);
+    let Some(turn) = message
+        .turn
+        .as_mut()
+        .and_then(serde_json::Value::as_object_mut)
+    else {
+        return;
+    };
+    // Provider-native parts remain isolated from the UI projection so a
+    // protocol adapter can replay opaque metadata without changing display.
+    let providers = turn
+        .entry(AI_PROVIDER_PARTS_KEY.to_string())
+        .or_insert_with(|| serde_json::json!({}));
+    let Some(providers) = providers.as_object_mut() else {
+        return;
+    };
+    providers.insert(provider_type.to_string(), serde_json::Value::Array(parts));
+}
+
 pub fn upsert_ai_tool_call(
     message: &mut AiChatMessage,
     id: &str,

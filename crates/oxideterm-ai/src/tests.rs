@@ -2696,13 +2696,22 @@ fn anthropic_and_gemini_stream_parsers_extract_content() {
     let gemini = parse_gemini_data_line(
         r#"data: {"candidates":[{"content":{"parts":[{"text":"hello"}]}}]}"#,
     );
-    assert_eq!(gemini.events, vec![AiStreamEvent::Content("hello".into())]);
+    assert_eq!(
+        gemini.events,
+        vec![
+            AiStreamEvent::ProviderResponsePart {
+                provider_type: "gemini".to_string(),
+                part: serde_json::json!({"text": "hello"}),
+            },
+            AiStreamEvent::Content("hello".into()),
+        ]
+    );
 
     let gemini_tool = parse_gemini_data_line(
         r#"data: {"candidates":[{"content":{"parts":[{"functionCall":{"name":"get_state","args":{"scope":"active"}}}]}}]}"#,
     );
-    assert_eq!(gemini_tool.events.len(), 1);
-    match &gemini_tool.events[0] {
+    assert_eq!(gemini_tool.events.len(), 2);
+    match &gemini_tool.events[1] {
         AiStreamEvent::ToolCallComplete {
             name, arguments, ..
         } => {
@@ -2715,7 +2724,7 @@ fn anthropic_and_gemini_stream_parsers_extract_content() {
     let gemini_array_tool = parse_gemini_data_line(
         r#"data: {"candidates":[{"content":{"parts":[{"functionCall":{"name":"get_state","args":["scope","active"]}}]}}]}"#,
     );
-    match &gemini_array_tool.events[0] {
+    match &gemini_array_tool.events[1] {
         AiStreamEvent::ToolCallComplete { arguments, .. } => {
             assert_eq!(arguments, "[\"scope\",\"active\"]");
         }
@@ -2725,10 +2734,53 @@ fn anthropic_and_gemini_stream_parsers_extract_content() {
     let gemini_empty_string_tool = parse_gemini_data_line(
         r#"data: {"candidates":[{"content":{"parts":[{"functionCall":{"name":"get_state","args":""}}]}}]}"#,
     );
-    match &gemini_empty_string_tool.events[0] {
+    match &gemini_empty_string_tool.events[1] {
         AiStreamEvent::ToolCallComplete { arguments, .. } => {
             assert_eq!(arguments, "{}");
         }
         other => panic!("expected Gemini tool call, got {other:?}"),
     }
+}
+
+#[test]
+fn gemini_signed_parts_round_trip_without_rebuilding() {
+    let line = r#"data: {"candidates":[{"content":{"parts":[{"text":"checking","thoughtSignature":"text-signature"},{"functionCall":{"name":"get_state","args":{"scope":"active"}},"thoughtSignature":"call-signature"}]}}]}"#;
+    let parsed = parse_gemini_data_line(line);
+    let mut assistant = chat_message("assistant", AiChatRole::Assistant, "checking");
+    let mut provider_parts = Vec::new();
+
+    for event in parsed.events {
+        match event {
+            AiStreamEvent::ProviderResponsePart {
+                provider_type,
+                part,
+            } if provider_type == "gemini" => provider_parts.push(part),
+            AiStreamEvent::ToolCallComplete {
+                id,
+                name,
+                arguments,
+            } => upsert_ai_tool_call(&mut assistant, &id, &name, &arguments, "completed"),
+            _ => {}
+        }
+    }
+    set_ai_provider_parts(&mut assistant, "gemini", provider_parts);
+
+    let (_, contents) = gemini_chat_contents(&[assistant]);
+
+    assert_eq!(
+        contents[1]["parts"],
+        serde_json::json!([
+            {
+                "text": "checking",
+                "thoughtSignature": "text-signature",
+            },
+            {
+                "functionCall": {
+                    "name": "get_state",
+                    "args": { "scope": "active" },
+                },
+                "thoughtSignature": "call-signature",
+            },
+        ])
+    );
 }

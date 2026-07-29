@@ -11,7 +11,7 @@ pub use catalog::{
 };
 pub use discovery::fetch_provider_models;
 pub(crate) use discovery::{
-    ANTHROPIC_VERSION, api_key_required_ref, looks_like_html_response,
+    ANTHROPIC_VERSION, api_key_required_ref, gemini_api_base_url, looks_like_html_response,
     openai_compatible_candidates, parse_provider_json, url_encode_component,
 };
 #[cfg(test)]
