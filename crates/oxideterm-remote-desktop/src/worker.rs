@@ -14,6 +14,11 @@ use crate::{helper_process, request_writer};
 const HELPER_CLOSE_GRACE_PERIOD: Duration = Duration::from_secs(2);
 const HELPER_LIVENESS_CHECK_INTERVAL: Duration = Duration::from_millis(250);
 
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+struct RemoteDesktopReaderOutcome {
+    terminal_delivery_sent: bool,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RemoteDesktopWorkerId {
     pub session_id: RemoteDesktopSessionId,
@@ -126,6 +131,7 @@ fn run_remote_desktop_worker_with_close_grace(
             });
 
             let mut exit_status = None;
+            let mut pending_transport_failure = None;
             loop {
                 match helper.child.try_wait() {
                     Ok(Some(status)) => {
@@ -134,13 +140,7 @@ fn run_remote_desktop_worker_with_close_grace(
                     }
                     Ok(None) => {}
                     Err(error) => {
-                        send_delivery(
-                            &delivery_tx,
-                            RemoteDesktopWorkerDelivery::TransportFailed {
-                                worker_id: config.worker_id.clone(),
-                                message: error.to_string(),
-                            },
-                        );
+                        pending_transport_failure = Some(error.to_string());
                         break;
                     }
                 }
@@ -155,13 +155,7 @@ fn run_remote_desktop_worker_with_close_grace(
                         break;
                     }
                     Err(error) => {
-                        send_delivery(
-                            &delivery_tx,
-                            RemoteDesktopWorkerDelivery::TransportFailed {
-                                worker_id: config.worker_id.clone(),
-                                message: error.to_string(),
-                            },
-                        );
+                        pending_transport_failure = Some(error.to_string());
                         break;
                     }
                 }
@@ -178,10 +172,17 @@ fn run_remote_desktop_worker_with_close_grace(
                     )
                 })
                 .and_then(|status| status.code());
-            if let Some(reader_thread) = reader_thread {
-                // Preserve every event emitted before process termination.
-                let _ = reader_thread.join();
-            }
+            // The reader owns helper-reported termination semantics. Join it before deciding
+            // whether a writer-side pipe error is the only available failure reason.
+            let reader_outcome = reader_thread
+                .and_then(|reader_thread| reader_thread.join().ok())
+                .unwrap_or_default();
+            deliver_pending_transport_failure(
+                &delivery_tx,
+                &config.worker_id,
+                pending_transport_failure,
+                reader_outcome,
+            );
             send_delivery(
                 &delivery_tx,
                 RemoteDesktopWorkerDelivery::Event {
@@ -286,26 +287,64 @@ fn read_remote_desktop_events(
     stdout: impl std::io::Read,
     delivery_tx: mpsc::Sender<RemoteDesktopWorkerDelivery>,
     frame_slot: RemoteDesktopFrameDeliverySlot,
-) {
+) -> RemoteDesktopReaderOutcome {
     let mut reader = BufReader::new(stdout);
+    let mut outcome = RemoteDesktopReaderOutcome::default();
     loop {
         match read_event_line(&mut reader) {
             Ok(Some(event)) => {
+                if is_terminal_helper_event(&event) {
+                    outcome.terminal_delivery_sent = true;
+                }
                 deliver_worker_event(&worker_id, event, &delivery_tx, &frame_slot);
             }
             Ok(None) => break,
             Err(error) => {
-                send_delivery(
-                    &delivery_tx,
-                    RemoteDesktopWorkerDelivery::TransportFailed {
-                        worker_id,
-                        message: error.to_string(),
-                    },
-                );
+                if !outcome.terminal_delivery_sent {
+                    send_delivery(
+                        &delivery_tx,
+                        RemoteDesktopWorkerDelivery::TransportFailed {
+                            worker_id,
+                            message: error.to_string(),
+                        },
+                    );
+                    outcome.terminal_delivery_sent = true;
+                }
                 break;
             }
         }
     }
+    outcome
+}
+
+fn is_terminal_helper_event(event: &RemoteDesktopHelperEvent) -> bool {
+    matches!(
+        event,
+        RemoteDesktopHelperEvent::ConnectionFailure { .. }
+            | RemoteDesktopHelperEvent::Disconnected { .. }
+            | RemoteDesktopHelperEvent::Terminated { .. }
+    )
+}
+
+fn deliver_pending_transport_failure(
+    delivery_tx: &mpsc::Sender<RemoteDesktopWorkerDelivery>,
+    worker_id: &RemoteDesktopWorkerId,
+    pending_message: Option<String>,
+    reader_outcome: RemoteDesktopReaderOutcome,
+) {
+    let Some(message) = pending_message else {
+        return;
+    };
+    if reader_outcome.terminal_delivery_sent {
+        return;
+    }
+    send_delivery(
+        delivery_tx,
+        RemoteDesktopWorkerDelivery::TransportFailed {
+            worker_id: worker_id.clone(),
+            message,
+        },
+    );
 }
 
 fn deliver_worker_event(
@@ -494,6 +533,77 @@ mod tests {
         assert!(effective.audio.playback);
         assert!(!effective.audio.capture);
         assert!(effective.display.use_all_monitors);
+    }
+
+    #[test]
+    fn helper_protocol_failure_suppresses_later_reader_transport_error() {
+        let worker_id = RemoteDesktopWorkerId::new(RemoteDesktopSessionId::new(), 41);
+        let event = RemoteDesktopHelperEvent::ConnectionFailure {
+            message: "ClearCodec decode failed".to_string(),
+            category: Some(crate::RemoteDesktopErrorCategory::Protocol),
+        };
+        let input = format!(
+            "{}\nnot-valid-json\n",
+            serde_json::to_string(&event).unwrap()
+        );
+        let (delivery_tx, delivery_rx) = mpsc::channel();
+
+        let outcome = read_remote_desktop_events(
+            worker_id,
+            input.as_bytes(),
+            delivery_tx,
+            RemoteDesktopFrameDeliverySlot::new(),
+        );
+
+        assert!(outcome.terminal_delivery_sent);
+        let deliveries = delivery_rx.try_iter().collect::<Vec<_>>();
+        assert_eq!(deliveries.len(), 1);
+        assert!(matches!(
+            &deliveries[0],
+            RemoteDesktopWorkerDelivery::Event {
+                event: RemoteDesktopHelperEvent::ConnectionFailure {
+                    category: Some(crate::RemoteDesktopErrorCategory::Protocol),
+                    ..
+                },
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn pending_transport_failure_is_delivered_without_helper_terminal_reason() {
+        let worker_id = RemoteDesktopWorkerId::new(RemoteDesktopSessionId::new(), 42);
+        let (delivery_tx, delivery_rx) = mpsc::channel();
+
+        deliver_pending_transport_failure(
+            &delivery_tx,
+            &worker_id,
+            Some("helper pipe closed".to_string()),
+            RemoteDesktopReaderOutcome::default(),
+        );
+
+        assert!(matches!(
+            delivery_rx.recv().unwrap(),
+            RemoteDesktopWorkerDelivery::TransportFailed { message, .. }
+                if message == "helper pipe closed"
+        ));
+    }
+
+    #[test]
+    fn helper_terminal_reason_suppresses_pending_transport_failure() {
+        let worker_id = RemoteDesktopWorkerId::new(RemoteDesktopSessionId::new(), 43);
+        let (delivery_tx, delivery_rx) = mpsc::channel();
+
+        deliver_pending_transport_failure(
+            &delivery_tx,
+            &worker_id,
+            Some("os error 232".to_string()),
+            RemoteDesktopReaderOutcome {
+                terminal_delivery_sent: true,
+            },
+        );
+
+        assert!(delivery_rx.try_recv().is_err());
     }
 
     #[test]
