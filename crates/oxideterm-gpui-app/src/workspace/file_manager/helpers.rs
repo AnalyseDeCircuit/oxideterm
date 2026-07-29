@@ -4,84 +4,12 @@ pub(super) use oxideterm_local_files::{
     bookmark_name_for_path, calculate_local_checksum, can_extract_archive, compress_local_files,
     copy_recursively_with_progress, default_file_manager_bookmarks_path, directory_stats,
     extract_local_archive, home_path, join_local_path, list_local_files, local_drives,
-    local_operation_unit_count, local_parent_path, local_preview_metadata, local_sidebar_locations,
-    new_file_manager_bookmark_id, normalize_local_path, now_ms, read_local_preview,
-    read_local_preview_range, sorted_local_files, unique_copy_path, validate_local_name,
-    would_move_directory_into_itself,
+    local_operation_unit_count, local_parent_path,
+    local_path_segments as file_manager_path_segments, local_preview_metadata,
+    local_sidebar_locations, new_file_manager_bookmark_id, normalize_local_path, now_ms,
+    read_local_preview, read_local_preview_range, sorted_local_files, unique_copy_path,
+    validate_local_name, would_move_directory_into_itself,
 };
-
-#[derive(Clone, Debug)]
-pub(super) struct FileManagerPathSegment {
-    pub(super) name: String,
-    pub(super) full_path: String,
-    pub(super) root_is_drive: bool,
-}
-
-pub(super) fn file_manager_path_segments(path: &str) -> Vec<FileManagerPathSegment> {
-    let normalized = normalize_local_path(path);
-    if let Some(segments) = windows_path_segments(&normalized) {
-        return segments;
-    }
-
-    let unix_path = normalized.replace('\\', "/");
-    let mut segments = Vec::new();
-    segments.push(FileManagerPathSegment {
-        name: "/".to_string(),
-        full_path: "/".to_string(),
-        root_is_drive: false,
-    });
-    let mut current = String::from("/");
-    for part in unix_path
-        .trim_start_matches('/')
-        .split('/')
-        .filter(|part| !part.is_empty())
-    {
-        current = if current == "/" {
-            format!("/{part}")
-        } else {
-            format!("{current}/{part}")
-        };
-        segments.push(FileManagerPathSegment {
-            name: part.to_string(),
-            full_path: current.clone(),
-            root_is_drive: false,
-        });
-    }
-    segments
-}
-
-fn windows_path_segments(path: &str) -> Option<Vec<FileManagerPathSegment>> {
-    let normalized = path.replace('/', "\\");
-    let bytes = normalized.as_bytes();
-    if bytes.len() < 2 || bytes[1] != b':' {
-        return None;
-    }
-
-    let drive = normalized[..2].to_string();
-    let mut segments = Vec::new();
-    let mut current = format!("{drive}\\");
-    segments.push(FileManagerPathSegment {
-        name: drive,
-        full_path: current.clone(),
-        root_is_drive: true,
-    });
-    for part in normalized[2..]
-        .trim_start_matches('\\')
-        .split('\\')
-        .filter(|part| !part.is_empty())
-    {
-        if !current.ends_with('\\') {
-            current.push('\\');
-        }
-        current.push_str(part);
-        segments.push(FileManagerPathSegment {
-            name: part.to_string(),
-            full_path: current.clone(),
-            root_is_drive: true,
-        });
-    }
-    Some(segments)
-}
 
 pub(super) fn file_icon_for_entry(entry: &LocalFileEntry) -> (LucideIcon, u32) {
     if entry.file_type == LocalFileType::Directory {

@@ -4,12 +4,6 @@ pub(in crate::workspace::sftp) use oxideterm_sftp::{
     join_remote_path as join_sftp_path, normalize_remote_path, remote_directory_prefixes,
 };
 
-#[derive(Clone)]
-pub(in crate::workspace::sftp) struct PathSegment {
-    pub(super) name: String,
-    pub(super) full_path: String,
-}
-
 pub(in crate::workspace::sftp) fn sftp_bg(color: u32, has_background: bool) -> Rgba {
     color_for_background(color, has_background, SFTP_BG_ACTIVE_BG_ALPHA)
 }
@@ -163,17 +157,17 @@ pub(in crate::workspace::sftp) fn sorted_sftp_files(
 pub(in crate::workspace::sftp) fn sftp_path_segments(
     path: &str,
     is_remote: bool,
-) -> Vec<PathSegment> {
-    let normalized = if is_remote {
-        normalize_remote_path(path)
-    } else {
-        path.replace('\\', "/")
-    };
-    let mut segments = Vec::new();
-    segments.push(PathSegment {
+) -> Vec<oxideterm_local_files::LocalPathSegment> {
+    if !is_remote {
+        return oxideterm_local_files::local_path_segments(path);
+    }
+
+    let normalized = normalize_remote_path(path);
+    let mut segments = vec![oxideterm_local_files::LocalPathSegment {
         name: "/".to_string(),
         full_path: "/".to_string(),
-    });
+        root_is_drive: false,
+    }];
     let without_root = normalized.trim_start_matches('/');
     let mut current = String::from("/");
     for part in without_root.split('/').filter(|part| !part.is_empty()) {
@@ -182,9 +176,10 @@ pub(in crate::workspace::sftp) fn sftp_path_segments(
         } else {
             format!("{current}/{part}")
         };
-        segments.push(PathSegment {
+        segments.push(oxideterm_local_files::LocalPathSegment {
             name: part.to_string(),
             full_path: current.clone(),
+            root_is_drive: false,
         });
     }
     segments
@@ -194,21 +189,8 @@ pub(in crate::workspace::sftp) fn parent_path(path: &str, remote: bool) -> Strin
     if remote {
         return oxideterm_sftp::remote_parent_path(path);
     }
-    let normalized = path.replace('\\', "/");
-    if normalized == "/" {
-        return "/".to_string();
-    }
-    let mut parts = normalized
-        .trim_end_matches('/')
-        .split('/')
-        .filter(|part| !part.is_empty())
-        .collect::<Vec<_>>();
-    parts.pop();
-    if parts.is_empty() {
-        "/".to_string()
-    } else {
-        format!("/{}", parts.join("/"))
-    }
+    oxideterm_local_files::local_parent_path(path)
+        .unwrap_or_else(|| oxideterm_local_files::normalize_local_path(path))
 }
 
 pub(in crate::workspace::sftp) fn join_local_path(base: &str, name: &str) -> String {
@@ -968,5 +950,20 @@ mod sftp_helper_tests {
         assert_ne!(rendered, "-");
         assert_ne!(rendered, "2026/5/7");
         assert!(rendered.contains('/'));
+    }
+
+    #[test]
+    fn local_navigation_preserves_windows_drive_roots() {
+        let segments = sftp_path_segments(r"D:\Projects\OxideTerm", false);
+
+        assert_eq!(
+            segments
+                .iter()
+                .map(|segment| segment.full_path.as_str())
+                .collect::<Vec<_>>(),
+            [r"D:\", r"D:\Projects", r"D:\Projects\OxideTerm"]
+        );
+        assert_eq!(parent_path(r"D:\Projects\OxideTerm", false), r"D:\Projects");
+        assert_eq!(parent_path(r"D:\", false), r"D:\");
     }
 }

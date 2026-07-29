@@ -684,10 +684,10 @@ impl WorkspaceApp {
                     })
                     .when(index == 0, |item| {
                         item.child(Self::render_lucide_icon(
-                            if pane == SftpPane::Remote {
-                                LucideIcon::Server
-                            } else {
-                                LucideIcon::Home
+                            match (pane, segment.root_is_drive) {
+                                (SftpPane::Remote, _) => LucideIcon::Server,
+                                (SftpPane::Local, true) => LucideIcon::HardDrive,
+                                (SftpPane::Local, false) => LucideIcon::Home,
                             },
                             SFTP_ICON_MD,
                             rgb(theme.text_muted),

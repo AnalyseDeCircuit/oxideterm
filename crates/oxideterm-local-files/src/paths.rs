@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use crate::{LocalSidebarLocation, LocalSidebarLocationKind};
+use crate::{LocalPathSegment, LocalSidebarLocation, LocalSidebarLocationKind};
 
 #[cfg(target_os = "macos")]
 const MACOS_APPLICATIONS_PATH: &str = "/Applications";
@@ -89,10 +89,86 @@ pub fn normalize_local_path(path: &str) -> String {
 }
 
 pub fn local_parent_path(path: &str) -> Option<String> {
-    let path = Path::new(path);
+    let normalized = normalize_local_path(path);
+    if let Some(segments) = windows_path_segments(&normalized) {
+        // Drive roots have no filesystem parent; their caller may open the drive picker.
+        return segments
+            .get(segments.len().checked_sub(2)?)
+            .map(|segment| segment.full_path.clone());
+    }
+    let path = Path::new(&normalized);
     path.parent()
         .map(|parent| parent.to_string_lossy().to_string())
         .filter(|parent| !parent.is_empty())
+}
+
+pub fn local_path_segments(path: &str) -> Vec<LocalPathSegment> {
+    let normalized = normalize_local_path(path);
+    if let Some(segments) = windows_path_segments(&normalized) {
+        return segments;
+    }
+
+    let unix_path = normalized.replace('\\', "/");
+    let mut segments = vec![LocalPathSegment {
+        name: "/".to_string(),
+        full_path: "/".to_string(),
+        root_is_drive: false,
+    }];
+    let mut current = String::from("/");
+    for part in unix_path
+        .trim_start_matches('/')
+        .split('/')
+        .filter(|part| !part.is_empty())
+    {
+        current = if current == "/" {
+            format!("/{part}")
+        } else {
+            format!("{current}/{part}")
+        };
+        segments.push(LocalPathSegment {
+            name: part.to_string(),
+            full_path: current.clone(),
+            root_is_drive: false,
+        });
+    }
+    segments
+}
+
+fn windows_path_segments(path: &str) -> Option<Vec<LocalPathSegment>> {
+    let normalized = path.replace('/', "\\");
+    let bytes = normalized.as_bytes();
+    if bytes.len() < 2
+        || !bytes[0].is_ascii_alphabetic()
+        || bytes[1] != b':'
+        || (bytes.len() > 2 && bytes[2] != b'\\')
+    {
+        return None;
+    }
+
+    // Keep the drive prefix attached to every clickable path instead of producing `/C:`.
+    let drive = normalized[..2].to_string();
+    let mut current = format!("{drive}\\");
+    let mut segments = vec![LocalPathSegment {
+        name: drive,
+        full_path: current.clone(),
+        root_is_drive: true,
+    }];
+    for part in normalized[2..]
+        .trim_start_matches('\\')
+        .split('\\')
+        .filter(|part| !part.is_empty())
+    {
+        if !current.ends_with('\\') {
+            current.push('\\');
+        }
+        current.push_str(part);
+        segments.push(LocalPathSegment {
+            name: part.to_string(),
+            full_path: current.clone(),
+            root_is_drive: true,
+        });
+    }
+    Some(segments)
 }
 
 pub fn join_local_path(base: &str, name: &str) -> String {
@@ -212,6 +288,30 @@ mod tests {
         );
 
         assert_eq!(locations[0].path, redirected_desktop.to_string_lossy());
+    }
+
+    #[test]
+    fn windows_drive_segments_remain_absolute_on_every_platform() {
+        let segments = local_path_segments(r"D:\Projects\OxideTerm");
+
+        assert_eq!(
+            segments
+                .iter()
+                .map(|segment| segment.full_path.as_str())
+                .collect::<Vec<_>>(),
+            [r"D:\", r"D:\Projects", r"D:\Projects\OxideTerm"]
+        );
+        assert!(segments.iter().all(|segment| segment.root_is_drive));
+    }
+
+    #[test]
+    fn windows_drive_parent_never_becomes_a_unix_style_path() {
+        assert_eq!(
+            local_parent_path(r"D:\Projects\OxideTerm").as_deref(),
+            Some(r"D:\Projects")
+        );
+        assert_eq!(local_parent_path(r"D:\Projects").as_deref(), Some(r"D:\"));
+        assert_eq!(local_parent_path(r"D:\"), None);
     }
 
     #[test]

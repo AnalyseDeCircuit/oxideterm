@@ -51,6 +51,14 @@ pub struct LocalDrive {
     pub read_only: bool,
 }
 
+/// A clickable component of a platform-native local filesystem path.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct LocalPathSegment {
+    pub name: String,
+    pub full_path: String,
+    pub root_is_drive: bool,
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 /// Identifies the semantic role of an operating-system sidebar directory.
 pub enum LocalSidebarLocationKind {

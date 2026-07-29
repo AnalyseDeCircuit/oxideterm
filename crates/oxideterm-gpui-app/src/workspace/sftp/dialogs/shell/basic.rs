@@ -107,8 +107,9 @@ impl WorkspaceApp {
                                 MouseButton::Left,
                                 cx.listener(move |this, _event, _window, cx| {
                                     this.sftp_view.update(cx, |sftp_view, cx| {
-                                        sftp_view.local_path = path.clone();
-                                        sftp_view.local_path_input = path.clone();
+                                        // Drive selection is committed navigation, so refresh the
+                                        // file list and reset selection state through one path.
+                                        sftp_view.apply_local_path(path.clone());
                                         cx.notify();
                                     });
                                     this.close_sftp_dialog(cx);
