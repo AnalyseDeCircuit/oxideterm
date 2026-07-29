@@ -138,27 +138,27 @@ impl window_shell::WorkspaceWindowBackgroundEntity {
         let blurred_image = self.cache.render_blurred_image(&background);
         self.drop_retired_images(Some(window), cx);
         if self.cache.has_pending() {
-            self.schedule_poll(cx);
+            self.schedule_decode_completion(cx);
         }
         workspace_background_image_layer(background, blurred_image)
     }
 
-    fn schedule_poll(&mut self, cx: &mut Context<Self>) {
-        if self.poll_task.is_some() {
+    fn schedule_decode_completion(&mut self, cx: &mut Context<Self>) {
+        if self.decode_completion_task.is_some() {
             return;
         }
         // Each shell owns its cache completion task, so releasing one native
         // window cannot keep repaint work alive through the shared session.
-        self.poll_task = Some(cx.spawn(async move |window_background, cx| {
+        self.decode_completion_task = Some(cx.spawn(async move |window_background, cx| {
             Timer::after(Duration::from_millis(16)).await;
             let _ = window_background.update(cx, |window_background, cx| {
-                window_background.poll_task = None;
+                window_background.decode_completion_task = None;
                 if window_background.cache.drain_completed() {
                     window_background.drop_retired_images(None, cx);
                     cx.notify();
                 }
                 if window_background.cache.has_pending() {
-                    window_background.schedule_poll(cx);
+                    window_background.schedule_decode_completion(cx);
                 }
             });
         }));

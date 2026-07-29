@@ -99,7 +99,7 @@ where
 /// Owns one native window's image cache and its bounded completion task.
 pub(in crate::workspace) struct WorkspaceWindowBackgroundEntity {
     pub(in crate::workspace) cache: BackgroundImageRenderCache,
-    pub(in crate::workspace) poll_task: Option<Task<()>>,
+    pub(in crate::workspace) decode_completion_task: Option<Task<()>>,
 }
 
 impl WorkspaceWindowBackgroundEntity {
@@ -116,7 +116,7 @@ impl WorkspaceWindowBackgroundEntity {
             cache.set_byte_limit(byte_limit);
             Self {
                 cache,
-                poll_task: None,
+                decode_completion_task: None,
             }
         })
     }
@@ -274,7 +274,7 @@ mod tests {
         let session = cx.new(|_| NotificationSource);
         let background = cx.new(|_| WorkspaceWindowBackgroundEntity {
             cache: BackgroundImageRenderCache::default(),
-            poll_task: None,
+            decode_completion_task: None,
         });
         let render_count = Arc::new(AtomicUsize::new(0));
         let (_, cx) = cx.add_window_view({
@@ -296,11 +296,11 @@ mod tests {
     }
 
     #[gpui::test]
-    fn releasing_window_background_cancels_its_pending_poll(cx: &mut TestAppContext) {
+    fn releasing_window_background_cancels_its_pending_decode_completion(cx: &mut TestAppContext) {
         let (release_sender, release_receiver) = tokio::sync::oneshot::channel();
         let background = cx.new(|cx| WorkspaceWindowBackgroundEntity {
             cache: BackgroundImageRenderCache::default(),
-            poll_task: Some(cx.spawn(async move |_, _| {
+            decode_completion_task: Some(cx.spawn(async move |_, _| {
                 let _ = release_receiver.await;
             })),
         });
