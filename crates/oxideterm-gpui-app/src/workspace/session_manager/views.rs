@@ -624,6 +624,8 @@ impl WorkspaceApp {
                 item_indices,
                 is_last_in_section,
             }) => div()
+                .w_full()
+                .min_w(px(0.0))
                 .flex()
                 .flex_wrap()
                 .gap(px(self.tokens.spacing.two))
@@ -639,6 +641,8 @@ impl WorkspaceApp {
                 }))
                 .into_any_element(),
             Some(SessionManagerGridRow::Cards { item_indices }) => div()
+                .w_full()
+                .min_w(px(0.0))
                 .flex()
                 .flex_wrap()
                 .gap(px(self.tokens.spacing.three))
@@ -754,6 +758,8 @@ impl WorkspaceApp {
 
     pub(super) fn render_session_manager_section_header(&self, title: String, count: usize) -> Div {
         div()
+            .w_full()
+            .min_w(px(0.0))
             .flex()
             .flex_col()
             .gap(px(self.tokens.spacing.three))
@@ -1165,6 +1171,8 @@ impl WorkspaceApp {
         let group_name = group.rsplit('/').next().unwrap_or(group).to_string();
         let group_id = group.to_string();
         div()
+            .w_full()
+            .min_w(px(0.0))
             .border_b_1()
             .border_color(theme_border_half(theme.border, has_background))
             .px_3()
@@ -1272,6 +1280,8 @@ impl WorkspaceApp {
                 .into_any_element()
         };
         div()
+            .w_full()
+            .min_w(px(0.0))
             .border_b_1()
             .border_color(theme_border_half(theme.border, has_background))
             .px_3()

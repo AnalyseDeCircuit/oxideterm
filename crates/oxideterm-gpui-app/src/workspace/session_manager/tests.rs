@@ -259,6 +259,47 @@ pub(super) fn session_manager_main_views_use_virtual_lists_as_scroll_owners() {
 }
 
 #[test]
+pub(super) fn session_manager_virtual_rows_claim_the_available_list_width() {
+    let source = include_str!("views.rs");
+    // Every top-level virtual row must stretch independently of its content width.
+    for (function_name, next_function_name) in [
+        (
+            "pub(super) fn render_session_manager_section_header",
+            "pub(super) fn render_session_manager_item_card",
+        ),
+        (
+            "pub(super) fn render_session_manager_tree_group_row",
+            "pub(super) fn render_session_manager_display_item_row",
+        ),
+        (
+            "pub(super) fn render_session_manager_display_item_row",
+            "pub(super) fn render_session_manager_item_icon",
+        ),
+    ] {
+        let function_start = source.find(function_name).expect("row function");
+        let function_tail = &source[function_start + function_name.len()..];
+        let function_end = function_tail
+            .find(next_function_name)
+            .expect("next row function");
+        let function_source = &function_tail[..function_end];
+        assert!(function_source.contains(".w_full()"));
+        assert!(function_source.contains(".min_w(px(0.0))"));
+    }
+
+    let grid_row_start = source
+        .find("pub(super) fn render_session_manager_grid_row")
+        .expect("grid row function");
+    let grid_row_tail =
+        &source[grid_row_start + "pub(super) fn render_session_manager_grid_row".len()..];
+    let grid_row_end = grid_row_tail
+        .find("pub(super) fn render_session_manager_recent_item")
+        .expect("next grid function");
+    let grid_row_source = &grid_row_tail[..grid_row_end];
+    assert_eq!(grid_row_source.matches(".w_full()").count(), 2);
+    assert_eq!(grid_row_source.matches(".min_w(px(0.0))").count(), 2);
+}
+
+#[test]
 pub(super) fn session_menu_dismissal_closes_all_manager_popovers() {
     let mut state = SessionManagerState {
         show_batch_move: true,
