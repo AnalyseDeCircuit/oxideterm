@@ -92,6 +92,7 @@ sum_tree.workspace = true
 taffy = "=0.10.1"
 thiserror.workspace = true
 gpui_util.workspace = true
+unicode-segmentation = { workspace = true }
 hdrhistogram = { workspace = true, optional = true }
 waker-fn = "1.2.0"
 lyon = "1.0"
@@ -148,7 +149,6 @@ lyon = { version = "1.0", features = ["extra"] }
 proptest = { workspace = true }
 rand = "0.9.4"
 scheduler = { workspace = true, features = ["test-support"] }
-unicode-segmentation = { workspace = true }
 
 
 [build-dependencies]

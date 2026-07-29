@@ -724,11 +724,15 @@ pub(crate) fn terminal_font_with_family_and_cjk(
 ) -> Font {
     let mut fallback_families = Vec::new();
     push_font_fallback(&mut fallback_families, family);
+    // A bundled Latin monospace must precede optional CJK and system fallbacks.
+    push_font_fallback(
+        &mut fallback_families,
+        oxideterm_settings::JETBRAINS_MONO_SUBSET_FAMILY,
+    );
     if let Some(cjk_family) = cjk_family {
         push_font_fallback(&mut fallback_families, cjk_family);
     }
     for fallback in [
-        oxideterm_settings::JETBRAINS_MONO_SUBSET_FAMILY,
         "JetBrainsMono Nerd Font",
         "JetBrains Mono NF (Subset)",
         "JetBrains Mono",

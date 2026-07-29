@@ -10,6 +10,7 @@ use std::{
     ops::Range,
     sync::Arc,
 };
+use unicode_segmentation::UnicodeSegmentation;
 
 use super::LineWrapper;
 
@@ -614,7 +615,7 @@ impl LineLayoutCache {
                 .layout_line(&text, font_size, runs);
 
             if let Some(force_width) = force_width {
-                apply_force_width_to_layout(&mut layout, force_width);
+                apply_force_width_to_layout(&mut layout, &text, force_width);
             }
 
             let key = Arc::new(CacheKey {
@@ -763,7 +764,7 @@ impl LineLayoutCache {
             .layout_line(&text, font_size, runs);
 
         if let Some(force_width) = force_width {
-            apply_force_width_to_layout(&mut layout, force_width);
+            apply_force_width_to_layout(&mut layout, &text, force_width);
         }
 
         let key = Arc::new(HashedCacheKey {
@@ -783,33 +784,46 @@ impl LineLayoutCache {
     }
 }
 
-// Combining marks (e.g. Thai vowel signs, Arabic diacritics) are shaped by
-// HarfBuzz at the same x position as their base character. The force-width
-// loop must not advance the cell counter for these zero-advance glyphs,
-// otherwise they get displaced into the next cell. We detect them by checking
-// whether shaped x has advanced by at least half a cell beyond the last base.
-fn apply_force_width_to_layout(layout: &mut LineLayout, force_width: Pixels) {
-    let mut glyph_pos: usize = 0;
-    // NEG_INFINITY ensures the first glyph is always classified as a base.
-    let mut last_base_shaped_x = px(f32::NEG_INFINITY);
+fn apply_force_width_to_layout(layout: &mut LineLayout, text: &str, force_width: Pixels) {
+    let grapheme_starts = text
+        .grapheme_indices(true)
+        .map(|(byte_index, _)| byte_index)
+        .collect::<Vec<_>>();
+    let mut visual_cell = 0usize;
+    let mut last_grapheme_ordinal = None;
+    let mut last_base_shaped_x = px(0.);
     let mut last_base_actual_x = px(0.);
 
     for run in layout.runs.iter_mut() {
         for glyph in run.glyphs.iter_mut() {
             let shaped_x = glyph.position.x;
+            let grapheme_ordinal = grapheme_ordinal_for_byte_index(&grapheme_starts, glyph.index);
 
-            if shaped_x > last_base_shaped_x + force_width * 0.5 {
-                let forced_x = glyph_pos * force_width;
+            if last_grapheme_ordinal != Some(grapheme_ordinal) {
+                if let Some(previous_ordinal) = last_grapheme_ordinal {
+                    // Absolute distance handles visual-order glyphs from right-to-left shaping,
+                    // while larger jumps preserve the cells consumed by a ligature cluster.
+                    visual_cell += grapheme_ordinal.abs_diff(previous_ordinal).max(1);
+                }
+                let forced_x = visual_cell * force_width;
                 if (shaped_x - forced_x).abs() > px(1.) {
                     glyph.position.x = forced_x;
                 }
                 last_base_shaped_x = shaped_x;
                 last_base_actual_x = glyph.position.x;
-                glyph_pos += 1;
+                last_grapheme_ordinal = Some(grapheme_ordinal);
             } else {
+                // Multiple glyphs in one grapheme retain their shaped offset from the base glyph.
                 glyph.position.x = last_base_actual_x + (shaped_x - last_base_shaped_x);
             }
         }
+    }
+}
+
+fn grapheme_ordinal_for_byte_index(grapheme_starts: &[usize], byte_index: usize) -> usize {
+    match grapheme_starts.binary_search(&byte_index) {
+        Ok(ordinal) => ordinal,
+        Err(next_ordinal) => next_ordinal.saturating_sub(1),
     }
 }
 
@@ -1002,7 +1016,19 @@ mod tests {
         let cell_width = px(8.);
         let mut layout = make_layout(vec![glyph_at(0., 0), glyph_at(8., 1), glyph_at(16., 2)]);
 
-        apply_force_width_to_layout(&mut layout, cell_width);
+        apply_force_width_to_layout(&mut layout, "abc", cell_width);
+
+        let positions = glyph_x_positions(&layout);
+        assert_eq!(positions, vec![0., 8., 16.]);
+    }
+
+    #[test]
+    fn test_force_width_proportional_narrow_latin_uses_distinct_cells() {
+        let cell_width = px(8.);
+        // A proportional fallback advances narrow Latin glyphs by less than half a terminal cell.
+        let mut layout = make_layout(vec![glyph_at(0., 0), glyph_at(3., 1), glyph_at(6., 2)]);
+
+        apply_force_width_to_layout(&mut layout, "iii", cell_width);
 
         let positions = glyph_x_positions(&layout);
         assert_eq!(positions, vec![0., 8., 16.]);
@@ -1017,7 +1043,7 @@ mod tests {
             glyph_at(0., 3), // ี (combining mark, same x)
         ]);
 
-        apply_force_width_to_layout(&mut layout, cell_width);
+        apply_force_width_to_layout(&mut layout, "กี", cell_width);
 
         let positions = glyph_x_positions(&layout);
         assert_eq!(positions, vec![0., 0.]);
@@ -1028,7 +1054,7 @@ mod tests {
         let cell_width = px(8.);
         let mut layout = make_layout(vec![glyph_at(0., 0), glyph_at(0., 3), glyph_at(8., 6)]);
 
-        apply_force_width_to_layout(&mut layout, cell_width);
+        apply_force_width_to_layout(&mut layout, "กีข", cell_width);
 
         let positions = glyph_x_positions(&layout);
         assert_eq!(positions, vec![0., 0., 8.]);
@@ -1037,7 +1063,7 @@ mod tests {
     #[test]
     fn test_force_width_multiple_combining_marks() {
         let cell_width = px(8.);
-        // Simulates "ก้" — base + vowel + tone mark (two combining marks stacked)
+        // Simulates "กี้ข" — base + vowel + tone mark followed by another base.
         let mut layout = make_layout(vec![
             glyph_at(0., 0), // ก (base)
             glyph_at(0., 3), // vowel (combining)
@@ -1045,7 +1071,7 @@ mod tests {
             glyph_at(8., 9), // next base
         ]);
 
-        apply_force_width_to_layout(&mut layout, cell_width);
+        apply_force_width_to_layout(&mut layout, "กี้ข", cell_width);
 
         let positions = glyph_x_positions(&layout);
         assert_eq!(positions, vec![0., 0., 0., 8.]);
@@ -1061,7 +1087,7 @@ mod tests {
             glyph_at(19.8, 2), // >1px off from 16.0, corrected
         ]);
 
-        apply_force_width_to_layout(&mut layout, cell_width);
+        apply_force_width_to_layout(&mut layout, "abc", cell_width);
 
         let positions = glyph_x_positions(&layout);
         assert_eq!(positions, vec![0.5, 8., 16.]);
@@ -1074,9 +1100,42 @@ mod tests {
         // The combining mark must align to the base's actual position, not the grid slot.
         let mut layout = make_layout(vec![glyph_at(0.5, 0), glyph_at(0.5, 3)]);
 
-        apply_force_width_to_layout(&mut layout, cell_width);
+        apply_force_width_to_layout(&mut layout, "กี", cell_width);
 
         let positions = glyph_x_positions(&layout);
         assert_eq!(positions, vec![0.5, 0.5]);
+    }
+
+    #[test]
+    fn test_force_width_keeps_multiple_glyphs_in_one_cluster_together() {
+        let cell_width = px(8.);
+        let mut layout = make_layout(vec![glyph_at(0., 0), glyph_at(1.5, 0)]);
+
+        apply_force_width_to_layout(&mut layout, "กี", cell_width);
+
+        let positions = glyph_x_positions(&layout);
+        assert_eq!(positions, vec![0., 1.5]);
+    }
+
+    #[test]
+    fn test_force_width_preserves_cells_consumed_by_ligature() {
+        let cell_width = px(8.);
+        let mut layout = make_layout(vec![glyph_at(0., 0), glyph_at(18., 3)]);
+
+        apply_force_width_to_layout(&mut layout, "ffix", cell_width);
+
+        let positions = glyph_x_positions(&layout);
+        assert_eq!(positions, vec![0., 24.]);
+    }
+
+    #[test]
+    fn test_force_width_handles_right_to_left_visual_order() {
+        let cell_width = px(8.);
+        let mut layout = make_layout(vec![glyph_at(0., 4), glyph_at(8., 2), glyph_at(16., 0)]);
+
+        apply_force_width_to_layout(&mut layout, "אבג", cell_width);
+
+        let positions = glyph_x_positions(&layout);
+        assert_eq!(positions, vec![0., 8., 16.]);
     }
 }

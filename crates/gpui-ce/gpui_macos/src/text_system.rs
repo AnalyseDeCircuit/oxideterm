@@ -2,7 +2,7 @@
 
 use anyhow::anyhow;
 use cocoa::appkit::CGFloat;
-use collections::HashMap;
+use collections::{HashMap, HashSet};
 use core_foundation::{
     array::{CFArray, CFArrayRef},
     attributed_string::CFMutableAttributedString,
@@ -63,6 +63,28 @@ struct FontKey {
     font_family: SharedString,
     font_features: FontFeatures,
     font_fallbacks: Option<FontFallbacks>,
+}
+
+impl FontKey {
+    fn references_any_family(&self, families: &HashSet<String>) -> bool {
+        families.contains(self.font_family.as_ref())
+            || self.font_fallbacks.as_ref().is_some_and(|fallbacks| {
+                fallbacks
+                    .fallback_list()
+                    .iter()
+                    .any(|family| families.contains(family))
+            })
+    }
+}
+
+fn font_references_any_family(font: &Font, families: &HashSet<String>) -> bool {
+    families.contains(font.family.as_ref())
+        || font.fallbacks.as_ref().is_some_and(|fallbacks| {
+            fallbacks
+                .fallback_list()
+                .iter()
+                .any(|family| families.contains(family))
+        })
 }
 
 struct MacTextSystemState {
@@ -258,7 +280,7 @@ fn font_smoothing_allowed_by_user() -> bool {
 
 impl MacTextSystemState {
     fn add_fonts(&mut self, fonts: Vec<Cow<'static, [u8]>>) -> Result<()> {
-        let fonts = fonts
+        let font_handles = fonts
             .into_iter()
             .map(|bytes| match bytes {
                 Cow::Borrowed(embedded_font) => {
@@ -273,7 +295,16 @@ impl MacTextSystemState {
                 Cow::Owned(bytes) => Ok(Handle::from_memory(Arc::new(bytes), 0)),
             })
             .collect::<Result<Vec<_>>>()?;
-        self.memory_source.add_fonts(fonts.into_iter())?;
+        let added_families = font_handles
+            .iter()
+            .filter_map(|handle| handle.load().ok().map(|font| font.family_name()))
+            .collect::<HashSet<_>>();
+        self.memory_source.add_fonts(font_handles.into_iter())?;
+        // Preserve loaded font IDs while replacing selections affected by a newly registered family.
+        self.font_selections
+            .retain(|font, _| !font_references_any_family(font, &added_families));
+        self.font_ids_by_font_key
+            .retain(|key, _| !key.references_any_family(&added_families));
         Ok(())
     }
 

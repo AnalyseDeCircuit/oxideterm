@@ -466,11 +466,15 @@ fn terminal_font_ligature_preference_controls_font_features() {
 #[test]
 fn terminal_font_places_explicit_cjk_fallback_before_defaults() {
     let font = terminal_font_with_family_and_cjk(
-        oxideterm_settings::JETBRAINS_MONO_SUBSET_FAMILY,
+        "Missing Custom Font",
         Some("Noto Sans Mono CJK SC"),
         false,
     );
     let fallbacks = font.fallbacks.as_ref().unwrap().fallback_list();
+    let bundled_latin = fallbacks
+        .iter()
+        .position(|family| family == oxideterm_settings::JETBRAINS_MONO_SUBSET_FAMILY)
+        .expect("bundled Latin fallback should remain available");
     let explicit_cjk = fallbacks
         .iter()
         .position(|family| family == "Noto Sans Mono CJK SC")
@@ -480,6 +484,7 @@ fn terminal_font_places_explicit_cjk_fallback_before_defaults() {
         .position(|family| family == oxideterm_settings::MAPLE_MONO_SUBSET_FAMILY)
         .expect("bundled CJK fallback should remain available");
 
+    assert!(bundled_latin < explicit_cjk);
     assert!(explicit_cjk < bundled_cjk);
 }
 

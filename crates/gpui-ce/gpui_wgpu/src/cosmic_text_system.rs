@@ -1,5 +1,5 @@
 use anyhow::{Context as _, Ok, Result};
-use collections::HashMap;
+use collections::{HashMap, HashSet};
 use cosmic_text::{
     Attrs, AttrsList, Ellipsize, Family, Font as CosmicTextFont,
     FontFeatures as CosmicFontFeatures, FontSystem, ShapeBuffer, ShapeLine,
@@ -37,6 +37,16 @@ impl FontKey {
             features,
             fallbacks,
         }
+    }
+
+    fn references_any_family(&self, families: &HashSet<String>) -> bool {
+        families.contains(self.family.as_ref())
+            || self.fallbacks.as_ref().is_some_and(|fallbacks| {
+                fallbacks
+                    .fallback_list()
+                    .iter()
+                    .any(|family| families.contains(family))
+            })
     }
 }
 
@@ -210,17 +220,27 @@ impl CosmicTextSystemState {
 
     #[profiling::function]
     fn add_fonts(&mut self, fonts: Vec<Cow<'static, [u8]>>) -> Result<()> {
-        let db = self.font_system.db_mut();
-        for bytes in fonts {
-            match bytes {
-                Cow::Borrowed(embedded_font) => {
-                    db.load_font_data(embedded_font.to_vec());
-                }
-                Cow::Owned(bytes) => {
-                    db.load_font_data(bytes);
+        let added_families = {
+            let db = self.font_system.db_mut();
+            let existing_face_ids = db.faces().map(|face| face.id).collect::<HashSet<_>>();
+            for bytes in fonts {
+                match bytes {
+                    Cow::Borrowed(embedded_font) => {
+                        db.load_font_data(embedded_font.to_vec());
+                    }
+                    Cow::Owned(bytes) => {
+                        db.load_font_data(bytes);
+                    }
                 }
             }
-        }
+            db.faces()
+                .filter(|face| !existing_face_ids.contains(&face.id))
+                .flat_map(|face| face.families.iter().map(|family| family.0.clone()))
+                .collect::<HashSet<_>>()
+        };
+        // Keep loaded font IDs stable while invalidating selections affected by new families.
+        self.font_ids_by_family_cache
+            .retain(|key, _| !key.references_any_family(&added_families));
         Ok(())
     }
 
@@ -273,6 +293,8 @@ impl CosmicTextSystemState {
             .db()
             .faces()
             .filter(|face| face.families.iter().any(|family| *name == family.0))
+            // Bundled bytes are authoritative when the system has another face with the same name.
+            .sorted_by_key(|face| !matches!(&face.source, cosmic_text::fontdb::Source::Binary(_)))
             .map(|face| (face.id, face.post_script_name.clone()))
             .collect::<SmallVec<[_; 4]>>();
 
@@ -868,6 +890,20 @@ mod tests {
 
     fn fid(i: usize) -> FontId {
         FontId(i)
+    }
+
+    #[test]
+    fn font_key_matches_new_primary_or_fallback_family() {
+        let key = FontKey::new(
+            SharedString::from("Primary"),
+            FontFeatures::default(),
+            Some(FontFallbacks::from_fonts(vec!["Fallback".to_string()])),
+        );
+        let families = |family: &str| std::iter::once(family.to_string()).collect::<HashSet<_>>();
+
+        assert!(key.references_any_family(&families("Primary")));
+        assert!(key.references_any_family(&families("Fallback")));
+        assert!(!key.references_any_family(&families("Other")));
     }
 
     fn chain(ids: &[usize]) -> SmallVec<[(FontId, SharedString); 4]> {
