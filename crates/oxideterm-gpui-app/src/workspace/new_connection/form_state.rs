@@ -191,6 +191,7 @@ pub(in crate::workspace) enum NewConnectionField {
     ManagedKeyId,
     CertPath,
     Passphrase,
+    IdentityAgent,
     Group,
     PostConnectCommand,
     Color,
@@ -203,6 +204,7 @@ pub(in crate::workspace) enum NewConnectionField {
     JumpManagedKeyId,
     JumpCertPath,
     JumpPassphrase,
+    JumpIdentityAgent,
     UpstreamProxyHost,
     UpstreamProxyPort,
     UpstreamProxyNoProxy,
@@ -318,7 +320,7 @@ pub(in crate::workspace) struct NewConnectionProxyHop {
     pub(in crate::workspace) cert_path: String,
     pub(in crate::workspace) passphrase: String,
     pub(in crate::workspace) agent_forwarding: bool,
-    pub(in crate::workspace) identity_agent: Option<String>,
+    pub(in crate::workspace) identity_agent: String,
     pub(in crate::workspace) agent_forwarding_socket: Option<String>,
     pub(in crate::workspace) legacy_ssh_compatibility: bool,
 }
@@ -338,7 +340,10 @@ impl fmt::Debug for NewConnectionProxyHop {
             .field("cert_path", &self.cert_path)
             .field("passphrase", &"[redacted secret]")
             .field("agent_forwarding", &self.agent_forwarding)
-            .field("identity_agent_configured", &self.identity_agent.is_some())
+            .field(
+                "identity_agent_configured",
+                &identity_agent_selector(&self.identity_agent).is_some(),
+            )
             .field(
                 "agent_forwarding_socket_configured",
                 &self.agent_forwarding_socket.is_some(),
@@ -362,7 +367,7 @@ impl NewConnectionProxyHop {
             cert_path: String::new(),
             passphrase: String::new(),
             agent_forwarding: false,
-            identity_agent: None,
+            identity_agent: String::new(),
             agent_forwarding_socket: None,
             legacy_ssh_compatibility: false,
         }
@@ -398,7 +403,7 @@ impl NewConnectionProxyHop {
         self.cert_path = connection.cert_path.clone().unwrap_or_default();
         self.managed_key_id = connection.managed_key_id.clone().unwrap_or_default();
         self.agent_forwarding = connection.agent_forwarding;
-        self.identity_agent = connection.identity_agent.clone();
+        self.identity_agent = connection.identity_agent.clone().unwrap_or_default();
         self.agent_forwarding_socket = connection.agent_forwarding_socket.clone();
         self.legacy_ssh_compatibility = connection.legacy_ssh_compatibility;
     }
@@ -454,7 +459,7 @@ pub(in crate::workspace) struct NewConnectionForm {
     pub(in crate::workspace) upstream_proxy_remote_dns: bool,
     pub(in crate::workspace) upstream_proxy_no_proxy: String,
     pub(in crate::workspace) agent_forwarding: bool,
-    pub(in crate::workspace) identity_agent: Option<String>,
+    pub(in crate::workspace) identity_agent: String,
     pub(in crate::workspace) agent_forwarding_socket: Option<String>,
     pub(in crate::workspace) legacy_ssh_compatibility: bool,
     pub(in crate::workspace) terminal: ConnectionTerminalOptions,
@@ -531,7 +536,10 @@ impl fmt::Debug for NewConnectionForm {
             .field("upstream_proxy_remote_dns", &self.upstream_proxy_remote_dns)
             .field("upstream_proxy_no_proxy", &self.upstream_proxy_no_proxy)
             .field("agent_forwarding", &self.agent_forwarding)
-            .field("identity_agent_configured", &self.identity_agent.is_some())
+            .field(
+                "identity_agent_configured",
+                &identity_agent_selector(&self.identity_agent).is_some(),
+            )
             .field(
                 "agent_forwarding_socket_configured",
                 &self.agent_forwarding_socket.is_some(),
@@ -603,7 +611,7 @@ impl Default for NewConnectionForm {
             upstream_proxy_remote_dns: true,
             upstream_proxy_no_proxy: String::new(),
             agent_forwarding: false,
-            identity_agent: None,
+            identity_agent: String::new(),
             agent_forwarding_socket: None,
             legacy_ssh_compatibility: false,
             terminal: ConnectionTerminalOptions::default(),
@@ -696,6 +704,29 @@ pub(in crate::workspace) fn toggle_connection_secret_field_visibility(
             true
         }
         _ => false,
+    }
+}
+
+/// Returns the configured endpoint selector while preserving an empty draft as auto-detect.
+pub(in crate::workspace) fn identity_agent_selector(value: &str) -> Option<&str> {
+    let value = value.trim();
+    (!value.is_empty()).then_some(value)
+}
+
+/// Converts a form endpoint into the persisted optional representation.
+pub(in crate::workspace) fn identity_agent_from_form(value: &str) -> Option<String> {
+    identity_agent_selector(value).map(str::to_string)
+}
+
+/// Refreshes the main connection's status only after its endpoint draft changes.
+pub(in crate::workspace) fn refresh_identity_agent_availability(form: &mut NewConnectionForm) {
+    form.agent_available =
+        oxideterm_ssh::ssh_agent_available(identity_agent_selector(&form.identity_agent));
+}
+
+fn refresh_focused_identity_agent_availability(form: &mut NewConnectionForm) {
+    if form.focused_field == NewConnectionField::IdentityAgent {
+        refresh_identity_agent_availability(form);
     }
 }
 
@@ -856,7 +887,16 @@ pub(in crate::workspace) fn next_connection_field(
             NewConnectionField::Group,
             NewConnectionField::PostConnectCommand,
         ],
-        SshAuthTab::Agent | SshAuthTab::TwoFactor => vec![
+        SshAuthTab::Agent => vec![
+            NewConnectionField::Name,
+            NewConnectionField::Host,
+            NewConnectionField::Port,
+            NewConnectionField::Username,
+            NewConnectionField::IdentityAgent,
+            NewConnectionField::Group,
+            NewConnectionField::PostConnectCommand,
+        ],
+        SshAuthTab::TwoFactor => vec![
             NewConnectionField::Name,
             NewConnectionField::Host,
             NewConnectionField::Port,
@@ -904,10 +944,16 @@ pub(in crate::workspace) fn next_jump_connection_field(
             NewConnectionField::JumpUsername,
             NewConnectionField::JumpPassword,
         ],
-        SshAuthTab::DefaultKey | SshAuthTab::Agent => vec![
+        SshAuthTab::DefaultKey => vec![
             NewConnectionField::JumpHost,
             NewConnectionField::JumpPort,
             NewConnectionField::JumpUsername,
+        ],
+        SshAuthTab::Agent => vec![
+            NewConnectionField::JumpHost,
+            NewConnectionField::JumpPort,
+            NewConnectionField::JumpUsername,
+            NewConnectionField::JumpIdentityAgent,
         ],
         SshAuthTab::SshKey => vec![
             NewConnectionField::JumpHost,
@@ -964,6 +1010,7 @@ pub(in crate::workspace) fn current_connection_field_mut(
         NewConnectionField::ManagedKeyId => &mut form.managed_key_id,
         NewConnectionField::CertPath => &mut form.cert_path,
         NewConnectionField::Passphrase => &mut form.passphrase,
+        NewConnectionField::IdentityAgent => &mut form.identity_agent,
         NewConnectionField::Group => &mut form.group,
         NewConnectionField::PostConnectCommand => &mut form.post_connect_command,
         NewConnectionField::UpstreamProxyHost => &mut form.upstream_proxy_host,
@@ -1029,6 +1076,13 @@ pub(in crate::workspace) fn current_connection_field_mut(
                 .expect("jump passphrase field without jump form")
                 .passphrase
         }
+        NewConnectionField::JumpIdentityAgent => {
+            &mut form
+                .jump_server_form
+                .as_mut()
+                .expect("jump identity agent field without jump form")
+                .identity_agent
+        }
         NewConnectionField::SerialPortPath => &mut form.serial_port_path,
         NewConnectionField::SerialBaudRate => &mut form.serial_baud_rate,
         NewConnectionField::SerialProfileName => &mut form.serial_profile_name,
@@ -1047,6 +1101,7 @@ pub(in crate::workspace) fn current_connection_field(form: &NewConnectionForm) -
         NewConnectionField::ManagedKeyId => &form.managed_key_id,
         NewConnectionField::CertPath => &form.cert_path,
         NewConnectionField::Passphrase => &form.passphrase,
+        NewConnectionField::IdentityAgent => &form.identity_agent,
         NewConnectionField::Group => &form.group,
         NewConnectionField::PostConnectCommand => &form.post_connect_command,
         NewConnectionField::UpstreamProxyHost => &form.upstream_proxy_host,
@@ -1112,6 +1167,13 @@ pub(in crate::workspace) fn current_connection_field(form: &NewConnectionForm) -
                 .expect("jump passphrase field without jump form")
                 .passphrase
         }
+        NewConnectionField::JumpIdentityAgent => {
+            &form
+                .jump_server_form
+                .as_ref()
+                .expect("jump identity agent field without jump form")
+                .identity_agent
+        }
         NewConnectionField::SerialPortPath => &form.serial_port_path,
         NewConnectionField::SerialBaudRate => &form.serial_baud_rate,
         NewConnectionField::SerialProfileName => &form.serial_profile_name,
@@ -1148,6 +1210,7 @@ pub(in crate::workspace) fn insert_text_into_current_connection_field(
     }
     current_connection_field_mut(form).push_str(text);
     form.selected_field = None;
+    refresh_focused_identity_agent_availability(form);
 }
 
 pub(in crate::workspace) fn backspace_current_connection_field(
@@ -1161,10 +1224,16 @@ pub(in crate::workspace) fn backspace_current_connection_field(
         let text_changed = !field.is_empty();
         field.clear();
         form.selected_field = None;
+        if text_changed {
+            refresh_focused_identity_agent_availability(form);
+        }
         text_changed || selection_was_visible
     } else {
         let text_changed = current_connection_field_mut(form).pop().is_some();
         form.selected_field = None;
+        if text_changed {
+            refresh_focused_identity_agent_availability(form);
+        }
         text_changed || selection_was_visible
     }
 }
@@ -1172,6 +1241,7 @@ pub(in crate::workspace) fn backspace_current_connection_field(
 pub(in crate::workspace) fn clear_current_connection_field(form: &mut NewConnectionForm) {
     current_connection_field_mut(form).clear();
     form.selected_field = None;
+    refresh_focused_identity_agent_availability(form);
 }
 
 pub(in crate::workspace) fn text_from_keystroke(keystroke: &gpui::Keystroke) -> Option<&str> {
@@ -1199,20 +1269,22 @@ mod tests {
 
     use super::{
         NewConnectionField, NewConnectionForm, NewConnectionFormMode, NewConnectionProxyHop,
-        NewConnectionTransport, RDP_DEFAULT_PORT_TEXT, RemoteDesktopSessionFeature,
-        RemoteDesktopSessionOptions, RemoteDesktopVncCompression, RemoteDesktopVncImageQuality,
-        RemoteDesktopVncOptions, RemoteDesktopVncPreference, RemoteDesktopVncSecurityPolicy,
-        RemoteDesktopVncSessionMode, SSH_DEFAULT_PORT_TEXT, SavedConnectionPromptAction,
-        SshAuthFamily, SshAuthTab, SshKeyAuthSource, TELNET_DEFAULT_PORT_TEXT,
-        VNC_DEFAULT_PORT_TEXT, apply_remote_desktop_vnc_preference, apply_transport_default_port,
+        NewConnectionTransport, NewConnectionUpstreamProxyAuth, NewConnectionUpstreamProxyPolicy,
+        RDP_DEFAULT_PORT_TEXT, RemoteDesktopSessionFeature, RemoteDesktopSessionOptions,
+        RemoteDesktopVncCompression, RemoteDesktopVncImageQuality, RemoteDesktopVncOptions,
+        RemoteDesktopVncPreference, RemoteDesktopVncSecurityPolicy, RemoteDesktopVncSessionMode,
+        SSH_DEFAULT_PORT_TEXT, SavedConnectionPromptAction, SshAuthFamily, SshAuthTab,
+        SshKeyAuthSource, TELNET_DEFAULT_PORT_TEXT, VNC_DEFAULT_PORT_TEXT,
+        apply_remote_desktop_vnc_preference, apply_transport_default_port,
         apply_transport_default_username, auth_family_from_tab, auth_tab_from_key_source,
         backspace_current_connection_field, connection_icon_field_visible,
         connection_secret_field_visible, default_auth_tab_for_family,
-        form_from_remote_desktop_profile, insert_text_into_current_connection_field,
-        key_source_from_tab, new_connection_form_mode, next_connection_field,
-        remote_desktop_feature_supported, remote_desktop_vnc_preference_selected,
-        select_current_connection_field, text_from_keystroke,
-        toggle_connection_secret_field_visibility, toggle_remote_desktop_feature,
+        form_from_remote_desktop_profile, identity_agent_from_form, identity_agent_selector,
+        insert_text_into_current_connection_field, key_source_from_tab, new_connection_form_mode,
+        next_connection_field, next_jump_connection_field, remote_desktop_feature_supported,
+        remote_desktop_vnc_preference_selected, select_current_connection_field,
+        text_from_keystroke, toggle_connection_secret_field_visibility,
+        toggle_remote_desktop_feature,
     };
 
     fn keystroke(key: &str, key_char: Option<&str>, modifiers: Modifiers) -> Keystroke {
@@ -1758,6 +1830,38 @@ mod tests {
 
         assert!(backspace_current_connection_field(&mut form));
         assert_eq!(form.selected_field, None);
+    }
+
+    #[test]
+    fn identity_agent_form_values_trim_and_preserve_automatic_detection() {
+        assert_eq!(identity_agent_selector(" \t "), None);
+        assert_eq!(
+            identity_agent_selector("  $YUBIKEY_AGENT  "),
+            Some("$YUBIKEY_AGENT")
+        );
+        assert_eq!(
+            identity_agent_from_form("  /tmp/yubikey-agent.sock  "),
+            Some("/tmp/yubikey-agent.sock".to_string())
+        );
+    }
+
+    #[test]
+    fn agent_tab_navigation_reaches_identity_agent_fields() {
+        assert_eq!(
+            next_connection_field(
+                NewConnectionField::Username,
+                SshAuthTab::Agent,
+                NewConnectionTransport::Ssh,
+                NewConnectionUpstreamProxyPolicy::UseGlobal,
+                NewConnectionUpstreamProxyAuth::None,
+                true,
+            ),
+            NewConnectionField::IdentityAgent
+        );
+        assert_eq!(
+            next_jump_connection_field(NewConnectionField::JumpUsername, SshAuthTab::Agent, true,),
+            NewConnectionField::JumpIdentityAgent
+        );
     }
 
     #[test]

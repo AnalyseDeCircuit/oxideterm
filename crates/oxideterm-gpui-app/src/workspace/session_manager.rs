@@ -8,6 +8,7 @@ use std::{
 
 use crate::workspace::new_connection::{
     NewConnectionProxyHop, NewConnectionUpstreamProxyAuth, NewConnectionUpstreamProxyPolicy,
+    identity_agent_from_form, identity_agent_selector,
 };
 use crate::workspace::quick_commands::QuickCommandImportStrategy;
 use crate::workspace::session_icons;

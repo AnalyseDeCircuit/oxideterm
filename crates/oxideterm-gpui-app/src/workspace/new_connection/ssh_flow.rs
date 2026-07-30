@@ -28,7 +28,7 @@ use super::{
     form_state::{
         NewConnectionForm, NewConnectionFormMode, NewConnectionProxyHop, NewConnectionSubmitAction,
         NewConnectionTransport, NewConnectionUpstreamProxyAuth, NewConnectionUpstreamProxyPolicy,
-        SavedConnectionPromptAction, SshAuthTab,
+        SavedConnectionPromptAction, SshAuthTab, identity_agent_from_form, identity_agent_selector,
     },
     host_key_dialog::HostKeyChallenge,
 };
@@ -220,7 +220,7 @@ impl WorkspaceApp {
         self.prepare_modal_interaction_boundary(cx);
         let mut form = NewConnectionForm::default();
         form.group = self.i18n.t("ssh.form.ungrouped");
-        form.agent_available = detect_ssh_agent_available();
+        form.agent_available = detect_ssh_agent_available(&form.identity_agent);
         form.save_connection = self
             .settings_store
             .settings()
@@ -293,7 +293,7 @@ impl WorkspaceApp {
         form.focused_field = super::form_state::NewConnectionField::Host;
         form.save_connection = false;
         form.group = self.i18n.t("ssh.form.ungrouped");
-        form.agent_available = detect_ssh_agent_available();
+        form.agent_available = detect_ssh_agent_available(&form.identity_agent);
         form.username = String::new();
         self.update_connection_form_state(cx, |state| {
             state.replace_with_new_form(form);

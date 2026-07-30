@@ -206,9 +206,11 @@ impl WorkspaceApp {
                     | NewConnectionField::Username
                     | NewConnectionField::Group
                     | NewConnectionField::Color
+                    | NewConnectionField::IdentityAgent
                     | NewConnectionField::TelnetProfileName
                     | NewConnectionField::JumpHost
                     | NewConnectionField::JumpUsername
+                    | NewConnectionField::JumpIdentityAgent
                     | NewConnectionField::UpstreamProxyHost
                     | NewConnectionField::UpstreamProxyNoProxy
                     | NewConnectionField::UpstreamProxyUsername

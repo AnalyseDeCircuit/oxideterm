@@ -74,7 +74,7 @@ impl WorkspaceApp {
         );
         form.proxy_hops = proxy_hops;
         form.proxy_chain_expanded = !form.proxy_hops.is_empty();
-        form.agent_available = detect_ssh_agent_available();
+        form.agent_available = detect_ssh_agent_available(&form.identity_agent);
         form.save_connection = true;
         self.update_connection_form_state(cx, |state| state.replace_with_new_form(form));
         self.show_active_input_caret(cx);
@@ -1119,7 +1119,7 @@ impl WorkspaceApp {
             Some(&title),
             self.i18n.t("ssh.form.ungrouped"),
         );
-        form.agent_available = detect_ssh_agent_available();
+        form.agent_available = detect_ssh_agent_available(&form.identity_agent);
         form.save_connection = false;
         self.update_connection_form_state(cx, |state| state.replace_with_new_form(form));
         self.show_active_input_caret(cx);

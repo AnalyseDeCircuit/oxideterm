@@ -700,6 +700,18 @@ pub(super) fn edit_properties_initializes_saved_agent_availability() {
 }
 
 #[test]
+pub(super) fn edit_properties_round_trips_custom_identity_agent() {
+    let mut saved_connection = saved_connection_fixture(SavedAuth::Agent);
+    saved_connection.options.identity_agent = Some("$YUBIKEY_AGENT".to_string());
+
+    let mut form = form_from_saved_connection(&saved_connection, None);
+    let request = save_request_from_form(&mut form, Some(saved_connection.id.clone())).unwrap();
+
+    assert_eq!(form.identity_agent, "$YUBIKEY_AGENT");
+    assert_eq!(request.identity_agent.as_deref(), Some("$YUBIKEY_AGENT"));
+}
+
+#[test]
 pub(super) fn duplicate_template_name_uses_unique_tauri_copy_suffix() {
     let name = duplicate_connection_template_name(
         "Prod Copy",
@@ -754,7 +766,7 @@ pub(super) fn edit_properties_same_key_empty_passphrase_submits_no_new_secret() 
 pub(super) fn new_connection_request_carries_proxy_chain() {
     let mut form = base_form();
     form.auth_tab = SshAuthTab::Agent;
-    form.identity_agent = Some("/tmp/target-agent.sock".to_string());
+    form.identity_agent = "  /tmp/target-agent.sock  ".to_string();
     form.agent_forwarding_socket = Some("/tmp/target-forward.sock".to_string());
     form.proxy_hops
         .push(crate::workspace::new_connection::NewConnectionProxyHop {
@@ -769,7 +781,7 @@ pub(super) fn new_connection_request_carries_proxy_chain() {
             cert_path: String::new(),
             passphrase: String::new(),
             agent_forwarding: true,
-            identity_agent: Some("/tmp/jump-agent.sock".to_string()),
+            identity_agent: "  /tmp/jump-agent.sock  ".to_string(),
             agent_forwarding_socket: Some("/tmp/jump-forward.sock".to_string()),
             legacy_ssh_compatibility: true,
         });
@@ -920,7 +932,7 @@ pub(super) fn proxy_hop_two_factor_is_saved_as_keyboard_interactive() {
             cert_path: String::new(),
             passphrase: String::new(),
             agent_forwarding: false,
-            identity_agent: None,
+            identity_agent: String::new(),
             agent_forwarding_socket: None,
             legacy_ssh_compatibility: false,
         });

@@ -365,12 +365,12 @@ pub(in crate::workspace) fn form_from_saved_connection(
     form.upstream_proxy_remote_dns = upstream_proxy_form.remote_dns;
     form.upstream_proxy_no_proxy = upstream_proxy_form.no_proxy;
     form.agent_forwarding = conn.options.agent_forwarding;
-    form.identity_agent = conn.options.identity_agent.clone();
+    form.identity_agent = conn.options.identity_agent.clone().unwrap_or_default();
     form.agent_forwarding_socket = conn.options.agent_forwarding_socket.clone();
     // Probe the saved IdentityAgent when reopening a form so edit,
     // credential-prompt, and duplicate modes never inherit Unknown.
     form.agent_available =
-        oxideterm_ssh::ssh_agent_available(conn.options.identity_agent.as_deref());
+        oxideterm_ssh::ssh_agent_available(identity_agent_selector(&form.identity_agent));
     // Preserve compatibility settings when an existing connection enters edit mode.
     form.legacy_ssh_compatibility = conn.options.legacy_ssh_compatibility;
     form.terminal = conn.options.terminal;
@@ -562,7 +562,7 @@ fn connection_draft_from_form_with_proxy_hop_prefix(
             .map(proxy_hop_draft_from_form)
             .collect(),
         agent_forwarding: form.agent_forwarding,
-        identity_agent: form.identity_agent.clone(),
+        identity_agent: identity_agent_from_form(&form.identity_agent),
         agent_forwarding_socket: form.agent_forwarding_socket.clone(),
         legacy_ssh_compatibility: form.legacy_ssh_compatibility,
         post_connect_command: form.post_connect_command.clone(),
@@ -588,7 +588,7 @@ pub(super) fn proxy_hop_draft_from_form(
             ..ConnectionAuthDraft::default()
         },
         agent_forwarding: hop.agent_forwarding,
-        identity_agent: hop.identity_agent.clone(),
+        identity_agent: identity_agent_from_form(&hop.identity_agent),
         agent_forwarding_socket: hop.agent_forwarding_socket.clone(),
         legacy_ssh_compatibility: hop.legacy_ssh_compatibility,
     }

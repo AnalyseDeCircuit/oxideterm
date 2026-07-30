@@ -9,6 +9,7 @@ struct JumpServerRenderSnapshot {
     key_path: String,
     managed_key_id: String,
     cert_path: String,
+    identity_agent: String,
     agent_forwarding: bool,
     legacy_ssh_compatibility: bool,
     complete: bool,
@@ -25,6 +26,7 @@ impl JumpServerRenderSnapshot {
             key_path: hop.key_path.clone(),
             managed_key_id: hop.managed_key_id.clone(),
             cert_path: hop.cert_path.clone(),
+            identity_agent: hop.identity_agent.clone(),
             agent_forwarding: hop.agent_forwarding,
             legacy_ssh_compatibility: hop.legacy_ssh_compatibility,
             complete: hop.complete(),
@@ -815,9 +817,21 @@ impl WorkspaceApp {
                                 ))
                             })
                             .when(jump_form.auth_tab == SshAuthTab::Agent, |content| {
-                                content.child(self.render_connection_hint(
-                                    self.i18n.t("ssh.form.proxy_jump_agent_desc"),
-                                ))
+                                content
+                                    .child(self.render_connection_hint(
+                                        self.i18n.t("ssh.form.proxy_jump_agent_desc"),
+                                    ))
+                                    .child(self.render_connection_field(
+                                        self.i18n.t("ssh.form.agent_endpoint"),
+                                        &jump_form.identity_agent,
+                                        self.i18n.t("ssh.form.agent_endpoint_placeholder"),
+                                        NewConnectionField::JumpIdentityAgent,
+                                        false,
+                                        cx,
+                                    ))
+                                    .child(self.render_connection_hint(
+                                        self.i18n.t("ssh.form.agent_endpoint_hint"),
+                                    ))
                             })
                             .child(self.render_connection_checkbox(
                                 self.i18n.t("ssh.form.agent_forwarding"),

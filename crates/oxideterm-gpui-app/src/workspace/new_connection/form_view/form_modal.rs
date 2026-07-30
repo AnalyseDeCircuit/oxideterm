@@ -27,6 +27,7 @@ struct ConnectionFormModalSnapshot {
     icon_picker_expanded: bool,
     legacy_ssh_compatibility: bool,
     agent_forwarding: bool,
+    identity_agent: String,
     agent_available: Option<bool>,
     error: Option<String>,
     pending: bool,
@@ -61,6 +62,7 @@ impl ConnectionFormModalSnapshot {
             icon_picker_expanded: form.icon_picker_expanded,
             legacy_ssh_compatibility: form.legacy_ssh_compatibility,
             agent_forwarding: form.agent_forwarding,
+            identity_agent: form.identity_agent.clone(),
             agent_available: form.agent_available,
             error: form.error.clone(),
             pending: form.pending,
@@ -662,18 +664,33 @@ impl WorkspaceApp {
                                         } else {
                                             self.i18n.t("ssh.form.agent_desc")
                                         }))
-                                        .when(!drill_down_mode && !prompt_mode, |content| {
+                                        .when(!prompt_mode, |content| {
                                             content
-                                                .child(self.render_agent_status(
-                                                    form.agent_available,
+                                                .child(self.render_connection_field(
+                                                    self.i18n.t("ssh.form.agent_endpoint"),
+                                                    &form.identity_agent,
+                                                    self.i18n
+                                                        .t("ssh.form.agent_endpoint_placeholder"),
+                                                    NewConnectionField::IdentityAgent,
+                                                    false,
+                                                    cx,
                                                 ))
                                                 .child(self.render_connection_hint(
-                                                    self.i18n.t("ssh.form.agent_hint"),
+                                                    self.i18n.t("ssh.form.agent_endpoint_hint"),
                                                 ))
+                                                .when(!drill_down_mode, |content| {
+                                                    content.child(self.render_agent_status(
+                                                        form.agent_available,
+                                                    ))
+                                                })
                                         });
                                     if drill_down_mode {
                                         content.child(self.render_connection_hint(
                                             self.i18n.t("ssh.drill_down.agent_hint"),
+                                        ))
+                                    } else if !prompt_mode {
+                                        content.child(self.render_connection_hint(
+                                            self.i18n.t("ssh.form.agent_hint"),
                                         ))
                                     } else {
                                         content

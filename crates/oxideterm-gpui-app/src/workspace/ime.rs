@@ -20,7 +20,7 @@ use super::file_manager::FileManagerInput;
 use super::forwards::ForwardInput;
 use super::graphics::GraphicsInput;
 use super::launcher::LauncherInput;
-use super::new_connection::NewConnectionField;
+use super::new_connection::{NewConnectionField, refresh_identity_agent_availability};
 use super::quick_commands::QuickCommandInput;
 use super::session_manager::{SessionManagerInput, SessionManagerState};
 use super::sftp::SftpInput;
@@ -2780,6 +2780,9 @@ impl WorkspaceApp {
                     );
                     form.selected_field = None;
                     form.error = None;
+                    if field == NewConnectionField::IdentityAgent {
+                        refresh_identity_agent_availability(form);
+                    }
                     true
                 });
                 if changed {
@@ -2826,6 +2829,7 @@ fn new_connection_field_value(
         NewConnectionField::ManagedKeyId => &form.managed_key_id,
         NewConnectionField::CertPath => &form.cert_path,
         NewConnectionField::Passphrase => &form.passphrase,
+        NewConnectionField::IdentityAgent => &form.identity_agent,
         NewConnectionField::Group => &form.group,
         NewConnectionField::PostConnectCommand => &form.post_connect_command,
         NewConnectionField::UpstreamProxyHost => &form.upstream_proxy_host,
@@ -2847,6 +2851,7 @@ fn new_connection_field_value(
         NewConnectionField::JumpManagedKeyId => &form.jump_server_form.as_ref()?.managed_key_id,
         NewConnectionField::JumpCertPath => &form.jump_server_form.as_ref()?.cert_path,
         NewConnectionField::JumpPassphrase => &form.jump_server_form.as_ref()?.passphrase,
+        NewConnectionField::JumpIdentityAgent => &form.jump_server_form.as_ref()?.identity_agent,
     })
 }
 
@@ -2864,6 +2869,7 @@ fn connection_field_value_mut(
         NewConnectionField::ManagedKeyId => &mut form.managed_key_id,
         NewConnectionField::CertPath => &mut form.cert_path,
         NewConnectionField::Passphrase => &mut form.passphrase,
+        NewConnectionField::IdentityAgent => &mut form.identity_agent,
         NewConnectionField::Group => &mut form.group,
         NewConnectionField::PostConnectCommand => &mut form.post_connect_command,
         NewConnectionField::UpstreamProxyHost => &mut form.upstream_proxy_host,
@@ -2932,6 +2938,13 @@ fn connection_field_value_mut(
                 .as_mut()
                 .expect("jump passphrase field without jump form")
                 .passphrase
+        }
+        NewConnectionField::JumpIdentityAgent => {
+            &mut form
+                .jump_server_form
+                .as_mut()
+                .expect("jump identity agent field without jump form")
+                .identity_agent
         }
     }
 }

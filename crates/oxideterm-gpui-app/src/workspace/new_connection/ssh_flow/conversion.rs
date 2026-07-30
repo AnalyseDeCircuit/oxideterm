@@ -3,8 +3,8 @@
 
 use super::*;
 
-pub(super) fn detect_ssh_agent_available() -> Option<bool> {
-    oxideterm_ssh::ssh_agent_available(None)
+pub(super) fn detect_ssh_agent_available(identity_agent: &str) -> Option<bool> {
+    oxideterm_ssh::ssh_agent_available(identity_agent_selector(identity_agent))
 }
 
 pub(super) fn proxy_chain_from_form(
@@ -24,7 +24,7 @@ pub(super) fn proxy_chain_from_form(
             username: hop.username.trim().to_string(),
             auth: auth_method_from_proxy_hop(hop),
             agent_forwarding: hop.agent_forwarding,
-            identity_agent: hop.identity_agent.clone(),
+            identity_agent: identity_agent_from_form(&hop.identity_agent),
             agent_forwarding_socket: hop.agent_forwarding_socket.clone(),
             legacy_ssh_compatibility: hop.legacy_ssh_compatibility,
             strict_host_key_checking: true,
@@ -159,7 +159,7 @@ pub(super) fn form_from_runtime_config(
     form.group = default_group;
     form.post_connect_command = config.post_connect_command.clone().unwrap_or_default();
     form.agent_forwarding = config.agent_forwarding;
-    form.identity_agent = config.identity_agent.clone();
+    form.identity_agent = config.identity_agent.clone().unwrap_or_default();
     form.agent_forwarding_socket = config.agent_forwarding_socket.clone();
     form.legacy_ssh_compatibility = config.legacy_ssh_compatibility;
     form.save_password = auth_fields.save_password;
@@ -211,7 +211,7 @@ pub(super) fn proxy_hop_form_from_runtime_config(config: ProxyHopConfig) -> NewC
         password: auth_fields.password,
         passphrase: auth_fields.passphrase,
         agent_forwarding: config.agent_forwarding,
-        identity_agent: config.identity_agent,
+        identity_agent: config.identity_agent.unwrap_or_default(),
         agent_forwarding_socket: config.agent_forwarding_socket,
         legacy_ssh_compatibility: config.legacy_ssh_compatibility,
     }
@@ -344,7 +344,7 @@ mod runtime_save_tests {
         assert_eq!(hop.auth_tab, SshAuthTab::Password);
         assert_eq!(hop.password, "jump-secret");
         assert!(hop.agent_forwarding);
-        assert_eq!(hop.identity_agent.as_deref(), Some("/tmp/jump-agent.sock"));
+        assert_eq!(hop.identity_agent, "/tmp/jump-agent.sock");
         assert_eq!(
             hop.agent_forwarding_socket.as_deref(),
             Some("/tmp/jump-forward.sock")
@@ -395,10 +395,7 @@ mod runtime_save_tests {
         assert_eq!(form.auth_tab, SshAuthTab::Password);
         assert_eq!(form.password, "target-secret");
         assert!(form.save_password);
-        assert_eq!(
-            form.identity_agent.as_deref(),
-            Some("/tmp/target-agent.sock")
-        );
+        assert_eq!(form.identity_agent, "/tmp/target-agent.sock");
         assert_eq!(
             form.agent_forwarding_socket.as_deref(),
             Some("/tmp/target-forward.sock")
