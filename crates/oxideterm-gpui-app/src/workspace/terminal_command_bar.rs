@@ -370,7 +370,10 @@ fn build_privilege_prompt_helper_state(
     credentials: &[SavedPrivilegeCredential],
     visible_text: &str,
 ) -> Option<PrivilegePromptHelperState> {
-    let prompt = choose_privilege_prompt(credentials, visible_text, None)?;
+    // Pure helper tests synthesize the semantic session event from their text
+    // fixture; production code receives the equivalent tracked prompt.
+    let tracked_prompt = oxideterm_gpui_terminal::detect_privilege_prompt(visible_text);
+    let prompt = choose_privilege_prompt(credentials, visible_text, tracked_prompt)?;
     build_privilege_prompt_helper_state_from_prompt(connection_id, credentials, prompt)
 }
 
@@ -425,8 +428,10 @@ fn choose_privilege_prompt(
             detect_custom_prompt_from_credentials(credentials, visible_text).or(Some(prompt))
         }
         Some(prompt @ PrivilegePromptMatch::Custom { .. }) => Some(prompt),
-        None => detect_custom_prompt_from_credentials(credentials, visible_text)
-            .or_else(|| detect_privilege_prompt(visible_text)),
+        // Standard prompts arrive as session-owned semantic events. The
+        // viewport fallback remains only for user-authored custom patterns,
+        // which cannot be classified without credential configuration.
+        None => detect_custom_prompt_from_credentials(credentials, visible_text),
     }
 }
 

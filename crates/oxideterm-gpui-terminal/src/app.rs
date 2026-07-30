@@ -983,14 +983,11 @@ impl TerminalPane {
             .recorder
             .as_ref()
             .is_some_and(|recorder| recorder.status().state == TerminalRecordingState::Recording);
-        let privilege_helper_requires_output = self
-            .privilege_prompt_tracker
-            .requires_output_observation(Instant::now());
-        // Recording and privilege detection independently consume decoded
-        // output. Disabling either consumer must not starve the other.
-        self.terminal.lock().set_output_events_enabled(
-            recording_requires_output || privilege_helper_requires_output,
-        );
+        // Privilege prompts use compact semantic events at the session output
+        // boundary. Full decoded output is duplicated only for recording.
+        self.terminal
+            .lock()
+            .set_output_events_enabled(recording_requires_output);
     }
 
     fn finish_privilege_prompt_tracker_update(
@@ -1001,7 +998,6 @@ impl TerminalPane {
         if self.privilege_prompt_tracker.state_generation() == previous_state_generation {
             return;
         }
-        self.sync_terminal_output_events_enabled();
         self.schedule_privilege_prompt_expiry(cx);
         cx.emit(TerminalPaneEvent::PrivilegePromptStateChanged);
     }
@@ -1025,7 +1021,6 @@ impl TerminalPane {
                     pane.schedule_privilege_prompt_expiry(cx);
                     return;
                 }
-                pane.sync_terminal_output_events_enabled();
                 // Expiry carries no prompt payload. Workspace reads only the
                 // active pane and clears any now-stale inline hint.
                 cx.emit(TerminalPaneEvent::PrivilegePromptStateChanged);
@@ -1962,13 +1957,16 @@ impl TerminalPane {
     ) -> TerminalEventEffect {
         match event {
             TerminalEvent::Output(bytes) => {
-                let previous_state_generation = self.privilege_prompt_tracker.state_generation();
-                self.privilege_prompt_tracker
-                    .observe_output_bytes(&bytes, Instant::now());
-                self.finish_privilege_prompt_tracker_update(previous_state_generation, cx);
                 if let Some(recorder) = self.recorder.as_mut() {
                     recorder.record_output(&bytes);
                 }
+                TerminalEventEffect::default()
+            }
+            TerminalEvent::PrivilegePrompt(event) => {
+                let previous_state_generation = self.privilege_prompt_tracker.state_generation();
+                self.privilege_prompt_tracker
+                    .observe_terminal_prompt_event(event, Instant::now());
+                self.finish_privilege_prompt_tracker_update(previous_state_generation, cx);
                 TerminalEventEffect::default()
             }
             TerminalEvent::TitleChanged(title) => {
@@ -2316,13 +2314,6 @@ impl TerminalPane {
         let Some(command) = self.observe_autosuggest_input_bytes(bytes, cx) else {
             return;
         };
-        // The autosuggest input tracker owns the current editable command line.
-        // Arm sudo/su detection from its completed command on Enter so bare
-        // prompts such as macOS `Password:` do not depend on viewport parsing.
-        let previous_state_generation = self.privilege_prompt_tracker.state_generation();
-        self.privilege_prompt_tracker
-            .observe_reconstructed_submitted_command(&command, now);
-        self.finish_privilege_prompt_tracker_update(previous_state_generation, cx);
         self.observe_current_directory_submitted_command(&command, cx);
         if self.shell_integration_status.detected
             || !self.settings.command_marks_user_input_observed

@@ -41,7 +41,8 @@ use crate::{
     TerminalModemTransferRequest, TerminalProcessInfo, TerminalProcessProbe, TerminalSearchMatch,
     TerminalSize, TerminalSnapshot, append_grid_line_text, backpressure::MagicScanWindow,
     focus_report_sequence, graphics_cursor_from_term, interactive_terminal_config,
-    search_logical_line_matches, shell_integration::TerminalShellIntegration, snapshot_from_term,
+    privilege_prompt::TerminalPrivilegePromptStream, search_logical_line_matches,
+    shell_integration::TerminalShellIntegration, snapshot_from_term,
     snapshot_from_term_with_display_offset,
 };
 

@@ -1,10 +1,12 @@
+use oxideterm_terminal::{
+    TerminalPrivilegePrompt, TerminalPrivilegePromptEvent, detect_terminal_privilege_prompt,
+};
 use std::time::{Duration, Instant};
 use zeroize::Zeroizing;
 
-const MAX_PROMPT_TAIL_CHARS: usize = 4_096;
 const MAX_TRACKED_INPUT_CHARS: usize = 512;
+const MAX_PROMPT_SNAPSHOT_CHARS: usize = 4_096;
 const PRIVILEGE_COMMAND_CONTEXT_TTL: Duration = Duration::from_secs(15);
-const OPAQUE_COMMAND_OBSERVATION_TTL: Duration = Duration::from_secs(5);
 const PRIVILEGE_PROMPT_VISIBLE_TTL: Duration = Duration::from_secs(300);
 const PRIVILEGE_PROMPT_FILLED_TTL: Duration = Duration::from_secs(8);
 const PRIVILEGE_PROMPT_DEBUG_ENV: &str = "OXIDETERM_PRIVILEGE_DEBUG";
@@ -63,9 +65,6 @@ pub struct PrivilegePromptSnapshot {
 #[derive(Clone, Debug)]
 enum PrivilegePromptTrackerState {
     Idle,
-    OpaqueCommandSubmission {
-        observed_at: Instant,
-    },
     CommandCandidate {
         command_id: u64,
         context: PrivilegeCommandContext,
@@ -112,7 +111,6 @@ fn privilege_prompt_match_name(prompt: &PrivilegePromptMatch) -> &'static str {
 fn privilege_prompt_tracker_state_name(state: &PrivilegePromptTrackerState) -> &'static str {
     match state {
         PrivilegePromptTrackerState::Idle => "idle",
-        PrivilegePromptTrackerState::OpaqueCommandSubmission { .. } => "opaque-command-submission",
         PrivilegePromptTrackerState::CommandCandidate { .. } => "command-candidate",
         PrivilegePromptTrackerState::PromptVisible { .. } => "prompt-visible",
         PrivilegePromptTrackerState::Filled { .. } => "filled",
@@ -123,8 +121,7 @@ fn privilege_prompt_tracker_state_name(state: &PrivilegePromptTrackerState) -> &
 #[derive(Clone)]
 pub struct PrivilegePromptTracker {
     input_line: Zeroizing<String>,
-    input_line_opaque: bool,
-    output_tail: Zeroizing<String>,
+    input_line_reliable: bool,
     next_command_id: u64,
     state: PrivilegePromptTrackerState,
     state_generation: u64,
@@ -134,8 +131,7 @@ impl Default for PrivilegePromptTracker {
     fn default() -> Self {
         Self {
             input_line: Zeroizing::new(String::new()),
-            input_line_opaque: false,
-            output_tail: Zeroizing::new(String::new()),
+            input_line_reliable: true,
             next_command_id: 1,
             state: PrivilegePromptTrackerState::Idle,
             state_generation: 0,
@@ -148,16 +144,8 @@ impl PrivilegePromptTracker {
         self.state_generation
     }
 
-    pub(crate) fn requires_output_observation(&self, now: Instant) -> bool {
-        self.next_expiry_deadline()
-            .is_some_and(|deadline| now < deadline)
-    }
-
     pub(crate) fn next_expiry_deadline(&self) -> Option<Instant> {
         match &self.state {
-            PrivilegePromptTrackerState::OpaqueCommandSubmission { observed_at } => {
-                observed_at.checked_add(OPAQUE_COMMAND_OBSERVATION_TTL)
-            }
             PrivilegePromptTrackerState::CommandCandidate { observed_at, .. } => {
                 observed_at.checked_add(PRIVILEGE_COMMAND_CONTEXT_TTL)
             }
@@ -200,7 +188,7 @@ impl PrivilegePromptTracker {
         }
         let normalized_input = normalize_privilege_input_bytes(bytes);
         let input_bytes = normalized_input.bytes.as_slice();
-        self.input_line_opaque |= normalized_input.invalidates_reconstruction;
+        self.input_line_reliable &= !normalized_input.invalidates_reconstruction;
 
         if self.prompt_is_waiting_for_secret(now) {
             if input_bytes
@@ -219,7 +207,7 @@ impl PrivilegePromptTracker {
                 self.mark_manual_secret_entry(now);
             }
             self.input_line.clear();
-            self.input_line_opaque = false;
+            self.input_line_reliable = true;
             return PrivilegeInputObservation::SecretEntry;
         }
 
@@ -234,7 +222,7 @@ impl PrivilegePromptTracker {
                     self.input_line.clear();
                     // Ctrl+U clears the remote line too, restoring a reliable
                     // frontend reconstruction after history navigation.
-                    self.input_line_opaque = false;
+                    self.input_line_reliable = true;
                 }
                 0x17 => {
                     self.trim_last_input_word();
@@ -249,7 +237,7 @@ impl PrivilegePromptTracker {
                 _ => {
                     // Completion, history search, and other line-editor
                     // controls can replace text without exposing the result.
-                    self.input_line_opaque = true;
+                    self.input_line_reliable = false;
                 }
             }
         }
@@ -257,71 +245,86 @@ impl PrivilegePromptTracker {
         PrivilegeInputObservation::Normal
     }
 
-    pub fn observe_output_bytes(&mut self, bytes: &[u8], now: Instant) {
-        if bytes.is_empty() {
+    pub fn observe_terminal_prompt_event(
+        &mut self,
+        event: TerminalPrivilegePromptEvent,
+        now: Instant,
+    ) {
+        let TerminalPrivilegePromptEvent::Visible {
+            prompt: terminal_prompt,
+            retry,
+        } = event
+        else {
+            // A dismissal belongs to the prompt that produced it. Preserve a
+            // newer command candidate that may already be awaiting output.
+            if matches!(
+                self.state,
+                PrivilegePromptTrackerState::PromptVisible { .. }
+            ) {
+                self.reset();
+            }
             return;
-        }
-        let text = String::from_utf8_lossy(bytes);
-        self.observe_output_text(&text, now);
-    }
+        };
 
-    pub fn observe_output_text(&mut self, text: &str, now: Instant) {
-        if text.is_empty() {
-            return;
-        }
-
-        // This short tail mirrors already-visible terminal output only for
-        // prompt classification. It is never logged, persisted, or exposed to
-        // AI/tooling, and manual secret keystrokes are excluded before this
-        // tracker sees normal command input.
-        self.output_tail.push_str(text);
-        let trimmed = tail_chars(&self.output_tail, MAX_PROMPT_TAIL_CHARS);
-        if trimmed.len() != self.output_tail.len() {
-            self.output_tail = Zeroizing::new(trimmed.to_string());
-        }
-
-        let retry_notice = output_contains_retry_notice(text);
         let context = self
             .active_command_candidate(now)
             .or_else(|| self.retry_prompt_context());
-        let had_context = context.is_some();
-        let output_moved_past_prompt = output_advances_past_prompt(text);
-        if let Some((prompt, confidence)) = detect_privilege_prompt_with_context(
-            &self.output_tail,
-            context.as_ref().map(|(_, c)| c),
-            false,
-        ) {
-            log_privilege_prompt_tracker(format_args!(
-                "tracker output: prompt detected prompt_kind={} confidence={:?} retry_notice={} had_context={} output_chars={} output_moved_past_prompt={}",
-                privilege_prompt_match_name(&prompt),
-                confidence,
-                retry_notice,
-                had_context,
-                text.chars().count(),
-                output_moved_past_prompt
-            ));
-            self.remember_visible_prompt(
-                prompt,
-                confidence,
-                context.map(|(id, _)| id),
-                retry_notice,
-                now,
-            );
-        } else if retry_notice {
-            log_privilege_prompt_tracker(format_args!(
-                "tracker output: retry notice without prompt state={}",
-                privilege_prompt_tracker_state_name(&self.state)
-            ));
-            self.increment_retry_count();
-        } else if self.prompt_is_waiting_for_secret(now) && output_moved_past_prompt {
-            // Once output advances to a new line without a prompt, a later
-            // Enter must not send the saved secret to a different reader.
-            log_privilege_prompt_tracker(format_args!(
-                "tracker output: reset because output advanced past prompt state={}",
-                privilege_prompt_tracker_state_name(&self.state)
-            ));
-            self.reset();
-        }
+        let (prompt, confidence) = match terminal_prompt {
+            TerminalPrivilegePrompt::Sudo {
+                username,
+                prompt_text,
+            } => (
+                PrivilegePromptMatch::Sudo {
+                    username,
+                    prompt_text,
+                },
+                PrivilegePromptConfidence::ExplicitPrompt,
+            ),
+            TerminalPrivilegePrompt::Su {
+                target_user,
+                prompt_text,
+            } => (
+                PrivilegePromptMatch::Su {
+                    target_user,
+                    prompt_text,
+                },
+                PrivilegePromptConfidence::ExplicitPrompt,
+            ),
+            TerminalPrivilegePrompt::GenericPassword { prompt_text } => match context.as_ref() {
+                Some((_, PrivilegeCommandContext::Sudo)) => (
+                    PrivilegePromptMatch::Sudo {
+                        username: None,
+                        prompt_text,
+                    },
+                    PrivilegePromptConfidence::CommandContext,
+                ),
+                Some((_, PrivilegeCommandContext::Su { target_user })) => (
+                    PrivilegePromptMatch::Su {
+                        target_user: target_user.clone(),
+                        prompt_text,
+                    },
+                    PrivilegePromptConfidence::CommandContext,
+                ),
+                None => (
+                    PrivilegePromptMatch::GenericPassword { prompt_text },
+                    PrivilegePromptConfidence::GenericPrompt,
+                ),
+            },
+        };
+        log_privilege_prompt_tracker(format_args!(
+            "tracker event: prompt visible prompt_kind={} confidence={:?} retry={} has_context={}",
+            privilege_prompt_match_name(&prompt),
+            confidence,
+            retry,
+            context.is_some()
+        ));
+        self.remember_visible_prompt(
+            prompt,
+            confidence,
+            context.map(|(command_id, _)| command_id),
+            retry,
+            now,
+        );
     }
 
     pub fn observe_submitted_command(&mut self, command: &str, now: Instant) {
@@ -331,30 +334,7 @@ impl PrivilegePromptTracker {
         }
         self.commit_command_line(line, now);
         self.input_line.clear();
-        self.input_line_opaque = false;
-    }
-
-    pub(crate) fn observe_reconstructed_submitted_command(&mut self, command: &str, now: Instant) {
-        let line = command.trim();
-        if line.is_empty() {
-            return;
-        }
-        if matches!(
-            self.state,
-            PrivilegePromptTrackerState::OpaqueCommandSubmission { .. }
-        ) && detect_privilege_command(line).is_none()
-        {
-            // A shell-owned history edit can leave a lossy frontend tracker
-            // with escape-sequence fragments. Such a reconstruction may prove
-            // sudo/su context, but it cannot disprove the opaque submission.
-            log_privilege_prompt_tracker(format_args!(
-                "tracker input: non-privilege reconstruction ignored during opaque submission"
-            ));
-            self.input_line.clear();
-            self.input_line_opaque = false;
-            return;
-        }
-        self.observe_submitted_command(line, now);
+        self.input_line_reliable = true;
     }
 
     pub fn mark_secret_filled(&mut self, now: Instant) {
@@ -385,13 +365,10 @@ impl PrivilegePromptTracker {
                 filled_at: now,
                 retry_count,
             };
-            // The accepted prompt must not be rediscovered when a full-screen
-            // program starts with cursor-control bytes but no printable line.
-            self.output_tail.clear();
             self.advance_state_generation();
         };
         self.input_line.clear();
-        self.input_line_opaque = false;
+        self.input_line_reliable = true;
     }
 
     pub fn mark_confirmed_secret_filled(
@@ -417,17 +394,15 @@ impl PrivilegePromptTracker {
             _ => (None, confirmed_prompt, 0),
         };
         // Workspace calls this path only after it confirms a visible prompt
-        // and one scoped credential. Preserve that confirmation even if the
-        // decoded-output event arrived before output observation was armed.
+        // and one scoped credential.
         self.state = PrivilegePromptTrackerState::Filled {
             command_id,
             prompt,
             filled_at: now,
             retry_count,
         };
-        self.output_tail.clear();
         self.input_line.clear();
-        self.input_line_opaque = false;
+        self.input_line_reliable = true;
         self.advance_state_generation();
     }
 
@@ -468,27 +443,11 @@ impl PrivilegePromptTracker {
 
     fn commit_input_line(&mut self, now: Instant) {
         let line = Zeroizing::new(self.input_line.trim().to_string());
-        if self.input_line_opaque || line.is_empty() {
-            self.arm_opaque_command_submission(now);
-        } else {
+        if self.input_line_reliable && !line.is_empty() {
             self.commit_command_line(&line, now);
         }
         self.input_line.clear();
-        self.input_line_opaque = false;
-    }
-
-    fn arm_opaque_command_submission(&mut self, now: Instant) {
-        if !matches!(self.state, PrivilegePromptTrackerState::Idle) {
-            return;
-        }
-        // Shell history and remote line editors can submit text that never
-        // crossed the frontend input cache. Observe decoded output briefly so
-        // the first prompt is not lost before the screen snapshot catches up.
-        self.state = PrivilegePromptTrackerState::OpaqueCommandSubmission { observed_at: now };
-        self.advance_state_generation();
-        log_privilege_prompt_tracker(format_args!(
-            "tracker input: opaque command submission armed"
-        ));
+        self.input_line_reliable = true;
     }
 
     fn commit_command_line(&mut self, line: &str, now: Instant) {
@@ -645,25 +604,6 @@ impl PrivilegePromptTracker {
         }
     }
 
-    fn increment_retry_count(&mut self) {
-        let changed = match &mut self.state {
-            PrivilegePromptTrackerState::PromptVisible { retry_count, .. }
-            | PrivilegePromptTrackerState::Filled { retry_count, .. }
-            | PrivilegePromptTrackerState::ManualEntry { retry_count, .. } => {
-                *retry_count = retry_count.saturating_add(1);
-                log_privilege_prompt_tracker(format_args!(
-                    "tracker state: retry_count incremented value={}",
-                    *retry_count
-                ));
-                true
-            }
-            _ => false,
-        };
-        if changed {
-            self.advance_state_generation();
-        }
-    }
-
     fn mark_manual_secret_entry(&mut self, now: Instant) {
         let PrivilegePromptTrackerState::PromptVisible {
             command_id,
@@ -692,7 +632,7 @@ impl PrivilegePromptTracker {
         let previous_state = privilege_prompt_tracker_state_name(&self.state);
         let had_input = !self.input_line.is_empty();
         self.input_line.clear();
-        self.input_line_opaque = false;
+        self.input_line_reliable = true;
         self.state = PrivilegePromptTrackerState::Idle;
         self.advance_state_generation();
         log_privilege_prompt_tracker(format_args!(
@@ -815,62 +755,55 @@ fn detect_privilege_prompt_with_context(
     let lines = recent_prompt_candidate_lines(text);
     let line = lines.last()?.as_str();
 
-    if looks_like_password_result(line) {
-        return None;
-    }
-
-    if let Some(username) = parse_sudo_prompt(line) {
-        return Some((
+    match detect_terminal_privilege_prompt(line)? {
+        TerminalPrivilegePrompt::Sudo {
+            username,
+            prompt_text,
+        } => Some((
             PrivilegePromptMatch::Sudo {
                 username,
-                prompt_text: line.to_string(),
+                prompt_text,
             },
             PrivilegePromptConfidence::ExplicitPrompt,
-        ));
-    }
-
-    if let Some(target_user) = parse_su_prompt(line) {
-        return Some((
+        )),
+        TerminalPrivilegePrompt::Su {
+            target_user,
+            prompt_text,
+        } => Some((
             PrivilegePromptMatch::Su {
                 target_user,
-                prompt_text: line.to_string(),
+                prompt_text,
             },
             PrivilegePromptConfidence::ExplicitPrompt,
-        ));
-    }
-
-    if is_generic_password_prompt(line) {
-        if let Some(context) = command_context.cloned().or_else(|| {
-            allow_line_context
-                .then(|| command_context_before_prompt(&lines))
-                .flatten()
-        }) {
-            return Some((
-                match context {
-                    PrivilegeCommandContext::Sudo => PrivilegePromptMatch::Sudo {
-                        username: None,
-                        prompt_text: line.to_string(),
+        )),
+        TerminalPrivilegePrompt::GenericPassword { prompt_text } => {
+            if let Some(context) = command_context.cloned().or_else(|| {
+                allow_line_context
+                    .then(|| command_context_before_prompt(&lines))
+                    .flatten()
+            }) {
+                return Some((
+                    match context {
+                        PrivilegeCommandContext::Sudo => PrivilegePromptMatch::Sudo {
+                            username: None,
+                            prompt_text,
+                        },
+                        PrivilegeCommandContext::Su { target_user } => PrivilegePromptMatch::Su {
+                            target_user,
+                            prompt_text,
+                        },
                     },
-                    PrivilegeCommandContext::Su { target_user } => PrivilegePromptMatch::Su {
-                        target_user,
-                        prompt_text: line.to_string(),
-                    },
-                },
-                PrivilegePromptConfidence::CommandContext,
-            ));
+                    PrivilegePromptConfidence::CommandContext,
+                ));
+            }
+            // A bare password prompt without a nearby sudo/su command is still
+            // a sensitive-input opportunity, but it needs explicit confirmation.
+            Some((
+                PrivilegePromptMatch::GenericPassword { prompt_text },
+                PrivilegePromptConfidence::GenericPrompt,
+            ))
         }
-        // A bare password prompt without a nearby sudo/su command is still a
-        // sensitive-input opportunity, but it must not be silently classified
-        // as privilege escalation. The app layer can offer explicit choices.
-        return Some((
-            PrivilegePromptMatch::GenericPassword {
-                prompt_text: line.to_string(),
-            },
-            PrivilegePromptConfidence::GenericPrompt,
-        ));
     }
-
-    None
 }
 
 fn latest_prompt_candidate_line(text: &str) -> Option<String> {
@@ -878,7 +811,7 @@ fn latest_prompt_candidate_line(text: &str) -> Option<String> {
 }
 
 fn recent_prompt_candidate_lines(text: &str) -> Vec<String> {
-    let tail = tail_chars(text, MAX_PROMPT_TAIL_CHARS);
+    let tail = tail_chars(text, MAX_PROMPT_SNAPSHOT_CHARS);
     recent_non_empty_lines(tail)
 }
 
@@ -941,143 +874,9 @@ fn normalize_terminal_line(line: &str) -> String {
     output
 }
 
-fn parse_sudo_prompt(line: &str) -> Option<Option<String>> {
-    if strip_sudo_marker(line).is_none()
-        && let Some(username) = parse_sudo_username_body(line)
-    {
-        return Some(username);
-    }
-
-    let body = strip_sudo_marker(line)?;
-    let prompt_body = strip_prompt_colon(body)?;
-    if prompt_body.is_empty() {
-        return None;
-    }
-    if !is_password_prompt_text(line) {
-        return None;
-    }
-    parse_sudo_username_body(body).or_else(|| is_password_label(prompt_body).then_some(None))
-}
-
-fn strip_sudo_marker(line: &str) -> Option<&str> {
-    let trimmed = line.trim();
-    if !trimmed.to_ascii_lowercase().starts_with("[sudo") {
-        return None;
-    }
-    let marker_end = trimmed.find(']')?;
-    Some(trimmed[marker_end + 1..].trim())
-}
-
-fn parse_sudo_username_body(line: &str) -> Option<Option<String>> {
-    let prompt = strip_prompt_colon(line)?;
-    let prefixes = [
-        "password for ",
-        "passwort für ",
-        "passwort fuer ",
-        "contraseña para ",
-        "contrasena para ",
-        "senha para ",
-        "mot de passe de ",
-        "mot de passe pour ",
-        "password di ",
-        "пароль для ",
-    ];
-    for prefix in prefixes {
-        if let Some(username) = strip_prefix_ascii_case_insensitive(prompt, prefix) {
-            return Some(non_empty_username(username));
-        }
-    }
-
-    let suffixes = ["のパスワード", "암호"];
-    for suffix in suffixes {
-        if let Some(username) = prompt.strip_suffix(suffix) {
-            return Some(non_empty_username(username));
-        }
-    }
-
-    parse_cjk_possessive_password_body(prompt)
-}
-
-fn parse_su_prompt(line: &str) -> Option<Option<String>> {
-    let prompt = strip_prompt_colon(line)?;
-    let Some(prefix) = prompt.get(..3) else {
-        return None;
-    };
-    if !prefix.eq_ignore_ascii_case("su:") {
-        return None;
-    }
-    let label = prompt[3..].trim();
-    is_password_label(label).then_some(None)
-}
-
-fn strip_prompt_colon(line: &str) -> Option<&str> {
-    line.trim()
-        .strip_suffix(':')
-        .or_else(|| line.trim().strip_suffix('：'))
-        .map(str::trim)
-}
-
-fn strip_prefix_ascii_case_insensitive<'a>(text: &'a str, prefix: &str) -> Option<&'a str> {
-    let candidate = text.get(..prefix.len())?;
-    candidate
-        .eq_ignore_ascii_case(prefix)
-        .then(|| text[prefix.len()..].trim())
-}
-
 fn non_empty_username(username: &str) -> Option<String> {
     let username = username.trim();
     (!username.is_empty()).then(|| username.to_string())
-}
-
-fn is_generic_password_prompt(line: &str) -> bool {
-    strip_prompt_colon(line).is_some_and(is_password_label)
-}
-
-fn is_password_prompt_text(line: &str) -> bool {
-    let Some(prompt) = strip_prompt_colon(line) else {
-        return false;
-    };
-    let lower = prompt.to_ascii_lowercase();
-    lower.contains("password")
-        || lower.contains("passwort")
-        || lower.contains("contraseña")
-        || lower.contains("contrasena")
-        || lower.contains("senha")
-        || lower.contains("mot de passe")
-        || lower.contains("пароль")
-        || contains_cjk_password_label(prompt)
-        || prompt.contains("パスワード")
-        || prompt.contains("암호")
-}
-
-fn is_password_label(label: &str) -> bool {
-    let label = label.trim();
-    let lower = label.to_ascii_lowercase();
-    matches!(
-        lower.as_str(),
-        "password" | "passwort" | "contraseña" | "contrasena" | "senha" | "mot de passe"
-    ) || is_cjk_password_label(label)
-        || matches!(label, "パスワード" | "암호" | "пароль")
-}
-
-fn parse_cjk_possessive_password_body(line: &str) -> Option<Option<String>> {
-    let marker = line.find('的')?;
-    let username = line[..marker].trim();
-    let label = line[marker + '的'.len_utf8()..].trim();
-    is_cjk_password_label(label).then(|| non_empty_username(username))
-}
-
-fn contains_cjk_password_label(text: &str) -> bool {
-    let compact = cjk_label_compact(text);
-    compact.contains("密码") || compact.contains("密碼") || compact.contains("口令")
-}
-
-fn is_cjk_password_label(label: &str) -> bool {
-    matches!(cjk_label_compact(label).as_str(), "密码" | "密碼" | "口令")
-}
-
-fn cjk_label_compact(text: &str) -> String {
-    text.chars().filter(|ch| !ch.is_whitespace()).collect()
 }
 
 fn line_matches_custom_patterns(line: &str, patterns: &[String]) -> bool {
@@ -1229,35 +1028,6 @@ fn looks_like_password_result(line: &str) -> bool {
     has_password && has_result
 }
 
-fn output_contains_retry_notice(text: &str) -> bool {
-    recent_non_empty_lines(text)
-        .iter()
-        .any(|line| looks_like_retry_notice(line))
-}
-
-fn output_advances_past_prompt(text: &str) -> bool {
-    text.contains('\n') || text.contains('\r')
-}
-
-fn looks_like_retry_notice(line: &str) -> bool {
-    let lower = line.to_ascii_lowercase();
-    [
-        "sorry",
-        "try again",
-        "incorrect",
-        "authentication failure",
-        "permission denied",
-        "对不起",
-        "重试",
-        "再试",
-        "错误",
-        "失敗",
-        "失败",
-    ]
-    .iter()
-    .any(|needle| lower.contains(needle))
-}
-
 fn same_prompt_kind(left: &PrivilegePromptMatch, right: &PrivilegePromptMatch) -> bool {
     matches!(
         (left, right),
@@ -1300,24 +1070,40 @@ fn prompt_context(prompt: &PrivilegePromptMatch) -> Option<PrivilegeCommandConte
 mod tests {
     use super::*;
 
+    fn observe_standard_prompt(
+        tracker: &mut PrivilegePromptTracker,
+        line: &str,
+        retry: bool,
+        now: Instant,
+    ) {
+        let prompt = detect_terminal_privilege_prompt(line)
+            .expect("test fixture must contain a standard password prompt");
+        tracker.observe_terminal_prompt_event(
+            TerminalPrivilegePromptEvent::Visible { prompt, retry },
+            now,
+        );
+    }
+
+    fn dismiss_standard_prompt(tracker: &mut PrivilegePromptTracker, now: Instant) {
+        tracker.observe_terminal_prompt_event(TerminalPrivilegePromptEvent::Dismissed, now);
+    }
+
     #[test]
     fn tracker_generation_and_expiry_follow_state_transitions() {
         let now = Instant::now();
         let mut tracker = PrivilegePromptTracker::default();
         assert_eq!(tracker.state_generation(), 0);
         assert_eq!(tracker.next_expiry_deadline(), None);
-        assert!(!tracker.requires_output_observation(now));
 
         tracker.observe_submitted_command("sudo true", now);
         let command_generation = tracker.state_generation();
         assert!(command_generation > 0);
-        assert!(tracker.requires_output_observation(now));
         assert_eq!(
             tracker.next_expiry_deadline(),
             now.checked_add(PRIVILEGE_COMMAND_CONTEXT_TTL)
         );
 
-        tracker.observe_output_text("[sudo] password for test:", now);
+        observe_standard_prompt(&mut tracker, "[sudo] password for test:", false, now);
         assert!(tracker.state_generation() > command_generation);
         assert_eq!(
             tracker.next_expiry_deadline(),
@@ -1325,7 +1111,6 @@ mod tests {
         );
 
         tracker.mark_secret_filled(now);
-        assert!(tracker.requires_output_observation(now));
         assert_eq!(
             tracker.next_expiry_deadline(),
             now.checked_add(PRIVILEGE_PROMPT_FILLED_TTL)
@@ -1333,7 +1118,6 @@ mod tests {
         assert!(!tracker.expire_at(now));
         assert!(tracker.expire_at(now + PRIVILEGE_PROMPT_FILLED_TTL));
         assert_eq!(tracker.next_expiry_deadline(), None);
-        assert!(!tracker.requires_output_observation(now + PRIVILEGE_PROMPT_FILLED_TTL));
     }
 
     #[test]
@@ -1533,7 +1317,12 @@ mod tests {
             tracker.observe_user_input_bytes(b"sudo systemctl restart nginx\r", start),
             PrivilegeInputObservation::Normal
         );
-        tracker.observe_output_text("Password:", start + Duration::from_millis(40));
+        observe_standard_prompt(
+            &mut tracker,
+            "Password:",
+            false,
+            start + Duration::from_millis(40),
+        );
 
         assert_eq!(
             tracker.snapshot(start + Duration::from_millis(40)),
@@ -1555,7 +1344,12 @@ mod tests {
 
         tracker.observe_user_input_bytes(b"sudo yazi", start);
         tracker.observe_user_input_bytes(b"\r", start + Duration::from_millis(10));
-        tracker.observe_output_text("Password:", start + Duration::from_millis(40));
+        observe_standard_prompt(
+            &mut tracker,
+            "Password:",
+            false,
+            start + Duration::from_millis(40),
+        );
 
         assert_eq!(
             tracker.snapshot(start + Duration::from_millis(40)),
@@ -1571,24 +1365,21 @@ mod tests {
     }
 
     #[test]
-    fn tracker_observes_first_prompt_after_opaque_shell_history_submission() {
+    fn tracker_observes_first_prompt_after_shell_history_submission() {
         let start = Instant::now();
         let mut tracker = PrivilegePromptTracker::default();
 
-        // Shell history edits the remote line without exposing its command
-        // text to the frontend. Previously typed text must not make that
-        // reconstructed command look reliable after history navigation.
+        // The semantic output event is authoritative even though shell history
+        // changed and submitted text that the frontend never observed.
         tracker.observe_user_input_bytes(b"echo stale", start);
         tracker.observe_user_input_bytes(b"\x1b[A", start);
         tracker.observe_user_input_bytes(b"\r", start + Duration::from_millis(10));
-        tracker.observe_reconstructed_submitted_command("OA", start + Duration::from_millis(10));
-
-        assert!(
-            tracker.requires_output_observation(start + Duration::from_millis(10)),
-            "lossy command reconstruction must not disable decoded output events"
+        observe_standard_prompt(
+            &mut tracker,
+            "Password:",
+            false,
+            start + Duration::from_millis(40),
         );
-
-        tracker.observe_output_text("Password:", start + Duration::from_millis(40));
 
         assert_eq!(
             tracker.snapshot(start + Duration::from_millis(40)),
@@ -1603,84 +1394,27 @@ mod tests {
     }
 
     #[test]
-    fn tracker_trusts_shell_integration_after_opaque_submission() {
+    fn tracker_uses_shell_integration_context_after_history_submission() {
         let start = Instant::now();
         let mut tracker = PrivilegePromptTracker::default();
 
         tracker.observe_user_input_bytes(b"\x1b[A\r", start);
-        tracker.observe_submitted_command("printf ok", start);
-
-        assert!(
-            !tracker.requires_output_observation(start),
-            "shell integration must replace the opaque fallback with its known command"
+        tracker.observe_submitted_command("sudo true", start);
+        observe_standard_prompt(
+            &mut tracker,
+            "Password:",
+            false,
+            start + Duration::from_millis(10),
         );
-    }
 
-    #[test]
-    fn tracker_upgrades_opaque_submission_from_reconstructed_sudo() {
-        let start = Instant::now();
-        let mut tracker = PrivilegePromptTracker::default();
-
-        tracker.observe_user_input_bytes(b"\x1b[A\r", start);
-        tracker.observe_reconstructed_submitted_command("sudo true", start);
-        tracker.observe_output_text("Password:", start + Duration::from_millis(10));
-
-        assert_eq!(
+        assert!(matches!(
             tracker.snapshot(start + Duration::from_millis(10)),
             Some(PrivilegePromptSnapshot {
-                prompt: PrivilegePromptMatch::Sudo {
-                    username: None,
-                    prompt_text: "Password:".to_string(),
-                },
+                prompt: PrivilegePromptMatch::Sudo { .. },
                 confidence: PrivilegePromptConfidence::CommandContext,
-                retry_count: 0,
+                ..
             })
-        );
-    }
-
-    #[test]
-    fn tracker_bounds_opaque_history_output_observation() {
-        let start = Instant::now();
-        let mut tracker = PrivilegePromptTracker::default();
-
-        tracker.observe_user_input_bytes(b"\x1b[A", start);
-        assert!(
-            !tracker.requires_output_observation(start),
-            "history navigation alone must not enable decoded output events"
-        );
-
-        tracker.observe_user_input_bytes(b"\r", start + Duration::from_millis(10));
-        assert!(tracker.requires_output_observation(start + Duration::from_millis(10)));
-        assert!(!tracker.requires_output_observation(
-            start + Duration::from_millis(10) + OPAQUE_COMMAND_OBSERVATION_TTL
         ));
-    }
-
-    #[test]
-    fn tracker_keeps_reconstructed_non_privilege_commands_out_of_output_observation() {
-        let start = Instant::now();
-        let mut tracker = PrivilegePromptTracker::default();
-
-        tracker.observe_user_input_bytes(b"printf ok\r", start);
-
-        assert!(
-            !tracker.requires_output_observation(start),
-            "known non-privilege commands must preserve the output fast path"
-        );
-    }
-
-    #[test]
-    fn tracker_ctrl_u_restores_reliable_input_after_history_navigation() {
-        let start = Instant::now();
-        let mut tracker = PrivilegePromptTracker::default();
-
-        tracker.observe_user_input_bytes(b"\x1b[A", start);
-        tracker.observe_user_input_bytes(b"\x15printf ok\r", start);
-
-        assert!(
-            !tracker.requires_output_observation(start),
-            "clearing the remote line must restore reconstructed input behavior"
-        );
     }
 
     #[test]
@@ -1689,7 +1423,12 @@ mod tests {
         let mut tracker = PrivilegePromptTracker::default();
 
         tracker.observe_submitted_command("sudo yazi", start);
-        tracker.observe_output_text("Password:", start + Duration::from_millis(40));
+        observe_standard_prompt(
+            &mut tracker,
+            "Password:",
+            false,
+            start + Duration::from_millis(40),
+        );
 
         assert_eq!(
             tracker.snapshot(start + Duration::from_millis(40)),
@@ -1705,34 +1444,31 @@ mod tests {
     }
 
     #[test]
-    fn tracker_classifies_first_password_prompt_after_shell_integration_osc() {
+    fn tracker_classifies_first_semantic_password_prompt_with_sudo_context() {
         let start = Instant::now();
-        for output_chunks in [
-            &["\x1b]633;C\x07Password:"][..],
-            &["\x1b]633;C\x1b\\Password:"][..],
-            &["\x1b]633;C", "\x07Password:"][..],
-        ] {
-            let mut tracker = PrivilegePromptTracker::default();
-            assert_eq!(
-                tracker.observe_user_input_bytes(b"sudo vim\r", start),
-                PrivilegeInputObservation::Normal
-            );
-            for output in output_chunks {
-                tracker.observe_output_text(output, start + Duration::from_millis(40));
-            }
+        let mut tracker = PrivilegePromptTracker::default();
+        assert_eq!(
+            tracker.observe_user_input_bytes(b"sudo vim\r", start),
+            PrivilegeInputObservation::Normal
+        );
+        observe_standard_prompt(
+            &mut tracker,
+            "Password:",
+            false,
+            start + Duration::from_millis(40),
+        );
 
-            assert_eq!(
-                tracker.snapshot(start + Duration::from_millis(40)),
-                Some(PrivilegePromptSnapshot {
-                    prompt: PrivilegePromptMatch::Sudo {
-                        username: None,
-                        prompt_text: "Password:".to_string(),
-                    },
-                    confidence: PrivilegePromptConfidence::CommandContext,
-                    retry_count: 0,
-                })
-            );
-        }
+        assert_eq!(
+            tracker.snapshot(start + Duration::from_millis(40)),
+            Some(PrivilegePromptSnapshot {
+                prompt: PrivilegePromptMatch::Sudo {
+                    username: None,
+                    prompt_text: "Password:".to_string(),
+                },
+                confidence: PrivilegePromptConfidence::CommandContext,
+                retry_count: 0,
+            })
+        );
     }
 
     #[test]
@@ -1744,7 +1480,12 @@ mod tests {
             b"\x1b[200~sudo yazi\x1b[201~\r",
             start + Duration::from_millis(10),
         );
-        tracker.observe_output_text("Password:", start + Duration::from_millis(40));
+        observe_standard_prompt(
+            &mut tracker,
+            "Password:",
+            false,
+            start + Duration::from_millis(40),
+        );
 
         assert_eq!(
             tracker.snapshot(start + Duration::from_millis(40)),
@@ -1768,7 +1509,12 @@ mod tests {
             b"\x1b[115;1u\x1b[117;1u\x1b[100;1u\x1b[111;1u\x1b[32;1u\x1b[121;1u\x1b[97;1u\x1b[122;1u\x1b[105;1u\x1b[13;1u",
             start + Duration::from_millis(10),
         );
-        tracker.observe_output_text("Password:", start + Duration::from_millis(40));
+        observe_standard_prompt(
+            &mut tracker,
+            "Password:",
+            false,
+            start + Duration::from_millis(40),
+        );
 
         assert_eq!(
             tracker.snapshot(start + Duration::from_millis(40)),
@@ -1788,7 +1534,7 @@ mod tests {
         let start = Instant::now();
         let mut tracker = PrivilegePromptTracker::default();
 
-        tracker.observe_output_text("Password:", start);
+        observe_standard_prompt(&mut tracker, "Password:", false, start);
 
         assert_eq!(
             tracker.snapshot(start),
@@ -1808,7 +1554,12 @@ mod tests {
         let mut tracker = PrivilegePromptTracker::default();
 
         tracker.observe_user_input_bytes(b"sudo id\r", start);
-        tracker.observe_output_text("Password:", start + PRIVILEGE_COMMAND_CONTEXT_TTL * 2);
+        observe_standard_prompt(
+            &mut tracker,
+            "Password:",
+            false,
+            start + PRIVILEGE_COMMAND_CONTEXT_TTL * 2,
+        );
 
         assert_eq!(
             tracker.snapshot(start + PRIVILEGE_COMMAND_CONTEXT_TTL * 2),
@@ -1828,8 +1579,12 @@ mod tests {
         let mut tracker = PrivilegePromptTracker::default();
 
         tracker.observe_user_input_bytes(b"sudo id\r", start);
-        tracker.observe_output_text("sudo id\n", start + Duration::from_millis(5));
-        tracker.observe_output_text("Password:", start + PRIVILEGE_COMMAND_CONTEXT_TTL * 2);
+        observe_standard_prompt(
+            &mut tracker,
+            "Password:",
+            false,
+            start + PRIVILEGE_COMMAND_CONTEXT_TTL * 2,
+        );
 
         assert_eq!(
             tracker.snapshot(start + PRIVILEGE_COMMAND_CONTEXT_TTL * 2),
@@ -1849,7 +1604,12 @@ mod tests {
         let mut tracker = PrivilegePromptTracker::default();
 
         tracker.observe_user_input_bytes(b"sudo true\r", start);
-        tracker.observe_output_text("Password:", start + Duration::from_millis(10));
+        observe_standard_prompt(
+            &mut tracker,
+            "Password:",
+            false,
+            start + Duration::from_millis(10),
+        );
 
         assert_eq!(
             tracker.observe_user_input_bytes(b"not-for-history", start + Duration::from_millis(20)),
@@ -1871,10 +1631,17 @@ mod tests {
         let mut tracker = PrivilegePromptTracker::default();
 
         tracker.observe_user_input_bytes(b"sudo true\r", start);
-        tracker.observe_output_text("Password:", start + Duration::from_millis(10));
+        observe_standard_prompt(
+            &mut tracker,
+            "Password:",
+            false,
+            start + Duration::from_millis(10),
+        );
         tracker.mark_secret_filled(start + Duration::from_millis(20));
-        tracker.observe_output_text(
-            "Sorry, try again.\nPassword:",
+        observe_standard_prompt(
+            &mut tracker,
+            "Password:",
+            true,
             start + Duration::from_millis(30),
         );
 
@@ -1897,15 +1664,13 @@ mod tests {
         let mut tracker = PrivilegePromptTracker::default();
 
         tracker.observe_user_input_bytes(b"sudo vim /etc/hosts\r", start);
-        tracker.observe_output_text(
+        observe_standard_prompt(
+            &mut tracker,
             "[sudo] password for alice:",
+            false,
             start + Duration::from_millis(10),
         );
         tracker.mark_secret_filled(start + Duration::from_millis(20));
-        tracker.observe_output_text(
-            "\x1b[?1049h\x1b[22;0;0t\x1b[H\x1b[2J",
-            start + Duration::from_millis(30),
-        );
 
         assert_eq!(tracker.snapshot(start + Duration::from_millis(30)), None);
         assert!(tracker.suppresses_fallback_prompt_detection(start + Duration::from_millis(30)));
@@ -1936,8 +1701,10 @@ mod tests {
         let mut tracker = PrivilegePromptTracker::default();
 
         tracker.observe_user_input_bytes(b"sudo true\r", start);
-        tracker.observe_output_text(
+        observe_standard_prompt(
+            &mut tracker,
             "[sudo] password for alice:",
+            false,
             start + Duration::from_millis(10),
         );
         assert!(
@@ -1946,10 +1713,7 @@ mod tests {
                 .is_some()
         );
 
-        tracker.observe_output_text(
-            "\r\nsudo: timed out reading password\r\nalice@host:~$ ",
-            start + Duration::from_millis(20),
-        );
+        dismiss_standard_prompt(&mut tracker, start + Duration::from_millis(20));
 
         assert_eq!(tracker.snapshot(start + Duration::from_millis(20)), None);
     }

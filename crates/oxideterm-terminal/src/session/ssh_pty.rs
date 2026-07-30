@@ -22,6 +22,7 @@ pub struct SshPtySession {
     output_decoder: TerminalOutputDecoder,
     output_processor: Option<TerminalOutputProcessor>,
     output_events_enabled: bool,
+    privilege_prompt: TerminalPrivilegePromptStream,
     input_encoder: TerminalInputEncoder,
     encoding_detector: EncodingMismatchDetector,
     trzsz_consumer: Option<TrzszConsumer>,
@@ -150,6 +151,7 @@ impl SshPtySession {
             output_decoder: TerminalOutputDecoder::new(encoding),
             output_processor: None,
             output_events_enabled: false,
+            privilege_prompt: TerminalPrivilegePromptStream::default(),
             input_encoder: TerminalInputEncoder::new(encoding),
             encoding_detector: EncodingMismatchDetector::new(encoding),
             trzsz_consumer,
@@ -272,6 +274,10 @@ impl SshPtySession {
                         self.pending_events.push(TerminalEvent::EncodingHint(hint));
                     }
                     let decoded = self.output_decoder.decode_to_utf8_bytes(&terminal_bytes);
+                    for event in self.privilege_prompt.observe(decoded.as_ref()) {
+                        self.pending_events
+                            .push(TerminalEvent::PrivilegePrompt(event));
+                    }
                     if self.output_events_enabled && !decoded.is_empty() {
                         // Match the Tauri hook boundary: recording observes UTF-8
                         // display output after terminal decoding, not SSH bytes.
@@ -631,6 +637,7 @@ impl TerminalSessionBackend for SshPtySession {
         self.encoding = encoding;
         self.output_decoder.set_encoding(encoding);
         self.output_decoder.reset();
+        self.privilege_prompt = TerminalPrivilegePromptStream::default();
         self.input_encoder.set_encoding(encoding);
         self.encoding_detector.set_encoding(encoding);
     }
@@ -638,6 +645,7 @@ impl TerminalSessionBackend for SshPtySession {
     fn set_output_processor(&mut self, processor: Option<TerminalOutputProcessor>) {
         self.output_processor = processor;
         self.output_decoder.reset();
+        self.privilege_prompt = TerminalPrivilegePromptStream::default();
         self.encoding_detector.set_encoding(self.encoding);
     }
 

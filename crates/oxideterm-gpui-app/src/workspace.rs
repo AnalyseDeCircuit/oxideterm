@@ -170,7 +170,7 @@ use oxideterm_gpui_terminal::{
     TerminalPasteLabels, TerminalRecordingState, TerminalRecordingStatus, TerminalSearchStatus,
     TerminalSerialControlLabels, TerminalTrzszLabels, TerminalUiPreferenceOverrides,
     TerminalUiPreferences, TerminalUiTheme, TerminalWorkingDirectorySource,
-    detect_custom_privilege_prompt, detect_privilege_prompt,
+    detect_custom_privilege_prompt,
 };
 use oxideterm_gpui_ui::scroll::ScrollableElement;
 use oxideterm_gpui_ui::{

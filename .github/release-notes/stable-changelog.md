@@ -3,6 +3,29 @@
 Stable releases are listed newest first. The release workflow uses each versioned
 section as the detailed changelog attached to the corresponding GitHub Release.
 
+## 2.0.14
+
+OxideTerm 2.0.14 unifies ACP and ordinary AI conversations, makes long chats and privilege prompts more reliable, and improves portable credentials, SSH Agent routing, terminal input, and remote compatibility.
+
+### ✨ Highlights
+
+- Integrated ACP agents into the existing OxideSens chat surface, allowing ordinary models and ACP backends to alternate within one conversation while preserving message ownership, incremental handoff, cancellation, and session lifecycle.
+- Added an authoritative, capability-scoped AI runtime context so approved terminal, SFTP, IDE, connection, and workspace state is projected consistently without exposing internal runtime handles or unredacted secret-bearing data.
+- Added configurable custom SSH Agent endpoints to new and edited SSH connections, including imported `IdentityAgent` values, while preserving automatic system Agent discovery when no override is selected.
+
+### 🛠️ Fixes
+
+- Rebuilt sudo and su password-prompt detection at the decoded local and SSH session boundary, so the first prompt is available immediately even for shell-history commands, split output, localized prompts, and retry flows without leaking full terminal output into the UI event path.
+- Virtualized long AI conversation rendering, preserved per-message backend attribution, and limited tool-result progress indicators to the tool call that is actually being summarized.
+- Migrated portable Vault credentials to stable account identifiers, allowing managed SSH keys, connection passwords, private-key passphrases, and privilege credentials to remain accessible after moving the portable directory to another machine or operating-system account.
+- Restored clipboard editing in managed SSH key dialogs and added an optional right-click terminal paste setting alongside the existing middle-click behavior.
+- Restored the compact command input layout and cursor behavior, cleared submitted commands correctly, and kept QuickBar commands on a single horizontal row.
+- Updated the RDP ClearCodec dependency to decode valid short vertical-band regions that previously failed during compatible remote-desktop sessions.
+
+### 🔒 Security
+
+- Kept privilege-prompt classification independent from credential retrieval: terminal sessions emit only bounded semantic prompt events, while scoped secret lookup, confirmation, zeroization, and direct PTY writes remain owned by the application boundary.
+
 ## 2.0.13
 
 OxideTerm 2.0.13 introduces an advanced terminal command sender, completes portable-mode updates and storage, and substantially strengthens native workspace ownership while resolving important Windows, remote-desktop, font, and AI compatibility issues.
