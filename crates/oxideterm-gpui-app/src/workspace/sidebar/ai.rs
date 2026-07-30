@@ -12,7 +12,7 @@ use oxideterm_ai::{
     AiChatStreamConfig, AiConversation, AiExecutionBackend, AiMessageBranches,
     AiOrchestratorObligation, AiOrchestratorObligationMode, AiPolicySafetyMode, AiProviderView,
     AiReasoningLevel, AiReferenceMatch, AiStreamEvent, AiToolCall, AiToolUsePolicy,
-    ModelSelectorProviderProbe, active_model_selection, active_provider_view,
+    ModelSelectorProviderProbe, ToolSessionId, active_model_selection, active_provider_view,
     ai_autocomplete_candidates, ai_classify_orchestrator_obligation,
     ai_detected_intent_system_prompt, ai_help_markdown as ai_help_markdown_core,
     ai_input_system_prompt, ai_orchestrator_obligation_prompt, ai_reference_context_block,

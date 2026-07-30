@@ -1,4 +1,10 @@
 impl IdeSurface {
+    /// Returns the surface-owned filesystem scope for host-mediated AI actions.
+    /// The caller must still validate its own runtime capability before use.
+    pub fn ai_owner_file_system(&self) -> NodeAgentIdeFileSystem {
+        self.fs.clone()
+    }
+
     pub fn project_root_path(&self) -> Option<String> {
         self.root_path.clone()
     }

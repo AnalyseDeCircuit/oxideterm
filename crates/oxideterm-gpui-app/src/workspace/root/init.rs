@@ -476,6 +476,10 @@ impl WorkspaceApp {
                 workspace.enqueue_ai_window_effect(event, cx);
             },
         );
+        let ai_runtime_context = cx.new(|cx| {
+            ai_runtime_context::AiRuntimeContextEntity::attach_release_shutdown(cx);
+            ai_runtime_context::AiRuntimeContextEntity::new()
+        });
         let plugin_task_runtime = forwarding_runtime.clone();
         let plugin_entity = cx.new(move |cx| {
             plugin_entity::PluginWorkspaceEntity::new(plugin_task_runtime, plugin_registry, cx)
@@ -588,6 +592,7 @@ impl WorkspaceApp {
                 && settings.ai.enabled,
             context_sidebar_motion_generation: 0,
             ai_entity,
+            ai_runtime_context,
             _ai_entity_subscription: ai_entity_subscription,
             active_context_sidebar_panel: ContextSidebarPanel::Assistant,
             needs_active_pane_focus: false,
@@ -768,6 +773,20 @@ impl WorkspaceApp {
         workspace.sync_active_terminal_recording_elapsed_tick(cx);
         workspace.sync_active_privilege_prompt_inline_hint(cx);
         workspace.schedule_automatic_native_update_check(cx);
+        cx.on_release(|workspace, cx| {
+            // Shutdown ordering is security-sensitive: late broker callbacks
+            // fail before user-decision waiters and owner projections disappear.
+            workspace.ai_runtime_context.update(cx, |runtime, _cx| {
+                runtime.stop_accepting_and_finish_tool_sessions();
+            });
+            workspace.ai_entity.update(cx, |ai, _cx| {
+                ai.cancel_chat_stream();
+            });
+            workspace.ai_runtime_context.update(cx, |runtime, _cx| {
+                runtime.revoke_registered_owner_projections();
+            });
+        })
+        .detach();
         Ok(workspace)
     }
 

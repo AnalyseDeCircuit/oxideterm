@@ -3,6 +3,24 @@ use super::*;
 impl WorkspaceApp {
     pub(in crate::workspace) fn insert_tab(&mut self, tab: Tab, cx: &mut App) {
         let tab_id = tab.id;
+        let surface_kind =
+            crate::workspace::root::helpers::tab_background_key(&tab.kind).to_string();
+        let surface_label = if tab.title.trim().is_empty() {
+            surface_kind.clone()
+        } else {
+            tab.title.clone()
+        };
+        let stable_surface_ref = oxideterm_ai::StableResourceRef::new(
+            oxideterm_ai::StableResourceKind::AppSurface,
+            surface_kind,
+            Some(surface_label.clone()),
+        )
+        .ok();
+        // Tab insertion is the mount boundary for exact focus authority. The
+        // stable reference is optional because not every internal tab is openable.
+        self.ai_runtime_context.update(cx, |runtime, _cx| {
+            runtime.register_app_surface(tab_id, surface_label, stable_surface_ref);
+        });
         // Creation and selection are one Entity-owned transition. Root only
         // applies the cross-subsystem visibility consequences.
         let previous_active_tab_id = self

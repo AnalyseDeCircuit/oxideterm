@@ -149,6 +149,18 @@
       "show_raw_output": "全文を表示",
       "hide_raw_output": "出力を折りたたむ",
       "recovery_actions": "復旧アクション",
+      "choose_target": "続行する対象を選択",
+      "cancel_selection": "キャンセル",
+      "recovery": {
+        "stale_target": "ライブ対象が変更されたか、利用できなくなりました。",
+        "state_changed_after_approval": "承認待ちの間に対象が変わったため、何も実行されませんでした。",
+        "resource_removed": "保存済みリソースは存在しません。",
+        "resource_disconnected": "保存済みリソースは切断されています。",
+        "credential_interaction_required": "通常の接続フローで認証情報または確認が必要です。",
+        "operation_cancelled": "変更を行わずに操作をキャンセルしました。",
+        "rediscover": "再検出",
+        "connect": "接続"
+      },
       "copy_session_id": "session_id をコピー",
       "recoverable_error": "回復可能なエラー",
       "output_truncated": "出力は切り詰められました",
@@ -313,6 +325,7 @@
       "status": {
         "pending": "待機中",
         "pending_approval": "承認待ち",
+        "pending_selection": "対象の選択待ち",
         "approved": "承認済み",
         "running": "実行中",
         "completed": "完了",

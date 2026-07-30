@@ -2,36 +2,143 @@ use super::*;
 use sha2::Digest as _;
 
 pub(in crate::workspace) fn ai_tool_requires_ui_thread(
-    snapshot: &AiOrchestratorRuntimeSnapshot,
+    tool_name: &str,
+    _args: &serde_json::Value,
+) -> bool {
+    // Every application tool crosses the same UI-owned broker. Background
+    // provider tasks therefore never execute against their frozen snapshots.
+    oxideterm_ai::is_orchestrator_tool_name(tool_name)
+}
+
+/// Rejects the removed v1 authority field before any canonical v2 dispatch.
+/// This is defense in depth alongside strict schemas and argument parsing.
+pub(in crate::workspace) fn ai_rejects_legacy_live_target_argument(
     tool_name: &str,
     args: &serde_json::Value,
 ) -> bool {
-    if matches!(
+    matches!(
         tool_name,
-        "connect_target" | "send_terminal_input" | "open_app_surface" | "remember_preference"
-    ) {
-        return true;
-    }
-    if tool_name == "write_resource" {
-        return args.get("resource").and_then(serde_json::Value::as_str) == Some("settings");
-    }
-    if tool_name == "run_command"
-        && let Some(target_id) = args.get("target_id").and_then(serde_json::Value::as_str)
-    {
-        return snapshot.targets.iter().any(|target| {
-            target.id == target_id && ai_run_command_requires_ui_thread_target(target)
-        });
-    }
-    false
+        "read_resource"
+            | "write_resource"
+            | "transfer_resource"
+            | "open_app_surface"
+            | "get_state"
+    ) && args.get("target_id").is_some()
 }
 
-pub(in crate::workspace) fn ai_run_command_requires_ui_thread_target(
-    target: &AiOrchestratorTarget,
-) -> bool {
-    matches!(
-        target.kind.as_str(),
-        "terminal-session" | "ssh-node" | "local-shell"
-    )
+/// Identifies a stable resource only after its typed wire reference has been
+/// parsed and checked against the operation it is allowed to perform.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(in crate::workspace) enum AiStableResourceOperation {
+    SavedConnection(oxideterm_ai::StableResourceRef),
+    Settings,
+    Rag,
+    AppSurface(String),
+}
+
+/// Classifies the exact live-owner capability required by a v2 resource tool.
+/// A resource family cannot be widened by selecting a handle of another kind.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(in crate::workspace) enum AiLiveResourceOperation {
+    SftpRead,
+    SftpWrite,
+    SftpStartTransfer,
+    IdeRead,
+    IdeWrite,
+}
+
+impl AiLiveResourceOperation {
+    pub(in crate::workspace) const fn capability(self) -> oxideterm_ai::RuntimeCapability {
+        match self {
+            Self::SftpRead => oxideterm_ai::RuntimeCapability::SftpRead,
+            Self::SftpWrite => oxideterm_ai::RuntimeCapability::SftpWrite,
+            Self::SftpStartTransfer => oxideterm_ai::RuntimeCapability::SftpStartTransfer,
+            Self::IdeRead => oxideterm_ai::RuntimeCapability::IdeRead,
+            Self::IdeWrite => oxideterm_ai::RuntimeCapability::IdeWrite,
+        }
+    }
+
+    pub(in crate::workspace) const fn requires_ide_owner(self) -> bool {
+        matches!(self, Self::IdeRead | Self::IdeWrite)
+    }
+}
+
+pub(in crate::workspace) fn ai_live_resource_operation(
+    tool_name: &str,
+    args: &serde_json::Value,
+) -> Result<AiLiveResourceOperation, oxideterm_ai::RuntimeValidationError> {
+    let resource = args.get("resource").and_then(serde_json::Value::as_str);
+    let operation = match (tool_name, resource) {
+        ("read_resource", Some("file" | "directory" | "sftp")) => {
+            AiLiveResourceOperation::SftpRead
+        }
+        ("read_resource", Some("ide")) => AiLiveResourceOperation::IdeRead,
+        ("write_resource", Some("file")) => AiLiveResourceOperation::SftpWrite,
+        ("write_resource", Some("ide")) => AiLiveResourceOperation::IdeWrite,
+        ("transfer_resource", _) => AiLiveResourceOperation::SftpStartTransfer,
+        _ => {
+            return Err(oxideterm_ai::RuntimeValidationError::new(
+                oxideterm_ai::RuntimeValidationFailure::CapabilityUnavailable,
+            ));
+        }
+    };
+    Ok(operation)
+}
+
+pub(in crate::workspace) fn ai_stable_resource_operation(
+    tool_name: &str,
+    args: &serde_json::Value,
+) -> Result<AiStableResourceOperation, oxideterm_ai::RuntimeValidationError> {
+    let resource_ref = args
+        .get("resource_ref")
+        .cloned()
+        .and_then(|value| serde_json::from_value::<oxideterm_ai::StableResourceRef>(value).ok())
+        .ok_or_else(|| {
+            oxideterm_ai::RuntimeValidationError::new(
+                oxideterm_ai::RuntimeValidationFailure::CapabilityUnavailable,
+            )
+        })?;
+
+    let operation = match tool_name {
+        "connect_target"
+            if resource_ref.kind() == oxideterm_ai::StableResourceKind::SavedConnection =>
+        {
+            AiStableResourceOperation::SavedConnection(resource_ref)
+        }
+        "read_resource"
+            if args.get("resource").and_then(serde_json::Value::as_str) == Some("settings")
+                && resource_ref.kind() == oxideterm_ai::StableResourceKind::SettingsScope
+                && resource_ref.id() == "app" =>
+        {
+            AiStableResourceOperation::Settings
+        }
+        "read_resource"
+            if args.get("resource").and_then(serde_json::Value::as_str) == Some("rag")
+                && resource_ref.kind() == oxideterm_ai::StableResourceKind::RagIndex
+                && resource_ref.id() == "default" =>
+        {
+            AiStableResourceOperation::Rag
+        }
+        "write_resource"
+            if args.get("resource").and_then(serde_json::Value::as_str) == Some("settings")
+                && resource_ref.kind() == oxideterm_ai::StableResourceKind::SettingsScope
+                && resource_ref.id() == "app" =>
+        {
+            AiStableResourceOperation::Settings
+        }
+        "open_app_surface"
+            if resource_ref.kind() == oxideterm_ai::StableResourceKind::AppSurface =>
+        {
+            AiStableResourceOperation::AppSurface(resource_ref.id().to_string())
+        }
+        _ => {
+            return Err(oxideterm_ai::RuntimeValidationError::new(
+                oxideterm_ai::RuntimeValidationFailure::CapabilityUnavailable,
+            ));
+        }
+    };
+
+    Ok(operation)
 }
 
 #[cfg(windows)]
@@ -78,10 +185,6 @@ impl AiActionResultLite {
         self
     }
 
-    pub(in crate::workspace) fn with_data(mut self, data: serde_json::Value) -> Self {
-        self.data = data;
-        self
-    }
 
     pub(in crate::workspace) fn with_optional_target(
         mut self,
@@ -105,7 +208,6 @@ pub(in crate::workspace) async fn run_local_ai_command(
     cwd: Option<&str>,
     timeout_secs: u64,
     dangerous_command_approved: bool,
-    target: &AiOrchestratorTarget,
 ) -> AiActionResultLite {
     if oxideterm_ai::has_denied_commands(
         "run_command",
@@ -120,7 +222,7 @@ pub(in crate::workspace) async fn run_local_ai_command(
             error_code: Some("local_command_error".to_string()),
             error_message: Some("Command denied for security reasons".to_string()),
             risk: "execute",
-            target: Some(target.clone()),
+            target: None,
             targets: Vec::new(),
             next_actions: Vec::new(),
             observations: Vec::new(),
@@ -133,6 +235,8 @@ pub(in crate::workspace) async fn run_local_ai_command(
     } else {
         "sh"
     });
+    // Dropping a cancelled tool future must also terminate its local child.
+    process.kill_on_drop(true);
     configure_ai_local_command_process(&mut process);
     if cfg!(target_os = "windows") {
         process.arg("/C").arg(command);
@@ -148,9 +252,9 @@ pub(in crate::workspace) async fn run_local_ai_command(
                 output: format!("Working directory does not exist: {cwd}"),
                 data: serde_json::Value::Null,
                 error_code: Some("local_command_error".to_string()),
-                error_message: Some(format!("Working directory does not exist: {cwd}")),
+                error_message: Some("Working directory does not exist.".to_string()),
                 risk: "execute",
-                target: Some(target.clone()),
+                target: None,
                 targets: Vec::new(),
                 next_actions: Vec::new(),
                 observations: Vec::new(),
@@ -163,10 +267,8 @@ pub(in crate::workspace) async fn run_local_ai_command(
     let timeout_secs = ai_local_exec_timeout_secs(timeout_secs);
     match tokio::time::timeout(Duration::from_secs(timeout_secs), process.output()).await {
         Ok(Ok(output)) => {
-            let stdout = String::from_utf8_lossy(&output.stdout);
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            let stdout = truncate_ai_local_exec_output(&stdout);
-            let stderr = truncate_ai_local_exec_output(&stderr);
+            let stdout = truncate_ai_local_exec_output(&String::from_utf8_lossy(&output.stdout));
+            let stderr = truncate_ai_local_exec_output(&String::from_utf8_lossy(&output.stderr));
             let exit_code = output.status.code();
             let has_output = !stdout.trim().is_empty() || !stderr.trim().is_empty();
             let ok = output.status.success() || (exit_code.is_none() && has_output);
@@ -193,7 +295,12 @@ pub(in crate::workspace) async fn run_local_ai_command(
                 } else if exit_code.is_none() && has_output {
                     "Local command output captured; exit code was not reported.".to_string()
                 } else {
-                    format!("Local command exited with {}.", exit_code.map(|code| code.to_string()).unwrap_or_else(|| "unknown".to_string()))
+                    format!(
+                        "Local command exited with {}.",
+                        exit_code
+                            .map(|code| code.to_string())
+                            .unwrap_or_else(|| "unknown".to_string())
+                    )
                 },
                 output: body,
                 data: serde_json::json!({
@@ -203,9 +310,9 @@ pub(in crate::workspace) async fn run_local_ai_command(
                     "visibleInTerminal": false,
                 }),
                 error_code: (!ok).then(|| "local_command_failed".to_string()),
-                error_message: (!ok).then(|| format!("Exit code: {}", exit_code.map(|code| code.to_string()).unwrap_or_else(|| "unknown".to_string()))),
+                error_message: (!ok).then(|| "The local command failed.".to_string()),
                 risk: "execute",
-                target: Some(target.clone()),
+                target: None,
                 targets: Vec::new(),
                 next_actions: Vec::new(),
                 observations: (exit_code.is_none() && has_output)
@@ -222,9 +329,9 @@ pub(in crate::workspace) async fn run_local_ai_command(
             output: error.to_string(),
             data: serde_json::Value::Null,
             error_code: Some("local_command_error".to_string()),
-            error_message: Some(error.to_string()),
+            error_message: Some("The local command could not be started.".to_string()),
             risk: "execute",
-            target: Some(target.clone()),
+            target: None,
             targets: Vec::new(),
             next_actions: Vec::new(),
             observations: Vec::new(),
@@ -246,7 +353,7 @@ pub(in crate::workspace) async fn run_local_ai_command(
             error_code: Some("local_command_timeout".to_string()),
             error_message: Some("Command timed out.".to_string()),
             risk: "execute",
-            target: Some(target.clone()),
+            target: None,
             targets: Vec::new(),
             next_actions: Vec::new(),
             observations: Vec::new(),
@@ -348,39 +455,7 @@ pub(in crate::workspace) fn ai_command_with_cwd(command: &str, cwd: Option<&str>
     }
 }
 
-pub(in crate::workspace) fn ai_target_is_local_terminal(target: &AiOrchestratorTarget) -> bool {
-    target
-        .metadata
-        .get("terminalType")
-        .and_then(serde_json::Value::as_str)
-        == Some("local_terminal")
-}
 
-pub(in crate::workspace) fn local_terminal_run_target(
-    snapshot: &AiOrchestratorRuntimeSnapshot,
-) -> Option<AiOrchestratorTarget> {
-    let active_tab_id = snapshot.active_tab_id.as_deref();
-    let matches_local_terminal = |target: &&AiOrchestratorTarget| {
-        target.kind == "terminal-session"
-            && target.state == "connected"
-            && ai_target_is_local_terminal(target)
-    };
-
-    // Prefer the terminal the user is already looking at. If none is active,
-    // reuse any connected local terminal before opening another tab.
-    snapshot
-        .targets
-        .iter()
-        .find(|target| {
-            matches_local_terminal(target)
-                && target
-                    .refs
-                    .get("tabId")
-                    .is_some_and(|tab_id| Some(tab_id.as_str()) == active_tab_id)
-        })
-        .or_else(|| snapshot.targets.iter().find(matches_local_terminal))
-        .cloned()
-}
 
 pub(in crate::workspace) fn target_in_ai_view(target: &AiOrchestratorTarget, view: &str) -> bool {
     match view {
@@ -426,90 +501,30 @@ pub(in crate::workspace) fn target_matches_ai_query(
     if query.is_empty() {
         return true;
     }
-    let haystack = [
-        target.id.as_str(),
-        target.kind.as_str(),
-        target.label.as_str(),
-        &target.refs.values().cloned().collect::<Vec<_>>().join(" "),
-        &target
-            .metadata
-            .as_object()
-            .map(|object| {
-                object
-                    .values()
-                    .map(ai_js_query_string)
-                    .collect::<Vec<_>>()
-                    .join(" ")
-            })
-            .unwrap_or_default(),
-    ]
-    .join(" ")
-    .to_lowercase();
-    haystack.contains(query)
+    // Discovery may rank presentation data, but it must never turn a leaked
+    // node, tab, pane, or session id back into current authority.
+    if target.label.to_lowercase().contains(query) {
+        return true;
+    }
+    if target
+        .metadata
+        .get("host")
+        .and_then(serde_json::Value::as_str)
+        .is_some_and(|host| host.to_lowercase().contains(query))
+    {
+        return true;
+    }
+    // Saved UUIDs are durable identities. Match them exactly so UUID
+    // fragments cannot accidentally select an unrelated current resource.
+    target
+        .refs
+        .get("connectionId")
+        .is_some_and(|connection_id| connection_id.eq_ignore_ascii_case(query))
 }
 
 pub(in crate::workspace) fn normalized_ai_query(query: Option<&str>) -> String {
     // Tauri trims discovery queries before filtering targets.
     query.unwrap_or("").trim().to_lowercase()
-}
-
-pub(in crate::workspace) fn ai_js_query_string(value: &serde_json::Value) -> String {
-    match value {
-        serde_json::Value::Null => String::new(),
-        serde_json::Value::Bool(value) => value.to_string(),
-        serde_json::Value::Number(value) => value.to_string(),
-        serde_json::Value::String(value) => value.clone(),
-        serde_json::Value::Array(values) => values
-            .iter()
-            .map(ai_js_query_string)
-            .collect::<Vec<_>>()
-            .join(","),
-        // JavaScript Array.join stringifies plain object metadata this way.
-        serde_json::Value::Object(_) => "[object Object]".to_string(),
-    }
-}
-
-pub(in crate::workspace) fn target_requires_live_state(target: &AiOrchestratorTarget) -> bool {
-    matches!(
-        target.kind.as_str(),
-        "ssh-node" | "terminal-session" | "sftp-session"
-    )
-}
-
-pub(in crate::workspace) fn recovery_actions_for_target(
-    target: &AiOrchestratorTarget,
-) -> Vec<serde_json::Value> {
-    match target.kind.as_str() {
-        "saved-connection" | "ssh-node" => vec![serde_json::json!({
-            "action": "connect_target",
-            "args": { "target_id": target.id },
-            "reason": "Reconnect or open this SSH target before continuing."
-        })],
-        "terminal-session" => vec![
-            serde_json::json!({
-                "action": "observe_terminal",
-                "args": { "target_id": target.id },
-                "reason": "Check whether the terminal has become ready."
-            }),
-            serde_json::json!({
-                "action": "list_targets",
-                "reason": "Find a live terminal or SSH target if this one is stale."
-            }),
-        ],
-        _ => vec![serde_json::json!({
-            "action": "list_targets",
-            "reason": "Find a currently available target before continuing."
-        })],
-    }
-}
-
-pub(in crate::workspace) fn ai_ssh_reconnect_failed_next_actions() -> Vec<serde_json::Value> {
-    // Tauri returns this specific recovery hint when connect_target cannot
-    // reconnect a stale ssh-node target.
-    vec![serde_json::json!({
-        "action": "list_targets",
-        "reason": "Refresh target state before retrying."
-    })]
 }
 
 pub(in crate::workspace) fn view_for_ai_intent(intent: &str) -> &'static str {
@@ -576,17 +591,6 @@ pub(in crate::workspace) fn normalized_ai_select_target_kind(
     }
 }
 
-pub(in crate::workspace) fn normalized_ai_resource_kind(resource: Option<&str>) -> &'static str {
-    match resource {
-        Some("settings") => "settings",
-        Some("file") => "file",
-        Some("directory") => "directory",
-        Some("sftp") => "sftp",
-        Some("ide") => "ide",
-        Some("rag") => "rag",
-        _ => "",
-    }
-}
 
 pub(in crate::workspace) fn ai_rag_query_arg(args: &serde_json::Value) -> &str {
     // Tauri uses `options.query ?? options.path ?? ''` for RAG reads and does
@@ -658,107 +662,47 @@ pub(in crate::workspace) fn is_ai_command_like_query(query: &str) -> bool {
         })
 }
 
-pub(in crate::workspace) fn target_json(target: &AiOrchestratorTarget) -> serde_json::Value {
-    serde_json::json!({
-        "id": target.id,
-        "kind": target.kind,
-        "label": target.label,
-        "state": target.state,
-        "capabilities": target.capabilities,
-        "refs": target.refs,
-        "metadata": target.metadata,
-    })
+pub(in crate::workspace) struct AiConnectionCounts {
+    pub(in crate::workspace) total: usize,
+    pub(in crate::workspace) saved: usize,
+    pub(in crate::workspace) live: usize,
+    pub(in crate::workspace) link_down: usize,
+    pub(in crate::workspace) error: usize,
 }
 
-pub(in crate::workspace) fn tool_result_target_json(
-    target: &AiOrchestratorTarget,
-) -> serde_json::Value {
-    let mut metadata = serde_json::Map::new();
-    metadata.insert("state".to_string(), serde_json::json!(target.state));
-    metadata.insert(
-        "capabilities".to_string(),
-        serde_json::json!(target.capabilities),
-    );
-    metadata.insert("refs".to_string(), serde_json::json!(target.refs));
-    if let Some(source) = target.metadata.as_object() {
-        for (key, value) in source {
-            metadata.insert(key.clone(), value.clone());
-        }
-    }
-    serde_json::json!({
-        "id": target.id,
-        "kind": target.kind,
-        "label": target.label,
-        "metadata": metadata,
-    })
-}
-
-pub(in crate::workspace) fn compact_ai_target_json(
-    target: &AiOrchestratorTarget,
-) -> serde_json::Value {
-    serde_json::json!({
-        "id": target.id,
-        "kind": target.kind,
-        "label": target.label,
-        "state": target.state,
-        "capabilities": target.capabilities,
-        "refs": target.refs,
-    })
-}
-
-pub(in crate::workspace) fn ai_targets_state(
+pub(in crate::workspace) fn ai_connection_counts(
     targets: &[AiOrchestratorTarget],
-    runtime_epoch: &str,
-) -> serde_json::Value {
-    let view_targets = |view: &str| {
-        targets
-            .iter()
-            .filter(|target| target_in_ai_view(target, view))
-            .map(compact_ai_target_json)
-            .collect::<Vec<_>>()
-    };
-    let connections = view_targets("connections");
-    let live_sessions = view_targets("live_sessions");
-    let app_surfaces = view_targets("app_surfaces");
-    let files = view_targets("files");
-    serde_json::json!({
-        "runtimeEpoch": runtime_epoch,
-        "views": {
-            "connections": { "count": connections.len(), "targets": connections },
-            "live_sessions": { "count": live_sessions.len(), "targets": live_sessions },
-            "app_surfaces": { "count": app_surfaces.len(), "targets": app_surfaces },
-            "files": { "count": files.len(), "targets": files },
-            "all": { "count": targets.len() },
-        },
-    })
-}
-
-pub(in crate::workspace) fn ai_connections_state(
-    targets: &[AiOrchestratorTarget],
-    runtime_epoch: &str,
-) -> serde_json::Value {
+) -> AiConnectionCounts {
     let connections = targets
         .iter()
         .filter(|target| target_in_ai_view(target, "connections"))
         .collect::<Vec<_>>();
-    serde_json::json!({
-        "runtimeEpoch": runtime_epoch,
-        "total": connections.len(),
-        "counts": {
-            "saved": connections.iter().filter(|target| target.kind == "saved-connection").count(),
-            "live": connections.iter().filter(|target| target.kind == "ssh-node" && target.state == "connected").count(),
-            "linkDown": connections.iter().filter(|target| target.kind == "ssh-node" && target.state == "stale").count(),
-            "error": connections.iter().filter(|target| {
+    AiConnectionCounts {
+        total: connections.len(),
+        saved: connections
+            .iter()
+            .filter(|target| target.kind == "saved-connection")
+            .count(),
+        live: connections
+            .iter()
+            .filter(|target| target.kind == "ssh-node" && target.state == "connected")
+            .count(),
+        link_down: connections
+            .iter()
+            .filter(|target| target.kind == "ssh-node" && target.state == "stale")
+            .count(),
+        error: connections
+            .iter()
+            .filter(|target| {
                 target.kind == "ssh-node"
                     && target
                         .metadata
                         .get("status")
                         .and_then(serde_json::Value::as_str)
                         == Some("error")
-            }).count(),
-        },
-        "targets": connections.into_iter().map(compact_ai_target_json).collect::<Vec<_>>(),
-    })
+            })
+            .count(),
+    }
 }
 
 pub(in crate::workspace) fn ai_background_transfer_state_label(
@@ -776,7 +720,6 @@ pub(in crate::workspace) fn ai_background_transfer_state_label(
 
 pub(in crate::workspace) fn ai_transfers_state(
     manager: &SftpTransferManager,
-    runtime_epoch: &str,
 ) -> serde_json::Value {
     let transfers = manager.list_background_transfers(None);
     let count = |state| {
@@ -812,20 +755,17 @@ pub(in crate::workspace) fn ai_transfers_state(
         .map(|transfer| {
             serde_json::json!({
                 "id": transfer.id,
-                "nodeId": transfer.node_id,
-                "name": transfer.name,
                 "direction": transfer.direction,
                 "state": ai_background_transfer_state_label(transfer.state),
                 "size": transfer.size,
                 "transferred": transfer.transferred,
-                "error": transfer.error,
+                "hasError": transfer.error.is_some(),
                 "startTime": transfer.start_time,
                 "endTime": transfer.end_time,
             })
         })
         .collect::<Vec<_>>();
     serde_json::json!({
-        "runtimeEpoch": runtime_epoch,
         "total": transfers.len(),
         "counts": {
             "pending": count(BackgroundTransferState::Pending),

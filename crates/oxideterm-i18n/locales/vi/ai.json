@@ -149,6 +149,18 @@
       "show_raw_output": "Hiện toàn bộ đầu ra",
       "hide_raw_output": "Thu gọn đầu ra",
       "recovery_actions": "Hành động khôi phục",
+      "choose_target": "Chọn đích để tiếp tục",
+      "cancel_selection": "Hủy",
+      "recovery": {
+        "stale_target": "Đích đang hoạt động đã thay đổi hoặc không còn khả dụng.",
+        "state_changed_after_approval": "Không có thao tác nào được chạy vì đích đã thay đổi trong khi chờ phê duyệt.",
+        "resource_removed": "Tài nguyên đã lưu không còn tồn tại.",
+        "resource_disconnected": "Tài nguyên đã lưu đang bị ngắt kết nối.",
+        "credential_interaction_required": "Luồng kết nối thông thường cần thông tin xác thực hoặc xác nhận.",
+        "operation_cancelled": "Thao tác đã bị hủy mà không có thay đổi.",
+        "rediscover": "Tìm lại",
+        "connect": "Kết nối"
+      },
       "copy_session_id": "Sao chép session_id",
       "recoverable_error": "Lỗi có thể khôi phục",
       "output_truncated": "Kết quả đã bị cắt ngắn",
@@ -313,6 +325,7 @@
       "status": {
         "pending": "Đang chờ",
         "pending_approval": "Đang chờ phê duyệt",
+        "pending_selection": "Đang chờ chọn đích",
         "approved": "Đã phê duyệt",
         "running": "Đang chạy",
         "completed": "Hoàn tất",

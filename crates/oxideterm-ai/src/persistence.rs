@@ -253,7 +253,7 @@ impl AiChatPersistenceStore {
         for entry in &mut entries {
             // Transcript payloads can include tool arguments and output, so
             // durable storage owns the final key-aware redaction boundary.
-            entry.payload = crate::sanitize_json_for_ai(&entry.payload);
+            entry.payload = crate::sanitize_tool_protocol_json_for_persistence(&entry.payload);
         }
         self.initialize()?;
         let write_txn = self.db.begin_write()?;
@@ -1263,6 +1263,10 @@ pub struct PersistedToolResult {
     pub error: Option<String>,
     pub truncated: Option<bool>,
     pub duration_ms: Option<i64>,
+    #[serde(default = "default_historical")]
+    pub historical: bool,
+    #[serde(default)]
+    pub actionable: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1284,6 +1288,14 @@ pub struct PersistedToolCall {
     pub arguments: String,
     pub status: PersistedToolCallStatus,
     pub result: Option<PersistedToolResult>,
+    #[serde(default = "default_historical")]
+    pub historical: bool,
+    #[serde(default)]
+    pub actionable: bool,
+}
+
+fn default_historical() -> bool {
+    true
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -1,5 +1,6 @@
 mod actions;
 mod ai_lazy;
+mod ai_runtime_context;
 mod ai_state;
 mod app_lock;
 mod breadcrumb_scroll;
@@ -708,6 +709,7 @@ pub(crate) struct WorkspaceApp {
     context_sidebar_rendered: bool,
     context_sidebar_motion_generation: u64,
     ai_entity: Entity<ai_state::AiWorkspaceEntity>,
+    ai_runtime_context: Entity<ai_runtime_context::AiRuntimeContextEntity>,
     _ai_entity_subscription: Subscription,
     active_context_sidebar_panel: ContextSidebarPanel,
     needs_active_pane_focus: bool,
@@ -923,12 +925,9 @@ enum TerminalCommandSuggestionKind {
     QuickCommand,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub(crate) struct AiRuntimeCommandRecord {
     pub(crate) command_id: String,
-    pub(crate) target_id: Option<String>,
-    pub(crate) session_id: Option<String>,
-    pub(crate) node_id: Option<String>,
     pub(crate) command: String,
     pub(crate) cwd: Option<String>,
     pub(crate) source: String,
@@ -936,9 +935,27 @@ pub(crate) struct AiRuntimeCommandRecord {
     pub(crate) exit_code: Option<i64>,
     pub(crate) started_at: i64,
     pub(crate) finished_at: Option<i64>,
-    pub(crate) runtime_epoch: String,
     pub(crate) approval_mode: Option<String>,
     pub(crate) risk: String,
+}
+
+impl std::fmt::Debug for AiRuntimeCommandRecord {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // Command text and working directories can contain credentials.
+        formatter
+            .debug_struct("AiRuntimeCommandRecord")
+            .field("command_id", &self.command_id)
+            .field("command", &"[redacted]")
+            .field("cwd", &self.cwd.as_ref().map(|_| "[redacted]"))
+            .field("source", &self.source)
+            .field("status", &self.status)
+            .field("exit_code", &self.exit_code)
+            .field("started_at", &self.started_at)
+            .field("finished_at", &self.finished_at)
+            .field("approval_mode", &self.approval_mode)
+            .field("risk", &self.risk)
+            .finish()
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -949,7 +966,7 @@ pub(crate) struct AiToolExecutionRecord {
     pub(crate) tool_call_id: String,
     pub(crate) tool_name: String,
     pub(crate) argument_summary: String,
-    pub(crate) target_id: Option<String>,
+    pub(crate) resource_kind: Option<oxideterm_ai::StableResourceKind>,
     pub(crate) target_kind: Option<String>,
     pub(crate) risk: String,
     pub(crate) approval_source: Option<String>,
@@ -958,11 +975,9 @@ pub(crate) struct AiToolExecutionRecord {
     pub(crate) status: String,
     pub(crate) success: Option<bool>,
     pub(crate) error_code: Option<String>,
-    pub(crate) result_summary: Option<String>,
     pub(crate) duration_ms: Option<u64>,
     pub(crate) started_at: i64,
     pub(crate) finished_at: Option<i64>,
-    pub(crate) runtime_epoch: String,
 }
 
 #[derive(Clone, Debug)]
@@ -973,26 +988,35 @@ pub(crate) struct AiToolResultFact {
     pub(crate) tool_call_id: String,
     pub(crate) tool_name: String,
     pub(crate) source_kind: String,
-    pub(crate) text_hash: String,
     pub(crate) summary: String,
-    pub(crate) output_preview: String,
     pub(crate) created_at: i64,
-    pub(crate) runtime_epoch: String,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub(crate) struct AiCliAgentSession {
     pub(crate) id: String,
     pub(crate) kind: String,
     pub(crate) label: String,
     pub(crate) status: String,
-    pub(crate) target_id: Option<String>,
-    pub(crate) session_id: Option<String>,
-    pub(crate) node_id: Option<String>,
-    pub(crate) command: String,
+    pub(crate) live_terminal: bool,
     pub(crate) started_at: i64,
     pub(crate) updated_at: i64,
-    pub(crate) runtime_epoch: String,
+}
+
+impl std::fmt::Debug for AiCliAgentSession {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // Agent launch commands share the same secret-bearing boundary.
+        formatter
+            .debug_struct("AiCliAgentSession")
+            .field("id", &self.id)
+            .field("kind", &self.kind)
+            .field("label", &self.label)
+            .field("status", &self.status)
+            .field("live_terminal", &self.live_terminal)
+            .field("started_at", &self.started_at)
+            .field("updated_at", &self.updated_at)
+            .finish()
+    }
 }
 
 #[derive(Clone)]

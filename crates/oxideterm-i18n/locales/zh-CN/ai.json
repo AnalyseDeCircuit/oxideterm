@@ -149,6 +149,18 @@
       "show_raw_output": "显示完整输出",
       "hide_raw_output": "收起输出",
       "recovery_actions": "恢复操作",
+      "choose_target": "选择要继续使用的目标",
+      "cancel_selection": "取消",
+      "recovery": {
+        "stale_target": "实时目标已变化或不再可用。",
+        "state_changed_after_approval": "目标在等待确认期间发生变化，因此没有执行任何操作。",
+        "resource_removed": "保存的资源已不存在。",
+        "resource_disconnected": "保存的资源当前未连接。",
+        "credential_interaction_required": "常规连接流程需要凭据或确认。",
+        "operation_cancelled": "操作已取消，未产生更改。",
+        "rediscover": "重新发现",
+        "connect": "连接"
+      },
       "copy_session_id": "复制 session_id",
       "recoverable_error": "可恢复错误",
       "output_truncated": "输出已截断",
@@ -313,6 +325,7 @@
       "status": {
         "pending": "等待执行",
         "pending_approval": "等待确认",
+        "pending_selection": "等待选择目标",
         "approved": "已允许",
         "running": "执行中",
         "completed": "已完成",

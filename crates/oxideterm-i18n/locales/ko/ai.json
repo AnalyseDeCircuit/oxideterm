@@ -149,6 +149,18 @@
       "show_raw_output": "전체 출력 표시",
       "hide_raw_output": "출력 접기",
       "recovery_actions": "복구 작업",
+      "choose_target": "계속할 대상을 선택하세요",
+      "cancel_selection": "취소",
+      "recovery": {
+        "stale_target": "실시간 대상이 변경되었거나 더 이상 사용할 수 없습니다.",
+        "state_changed_after_approval": "승인을 기다리는 동안 대상이 변경되어 아무 작업도 실행되지 않았습니다.",
+        "resource_removed": "저장된 리소스가 더 이상 존재하지 않습니다.",
+        "resource_disconnected": "저장된 리소스의 연결이 끊겼습니다.",
+        "credential_interaction_required": "일반 연결 흐름에 자격 증명 또는 확인이 필요합니다.",
+        "operation_cancelled": "변경 없이 작업이 취소되었습니다.",
+        "rediscover": "다시 찾기",
+        "connect": "연결"
+      },
       "copy_session_id": "session_id 복사",
       "recoverable_error": "복구 가능한 오류",
       "output_truncated": "출력이 잘렸습니다",
@@ -313,6 +325,7 @@
       "status": {
         "pending": "대기 중",
         "pending_approval": "승인 대기 중",
+        "pending_selection": "대상 선택 대기 중",
         "approved": "승인됨",
         "running": "실행 중",
         "completed": "완료됨",

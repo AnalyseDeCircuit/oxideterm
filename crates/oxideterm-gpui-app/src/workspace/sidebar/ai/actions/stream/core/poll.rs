@@ -342,17 +342,141 @@ impl WorkspaceApp {
                         ai.register_tool_approval(delivery.generation, tool_call_id, sender);
                     });
                 }
-                AiStreamDeliveryEvent::ToolExecutionRequested {
+                AiStreamDeliveryEvent::ToolCandidateSelectionRequested {
+                    tool_call_id,
+                    name,
+                    arguments,
+                    candidates,
+                    sender,
+                } => {
+                    self.flush_pending_ai_stream_text(&mut pending_text, cx);
+                    let candidate_count = candidates.len();
+                    let result = serde_json::json!({
+                        "ok": false,
+                        "summary": self.i18n.t("ai.tool_use.choose_target"),
+                        "disambiguation": {
+                            "candidates": candidates,
+                        },
+                        "recoverable": true,
+                    });
+                    self.apply_ai_tool_status(
+                        delivery.generation,
+                        &delivery.conversation_id,
+                        &delivery.assistant_id,
+                        &tool_call_id,
+                        &name,
+                        &arguments,
+                        "pending_user_selection",
+                        Some(result),
+                        Some("read".to_string()),
+                        Some(self.i18n.t("ai.tool_use.choose_target")),
+                        false,
+                        None,
+                        None,
+                        None,
+                        cx,
+                    );
+                    self.ai_entity.update(cx, |ai, _cx| {
+                        ai.register_tool_candidate_selection(
+                            delivery.generation,
+                            tool_call_id,
+                            candidate_count,
+                            sender,
+                        );
+                    });
+                    window.focus(&self.focus_handle, cx);
+                    cx.notify();
+                }
+                AiStreamDeliveryEvent::ToolPreflightRequested {
+                    tool_session_id,
                     tool_call_id,
                     name,
                     args,
                     sender,
                 } => {
                     self.flush_pending_ai_stream_text(&mut pending_text, cx);
+                    let session_is_active = self.ai_runtime_context.read(cx).is_active_tool_session(
+                        delivery.generation,
+                        &tool_session_id,
+                    );
+                    let rejection = if !session_is_active {
+                        Some(rejected_ai_tool_result(
+                            tool_call_id,
+                            name,
+                            "operation_cancelled",
+                            "The AI tool session is no longer active.",
+                        ))
+                    } else {
+                        self.preflight_ai_ui_orchestrator_tool(
+                            &tool_session_id,
+                            &name,
+                            &args,
+                            cx,
+                        )
+                        .err()
+                        .map(|error| {
+                            let snapshot = self.ai_orchestrator_snapshot_for_tool_session(
+                                Some(&tool_session_id),
+                                cx,
+                            );
+                            snapshot.to_executed_tool_result(
+                                tool_call_id,
+                                name,
+                                snapshot.fail(
+                                    "Runtime target is unavailable.",
+                                    error.public_code(),
+                                    "Rediscover the current terminal target before retrying.",
+                                    "interactive",
+                                ),
+                                0,
+                            )
+                        })
+                    };
+                    let _ = sender.send(rejection);
+                }
+                AiStreamDeliveryEvent::RuntimeContextRequested {
+                    tool_session_id,
+                    sender,
+                } => {
+                    let session_is_active = self.ai_runtime_context.read(cx).is_active_tool_session(
+                        delivery.generation,
+                        &tool_session_id,
+                    );
+                    let context = session_is_active.then(|| {
+                        self.ai_runtime_context_prompt(&tool_session_id, cx)
+                    });
+                    let _ = sender.send(context);
+                }
+                AiStreamDeliveryEvent::ToolExecutionRequested {
+                    tool_session_id,
+                    tool_call_id,
+                    name,
+                    args,
+                    post_user_approval,
+                    dangerous_command_approved,
+                    sender,
+                } => {
+                    self.flush_pending_ai_stream_text(&mut pending_text, cx);
+                    let session_is_active = self.ai_runtime_context.read(cx).is_active_tool_session(
+                        delivery.generation,
+                        &tool_session_id,
+                    );
+                    if !session_is_active {
+                        let _ = sender.send(rejected_ai_tool_result(
+                            tool_call_id,
+                            name,
+                            "operation_cancelled",
+                            "The AI tool session is no longer active.",
+                        ));
+                        continue;
+                    }
                     self.start_ai_ui_orchestrator_tool_execution(
+                        tool_session_id,
                         tool_call_id,
                         name,
                         args,
+                        post_user_approval,
+                        dangerous_command_approved,
                         sender,
                         window,
                         cx,

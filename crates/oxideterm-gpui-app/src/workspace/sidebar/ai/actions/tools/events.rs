@@ -272,12 +272,12 @@ pub(in crate::workspace) fn send_ai_tool_status_with_payload(
     round_number: Option<i64>,
 ) -> Result<(), std::sync::mpsc::SendError<AiStreamDelivery>> {
     let arguments = sanitize_ai_tool_arguments_for_persistence(&call.arguments);
-    let result = result
-        .as_ref()
-        .map(oxideterm_ai::sanitize_json_for_ai);
+    let result = result.as_ref().map(|result| {
+        oxideterm_ai::sanitize_tool_result_json_for_persistence(&call.name, result)
+    });
     let summary = summary
         .as_deref()
-        .map(oxideterm_ai::sanitize_for_ai);
+        .map(oxideterm_ai::sanitize_for_persistence);
     send_ai_stream_delivery(
         ui_tx,
         generation,
@@ -299,13 +299,23 @@ pub(in crate::workspace) fn send_ai_tool_status_with_payload(
     )
 }
 
-pub(in crate::workspace) fn parse_ai_tool_args(arguments: &str) -> Option<serde_json::Value> {
+pub(in crate::workspace) fn parse_ai_tool_args(
+    tool_name: &str,
+    arguments: &str,
+) -> Option<serde_json::Value> {
     let parsed = serde_json::from_str::<serde_json::Value>(arguments).ok()?;
-    if parsed.is_object() {
-        Some(parsed)
-    } else {
-        None
+    if !parsed.is_object() {
+        return None;
     }
+    if !oxideterm_ai::is_orchestrator_tool_name(tool_name) {
+        // External MCP servers own their argument contracts. Their payloads
+        // are forwarded only to that server and never resolved as application
+        // runtime authority.
+        return Some(parsed);
+    }
+    // Provider schemas are advisory. The same strict parser is the actual
+    // authority boundary for provider and ACP application tool calls.
+    oxideterm_ai::canonicalize_orchestrator_tool_arguments(tool_name, parsed).ok()
 }
 
 pub(in crate::workspace) fn ai_tool_call_message_value(call: &AiToolCall) -> serde_json::Value {

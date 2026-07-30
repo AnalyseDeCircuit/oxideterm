@@ -138,6 +138,12 @@ pub(in crate::workspace) enum NodeRuntimeEffect {
         ready: bool,
         cwd: Option<String>,
     },
+    SharedSftpSessionChanged {
+        node_id: String,
+        connection_id: String,
+        session_generation: Option<u64>,
+        ready: bool,
+    },
     TerminalEndpointChanged,
 }
 
@@ -2845,6 +2851,18 @@ impl WorkspaceRuntimeEntity {
                 ready,
                 cwd,
             }),
+            NodeStateEvent::SharedSftpSessionChanged {
+                node_id,
+                connection_id,
+                session_generation,
+                ready,
+                ..
+            } => Some(NodeRuntimeEffect::SharedSftpSessionChanged {
+                node_id,
+                connection_id,
+                session_generation,
+                ready,
+            }),
             NodeStateEvent::TerminalEndpointChanged { .. } => {
                 Some(NodeRuntimeEffect::TerminalEndpointChanged)
             }
@@ -2979,6 +2997,11 @@ fn node_event_generation(event: &NodeStateEvent) -> Option<(NodeId, u64)> {
             ..
         }
         | NodeStateEvent::SftpReady {
+            node_id,
+            generation,
+            ..
+        }
+        | NodeStateEvent::SharedSftpSessionChanged {
             node_id,
             generation,
             ..

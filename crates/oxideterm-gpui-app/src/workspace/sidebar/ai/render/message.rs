@@ -1147,12 +1147,19 @@ window.focus(&this.focus_handle, cx);
             let status = ai_tool_status_from_value(call.get("status"));
             let risk = ai_tool_risk_from_value(call.get("risk"), &name);
             let arguments_value = serde_json::from_str::<serde_json::Value>(&arguments).ok();
-            let summary = call
-                .get("summary")
-                .and_then(serde_json::Value::as_str)
-                .map(str::to_string)
-                .unwrap_or_else(|| self.ai_tool_status_label(status));
             let result = call.get("result").filter(|value| !value.is_null());
+            let recovery_code = result
+                .and_then(|value| value.pointer("/error/code"))
+                .and_then(serde_json::Value::as_str);
+            let summary = recovery_code
+                .and_then(ai_runtime_recovery_message_key)
+                .map(|key| self.i18n.t(key))
+                .or_else(|| {
+                    call.get("summary")
+                        .and_then(serde_json::Value::as_str)
+                        .map(str::to_string)
+                })
+                .unwrap_or_else(|| self.ai_tool_status_label(status));
             let bypass_approval = result
                 .and_then(|value| value.pointer("/meta/approvalMode"))
                 .and_then(serde_json::Value::as_str)
@@ -1299,6 +1306,42 @@ window.focus(&this.focus_handle, cx);
                 item = item.child(details);
             }
 
+            if status == AiToolStatus::Error
+                && let Some((action_label_key, action_prompt)) =
+                    recovery_code.and_then(ai_runtime_recovery_action)
+            {
+                let prompt = action_prompt.to_string();
+                item = item.child(
+                    ai_tool_approval_bar(
+                        &self.tokens,
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .text_size(px(10.0))
+                            .text_color(rgba((self.tokens.ui.text_muted << 8) | 0xcc))
+                            .child(self.i18n.t("ai.tool_use.recoverable_error")),
+                        ai_tool_approval_button(
+                            &self.tokens,
+                            self.i18n.t(action_label_key),
+                            true,
+                            Self::render_lucide_icon(
+                                LucideIcon::RefreshCw,
+                                11.0,
+                                rgb(self.tokens.ui.accent),
+                            ),
+                        )
+                        .on_mouse_down(
+                            MouseButton::Left,
+                            cx.listener(move |this, _event, _window, cx| {
+                                this.send_ai_follow_up_suggestion(prompt.clone(), cx);
+                                cx.stop_propagation();
+                            }),
+                        ),
+                        div(),
+                    ),
+                );
+            }
+
             if status == AiToolStatus::PendingApproval {
                 let approve_id = id.clone();
                 let reject_id = id.clone();
@@ -1341,6 +1384,148 @@ window.focus(&this.focus_handle, cx);
                         }),
                     ),
                 ));
+            } else if status == AiToolStatus::PendingSelection {
+                let candidates = result
+                    .and_then(|value| value.pointer("/disambiguation/candidates"))
+                    .and_then(serde_json::Value::as_array)
+                    .cloned()
+                    .unwrap_or_default();
+                let selection = self
+                    .ai_entity
+                    .read(cx)
+                    .chat_ui()
+                    .tool_candidate_selection
+                    .clone()
+                    .filter(|selection| selection.tool_call_id == id);
+                let selected_index = selection
+                    .as_ref()
+                    .map(|selection| selection.selected_index)
+                    .unwrap_or(0);
+                let cancel_id = id.clone();
+                item = item.child(
+                    div()
+                        .flex()
+                        .flex_col()
+                        .gap(px(self.tokens.spacing.one))
+                        .border_t_1()
+                        .border_color(rgba((self.tokens.ui.border << 8) | 0x4d))
+                        .px(px(self.tokens.spacing.two))
+                        .py(px(self.tokens.spacing.two))
+                        .child(
+                            div()
+                                .text_size(px(10.0))
+                                .text_color(rgba((self.tokens.ui.text_muted << 8) | 0xcc))
+                                .child(self.i18n.t("ai.tool_use.choose_target")),
+                        )
+                        .children(candidates.into_iter().enumerate().map(
+                            |(candidate_index, candidate)| {
+                                let candidate_id = id.clone();
+                                let label = candidate
+                                    .get("label")
+                                    .and_then(serde_json::Value::as_str)
+                                    .unwrap_or("Target")
+                                    .to_string();
+                                let kind = candidate
+                                    .get("kind")
+                                    .and_then(serde_json::Value::as_str)
+                                    .map(|kind| self.localized_ai_tool_value("surfaces", kind))
+                                    .unwrap_or_default();
+                                let selected = candidate_index == selected_index;
+                                div()
+                                    .flex()
+                                    .items_center()
+                                    .gap(px(self.tokens.spacing.two))
+                                    .rounded(px(self.tokens.radii.md))
+                                    .border_1()
+                                    .border_color(if selected {
+                                        rgba((self.tokens.ui.accent << 8) | 0x99)
+                                    } else {
+                                        rgba((self.tokens.ui.border << 8) | 0x4d)
+                                    })
+                                    .bg(if selected {
+                                        rgba((self.tokens.ui.accent << 8) | 0x12)
+                                    } else {
+                                        rgba((self.tokens.ui.bg_hover << 8) | 0x24)
+                                    })
+                                    .px(px(self.tokens.spacing.two))
+                                    .py(px(self.tokens.spacing.one))
+                                    .cursor_pointer()
+                                    .hover(|style| {
+                                        style.bg(rgba((self.tokens.ui.accent << 8) | 0x1f))
+                                    })
+                                    .child(Self::render_lucide_icon(
+                                        if selected {
+                                            LucideIcon::CheckCircle
+                                        } else {
+                                            LucideIcon::Circle
+                                        },
+                                        12.0,
+                                        if selected {
+                                            rgb(self.tokens.ui.accent)
+                                        } else {
+                                            rgba((self.tokens.ui.text_muted << 8) | 0x99)
+                                        },
+                                    ))
+                                    .child(
+                                        div()
+                                            .flex_1()
+                                            .min_w_0()
+                                            .text_size(px(11.0))
+                                            .text_color(rgb(self.tokens.ui.text))
+                                            .child(label),
+                                    )
+                                    .when(!kind.is_empty(), |row| {
+                                        row.child(
+                                            div()
+                                                .text_size(px(9.0))
+                                                .text_color(rgba(
+                                                    (self.tokens.ui.text_muted << 8) | 0x99,
+                                                ))
+                                                .child(kind),
+                                        )
+                                    })
+                                    .on_mouse_down(
+                                        MouseButton::Left,
+                                        cx.listener(move |this, _event, _window, cx| {
+                                            this.resolve_ai_tool_candidate_selection(
+                                                candidate_id.clone(),
+                                                Some(candidate_index),
+                                                cx,
+                                            );
+                                            cx.stop_propagation();
+                                        }),
+                                    )
+                            },
+                        ))
+                        .child(
+                            div()
+                                .flex()
+                                .justify_end()
+                                .child(
+                                    ai_tool_approval_button(
+                                        &self.tokens,
+                                        self.i18n.t("ai.tool_use.cancel_selection"),
+                                        false,
+                                        Self::render_lucide_icon(
+                                            LucideIcon::X,
+                                            11.0,
+                                            rgb(self.tokens.ui.text_muted),
+                                        ),
+                                    )
+                                    .on_mouse_down(
+                                        MouseButton::Left,
+                                        cx.listener(move |this, _event, _window, cx| {
+                                            this.resolve_ai_tool_candidate_selection(
+                                                cancel_id.clone(),
+                                                None,
+                                                cx,
+                                            );
+                                            cx.stop_propagation();
+                                        }),
+                                    ),
+                                ),
+                        ),
+                );
             }
             block = block.child(item);
         }
@@ -1671,6 +1856,7 @@ window.focus(&this.focus_handle, cx);
         let key = match status {
             AiToolStatus::Pending => "ai.tool_use.status.pending",
             AiToolStatus::PendingApproval => "ai.tool_use.status.pending_approval",
+            AiToolStatus::PendingSelection => "ai.tool_use.status.pending_selection",
             AiToolStatus::Approved => "ai.tool_use.status.approved",
             AiToolStatus::Running => "ai.tool_use.status.running",
             AiToolStatus::Completed => "ai.tool_use.status.completed",
@@ -1776,12 +1962,53 @@ pub(in crate::workspace) fn ai_tool_status_from_value(
         .unwrap_or("pending")
     {
         "pending_user_approval" | "pending_approval" => AiToolStatus::PendingApproval,
+        "pending_user_selection" => AiToolStatus::PendingSelection,
         "approved" => AiToolStatus::Approved,
         "running" => AiToolStatus::Running,
         "completed" => AiToolStatus::Completed,
         "error" | "failed" => AiToolStatus::Error,
         "rejected" => AiToolStatus::Rejected,
         _ => AiToolStatus::Pending,
+    }
+}
+
+fn ai_runtime_recovery_message_key(code: &str) -> Option<&'static str> {
+    match code {
+        "runtime_handle_missing"
+        | "runtime_handle_expired"
+        | "runtime_owner_closed"
+        | "runtime_owner_replaced"
+        | "runtime_capability_unavailable" => Some("ai.tool_use.recovery.stale_target"),
+        "runtime_state_changed_after_approval" => {
+            Some("ai.tool_use.recovery.state_changed_after_approval")
+        }
+        "resource_removed" => Some("ai.tool_use.recovery.resource_removed"),
+        "resource_disconnected" => Some("ai.tool_use.recovery.resource_disconnected"),
+        "credential_interaction_required" => {
+            Some("ai.tool_use.recovery.credential_interaction_required")
+        }
+        "operation_cancelled" => Some("ai.tool_use.recovery.operation_cancelled"),
+        _ => None,
+    }
+}
+
+fn ai_runtime_recovery_action(code: &str) -> Option<(&'static str, &'static str)> {
+    match code {
+        "runtime_handle_missing"
+        | "runtime_handle_expired"
+        | "runtime_owner_closed"
+        | "runtime_owner_replaced"
+        | "runtime_capability_unavailable"
+        | "runtime_state_changed_after_approval"
+        | "resource_removed" => Some((
+            "ai.tool_use.recovery.rediscover",
+            "Rediscover the current target and retry the requested operation.",
+        )),
+        "resource_disconnected" | "credential_interaction_required" => Some((
+            "ai.tool_use.recovery.connect",
+            "Use the normal saved-connection flow, then retry the requested operation.",
+        )),
+        _ => None,
     }
 }
 
@@ -1937,7 +2164,9 @@ pub(in crate::workspace) fn ai_tool_status_icon(status: AiToolStatus) -> LucideI
         AiToolStatus::Completed => LucideIcon::Check,
         AiToolStatus::Error => LucideIcon::AlertCircle,
         AiToolStatus::Rejected => LucideIcon::X,
-        AiToolStatus::PendingApproval => LucideIcon::AlertTriangle,
+        AiToolStatus::PendingApproval | AiToolStatus::PendingSelection => {
+            LucideIcon::ListChecks
+        }
         AiToolStatus::Running | AiToolStatus::Approved => LucideIcon::LoaderCircle,
         AiToolStatus::Pending => LucideIcon::Clock,
     }
@@ -1951,7 +2180,7 @@ pub(in crate::workspace) fn ai_tool_status_color(
         AiToolStatus::Completed => tokens.ui.success,
         AiToolStatus::Error => tokens.ui.error,
         AiToolStatus::Rejected => tokens.ui.text_muted,
-        AiToolStatus::PendingApproval => tokens.ui.warning,
+        AiToolStatus::PendingApproval | AiToolStatus::PendingSelection => tokens.ui.warning,
         AiToolStatus::Running | AiToolStatus::Approved => tokens.ui.accent,
         AiToolStatus::Pending => tokens.ui.warning,
     }

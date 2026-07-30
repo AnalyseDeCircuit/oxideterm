@@ -589,13 +589,17 @@ impl WorkspaceApp {
             .map(|provider| provider.name.as_str())
             .filter(|label| !label.trim().is_empty())
             .unwrap_or(config.provider_type.as_str());
-        let mut prompt = settings.ai.custom_system_prompt.trim().to_string();
+        // This is the final provider boundary for custom, RAG, and runtime context.
+        let mut prompt =
+            oxideterm_ai::sanitize_for_ai(settings.ai.custom_system_prompt.trim());
         if prompt.is_empty() {
             prompt = DEFAULT_AI_SYSTEM_PROMPT.to_string();
         }
+        let safe_model = oxideterm_ai::sanitize_for_ai(&config.model);
+        let safe_provider_label = oxideterm_ai::sanitize_for_ai(provider_label);
         prompt.push_str(&format!(
             "\nYou are currently the model \"{}\", provided by {}.",
-            config.model, provider_label
+            safe_model, safe_provider_label
         ));
         if let Some(memory) =
             ai_user_memory_prompt(&settings.ai.memory.content, settings.ai.memory.enabled)
@@ -608,14 +612,14 @@ impl WorkspaceApp {
             .filter(|prompt| !prompt.is_empty())
         {
             prompt.push_str("\n\n");
-            prompt.push_str(rag_system_prompt);
+            prompt.push_str(&oxideterm_ai::sanitize_for_ai(rag_system_prompt));
         }
         if let Some(task_system_prompt) = task_system_prompt
             .map(str::trim)
             .filter(|prompt| !prompt.is_empty())
         {
             prompt.push_str("\n\n");
-            prompt.push_str(task_system_prompt);
+            prompt.push_str(&oxideterm_ai::sanitize_for_ai(task_system_prompt));
         }
         if self.ai_active_model_context_window(config) >= 8192 {
             prompt.push_str(AI_SUGGESTIONS_INSTRUCTION);

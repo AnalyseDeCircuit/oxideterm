@@ -149,6 +149,18 @@
       "show_raw_output": "顯示完整輸出",
       "hide_raw_output": "收合輸出",
       "recovery_actions": "復原操作",
+      "choose_target": "選擇要繼續使用的目標",
+      "cancel_selection": "取消",
+      "recovery": {
+        "stale_target": "即時目標已變更或不再可用。",
+        "state_changed_after_approval": "目標在等待確認期間發生變更，因此未執行任何操作。",
+        "resource_removed": "已儲存的資源已不存在。",
+        "resource_disconnected": "已儲存的資源目前未連線。",
+        "credential_interaction_required": "一般連線流程需要憑證或確認。",
+        "operation_cancelled": "操作已取消，未產生變更。",
+        "rediscover": "重新探索",
+        "connect": "連線"
+      },
       "copy_session_id": "複製 session_id",
       "recoverable_error": "可復原錯誤",
       "output_truncated": "輸出已截斷",
@@ -313,6 +325,7 @@
       "status": {
         "pending": "等待執行",
         "pending_approval": "等待確認",
+        "pending_selection": "等待選擇目標",
         "approved": "已允許",
         "running": "執行中",
         "completed": "已完成",

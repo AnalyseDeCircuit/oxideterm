@@ -18,10 +18,11 @@ mod ai_turn_order_tests {
             )
         });
         entity.update(cx, |entity, _cx| {
+            let representative_runtime_epoch = "epoch-test-only";
             let result = serde_json::json!({
                 "output": "API_KEY=supersecret123456",
                 "data": { "exitCode": 0 },
-                "meta": { "runtimeEpoch": entity.runtime_epoch() },
+                "meta": { "runtimeEpoch": representative_runtime_epoch },
             });
             let record = entity
                 .record_ai_tool_execution_status(
@@ -37,32 +38,26 @@ mod ai_turn_order_tests {
                 )
                 .expect("tool execution record");
             let facts = entity.record_ai_tool_result_facts(&record, Some(&result), 10);
-            entity.record_ai_command_from_tool_status(
-                "run_command",
-                r#"{"command":"codex --help API_KEY=supersecret123456"}"#,
-                "completed",
-                Some(&result),
-                Some("execute"),
-            );
 
             assert_eq!(entity.tool_execution_records.len(), 1);
             assert!(!facts.is_empty());
             assert_eq!(entity.tool_result_facts.len(), facts.len());
-            assert_eq!(entity.command_records().len(), 1);
-            assert_eq!(entity.cli_agent_sessions().len(), 1);
             let retained = format!(
-                "{:?}{:?}{:?}",
-                entity.tool_execution_records,
-                entity.tool_result_facts,
-                entity.command_records()
+                "{:?}{:?}",
+                entity.tool_execution_records, entity.tool_result_facts
             );
             assert!(!retained.contains("supersecret123456"));
-            assert!(retained.contains("[REDACTED]"));
+            assert!(retained.contains("command_chars="));
+            assert!(retained.contains("exit_code: 0"));
+            assert!(!retained.contains("target_id"));
+            assert!(!retained.contains("session_id"));
+            assert!(!retained.contains("node_id"));
+            assert!(!retained.contains(representative_runtime_epoch));
         });
     }
 
     #[test]
-    fn persisted_tool_arguments_use_key_aware_secret_redaction() {
+    fn persisted_tool_arguments_drop_secret_capable_execution_payloads() {
         let arguments = serde_json::json!({
             "command": "curl https://example.test",
             "apiKey": "short",
@@ -74,10 +69,58 @@ mod ai_turn_order_tests {
 
         let sanitized = sanitize_ai_tool_arguments_for_persistence(&arguments);
 
-        assert!(sanitized.contains("curl https://example.test"));
+        assert!(!sanitized.contains("curl https://example.test"));
+        assert!(!sanitized.contains("\"command\""));
         assert!(!sanitized.contains("\"short\""));
         assert!(!sanitized.contains("opaque-value"));
+        assert!(!sanitized.contains("\"headers\""));
+    }
+
+    #[test]
+    fn approval_arguments_keep_only_a_locally_redacted_command() {
+        let arguments = serde_json::json!({
+            "command": "curl https://example.test",
+            "apiKey": "short",
+        })
+        .to_string();
+
+        let sanitized = sanitize_ai_tool_arguments_for_approval(&arguments);
+
+        assert!(sanitized.contains("curl https://example.test"));
+        assert!(!sanitized.contains("\"short\""));
         assert!(sanitized.contains("[REDACTED]"));
+    }
+
+    #[test]
+    fn remote_write_error_debug_omits_sensitive_details() {
+        let path = "/private/runtime/secret.txt";
+        let error = AiRemoteFileWriteError::ExpectedFileMissing {
+            path: path.to_string(),
+        };
+
+        let debug = format!("{error:?}");
+
+        assert!(debug.contains("ExpectedFileMissing"));
+        assert!(!debug.contains(path));
+    }
+
+    #[test]
+    fn diagnostic_resource_projection_omits_stable_identifiers() {
+        let stable_id = "4e22e673-067e-46e2-8b9f-902d7b21af4c";
+        let resource_kind = ai_tool_argument_resource_kind(Some(&serde_json::json!({
+            "resource_ref": {
+                "kind": "saved_connection",
+                "id": stable_id,
+                "label": "Production",
+            },
+        })));
+        let mut record = test_tool_execution_record("tool-resource");
+        record.resource_kind = resource_kind;
+
+        let diagnostic = ai_tool_execution_record_json(&record).to_string();
+
+        assert!(!diagnostic.contains(stable_id));
+        assert!(diagnostic.contains("saved_connection"));
     }
 
     #[test]
@@ -193,18 +236,31 @@ mod ai_turn_order_tests {
 
     #[test]
     fn acp_bridge_exposes_only_visible_terminal_tools() {
-    let names = acp_visible_terminal_tool_definitions(true)
-        .into_iter()
-        .map(|definition| definition.name)
-        .collect::<Vec<_>>();
-    let expected = ACP_VISIBLE_TERMINAL_TOOL_NAMES
-        .iter()
-        .map(|name| (*name).to_string())
-        .collect::<Vec<_>>();
+        let definitions = acp_visible_terminal_tool_definitions(true);
+        let names = definitions
+            .iter()
+            .map(|definition| definition.name.clone())
+            .collect::<Vec<_>>();
+        let expected = ACP_VISIBLE_TERMINAL_TOOL_NAMES
+            .iter()
+            .map(|name| (*name).to_string())
+            .collect::<Vec<_>>();
 
-    assert_eq!(names, expected);
-    assert!(acp_visible_terminal_tool_definitions(false).is_empty());
-}
+        assert_eq!(names, expected);
+        assert!(acp_visible_terminal_tool_definitions(false).is_empty());
+
+        // ACP must expose the exact canonical v2 schemas so it cannot regain
+        // legacy identifiers or a more permissive application-tool contract.
+        let native_definitions = oxideterm_ai::orchestrator_tool_definitions();
+        for definition in definitions {
+            let native = native_definitions
+                .iter()
+                .find(|native| native.name == definition.name)
+                .expect("ACP tool has a native v2 definition");
+            assert_eq!(definition.description, native.description);
+            assert_eq!(definition.input_schema, native.parameters);
+        }
+    }
 
     fn assistant_message() -> AiChatMessage {
         AiChatMessage {
@@ -251,7 +307,7 @@ mod ai_turn_order_tests {
     fn test_tool_result_fact_for_assistant(
         fact_id: &str,
         assistant_message_id: &str,
-        output_preview: &str,
+        summary: &str,
     ) -> AiToolResultFact {
         AiToolResultFact {
             fact_id: fact_id.to_string(),
@@ -260,15 +316,8 @@ mod ai_turn_order_tests {
             tool_call_id: "tool-1".to_string(),
             tool_name: "run_command".to_string(),
             source_kind: "output".to_string(),
-            text_hash: ai_tool_fact_hash(output_preview),
-            summary: output_preview
-                .lines()
-                .next()
-                .unwrap_or_default()
-                .to_string(),
-            output_preview: output_preview.to_string(),
+            summary: summary.to_string(),
             created_at: 1,
-            runtime_epoch: "epoch-1".to_string(),
         }
     }
 
@@ -279,8 +328,8 @@ mod ai_turn_order_tests {
             assistant_message_id: "assistant-1".to_string(),
             tool_call_id: tool_call_id.to_string(),
             tool_name: "run_command".to_string(),
-            argument_summary: "target=local-shell:default command=df -h /".to_string(),
-            target_id: Some("local-shell:default".to_string()),
+            argument_summary: "runtime_target=current command=df -h /".to_string(),
+            resource_kind: None,
             target_kind: Some("local-shell".to_string()),
             risk: "execute".to_string(),
             approval_source: Some("policy_allowed".to_string()),
@@ -289,11 +338,9 @@ mod ai_turn_order_tests {
             status: "completed".to_string(),
             success: Some(true),
             error_code: None,
-            result_summary: Some("Remote command completed.".to_string()),
             duration_ms: Some(12),
             started_at: 1,
             finished_at: Some(2),
-            runtime_epoch: "epoch-1".to_string(),
         }
     }
 
@@ -428,6 +475,32 @@ mod ai_turn_order_tests {
         )];
 
         assert!(acp_current_turn_prompt(&history).is_none());
+    }
+
+    #[test]
+    fn second_model_round_replaces_the_previous_runtime_context() {
+        let mut history = vec![test_message(
+            "latest-user",
+            AiChatRole::User,
+            "inspect the active terminal".to_string(),
+        )];
+
+        replace_ai_runtime_context_message(
+            &mut history,
+            r#"{"runtimeContext":{"snapshotId":"snap_first"}}"#.to_string(),
+        );
+        replace_ai_runtime_context_message(
+            &mut history,
+            r#"{"runtimeContext":{"snapshotId":"snap_second"}}"#.to_string(),
+        );
+
+        let runtime_messages = history
+            .iter()
+            .filter(|message| message.id == AI_RUNTIME_CONTEXT_MESSAGE_ID)
+            .collect::<Vec<_>>();
+        assert_eq!(runtime_messages.len(), 1);
+        assert!(runtime_messages[0].content.contains("snap_second"));
+        assert!(!runtime_messages[0].content.contains("snap_first"));
     }
 
     #[test]
@@ -634,6 +707,7 @@ mod ai_turn_order_tests {
         );
 
         let target = ai_ide_workspace_target_for_node(
+            TabId(9),
             &node_id,
             &node,
             Some("editor-tab-1".to_string()),
@@ -641,9 +715,13 @@ mod ai_turn_order_tests {
             Some("app".to_string()),
         );
 
-        assert_eq!(target.id, "ide-workspace:node-1");
+        assert_eq!(target.id, "ide-surface:9");
         assert_eq!(target.kind, "ide-workspace");
         assert_eq!(target.label, "app");
+        assert_eq!(
+            target.refs.get("surfaceTabId").map(String::as_str),
+            Some("9")
+        );
         assert_eq!(
             target.refs.get("nodeId").map(String::as_str),
             Some("node-1")
@@ -672,61 +750,6 @@ mod ai_turn_order_tests {
         );
     }
 
-    #[test]
-    fn connect_result_terminal_target_keeps_tauri_synthetic_refs() {
-        let mut refs = std::collections::BTreeMap::new();
-        refs.insert("sessionId".to_string(), "session-1".to_string());
-        refs.insert("tabId".to_string(), "tab-1".to_string());
-        let terminal = AiOrchestratorTarget {
-            id: "terminal-session:session-1".to_string(),
-            kind: "terminal-session".to_string(),
-            label: "SSH terminal session-".to_string(),
-            state: "connected".to_string(),
-            capabilities: vec![
-                "terminal.observe".to_string(),
-                "terminal.send".to_string(),
-                "terminal.wait".to_string(),
-                "state.list".to_string(),
-            ],
-            refs,
-            metadata: serde_json::json!({
-                "paneId": 7,
-                "terminalType": "terminal",
-            }),
-            terminal_buffer: None,
-            terminal_screen: None,
-        };
-
-        let target = ai_connect_result_terminal_target(
-            &terminal,
-            "prod (alice@example.com:22)",
-            Some("node-1"),
-            Some("conn-1"),
-        );
-
-        assert_eq!(target.label, "prod (alice@example.com:22) terminal");
-        assert_eq!(
-            target.refs.get("sessionId").map(String::as_str),
-            Some("session-1")
-        );
-        assert_eq!(
-            target.refs.get("nodeId").map(String::as_str),
-            Some("node-1")
-        );
-        assert_eq!(
-            target.refs.get("connectionId").map(String::as_str),
-            Some("conn-1")
-        );
-        assert!(!target.refs.contains_key("tabId"));
-        assert_eq!(
-            target
-                .metadata
-                .get("terminalType")
-                .and_then(serde_json::Value::as_str),
-            Some("terminal")
-        );
-        assert!(target.metadata.get("paneId").is_none());
-    }
 
     #[test]
     fn prompt_budget_policy_matches_tauri_levels() {
@@ -1155,8 +1178,9 @@ mod ai_turn_order_tests {
 
         let summary = ai_tool_argument_summary("write_resource", Some(&args));
 
-        assert!(summary.contains("ssh-node:node-1"));
-        assert!(summary.contains("/tmp/report.txt"));
+        assert!(summary.contains("resource=file"));
+        assert!(!summary.contains("ssh-node:node-1"));
+        assert!(!summary.contains("/tmp/report.txt"));
         assert!(!summary.contains("super secret draft"));
     }
 
@@ -1246,11 +1270,11 @@ mod ai_turn_order_tests {
 
         assert_eq!(filtered.len(), 1);
         assert_eq!(filtered[0].fact_id, "current-tool.output");
-        assert!(!filtered[0].output_preview.contains("468G"));
+        assert!(!filtered[0].summary.contains("468G"));
     }
 
     #[test]
-    fn tool_result_fact_extraction_hashes_output_and_execution_values() {
+    fn tool_result_fact_extraction_keeps_only_structured_execution_values() {
         let record = test_tool_execution_record("tool-1");
         let result = serde_json::json!({
             "summary": "Remote command completed.",
@@ -1264,7 +1288,8 @@ mod ai_turn_order_tests {
 
         let facts = extract_ai_tool_result_facts(&record, Some(&result), 42);
 
-        assert!(facts.iter().any(|fact| fact.fact_id == "tool-1.output"));
+        assert!(!facts.iter().any(|fact| fact.fact_id == "tool-1.output"));
+        assert!(!facts.iter().any(|fact| fact.fact_id == "tool-1.summary"));
         assert!(
             facts
                 .iter()
@@ -1273,13 +1298,23 @@ mod ai_turn_order_tests {
         assert!(
             facts
                 .iter()
-                .all(|fact| fact.text_hash.starts_with("sha256:"))
+                .any(|fact| fact.fact_id == "tool-1.execution.visible_in_terminal")
         );
         assert!(
             facts
                 .iter()
-                .any(|fact| fact.output_preview.contains("468G"))
+                .any(|fact| fact.fact_id == "tool-1.execution.state")
         );
+        let diagnostic = serde_json::json!(
+            facts
+                .iter()
+                .map(ai_tool_result_fact_json)
+                .collect::<Vec<_>>()
+        )
+        .to_string();
+        assert!(!diagnostic.contains("468G"));
+        assert!(!diagnostic.contains("textHash"));
+        assert!(!diagnostic.contains("outputPreview"));
     }
 
     #[test]
@@ -1975,14 +2010,28 @@ mod ai_turn_order_tests {
     }
 
     #[test]
-    fn tool_arguments_must_parse_to_json_object() {
+    fn tool_arguments_must_match_the_v2_contract() {
         assert_eq!(
-            parse_ai_tool_args("{\"target\":\"local\"}")
-                .and_then(|value| value.get("target").cloned()),
-            Some(serde_json::json!("local"))
+            parse_ai_tool_args("list_targets", "{\"view\":\"live_sessions\"}")
+                .and_then(|value| value.get("view").cloned()),
+            Some(serde_json::json!("live_sessions"))
         );
-        assert!(parse_ai_tool_args("not json").is_none());
-        assert!(parse_ai_tool_args("[\"not\", \"an\", \"object\"]").is_none());
+        assert!(parse_ai_tool_args("list_targets", "{\"target_id\":\"local\"}").is_none());
+        assert!(parse_ai_tool_args("list_targets", "not json").is_none());
+        assert!(
+            parse_ai_tool_args("list_targets", "[\"not\", \"an\", \"object\"]").is_none()
+        );
+        assert_eq!(
+            parse_ai_tool_args(
+                "mcp__example__inspect",
+                "{\"target_id\":\"terminal-session:42\",\"custom\":true}"
+            ),
+            Some(serde_json::json!({
+                "target_id": "terminal-session:42",
+                "custom": true,
+            })),
+            "an external MCP payload remains server-owned and gains no app authority"
+        );
     }
 
     #[test]

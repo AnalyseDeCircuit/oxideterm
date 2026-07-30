@@ -92,7 +92,7 @@ fn provider_templates_keep_stable_protocol_order() {
 }
 
 #[test]
-fn orchestrator_tool_definitions_match_tauri_core_names_and_order() {
+fn orchestrator_tool_definitions_preserve_core_names_and_order() {
     let tools = orchestrator_tool_definitions();
     let names = tools
         .iter()
@@ -159,6 +159,196 @@ fn orchestrator_send_terminal_input_blocks_control_schema() {
     assert!(properties.contains_key("text"));
     assert!(properties.contains_key("append_enter"));
     assert!(!properties.contains_key("control"));
+}
+
+#[test]
+fn v2_terminal_and_connection_tools_reject_legacy_target_authority() {
+    let tools = orchestrator_tool_definitions();
+    for name in [
+        "connect_target",
+        "run_command",
+        "observe_terminal",
+        "send_terminal_input",
+    ] {
+        let tool = tools
+            .iter()
+            .find(|tool| tool.name == name)
+            .expect("v2 tool definition");
+        let properties = tool
+            .parameters
+            .get("properties")
+            .and_then(serde_json::Value::as_object)
+            .expect("v2 tool properties");
+
+        assert_eq!(
+            tool.parameters.get("additionalProperties"),
+            Some(&serde_json::json!(false)),
+            "{name} must reject unknown legacy authority fields"
+        );
+        assert!(
+            !properties.contains_key("target_id"),
+            "{name} must not accept a raw runtime target id"
+        );
+    }
+    let connect_target = tools
+        .iter()
+        .find(|tool| tool.name == "connect_target")
+        .expect("connect target definition");
+    assert_eq!(
+        connect_target
+            .parameters
+            .pointer("/properties/resource_ref/required"),
+        Some(&serde_json::json!(["kind", "id"]))
+    );
+
+    for name in [
+        "read_resource",
+        "write_resource",
+        "transfer_resource",
+        "open_app_surface",
+        "get_state",
+    ] {
+        let tool = tools
+            .iter()
+            .find(|tool| tool.name == name)
+            .expect("v2 tool definition");
+        let properties = tool
+            .parameters
+            .get("properties")
+            .and_then(serde_json::Value::as_object)
+            .expect("v2 tool properties");
+
+        assert_eq!(
+            tool.parameters.get("additionalProperties"),
+            Some(&serde_json::json!(false)),
+            "{name} must reject unknown legacy authority fields"
+        );
+        assert!(
+            !properties.contains_key("target_id"),
+            "{name} must not accept a raw runtime target id"
+        );
+    }
+}
+
+#[test]
+fn orchestrator_v2_authority_inventory_covers_every_tool() {
+    let inventory = serde_json::json!({
+        "list_targets": { "authority": "discovery", "fields": [] },
+        "select_target": { "authority": "discovery", "fields": [] },
+        "connect_target": { "authority": "stable_resource", "fields": ["resource_ref"] },
+        "run_command": { "authority": "runtime_handle", "fields": ["handle_id"] },
+        "observe_terminal": { "authority": "runtime_handle", "fields": ["handle_id"] },
+        "send_terminal_input": { "authority": "runtime_handle", "fields": ["handle_id"] },
+        "read_resource": { "authority": "discriminated", "fields": ["resource_ref", "handle_id"] },
+        "write_resource": { "authority": "discriminated", "fields": ["resource_ref", "handle_id"] },
+        "transfer_resource": { "authority": "runtime_handle", "fields": ["handle_id"] },
+        "open_app_surface": { "authority": "discriminated", "fields": ["resource_ref", "handle_id"] },
+        "get_state": { "authority": "discriminated", "fields": ["resource_ref", "handle_id"] },
+        "remember_preference": { "authority": "memory_store", "fields": [] },
+        "recall_preferences": { "authority": "memory_store", "fields": [] }
+    });
+    let tools = orchestrator_tool_definitions();
+    let inventory = inventory
+        .as_object()
+        .expect("the contract inventory is an object");
+
+    assert_eq!(tools.len(), inventory.len());
+    for tool in &tools {
+        let contract = inventory
+            .get(&tool.name)
+            .unwrap_or_else(|| panic!("{} is missing from the v2 inventory", tool.name));
+        assert_eq!(
+            tool.parameters.get("additionalProperties"),
+            Some(&serde_json::json!(false)),
+            "{} must reject unknown authority fields",
+            tool.name
+        );
+        let properties = tool
+            .parameters
+            .get("properties")
+            .and_then(serde_json::Value::as_object)
+            .expect("tool properties");
+        for field in contract
+            .get("fields")
+            .and_then(serde_json::Value::as_array)
+            .expect("authority field inventory")
+        {
+            let field = field.as_str().expect("authority field name");
+            assert!(
+                properties.contains_key(field),
+                "{} must expose its declared {field} authority field",
+                tool.name
+            );
+        }
+        assert!(
+            !properties.contains_key("target_id"),
+            "{} must never restore v1 raw target authority",
+            tool.name
+        );
+    }
+}
+
+#[test]
+fn canonical_v2_arguments_reject_unknown_and_legacy_authority_fields() {
+    for arguments in [
+        serde_json::json!({
+            "handle_id": "rt_current",
+            "command": "pwd",
+            "target_id": "terminal-session:42",
+        }),
+        serde_json::json!({
+            "handle_id": "rt_current",
+            "command": "pwd",
+            "capabilities": ["terminal.run_command"],
+        }),
+    ] {
+        assert_eq!(
+            canonicalize_orchestrator_tool_arguments("run_command", arguments),
+            Err(OrchestratorArgumentError::InvalidArguments)
+        );
+    }
+}
+
+#[test]
+fn canonical_v2_arguments_enforce_discriminated_resource_authority() {
+    let settings_with_live_handle = serde_json::json!({
+        "resource": "settings",
+        "handle_id": "rt_current",
+    });
+    let file_with_stable_reference = serde_json::json!({
+        "resource": "file",
+        "resource_ref": {
+            "kind": "settings_scope",
+            "id": "app",
+        },
+        "path": "/tmp/example.txt",
+    });
+
+    assert!(
+        canonicalize_orchestrator_tool_arguments("read_resource", settings_with_live_handle)
+            .is_err()
+    );
+    assert!(
+        canonicalize_orchestrator_tool_arguments("read_resource", file_with_stable_reference)
+            .is_err()
+    );
+}
+
+#[test]
+fn canonical_v2_file_write_preserves_the_approved_argument_object() {
+    let arguments = serde_json::json!({
+        "resource": "file",
+        "handle_id": "rt_current",
+        "path": "/tmp/example.txt",
+        "content": "replacement text",
+        "expected_hash": "sha256:example",
+        "dry_run": true,
+    });
+
+    let canonical = canonicalize_orchestrator_tool_arguments("write_resource", arguments.clone())
+        .expect("valid v2 file write");
+
+    assert_eq!(canonical, arguments);
 }
 
 #[test]
@@ -2117,6 +2307,74 @@ fn chat_persistence_redacts_conversation_projection_before_storage() {
         assert!(!retained.contains(secret));
     }
     assert!(retained.contains("[REDACTED]"));
+}
+
+#[test]
+fn legacy_runtime_history_fixture_is_readable_and_non_actionable() {
+    const LEGACY_HANDLE: &str = "rt_0123456789abcdef0123456789abcdef";
+    const FIXTURE_SECRET: &str = "fixture-secret-value";
+    let state: AiChatState =
+        serde_json::from_str(include_str!("testdata/legacy_conversation_2_0_13.json"))
+            .expect("the checked-in legacy fixture is valid");
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("chat_history.redb");
+    let store = AiChatPersistenceStore::new(&path);
+
+    store.save_state(state).unwrap();
+    let loaded = store.load_state().unwrap();
+    let conversation = &loaded.conversations[0];
+    assert_eq!(conversation.title, "Legacy runtime history");
+    assert!(
+        conversation.messages[1]
+            .content
+            .contains("completed successfully"),
+        "legacy visible history remains readable"
+    );
+    let tool_call = conversation.messages[1].tool_calls[0]
+        .as_object()
+        .expect("persisted tool call");
+    assert_eq!(tool_call.get("historical"), Some(&serde_json::json!(true)));
+    assert_eq!(tool_call.get("actionable"), Some(&serde_json::json!(false)));
+
+    let projection = serde_json::to_string(&loaded).unwrap();
+    for forbidden in [
+        LEGACY_HANDLE,
+        FIXTURE_SECRET,
+        "\"target_id\"",
+        "\"targetId\"",
+        "\"sessionId\"",
+        "\"node_id\"",
+        "\"nodeId\"",
+        "\"tab_id\"",
+        "\"tabId\"",
+        "\"pane_id\"",
+        "\"paneId\"",
+        "\"runtimeEpoch\"",
+    ] {
+        assert!(
+            !projection.contains(forbidden),
+            "persisted projection retained forbidden runtime authority: {forbidden}"
+        );
+    }
+
+    store.save_state(loaded.clone()).unwrap();
+    assert_eq!(
+        store.load_state().unwrap(),
+        loaded,
+        "projection-time migration must be idempotent"
+    );
+    drop(store);
+    let stored_bytes = std::fs::read(path).unwrap();
+    assert!(
+        !stored_bytes
+            .windows(LEGACY_HANDLE.len())
+            .any(|window| window == LEGACY_HANDLE.as_bytes())
+    );
+    assert!(
+        !stored_bytes
+            .windows(FIXTURE_SECRET.len())
+            .any(|window| window == FIXTURE_SECRET.as_bytes())
+    );
 }
 
 #[test]

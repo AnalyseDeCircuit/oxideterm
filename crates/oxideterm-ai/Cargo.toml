@@ -19,6 +19,7 @@ oxideterm-network-proxy = { path = "../oxideterm-network-proxy" }
 oxideterm-portable-runtime = { path = "../oxideterm-portable-runtime" }
 oxideterm-secret-store = { path = "../oxideterm-secret-store" }
 parking_lot.workspace = true
+rand.workspace = true
 redb = "2.1"
 regex.workspace = true
 reqwest.workspace = true

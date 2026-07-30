@@ -149,6 +149,18 @@
       "show_raw_output": "Mostrar saída completa",
       "hide_raw_output": "Recolher saída",
       "recovery_actions": "Ações de recuperação",
+      "choose_target": "Escolha o destino para continuar",
+      "cancel_selection": "Cancelar",
+      "recovery": {
+        "stale_target": "O destino ativo mudou ou não está mais disponível.",
+        "state_changed_after_approval": "Nada foi executado porque o destino mudou enquanto aguardava aprovação.",
+        "resource_removed": "O recurso salvo não existe mais.",
+        "resource_disconnected": "O recurso salvo está desconectado.",
+        "credential_interaction_required": "O fluxo normal de conexão precisa de credenciais ou confirmação.",
+        "operation_cancelled": "A operação foi cancelada sem alterações.",
+        "rediscover": "Redescobrir",
+        "connect": "Conectar"
+      },
       "copy_session_id": "Copiar session_id",
       "recoverable_error": "Erro recuperável",
       "output_truncated": "A saída foi truncada",
@@ -313,6 +325,7 @@
       "status": {
         "pending": "Pendente",
         "pending_approval": "Aguardando aprovação",
+        "pending_selection": "Aguardando seleção do destino",
         "approved": "Aprovado",
         "running": "Em execução",
         "completed": "Concluído",

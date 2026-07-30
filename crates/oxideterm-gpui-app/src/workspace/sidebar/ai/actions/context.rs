@@ -66,20 +66,18 @@ impl WorkspaceApp {
         }
         match self.active_tab(cx).map(|tab| &tab.kind) {
             Some(TabKind::SshTerminal) => {
-                if let Some((session_id, node_id)) = self.ai_active_ssh_session(cx)
+                if let Some((_, node_id)) = self.ai_active_ssh_session(cx)
                     && let Some(node) = self.ssh_nodes.get(&node_id)
                 {
                     parts.push(format!(
                         "- Terminal: SSH to {}@{}:{}",
                         node.endpoint.username, node.endpoint.host, node.endpoint.port
                     ));
-                    parts.push(format!("- Active session_id: {}", session_id.0));
                 }
             }
             Some(TabKind::LocalTerminal) => {
-                if let Some(session_id) = self.ai_active_terminal_session_id(cx) {
+                if self.ai_active_terminal_session_id(cx).is_some() {
                     parts.push(format!("- Terminal: Local ({})", ai_local_os_label()));
-                    parts.push(format!("- Active session_id: {}", session_id.0));
                 }
             }
             _ => parts.push("- Terminal: No active terminal".to_string()),
@@ -120,11 +118,10 @@ impl WorkspaceApp {
             }
         }
 
-        if let Some((node_id, remote_path, selected_files)) = self.ai_active_sftp_context(cx) {
+        if let Some((_, remote_path, selected_files)) = self.ai_active_sftp_context(cx) {
             parts.push(String::new());
             parts.push("## File Browser Context".to_string());
             parts.push(format!("- CWD: {remote_path}"));
-            parts.push(format!("- Node ID: {}", node_id.0));
             if !selected_files.is_empty() {
                 let shown = selected_files.iter().take(20).cloned().collect::<Vec<_>>();
                 let suffix = if selected_files.len() > 20 {
@@ -172,20 +169,15 @@ impl WorkspaceApp {
                 .map(|code| format!(" (exit {code})"))
                 .unwrap_or_default();
             chips.push(format!(
-                "- {kind}: {}{} {}",
-                record.command,
+                "- {kind}:{} {}",
                 exit_suffix,
                 serde_json::json!({
-                    "commandRecordId": record.command_id,
-                    "targetId": record.target_id,
-                    "sessionId": record.session_id,
-                    "nodeId": record.node_id,
                     "status": record.status,
-                    "runtimeEpoch": record.runtime_epoch,
                     "approvalMode": record.approval_mode,
                     "source": record.source,
                     "risk": record.risk,
-                    "cwd": record.cwd,
+                    "commandChars": record.command.chars().count(),
+                    "hasCwd": record.cwd.is_some(),
                 })
             ));
             if chips.len() >= 8 {
@@ -201,20 +193,13 @@ impl WorkspaceApp {
                     session.kind,
                     session.status,
                     session
-                        .session_id
-                        .as_ref()
-                        .map(|id| format!(" in {id}"))
+                        .live_terminal
+                        .then(|| " in a live terminal".to_string())
                         .unwrap_or_default(),
                     serde_json::json!({
-                        "cliAgentSessionId": session.id,
                         "kind": session.kind,
                         "status": session.status,
-                        "targetId": session.target_id,
-                        "sessionId": session.session_id,
-                        "nodeId": session.node_id,
-                        "runtimeEpoch": session.runtime_epoch,
                         "label": session.label,
-                        "command": session.command,
                     })
                 ));
                 if chips.len() >= 8 {
@@ -228,7 +213,7 @@ impl WorkspaceApp {
         Some(
             [
                 "## Runtime Context Chips".to_string(),
-                "These are current-runtime structured hints. Treat chips as stale if their runtimeEpoch differs from current tool results.".to_string(),
+                "These are non-authoritative runtime hints. Rediscover a current handle before acting on a live target.".to_string(),
             ]
             .into_iter()
             .chain(chips)
@@ -241,26 +226,15 @@ impl WorkspaceApp {
         &self,
         cx: &mut Context<Self>,
     ) -> Vec<AiRuntimeCommandRecord> {
-        let (mut records, runtime_epoch) = {
-            let ai = self.ai_entity.read(cx);
-            (
-                ai.command_records().iter().cloned().collect::<Vec<_>>(),
-                ai.runtime_epoch().to_string(),
-            )
-        };
-        let mut seen = records
-            .iter()
-            .map(|record| record.command_id.clone())
-            .collect::<HashSet<_>>();
+        // Command history remains owned by terminal panes and is never copied
+        // from secret-capable AI tool arguments.
+        let mut records = Vec::new();
+        let mut seen = HashSet::new();
         let tab_host = self.tab_host.read(cx);
         for (pane_id, pane) in tab_host.panes() {
-            let Some(session_id) = self.session_id_for_pane(*pane_id, cx) else {
+            if self.session_id_for_pane(*pane_id, cx).is_none() {
                 continue;
-            };
-            let node_id = self
-                .workspace_runtime
-                .read(cx)
-                .ssh_terminal_node_id(session_id);
+            }
             for record in pane.read(cx).ai_command_records() {
                 if !seen.insert(record.command_id.clone()) {
                     continue;
@@ -269,11 +243,6 @@ impl WorkspaceApp {
                 let status = ai_ledger_status_from_terminal_status(record.status);
                 records.push(AiRuntimeCommandRecord {
                     command_id: record.command_id,
-                    target_id: node_id
-                        .as_ref()
-                        .map(|node_id| format!("ssh-node:{}", node_id.0)),
-                    session_id: Some(session_id.0.to_string()),
-                    node_id: node_id.as_ref().map(|node_id| node_id.0.to_string()),
                     command: record.command,
                     cwd: None,
                     source,
@@ -281,7 +250,6 @@ impl WorkspaceApp {
                     exit_code: record.exit_code.map(i64::from),
                     started_at: record.started_at as i64,
                     finished_at: record.finished_at.map(|value| value as i64),
-                    runtime_epoch: runtime_epoch.clone(),
                     approval_mode: None,
                     risk: "execute".to_string(),
                 });
@@ -293,31 +261,15 @@ impl WorkspaceApp {
     pub(in crate::workspace) fn ai_runtime_cli_agent_sessions(
         &self,
         records: &[AiRuntimeCommandRecord],
-        cx: &mut Context<Self>,
+        _cx: &mut Context<Self>,
     ) -> Vec<AiCliAgentSession> {
-        let mut sessions = self
-            .ai_entity
-            .read(cx)
-            .cli_agent_sessions()
-            .values()
-            .cloned()
-            .collect::<Vec<_>>();
-        let mut seen = sessions
-            .iter()
-            .map(|session| session.id.clone())
-            .collect::<HashSet<_>>();
+        let mut sessions = Vec::new();
+        let mut seen = HashSet::new();
         for record in records {
             let Some(kind) = detect_ai_cli_agent_kind(&record.command) else {
                 continue;
             };
-            let target_key = record
-                .session_id
-                .as_ref()
-                .or(record.node_id.as_ref())
-                .or(record.target_id.as_ref())
-                .cloned()
-                .unwrap_or_else(|| "unknown".to_string());
-            let id = format!("cli-agent:{kind}:{target_key}");
+            let id = format!("cli-agent:{kind}:live-terminal");
             if !seen.insert(id.clone()) {
                 continue;
             }
@@ -331,13 +283,9 @@ impl WorkspaceApp {
                 kind: kind.clone(),
                 label: format!("{kind} agent"),
                 status: status.to_string(),
-                target_id: record.target_id.clone(),
-                session_id: record.session_id.clone(),
-                node_id: record.node_id.clone(),
-                command: record.command.clone(),
+                live_terminal: true,
                 started_at: record.started_at,
                 updated_at: record.finished_at.unwrap_or(record.started_at),
-                runtime_epoch: record.runtime_epoch.clone(),
             });
         }
         sessions
@@ -417,10 +365,6 @@ impl WorkspaceApp {
             let Some(buffer) = self.ai_terminal_pane_text(pane_id, cx) else {
                 continue;
             };
-            let session_id = root
-                .session_id_for_pane(pane_id)
-                .map(|id| id.0.to_string())
-                .unwrap_or_else(|| pane_id.0.to_string());
             let (buffer, line_count) = self.ai_limited_terminal_buffer(&buffer, 30, 4000);
             if buffer.trim().is_empty() {
                 continue;
@@ -431,7 +375,7 @@ impl WorkspaceApp {
                 "Pane"
             };
             parts.push(format!(
-                "=== {label} ({terminal_type}, session_id={session_id}) — last {line_count} lines ==="
+                "=== {label} ({terminal_type}) — last {line_count} lines ==="
             ));
             parts.push(buffer);
             parts.push(String::new());

@@ -4,7 +4,64 @@ impl WorkspaceApp {
         event: &KeyDownEvent,
         cx: &mut Context<Self>,
     ) -> bool {
-        if self.ai_entity.read(cx).model_selector_open()
+        if let Some(selection) = self
+            .ai_entity
+            .read(cx)
+            .chat_ui()
+            .tool_candidate_selection
+            .clone()
+        {
+            if event.keystroke.modifiers.platform {
+                return false;
+            }
+            match event.keystroke.key.as_str() {
+                "down" | "arrowdown" => {
+                    self.ai_entity.update(cx, |ai, _cx| {
+                        ai.move_tool_candidate_selection(1);
+                    });
+                    cx.notify();
+                    true
+                }
+                "up" | "arrowup" => {
+                    self.ai_entity.update(cx, |ai, _cx| {
+                        ai.move_tool_candidate_selection(-1);
+                    });
+                    cx.notify();
+                    true
+                }
+                "home" => {
+                    self.ai_entity.update(cx, |ai, _cx| {
+                        ai.move_tool_candidate_selection(-(selection.candidate_count as isize));
+                    });
+                    cx.notify();
+                    true
+                }
+                "end" => {
+                    self.ai_entity.update(cx, |ai, _cx| {
+                        ai.move_tool_candidate_selection(selection.candidate_count as isize);
+                    });
+                    cx.notify();
+                    true
+                }
+                "enter" => {
+                    self.resolve_ai_tool_candidate_selection(
+                        selection.tool_call_id,
+                        Some(selection.selected_index),
+                        cx,
+                    );
+                    true
+                }
+                "escape" => {
+                    self.resolve_ai_tool_candidate_selection(
+                        selection.tool_call_id,
+                        None,
+                        cx,
+                    );
+                    true
+                }
+                _ => true,
+            }
+        } else if self.ai_entity.read(cx).model_selector_open()
             && self.ai_entity.read(cx).model_selector_search_focused()
         {
             if event.keystroke.modifiers.platform {

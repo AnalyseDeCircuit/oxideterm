@@ -157,6 +157,7 @@ impl WorkspaceApp {
     }
 
     pub(in crate::workspace) fn cancel_ai_chat_stream_without_notify(&mut self, cx: &mut App) {
+        let cancelled_generation = self.ai_entity.read(cx).chat_stream_generation();
         let active_conversation_id = self
             .ai_entity
             .read(cx)
@@ -176,6 +177,14 @@ impl WorkspaceApp {
         let (conversation_id, stopped_turns) = self.ai_entity.update(cx, |ai, _cx| {
             ai.cancel_chat_stream();
             ai.cancel_chat_conversation_state()
+        });
+        // An abort can leave a UI delivery queued behind the model task. Revoke
+        // its lease before that delivery can reach a terminal or other owner.
+        self.ai_runtime_context.update(cx, |runtime, _cx| {
+            runtime.finish_tool_session(
+                cancelled_generation,
+                oxideterm_ai::RuntimeRevocationReason::ToolSessionCancelled,
+            );
         });
         if let Some(conversation_id) = conversation_id.as_deref() {
             self.persist_ai_stopped_assistant_turns(conversation_id, &stopped_turns, cx);

@@ -13,6 +13,7 @@ mod providers;
 mod rag;
 mod reasoning;
 mod references;
+mod runtime_context;
 mod settings;
 mod slash;
 pub mod stream_state;
@@ -42,8 +43,12 @@ pub use acp::{
 };
 pub use chat::{apply_chat_request_overrides, generate_chat_title};
 pub use context_sanitizer::{
-    sanitize_api_messages_for_provider, sanitize_chat_state_for_persistence, sanitize_for_ai,
-    sanitize_json_for_ai, sanitize_json_text_for_ai,
+    preference_is_safe_to_persist, sanitize_api_messages_for_provider,
+    sanitize_chat_state_for_persistence, sanitize_for_ai, sanitize_for_persistence,
+    sanitize_json_for_ai, sanitize_json_for_persistence, sanitize_json_text_for_ai,
+    sanitize_json_text_for_persistence, sanitize_tool_arguments_json_for_persistence,
+    sanitize_tool_arguments_text_for_persistence, sanitize_tool_protocol_json_for_persistence,
+    sanitize_tool_result_json_for_persistence,
 };
 pub use context_window::{
     ContextWindowSource, DEFAULT_CONTEXT_WINDOW, ModelContextWindowInfo,
@@ -55,7 +60,10 @@ pub use mcp::{
     McpServerConfig, McpServerStateSnapshot, McpTransport, is_mcp_tool_name, mcp_resource_output,
     mcp_tool_output,
 };
-pub use orchestrator::orchestrator_tool_definitions;
+pub use orchestrator::{
+    OrchestratorArgumentError, canonicalize_orchestrator_tool_arguments,
+    orchestrator_tool_definitions,
+};
 pub use persistence::{AiChatPersistenceStore, PersistedDiagnosticEvent, PersistedTranscriptEntry};
 pub use policy::{
     AiActionRisk, AiPolicyDecision, AiPolicyDecisionKind, AiPolicySafetyMode, AiToolUsePolicy,
@@ -98,6 +106,13 @@ pub use reasoning::{
 pub use references::{
     ai_reference_context_block, ai_reference_label, current_terminal_context_system_message,
     extract_ai_error_context, infer_ai_cwd,
+};
+pub use runtime_context::{
+    RuntimeCapability, RuntimeCapabilityRegistry, RuntimeContextError, RuntimeContextSnapshot,
+    RuntimeHandleId, RuntimeHandleProjection, RuntimeOwnerGeneration, RuntimeOwnerKey,
+    RuntimeOwnerKind, RuntimeOwnerRegistration, RuntimeRegistryEpoch, RuntimeRevocationReason,
+    RuntimeValidationError, RuntimeValidationFailure, StableResourceKind, StableResourceRef,
+    ToolSessionId, ValidatedRuntimeHandle,
 };
 pub use settings::{
     AiProviderKeyDisplayState, AiProviderRefreshKeyPolicy, add_provider_from_template,

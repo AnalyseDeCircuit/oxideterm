@@ -344,14 +344,11 @@ pub(in crate::workspace) struct AiWorkspaceEntity {
     chat_loading: bool,
     next_chat_sequence: u64,
     pending_tool_approvals: HashMap<String, tokio::sync::oneshot::Sender<bool>>,
+    pending_tool_candidate_selections: HashMap<String, tokio::sync::oneshot::Sender<Option<usize>>>,
     // Runtime evidence transitions are implemented beside stream application,
     // but these collections remain physically owned by this Entity.
-    pub(in crate::workspace) runtime_epoch: String,
-    pub(in crate::workspace) command_record_sequence: u64,
-    pub(in crate::workspace) command_records: VecDeque<AiRuntimeCommandRecord>,
     pub(in crate::workspace) tool_execution_records: VecDeque<AiToolExecutionRecord>,
     pub(in crate::workspace) tool_result_facts: VecDeque<AiToolResultFact>,
-    pub(in crate::workspace) cli_agent_sessions: HashMap<String, AiCliAgentSession>,
     agent_fs: NodeAgentIdeFileSystem,
     mcp_registry: oxideterm_ai::McpRegistry,
     acp_runtime_registry: oxideterm_ai::AcpRuntimeRegistry,
@@ -1097,12 +1094,9 @@ impl AiWorkspaceEntity {
             chat_loading: false,
             next_chat_sequence: 0,
             pending_tool_approvals: HashMap::new(),
-            runtime_epoch: uuid::Uuid::new_v4().to_string(),
-            command_record_sequence: 0,
-            command_records: VecDeque::new(),
+            pending_tool_candidate_selections: HashMap::new(),
             tool_execution_records: VecDeque::new(),
             tool_result_facts: VecDeque::new(),
-            cli_agent_sessions: HashMap::new(),
             agent_fs,
             mcp_registry,
             acp_runtime_registry: oxideterm_ai::AcpRuntimeRegistry::default(),
@@ -3213,7 +3207,7 @@ impl AiWorkspaceEntity {
     }
 
     pub(in crate::workspace) fn begin_chat_stream(&mut self) -> (u64, AiStreamDeliverySender) {
-        self.reject_all_tool_approvals();
+        self.reject_all_tool_interactions();
         if let Some(task) = self.chat_stream_task.take() {
             task.abort();
         }
@@ -3236,7 +3230,7 @@ impl AiWorkspaceEntity {
     }
 
     pub(in crate::workspace) fn cancel_chat_stream(&mut self) -> u64 {
-        self.reject_all_tool_approvals();
+        self.reject_all_tool_interactions();
         if let Some(task) = self.chat_stream_task.take() {
             task.abort();
         }
@@ -3248,7 +3242,7 @@ impl AiWorkspaceEntity {
         if generation != self.chat_stream_generation {
             return false;
         }
-        self.reject_all_tool_approvals();
+        self.reject_all_tool_interactions();
         // Invalidate any delivery queued after the terminal event, matching the
         // old one-shot receiver lifetime without keeping a receiver on the root.
         if let Some(task) = self.chat_stream_task.take() {
@@ -3294,16 +3288,90 @@ impl AiWorkspaceEntity {
         }
     }
 
-    pub(in crate::workspace) fn runtime_epoch(&self) -> &str {
-        &self.runtime_epoch
+    pub(in crate::workspace) fn register_tool_candidate_selection(
+        &mut self,
+        generation: u64,
+        tool_call_id: String,
+        candidate_count: usize,
+        sender: tokio::sync::oneshot::Sender<Option<usize>>,
+    ) -> bool {
+        if generation != self.chat_stream_generation || candidate_count == 0 {
+            let _ = sender.send(None);
+            return false;
+        }
+        if let Some(stale_sender) = self
+            .pending_tool_candidate_selections
+            .insert(tool_call_id.clone(), sender)
+        {
+            // Repeated protocol IDs cancel the older selector before replacing it.
+            let _ = stale_sender.send(None);
+        }
+        let input_was_focused = self.chat_ui.input_focused;
+        let footer_focus = self.chat_ui.footer_focus;
+        self.chat_ui.tool_candidate_selection = Some(AiToolCandidateSelectionState {
+            tool_call_id,
+            selected_index: 0,
+            candidate_count,
+            input_was_focused,
+            footer_focus,
+        });
+        self.chat_ui.input_focused = false;
+        self.chat_ui.footer_focus = None;
+        true
     }
 
-    pub(in crate::workspace) fn command_records(&self) -> &VecDeque<AiRuntimeCommandRecord> {
-        &self.command_records
+    pub(in crate::workspace) fn move_tool_candidate_selection(&mut self, delta: isize) -> bool {
+        let Some(selection) = self.chat_ui.tool_candidate_selection.as_mut() else {
+            return false;
+        };
+        selection.selected_index = selection
+            .selected_index
+            .saturating_add_signed(delta)
+            .min(selection.candidate_count.saturating_sub(1));
+        true
     }
 
-    pub(in crate::workspace) fn cli_agent_sessions(&self) -> &HashMap<String, AiCliAgentSession> {
-        &self.cli_agent_sessions
+    pub(in crate::workspace) fn resolve_tool_candidate_selection(
+        &mut self,
+        tool_call_id: &str,
+        selected_index: Option<usize>,
+    ) -> bool {
+        let Some(sender) = self.pending_tool_candidate_selections.remove(tool_call_id) else {
+            return false;
+        };
+        let selected_index = selected_index.filter(|index| {
+            self.chat_ui
+                .tool_candidate_selection
+                .as_ref()
+                .is_some_and(|selection| {
+                    selection.tool_call_id == tool_call_id && *index < selection.candidate_count
+                })
+        });
+        if let Some(selection) = self.chat_ui.tool_candidate_selection.take() {
+            // Candidate selection temporarily owns keyboard routing. Restore the
+            // exact composer focus state instead of always focusing the input.
+            self.chat_ui.input_focused = selection.input_was_focused;
+            self.chat_ui.footer_focus = selection.footer_focus;
+        }
+        let _ = sender.send(selected_index);
+        true
+    }
+
+    fn reject_all_tool_candidate_selections(&mut self) {
+        for (_, sender) in self.pending_tool_candidate_selections.drain() {
+            let _ = sender.send(None);
+        }
+        if let Some(selection) = self.chat_ui.tool_candidate_selection.take() {
+            // Stream cancellation and replacement release the selector through
+            // the same focus-restoration boundary as an explicit user cancel.
+            self.chat_ui.input_focused = selection.input_was_focused;
+            self.chat_ui.footer_focus = selection.footer_focus;
+        }
+    }
+
+    fn reject_all_tool_interactions(&mut self) {
+        self.reject_all_tool_approvals();
+        self.reject_all_tool_candidate_selections();
     }
 
     pub(in crate::workspace) fn agent_fs(&self) -> &NodeAgentIdeFileSystem {
@@ -4063,7 +4131,7 @@ impl Drop for AiWorkspaceEntity {
     fn drop(&mut self) {
         // Releasing the workspace is an explicit rejection boundary for every
         // protocol worker still waiting on a user decision.
-        self.reject_all_tool_approvals();
+        self.reject_all_tool_interactions();
         if let Some(task) = self.chat_stream_task.take() {
             task.abort();
         }
@@ -4083,6 +4151,15 @@ impl gpui::EventEmitter<AiWorkspaceEvent> for AiWorkspaceEntity {}
 pub(super) enum AiStandardConfirmKind {
     Safety,
     Summarize,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(super) struct AiToolCandidateSelectionState {
+    pub(super) tool_call_id: String,
+    pub(super) selected_index: usize,
+    pub(super) candidate_count: usize,
+    input_was_focused: bool,
+    footer_focus: Option<AiChatFooterAction>,
 }
 
 /// Owns AI chat presentation, conversation persistence, streaming, and compaction state.
@@ -4114,6 +4191,7 @@ pub(super) struct AiChatWorkspaceState {
     pub(super) editing_message_focused: bool,
     pub(super) thinking_expansion_state: HashMap<String, bool>,
     pub(super) tool_call_expansion_state: HashSet<String>,
+    pub(super) tool_candidate_selection: Option<AiToolCandidateSelectionState>,
     pub(super) autocomplete_index: usize,
     pub(super) autocomplete_suppressed: bool,
     pub(super) context_popover_open: bool,
@@ -4178,6 +4256,7 @@ impl AiChatWorkspaceState {
             editing_message_focused: false,
             thinking_expansion_state: HashMap::new(),
             tool_call_expansion_state: HashSet::new(),
+            tool_candidate_selection: None,
             autocomplete_index: 0,
             autocomplete_suppressed: false,
             context_popover_open: false,
@@ -5663,6 +5742,55 @@ mod entity_tests {
         cx.run_until_parked();
 
         assert_eq!(release_receiver.try_recv(), Ok(false));
+    }
+
+    #[gpui::test]
+    fn tool_candidate_selection_is_keyboard_ordered_and_cancelled_with_stream(
+        cx: &mut TestAppContext,
+    ) {
+        let entity = cx.new(|cx| {
+            AiWorkspaceEntity::new(test_runtime(), oxideterm_ai::AiProviderKeyStore::new(), cx)
+        });
+        let (generation, _) = entity.update(cx, |entity, _cx| entity.begin_chat_stream());
+        let (sender, mut receiver) = tokio::sync::oneshot::channel();
+        entity.update(cx, |entity, _cx| {
+            entity.focus_chat_input();
+            assert!(entity.register_tool_candidate_selection(
+                generation,
+                "tool-choice".to_string(),
+                3,
+                sender,
+            ));
+            assert!(entity.move_tool_candidate_selection(1));
+            assert!(entity.move_tool_candidate_selection(1));
+            assert!(entity.move_tool_candidate_selection(1));
+            assert_eq!(
+                entity
+                    .chat_ui()
+                    .tool_candidate_selection
+                    .as_ref()
+                    .map(|selection| selection.selected_index),
+                Some(2),
+            );
+            assert!(!entity.chat_ui().input_focused);
+            assert!(entity.resolve_tool_candidate_selection("tool-choice", Some(2)));
+            assert!(entity.chat_ui().input_focused);
+        });
+        assert_eq!(receiver.try_recv(), Ok(Some(2)));
+
+        let (cancel_sender, mut cancel_receiver) = tokio::sync::oneshot::channel();
+        entity.update(cx, |entity, _cx| {
+            entity.focus_chat_input();
+            assert!(entity.register_tool_candidate_selection(
+                generation,
+                "tool-cancel".to_string(),
+                2,
+                cancel_sender,
+            ));
+            entity.cancel_chat_stream();
+            assert!(entity.chat_ui().input_focused);
+        });
+        assert_eq!(cancel_receiver.try_recv(), Ok(None));
     }
 
     #[gpui::test]

@@ -677,6 +677,14 @@ impl WorkspaceApp {
         let session_id = format!("node:{}:sftp", node_id.0);
         let runtime = self.forwarding_runtime.clone();
         let router = self.node_router.clone();
+        let owner_router = router.clone();
+        let owner_node_id = node_id.clone();
+        runtime.spawn(async move {
+            // Opening a visible SFTP surface creates the concrete shared channel
+            // that owns AI file capabilities. Listing remains on its independent
+            // transfer channel, so capability registration never blocks it.
+            let _ = owner_router.acquire_sftp(&owner_node_id).await;
+        });
         runtime.spawn(async move {
             // Tauri node_sftp_* calls do not synchronously borrow a terminal
             // session before starting SFTP work. The worker waits on the

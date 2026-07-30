@@ -143,6 +143,25 @@ fn compaction_anchor_normalizes_to_provider_summary() {
 }
 
 #[test]
+fn compaction_and_provider_history_scrub_runtime_handles() {
+    let handle = "rt_0123456789abcdef0123456789abcdef";
+    let source = message(
+        "assistant",
+        AiChatRole::Assistant,
+        &format!("Earlier authority was {handle}."),
+    );
+
+    let summary_messages = ai_compaction_summary_messages(std::slice::from_ref(&source));
+    assert!(!summary_messages[1].content.contains(handle));
+    let snapshot = ai_compaction_anchor_snapshot(std::slice::from_ref(&source));
+    assert!(!snapshot[0].content.contains(handle));
+
+    let mut provider_history = vec![source];
+    normalize_ai_stream_history_for_provider(&mut provider_history);
+    assert!(!provider_history[0].content.contains(handle));
+}
+
+#[test]
 fn turn_status_initializes_structured_turn_state() {
     let mut assistant = message("assistant", AiChatRole::Assistant, "answer");
 

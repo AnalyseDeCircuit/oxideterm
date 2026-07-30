@@ -149,6 +149,18 @@
       "show_raw_output": "Vollständige Ausgabe anzeigen",
       "hide_raw_output": "Ausgabe einklappen",
       "recovery_actions": "Wiederherstellungsaktionen",
+      "choose_target": "Ziel zum Fortfahren auswählen",
+      "cancel_selection": "Abbrechen",
+      "recovery": {
+        "stale_target": "Das Live-Ziel wurde geändert oder ist nicht mehr verfügbar.",
+        "state_changed_after_approval": "Es wurde nichts ausgeführt, da sich das Live-Ziel während der Freigabe geändert hat.",
+        "resource_removed": "Die gespeicherte Ressource existiert nicht mehr.",
+        "resource_disconnected": "Die gespeicherte Ressource ist getrennt.",
+        "credential_interaction_required": "Der normale Verbindungsablauf benötigt Anmeldedaten oder eine Bestätigung.",
+        "operation_cancelled": "Der Vorgang wurde ohne Änderungen abgebrochen.",
+        "rediscover": "Neu suchen",
+        "connect": "Verbinden"
+      },
       "copy_session_id": "session_id kopieren",
       "recoverable_error": "Behebbarer Fehler",
       "output_truncated": "Ausgabe wurde abgeschnitten",
@@ -313,6 +325,7 @@
       "status": {
         "pending": "Ausstehend",
         "pending_approval": "Wartet auf Freigabe",
+        "pending_selection": "Wartet auf Zielauswahl",
         "approved": "Freigegeben",
         "running": "Wird ausgeführt",
         "completed": "Abgeschlossen",

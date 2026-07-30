@@ -149,6 +149,18 @@
       "show_raw_output": "Show full output",
       "hide_raw_output": "Collapse output",
       "recovery_actions": "Recovery Actions",
+      "choose_target": "Choose the target to continue",
+      "cancel_selection": "Cancel",
+      "recovery": {
+        "stale_target": "The live target changed or is no longer available.",
+        "state_changed_after_approval": "Nothing ran because the live target changed while approval was open.",
+        "resource_removed": "The saved resource no longer exists.",
+        "resource_disconnected": "The saved resource is disconnected.",
+        "credential_interaction_required": "The normal connection flow needs your credentials or confirmation.",
+        "operation_cancelled": "The operation was cancelled without making changes.",
+        "rediscover": "Rediscover",
+        "connect": "Connect"
+      },
       "copy_session_id": "Copy session_id",
       "recoverable_error": "Recoverable error",
       "output_truncated": "Output was truncated",
@@ -313,6 +325,7 @@
       "status": {
         "pending": "Pending",
         "pending_approval": "Awaiting approval",
+        "pending_selection": "Awaiting target selection",
         "approved": "Approved",
         "running": "Running",
         "completed": "Completed",

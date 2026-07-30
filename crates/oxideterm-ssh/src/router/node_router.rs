@@ -369,6 +369,7 @@ impl NodeRouter {
             session,
             was_new,
             cwd,
+            generation,
         } = resolved
             .handle
             .acquire_sftp_with_meta()
@@ -383,8 +384,42 @@ impl NodeRouter {
         let event = self.runtime.set_sftp_ready(node_id, true, cwd)?;
         if was_new {
             self.emitter.dispatch(&event);
+            // The shared channel is a separate owner from short-lived listing
+            // channels, so capability consumers receive its own lifecycle event.
+            let owner_event = self.runtime.shared_sftp_session_changed(
+                node_id,
+                resolved.connection_id,
+                Some(generation),
+                true,
+            )?;
+            self.emitter.dispatch(&owner_event);
         }
         Ok(session)
+    }
+
+    /// Resolves the exact shared SFTP owner validated by an upper-layer
+    /// capability. A changed connection or generation fails without rebuilding.
+    pub async fn acquire_existing_sftp_generation(
+        &self,
+        node_id: &NodeId,
+        expected_connection_id: &str,
+        expected_generation: u64,
+    ) -> Result<Arc<Mutex<SftpSession>>, RouteError> {
+        let resolved = self
+            .resolve_connection_wait(node_id, Duration::from_secs(15))
+            .await?;
+        if resolved.connection_id != expected_connection_id {
+            return Err(RouteError::CapabilityUnavailable(
+                "Shared SFTP owner changed".to_string(),
+            ));
+        }
+        resolved
+            .handle
+            .acquire_existing_sftp_generation(expected_generation)
+            .await
+            .ok_or_else(|| {
+                RouteError::CapabilityUnavailable("Shared SFTP owner changed".to_string())
+            })
     }
 
     pub async fn acquire_transfer_sftp(
@@ -443,9 +478,23 @@ impl NodeRouter {
                 .mark_sftp_session(&resolved.connection_id, false, None);
             let event = self.runtime.set_sftp_ready(node_id, false, None)?;
             self.emitter.dispatch(&event);
+            // Revocation is published before a replacement channel can become
+            // visible, preventing the old generation from authorizing later calls.
+            let owner_event = self.runtime.shared_sftp_session_changed(
+                node_id,
+                resolved.connection_id.clone(),
+                None,
+                false,
+            )?;
+            self.emitter.dispatch(&owner_event);
         }
 
-        let AcquiredSftpMeta { session, cwd, .. } = resolved
+        let AcquiredSftpMeta {
+            session,
+            cwd,
+            generation,
+            ..
+        } = resolved
             .handle
             .acquire_sftp_with_meta()
             .await
@@ -455,6 +504,13 @@ impl NodeRouter {
             .mark_sftp_session(&resolved.connection_id, true, cwd.clone());
         let event = self.runtime.set_sftp_ready(node_id, true, cwd)?;
         self.emitter.dispatch(&event);
+        let owner_event = self.runtime.shared_sftp_session_changed(
+            node_id,
+            resolved.connection_id,
+            Some(generation),
+            true,
+        )?;
+        self.emitter.dispatch(&owner_event);
         Ok(session)
     }
 

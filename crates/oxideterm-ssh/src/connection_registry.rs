@@ -160,6 +160,7 @@ pub struct AcquiredSftpMeta {
     pub session: Arc<Mutex<SftpSession>>,
     pub was_new: bool,
     pub cwd: Option<String>,
+    pub generation: u64,
 }
 
 enum SharedSftpState {
@@ -477,12 +478,29 @@ impl SshConnectionHandle {
         Ok(self.acquire_sftp_with_meta().await?.session)
     }
 
+    /// Returns only the already-open shared channel for the exact owner
+    /// generation. It never creates or substitutes a replacement session.
+    pub async fn acquire_existing_sftp_generation(
+        &self,
+        expected_generation: u64,
+    ) -> Option<Arc<Mutex<SftpSession>>> {
+        let guard = self.entry.sftp.lock().await;
+        if self.entry.sftp_generation.load(Ordering::Acquire) != expected_generation {
+            return None;
+        }
+        match &*guard {
+            SharedSftpState::Ready(session) => Some(Arc::clone(session)),
+            SharedSftpState::Empty | SharedSftpState::Initializing { .. } => None,
+        }
+    }
+
     pub async fn acquire_sftp_with_meta(&self) -> Result<AcquiredSftpMeta, SftpError> {
         loop {
             let initializing = {
                 let mut guard = self.entry.sftp.lock().await;
                 match &*guard {
                     SharedSftpState::Ready(session) => {
+                        let generation = self.entry.sftp_generation.load(Ordering::Acquire);
                         let session = Arc::clone(session);
                         drop(guard);
                         let cwd = {
@@ -493,6 +511,7 @@ impl SshConnectionHandle {
                             session,
                             was_new: false,
                             cwd,
+                            generation,
                         });
                     }
                     SharedSftpState::Initializing { notify, .. } => Some(notify.clone()),
@@ -521,6 +540,7 @@ impl SshConnectionHandle {
                     let session = Arc::new(Mutex::new(sftp));
                     match &*guard {
                         SharedSftpState::Ready(existing) => {
+                            let generation = self.entry.sftp_generation.load(Ordering::Acquire);
                             let existing = Arc::clone(existing);
                             drop(guard);
                             let cwd = {
@@ -531,12 +551,14 @@ impl SshConnectionHandle {
                                 session: existing,
                                 was_new: false,
                                 cwd,
+                                generation,
                             });
                         }
                         SharedSftpState::Initializing { notify, generation }
                             if *generation
                                 == self.entry.sftp_generation.load(Ordering::Acquire) =>
                         {
+                            let generation = *generation;
                             let notify = notify.clone();
                             *guard = SharedSftpState::Ready(Arc::clone(&session));
                             notify.notify_waiters();
@@ -545,6 +567,7 @@ impl SshConnectionHandle {
                                 session,
                                 was_new: true,
                                 cwd,
+                                generation,
                             });
                         }
                         SharedSftpState::Initializing { notify, .. } => {

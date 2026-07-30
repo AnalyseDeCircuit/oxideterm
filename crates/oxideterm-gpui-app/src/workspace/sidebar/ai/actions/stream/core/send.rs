@@ -56,12 +56,12 @@ impl WorkspaceApp {
             return;
         };
 
-        let snapshot = self.ai_chat_orchestrator_snapshot(&config, cx);
+        let services = self.ai_model_backend_services(cx);
         let (rag_tx, rag_rx) = std::sync::mpsc::channel();
         self.forwarding_runtime.spawn(async move {
             let rag_system_prompt = tokio::time::timeout(
                 std::time::Duration::from_millis(3000),
-                snapshot.build_rag_system_prompt(Some(&rag_query), &config),
+                services.build_rag_system_prompt(Some(&rag_query), &config),
             )
             .await
             .ok()
@@ -303,15 +303,25 @@ impl WorkspaceApp {
         let (generation, ui_tx) = self
             .ai_entity
             .update(cx, |ai, _cx| ai.begin_chat_stream());
-        let snapshot = self.ai_chat_orchestrator_snapshot(&config, cx);
+        // Every model turn receives a fresh authority lease. The token remains
+        // transient and never enters conversation history or diagnostics.
+        let tool_session_id = self
+            .ai_runtime_context
+            .update(cx, |runtime, _cx| runtime.begin_tool_session(generation));
+        let model_runtime = AiModelRuntimeState {
+            context_window: self.ai_active_model_context_window(&config),
+        };
+        let services = self.ai_model_backend_services(cx);
         let acp_launch = self.ai_acp_chat_launch(&config);
         let task = self.forwarding_runtime.spawn(run_ai_chat_tool_loop(
             config,
             history,
-            snapshot,
+            model_runtime,
+            services,
             acp_launch,
             budget_decision.map(|decision| decision.level).unwrap_or(0),
             generation,
+            tool_session_id,
             conversation_id,
             assistant_id,
             ui_tx,

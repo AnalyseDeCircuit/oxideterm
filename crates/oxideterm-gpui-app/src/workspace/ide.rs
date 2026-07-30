@@ -20,6 +20,13 @@ use super::{TabId, WorkspaceApp, tabs::TabRemovalTransition};
 /// Cross-workspace IDE effects that require settings, tabs, or reconnect coordination.
 pub(super) enum IdeWorkspaceEvent {
     RememberAgentMode(NodeAgentMode),
+    SurfaceOpened {
+        tab_id: TabId,
+        node_id: NodeId,
+    },
+    SurfaceClosed {
+        tab_id: TabId,
+    },
     TransientSurfaceClosed {
         tab_id: TabId,
     },
@@ -45,6 +52,7 @@ struct IdeSurfaceEntry {
 }
 
 pub(super) struct IdeWorkspaceTargetSnapshot {
+    pub(super) tab_id: TabId,
     pub(super) node_id: NodeId,
     pub(super) project_root_path: Option<String>,
     pub(super) project_name: Option<String>,
@@ -200,6 +208,7 @@ impl IdeWorkspaceEntity {
             },
         );
 
+        let event_node_id = node_id.clone();
         self.tabs_by_node
             .entry(node_id.clone())
             .or_default()
@@ -212,6 +221,12 @@ impl IdeWorkspaceEntity {
                 _subscription: subscription,
             },
         );
+        // The app-level subscriber registers capability authority only after
+        // this surface has become the IDE workspace's real owner.
+        cx.emit(IdeWorkspaceEvent::SurfaceOpened {
+            tab_id,
+            node_id: event_node_id,
+        });
     }
 
     pub(super) fn close_surface(
@@ -251,6 +266,7 @@ impl IdeWorkspaceEntity {
             // This releases only the surface-scoped IDE consumer and watch owner.
             surface.release_remote_session(cx);
         });
+        cx.emit(IdeWorkspaceEvent::SurfaceClosed { tab_id });
         true
     }
 
@@ -258,6 +274,18 @@ impl IdeWorkspaceEntity {
         self.surfaces_by_tab
             .get(&tab_id.0)
             .map(|entry| entry.surface.clone())
+    }
+
+    /// Returns the existing IDE surface's filesystem owner for a capability
+    /// already validated by the workspace runtime broker.
+    pub(super) fn ai_owner_file_system(
+        &self,
+        tab_id: TabId,
+        cx: &App,
+    ) -> Option<NodeAgentIdeFileSystem> {
+        self.surfaces_by_tab
+            .get(&tab_id.0)
+            .map(|entry| entry.surface.read(cx).ai_owner_file_system())
     }
 
     pub(super) fn node_for_tab(&self, tab_id: TabId) -> Option<&NodeId> {
@@ -440,11 +468,12 @@ impl IdeWorkspaceEntity {
 
     pub(super) fn target_snapshots(&self, cx: &App) -> Vec<IdeWorkspaceTargetSnapshot> {
         self.surfaces_by_tab
-            .values()
-            .map(|entry| {
+            .iter()
+            .map(|(tab_id, entry)| {
                 let surface = entry.surface.read(cx);
                 let context = surface.ai_context_snapshot();
                 IdeWorkspaceTargetSnapshot {
+                    tab_id: TabId(*tab_id),
                     node_id: entry.node_id.clone(),
                     project_root_path: surface.project_root_path(),
                     project_name: context.map(|snapshot| snapshot.project_name),
@@ -709,7 +738,10 @@ impl WorkspaceApp {
             self.active_surface = oxideterm_gpui_settings_view::ActiveSurface::Terminal;
         }
         self.active_ssh_node_id = Some(target_node_id.clone());
-        self.expanded_ssh_nodes.insert(target_node_id);
+        self.expanded_ssh_nodes.insert(target_node_id.clone());
+        // Existing IDE surfaces do not emit SurfaceOpened during reconnect.
+        // Re-register only after the real surface has restored its new node owner.
+        self.register_ai_runtime_ide_surface_owner(tab_id, &target_node_id, cx);
         cx.notify();
         if same_project_open {
             IdeReconnectRestoreStatus::Restored
@@ -983,6 +1015,13 @@ impl WorkspaceApp {
             IdeWorkspaceEvent::RememberAgentMode(mode) => {
                 self.remember_ide_agent_mode(*mode, cx);
             }
+            IdeWorkspaceEvent::SurfaceOpened { tab_id, node_id } => {
+                self.register_ai_runtime_ide_surface_owner(*tab_id, node_id, cx);
+            }
+            IdeWorkspaceEvent::SurfaceClosed { tab_id } => {
+                self.ai_runtime_context
+                    .update(cx, |runtime, _cx| runtime.revoke_ide_surface(*tab_id));
+            }
             IdeWorkspaceEvent::TransientSurfaceClosed { tab_id } => {
                 self.close_transient_ide_tab_after_folder_cancel(*tab_id, cx);
             }
@@ -999,6 +1038,33 @@ impl WorkspaceApp {
                 );
             }
         }
+    }
+
+    fn register_ai_runtime_ide_surface_owner(
+        &mut self,
+        tab_id: TabId,
+        node_id: &NodeId,
+        cx: &mut Context<Self>,
+    ) {
+        let label = self
+            .tabs(cx)
+            .iter()
+            .find(|tab| tab.id == tab_id)
+            .map(|tab| tab.title.clone())
+            .unwrap_or_else(|| "IDE workspace".to_string());
+        let resource_ref = self.ssh_nodes.get(node_id).and_then(|node| {
+            node.saved_connection_id.as_ref().and_then(|connection_id| {
+                oxideterm_ai::StableResourceRef::new(
+                    oxideterm_ai::StableResourceKind::SavedConnection,
+                    connection_id.clone(),
+                    Some(label.clone()),
+                )
+                .ok()
+            })
+        });
+        self.ai_runtime_context.update(cx, |runtime, _cx| {
+            runtime.register_ide_surface(tab_id, node_id.clone(), label, resource_ref);
+        });
     }
 
     fn close_transient_ide_tab_after_folder_cancel(

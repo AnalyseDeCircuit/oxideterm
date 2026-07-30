@@ -149,6 +149,18 @@
       "show_raw_output": "Mostra output completo",
       "hide_raw_output": "Comprimi output",
       "recovery_actions": "Azioni di recupero",
+      "choose_target": "Scegli la destinazione per continuare",
+      "cancel_selection": "Annulla",
+      "recovery": {
+        "stale_target": "La destinazione attiva è cambiata o non è più disponibile.",
+        "state_changed_after_approval": "Non è stato eseguito nulla perché la destinazione è cambiata durante l’attesa dell’approvazione.",
+        "resource_removed": "La risorsa salvata non esiste più.",
+        "resource_disconnected": "La risorsa salvata è disconnessa.",
+        "credential_interaction_required": "Il normale flusso di connessione richiede credenziali o conferma.",
+        "operation_cancelled": "L’operazione è stata annullata senza modifiche.",
+        "rediscover": "Rileva di nuovo",
+        "connect": "Connetti"
+      },
       "copy_session_id": "Copia session_id",
       "recoverable_error": "Errore recuperabile",
       "output_truncated": "L'output è stato troncato",
@@ -313,6 +325,7 @@
       "status": {
         "pending": "In sospeso",
         "pending_approval": "In attesa di approvazione",
+        "pending_selection": "In attesa della selezione della destinazione",
         "approved": "Approvato",
         "running": "In esecuzione",
         "completed": "Completato",

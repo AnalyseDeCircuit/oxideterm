@@ -59,9 +59,15 @@ pub(in crate::workspace) fn apply_ai_acp_session_started_to_conversations(
 pub(in crate::workspace) fn sanitize_ai_tool_arguments_for_persistence(
     arguments: &str,
 ) -> String {
-    // Parsed JSON needs key-aware redaction because short or opaque tokens may
-    // not carry enough structure for text-only credential detection.
-    oxideterm_ai::sanitize_json_text_for_ai(arguments)
+    // Execution payloads are current-turn data. Durable history keeps only
+    // safe descriptors such as resource kind, path, and non-authority options.
+    oxideterm_ai::sanitize_tool_arguments_text_for_persistence(arguments)
+}
+
+pub(in crate::workspace) fn sanitize_ai_tool_arguments_for_approval(arguments: &str) -> String {
+    // Approval is local and immediate, so a redacted command or input summary
+    // may remain visible without entering the persistence projection.
+    oxideterm_ai::sanitize_json_text_for_persistence(arguments)
 }
 
 enum AiStreamApplyOutcome {
@@ -267,6 +273,12 @@ impl WorkspaceApp {
         match outcome {
             AiStreamApplyOutcome::Applied => {}
             AiStreamApplyOutcome::Completed => {
+                self.ai_runtime_context.update(cx, |runtime, _cx| {
+                    runtime.finish_tool_session(
+                        generation,
+                        oxideterm_ai::RuntimeRevocationReason::ToolSessionFinished,
+                    );
+                });
                 self.persist_ai_assistant_turn_end(
                     conversation_id,
                     message_id,
@@ -276,6 +288,12 @@ impl WorkspaceApp {
                 self.maybe_start_ai_auto_compaction(conversation_id, cx);
             }
             AiStreamApplyOutcome::Failed(safe_error) => {
+                self.ai_runtime_context.update(cx, |runtime, _cx| {
+                    runtime.finish_tool_session(
+                        generation,
+                        oxideterm_ai::RuntimeRevocationReason::ToolSessionFinished,
+                    );
+                });
                 // Provider errors may contain response bodies or request
                 // metadata. Only a localized stable category reaches the
                 // conversation, diagnostics, notifications, and persistence.
@@ -460,10 +478,10 @@ impl WorkspaceApp {
         let persisted_arguments = sanitize_ai_tool_arguments_for_persistence(arguments);
         let persisted_result = result
             .as_ref()
-            .map(oxideterm_ai::sanitize_json_for_ai);
+            .map(|result| oxideterm_ai::sanitize_tool_result_json_for_persistence(name, result));
         let persisted_summary = summary
             .as_deref()
-            .map(oxideterm_ai::sanitize_for_ai);
+            .map(oxideterm_ai::sanitize_for_persistence);
         let should_persist = result.is_some()
             || matches!(
                 status,
@@ -505,9 +523,9 @@ impl WorkspaceApp {
                     message_id,
                     tool_call_id,
                     name,
-                    arguments,
+                    &persisted_arguments,
                     status,
-                    result.as_ref(),
+                    persisted_result.as_ref(),
                     risk.as_deref(),
                     now,
                 )
@@ -604,7 +622,7 @@ impl WorkspaceApp {
                 ));
                 if let Some(record) = tool_execution_record.as_ref() {
                     let facts = self.ai_entity.update(cx, |ai, _cx| {
-                        ai.record_ai_tool_result_facts(record, result.as_ref(), now)
+                        ai.record_ai_tool_result_facts(record, persisted_result.as_ref(), now)
                     });
                     diagnostic_events.push(ai_diagnostic_event(
                         format!("diagnostic-tool-execution-{tool_call_id}"),
@@ -629,15 +647,6 @@ impl WorkspaceApp {
                         ));
                     }
                 }
-                self.ai_entity.update(cx, |ai, _cx| {
-                    ai.record_ai_command_from_tool_status(
-                        name,
-                        arguments,
-                        status,
-                        result.as_ref(),
-                        risk.as_deref(),
-                    );
-                });
             }
             self.persist_ai_transcript_entries(
                 conversation_id.to_string(),
@@ -683,7 +692,7 @@ impl crate::workspace::ai_state::AiWorkspaceEntity {
                 tool_call_id: tool_call_id.to_string(),
                 tool_name: tool_name.to_string(),
                 argument_summary: ai_tool_argument_summary(tool_name, args.as_ref()),
-                target_id: ai_tool_argument_target_id(args.as_ref()),
+                resource_kind: ai_tool_argument_resource_kind(args.as_ref()),
                 target_kind: None,
                 risk: risk.unwrap_or("read").to_string(),
                 approval_source: None,
@@ -692,39 +701,24 @@ impl crate::workspace::ai_state::AiWorkspaceEntity {
                 status: status.to_string(),
                 success: None,
                 error_code: None,
-                result_summary: None,
                 duration_ms: None,
                 started_at: now,
                 finished_at: None,
-                runtime_epoch: self.runtime_epoch.clone(),
             });
 
         record.status = status.to_string();
         record.risk = risk.unwrap_or(&record.risk).to_string();
         record.argument_summary = ai_tool_argument_summary(tool_name, args.as_ref());
-        record.target_id =
-            ai_tool_result_target_id(result).or_else(|| ai_tool_argument_target_id(args.as_ref()));
+        record.resource_kind = ai_tool_result_resource_kind(result)
+            .or_else(|| ai_tool_argument_resource_kind(args.as_ref()));
         record.target_kind = ai_tool_result_target_kind(result);
         record.execution_surface = ai_tool_execution_surface(tool_name, args.as_ref(), result);
         record.visible_in_terminal = ai_tool_visible_in_terminal(result);
         record.approval_source = ai_tool_approval_source(status, result);
-        record.runtime_epoch =
-            ai_tool_runtime_epoch(result).unwrap_or_else(|| self.runtime_epoch.clone());
-
         if matches!(status, "rejected" | "completed" | "error") {
             record.finished_at = Some(now);
             record.success = Some(status == "completed");
             record.error_code = ai_tool_error_code(result);
-            record.result_summary = result
-                .and_then(|value| value.get("summary"))
-                .and_then(serde_json::Value::as_str)
-                .or_else(|| {
-                    result
-                        .and_then(|value| value.get("output"))
-                        .and_then(serde_json::Value::as_str)
-                })
-                .map(oxideterm_ai::sanitize_for_ai)
-                .map(|value| truncate_ai_tool_record_text(&value, 240));
             record.duration_ms = ai_tool_duration_ms(result);
         }
 
@@ -754,191 +748,6 @@ impl crate::workspace::ai_state::AiWorkspaceEntity {
         facts
     }
 
-    fn record_ai_command_from_tool_status(
-        &mut self,
-        tool_name: &str,
-        arguments: &str,
-        status: &str,
-        result: Option<&serde_json::Value>,
-        risk: Option<&str>,
-    ) {
-        if !matches!(tool_name, "run_command" | "send_terminal_input")
-            || !matches!(status, "completed" | "error")
-        {
-            return;
-        }
-        let args = serde_json::from_str::<serde_json::Value>(arguments)
-            .unwrap_or_else(|_| serde_json::json!({ "rawArguments": arguments }));
-        let command = match tool_name {
-            "run_command" => args
-                .get("command")
-                .and_then(serde_json::Value::as_str)
-                .unwrap_or_default()
-                .to_string(),
-            "send_terminal_input" => args
-                .get("text")
-                .or_else(|| args.get("keys"))
-                .or_else(|| args.get("sequence"))
-                .and_then(serde_json::Value::as_str)
-                .unwrap_or_default()
-                .to_string(),
-            _ => String::new(),
-        };
-        let command = oxideterm_ai::sanitize_for_ai(command.trim());
-        if command.is_empty() {
-            return;
-        }
-
-        let meta = result.and_then(|value| value.get("meta"));
-        let data = result.and_then(|value| value.get("data"));
-        let target = result
-            .and_then(|value| value.get("targets"))
-            .and_then(serde_json::Value::as_array)
-            .and_then(|targets| targets.first());
-        let target_refs = target.and_then(|value| value.get("refs")).or_else(|| {
-            // Tauri tool result targets keep refs under metadata; retain
-            // the old native fallback while reading the canonical shape.
-            target
-                .and_then(|value| value.get("metadata"))
-                .and_then(|metadata| metadata.get("refs"))
-        });
-        let target_id = meta
-            .and_then(|value| value.get("targetId"))
-            .and_then(serde_json::Value::as_str)
-            .map(ToString::to_string)
-            .or_else(|| {
-                target
-                    .and_then(|value| value.get("id"))
-                    .and_then(serde_json::Value::as_str)
-                    .map(ToString::to_string)
-            });
-        let session_id = target_refs
-            .and_then(|refs| refs.get("sessionId"))
-            .and_then(serde_json::Value::as_str)
-            .map(ToString::to_string)
-            .or_else(|| {
-                data.and_then(|value| value.get("sessionId"))
-                    .and_then(serde_json::Value::as_str)
-                    .map(ToString::to_string)
-            });
-        let node_id = target_refs
-            .and_then(|refs| refs.get("nodeId"))
-            .and_then(serde_json::Value::as_str)
-            .map(ToString::to_string);
-        let exit_code = data
-            .and_then(|value| value.get("exitCode"))
-            .and_then(serde_json::Value::as_i64);
-        let waiting_for_input = data
-            .and_then(|value| value.get("waitingForInput"))
-            .and_then(serde_json::Value::as_bool)
-            .unwrap_or(false);
-        let runtime_epoch = meta
-            .and_then(|value| value.get("runtimeEpoch"))
-            .and_then(serde_json::Value::as_str)
-            .unwrap_or(&self.runtime_epoch)
-            .to_string();
-        let approval_mode = meta
-            .and_then(|value| value.get("approvalMode"))
-            .and_then(serde_json::Value::as_str)
-            .map(ToString::to_string);
-        self.command_record_sequence = self.command_record_sequence.saturating_add(1);
-        let now = ai_now_ms();
-        let record = AiRuntimeCommandRecord {
-            command_id: format!("cmd-{}-{}", now, self.command_record_sequence),
-            target_id,
-            session_id,
-            node_id,
-            command,
-            cwd: args
-                .get("cwd")
-                .and_then(serde_json::Value::as_str)
-                .map(ToString::to_string),
-            source: if tool_name == "run_command" {
-                "ai.run_command".to_string()
-            } else {
-                "ai.terminal_input".to_string()
-            },
-            status: if waiting_for_input {
-                "waiting_for_input".to_string()
-            } else if status == "completed" {
-                "completed".to_string()
-            } else {
-                "error".to_string()
-            },
-            exit_code,
-            started_at: now,
-            finished_at: Some(now),
-            runtime_epoch,
-            approval_mode,
-            risk: risk.unwrap_or("read").to_string(),
-        };
-        self.record_ai_cli_agent_command(&record);
-        self.command_records.push_back(record);
-        while self.command_records.len() > 200 {
-            self.command_records.pop_front();
-        }
-        self.trim_ai_command_records_per_session();
-    }
-
-    fn trim_ai_command_records_per_session(&mut self) {
-        let mut per_session: HashMap<String, usize> = HashMap::new();
-        let mut keep = VecDeque::new();
-        for record in self.command_records.iter().rev() {
-            let key = record
-                .session_id
-                .as_ref()
-                .or(record.node_id.as_ref())
-                .or(record.target_id.as_ref())
-                .cloned()
-                .unwrap_or_else(|| "global".to_string());
-            let count = per_session.entry(key).or_insert(0);
-            if *count < 50 {
-                keep.push_front(record.clone());
-                *count += 1;
-            }
-        }
-        self.command_records = keep;
-    }
-
-    fn record_ai_cli_agent_command(&mut self, record: &AiRuntimeCommandRecord) {
-        let Some(kind) = detect_ai_cli_agent_kind(&record.command) else {
-            return;
-        };
-        let target_key = record
-            .session_id
-            .as_ref()
-            .or(record.node_id.as_ref())
-            .or(record.target_id.as_ref())
-            .cloned()
-            .unwrap_or_else(|| "unknown".to_string());
-        let id = format!("cli-agent:{kind}:{target_key}");
-        let existing_started_at = self
-            .cli_agent_sessions
-            .get(&id)
-            .map(|session| session.started_at)
-            .unwrap_or(record.started_at);
-        let status = match record.status.as_str() {
-            "waiting_for_input" => "waiting_for_input",
-            "error" => "failed",
-            _ => "running",
-        };
-        self.cli_agent_sessions.insert(
-            id.clone(),
-            AiCliAgentSession {
-                id,
-                kind: kind.clone(),
-                label: format!("{kind} agent"),
-                status: status.to_string(),
-                target_id: record.target_id.clone(),
-                session_id: record.session_id.clone(),
-                node_id: record.node_id.clone(),
-                command: record.command.clone(),
-                started_at: existing_started_at,
-                updated_at: record.finished_at.unwrap_or(record.started_at),
-                runtime_epoch: record.runtime_epoch.clone(),
-            },
-        );
-    }
 }
 
 impl WorkspaceApp {
@@ -1108,23 +917,17 @@ pub(in crate::workspace) fn ai_tool_argument_summary(
     };
     match tool_name {
         "run_command" => {
-            let command = args
+            let command_chars = args
                 .get("command")
                 .and_then(serde_json::Value::as_str)
-                .map(oxideterm_ai::sanitize_for_ai)
-                .map(|value| truncate_ai_tool_record_text(&value, 200))
-                .unwrap_or_else(|| "<missing command>".to_string());
-            let target = args
-                .get("target_id")
-                .and_then(serde_json::Value::as_str)
-                .unwrap_or("<missing target>");
-            let cwd = args
+                .map(str::chars)
+                .map(Iterator::count)
+                .unwrap_or(0);
+            let has_cwd = args
                 .get("cwd")
                 .and_then(serde_json::Value::as_str)
-                .filter(|value| !value.trim().is_empty())
-                .map(|value| format!(" cwd={}", truncate_ai_tool_record_text(value, 120)))
-                .unwrap_or_default();
-            format!("target={target}{cwd} command={command}")
+                .is_some_and(|value| !value.trim().is_empty());
+            format!("runtime_target=current command_chars={command_chars} has_cwd={has_cwd}")
         }
         "send_terminal_input" => {
             let text_len = args
@@ -1144,35 +947,10 @@ pub(in crate::workspace) fn ai_tool_argument_summary(
                 .get("resource")
                 .and_then(serde_json::Value::as_str)
                 .unwrap_or("<missing resource>");
-            let path = args
-                .get("path")
-                .and_then(serde_json::Value::as_str)
-                .map(|value| truncate_ai_tool_record_text(value, 160))
-                .unwrap_or_default();
-            let target = args
-                .get("target_id")
-                .and_then(serde_json::Value::as_str)
-                .unwrap_or("<missing target>");
-            if path.is_empty() {
-                format!("target={target} resource={resource}")
-            } else {
-                format!("target={target} resource={resource} path={path}")
-            }
+            format!("resource={resource}")
         }
-        "connect_target" => {
-            let target = args
-                .get("target_id")
-                .and_then(serde_json::Value::as_str)
-                .unwrap_or("<missing target>");
-            format!("target={target}")
-        }
-        "open_app_surface" => {
-            let surface = args
-                .get("surface")
-                .and_then(serde_json::Value::as_str)
-                .unwrap_or("<missing surface>");
-            format!("surface={surface}")
-        }
+        "connect_target" => "resource=saved_connection".to_string(),
+        "open_app_surface" => "resource=app_surface".to_string(),
         _ => {
             let mut keys = args.keys().cloned().collect::<Vec<_>>();
             keys.sort();
@@ -1181,36 +959,30 @@ pub(in crate::workspace) fn ai_tool_argument_summary(
     }
 }
 
-pub(in crate::workspace) fn ai_tool_argument_target_id(
+pub(in crate::workspace) fn ai_tool_argument_resource_kind(
     args: Option<&serde_json::Value>,
-) -> Option<String> {
-    args.and_then(|value| value.get("target_id"))
-        .and_then(serde_json::Value::as_str)
-        .map(ToString::to_string)
+) -> Option<oxideterm_ai::StableResourceKind> {
+    args.and_then(|value| value.get("resource_ref"))
+        .cloned()
+        .and_then(|value| {
+            serde_json::from_value::<oxideterm_ai::StableResourceRef>(value).ok()
+        })
+        .map(|resource_ref| resource_ref.kind())
 }
 
-pub(in crate::workspace) fn ai_tool_result_target_id(
+pub(in crate::workspace) fn ai_tool_result_resource_kind(
     result: Option<&serde_json::Value>,
-) -> Option<String> {
+) -> Option<oxideterm_ai::StableResourceKind> {
     result
-        .and_then(|value| value.pointer("/meta/targetId"))
-        .and_then(serde_json::Value::as_str)
-        .map(ToString::to_string)
-        .or_else(|| {
-            result
-                .and_then(|value| value.pointer("/execution/target/id"))
-                .and_then(serde_json::Value::as_str)
-                .map(ToString::to_string)
+        .and_then(|value| value.get("targets"))
+        .and_then(serde_json::Value::as_array)
+        .and_then(|targets| targets.first())
+        .and_then(|target| target.pointer("/authority/resource_ref"))
+        .cloned()
+        .and_then(|value| {
+            serde_json::from_value::<oxideterm_ai::StableResourceRef>(value).ok()
         })
-        .or_else(|| {
-            result
-                .and_then(|value| value.get("targets"))
-                .and_then(serde_json::Value::as_array)
-                .and_then(|targets| targets.first())
-                .and_then(|target| target.get("id"))
-                .and_then(serde_json::Value::as_str)
-                .map(ToString::to_string)
-        })
+        .map(|resource_ref| resource_ref.kind())
 }
 
 pub(in crate::workspace) fn ai_tool_result_target_kind(
@@ -1249,13 +1021,7 @@ pub(in crate::workspace) fn ai_tool_execution_surface(
         return "visible_terminal".to_string();
     }
     match tool_name {
-        "run_command" => {
-            if ai_tool_argument_target_id(args).as_deref() == Some("local-shell:default") {
-                "local_process".to_string()
-            } else {
-                "background_capture".to_string()
-            }
-        }
+        "run_command" => "background_capture".to_string(),
         "send_terminal_input" => "visible_terminal".to_string(),
         "connect_target" | "open_app_surface" | "remember_preference" => "ui_action".to_string(),
         "read_resource" | "write_resource" | "transfer_resource" => {
@@ -1306,15 +1072,6 @@ pub(in crate::workspace) fn ai_tool_duration_ms(result: Option<&serde_json::Valu
         .and_then(serde_json::Value::as_u64)
 }
 
-pub(in crate::workspace) fn ai_tool_runtime_epoch(
-    result: Option<&serde_json::Value>,
-) -> Option<String> {
-    result
-        .and_then(|value| value.pointer("/meta/runtimeEpoch"))
-        .and_then(serde_json::Value::as_str)
-        .map(ToString::to_string)
-}
-
 pub(in crate::workspace) fn ai_tool_execution_record_json(
     record: &AiToolExecutionRecord,
 ) -> serde_json::Value {
@@ -1325,7 +1082,8 @@ pub(in crate::workspace) fn ai_tool_execution_record_json(
         "toolCallId": record.tool_call_id,
         "toolName": record.tool_name,
         "argumentSummary": record.argument_summary,
-        "targetId": record.target_id,
+        // Diagnostics retain the resource class but never a stable identifier.
+        "resourceKind": record.resource_kind,
         "targetKind": record.target_kind,
         "risk": record.risk,
         "approvalSource": record.approval_source,
@@ -1334,11 +1092,11 @@ pub(in crate::workspace) fn ai_tool_execution_record_json(
         "status": record.status,
         "success": record.success,
         "errorCode": record.error_code,
-        "resultSummary": record.result_summary,
         "durationMs": record.duration_ms,
         "startedAt": record.started_at,
         "finishedAt": record.finished_at,
-        "runtimeEpoch": record.runtime_epoch,
+        "historical": true,
+        "actionable": false,
     })
 }
 
@@ -1348,20 +1106,8 @@ pub(in crate::workspace) fn extract_ai_tool_result_facts(
     now: i64,
 ) -> Vec<AiToolResultFact> {
     let mut facts = Vec::new();
-    if let Some(summary) = result
-        .and_then(|value| value.get("summary"))
-        .and_then(serde_json::Value::as_str)
-        .filter(|value| !value.trim().is_empty())
-    {
-        facts.push(ai_tool_result_fact(record, "summary", summary, now));
-    }
-    if let Some(output) = result
-        .and_then(|value| value.get("output"))
-        .and_then(serde_json::Value::as_str)
-        .filter(|value| !value.trim().is_empty())
-    {
-        facts.push(ai_tool_result_fact(record, "output", output, now));
-    }
+    // Default diagnostics retain only structured execution state. Human-readable
+    // summaries and output remain in the redacted conversation projection.
     if let Some(exit_code) = result
         .and_then(|value| value.pointer("/execution/exitCode"))
         .or_else(|| result.and_then(|value| value.pointer("/data/exitCode")))
@@ -1407,10 +1153,8 @@ pub(in crate::workspace) fn ai_tool_result_fact(
     text: &str,
     now: i64,
 ) -> AiToolResultFact {
-    // Facts can be replayed into later prompts and diagnostics, so redact
-    // before hashing or retaining any preview.
+    // Only bounded structured state reaches this helper.
     let safe_text = oxideterm_ai::sanitize_for_ai(text);
-    let output_preview = truncate_ai_tool_record_text(&safe_text, 4000);
     AiToolResultFact {
         fact_id: format!("{}.{}", record.tool_call_id, source_kind),
         conversation_id: record.conversation_id.clone(),
@@ -1418,14 +1162,8 @@ pub(in crate::workspace) fn ai_tool_result_fact(
         tool_call_id: record.tool_call_id.clone(),
         tool_name: record.tool_name.clone(),
         source_kind: source_kind.to_string(),
-        text_hash: ai_tool_fact_hash(&safe_text),
-        summary: truncate_ai_tool_record_text(
-            safe_text.lines().next().unwrap_or_default(),
-            240,
-        ),
-        output_preview,
+        summary: truncate_ai_tool_record_text(&safe_text, 240),
         created_at: now,
-        runtime_epoch: record.runtime_epoch.clone(),
     }
 }
 
@@ -1437,17 +1175,11 @@ pub(in crate::workspace) fn ai_tool_result_fact_json(fact: &AiToolResultFact) ->
         "toolCallId": fact.tool_call_id,
         "toolName": fact.tool_name,
         "sourceKind": fact.source_kind,
-        "textHash": fact.text_hash,
         "summary": fact.summary,
-        "outputPreview": fact.output_preview,
         "createdAt": fact.created_at,
-        "runtimeEpoch": fact.runtime_epoch,
+        "historical": true,
+        "actionable": false,
     })
-}
-
-pub(in crate::workspace) fn ai_tool_fact_hash(text: &str) -> String {
-    let digest = <sha2::Sha256 as sha2::Digest>::digest(text.as_bytes());
-    format!("sha256:{digest:x}")
 }
 
 pub(in crate::workspace) fn ai_fact_value_text(value: &serde_json::Value) -> String {

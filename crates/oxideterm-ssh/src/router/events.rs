@@ -272,6 +272,7 @@ fn node_event_coalesce_key(event: &NodeStateEvent) -> (&str, u8) {
         NodeStateEvent::ConnectionStateChanged { node_id, .. } => (node_id, 1),
         NodeStateEvent::SftpReady { node_id, .. } => (node_id, 2),
         NodeStateEvent::TerminalEndpointChanged { node_id, .. } => (node_id, 3),
+        NodeStateEvent::SharedSftpSessionChanged { node_id, .. } => (node_id, 4),
     }
 }
 
@@ -283,6 +284,9 @@ fn node_event_requires_reliable_delivery(event: &NodeStateEvent) -> bool {
         NodeStateEvent::ConnectionStateChanged { state, .. } => {
             matches!(state, NodeReadiness::Error | NodeReadiness::Disconnected)
         }
+        // Shared SFTP changes grant or revoke capability authority, so they
+        // must not be coalesced away while the UI event consumer is suspended.
+        NodeStateEvent::SharedSftpSessionChanged { .. } => true,
         NodeStateEvent::SftpReady { .. } | NodeStateEvent::TerminalEndpointChanged { .. } => false,
     }
 }
@@ -395,6 +399,43 @@ mod mailbox_tests {
             NodeStateEvent::ConnectionStateChanged {
                 generation: 2,
                 state: NodeReadiness::Connecting,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn shared_sftp_revocation_is_not_coalesced_by_replacement() {
+        let emitter = NodeEventEmitter::new();
+        let (_subscription, receiver) = emitter.subscribe_bounded(1);
+        emitter.dispatch(&NodeStateEvent::SharedSftpSessionChanged {
+            node_id: "node-a".to_string(),
+            generation: 1,
+            connection_id: "connection-a".to_string(),
+            session_generation: None,
+            ready: false,
+        });
+        emitter.dispatch(&NodeStateEvent::SharedSftpSessionChanged {
+            node_id: "node-a".to_string(),
+            generation: 2,
+            connection_id: "connection-a".to_string(),
+            session_generation: Some(2),
+            ready: true,
+        });
+
+        assert!(matches!(
+            receiver.try_recv().unwrap(),
+            NodeStateEvent::SharedSftpSessionChanged {
+                generation: 1,
+                ready: false,
+                ..
+            }
+        ));
+        assert!(matches!(
+            receiver.try_recv().unwrap(),
+            NodeStateEvent::SharedSftpSessionChanged {
+                generation: 2,
+                ready: true,
                 ..
             }
         ));

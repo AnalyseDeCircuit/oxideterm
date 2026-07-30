@@ -205,6 +205,13 @@ pub enum NodeStateEvent {
         ready: bool,
         cwd: Option<String>,
     },
+    SharedSftpSessionChanged {
+        node_id: String,
+        generation: u64,
+        connection_id: String,
+        session_generation: Option<u64>,
+        ready: bool,
+    },
     TerminalEndpointChanged {
         node_id: String,
         generation: u64,
@@ -250,6 +257,17 @@ impl fmt::Debug for NodeStateEvent {
                 .field("generation", generation)
                 .field("ready", ready)
                 .field("cwd", cwd)
+                .finish(),
+            Self::SharedSftpSessionChanged {
+                node_id,
+                generation,
+                ready,
+                ..
+            } => formatter
+                .debug_struct("SharedSftpSessionChanged")
+                .field("node_id", node_id)
+                .field("generation", generation)
+                .field("ready", ready)
                 .finish(),
             Self::TerminalEndpointChanged {
                 node_id,

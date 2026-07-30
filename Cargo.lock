@@ -7387,6 +7387,7 @@ dependencies = [
  "oxideterm-portable-runtime",
  "oxideterm-secret-store",
  "parking_lot",
+ "rand 0.8.6",
  "redb",
  "regex",
  "reqwest",

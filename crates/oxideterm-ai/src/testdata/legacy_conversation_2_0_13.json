@@ -1,0 +1,106 @@
+{
+  "conversations": [
+    {
+      "id": "legacy-conversation",
+      "title": "Legacy runtime history",
+      "messages": [
+        {
+          "id": "legacy-user",
+          "role": "user",
+          "content": "Show the previous terminal result.",
+          "timestamp_ms": 100,
+          "context": "nodeId=node-legacy sessionId=42 tabId=7 AUTH_TOKEN=fixture-secret-value"
+        },
+        {
+          "id": "legacy-assistant",
+          "role": "assistant",
+          "content": "The earlier command completed successfully.",
+          "timestamp_ms": 110,
+          "tool_calls": [
+            {
+              "id": "call-legacy",
+              "name": "run_command",
+              "arguments": "{\"target_id\":\"terminal-session:42\",\"session_id\":\"42\",\"node_id\":\"node-legacy\",\"tab_id\":\"7\",\"pane_id\":\"9\",\"runtimeEpoch\":\"epoch-legacy\",\"handle_id\":\"rt_0123456789abcdef0123456789abcdef\",\"command\":\"pwd\"}",
+              "status": "completed",
+              "result": {
+                "toolCallId": "call-legacy",
+                "toolName": "run_command",
+                "success": true,
+                "output": "terminal-session:42 returned /srv/app",
+                "error": null,
+                "truncated": false,
+                "durationMs": 12
+              }
+            }
+          ],
+          "turn": {
+            "id": "legacy-assistant",
+            "status": "complete",
+            "parts": [
+              {
+                "type": "tool_call",
+                "id": "call-legacy",
+                "name": "run_command",
+                "argumentsText": "{\"targetId\":\"terminal-session:42\",\"handleId\":\"rt_0123456789abcdef0123456789abcdef\"}",
+                "status": "complete"
+              },
+              {
+                "type": "text",
+                "text": "The earlier command completed successfully."
+              }
+            ],
+            "toolRounds": [
+              {
+                "id": "legacy-round",
+                "round": 1,
+                "toolCalls": [
+                  {
+                    "id": "call-legacy",
+                    "name": "run_command",
+                    "argumentsText": "{\"sessionId\":\"42\",\"runtimeEpoch\":\"epoch-legacy\"}",
+                    "executionState": "completed"
+                  }
+                ]
+              }
+            ],
+            "plainTextSummary": "Previous terminal-session:42 command completed."
+          },
+          "metadata": {
+            "type": "compaction-anchor",
+            "originalCount": 2,
+            "compactedAt": 120,
+            "originalMessages": [
+              {
+                "id": "legacy-original",
+                "role": "assistant",
+                "content": "Historical result for nodeId=node-legacy.",
+                "timestamp_ms": 105,
+                "tool_calls": [
+                  {
+                    "id": "original-call",
+                    "name": "observe_terminal",
+                    "arguments": "{\"sessionId\":\"42\",\"handleId\":\"rt_0123456789abcdef0123456789abcdef\"}",
+                    "status": "completed",
+                    "result": null
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "created_at_ms": 100,
+      "updated_at_ms": 120,
+      "origin": "sidebar",
+      "profile_id": null,
+      "message_count": 2,
+      "session_id": "legacy-provider-session",
+      "session_metadata": {
+        "targetId": "terminal-session:42",
+        "runtimeEpoch": "epoch-legacy"
+      },
+      "messages_loaded": true
+    }
+  ],
+  "active_conversation_id": "legacy-conversation"
+}

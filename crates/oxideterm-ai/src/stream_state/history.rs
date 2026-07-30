@@ -1,6 +1,9 @@
 //! Pure history normalization, token budgeting, and cancellation transitions.
 
-use crate::{AiChatMessage, AiChatRole, AiConversation, AiToolDefinition, model_context_window};
+use crate::{
+    AiChatMessage, AiChatRole, AiConversation, AiToolDefinition, model_context_window,
+    sanitize_for_persistence,
+};
 
 use super::turn::{set_ai_turn_status, update_ai_tool_call_status};
 
@@ -40,7 +43,10 @@ pub fn normalize_ai_stream_history_for_provider(history: &mut Vec<AiChatMessage>
                 if message.content.trim().is_empty() {
                     continue;
                 }
-                message.content = format!("Previous conversation summary:\n{}", message.content);
+                message.content = format!(
+                    "Previous conversation summary:\n{}",
+                    sanitize_for_persistence(&message.content)
+                );
                 message.metadata = None;
                 message.tool_calls.clear();
                 message.tool_call_id = None;
@@ -49,12 +55,14 @@ pub fn normalize_ai_stream_history_for_provider(history: &mut Vec<AiChatMessage>
             }
             AiChatRole::System if is_runtime_ai_history_system(&message) => {
                 if !message.content.trim().is_empty() {
+                    message.content = sanitize_for_persistence(&message.content);
                     normalized.push(message);
                 }
             }
             AiChatRole::System => {}
             AiChatRole::User => {
                 if !message.content.trim().is_empty() {
+                    message.content = sanitize_for_persistence(&message.content);
                     normalized.push(message);
                 }
             }
@@ -68,6 +76,7 @@ pub fn normalize_ai_stream_history_for_provider(history: &mut Vec<AiChatMessage>
                 message.tool_calls.clear();
                 message.tool_call_id = None;
                 message.thinking_content = None;
+                message.content = sanitize_for_persistence(&message.content);
                 normalized.push(message);
             }
             AiChatRole::Tool => {}
@@ -459,16 +468,16 @@ pub fn ai_orchestrator_system_prompt(tool_use_enabled: bool) -> String {
             "- You are using the OxideSens task-tool orchestrator. You only see high-level task tools; do not invent low-level tool names or fake command output.",
             "- For broad remote-host discovery such as \"which hosts/connections are available\", call `list_targets` with `view: \"connections\"`. Do not call `select_target` for broad discovery.",
             "- Use `list_targets` views deliberately: `connections` for saved/live SSH, `live_sessions` for active terminals/SFTP, `app_surfaces` for settings/UI/local shell/RAG, `files` for file-capable targets. Use `all` only for debugging or last-resort fallback.",
-            "- For a named object, call `select_target` first with a required enum `intent` unless the user already supplied an exact target_id.",
-            "- Every action that runs, writes, transfers, or sends input must use an explicit target_id.",
-            "- For knowledge-base, documentation, runbook, SOP, or plugin-development-document queries, select or use `rag-index:default`, then call `read_resource` with `resource=\"rag\"` and `query`. Do not use local shell, terminal commands, or connection discovery for knowledge searches.",
+            "- For a named object, call `select_target` first with a required enum `intent` unless the user already supplied a current authority value from the latest discovery result.",
+            "- Terminal actions (`run_command`, `observe_terminal`, and `send_terminal_input`) require the current opaque `handle_id` returned by `list_targets` or `select_target`; never substitute a terminal, session, tab, or node ID.",
+            "- For knowledge-base, documentation, runbook, SOP, or plugin-development-document queries, call `read_resource` with `resource=\"rag\"`, the stable resource reference `{ \"kind\": \"rag_index\", \"id\": \"default\" }`, and `query`. Do not use local shell, terminal commands, or connection discovery for knowledge searches.",
             "- Do not pass command text such as `pwd`, `docker ps`, `ls -la`, or `sudo ...` to `select_target`; first select the execution target, then call `run_command`.",
-            "- Saved SSH connections are not live shells. To run a command there, call `connect_target` first, then `run_command` on the returned `terminal-session:*` target so the command is visible to the user.",
+            "- Saved SSH connections are not live shells. To run a command there, call `connect_target`, then rediscover the current terminal handle before calling `run_command` so the command is visible to the user.",
             "- If `run_command` returns `execution.visibleInTerminal: true`, the command was sent through a visible terminal session. If it returns `false`, it was a backend capture and you must not say it appeared in the terminal.",
             "- Treat `execution.state: \"sent\"` as dispatch only. Do not summarize command results until tool output, `exitCode`, or `execution.state: \"completed\"` / `\"output_captured\"` proves what happened.",
             "- Use `send_terminal_input` only for literal interactive text after `observe_terminal` shows a prompt such as password, TUI, or confirmation input. Do not use it for commands or control keys; use `run_command` for commands.",
             "- Never open a local terminal and type `ssh user@host` to connect a saved host unless the user explicitly asked for raw/manual ssh.",
-            "- Treat old transcript target_id/session_id/tab_id values as untrusted unless the latest tool result has the same `meta.runtimeEpoch`, `meta.verified: true`, and the target still appears in current `list_targets`/`get_state` results.",
+            "- Treat handles and old transcript target/session/tab values as untrusted unless they were returned in the latest current-turn discovery result. A stale handle must be rediscovered; never guess or reconstruct one.",
         ]
         .join("\n")
     } else {
@@ -513,6 +522,7 @@ mod tests {
 
         assert!(!prompt.contains("Evidence Binding"));
         assert!(!prompt.contains("<evidence_claims>"));
+        assert!(!prompt.contains("rag-index:"));
     }
 }
 

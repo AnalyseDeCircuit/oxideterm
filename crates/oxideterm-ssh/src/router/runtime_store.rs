@@ -947,6 +947,27 @@ impl NodeRuntimeStore {
         })
     }
 
+    pub(super) fn shared_sftp_session_changed(
+        &self,
+        node_id: &NodeId,
+        connection_id: String,
+        session_generation: Option<u64>,
+        ready: bool,
+    ) -> Result<NodeStateEvent, RouteError> {
+        let mut route = self
+            .nodes
+            .get_mut(node_id)
+            .ok_or_else(|| RouteError::NodeNotFound(node_id.0.clone()))?;
+        route.generation += 1;
+        Ok(NodeStateEvent::SharedSftpSessionChanged {
+            node_id: node_id.0.clone(),
+            generation: route.generation,
+            connection_id,
+            session_generation,
+            ready,
+        })
+    }
+
     fn update_connection_state(
         &self,
         node_id: &NodeId,
