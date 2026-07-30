@@ -277,6 +277,10 @@ pub struct TerminalSettings {
     pub osc52_clipboard_read: bool,
     pub copy_on_select: bool,
     pub middle_click_paste: bool,
+    // Right-click paste stays opt-in because right click normally opens the
+    // terminal context menu and can be reported to mouse-aware applications.
+    #[serde(default)]
+    pub right_click_paste: bool,
     #[serde(default = "default_open_links_with_modifier")]
     pub open_links_with_modifier: bool,
     #[serde(default = "default_detect_file_paths_as_links")]
@@ -336,6 +340,7 @@ impl Default for TerminalSettings {
             osc52_clipboard_read: false,
             copy_on_select: false,
             middle_click_paste: false,
+            right_click_paste: false,
             open_links_with_modifier: true,
             detect_file_paths_as_links: true,
             selection_requires_shift: false,
@@ -471,6 +476,19 @@ mod tests {
         let settings: TerminalSettings = serde_json::from_value(value).unwrap();
 
         assert!(!settings.osc52_clipboard_read);
+    }
+
+    #[test]
+    fn terminal_settings_default_right_click_paste_when_missing() {
+        let mut value = serde_json::to_value(TerminalSettings::default()).unwrap();
+        value
+            .as_object_mut()
+            .unwrap()
+            .remove("rightClickPaste");
+
+        let settings: TerminalSettings = serde_json::from_value(value).unwrap();
+
+        assert!(!settings.right_click_paste);
     }
 
     #[test]

@@ -49,6 +49,10 @@ pub fn set_middle_click_paste(settings: &mut PersistedSettings, value: bool) {
     settings.terminal.middle_click_paste = value;
 }
 
+pub fn set_right_click_paste(settings: &mut PersistedSettings, value: bool) {
+    settings.terminal.right_click_paste = value;
+}
+
 pub fn set_open_links_with_modifier(settings: &mut PersistedSettings, value: bool) {
     settings.terminal.open_links_with_modifier = value;
 }

@@ -1069,6 +1069,11 @@ impl TerminalPane {
         {
             return;
         }
+        if event.button == MouseButton::Right
+            && right_click_paste_requested(self.settings.right_click_paste, mode, event.modifiers)
+        {
+            return;
+        }
 
         if self.start_free_type_drag_candidate(event, mode) {
             cx.notify();
@@ -1226,6 +1231,13 @@ impl TerminalPane {
         if event.button == MouseButton::Middle
             && self.settings.middle_click_paste
             && !mouse_tracking_active(mode)
+        {
+            self.last_mouse_report_point = None;
+            self.paste_from_clipboard(cx);
+            return;
+        }
+        if event.button == MouseButton::Right
+            && right_click_paste_requested(self.settings.right_click_paste, mode, event.modifiers)
         {
             self.last_mouse_report_point = None;
             self.paste_from_clipboard(cx);
@@ -1625,10 +1637,20 @@ impl TerminalPane {
             cx.notify();
         }
     }
+
+    pub(crate) fn right_click_paste_requested(&self, mode: TermMode, modifiers: Modifiers) -> bool {
+        right_click_paste_requested(self.settings.right_click_paste, mode, modifiers)
+    }
 }
 
 fn mouse_tracking_active(mode: TermMode) -> bool {
     mode.intersects(TermMode::MOUSE_MODE)
+}
+
+fn right_click_paste_requested(enabled: bool, mode: TermMode, modifiers: Modifiers) -> bool {
+    // Shift remains the local escape hatch for the context menu. Applications
+    // that requested mouse tracking continue to own unmodified right clicks.
+    enabled && !modifiers.shift && !mouse_tracking_active(mode)
 }
 
 fn terminal_selection_autoscroll_delta_rows(
@@ -2590,6 +2612,33 @@ mod tests {
             hyperlink: None,
             cursor: false,
         }
+    }
+
+    #[test]
+    fn right_click_paste_preserves_context_menu_and_remote_mouse_ownership() {
+        assert!(right_click_paste_requested(
+            true,
+            TermMode::NONE,
+            Modifiers::default()
+        ));
+        assert!(!right_click_paste_requested(
+            false,
+            TermMode::NONE,
+            Modifiers::default()
+        ));
+        assert!(!right_click_paste_requested(
+            true,
+            TermMode::NONE,
+            Modifiers {
+                shift: true,
+                ..Modifiers::default()
+            }
+        ));
+        assert!(!right_click_paste_requested(
+            true,
+            TermMode::MOUSE_MODE,
+            Modifiers::default()
+        ));
     }
 
     fn test_row(text: &str, active_input: bool) -> TerminalRow {

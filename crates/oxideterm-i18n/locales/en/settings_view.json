@@ -257,6 +257,8 @@
       "copy_on_select_hint": "Automatically copy terminal text to the system clipboard once a mouse selection settles",
       "middle_click_paste": "Middle-Click Paste",
       "middle_click_paste_hint": "Paste the current clipboard contents with middle click when the terminal is not in mouse-tracking mode",
+      "right_click_paste": "Right-Click Paste",
+      "right_click_paste_hint": "Paste with an unmodified right click outside mouse-tracking mode; use Shift+right click to open the context menu",
       "open_links_with_modifier": "Require Modifier to Open Links",
       "open_links_with_modifier_hint": "Open terminal links only with Ctrl + click, or Command + click on macOS; disable to open links with a direct click",
       "detect_file_paths_as_links": "Detect File Paths as Links",

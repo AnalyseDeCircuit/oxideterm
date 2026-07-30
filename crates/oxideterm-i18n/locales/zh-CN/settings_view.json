@@ -257,6 +257,8 @@
       "copy_on_select_hint": "鼠标选中的终端文本稳定后自动复制到系统剪贴板",
       "middle_click_paste": "中键粘贴",
       "middle_click_paste_hint": "终端未处于鼠标跟踪模式时，使用中键粘贴当前剪贴板内容",
+      "right_click_paste": "右键直接粘贴",
+      "right_click_paste_hint": "终端未处于鼠标跟踪模式时，直接右键粘贴当前剪贴板内容；使用 Shift+右键打开上下文菜单",
       "open_links_with_modifier": "按住修饰键打开链接",
       "open_links_with_modifier_hint": "仅在按住 Ctrl 单击时打开终端链接；macOS 使用 Command 单击。关闭后可直接单击打开链接",
       "detect_file_paths_as_links": "将文件路径识别为链接",

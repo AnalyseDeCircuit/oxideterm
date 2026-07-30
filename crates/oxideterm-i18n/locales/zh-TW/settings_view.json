@@ -255,6 +255,8 @@
       "copy_on_select_hint": "一旦滑鼠選取範圍穩定後，自動將終端機文字複製到系統剪貼簿",
       "middle_click_paste": "中鍵貼上",
       "middle_click_paste_hint": "當終端機未處於滑鼠追蹤模式時，使用中鍵貼上目前剪貼簿內容",
+      "right_click_paste": "右鍵直接貼上",
+      "right_click_paste_hint": "當終端機未處於滑鼠追蹤模式時，直接按右鍵貼上目前剪貼簿內容；使用 Shift+右鍵開啟內容選單",
       "open_links_with_modifier": "按住修飾鍵開啟連結",
       "open_links_with_modifier_hint": "僅在按住 Ctrl 點擊時開啟終端機連結；macOS 使用 Command 點擊。關閉後可直接點擊開啟連結",
       "smart_copy": "智慧 Ctrl+C 複製",

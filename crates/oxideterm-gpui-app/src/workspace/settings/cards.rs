@@ -221,6 +221,16 @@ impl WorkspaceApp {
             ))
             .child(self.settings_row_with_margin(
                 self.checkbox_row(
+                    "settings_view.terminal.right_click_paste",
+                    "settings_view.terminal.right_click_paste_hint",
+                    settings.terminal.right_click_paste,
+                    set_right_click_paste,
+                    cx,
+                ),
+                16.0,
+            ))
+            .child(self.settings_row_with_margin(
+                self.checkbox_row(
                     "settings_view.terminal.open_links_with_modifier",
                     "settings_view.terminal.open_links_with_modifier_hint",
                     settings.terminal.open_links_with_modifier,

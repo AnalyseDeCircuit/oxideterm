@@ -272,6 +272,9 @@ impl Render for TerminalPane {
                     let mode = this.terminal.lock().mode();
                     if mouse_mode(mode, event.modifiers.shift) {
                         this.handle_mouse_down(event, cx);
+                    } else if this.right_click_paste_requested(mode, event.modifiers) {
+                        window.prevent_default();
+                        this.handle_mouse_down(event, cx);
                     } else {
                         window.prevent_default();
                         this.open_terminal_context_menu(event, cx);

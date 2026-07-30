@@ -255,6 +255,8 @@
       "copy_on_select_hint": "Copiar automaticamente o texto do terminal para a área de transferência do sistema quando a seleção do mouse se estabilizar",
       "middle_click_paste": "Colar com clique do meio",
       "middle_click_paste_hint": "Colar o conteúdo atual da área de transferência com o clique do meio quando o terminal não estiver em modo de rastreamento do mouse",
+      "right_click_paste": "Colar com clique direito",
+      "right_click_paste_hint": "Colar com um clique direito sem modificadores fora do modo de rastreamento do mouse; Shift+clique direito abre o menu de contexto",
       "open_links_with_modifier": "Exigir modificador para abrir links",
       "open_links_with_modifier_hint": "Abrir links do terminal somente com Ctrl + clique, ou Command + clique no macOS; desative para abrir com um clique direto",
       "smart_copy": "Cópia inteligente com Ctrl+C",

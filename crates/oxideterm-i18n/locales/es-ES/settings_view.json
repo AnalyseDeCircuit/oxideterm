@@ -255,6 +255,8 @@
       "copy_on_select_hint": "Copiar automáticamente el texto del terminal al portapapeles del sistema cuando la selección con el ratón se estabilice",
       "middle_click_paste": "Pegar con clic central",
       "middle_click_paste_hint": "Pegar el contenido actual del portapapeles con el clic central cuando el terminal no esté en modo de seguimiento del ratón",
+      "right_click_paste": "Pegar con clic derecho",
+      "right_click_paste_hint": "Pegar con un clic derecho sin modificadores fuera del modo de seguimiento del ratón; Mayús+clic derecho abre el menú contextual",
       "open_links_with_modifier": "Requerir modificador para abrir enlaces",
       "open_links_with_modifier_hint": "Abrir enlaces del terminal solo con Ctrl + clic, o Comando + clic en macOS; desactivar para abrirlos con un clic directo",
       "smart_copy": "Copia inteligente con Ctrl+C",

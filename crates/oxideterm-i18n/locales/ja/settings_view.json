@@ -255,6 +255,8 @@
       "copy_on_select_hint": "マウス選択が落ち着いたら、自動的にターミナルテキストをシステムクリップボードにコピーします",
       "middle_click_paste": "中クリック貼り付け",
       "middle_click_paste_hint": "ターミナルがマウス追跡モードでない場合、中クリックで現在のクリップボード内容を貼り付けます",
+      "right_click_paste": "右クリック貼り付け",
+      "right_click_paste_hint": "マウス追跡モードでない場合、修飾キーなしの右クリックで貼り付けます。Shift+右クリックでコンテキストメニューを開きます",
       "open_links_with_modifier": "修飾キーを押してリンクを開く",
       "open_links_with_modifier_hint": "ターミナルのリンクを Ctrl + クリックでのみ開きます。macOS では Command + クリックを使用します。無効にすると直接クリックで開きます",
       "smart_copy": "スマート Ctrl+C コピー",

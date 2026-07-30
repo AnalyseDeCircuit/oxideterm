@@ -128,6 +128,7 @@ fn build_sectioned_app_settings_sections(
                     "osc52ClipboardRead",
                     "copyOnSelect",
                     "middleClickPaste",
+                    "rightClickPaste",
                     "openLinksWithModifier",
                     "selectionRequiresShift",
                 ],

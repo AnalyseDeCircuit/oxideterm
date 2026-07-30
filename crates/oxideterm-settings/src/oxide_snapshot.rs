@@ -64,6 +64,7 @@ const TERMINAL_BEHAVIOR_KEYS: &[&str] = &[
     "osc52ClipboardRead",
     "copyOnSelect",
     "middleClickPaste",
+    "rightClickPaste",
     "openLinksWithModifier",
     "selectionRequiresShift",
     "autosuggest",

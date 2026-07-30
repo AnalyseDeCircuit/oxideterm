@@ -255,6 +255,8 @@
       "copy_on_select_hint": "Terminaltext automatisch in die Systemzwischenablage kopieren, sobald eine Mausauswahl stabil ist",
       "middle_click_paste": "Mittelklick zum Einfügen",
       "middle_click_paste_hint": "Den aktuellen Inhalt der Zwischenablage mit Mittelklick einfügen, wenn sich das Terminal nicht im Mausverfolgungsmodus befindet",
+      "right_click_paste": "Rechtsklick zum Einfügen",
+      "right_click_paste_hint": "Außerhalb des Mausverfolgungsmodus mit einem unveränderten Rechtsklick einfügen; Umschalt+Rechtsklick öffnet das Kontextmenü",
       "open_links_with_modifier": "Modifikatortaste zum Öffnen von Links verlangen",
       "open_links_with_modifier_hint": "Terminal-Links nur mit Strg + Klick öffnen, unter macOS mit Befehl + Klick; deaktivieren, um Links direkt anzuklicken",
       "smart_copy": "Smartes Strg+C-Kopieren",

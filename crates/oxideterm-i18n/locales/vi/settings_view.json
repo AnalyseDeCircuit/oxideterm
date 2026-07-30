@@ -255,6 +255,8 @@
       "copy_on_select_hint": "Tự động sao chép văn bản terminal vào clipboard hệ thống khi vùng chọn chuột đã ổn định",
       "middle_click_paste": "Dán bằng nút giữa",
       "middle_click_paste_hint": "Dán nội dung clipboard hiện tại bằng nút giữa khi terminal không ở chế độ theo dõi chuột",
+      "right_click_paste": "Dán bằng chuột phải",
+      "right_click_paste_hint": "Dán bằng chuột phải không kèm phím bổ trợ khi không ở chế độ theo dõi chuột; Shift+chuột phải mở menu ngữ cảnh",
       "open_links_with_modifier": "Yêu cầu phím bổ trợ để mở liên kết",
       "open_links_with_modifier_hint": "Chỉ mở liên kết terminal bằng Ctrl + nhấp, hoặc Command + nhấp trên macOS; tắt để mở bằng cách nhấp trực tiếp",
       "smart_copy": "Sao chép Ctrl+C thông minh",
