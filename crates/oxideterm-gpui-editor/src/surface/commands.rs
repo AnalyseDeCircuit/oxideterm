@@ -98,6 +98,12 @@ impl TextEditorView {
     ) {
         let key = event.keystroke.key.as_str();
         let modifiers = event.keystroke.modifiers;
+        let commits_platform_text = input::keystroke_commits_platform_text(&event.keystroke);
+        if !commits_platform_text {
+            // Navigation and command keys do not pass through the platform
+            // text handler, so they restart caret blinking here.
+            self.activate_caret_blink(cx);
+        }
 
         if matches_tauri_plain_mod_key(key, modifiers, "s") {
             self.save(window, cx);
@@ -135,7 +141,7 @@ impl TextEditorView {
             self.add_next_find_match_as_cursor(cx);
             return;
         }
-        if input::keystroke_commits_platform_text(&event.keystroke) {
+        if commits_platform_text {
             return;
         }
 

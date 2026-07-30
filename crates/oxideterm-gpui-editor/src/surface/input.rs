@@ -66,6 +66,7 @@ impl EntityInputHandler for TextEditorView {
         if self.read_only {
             return;
         }
+        self.activate_caret_blink(cx);
         let range = self
             .ime_replacement_range(range_utf16)
             .unwrap_or_else(|| self.cursor.selection().range());
@@ -83,6 +84,7 @@ impl EntityInputHandler for TextEditorView {
         if self.read_only {
             return;
         }
+        self.activate_caret_blink(cx);
         let range = self
             .ime_replacement_range(range_utf16)
             .unwrap_or_else(|| self.cursor.selection().range());

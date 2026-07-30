@@ -1,13 +1,13 @@
 // Copyright (C) 2026 AnalyseDeCircuit
 // SPDX-License-Identifier: GPL-3.0-only
 
-use std::{cell::RefCell, collections::HashMap, ops::Range, sync::Arc};
+use std::{cell::RefCell, collections::HashMap, ops::Range, sync::Arc, time::Duration};
 
 use gpui::{
     AnyElement, App, Bounds, Context, Div, Element, ElementId, ElementInputHandler, Entity,
     FocusHandle, Focusable, GlobalElementId, InspectorElementId, IntoElement, LayoutId,
-    ParentElement, Pixels, Point, ScrollWheelEvent, SharedString, TextRun, Window, div, point,
-    prelude::*, px, rgb,
+    ParentElement, Pixels, Point, ScrollWheelEvent, SharedString, Task, TextRun, Timer, Window,
+    div, point, prelude::*, px, rgb,
 };
 use oxideterm_editor_core::{
     BufferOffset, Cursor, EditTransaction, FindMatch, LineCol, Selection, TextBuffer, TextEdit,
@@ -40,6 +40,8 @@ pub type SaveCallback =
     Box<dyn FnMut(&str, &mut Window, &mut Context<TextEditorView>) -> Result<(), String>>;
 pub type ModifiedWordClickCallback =
     Box<dyn FnMut(String, &mut Window, &mut Context<TextEditorView>) -> Result<(), String>>;
+
+const EDITOR_CARET_BLINK_INTERVAL: Duration = Duration::from_millis(530);
 
 /// Controls whether the editor owns a full document surface or sits inside an
 /// existing input row whose surrounding component already provides chrome.
@@ -304,6 +306,10 @@ pub struct TextEditorView {
     presentation: EditorPresentation,
     context_menu: Option<EditorContextMenu>,
     context_menu_labels: EditorContextMenuLabels,
+    caret_visible: bool,
+    caret_blink_focused: bool,
+    caret_blink_generation: u64,
+    caret_blink_task: Option<Task<()>>,
 }
 
 impl TextEditorView {
@@ -345,7 +351,64 @@ impl TextEditorView {
             presentation: EditorPresentation::Document,
             context_menu: None,
             context_menu_labels: EditorContextMenuLabels::default(),
+            caret_visible: true,
+            caret_blink_focused: false,
+            caret_blink_generation: 0,
+            caret_blink_task: None,
         }
+    }
+
+    fn sync_caret_blink_focus(&mut self, focused: bool, cx: &mut Context<Self>) {
+        if self.caret_blink_focused == focused {
+            return;
+        }
+        self.caret_blink_focused = focused;
+        if focused {
+            self.restart_caret_blink(cx);
+        } else {
+            // Dropping the task stops repainting as soon as this editor loses focus.
+            self.caret_blink_generation = self.caret_blink_generation.wrapping_add(1);
+            self.caret_blink_task = None;
+            self.caret_visible = true;
+        }
+    }
+
+    pub(super) fn activate_caret_blink(&mut self, cx: &mut Context<Self>) {
+        self.caret_blink_focused = true;
+        self.restart_caret_blink(cx);
+    }
+
+    fn restart_caret_blink_if_focused(&mut self, cx: &mut Context<Self>) {
+        if self.caret_blink_focused {
+            self.restart_caret_blink(cx);
+        }
+    }
+
+    fn restart_caret_blink(&mut self, cx: &mut Context<Self>) {
+        self.caret_blink_generation = self.caret_blink_generation.wrapping_add(1);
+        self.caret_blink_task = None;
+        self.caret_visible = true;
+        let generation = self.caret_blink_generation;
+        self.caret_blink_task = Some(cx.spawn(async move |editor, cx| {
+            loop {
+                Timer::after(EDITOR_CARET_BLINK_INTERVAL).await;
+                let should_continue = editor
+                    .update(cx, |editor, cx| {
+                        if editor.caret_blink_generation != generation
+                            || !editor.caret_blink_focused
+                        {
+                            return false;
+                        }
+                        editor.caret_visible = !editor.caret_visible;
+                        cx.notify();
+                        true
+                    })
+                    .unwrap_or(false);
+                if !should_continue {
+                    break;
+                }
+            }
+        }));
     }
 
     pub fn buffer(&self) -> &TextBuffer {
@@ -396,6 +459,7 @@ impl TextEditorView {
             self.refresh_find_matches();
             self.viewport
                 .clamp(self.document_row_count(), self.metrics.line_height);
+            self.restart_caret_blink_if_focused(cx);
             cx.notify();
         }
     }

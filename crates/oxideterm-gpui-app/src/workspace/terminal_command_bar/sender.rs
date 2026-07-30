@@ -1017,7 +1017,13 @@ impl WorkspaceApp {
             "enter" if !modifiers.platform && !modifiers.shift && !modifiers.alt => {
                 // Plain Enter is the compact send gesture. Shift/Alt+Enter
                 // remain available to the shared editor for multiline drafts.
-                let _ = self.start_terminal_command_sender(document.id, cx);
+                if self.start_terminal_command_sender(document.id, cx) {
+                    // The run owns an immutable copy of the command plan, so
+                    // compact input can be reset as soon as startup succeeds.
+                    document.editor.update(cx, |editor, cx| {
+                        editor.replace_text_external(String::new(), cx);
+                    });
+                }
                 true
             }
             _ => false,

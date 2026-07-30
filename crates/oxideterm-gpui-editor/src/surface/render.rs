@@ -79,13 +79,18 @@ struct RenderRowContext {
 
 impl Render for TextEditorView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let focused = self.focus_handle.is_focused(window);
+        self.sync_caret_blink_focus(focused, cx);
         self.measure_code_metrics(window, cx);
         let display_rows = self.display_rows();
         let visible = self
             .viewport
             .visible_rows(display_rows.len(), self.metrics.line_height);
-        let row_context =
-            self.prepare_render_row_context(&display_rows, &display_rows[visible.range.clone()]);
+        let row_context = self.prepare_render_row_context(
+            &display_rows,
+            &display_rows[visible.range.clone()],
+            focused && self.caret_visible,
+        );
         let view = cx.entity();
 
         let mut rows = div()
@@ -115,6 +120,7 @@ impl Render for TextEditorView {
                 MouseButton::Right,
                 cx.listener(|this, event: &MouseDownEvent, window, cx| {
                     window.focus(&this.focus_handle, cx);
+                    this.activate_caret_blink(cx);
                     this.open_context_menu(event.position, cx);
                     cx.stop_propagation();
                 }),
@@ -173,6 +179,7 @@ impl Render for TextEditorView {
                 MouseButton::Left,
                 cx.listener(|this, _event: &MouseDownEvent, window, cx| {
                     window.focus(&this.focus_handle, cx);
+                    this.activate_caret_blink(cx);
                     if this.context_menu.take().is_some() {
                         cx.notify();
                     }
@@ -436,6 +443,7 @@ impl TextEditorView {
                 cx.listener(move |this, event: &MouseDownEvent, window, cx| {
                     this.context_menu = None;
                     window.focus(&this.focus_handle, cx);
+                    this.activate_caret_blink(cx);
                     if let Some(offset) = this.offset_for_window_point(event.position, window) {
                         if (event.modifiers.secondary() || event.modifiers.control)
                             && !event.modifiers.alt
@@ -467,6 +475,7 @@ impl TextEditorView {
                 MouseButton::Right,
                 cx.listener(|this, event: &MouseDownEvent, window, cx| {
                     window.focus(&this.focus_handle, cx);
+                    this.activate_caret_blink(cx);
                     // Match browser editor behavior: opening the context menu
                     // over a selection must not collapse that selection first.
                     this.open_context_menu(event.position, cx);
@@ -905,21 +914,26 @@ impl TextEditorView {
         &self,
         display_rows: &[DisplayRow],
         visible_rows: &[DisplayRow],
+        show_caret: bool,
     ) -> RenderRowContext {
-        let primary_caret_display_index = self
-            .buffer
-            .offset_to_line_col(self.cursor.selection().head)
-            .ok()
-            .and_then(|position| {
-                let line_text = self.buffer.line_text(position.line).unwrap_or_default();
-                let visual_column = visual_column_for_byte_column(&line_text, position.column);
-                super::wrap::display_row_for_visual_column(
-                    display_rows,
-                    position.line,
-                    visual_column,
-                )
-                .map(|(index, _, _)| index)
-            });
+        let primary_caret_display_index = show_caret
+            .then(|| {
+                self.buffer
+                    .offset_to_line_col(self.cursor.selection().head)
+                    .ok()
+                    .and_then(|position| {
+                        let line_text = self.buffer.line_text(position.line).unwrap_or_default();
+                        let visual_column =
+                            visual_column_for_byte_column(&line_text, position.column);
+                        super::wrap::display_row_for_visual_column(
+                            display_rows,
+                            position.line,
+                            visual_column,
+                        )
+                        .map(|(index, _, _)| index)
+                    })
+            })
+            .flatten();
         RenderRowContext {
             // Selection ordering and bracket matching depend on editor state,
             // not on the row, so compute them once for the current frame.
