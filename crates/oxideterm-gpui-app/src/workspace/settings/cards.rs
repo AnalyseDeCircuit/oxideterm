@@ -1145,7 +1145,9 @@ impl WorkspaceApp {
             let cloud_sync = self.cloud_sync.read(cx);
             cloud_sync_form_input_value_ref(&cloud_sync.view.form, input).is_some()
         };
-        if app_lock_input && self.focused_settings_input == Some(input) {
+        if (app_lock_input || cloud_sync_input) && self.focused_settings_input == Some(input) {
+            // Repositioning the caret in a manually owned input must preserve
+            // the active draft instead of taking the now-empty backing field.
             self.clear_ime_selection();
             self.show_active_input_caret(cx);
             cx.notify();

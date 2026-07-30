@@ -843,6 +843,11 @@ impl WorkspaceApp {
                 source_window,
             } => {
                 if *source_window == window.window_handle() {
+                    let current_value = self.current_settings_input_value(*input, cx);
+                    // Pointer selection requires an active IME owner. Cloud Sync
+                    // fields move their draft into the root adapter at focus time.
+                    self.focus_settings_input(*input, current_value, cx);
+                    window.focus(&self.focus_handle, cx);
                     self.begin_ime_selection_from_mouse_down(
                         WorkspaceImeTarget::Settings(*input),
                         event,
