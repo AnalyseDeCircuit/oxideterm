@@ -234,34 +234,6 @@ mod ai_turn_order_tests {
         assert!(projection.pointer("/ai/acpAgents").is_none());
     }
 
-    #[test]
-    fn acp_bridge_exposes_only_visible_terminal_tools() {
-        let definitions = acp_visible_terminal_tool_definitions(true);
-        let names = definitions
-            .iter()
-            .map(|definition| definition.name.clone())
-            .collect::<Vec<_>>();
-        let expected = ACP_VISIBLE_TERMINAL_TOOL_NAMES
-            .iter()
-            .map(|name| (*name).to_string())
-            .collect::<Vec<_>>();
-
-        assert_eq!(names, expected);
-        assert!(acp_visible_terminal_tool_definitions(false).is_empty());
-
-        // ACP must expose the exact canonical v2 schemas so it cannot regain
-        // legacy identifiers or a more permissive application-tool contract.
-        let native_definitions = oxideterm_ai::orchestrator_tool_definitions();
-        for definition in definitions {
-            let native = native_definitions
-                .iter()
-                .find(|native| native.name == definition.name)
-                .expect("ACP tool has a native v2 definition");
-            assert_eq!(definition.description, native.description);
-            assert_eq!(definition.input_schema, native.parameters);
-        }
-    }
-
     fn assistant_message() -> AiChatMessage {
         AiChatMessage {
             id: "assistant-1".to_string(),
@@ -410,74 +382,6 @@ mod ai_turn_order_tests {
     }
 
     #[test]
-    fn acp_prompt_includes_current_context_without_replaying_history() {
-        let history = vec![
-            test_message(
-                "base-system",
-                AiChatRole::System,
-                "SSH session host: example.test\nIDE file: src/main.rs".to_string(),
-            ),
-            test_message(
-                "current-terminal-context",
-                AiChatRole::System,
-                "Current terminal context:\nAPI_KEY=supersecret123456\ncargo check failed"
-                    .to_string(),
-            ),
-            test_message(
-                "old-user",
-                AiChatRole::User,
-                "old request must not be replayed".to_string(),
-            ),
-            test_message(
-                "old-assistant",
-                AiChatRole::Assistant,
-                "old response must not be replayed".to_string(),
-            ),
-            test_message(
-                "latest-user",
-                AiChatRole::User,
-                "explain the failure".to_string(),
-            ),
-        ];
-
-        let prompt = acp_current_turn_prompt(&history).expect("ACP prompt");
-
-        assert!(prompt.contains("SSH session host: example.test"));
-        assert!(prompt.contains("IDE file: src/main.rs"));
-        assert!(prompt.contains("cargo check failed"));
-        assert!(prompt.contains("explain the failure"));
-        assert!(!prompt.contains("old request must not be replayed"));
-        assert!(!prompt.contains("old response must not be replayed"));
-        assert!(!prompt.contains("supersecret123456"));
-        assert!(prompt.contains("API_KEY=[REDACTED]"));
-    }
-
-    #[test]
-    fn acp_prompt_without_context_preserves_latest_request() {
-        let history = vec![test_message(
-            "latest-user",
-            AiChatRole::User,
-            "list the current directory".to_string(),
-        )];
-
-        assert_eq!(
-            acp_current_turn_prompt(&history).as_deref(),
-            Some("list the current directory")
-        );
-    }
-
-    #[test]
-    fn acp_prompt_requires_a_non_empty_user_request() {
-        let history = vec![test_message(
-            "base-system",
-            AiChatRole::System,
-            "runtime context".to_string(),
-        )];
-
-        assert!(acp_current_turn_prompt(&history).is_none());
-    }
-
-    #[test]
     fn second_model_round_replaces_the_previous_runtime_context() {
         let mut history = vec![test_message(
             "latest-user",
@@ -591,6 +495,7 @@ mod ai_turn_order_tests {
             "stale-session",
             Some(serde_json::json!({ "source": "stale" })),
             Vec::new(),
+            None,
             "agent-1",
         );
 
@@ -615,6 +520,14 @@ mod ai_turn_order_tests {
                     label: "Model A".to_string(),
                 }],
             }],
+            Some(oxideterm_ai::AcpSessionModeState {
+                current_mode_id: "agent".to_string(),
+                available_modes: vec![oxideterm_ai::AcpSessionMode {
+                    mode_id: "agent".to_string(),
+                    name: "Agent".to_string(),
+                    description: Some("Agent mode".to_string()),
+                }],
+            }),
             "agent-1",
         );
 
@@ -639,8 +552,200 @@ mod ai_turn_order_tests {
                     "currentValueId": "model-a",
                     "choices": [{ "valueId": "model-a", "label": "Model A" }],
                 }],
-                "modelSelection": null,
+                "modelSelection": {
+                    "configId": "model",
+                    "valueId": "model-a",
+                },
+                "configSelections": [{
+                    "configId": "model",
+                    "valueId": "model-a",
+                }],
+                "currentModeId": "agent",
+                "availableModes": [{
+                    "modeId": "agent",
+                    "name": "Agent",
+                    "description": "Agent mode",
+                }],
+                "availableCommands": [],
+                "plan": null,
+                "usage": null,
+                "title": null,
             }))
+        );
+
+        let modes_removed = apply_ai_acp_session_started_to_conversations(
+            &mut conversations,
+            2,
+            2,
+            "conv-1",
+            "mode-less-session",
+            None,
+            Vec::new(),
+            None,
+            "agent-1",
+        );
+        let current_state =
+            ai_acp_session_state(&conversations[0]).expect("current ACP session state");
+        assert!(modes_removed);
+        assert_eq!(current_state.current_mode_id, None);
+        assert!(current_state.available_modes.is_empty());
+    }
+
+    #[test]
+    fn acp_handoff_cursor_advances_only_for_the_matching_agent() {
+        let mut conversation = AiConversation {
+            id: "conv-1".to_string(),
+            title: "Conversation".to_string(),
+            messages: vec![AiChatMessage {
+                id: "assistant-1".to_string(),
+                role: AiChatRole::Assistant,
+                content: "done".to_string(),
+                timestamp_ms: 42,
+                model: Some("model".to_string()),
+                context: None,
+                thinking_content: None,
+                is_streaming: false,
+                metadata: None,
+                tool_call_id: None,
+                tool_calls: Vec::new(),
+                turn: None,
+                transcript_ref: None,
+                summary_ref: None,
+                branches: None,
+                suggestions: Vec::new(),
+            }],
+            created_at_ms: 0,
+            updated_at_ms: 0,
+            origin: "sidebar".to_string(),
+            profile_id: None,
+            message_count: 1,
+            session_id: Some("session-1".to_string()),
+            session_metadata: Some(serde_json::json!({
+                "acp": {
+                    "agentId": "agent-1",
+                    "sessionId": "session-1",
+                    "metadata": null,
+                    "configOptions": [],
+                    "modelSelection": null,
+                    "configSelections": [],
+                    "currentModeId": null,
+                    "availableModes": [],
+                    "availableCommands": [],
+                    "plan": null,
+                    "usage": null,
+                    "title": null
+                }
+            })),
+            messages_loaded: true,
+        };
+
+        assert!(!store_ai_acp_handoff_cursor_in_conversation(
+            &mut conversation,
+            "agent-2",
+            "assistant-1",
+        ));
+        assert!(
+            ai_acp_session_state(&conversation)
+                .and_then(|state| state.handoff_cursor)
+                .is_none()
+        );
+
+        assert!(store_ai_acp_handoff_cursor_in_conversation(
+            &mut conversation,
+            "agent-1",
+            "assistant-1",
+        ));
+        assert_eq!(
+            ai_acp_session_state(&conversation)
+                .and_then(|state| state.handoff_cursor),
+            Some(oxideterm_ai::AcpConversationHandoffCursor {
+                message_id: "assistant-1".to_string(),
+                timestamp_ms: 42,
+            })
+        );
+
+        let mut resumed = conversation.clone();
+        assert!(apply_ai_acp_session_started_to_conversations(
+            std::slice::from_mut(&mut resumed),
+            1,
+            1,
+            "conv-1",
+            "session-1",
+            None,
+            Vec::new(),
+            None,
+            "agent-1",
+        ));
+        assert!(
+            ai_acp_session_state(&resumed)
+                .and_then(|state| state.handoff_cursor)
+                .is_some()
+        );
+
+        assert!(apply_ai_acp_session_started_to_conversations(
+            std::slice::from_mut(&mut conversation),
+            1,
+            1,
+            "conv-1",
+            "replacement-session",
+            None,
+            Vec::new(),
+            None,
+            "agent-1",
+        ));
+        assert!(
+            ai_acp_session_state(&conversation)
+                .and_then(|state| state.handoff_cursor)
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn acp_config_catalog_replaces_stale_selections_with_agent_state() {
+        let config_options = vec![oxideterm_ai::AcpSessionConfigOption {
+            config_id: "model".to_string(),
+            name: "Model".to_string(),
+            category: Some("model".to_string()),
+            current_value_id: "model-b".to_string(),
+            choices: vec![oxideterm_ai::AcpSessionConfigChoice {
+                value_id: "model-b".to_string(),
+                label: "Model B".to_string(),
+            }],
+        }];
+        let mut model_selection = Some(oxideterm_ai::AcpSessionConfigSelection {
+            config_id: "model".to_string(),
+            value_id: "model-a".to_string(),
+        });
+        let mut config_selections = vec![
+            oxideterm_ai::AcpSessionConfigSelection {
+                config_id: "model".to_string(),
+                value_id: "model-b".to_string(),
+            },
+            oxideterm_ai::AcpSessionConfigSelection {
+                config_id: "removed-option".to_string(),
+                value_id: "removed-value".to_string(),
+            },
+        ];
+
+        synchronize_ai_acp_config_selections(
+            &config_options,
+            &mut model_selection,
+            &mut config_selections,
+        );
+
+        assert_eq!(
+            model_selection,
+            Some(oxideterm_ai::AcpSessionConfigSelection {
+                config_id: "model".to_string(),
+                value_id: "model-b".to_string(),
+            })
+        );
+        assert_eq!(
+            config_selections,
+            vec![oxideterm_ai::AcpSessionConfigSelection {
+                config_id: "model".to_string(),
+                value_id: "model-b".to_string(),
+            }]
         );
     }
 
@@ -1468,6 +1573,49 @@ mod ai_turn_order_tests {
         assert!(
             !ai_message_is_awaiting_tool_summary(&message),
             "persisted markers must not make completed messages look active"
+        );
+    }
+
+    #[test]
+    fn chat_message_signatures_rehash_only_the_invalidated_row() {
+        let mut cache = AiChatMessageSignatureCache::default();
+        let computed = std::cell::Cell::new(0usize);
+        let message_ids = (0..256)
+            .map(|index| format!("message-{index}"))
+            .collect::<Vec<_>>();
+        cache.select_conversation("conversation-1");
+
+        for message_id in &message_ids {
+            cache.signature_for(message_id, || {
+                computed.set(computed.get().saturating_add(1));
+                1
+            });
+        }
+        assert_eq!(computed.get(), message_ids.len());
+
+        for message_id in &message_ids {
+            cache.signature_for(message_id, || {
+                computed.set(computed.get().saturating_add(1));
+                2
+            });
+        }
+        assert_eq!(
+            computed.get(),
+            message_ids.len(),
+            "an unchanged scroll render must reuse all message signatures"
+        );
+
+        cache.invalidate_message(&message_ids[128]);
+        for message_id in &message_ids {
+            cache.signature_for(message_id, || {
+                computed.set(computed.get().saturating_add(1));
+                3
+            });
+        }
+        assert_eq!(
+            computed.get(),
+            message_ids.len() + 1,
+            "a streamed update must rehash only its owning message"
         );
     }
 

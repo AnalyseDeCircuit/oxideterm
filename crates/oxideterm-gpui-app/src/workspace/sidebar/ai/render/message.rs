@@ -256,6 +256,11 @@ impl WorkspaceApp {
                 body = body.child(self.render_ai_tool_calls(message, cx));
             }
         }
+        if ai_message_is_awaiting_tool_summary(message) {
+            // Structured turns may render several tool segments. Keep the
+            // round-level transition at the message footer so it appears once.
+            body = body.child(self.render_ai_tool_summary_indicator(message, cx));
+        }
         if user
             && !editing
             && let Some(branches) = message
@@ -1277,11 +1282,24 @@ window.focus(&this.focus_handle, cx);
                             )),
                     );
                 }
-                let output = result
-                    .get("output")
-                    .and_then(serde_json::Value::as_str)
-                    .map(str::to_string)
-                    .unwrap_or_else(|| serde_json::to_string_pretty(result).unwrap_or_default());
+                let file_write_preview = result
+                    .get("acpFileWriteReview")
+                    .and_then(serde_json::Value::as_bool)
+                    .filter(|enabled| *enabled)
+                    .and_then(|_| {
+                        self.acp_entity
+                            .read(cx)
+                            .file_write_preview(&id)
+                    });
+                let output = file_write_preview.unwrap_or_else(|| {
+                    result
+                        .get("output")
+                        .and_then(serde_json::Value::as_str)
+                        .map(str::to_string)
+                        .unwrap_or_else(|| {
+                            serde_json::to_string_pretty(result).unwrap_or_default()
+                        })
+                });
                 details = details.child(
                     div()
                         .child(ai_tool_section_label(
@@ -1343,47 +1361,124 @@ window.focus(&this.focus_handle, cx);
             }
 
             if status == AiToolStatus::PendingApproval {
-                let approve_id = id.clone();
-                let reject_id = id.clone();
-                item = item.child(ai_tool_approval_bar(
-                    &self.tokens,
-                    div()
-                        .flex_1()
-                        .min_w_0()
-                        .text_size(px(10.0))
-                        .text_color(rgba((self.tokens.ui.text_muted << 8) | 0xcc))
-                        .child(self.i18n.t("ai.tool_use.approval_required")),
-                    ai_tool_approval_button(
+                let acp_options = result
+                    .and_then(|value| value.get("acpPermissionOptions"))
+                    .and_then(serde_json::Value::as_array)
+                    .cloned()
+                    .unwrap_or_default();
+                if acp_options.is_empty() {
+                    let approve_id = id.clone();
+                    let reject_id = id.clone();
+                    item = item.child(ai_tool_approval_bar(
                         &self.tokens,
-                        self.i18n.t("ai.tool_use.approve"),
-                        true,
-                        Self::render_lucide_icon(
-                            LucideIcon::Check,
-                            11.0,
-                            rgb(self.tokens.ui.success),
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .text_size(px(10.0))
+                            .text_color(rgba((self.tokens.ui.text_muted << 8) | 0xcc))
+                            .child(self.i18n.t("ai.tool_use.approval_required")),
+                        ai_tool_approval_button(
+                            &self.tokens,
+                            self.i18n.t("ai.tool_use.approve"),
+                            true,
+                            Self::render_lucide_icon(
+                                LucideIcon::Check,
+                                11.0,
+                                rgb(self.tokens.ui.success),
+                            ),
+                        )
+                        .on_mouse_down(
+                            MouseButton::Left,
+                            cx.listener(move |this, _event, _window, cx| {
+                                this.resolve_ai_tool_approval(approve_id.clone(), true, cx);
+                                cx.stop_propagation();
+                            }),
                         ),
-                    )
-                    .on_mouse_down(
-                        MouseButton::Left,
-                        cx.listener(move |this, _event, _window, cx| {
-                            this.resolve_ai_tool_approval(approve_id.clone(), true, cx);
-                            cx.stop_propagation();
-                        }),
-                    ),
-                    ai_tool_approval_button(
+                        ai_tool_approval_button(
+                            &self.tokens,
+                            self.i18n.t("ai.tool_use.reject"),
+                            false,
+                            Self::render_lucide_icon(
+                                LucideIcon::X,
+                                11.0,
+                                rgb(self.tokens.ui.error),
+                            ),
+                        )
+                        .on_mouse_down(
+                            MouseButton::Left,
+                            cx.listener(move |this, _event, _window, cx| {
+                                this.resolve_ai_tool_approval(reject_id.clone(), false, cx);
+                                cx.stop_propagation();
+                            }),
+                        ),
+                    ));
+                } else {
+                    let mut option_buttons =
+                        div().flex().flex_wrap().justify_end().gap(px(self.tokens.spacing.one));
+                    for option in acp_options {
+                        let option_id = option
+                            .get("id")
+                            .and_then(serde_json::Value::as_str)
+                            .unwrap_or_default()
+                            .to_string();
+                        let option_name = option
+                            .get("name")
+                            .and_then(serde_json::Value::as_str)
+                            .unwrap_or_default()
+                            .to_string();
+                        if option_id.is_empty() || option_name.is_empty() {
+                            continue;
+                        }
+                        let allow = option
+                            .get("kind")
+                            .and_then(serde_json::Value::as_str)
+                            .is_some_and(|kind| kind.starts_with("allow_"));
+                        let tool_call_id = id.clone();
+                        let icon = if allow {
+                            Self::render_lucide_icon(
+                                LucideIcon::Check,
+                                11.0,
+                                rgb(self.tokens.ui.success),
+                            )
+                        } else {
+                            Self::render_lucide_icon(
+                                LucideIcon::X,
+                                11.0,
+                                rgb(self.tokens.ui.error),
+                            )
+                        };
+                        option_buttons = option_buttons.child(
+                            ai_tool_approval_button(
+                                &self.tokens,
+                                option_name,
+                                allow,
+                                icon,
+                            )
+                            .on_mouse_down(
+                                MouseButton::Left,
+                                cx.listener(move |this, _event, _window, cx| {
+                                    this.resolve_ai_acp_permission(
+                                        tool_call_id.clone(),
+                                        Some(option_id.clone()),
+                                        cx,
+                                    );
+                                    cx.stop_propagation();
+                                }),
+                            ),
+                        );
+                    }
+                    item = item.child(ai_tool_approval_bar(
                         &self.tokens,
-                        self.i18n.t("ai.tool_use.reject"),
-                        false,
-                        Self::render_lucide_icon(LucideIcon::X, 11.0, rgb(self.tokens.ui.error)),
-                    )
-                    .on_mouse_down(
-                        MouseButton::Left,
-                        cx.listener(move |this, _event, _window, cx| {
-                            this.resolve_ai_tool_approval(reject_id.clone(), false, cx);
-                            cx.stop_propagation();
-                        }),
-                    ),
-                ));
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .text_size(px(10.0))
+                            .text_color(rgba((self.tokens.ui.text_muted << 8) | 0xcc))
+                            .child(self.i18n.t("ai.tool_use.approval_required")),
+                        option_buttons,
+                        div(),
+                    ));
+                }
             } else if status == AiToolStatus::PendingSelection {
                 let candidates = result
                     .and_then(|value| value.pointer("/disambiguation/candidates"))
@@ -1529,37 +1624,44 @@ window.focus(&this.focus_handle, cx);
             }
             block = block.child(item);
         }
-        if ai_message_is_awaiting_tool_summary(message) {
-            block = block.child(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap(px(self.tokens.spacing.two))
-                    .rounded(px(self.tokens.radii.md))
-                    .border_1()
-                    .border_color(rgba((self.tokens.ui.border << 8) | 0x33))
-                    .bg(rgba((self.tokens.ui.bg_hover << 8) | 0x33))
-                    .px(px(self.tokens.spacing.two))
-                    .py(px(self.tokens.spacing.two))
-                    .text_size(px(11.0))
-                    .text_color(rgba((self.tokens.ui.text_muted << 8) | 0x99))
-                    .child(self.render_loading_icon(
-                        "ai-awaiting-tool-summary",
-                        14.0,
-                        rgba((self.tokens.ui.accent << 8) | 0xb3),
-                    ))
-                    .child(self.render_display_text_with_role_and_alpha(
-                        SelectableTextRole::PlainDocument,
-                        "ai-tool-use",
-                        "awaiting-summary",
-                        self.i18n.t("ai.tool_use.awaiting_summary"),
-                        self.tokens.ui.text_muted,
-                        0x99 as f32 / 255.0,
-                        cx,
-                    )),
-            );
-        }
         block.into_any_element()
+    }
+
+    pub(in crate::workspace) fn render_ai_tool_summary_indicator(
+        &self,
+        message: &AiChatMessage,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        div()
+            .flex()
+            .items_center()
+            .gap(px(self.tokens.spacing.two))
+            .rounded(px(self.tokens.radii.md))
+            .border_1()
+            .border_color(rgba((self.tokens.ui.border << 8) | 0x33))
+            .bg(rgba((self.tokens.ui.bg_hover << 8) | 0x33))
+            .px(px(self.tokens.spacing.two))
+            .py(px(self.tokens.spacing.two))
+            .text_size(px(11.0))
+            .text_color(rgba((self.tokens.ui.text_muted << 8) | 0x99))
+            .child(self.render_loading_icon(
+                (
+                    "ai-awaiting-tool-summary",
+                    ai_message_element_seed(&message.id),
+                ),
+                14.0,
+                rgba((self.tokens.ui.accent << 8) | 0xb3),
+            ))
+            .child(self.render_display_text_with_role_and_alpha(
+                SelectableTextRole::PlainDocument,
+                "ai-tool-use",
+                (&message.id, "awaiting-summary"),
+                self.i18n.t("ai.tool_use.awaiting_summary"),
+                self.tokens.ui.text_muted,
+                0x99 as f32 / 255.0,
+                cx,
+            ))
+            .into_any_element()
     }
 
     pub(in crate::workspace) fn render_ai_message_edit_body(

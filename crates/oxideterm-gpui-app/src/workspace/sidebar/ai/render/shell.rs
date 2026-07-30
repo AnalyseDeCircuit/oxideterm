@@ -1,3 +1,111 @@
+fn ai_chat_trim_notice_signature(sequence: u64, count: usize) -> u64 {
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    std::hash::Hash::hash(&"trim", &mut hasher);
+    std::hash::Hash::hash(&sequence, &mut hasher);
+    std::hash::Hash::hash(&count, &mut hasher);
+    std::hash::Hasher::finish(&hasher)
+}
+
+fn ai_chat_bottom_spacer_signature() -> u64 {
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    std::hash::Hash::hash(&"spacer", &mut hasher);
+    std::hash::Hasher::finish(&hasher)
+}
+
+fn ai_chat_message_base_signature(message: &AiChatMessage) -> u64 {
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    let role = match message.role {
+        AiChatRole::User => 0u8,
+        AiChatRole::Assistant => 1,
+        AiChatRole::System => 2,
+        AiChatRole::Tool => 3,
+    };
+    std::hash::Hash::hash(&"message", &mut hasher);
+    std::hash::Hash::hash(&message.id, &mut hasher);
+    std::hash::Hash::hash(&role, &mut hasher);
+    std::hash::Hash::hash(&message.content, &mut hasher);
+    std::hash::Hash::hash(&message.thinking_content, &mut hasher);
+    std::hash::Hash::hash(&message.is_streaming, &mut hasher);
+    std::hash::Hash::hash(&message.timestamp_ms, &mut hasher);
+    std::hash::Hash::hash(&message.model, &mut hasher);
+    std::hash::Hash::hash(&message.context, &mut hasher);
+    std::hash::Hash::hash(&message.tool_call_id, &mut hasher);
+    std::hash::Hash::hash(&message.tool_calls.len(), &mut hasher);
+    std::hash::Hash::hash(&message.suggestions.len(), &mut hasher);
+    if let Some(branches) = message.branches.as_ref() {
+        std::hash::Hash::hash(&branches.total, &mut hasher);
+        std::hash::Hash::hash(&branches.active_index, &mut hasher);
+    }
+    if let Some(turn) = message.turn.as_ref() {
+        // Hash JSON in place. Serializing tool output here would allocate a
+        // secret-capable temporary string on every invalidated render row.
+        ai_chat_hash_json_value(turn, &mut hasher);
+    }
+    if let Some(metadata) = message.metadata.as_ref() {
+        std::hash::Hash::hash(&metadata.kind, &mut hasher);
+        std::hash::Hash::hash(&metadata.original_count, &mut hasher);
+    }
+    for tool_call in &message.tool_calls {
+        ai_chat_hash_json_value(tool_call, &mut hasher);
+    }
+    std::hash::Hasher::finish(&hasher)
+}
+
+fn ai_chat_message_list_signature(
+    base_signature: u64,
+    thinking_expanded: Option<&bool>,
+) -> u64 {
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    std::hash::Hash::hash(&base_signature, &mut hasher);
+    std::hash::Hash::hash(&thinking_expanded, &mut hasher);
+    std::hash::Hasher::finish(&hasher)
+}
+
+fn ai_chat_hash_json_value(
+    value: &serde_json::Value,
+    hasher: &mut std::collections::hash_map::DefaultHasher,
+) {
+    match value {
+        serde_json::Value::Null => std::hash::Hash::hash(&0u8, hasher),
+        serde_json::Value::Bool(value) => {
+            std::hash::Hash::hash(&1u8, hasher);
+            std::hash::Hash::hash(value, hasher);
+        }
+        serde_json::Value::Number(value) => {
+            std::hash::Hash::hash(&2u8, hasher);
+            if let Some(value) = value.as_i64() {
+                std::hash::Hash::hash(&0u8, hasher);
+                std::hash::Hash::hash(&value, hasher);
+            } else if let Some(value) = value.as_u64() {
+                std::hash::Hash::hash(&1u8, hasher);
+                std::hash::Hash::hash(&value, hasher);
+            } else if let Some(value) = value.as_f64() {
+                std::hash::Hash::hash(&2u8, hasher);
+                std::hash::Hash::hash(&value.to_bits(), hasher);
+            }
+        }
+        serde_json::Value::String(value) => {
+            std::hash::Hash::hash(&3u8, hasher);
+            std::hash::Hash::hash(value, hasher);
+        }
+        serde_json::Value::Array(values) => {
+            std::hash::Hash::hash(&4u8, hasher);
+            std::hash::Hash::hash(&values.len(), hasher);
+            for value in values {
+                ai_chat_hash_json_value(value, hasher);
+            }
+        }
+        serde_json::Value::Object(values) => {
+            std::hash::Hash::hash(&5u8, hasher);
+            std::hash::Hash::hash(&values.len(), hasher);
+            for (key, value) in values {
+                std::hash::Hash::hash(key, hasher);
+                ai_chat_hash_json_value(value, hasher);
+            }
+        }
+    }
+}
+
 impl WorkspaceApp {
     pub(in crate::workspace) fn render_ai_sidebar_content(
         &mut self,
@@ -77,29 +185,55 @@ impl WorkspaceApp {
         if let Some(error) = self.ai_entity.read(cx).chat_initialization_error().copied() {
             return self.render_ai_sidebar_initialization_error(error, cx);
         }
-        let Some((conversation_id, items, signatures)) = self.ai_entity.read(cx).conversation_state()
-            .active_conversation()
-            .and_then(|conversation| {
+        let Some((conversation_id, items, signatures)) = ({
+            let ai = self.ai_entity.read(cx);
+            let conversation = ai.conversation_state().active_conversation();
+            conversation.and_then(|conversation| {
                 if conversation.messages.is_empty() {
                     return None;
                 }
-                let mut items = Vec::new();
-                if let Some(count) = self.ai_entity.read(cx).chat_ui().context_trim_notice_count {
-                    items.push(AiChatListItem::TrimNotice {
-                        sequence: self.ai_entity.read(cx).chat_ui().context_trim_notice_sequence,
-                        count,
-                    });
+                let chat_ui = ai.chat_ui();
+                let mut items = Vec::with_capacity(conversation.messages.len().saturating_add(2));
+                let mut signatures =
+                    Vec::with_capacity(conversation.messages.len().saturating_add(2));
+                if let Some(count) = chat_ui.context_trim_notice_count {
+                    let sequence = chat_ui.context_trim_notice_sequence;
+                    items.push(AiChatListItem::TrimNotice { count });
+                    signatures.push(ai_chat_trim_notice_signature(sequence, count));
                 }
-                for message in &conversation.messages {
-                    items.push(AiChatListItem::Message {
-                        id: message.id.clone(),
+                let last_assistant_index = conversation
+                    .messages
+                    .iter()
+                    .rposition(|message| message.role == AiChatRole::Assistant);
+                let mut signature_cache = chat_ui.message_signature_cache.borrow_mut();
+                signature_cache.select_conversation(&conversation.id);
+                for (index, message) in conversation.messages.iter().enumerate() {
+                    let base_signature = signature_cache.signature_for(&message.id, || {
+                        ai_chat_message_base_signature(message)
                     });
+                    let signature = ai_chat_message_list_signature(
+                        base_signature,
+                        chat_ui.thinking_expansion_state.get(&message.id),
+                    );
+                    items.push(AiChatListItem::Message {
+                        index,
+                        last_assistant: last_assistant_index == Some(index),
+                    });
+                    signatures.push(signature);
+                }
+                if signature_cache.needs_prune(conversation.messages.len()) {
+                    let retained_message_ids = conversation
+                        .messages
+                        .iter()
+                        .map(|message| message.id.as_str())
+                        .collect::<HashSet<_>>();
+                    signature_cache.prune(&retained_message_ids);
                 }
                 items.push(AiChatListItem::BottomSpacer);
-                let signatures = self.ai_chat_list_signatures(conversation, &items, cx);
+                signatures.push(ai_chat_bottom_spacer_signature());
                 Some((conversation.id.clone(), items, signatures))
             })
-        else {
+        }) else {
             return self.render_ai_sidebar_empty_chat(cx);
         };
 
@@ -131,25 +265,18 @@ impl WorkspaceApp {
     ) -> AnyElement {
         match item {
             AiChatListItem::TrimNotice { count, .. } => self.render_ai_trim_notice(count, cx),
-            AiChatListItem::Message { id } => {
+            AiChatListItem::Message {
+                index,
+                last_assistant,
+            } => {
                 let (message, last_assistant) = {
                     let ai = self.ai_entity.read(cx);
                     let Some(conversation) = ai.conversation_state().active_conversation() else {
                         return div().into_any_element();
                     };
-                    let Some(message) = conversation
-                        .messages
-                        .iter()
-                        .find(|message| message.id == id)
-                    else {
+                    let Some(message) = conversation.messages.get(index) else {
                         return div().into_any_element();
                     };
-                    let last_assistant = conversation
-                        .messages
-                        .iter()
-                        .rev()
-                        .find(|candidate| candidate.role == AiChatRole::Assistant)
-                        .is_some_and(|candidate| candidate.id == message.id);
                     // Release the Entity read guard before GPUI mutably borrows
                     // its context; only the visible message is copied.
                     (message.clone(), last_assistant)
@@ -193,82 +320,6 @@ impl WorkspaceApp {
             top,
             height: viewport.height,
         })
-    }
-
-    pub(in crate::workspace) fn ai_chat_list_signatures(
-        &self,
-        conversation: &AiConversation,
-        items: &[AiChatListItem],
-        cx: &App,
-    ) -> Vec<u64> {
-        items
-            .iter()
-            .map(|item| self.ai_chat_list_item_signature(conversation, item, cx))
-            .collect()
-    }
-
-    pub(in crate::workspace) fn ai_chat_list_item_signature(
-        &self,
-        conversation: &AiConversation,
-        item: &AiChatListItem,
-        cx: &App,
-    ) -> u64 {
-        let mut hasher = std::collections::hash_map::DefaultHasher::new();
-        match item {
-            AiChatListItem::TrimNotice { sequence, count } => {
-                std::hash::Hash::hash(&"trim", &mut hasher);
-                std::hash::Hash::hash(sequence, &mut hasher);
-                std::hash::Hash::hash(count, &mut hasher);
-            }
-            AiChatListItem::Message { id } => {
-                std::hash::Hash::hash(&"message", &mut hasher);
-                std::hash::Hash::hash(id, &mut hasher);
-                if let Some(message) = conversation
-                    .messages
-                    .iter()
-                    .find(|message| &message.id == id)
-                {
-                    let role = match message.role {
-                        AiChatRole::User => 0u8,
-                        AiChatRole::Assistant => 1,
-                        AiChatRole::System => 2,
-                        AiChatRole::Tool => 3,
-                    };
-                    std::hash::Hash::hash(&role, &mut hasher);
-                    std::hash::Hash::hash(&message.content, &mut hasher);
-                    std::hash::Hash::hash(&message.thinking_content, &mut hasher);
-                    std::hash::Hash::hash(&message.is_streaming, &mut hasher);
-                    std::hash::Hash::hash(&message.timestamp_ms, &mut hasher);
-                    std::hash::Hash::hash(&message.model, &mut hasher);
-                    std::hash::Hash::hash(&message.context, &mut hasher);
-                    std::hash::Hash::hash(&message.tool_call_id, &mut hasher);
-                    std::hash::Hash::hash(&message.tool_calls.len(), &mut hasher);
-                    std::hash::Hash::hash(&message.suggestions.len(), &mut hasher);
-                    if let Some(branches) = message.branches.as_ref() {
-                        std::hash::Hash::hash(&branches.total, &mut hasher);
-                        std::hash::Hash::hash(&branches.active_index, &mut hasher);
-                    }
-                    std::hash::Hash::hash(
-                        &self.ai_entity.read(cx).chat_ui().thinking_expansion_state.get(&message.id),
-                        &mut hasher,
-                    );
-                    if let Some(turn) = message.turn.as_ref() {
-                        std::hash::Hash::hash(&turn.to_string(), &mut hasher);
-                    }
-                    if let Some(metadata) = message.metadata.as_ref() {
-                        std::hash::Hash::hash(&metadata.kind, &mut hasher);
-                        std::hash::Hash::hash(&metadata.original_count, &mut hasher);
-                    }
-                    for tool_call in &message.tool_calls {
-                        std::hash::Hash::hash(&tool_call.to_string(), &mut hasher);
-                    }
-                }
-            }
-            AiChatListItem::BottomSpacer => {
-                std::hash::Hash::hash(&"spacer", &mut hasher);
-            }
-        }
-        std::hash::Hasher::finish(&hasher)
     }
 
     pub(in crate::workspace) fn sync_ai_chat_list_state(

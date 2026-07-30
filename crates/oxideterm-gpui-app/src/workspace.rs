@@ -1,3 +1,4 @@
+mod acp_workspace;
 mod actions;
 mod ai_lazy;
 mod ai_runtime_context;
@@ -469,9 +470,51 @@ const AI_MARKDOWN_CONTENT_OFFSET_PX: f32 = 56.0;
 
 #[derive(Clone, Debug)]
 enum AiChatListItem {
-    TrimNotice { sequence: u64, count: usize },
-    Message { id: String },
+    TrimNotice { count: usize },
+    Message { index: usize, last_assistant: bool },
     BottomSpacer,
+}
+
+#[derive(Default)]
+struct AiChatMessageSignatureCache {
+    conversation_id: Option<String>,
+    signatures: HashMap<String, u64>,
+}
+
+impl AiChatMessageSignatureCache {
+    fn select_conversation(&mut self, conversation_id: &str) {
+        if self.conversation_id.as_deref() == Some(conversation_id) {
+            return;
+        }
+        self.conversation_id = Some(conversation_id.to_string());
+        self.signatures.clear();
+    }
+
+    fn signature_for(&mut self, message_id: &str, compute: impl FnOnce() -> u64) -> u64 {
+        if let Some(signature) = self.signatures.get(message_id) {
+            return *signature;
+        }
+        let signature = compute();
+        self.signatures.insert(message_id.to_string(), signature);
+        signature
+    }
+
+    fn invalidate_message(&mut self, message_id: &str) {
+        self.signatures.remove(message_id);
+    }
+
+    fn invalidate_all(&mut self) {
+        self.signatures.clear();
+    }
+
+    fn needs_prune(&self, retained_count: usize) -> bool {
+        self.signatures.len() > retained_count.saturating_add(32)
+    }
+
+    fn prune(&mut self, retained_message_ids: &HashSet<&str>) {
+        self.signatures
+            .retain(|message_id, _| retained_message_ids.contains(message_id.as_str()));
+    }
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -709,8 +752,10 @@ pub(crate) struct WorkspaceApp {
     context_sidebar_rendered: bool,
     context_sidebar_motion_generation: u64,
     ai_entity: Entity<ai_state::AiWorkspaceEntity>,
+    acp_entity: Entity<acp_workspace::AcpWorkspaceEntity>,
     ai_runtime_context: Entity<ai_runtime_context::AiRuntimeContextEntity>,
     _ai_entity_subscription: Subscription,
+    _acp_entity_subscription: Subscription,
     active_context_sidebar_panel: ContextSidebarPanel,
     needs_active_pane_focus: bool,
     active_sidebar_section: SidebarSection,

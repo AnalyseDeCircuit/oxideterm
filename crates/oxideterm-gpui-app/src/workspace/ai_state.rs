@@ -125,16 +125,12 @@ pub(in crate::workspace) enum AiModelRefreshIntent {
 pub(in crate::workspace) enum AiCredentialFailure {
     SaveProviderKey,
     RemoveProviderKey,
-    SaveAcpToken,
-    RemoveAcpToken,
     SaveMcpToken,
 }
 
 pub(in crate::workspace) enum AiCredentialIntent {
     ProviderKeyStored { index: usize, provider_id: String },
     ProviderKeyRemoved,
-    AcpTokenStored { agent_id: String },
-    AcpTokenRemoved { agent_id: String },
     McpServerReady { config: serde_json::Value },
     McpServerRemoved { server_id: String },
     Failed(AiCredentialFailure),
@@ -161,12 +157,6 @@ pub(in crate::workspace) enum AiSettingsConfirmIntent {
 #[derive(Clone, Copy)]
 enum AiProviderKeyOperation {
     Store { index: usize },
-    Remove,
-}
-
-#[derive(Clone, Copy)]
-enum AiAcpTokenOperation {
-    Store,
     Remove,
 }
 
@@ -271,7 +261,6 @@ pub(in crate::workspace) struct AiWorkspaceEntity {
     focused_settings_input: Option<SettingsInput>,
     provider_key_operation_tasks: HashMap<String, Task<()>>,
     pending_provider_key_removals: HashSet<String>,
-    acp_token_operation_tasks: HashMap<String, Task<()>>,
     credential_intents: VecDeque<AiCredentialIntent>,
     mcp_add_dialog: Option<AiMcpServerDraft>,
     mcp_dialog_presence: oxideterm_gpui_ui::motion::ExitPresence,
@@ -344,6 +333,7 @@ pub(in crate::workspace) struct AiWorkspaceEntity {
     chat_loading: bool,
     next_chat_sequence: u64,
     pending_tool_approvals: HashMap<String, tokio::sync::oneshot::Sender<bool>>,
+    pending_acp_permission_choices: HashMap<String, tokio::sync::oneshot::Sender<Option<String>>>,
     pending_tool_candidate_selections: HashMap<String, tokio::sync::oneshot::Sender<Option<usize>>>,
     // Runtime evidence transitions are implemented beside stream application,
     // but these collections remain physically owned by this Entity.
@@ -351,7 +341,6 @@ pub(in crate::workspace) struct AiWorkspaceEntity {
     pub(in crate::workspace) tool_result_facts: VecDeque<AiToolResultFact>,
     agent_fs: NodeAgentIdeFileSystem,
     mcp_registry: oxideterm_ai::McpRegistry,
-    acp_runtime_registry: oxideterm_ai::AcpRuntimeRegistry,
     compaction_tx: AiCompactionDeliverySender,
     compaction_rx: std::sync::mpsc::Receiver<AiCompactionDelivery>,
     compaction_deliveries: VecDeque<AiCompactionDelivery>,
@@ -637,6 +626,10 @@ impl AiWorkspaceEntity {
         self.chat_ui
             .message_list_cache
             .replace(VirtualListSignatureCache::default());
+        self.chat_ui
+            .message_signature_cache
+            .borrow_mut()
+            .invalidate_all();
     }
 
     pub(in crate::workspace) fn sync_chat_message_list(
@@ -1026,7 +1019,6 @@ impl AiWorkspaceEntity {
             focused_settings_input: None,
             provider_key_operation_tasks: HashMap::new(),
             pending_provider_key_removals: HashSet::new(),
-            acp_token_operation_tasks: HashMap::new(),
             credential_intents: VecDeque::new(),
             mcp_add_dialog: None,
             mcp_dialog_presence: oxideterm_gpui_ui::motion::ExitPresence::visible(),
@@ -1094,12 +1086,12 @@ impl AiWorkspaceEntity {
             chat_loading: false,
             next_chat_sequence: 0,
             pending_tool_approvals: HashMap::new(),
+            pending_acp_permission_choices: HashMap::new(),
             pending_tool_candidate_selections: HashMap::new(),
             tool_execution_records: VecDeque::new(),
             tool_result_facts: VecDeque::new(),
             agent_fs,
             mcp_registry,
-            acp_runtime_registry: oxideterm_ai::AcpRuntimeRegistry::default(),
             compaction_tx,
             compaction_rx,
             compaction_deliveries: VecDeque::new(),
@@ -1321,7 +1313,6 @@ impl AiWorkspaceEntity {
         matches!(
             input,
             SettingsInput::AiProviderApiKey(_)
-                | SettingsInput::AiAcpAgentAuthToken(_)
                 | SettingsInput::KnowledgeCollectionName
                 | SettingsInput::KnowledgeDocumentTitle
         ) || input.is_ai_mcp()
@@ -1382,10 +1373,7 @@ impl AiWorkspaceEntity {
         }
 
         self.clear_focused_settings_input();
-        if matches!(
-            input,
-            SettingsInput::AiProviderApiKey(_) | SettingsInput::AiAcpAgentAuthToken(_)
-        ) {
+        if matches!(input, SettingsInput::AiProviderApiKey(_)) {
             self.settings_secret_drafts
                 .insert(input, zeroize::Zeroizing::new(String::new()));
         }
@@ -1464,16 +1452,6 @@ impl AiWorkspaceEntity {
         self.take_settings_secret(input)
     }
 
-    pub(in crate::workspace) fn take_acp_auth_token(
-        &mut self,
-        input: SettingsInput,
-    ) -> Option<zeroize::Zeroizing<String>> {
-        if !matches!(input, SettingsInput::AiAcpAgentAuthToken(_)) {
-            return None;
-        }
-        self.take_settings_secret(input)
-    }
-
     fn take_settings_secret(&mut self, input: SettingsInput) -> Option<zeroize::Zeroizing<String>> {
         if self.focused_settings_input != Some(input) {
             return None;
@@ -1504,6 +1482,12 @@ impl AiWorkspaceEntity {
     pub(in crate::workspace) fn conversation_state_mut(
         &mut self,
     ) -> &mut oxideterm_ai::AiChatState {
+        // Callers receive unrestricted mutable conversation access, so any
+        // cached render signature may become stale after this boundary.
+        self.chat_ui
+            .message_signature_cache
+            .borrow_mut()
+            .invalidate_all();
         &mut self.conversation_state
     }
 
@@ -1513,6 +1497,12 @@ impl AiWorkspaceEntity {
         message_id: &str,
         update: impl FnOnce(&mut oxideterm_ai::AiChatMessage),
     ) {
+        // Streaming changes one assistant message at a time. Invalidate only
+        // that row so long histories are not rehashed for every token.
+        self.chat_ui
+            .message_signature_cache
+            .borrow_mut()
+            .invalidate_message(message_id);
         self.conversation_state
             .update_message(conversation_id, message_id, update);
     }
@@ -1555,6 +1545,10 @@ impl AiWorkspaceEntity {
     }
 
     fn load_chat_store(&mut self, path: PathBuf) -> AiChatInitializationOutcome {
+        self.chat_ui
+            .message_signature_cache
+            .borrow_mut()
+            .invalidate_all();
         match oxideterm_ai::AiChatPersistenceStore::load(path) {
             Ok((store, state)) => {
                 self.persistence_store = Some(store);
@@ -1574,6 +1568,12 @@ impl AiWorkspaceEntity {
     }
 
     pub(in crate::workspace) fn select_conversation(&mut self, id: String) {
+        // Selecting can reload a previously unloaded conversation with the same
+        // identifier, so identity comparison alone cannot prove cached rows valid.
+        self.chat_ui
+            .message_signature_cache
+            .borrow_mut()
+            .invalidate_all();
         let previous_index = self
             .conversation_state
             .active_conversation_id
@@ -1718,6 +1718,12 @@ impl AiWorkspaceEntity {
         Vec<oxideterm_ai::stream_state::AiStoppedAssistantTurn>,
     ) {
         self.chat_loading = false;
+        // Cancellation finalizes streaming messages in place rather than through
+        // update_chat_message, so their list signatures must be recomputed.
+        self.chat_ui
+            .message_signature_cache
+            .borrow_mut()
+            .invalidate_all();
         let conversation_id = self.conversation_state.active_conversation_id.clone();
         let stopped_turns = self
             .conversation_state
@@ -2207,83 +2213,6 @@ impl AiWorkspaceEntity {
             self.chat_confirm_focused_action = None;
             cx.notify();
         }
-    }
-
-    pub(in crate::workspace) fn store_acp_auth_token(
-        &mut self,
-        agent_id: String,
-        token: zeroize::Zeroizing<String>,
-        cx: &mut Context<Self>,
-    ) -> bool {
-        let key_store = self.key_store.clone();
-        let task_runtime = self.task_runtime.clone();
-        let agent_id_for_store = agent_id.clone();
-        let operation = async move {
-            task_runtime
-                .spawn_blocking(move || key_store.store_acp_auth_token(&agent_id_for_store, token))
-                .await
-                .is_ok_and(|result| result.is_ok())
-        };
-        self.start_acp_token_operation(agent_id, AiAcpTokenOperation::Store, operation, cx)
-    }
-
-    pub(in crate::workspace) fn remove_acp_auth_token(
-        &mut self,
-        agent_id: String,
-        cx: &mut Context<Self>,
-    ) -> bool {
-        let key_store = self.key_store.clone();
-        let task_runtime = self.task_runtime.clone();
-        let agent_id_for_delete = agent_id.clone();
-        let operation = async move {
-            task_runtime
-                .spawn_blocking(move || key_store.delete_acp_auth_token(&agent_id_for_delete))
-                .await
-                .is_ok_and(|result| result.is_ok())
-        };
-        self.start_acp_token_operation(agent_id, AiAcpTokenOperation::Remove, operation, cx)
-    }
-
-    fn start_acp_token_operation(
-        &mut self,
-        agent_id: String,
-        operation_kind: AiAcpTokenOperation,
-        operation: impl std::future::Future<Output = bool> + 'static,
-        cx: &mut Context<Self>,
-    ) -> bool {
-        if self.acp_token_operation_tasks.contains_key(&agent_id) {
-            return false;
-        }
-
-        // Retain one task per agent so hiding settings cannot discard a
-        // user-requested keychain operation or its typed completion.
-        let operation_agent_id = agent_id.clone();
-        let operation_task = cx.spawn(async move |entity, cx| {
-            let succeeded = operation.await;
-            let _ = entity.update(cx, |entity, cx| {
-                entity.acp_token_operation_tasks.remove(&operation_agent_id);
-                let intent = match (operation_kind, succeeded) {
-                    (AiAcpTokenOperation::Store, true) => AiCredentialIntent::AcpTokenStored {
-                        agent_id: operation_agent_id,
-                    },
-                    (AiAcpTokenOperation::Remove, true) => AiCredentialIntent::AcpTokenRemoved {
-                        agent_id: operation_agent_id,
-                    },
-                    (AiAcpTokenOperation::Store, false) => {
-                        AiCredentialIntent::Failed(AiCredentialFailure::SaveAcpToken)
-                    }
-                    (AiAcpTokenOperation::Remove, false) => {
-                        AiCredentialIntent::Failed(AiCredentialFailure::RemoveAcpToken)
-                    }
-                };
-                entity.credential_intents.push_back(intent);
-                cx.emit(AiWorkspaceEvent::CredentialOperationReady);
-                cx.notify();
-            });
-        });
-        self.acp_token_operation_tasks
-            .insert(agent_id, operation_task);
-        true
     }
 
     pub(in crate::workspace) fn mcp_dialog_is_open(&self) -> bool {
@@ -2800,17 +2729,15 @@ impl AiWorkspaceEntity {
                         .await
                         {
                             Ok(response) => {
-                                let auth_required = !response.auth_methods.is_empty();
                                 AiAcpAgentProbeResult {
-                                    runtime_state: if auth_required {
-                                        oxideterm_settings::AcpAgentRuntimeState::AuthRequired
-                                    } else {
-                                        oxideterm_settings::AcpAgentRuntimeState::Ready
-                                    },
-                                    auth_status: if auth_required {
-                                        oxideterm_settings::AcpAgentAuthStatus::Required
-                                    } else {
+                                    // Initialize advertises available auth methods; it does
+                                    // not prove that the current process still needs auth.
+                                    // Only an AuthRequired protocol error can establish that.
+                                    runtime_state: oxideterm_settings::AcpAgentRuntimeState::Ready,
+                                    auth_status: if response.auth_methods.is_empty() {
                                         oxideterm_settings::AcpAgentAuthStatus::NotRequired
+                                    } else {
+                                        oxideterm_settings::AcpAgentAuthStatus::Unknown
                                     },
                                     last_error_kind: None,
                                 }
@@ -3215,6 +3142,15 @@ impl AiWorkspaceEntity {
         (self.chat_stream_generation, self.chat_stream_tx.clone())
     }
 
+    pub(in crate::workspace) fn enqueue_chat_stream_delivery(
+        &self,
+        delivery: AiStreamDelivery,
+    ) -> bool {
+        // External runtime entities use the same bounded, generation-guarded
+        // delivery path without placing their ownership inside this entity.
+        self.chat_stream_tx.send(delivery).is_ok()
+    }
+
     pub(in crate::workspace) fn set_chat_stream_task(
         &mut self,
         generation: u64,
@@ -3282,9 +3218,43 @@ impl AiWorkspaceEntity {
         true
     }
 
+    pub(in crate::workspace) fn register_acp_permission_choice(
+        &mut self,
+        generation: u64,
+        tool_call_id: String,
+        sender: tokio::sync::oneshot::Sender<Option<String>>,
+    ) -> bool {
+        if generation != self.chat_stream_generation {
+            let _ = sender.send(None);
+            return false;
+        }
+        if let Some(stale_sender) = self
+            .pending_acp_permission_choices
+            .insert(tool_call_id, sender)
+        {
+            let _ = stale_sender.send(None);
+        }
+        true
+    }
+
+    pub(in crate::workspace) fn resolve_acp_permission_choice(
+        &mut self,
+        tool_call_id: &str,
+        option_id: Option<String>,
+    ) -> bool {
+        let Some(sender) = self.pending_acp_permission_choices.remove(tool_call_id) else {
+            return false;
+        };
+        let _ = sender.send(option_id);
+        true
+    }
+
     fn reject_all_tool_approvals(&mut self) {
         for (_, sender) in self.pending_tool_approvals.drain() {
             let _ = sender.send(false);
+        }
+        for (_, sender) in self.pending_acp_permission_choices.drain() {
+            let _ = sender.send(None);
         }
     }
 
@@ -3387,10 +3357,6 @@ impl AiWorkspaceEntity {
 
     pub(in crate::workspace) fn mcp_registry(&self) -> &oxideterm_ai::McpRegistry {
         &self.mcp_registry
-    }
-
-    pub(in crate::workspace) fn acp_runtime_registry(&self) -> &oxideterm_ai::AcpRuntimeRegistry {
-        &self.acp_runtime_registry
     }
 
     pub(in crate::workspace) fn take_chat_stream_deliveries(
@@ -4170,6 +4136,7 @@ pub(super) struct AiChatWorkspaceState {
     pub(super) overlay_window_bounds_subscription: Option<Subscription>,
     pub(super) message_list_state: ListState,
     pub(super) message_list_cache: RefCell<VirtualListSignatureCache>,
+    pub(super) message_signature_cache: RefCell<AiChatMessageSignatureCache>,
     pub(super) markdown_cache: RefCell<AiMarkdownDocumentCache>,
     pub(super) context_token_cache: RefCell<AiContextTokenBreakdownCache>,
     pub(super) conversation_list_open: bool,
@@ -4235,6 +4202,7 @@ impl AiChatWorkspaceState {
                 ai_chat_virtual_list_spec(),
             ),
             message_list_cache: RefCell::new(VirtualListSignatureCache::default()),
+            message_signature_cache: RefCell::new(AiChatMessageSignatureCache::default()),
             markdown_cache: RefCell::new(AiMarkdownDocumentCache::default()),
             context_token_cache: RefCell::new(AiContextTokenBreakdownCache::default()),
             conversation_list_open: false,
@@ -4666,50 +4634,6 @@ mod entity_tests {
                     .contains("provider-test")
             );
             assert_eq!(entity.provider_key_operation_tasks.len(), 1);
-        });
-    }
-
-    #[gpui::test]
-    fn acp_token_draft_and_operation_are_entity_owned(cx: &mut TestAppContext) {
-        let entity = cx.new(|cx| {
-            AiWorkspaceEntity::new(test_runtime(), oxideterm_ai::AiProviderKeyStore::new(), cx)
-        });
-        let input = SettingsInput::AiAcpAgentAuthToken(2);
-        let draft_allocation = entity.update(cx, |entity, cx| {
-            assert!(entity.focus_settings_input(input, cx));
-            assert!(entity.replace_settings_input(input, None, "test-token", cx));
-            entity
-                .settings_input_value(input)
-                .expect("ACP token draft")
-                .as_ptr()
-        });
-        let token = entity
-            .update(cx, |entity, _cx| entity.take_acp_auth_token(input))
-            .expect("moved ACP token");
-        assert_eq!(token.as_ptr(), draft_allocation);
-
-        entity.update(cx, |entity, cx| {
-            assert!(entity.start_acp_token_operation(
-                "agent-test".to_string(),
-                AiAcpTokenOperation::Store,
-                std::future::ready(true),
-                cx,
-            ));
-            assert!(entity.acp_token_operation_tasks.contains_key("agent-test"));
-        });
-        cx.run_until_parked();
-
-        entity.update(cx, |entity, _cx| {
-            assert!(!entity.acp_token_operation_tasks.contains_key("agent-test"));
-            let intent = entity
-                .take_credential_intents()
-                .pop_front()
-                .expect("ACP completion intent");
-            assert!(matches!(
-                intent,
-                AiCredentialIntent::AcpTokenStored { agent_id }
-                    if agent_id == "agent-test"
-            ));
         });
     }
 
