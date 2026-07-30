@@ -2550,7 +2550,7 @@ fn snapshot_text_from_rows(rows: &[TerminalRow]) -> String {
         .join("\n")
 }
 
-pub(super) fn privilege_prompt_text_from_snapshot(snapshot: &TerminalSnapshot) -> String {
+fn privilege_prompt_text_from_snapshot(snapshot: &TerminalSnapshot) -> String {
     let Some(cursor_row) = snapshot.lines.get(snapshot.cursor_row) else {
         return snapshot_text_from_rows(&snapshot.lines);
     };

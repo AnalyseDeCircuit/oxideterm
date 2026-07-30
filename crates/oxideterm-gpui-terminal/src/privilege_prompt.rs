@@ -821,21 +821,36 @@ fn recent_non_empty_lines(text: &str) -> Vec<String> {
 }
 
 fn normalize_terminal_line(line: &str) -> String {
-    // Visible terminal snapshots should already be plain text, but stripping
-    // CSI escapes here keeps prompt detection resilient if a future renderer
-    // passes through raw decorated prompt fragments.
+    // Output observation receives the decoded PTY stream before terminal
+    // controls are rendered. Strip CSI styling and OSC shell-integration
+    // metadata so prompt matching sees the same text as the terminal grid.
     let mut output = String::with_capacity(line.len());
     let mut chars = line.chars().peekable();
     while let Some(ch) = chars.next() {
         if ch == '\r' {
             continue;
         }
-        if ch == '\x1b' && chars.peek() == Some(&'[') {
-            let _ = chars.next();
-            for control in chars.by_ref() {
-                if ('@'..='~').contains(&control) {
-                    break;
+        if ch == '\x1b' {
+            match chars.next() {
+                Some('[') => {
+                    for control in chars.by_ref() {
+                        if ('@'..='~').contains(&control) {
+                            break;
+                        }
+                    }
                 }
+                Some(']') => {
+                    while let Some(control) = chars.next() {
+                        if control == '\x07' {
+                            break;
+                        }
+                        if control == '\x1b' && chars.peek() == Some(&'\\') {
+                            let _ = chars.next();
+                            break;
+                        }
+                    }
+                }
+                Some(_) | None => {}
             }
             continue;
         }
@@ -1492,6 +1507,37 @@ mod tests {
                 retry_count: 0,
             })
         );
+    }
+
+    #[test]
+    fn tracker_classifies_first_password_prompt_after_shell_integration_osc() {
+        let start = Instant::now();
+        for output_chunks in [
+            &["\x1b]633;C\x07Password:"][..],
+            &["\x1b]633;C\x1b\\Password:"][..],
+            &["\x1b]633;C", "\x07Password:"][..],
+        ] {
+            let mut tracker = PrivilegePromptTracker::default();
+            assert_eq!(
+                tracker.observe_user_input_bytes(b"sudo vim\r", start),
+                PrivilegeInputObservation::Normal
+            );
+            for output in output_chunks {
+                tracker.observe_output_text(output, start + Duration::from_millis(40));
+            }
+
+            assert_eq!(
+                tracker.snapshot(start + Duration::from_millis(40)),
+                Some(PrivilegePromptSnapshot {
+                    prompt: PrivilegePromptMatch::Sudo {
+                        username: None,
+                        prompt_text: "Password:".to_string(),
+                    },
+                    confidence: PrivilegePromptConfidence::CommandContext,
+                    retry_count: 0,
+                })
+            );
+        }
     }
 
     #[test]

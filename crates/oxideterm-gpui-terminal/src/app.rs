@@ -243,20 +243,6 @@ fn terminal_poll_interval(
     IDLE_TERMINAL_POLL_INTERVAL
 }
 
-// Local PTY output-event enablement crosses an event-loop boundary, so the
-// first prompt can reach the terminal grid before decoded output is enabled.
-fn privilege_prompt_screen_fallback_needed(
-    terminal_changed: bool,
-    output_observation_required: bool,
-    decoded_output_event_received: bool,
-    mode: TermMode,
-) -> bool {
-    terminal_changed
-        && output_observation_required
-        && !decoded_output_event_received
-        && !mode.contains(TermMode::ALT_SCREEN)
-}
-
 fn viewport_needs_live_output_restore(
     display_offset: usize,
     scroll_remainder_px: Pixels,
@@ -1708,15 +1694,12 @@ impl TerminalPane {
     fn tick(&mut self, cx: &mut Context<Self>) {
         let now = Instant::now();
         let budget = self.next_drain_budget();
-        let (report, events, mode, decoded_output_event_received) = {
+        let (report, events, mode) = {
             let mut terminal = self.terminal.lock();
             let report = terminal.read_pending_with_budget(budget);
             let events = terminal.take_events();
             let mode = terminal.mode();
-            let decoded_output_event_received = events
-                .iter()
-                .any(|event| matches!(event, TerminalEvent::Output(_)));
-            (report, events, mode, decoded_output_event_received)
+            (report, events, mode)
         };
         self.last_drain_budget_exhausted = report.budget_exhausted;
         if report.changed {
@@ -1731,24 +1714,6 @@ impl TerminalPane {
         let mut event_effect = TerminalEventEffect::default();
         for event in events {
             event_effect.combine(self.handle_terminal_event(event, cx));
-        }
-        if privilege_prompt_screen_fallback_needed(
-            report.changed,
-            self.privilege_prompt_tracker
-                .requires_output_observation(now),
-            decoded_output_event_received,
-            mode,
-        ) {
-            // This bounded fallback exists only when the backend changed the
-            // screen without delivering decoded output. Keep the derived text
-            // zeroizing and feed only the live cursor input block.
-            let snapshot = self.terminal.lock().snapshot();
-            let prompt_text =
-                Zeroizing::new(interactions::privilege_prompt_text_from_snapshot(&snapshot));
-            let previous_state_generation = self.privilege_prompt_tracker.state_generation();
-            self.privilege_prompt_tracker
-                .observe_output_text(&prompt_text, now);
-            self.finish_privilege_prompt_tracker_update(previous_state_generation, cx);
         }
 
         let cleared_command_mark_selection = self.clear_command_mark_selection_for_tui_mode(mode);
@@ -2834,40 +2799,6 @@ mod tests {
             ),
             DRAIN_BOOST_POLL_INTERVAL
         );
-    }
-
-    #[test]
-    fn privilege_prompt_uses_screen_fallback_only_when_output_event_is_missing() {
-        assert!(privilege_prompt_screen_fallback_needed(
-            true,
-            true,
-            false,
-            TermMode::empty(),
-        ));
-        assert!(!privilege_prompt_screen_fallback_needed(
-            true,
-            true,
-            true,
-            TermMode::empty(),
-        ));
-        assert!(!privilege_prompt_screen_fallback_needed(
-            true,
-            true,
-            false,
-            TermMode::ALT_SCREEN,
-        ));
-        assert!(!privilege_prompt_screen_fallback_needed(
-            false,
-            true,
-            false,
-            TermMode::empty(),
-        ));
-        assert!(!privilege_prompt_screen_fallback_needed(
-            true,
-            false,
-            false,
-            TermMode::empty(),
-        ));
     }
 
     #[test]
