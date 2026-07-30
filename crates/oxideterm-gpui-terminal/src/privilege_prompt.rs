@@ -4,6 +4,7 @@ use zeroize::Zeroizing;
 const MAX_PROMPT_TAIL_CHARS: usize = 4_096;
 const MAX_TRACKED_INPUT_CHARS: usize = 512;
 const PRIVILEGE_COMMAND_CONTEXT_TTL: Duration = Duration::from_secs(15);
+const OPAQUE_COMMAND_OBSERVATION_TTL: Duration = Duration::from_secs(5);
 const PRIVILEGE_PROMPT_VISIBLE_TTL: Duration = Duration::from_secs(300);
 const PRIVILEGE_PROMPT_FILLED_TTL: Duration = Duration::from_secs(8);
 const PRIVILEGE_PROMPT_DEBUG_ENV: &str = "OXIDETERM_PRIVILEGE_DEBUG";
@@ -62,6 +63,9 @@ pub struct PrivilegePromptSnapshot {
 #[derive(Clone, Debug)]
 enum PrivilegePromptTrackerState {
     Idle,
+    OpaqueCommandSubmission {
+        observed_at: Instant,
+    },
     CommandCandidate {
         command_id: u64,
         context: PrivilegeCommandContext,
@@ -108,6 +112,7 @@ fn privilege_prompt_match_name(prompt: &PrivilegePromptMatch) -> &'static str {
 fn privilege_prompt_tracker_state_name(state: &PrivilegePromptTrackerState) -> &'static str {
     match state {
         PrivilegePromptTrackerState::Idle => "idle",
+        PrivilegePromptTrackerState::OpaqueCommandSubmission { .. } => "opaque-command-submission",
         PrivilegePromptTrackerState::CommandCandidate { .. } => "command-candidate",
         PrivilegePromptTrackerState::PromptVisible { .. } => "prompt-visible",
         PrivilegePromptTrackerState::Filled { .. } => "filled",
@@ -118,6 +123,7 @@ fn privilege_prompt_tracker_state_name(state: &PrivilegePromptTrackerState) -> &
 #[derive(Clone)]
 pub struct PrivilegePromptTracker {
     input_line: Zeroizing<String>,
+    input_line_opaque: bool,
     output_tail: Zeroizing<String>,
     next_command_id: u64,
     state: PrivilegePromptTrackerState,
@@ -128,6 +134,7 @@ impl Default for PrivilegePromptTracker {
     fn default() -> Self {
         Self {
             input_line: Zeroizing::new(String::new()),
+            input_line_opaque: false,
             output_tail: Zeroizing::new(String::new()),
             next_command_id: 1,
             state: PrivilegePromptTrackerState::Idle,
@@ -148,6 +155,9 @@ impl PrivilegePromptTracker {
 
     pub(crate) fn next_expiry_deadline(&self) -> Option<Instant> {
         match &self.state {
+            PrivilegePromptTrackerState::OpaqueCommandSubmission { observed_at } => {
+                observed_at.checked_add(OPAQUE_COMMAND_OBSERVATION_TTL)
+            }
             PrivilegePromptTrackerState::CommandCandidate { observed_at, .. } => {
                 observed_at.checked_add(PRIVILEGE_COMMAND_CONTEXT_TTL)
             }
@@ -188,8 +198,9 @@ impl PrivilegePromptTracker {
         if bytes.is_empty() {
             return PrivilegeInputObservation::Normal;
         }
-        let trackable_bytes = trackable_privilege_input_bytes(bytes);
-        let input_bytes = trackable_bytes.as_slice();
+        let normalized_input = normalize_privilege_input_bytes(bytes);
+        let input_bytes = normalized_input.bytes.as_slice();
+        self.input_line_opaque |= normalized_input.invalidates_reconstruction;
 
         if self.prompt_is_waiting_for_secret(now) {
             if input_bytes
@@ -208,6 +219,7 @@ impl PrivilegePromptTracker {
                 self.mark_manual_secret_entry(now);
             }
             self.input_line.clear();
+            self.input_line_opaque = false;
             return PrivilegeInputObservation::SecretEntry;
         }
 
@@ -220,6 +232,9 @@ impl PrivilegePromptTracker {
                 }
                 0x15 => {
                     self.input_line.clear();
+                    // Ctrl+U clears the remote line too, restoring a reliable
+                    // frontend reconstruction after history navigation.
+                    self.input_line_opaque = false;
                 }
                 0x17 => {
                     self.trim_last_input_word();
@@ -231,7 +246,11 @@ impl PrivilegePromptTracker {
                     }
                     self.input_line.push(char::from(byte));
                 }
-                _ => {}
+                _ => {
+                    // Completion, history search, and other line-editor
+                    // controls can replace text without exposing the result.
+                    self.input_line_opaque = true;
+                }
             }
         }
 
@@ -312,6 +331,30 @@ impl PrivilegePromptTracker {
         }
         self.commit_command_line(line, now);
         self.input_line.clear();
+        self.input_line_opaque = false;
+    }
+
+    pub(crate) fn observe_reconstructed_submitted_command(&mut self, command: &str, now: Instant) {
+        let line = command.trim();
+        if line.is_empty() {
+            return;
+        }
+        if matches!(
+            self.state,
+            PrivilegePromptTrackerState::OpaqueCommandSubmission { .. }
+        ) && detect_privilege_command(line).is_none()
+        {
+            // A shell-owned history edit can leave a lossy frontend tracker
+            // with escape-sequence fragments. Such a reconstruction may prove
+            // sudo/su context, but it cannot disprove the opaque submission.
+            log_privilege_prompt_tracker(format_args!(
+                "tracker input: non-privilege reconstruction ignored during opaque submission"
+            ));
+            self.input_line.clear();
+            self.input_line_opaque = false;
+            return;
+        }
+        self.observe_submitted_command(line, now);
     }
 
     pub fn mark_secret_filled(&mut self, now: Instant) {
@@ -348,6 +391,7 @@ impl PrivilegePromptTracker {
             self.advance_state_generation();
         };
         self.input_line.clear();
+        self.input_line_opaque = false;
     }
 
     pub fn mark_confirmed_secret_filled(
@@ -383,6 +427,7 @@ impl PrivilegePromptTracker {
         };
         self.output_tail.clear();
         self.input_line.clear();
+        self.input_line_opaque = false;
         self.advance_state_generation();
     }
 
@@ -423,8 +468,27 @@ impl PrivilegePromptTracker {
 
     fn commit_input_line(&mut self, now: Instant) {
         let line = Zeroizing::new(self.input_line.trim().to_string());
-        self.commit_command_line(&line, now);
+        if self.input_line_opaque || line.is_empty() {
+            self.arm_opaque_command_submission(now);
+        } else {
+            self.commit_command_line(&line, now);
+        }
         self.input_line.clear();
+        self.input_line_opaque = false;
+    }
+
+    fn arm_opaque_command_submission(&mut self, now: Instant) {
+        if !matches!(self.state, PrivilegePromptTrackerState::Idle) {
+            return;
+        }
+        // Shell history and remote line editors can submit text that never
+        // crossed the frontend input cache. Observe decoded output briefly so
+        // the first prompt is not lost before the screen snapshot catches up.
+        self.state = PrivilegePromptTrackerState::OpaqueCommandSubmission { observed_at: now };
+        self.advance_state_generation();
+        log_privilege_prompt_tracker(format_args!(
+            "tracker input: opaque command submission armed"
+        ));
     }
 
     fn commit_command_line(&mut self, line: &str, now: Instant) {
@@ -628,6 +692,7 @@ impl PrivilegePromptTracker {
         let previous_state = privilege_prompt_tracker_state_name(&self.state);
         let had_input = !self.input_line.is_empty();
         self.input_line.clear();
+        self.input_line_opaque = false;
         self.state = PrivilegePromptTrackerState::Idle;
         self.advance_state_generation();
         log_privilege_prompt_tracker(format_args!(
@@ -637,26 +702,36 @@ impl PrivilegePromptTracker {
     }
 }
 
-fn trackable_privilege_input_bytes(bytes: &[u8]) -> Vec<u8> {
+struct NormalizedPrivilegeInput {
+    bytes: Zeroizing<Vec<u8>>,
+    invalidates_reconstruction: bool,
+}
+
+fn normalize_privilege_input_bytes(bytes: &[u8]) -> NormalizedPrivilegeInput {
     // Terminal input may arrive through protocol escape sequences instead of
     // IME text commits. Keep only the user text/control bytes that affect the
-    // privilege command context so CSI wrappers cannot poison `sudo` parsing.
-    let mut output = Vec::with_capacity(bytes.len());
+    // privilege command context. Track editor-owned sequences separately so
+    // their unseen line mutations cannot be mistaken for reliable text.
+    let mut output = Zeroizing::new(Vec::with_capacity(bytes.len()));
+    let mut invalidates_reconstruction = false;
     let mut index = 0;
     while index < bytes.len() {
         match bytes[index] {
             b'\x1b' if bytes.get(index + 1) == Some(&b'[') => {
                 let Some((parameters, final_byte, next_index)) = parse_csi_sequence(bytes, index)
                 else {
-                    index += 1;
-                    continue;
+                    invalidates_reconstruction = true;
+                    break;
                 };
                 if let Some(byte) = trackable_byte_from_csi_u(parameters, final_byte) {
                     output.push(byte);
+                } else if !is_bracketed_paste_boundary(parameters, final_byte) {
+                    invalidates_reconstruction = true;
                 }
                 index = next_index;
             }
             b'\x1b' => {
+                invalidates_reconstruction = true;
                 index += 1;
             }
             byte => {
@@ -665,7 +740,14 @@ fn trackable_privilege_input_bytes(bytes: &[u8]) -> Vec<u8> {
             }
         }
     }
-    output
+    NormalizedPrivilegeInput {
+        bytes: output,
+        invalidates_reconstruction,
+    }
+}
+
+fn is_bracketed_paste_boundary(parameters: &[u8], final_byte: u8) -> bool {
+    final_byte == b'~' && matches!(parameters, b"200" | b"201")
 }
 
 fn parse_csi_sequence(bytes: &[u8], start_index: usize) -> Option<(&[u8], u8, usize)> {
@@ -1485,6 +1567,119 @@ mod tests {
                 confidence: PrivilegePromptConfidence::CommandContext,
                 retry_count: 0,
             })
+        );
+    }
+
+    #[test]
+    fn tracker_observes_first_prompt_after_opaque_shell_history_submission() {
+        let start = Instant::now();
+        let mut tracker = PrivilegePromptTracker::default();
+
+        // Shell history edits the remote line without exposing its command
+        // text to the frontend. Previously typed text must not make that
+        // reconstructed command look reliable after history navigation.
+        tracker.observe_user_input_bytes(b"echo stale", start);
+        tracker.observe_user_input_bytes(b"\x1b[A", start);
+        tracker.observe_user_input_bytes(b"\r", start + Duration::from_millis(10));
+        tracker.observe_reconstructed_submitted_command("OA", start + Duration::from_millis(10));
+
+        assert!(
+            tracker.requires_output_observation(start + Duration::from_millis(10)),
+            "lossy command reconstruction must not disable decoded output events"
+        );
+
+        tracker.observe_output_text("Password:", start + Duration::from_millis(40));
+
+        assert_eq!(
+            tracker.snapshot(start + Duration::from_millis(40)),
+            Some(PrivilegePromptSnapshot {
+                prompt: PrivilegePromptMatch::GenericPassword {
+                    prompt_text: "Password:".to_string(),
+                },
+                confidence: PrivilegePromptConfidence::GenericPrompt,
+                retry_count: 0,
+            })
+        );
+    }
+
+    #[test]
+    fn tracker_trusts_shell_integration_after_opaque_submission() {
+        let start = Instant::now();
+        let mut tracker = PrivilegePromptTracker::default();
+
+        tracker.observe_user_input_bytes(b"\x1b[A\r", start);
+        tracker.observe_submitted_command("printf ok", start);
+
+        assert!(
+            !tracker.requires_output_observation(start),
+            "shell integration must replace the opaque fallback with its known command"
+        );
+    }
+
+    #[test]
+    fn tracker_upgrades_opaque_submission_from_reconstructed_sudo() {
+        let start = Instant::now();
+        let mut tracker = PrivilegePromptTracker::default();
+
+        tracker.observe_user_input_bytes(b"\x1b[A\r", start);
+        tracker.observe_reconstructed_submitted_command("sudo true", start);
+        tracker.observe_output_text("Password:", start + Duration::from_millis(10));
+
+        assert_eq!(
+            tracker.snapshot(start + Duration::from_millis(10)),
+            Some(PrivilegePromptSnapshot {
+                prompt: PrivilegePromptMatch::Sudo {
+                    username: None,
+                    prompt_text: "Password:".to_string(),
+                },
+                confidence: PrivilegePromptConfidence::CommandContext,
+                retry_count: 0,
+            })
+        );
+    }
+
+    #[test]
+    fn tracker_bounds_opaque_history_output_observation() {
+        let start = Instant::now();
+        let mut tracker = PrivilegePromptTracker::default();
+
+        tracker.observe_user_input_bytes(b"\x1b[A", start);
+        assert!(
+            !tracker.requires_output_observation(start),
+            "history navigation alone must not enable decoded output events"
+        );
+
+        tracker.observe_user_input_bytes(b"\r", start + Duration::from_millis(10));
+        assert!(tracker.requires_output_observation(start + Duration::from_millis(10)));
+        assert!(!tracker.requires_output_observation(
+            start + Duration::from_millis(10) + OPAQUE_COMMAND_OBSERVATION_TTL
+        ));
+    }
+
+    #[test]
+    fn tracker_keeps_reconstructed_non_privilege_commands_out_of_output_observation() {
+        let start = Instant::now();
+        let mut tracker = PrivilegePromptTracker::default();
+
+        tracker.observe_user_input_bytes(b"printf ok\r", start);
+
+        assert!(
+            !tracker.requires_output_observation(start),
+            "known non-privilege commands must preserve the output fast path"
+        );
+    }
+
+    #[test]
+    fn tracker_ctrl_u_restores_reliable_input_after_history_navigation() {
+        let start = Instant::now();
+        let mut tracker = PrivilegePromptTracker::default();
+
+        tracker.observe_user_input_bytes(b"\x1b[A", start);
+        tracker.observe_user_input_bytes(b"\x15printf ok\r", start);
+
+        assert!(
+            !tracker.requires_output_observation(start),
+            "clearing the remote line must restore reconstructed input behavior"
         );
     }
 

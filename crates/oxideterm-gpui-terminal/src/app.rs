@@ -436,6 +436,11 @@ fn command_mark_ui_available(enabled: bool, mode: TermMode) -> bool {
     enabled && !mode.contains(TermMode::ALT_SCREEN) && !mode.intersects(TermMode::MOUSE_MODE)
 }
 
+fn privilege_prompt_input_tracking_available(mode: TermMode) -> bool {
+    // Full-screen applications own input; their navigation is not shell history.
+    !mode.contains(TermMode::ALT_SCREEN)
+}
+
 include!("app_recording.rs");
 include!("app_command_marks.rs");
 include!("app_modem.rs");
@@ -2316,7 +2321,7 @@ impl TerminalPane {
         // prompts such as macOS `Password:` do not depend on viewport parsing.
         let previous_state_generation = self.privilege_prompt_tracker.state_generation();
         self.privilege_prompt_tracker
-            .observe_submitted_command(&command, now);
+            .observe_reconstructed_submitted_command(&command, now);
         self.finish_privilege_prompt_tracker_update(previous_state_generation, cx);
         self.observe_current_directory_submitted_command(&command, cx);
         if self.shell_integration_status.detected
@@ -2338,6 +2343,9 @@ impl TerminalPane {
         now: Instant,
         cx: &mut Context<Self>,
     ) -> PrivilegeInputObservation {
+        if !privilege_prompt_input_tracking_available(self.terminal.lock().mode()) {
+            return PrivilegeInputObservation::Normal;
+        }
         let previous_state_generation = self.privilege_prompt_tracker.state_generation();
         let observation = self
             .privilege_prompt_tracker
@@ -2722,6 +2730,14 @@ mod tests {
         assert!(!command_mark_ui_available(
             true,
             TermMode::MOUSE_REPORT_CLICK
+        ));
+    }
+
+    #[test]
+    fn privilege_prompt_input_tracking_ignores_full_screen_application_keys() {
+        assert!(privilege_prompt_input_tracking_available(TermMode::empty()));
+        assert!(!privilege_prompt_input_tracking_available(
+            TermMode::ALT_SCREEN
         ));
     }
 
