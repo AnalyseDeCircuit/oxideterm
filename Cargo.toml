@@ -21,7 +21,6 @@ members = [
   "crates/oxideterm-plugin-wasm-runtime",
   "crates/oxideterm-ai",
   "crates/oxideterm-acp-adapter",
-  "crates/oxideterm-acp-host-tools",
   "crates/oxideterm-editor-core",
   "crates/oxideterm-editor-syntax",
   "crates/oxideterm-gpui-editor",
@@ -106,7 +105,7 @@ accesskit_macos = "0.26.0"
 accesskit_unix = "0.22.0"
 accesskit_windows = "0.32.1"
 alacritty_terminal = "0.26.0"
-agent-client-protocol = "=0.14.0"
+agent-client-protocol = { version = "=2.0.0", features = ["unstable"] }
 anyhow = "1.0"
 ashpd = { version = "0.13", default-features = false, features = ["async-io", "notification", "open_uri", "file_chooser", "settings", "trash"] }
 async-channel = "2.5.0"

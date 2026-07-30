@@ -14,15 +14,18 @@ use std::{
 use agent_client_protocol::{
     Agent, Client, ConnectionTo, Dispatch, Stdio,
     schema::{
-        AgentCapabilities, CancelNotification, CloseSessionRequest, CloseSessionResponse,
-        ConfigOptionUpdate, ContentBlock, ContentChunk, DeleteSessionRequest,
-        DeleteSessionResponse, Implementation, InitializeRequest, InitializeResponse,
-        NewSessionRequest, NewSessionResponse, PermissionOption, PermissionOptionKind,
-        PromptRequest, PromptResponse, ProtocolVersion, RequestPermissionOutcome,
-        RequestPermissionRequest, SessionConfigOption, SessionConfigOptionCategory,
-        SessionConfigSelectOption, SessionId, SessionNotification, SessionUpdate,
-        SetSessionConfigOptionRequest, SetSessionConfigOptionResponse, StopReason, ToolCall,
-        ToolCallStatus, ToolCallUpdate, ToolCallUpdateFields, ToolKind,
+        ProtocolVersion,
+        v1::{
+            AgentCapabilities, CancelNotification, CloseSessionRequest, CloseSessionResponse,
+            ConfigOptionUpdate, ContentBlock, ContentChunk, DeleteSessionRequest,
+            DeleteSessionResponse, Implementation, InitializeRequest, InitializeResponse,
+            NewSessionRequest, NewSessionResponse, PermissionOption, PermissionOptionKind,
+            PromptRequest, PromptResponse, RequestPermissionOutcome, RequestPermissionRequest,
+            SessionConfigOption, SessionConfigOptionCategory, SessionConfigSelectOption, SessionId,
+            SessionNotification, SessionUpdate, SetSessionConfigOptionRequest,
+            SetSessionConfigOptionResponse, StopReason, ToolCall, ToolCallStatus, ToolCallUpdate,
+            ToolCallUpdateFields, ToolKind,
+        },
     },
 };
 use clap::{Parser, ValueEnum};
@@ -275,12 +278,12 @@ async fn run_adapter(cli: Cli) -> agent_client_protocol::Result<()> {
             agent_client_protocol::on_receive_notification!(),
         )
         .on_receive_dispatch(
-            async move |message: Dispatch, connection: ConnectionTo<Client>| {
-                message.respond_with_error(
+            async move |message: Dispatch, _connection: ConnectionTo<Client>| match message {
+                Dispatch::Request(_, responder) => responder.respond_with_error(
                     agent_client_protocol::Error::method_not_found()
                         .data("oxideterm-acp-adapter unsupported ACP method"),
-                    connection,
-                )
+                ),
+                Dispatch::Notification(_) | Dispatch::Response(_, _) => Ok(()),
             },
             agent_client_protocol::on_receive_dispatch!(),
         )
@@ -392,7 +395,15 @@ fn set_session_config_option(
     let session = sessions
         .get_mut(&request.session_id)
         .ok_or_else(|| agent_client_protocol::util::internal_error("ACP session was not found"))?;
-    let value_id = request.value.to_string();
+    let value_id = request
+        .value
+        .as_value_id()
+        .map(ToString::to_string)
+        .ok_or_else(|| {
+            agent_client_protocol::util::internal_error(
+                "ACP model config requires a value-id selection",
+            )
+        })?;
     if !session.models.iter().any(|model| model.id == value_id) {
         if !session.accepts_unlisted_models {
             return Err(agent_client_protocol::util::internal_error(

@@ -170,7 +170,6 @@ pub enum SettingsInput {
     AiAcpAgentCwd(usize),
     AiAcpAgentArgs(usize),
     AiAcpAgentEnv(usize),
-    AiAcpAgentAuthToken(usize),
     AiSystemPrompt,
     AiMemoryContent,
     AiToolUseMaxRounds,
@@ -522,7 +521,6 @@ impl SettingsInput {
             Self::AiAcpAgentCwd(index) => 21_502 + index as u64 * 6,
             Self::AiAcpAgentArgs(index) => 21_503 + index as u64 * 6,
             Self::AiAcpAgentEnv(index) => 21_504 + index as u64 * 6,
-            Self::AiAcpAgentAuthToken(index) => 21_505 + index as u64 * 6,
             Self::AiSystemPrompt => 22_000,
             Self::AiMemoryContent => 22_001,
             Self::AiToolUseMaxRounds => 22_002,
@@ -586,7 +584,6 @@ impl SettingsInput {
         matches!(
             self,
             Self::AiProviderApiKey(_)
-                | Self::AiAcpAgentAuthToken(_)
                 | Self::AiMcpAuthToken
                 | Self::CloudSyncToken
                 | Self::CloudSyncGitToken
@@ -676,7 +673,6 @@ mod tests {
     #[test]
     fn secret_inputs_are_categorized_in_the_model_layer() {
         assert!(SettingsInput::AiProviderApiKey(0).is_secret());
-        assert!(SettingsInput::AiAcpAgentAuthToken(0).is_secret());
         assert!(SettingsInput::CloudSyncSecretAccessKey.is_secret());
         assert!(SettingsInput::PortableCurrentPassword.is_secret());
         assert!(SettingsInput::PortableNewPassword.is_secret());

@@ -65,8 +65,9 @@ pub enum AiAutocompleteKind {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct AiAutocompleteCandidate {
     pub kind: AiAutocompleteKind,
-    pub name: &'static str,
-    pub description_key: &'static str,
+    pub name: String,
+    pub description: String,
+    pub description_is_i18n_key: bool,
     pub accepts_value: bool,
 }
 
@@ -753,8 +754,9 @@ pub fn ai_autocomplete_candidates(text: &str, cursor_pos: usize) -> Vec<AiAutoco
             .filter(|command| command.name.starts_with(&partial))
             .map(|command| AiAutocompleteCandidate {
                 kind: AiAutocompleteKind::Slash,
-                name: command.name,
-                description_key: command.description_key,
+                name: command.name.to_string(),
+                description: command.description_key.to_string(),
+                description_is_i18n_key: true,
                 accepts_value: false,
             })
             .collect(),
@@ -763,8 +765,9 @@ pub fn ai_autocomplete_candidates(text: &str, cursor_pos: usize) -> Vec<AiAutoco
             .filter(|participant| participant.name.starts_with(&partial))
             .map(|participant| AiAutocompleteCandidate {
                 kind: AiAutocompleteKind::Participant,
-                name: participant.name,
-                description_key: participant.description_key,
+                name: participant.name.to_string(),
+                description: participant.description_key.to_string(),
+                description_is_i18n_key: true,
                 accepts_value: false,
             })
             .collect(),
@@ -773,8 +776,9 @@ pub fn ai_autocomplete_candidates(text: &str, cursor_pos: usize) -> Vec<AiAutoco
             .filter(|reference| reference.reference_type.starts_with(&partial))
             .map(|reference| AiAutocompleteCandidate {
                 kind: AiAutocompleteKind::Reference,
-                name: reference.reference_type,
-                description_key: reference.description_key,
+                name: reference.reference_type.to_string(),
+                description: reference.description_key.to_string(),
+                description_is_i18n_key: true,
                 accepts_value: reference.accepts_value,
             })
             .collect(),

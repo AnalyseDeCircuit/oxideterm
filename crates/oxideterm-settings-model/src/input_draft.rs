@@ -198,7 +198,6 @@ pub fn persisted_settings_input_value(
                     .join("\n")
             })
             .unwrap_or_default(),
-        SettingsInput::AiAcpAgentAuthToken(_) => String::new(),
         SettingsInput::AiSystemPrompt => settings.ai.custom_system_prompt.clone(),
         SettingsInput::AiMemoryContent => settings.ai.memory.content.clone(),
         SettingsInput::AiToolUseMaxRounds => settings
@@ -473,7 +472,6 @@ pub fn apply_persisted_settings_input_draft(
             }
             SettingsInputDraftApply::Applied
         }
-        SettingsInput::AiAcpAgentAuthToken(_) => SettingsInputDraftApply::Unhandled,
         SettingsInput::AiSystemPrompt => {
             settings.ai.custom_system_prompt = draft.to_string();
             SettingsInputDraftApply::Applied

@@ -2,47 +2,58 @@ use std::{
     collections::{BTreeMap, HashMap},
     env, fmt,
     path::{Path, PathBuf},
-    sync::{
-        Arc,
-        atomic::{AtomicU64, Ordering},
-    },
+    sync::atomic::{AtomicU64, Ordering},
 };
 
 use agent_client_protocol::{
-    AcpAgent, ActiveSession, Agent, Client, ConnectTo, ConnectionTo, Lines, Role, SessionMessage,
+    AcpAgent, AcpAgentConfig, Agent, Client, ConnectTo, ConnectionTo, Lines, Role,
     schema::{
-        AgentCapabilities, AuthMethod, AuthMethodId, AuthenticateRequest, AuthenticateResponse,
-        CancelNotification, ClientCapabilities, CloseSessionRequest, CloseSessionResponse,
-        CreateTerminalRequest, CreateTerminalResponse, DeleteSessionRequest, DeleteSessionResponse,
-        EnvVariable, FileSystemCapabilities, Implementation, InitializeRequest, InitializeResponse,
-        KillTerminalRequest, KillTerminalResponse, ListSessionsRequest, ListSessionsResponse,
-        LoadSessionRequest, LoadSessionResponse, LogoutRequest, LogoutResponse, McpServer,
-        McpServerStdio, NewSessionRequest, NewSessionResponse, PermissionOptionKind,
-        ProtocolVersion, ReadTextFileRequest, ReadTextFileResponse, ReleaseTerminalRequest,
-        ReleaseTerminalResponse, RequestPermissionOutcome, RequestPermissionRequest,
-        RequestPermissionResponse, ResumeSessionRequest, ResumeSessionResponse,
-        SelectedPermissionOutcome, SessionConfigId, SessionConfigKind, SessionConfigOption,
-        SessionConfigOptionCategory, SessionConfigSelectOptions, SessionConfigValueId, SessionId,
-        SessionModeId, SessionNotification, SessionUpdate, SetSessionConfigOptionRequest,
-        SetSessionConfigOptionResponse, SetSessionModeRequest, SetSessionModeResponse,
-        TerminalExitStatus, TerminalOutputRequest, TerminalOutputResponse, ToolCall,
-        ToolCallStatus, ToolCallUpdate, WaitForTerminalExitRequest, WaitForTerminalExitResponse,
-        WriteTextFileRequest, WriteTextFileResponse,
+        ProtocolVersion,
+        v1::{
+            AgentCapabilities, AuthMethod, AuthMethodId, AuthenticateRequest, AuthenticateResponse,
+            CancelNotification, ClientCapabilities, CloseSessionRequest, CloseSessionResponse,
+            CompleteElicitationNotification, ContentBlock, CreateElicitationRequest,
+            CreateElicitationResponse, CreateTerminalRequest, CreateTerminalResponse,
+            DeleteSessionRequest, DeleteSessionResponse, ElicitationScope, EnvVariable,
+            FileSystemCapabilities, Implementation, InitializeRequest, InitializeResponse,
+            KillTerminalRequest, KillTerminalResponse, ListSessionsRequest, ListSessionsResponse,
+            LoadSessionRequest, LoadSessionResponse, LogoutRequest, LogoutResponse, McpServer,
+            Meta, NewSessionRequest, NewSessionResponse, PermissionOptionKind, PromptRequest,
+            PromptResponse, ReadTextFileRequest, ReadTextFileResponse, ReleaseTerminalRequest,
+            ReleaseTerminalResponse, RequestPermissionOutcome, RequestPermissionRequest,
+            RequestPermissionResponse, ResumeSessionRequest, ResumeSessionResponse,
+            SelectedPermissionOutcome, SessionConfigId, SessionConfigKind, SessionConfigOption,
+            SessionConfigOptionCategory, SessionConfigSelectOptions, SessionConfigValueId,
+            SessionId, SessionModeId, SessionModeState, SessionNotification, SessionUpdate,
+            SetSessionConfigOptionRequest, SetSessionConfigOptionResponse, SetSessionModeRequest,
+            SetSessionModeResponse, TerminalExitStatus, TerminalOutputRequest,
+            TerminalOutputResponse, ToolCall, ToolCallContent, ToolCallStatus, ToolCallUpdate,
+            WaitForTerminalExitRequest, WaitForTerminalExitResponse, WriteTextFileRequest,
+            WriteTextFileResponse,
+        },
     },
-    util::MatchDispatch,
 };
 use futures::{AsyncBufReadExt, AsyncWriteExt, FutureExt, StreamExt, pin_mut};
 use thiserror::Error;
-use tokio::{
-    io::AsyncReadExt as _,
-    sync::{Mutex, mpsc, oneshot, watch},
-};
+use tokio::sync::{mpsc, oneshot};
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
 #[cfg(windows)]
 use async_process::windows::CommandExt as AsyncProcessCommandExt;
 
 use crate::types::AiStreamEvent;
+
+mod handoff;
+mod runtime;
+pub use handoff::{
+    AcpConversationHandoffCursor, AiMessageBackendKind, AiMessageBackendProvenance,
+    acp_conversation_handoff_cursor, ai_message_backend_provenance, build_acp_conversation_handoff,
+    store_ai_message_backend_provenance,
+};
+pub use runtime::{
+    AcpConnectionError, AcpConnectionManager, AcpConnectionState, AcpManagedEvent,
+    AcpManagedPromptRequest,
+};
 
 #[cfg(windows)]
 const ACP_BACKGROUND_PROCESS_CREATE_NO_WINDOW: u32 = 0x08000000;
@@ -87,9 +98,27 @@ pub struct AcpHostCapabilityPolicy {
     pub terminal: bool,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum AcpAuthMethodKind {
+    Agent,
+    Environment,
+    Terminal,
+    Unsupported,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AcpAuthMethod {
+    pub method_id: String,
+    pub name: String,
+    pub description: Option<String>,
+    pub kind: AcpAuthMethodKind,
+    pub environment_variables: Vec<String>,
+}
+
 #[derive(Debug)]
 pub struct AcpStdioLauncher {
     config: AcpLaunchConfig,
+    diagnostic_tx: Option<mpsc::Sender<String>>,
 }
 
 #[derive(Debug)]
@@ -100,13 +129,17 @@ pub struct AcpAgentRuntime {
 
 #[derive(Debug)]
 pub struct AcpActiveSession {
-    inner: ActiveSession<'static, Agent>,
+    connection: ConnectionTo<Agent>,
+    session_id: SessionId,
+    modes: Option<SessionModeState>,
+    meta: Option<Meta>,
     config_options: Vec<SessionConfigOption>,
 }
 
 pub type AcpClientEventSender = mpsc::UnboundedSender<AcpClientEvent>;
 type AcpClientResponseSender<T> = oneshot::Sender<Result<T, agent_client_protocol::Error>>;
 static ACP_TERMINAL_COUNTER: AtomicU64 = AtomicU64::new(1);
+static ACP_FILE_REVIEW_COUNTER: AtomicU64 = AtomicU64::new(1);
 
 pub enum AcpClientEvent {
     SessionUpdate(SessionNotification),
@@ -114,6 +147,11 @@ pub enum AcpClientEvent {
         request: RequestPermissionRequest,
         response_tx: AcpClientResponseSender<RequestPermissionResponse>,
     },
+    CreateElicitation {
+        request: CreateElicitationRequest,
+        response_tx: AcpClientResponseSender<CreateElicitationResponse>,
+    },
+    CompleteElicitation(CompleteElicitationNotification),
     ReadTextFile {
         request: ReadTextFileRequest,
         response_tx: AcpClientResponseSender<ReadTextFileResponse>,
@@ -144,11 +182,152 @@ pub enum AcpClientEvent {
     },
 }
 
+pub struct AcpTerminalCreateSpec {
+    pub command: String,
+    pub args: Vec<String>,
+    pub env: HashMap<String, String>,
+    pub cwd: Option<PathBuf>,
+    pub output_byte_limit: Option<usize>,
+}
+
+impl fmt::Debug for AcpTerminalCreateSpec {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("AcpTerminalCreateSpec")
+            .field("command", &"<redacted>")
+            .field("args", &format_args!("<redacted:{}>", self.args.len()))
+            .field("env", &format_args!("<redacted:{}>", self.env.len()))
+            .field("cwd", &self.cwd)
+            .field("output_byte_limit", &self.output_byte_limit)
+            .finish()
+    }
+}
+
+impl Drop for AcpTerminalCreateSpec {
+    fn drop(&mut self) {
+        // Agent-provided commands and environment values may contain secrets.
+        self.command.zeroize();
+        self.args.zeroize();
+        for value in self.env.values_mut() {
+            value.zeroize();
+        }
+        self.env.clear();
+    }
+}
+
+impl AcpClientEvent {
+    /// Returns the owning session without exposing ACP wire DTOs to the app crate.
+    pub fn session_id(&self) -> Option<String> {
+        let session_id = match self {
+            Self::SessionUpdate(notification) => Some(&notification.session_id),
+            Self::RequestPermission { request, .. } => Some(&request.session_id),
+            Self::CreateElicitation { request, .. } => match request.scope() {
+                ElicitationScope::Session(scope) => Some(&scope.session_id),
+                ElicitationScope::Request(_) => None,
+                _ => None,
+            },
+            Self::CompleteElicitation(_) => None,
+            Self::ReadTextFile { request, .. } => Some(&request.session_id),
+            Self::WriteTextFile { request, .. } => Some(&request.session_id),
+            Self::CreateTerminal { request, .. } => Some(&request.session_id),
+            Self::TerminalOutput { request, .. } => Some(&request.session_id),
+            Self::ReleaseTerminal { request, .. } => Some(&request.session_id),
+            Self::WaitForTerminalExit { request, .. } => Some(&request.session_id),
+            Self::KillTerminal { request, .. } => Some(&request.session_id),
+        };
+        session_id.map(ToString::to_string)
+    }
+}
+
+pub fn acp_terminal_create_spec(
+    request: &CreateTerminalRequest,
+) -> Result<AcpTerminalCreateSpec, agent_client_protocol::Error> {
+    if request.command.trim().is_empty() {
+        return Err(agent_client_protocol::util::internal_error(
+            "ACP terminal/create requires a command",
+        ));
+    }
+    Ok(AcpTerminalCreateSpec {
+        command: request.command.trim().to_string(),
+        args: request.args.clone(),
+        env: request
+            .env
+            .iter()
+            .map(|variable| (variable.name.clone(), variable.value.clone()))
+            .collect(),
+        cwd: request.cwd.clone(),
+        output_byte_limit: request
+            .output_byte_limit
+            .and_then(|limit| usize::try_from(limit).ok()),
+    })
+}
+
+pub async fn resolve_acp_terminal_working_directory(
+    workspace_root: &Path,
+    requested_cwd: Option<&Path>,
+) -> Result<PathBuf, agent_client_protocol::Error> {
+    resolve_acp_terminal_cwd(workspace_root, requested_cwd).await
+}
+
+pub fn next_acp_terminal_id() -> String {
+    format!(
+        "acp-terminal-{}",
+        ACP_TERMINAL_COUNTER.fetch_add(1, Ordering::Relaxed)
+    )
+}
+
+pub fn acp_terminal_created_response(terminal_id: &str) -> CreateTerminalResponse {
+    CreateTerminalResponse::new(terminal_id.to_string())
+}
+
+pub fn acp_terminal_output_request_id(request: &TerminalOutputRequest) -> String {
+    request.terminal_id.to_string()
+}
+
+pub fn acp_release_terminal_request_id(request: &ReleaseTerminalRequest) -> String {
+    request.terminal_id.to_string()
+}
+
+pub fn acp_wait_terminal_request_id(request: &WaitForTerminalExitRequest) -> String {
+    request.terminal_id.to_string()
+}
+
+pub fn acp_kill_terminal_request_id(request: &KillTerminalRequest) -> String {
+    request.terminal_id.to_string()
+}
+
+pub fn acp_terminal_output_response(
+    mut output: String,
+    output_byte_limit: Option<usize>,
+    exit_code: Option<i32>,
+) -> TerminalOutputResponse {
+    let truncated = truncate_acp_terminal_text(&mut output, output_byte_limit);
+    TerminalOutputResponse::new(output, truncated)
+        .exit_status(exit_code.map(|exit_code| acp_terminal_exit_status_from_code(Some(exit_code))))
+}
+
+pub fn acp_release_terminal_response() -> ReleaseTerminalResponse {
+    ReleaseTerminalResponse::new()
+}
+
+pub fn acp_kill_terminal_response() -> KillTerminalResponse {
+    KillTerminalResponse::new()
+}
+
+pub fn acp_wait_terminal_response(exit_code: Option<i32>) -> WaitForTerminalExitResponse {
+    WaitForTerminalExitResponse::new(acp_terminal_exit_status_from_code(exit_code))
+}
+
+pub fn acp_terminal_not_found_error() -> agent_client_protocol::Error {
+    acp_terminal_not_found()
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct AcpPromptSessionOutcome {
     pub session_id: String,
     pub session_metadata: Option<serde_json::Value>,
     pub session_config_options: Vec<AcpSessionConfigOption>,
+    pub session_modes: Option<AcpSessionModeState>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
@@ -175,6 +354,21 @@ pub struct AcpSessionConfigSelection {
     pub value_id: String,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AcpSessionMode {
+    pub mode_id: String,
+    pub name: String,
+    pub description: Option<String>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AcpSessionModeState {
+    pub current_mode_id: String,
+    pub available_modes: Vec<AcpSessionMode>,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum AcpLaunchModelHint {
     Automatic,
@@ -185,27 +379,43 @@ pub enum AcpLaunchModelHint {
 pub fn acp_session_config_options(options: &[SessionConfigOption]) -> Vec<AcpSessionConfigOption> {
     options
         .iter()
-        .filter_map(|option| {
-            let SessionConfigKind::Select(select) = &option.kind else {
-                return None;
-            };
-            let choices = match &select.options {
-                SessionConfigSelectOptions::Ungrouped(options) => options
-                    .iter()
-                    .map(|choice| AcpSessionConfigChoice {
-                        value_id: choice.value.to_string(),
-                        label: choice.name.clone(),
-                    })
-                    .collect(),
-                SessionConfigSelectOptions::Grouped(groups) => groups
-                    .iter()
-                    .flat_map(|group| group.options.iter())
-                    .map(|choice| AcpSessionConfigChoice {
-                        value_id: choice.value.to_string(),
-                        label: choice.name.clone(),
-                    })
-                    .collect(),
-                _ => Vec::new(),
+        .map(|option| {
+            let (current_value_id, choices) = match &option.kind {
+                SessionConfigKind::Select(select) => {
+                    let choices = match &select.options {
+                        SessionConfigSelectOptions::Ungrouped(options) => options
+                            .iter()
+                            .map(|choice| AcpSessionConfigChoice {
+                                value_id: choice.value.to_string(),
+                                label: choice.name.clone(),
+                            })
+                            .collect(),
+                        SessionConfigSelectOptions::Grouped(groups) => groups
+                            .iter()
+                            .flat_map(|group| group.options.iter())
+                            .map(|choice| AcpSessionConfigChoice {
+                                value_id: choice.value.to_string(),
+                                label: choice.name.clone(),
+                            })
+                            .collect(),
+                        _ => Vec::new(),
+                    };
+                    (select.current_value.to_string(), choices)
+                }
+                SessionConfigKind::Boolean(boolean) => (
+                    boolean.current_value.to_string(),
+                    vec![
+                        AcpSessionConfigChoice {
+                            value_id: "true".to_string(),
+                            label: "true".to_string(),
+                        },
+                        AcpSessionConfigChoice {
+                            value_id: "false".to_string(),
+                            label: "false".to_string(),
+                        },
+                    ],
+                ),
+                _ => (String::new(), Vec::new()),
             };
             let category = option.category.as_ref().map(|category| match category {
                 SessionConfigOptionCategory::Mode => "mode".to_string(),
@@ -214,15 +424,30 @@ pub fn acp_session_config_options(options: &[SessionConfigOption]) -> Vec<AcpSes
                 SessionConfigOptionCategory::Other(category) => category.clone(),
                 _ => "unknown".to_string(),
             });
-            Some(AcpSessionConfigOption {
+            AcpSessionConfigOption {
                 config_id: option.id.to_string(),
                 name: option.name.clone(),
                 category,
-                current_value_id: select.current_value.to_string(),
+                current_value_id,
                 choices,
-            })
+            }
         })
         .collect()
+}
+
+pub fn acp_session_mode_state(modes: Option<&SessionModeState>) -> Option<AcpSessionModeState> {
+    modes.map(|modes| AcpSessionModeState {
+        current_mode_id: modes.current_mode_id.to_string(),
+        available_modes: modes
+            .available_modes
+            .iter()
+            .map(|mode| AcpSessionMode {
+                mode_id: mode.id.to_string(),
+                name: mode.name.clone(),
+                description: mode.description.clone(),
+            })
+            .collect(),
+    })
 }
 
 /// Returns the first model selector because ACP defines option order as priority.
@@ -312,6 +537,61 @@ pub struct AcpPermissionRequestProjection {
     pub options: Vec<AcpPermissionOptionProjection>,
 }
 
+/// Stable application-facing projection of ACP session state notifications.
+///
+/// Keeping protocol DTOs behind this boundary prevents the GPUI crate from
+/// becoming coupled to the wire schema while still preserving every stateful
+/// update needed to restore and render an ACP thread.
+#[derive(Clone, Debug, PartialEq)]
+pub enum AcpSessionStateUpdate {
+    ConfigOptions(Vec<AcpSessionConfigOption>),
+    CurrentMode(String),
+    AvailableCommands(Vec<serde_json::Value>),
+    Plan(serde_json::Value),
+    SessionInfo {
+        title: Option<String>,
+        details: serde_json::Value,
+    },
+    Usage(serde_json::Value),
+}
+
+pub fn acp_session_state_update(
+    notification: &SessionNotification,
+) -> Option<AcpSessionStateUpdate> {
+    match &notification.update {
+        SessionUpdate::ConfigOptionUpdate(update) => Some(AcpSessionStateUpdate::ConfigOptions(
+            acp_session_config_options(&update.config_options),
+        )),
+        SessionUpdate::CurrentModeUpdate(update) => Some(AcpSessionStateUpdate::CurrentMode(
+            update.current_mode_id.to_string(),
+        )),
+        SessionUpdate::AvailableCommandsUpdate(update) => {
+            Some(AcpSessionStateUpdate::AvailableCommands(
+                update
+                    .available_commands
+                    .iter()
+                    .filter_map(|command| serde_json::to_value(command).ok())
+                    .collect(),
+            ))
+        }
+        SessionUpdate::Plan(plan) => serde_json::to_value(plan)
+            .ok()
+            .map(AcpSessionStateUpdate::Plan),
+        SessionUpdate::SessionInfoUpdate(update) => {
+            let details = serde_json::to_value(update).ok()?;
+            let title = details
+                .get("title")
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_string);
+            Some(AcpSessionStateUpdate::SessionInfo { title, details })
+        }
+        SessionUpdate::UsageUpdate(usage) => serde_json::to_value(usage)
+            .ok()
+            .map(AcpSessionStateUpdate::Usage),
+        _ => None,
+    }
+}
+
 pub fn acp_session_notification_to_ai_stream_events(
     notification: &SessionNotification,
 ) -> Vec<AiStreamEvent> {
@@ -382,12 +662,35 @@ pub fn acp_permission_response_for_decision(
         .unwrap_or_else(acp_permission_cancelled_response)
 }
 
+pub fn acp_permission_response_for_option(
+    request: &RequestPermissionRequest,
+    selected_option_id: Option<&str>,
+) -> RequestPermissionResponse {
+    let selected = selected_option_id.and_then(|selected_option_id| {
+        request
+            .options
+            .iter()
+            .find(|option| option.option_id.to_string() == selected_option_id)
+    });
+    selected
+        .map(|option| {
+            RequestPermissionResponse::new(RequestPermissionOutcome::Selected(
+                SelectedPermissionOutcome::new(option.option_id.clone()),
+            ))
+        })
+        .unwrap_or_else(acp_permission_cancelled_response)
+}
+
 pub fn acp_permission_cancelled_response() -> RequestPermissionResponse {
     RequestPermissionResponse::new(RequestPermissionOutcome::Cancelled)
 }
 
 pub fn acp_method_not_found(method: &'static str) -> agent_client_protocol::Error {
     agent_client_protocol::Error::method_not_found().data(method)
+}
+
+pub fn acp_internal_error(message: &'static str) -> agent_client_protocol::Error {
+    agent_client_protocol::util::internal_error(message)
 }
 
 pub async fn resolve_acp_read_text_file_request(
@@ -433,6 +736,32 @@ pub async fn resolve_acp_write_text_file_request(
     Ok(WriteTextFileResponse::new())
 }
 
+pub async fn resolve_acp_write_text_file_target(
+    workspace_root: &Path,
+    requested_path: &Path,
+) -> Result<PathBuf, agent_client_protocol::Error> {
+    resolve_acp_write_target_path(workspace_root, requested_path).await
+}
+
+pub async fn write_acp_validated_text_file(
+    target_path: &Path,
+    content: &str,
+) -> Result<WriteTextFileResponse, agent_client_protocol::Error> {
+    // The validated target is produced by resolve_acp_write_text_file_target;
+    // keeping this operation separate lets the UI review content before write.
+    tokio::fs::write(target_path, content.as_bytes())
+        .await
+        .map_err(agent_client_protocol::Error::into_internal_error)?;
+    Ok(WriteTextFileResponse::new())
+}
+
+pub fn next_acp_file_review_id() -> String {
+    format!(
+        "acp-file-write-{}",
+        ACP_FILE_REVIEW_COUNTER.fetch_add(1, Ordering::Relaxed)
+    )
+}
+
 pub fn acp_client_event_to_ai_stream_events(event: AcpClientEvent) -> Vec<AiStreamEvent> {
     match event {
         AcpClientEvent::SessionUpdate(notification) => {
@@ -442,6 +771,11 @@ pub fn acp_client_event_to_ai_stream_events(event: AcpClientEvent) -> Vec<AiStre
             reject_acp_client_request(response_tx, "session/request_permission");
             Vec::new()
         }
+        AcpClientEvent::CreateElicitation { response_tx, .. } => {
+            reject_acp_client_request(response_tx, "elicitation/create");
+            Vec::new()
+        }
+        AcpClientEvent::CompleteElicitation(_) => Vec::new(),
         AcpClientEvent::ReadTextFile { response_tx, .. } => {
             reject_acp_client_request(response_tx, "fs/read_text_file");
             Vec::new()
@@ -470,173 +804,6 @@ pub fn acp_client_event_to_ai_stream_events(event: AcpClientEvent) -> Vec<AiStre
             reject_acp_client_request(response_tx, "terminal/kill");
             Vec::new()
         }
-    }
-}
-
-#[derive(Clone, Default)]
-pub struct AcpTerminalRegistry {
-    terminals: Arc<Mutex<HashMap<String, AcpManagedTerminal>>>,
-}
-
-#[derive(Clone)]
-struct AcpManagedTerminal {
-    output: Arc<Mutex<AcpTerminalOutput>>,
-    status_rx: watch::Receiver<Option<TerminalExitStatus>>,
-    control_tx: mpsc::UnboundedSender<AcpTerminalControl>,
-}
-
-#[derive(Default)]
-struct AcpTerminalOutput {
-    content: String,
-    byte_limit: Option<usize>,
-    truncated: bool,
-}
-
-enum AcpTerminalControl {
-    Kill,
-    Release,
-}
-
-impl AcpTerminalRegistry {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    pub async fn create_terminal(
-        &self,
-        workspace_root: &Path,
-        request: &CreateTerminalRequest,
-    ) -> Result<CreateTerminalResponse, agent_client_protocol::Error> {
-        if request.command.trim().is_empty() {
-            return Err(agent_client_protocol::util::internal_error(
-                "ACP terminal/create requires a command",
-            ));
-        }
-        let cwd = resolve_acp_terminal_cwd(workspace_root, request.cwd.as_deref()).await?;
-        let terminal_id = format!(
-            "acp-terminal-{}",
-            ACP_TERMINAL_COUNTER.fetch_add(1, Ordering::Relaxed)
-        );
-        let mut command = tokio::process::Command::new(request.command.trim());
-        configure_acp_tokio_process(&mut command);
-        command.args(&request.args);
-        command.current_dir(cwd);
-        for variable in &request.env {
-            command.env(&variable.name, &variable.value);
-        }
-        command.stdout(std::process::Stdio::piped());
-        command.stderr(std::process::Stdio::piped());
-        let mut child = command
-            .spawn()
-            .map_err(agent_client_protocol::Error::into_internal_error)?;
-        let stdout = child.stdout.take();
-        let stderr = child.stderr.take();
-        let output = Arc::new(Mutex::new(AcpTerminalOutput {
-            content: String::new(),
-            byte_limit: request
-                .output_byte_limit
-                .and_then(|limit| limit.try_into().ok()),
-            truncated: false,
-        }));
-        if let Some(stdout) = stdout {
-            tokio::spawn(read_acp_terminal_output(stdout, output.clone()));
-        }
-        if let Some(stderr) = stderr {
-            tokio::spawn(read_acp_terminal_output(stderr, output.clone()));
-        }
-
-        let (control_tx, mut control_rx) = mpsc::unbounded_channel();
-        let (status_tx, status_rx) = watch::channel(None);
-        tokio::spawn(async move {
-            // The runner owns the child so wait/kill/release cannot race over a
-            // borrowed process handle.
-            let exit_status = tokio::select! {
-                result = child.wait() => result.map(acp_terminal_exit_status),
-                command = control_rx.recv() => {
-                    if matches!(command, Some(AcpTerminalControl::Kill | AcpTerminalControl::Release)) {
-                        let _ = child.kill().await;
-                    }
-                    child.wait().await.map(acp_terminal_exit_status)
-                }
-            };
-            let _ = status_tx.send(Some(
-                exit_status.unwrap_or_else(|_| TerminalExitStatus::new()),
-            ));
-        });
-
-        self.terminals.lock().await.insert(
-            terminal_id.clone(),
-            AcpManagedTerminal {
-                output,
-                status_rx,
-                control_tx,
-            },
-        );
-        Ok(CreateTerminalResponse::new(terminal_id))
-    }
-
-    pub async fn terminal_output(
-        &self,
-        request: &TerminalOutputRequest,
-    ) -> Result<TerminalOutputResponse, agent_client_protocol::Error> {
-        let terminal = self.terminal(&request.terminal_id.to_string()).await?;
-        let output = terminal.output.lock().await;
-        Ok(
-            TerminalOutputResponse::new(output.content.clone(), output.truncated)
-                .exit_status(terminal.status_rx.borrow().clone()),
-        )
-    }
-
-    pub async fn release_terminal(
-        &self,
-        request: &ReleaseTerminalRequest,
-    ) -> Result<ReleaseTerminalResponse, agent_client_protocol::Error> {
-        let terminal = self
-            .terminals
-            .lock()
-            .await
-            .remove(&request.terminal_id.to_string())
-            .ok_or_else(acp_terminal_not_found)?;
-        let _ = terminal.control_tx.send(AcpTerminalControl::Release);
-        Ok(ReleaseTerminalResponse::new())
-    }
-
-    pub async fn wait_for_terminal_exit(
-        &self,
-        request: &WaitForTerminalExitRequest,
-    ) -> Result<WaitForTerminalExitResponse, agent_client_protocol::Error> {
-        let terminal = self.terminal(&request.terminal_id.to_string()).await?;
-        let mut status_rx = terminal.status_rx.clone();
-        loop {
-            if let Some(status) = status_rx.borrow().clone() {
-                return Ok(WaitForTerminalExitResponse::new(status));
-            }
-            status_rx
-                .changed()
-                .await
-                .map_err(agent_client_protocol::Error::into_internal_error)?;
-        }
-    }
-
-    pub async fn kill_terminal(
-        &self,
-        request: &KillTerminalRequest,
-    ) -> Result<KillTerminalResponse, agent_client_protocol::Error> {
-        let terminal = self.terminal(&request.terminal_id.to_string()).await?;
-        let _ = terminal.control_tx.send(AcpTerminalControl::Kill);
-        Ok(KillTerminalResponse::new())
-    }
-
-    async fn terminal(
-        &self,
-        terminal_id: &str,
-    ) -> Result<AcpManagedTerminal, agent_client_protocol::Error> {
-        self.terminals
-            .lock()
-            .await
-            .get(terminal_id)
-            .cloned()
-            .ok_or_else(acp_terminal_not_found)
     }
 }
 
@@ -756,84 +923,28 @@ async fn resolve_acp_terminal_cwd(
     Ok(cwd)
 }
 
-async fn read_acp_terminal_output(
-    mut reader: impl tokio::io::AsyncRead + Unpin,
-    output: Arc<Mutex<AcpTerminalOutput>>,
-) {
-    let mut buffer = [0_u8; 8192];
-    loop {
-        match reader.read(&mut buffer).await {
-            Ok(0) | Err(_) => return,
-            Ok(read) => {
-                let chunk = String::from_utf8_lossy(&buffer[..read]);
-                let mut output = output.lock().await;
-                output.content.push_str(&chunk);
-                truncate_acp_terminal_output(&mut output);
-            }
-        }
-    }
-}
-
-fn truncate_acp_terminal_output(output: &mut AcpTerminalOutput) {
-    let Some(byte_limit) = output.byte_limit else {
-        return;
+fn truncate_acp_terminal_text(content: &mut String, byte_limit: Option<usize>) -> bool {
+    let Some(byte_limit) = byte_limit else {
+        return false;
     };
-    if output.content.len() <= byte_limit {
-        return;
+    if content.len() <= byte_limit {
+        return false;
     }
-    let mut start = output.content.len().saturating_sub(byte_limit);
-    while start < output.content.len() && !output.content.is_char_boundary(start) {
+    let mut start = content.len().saturating_sub(byte_limit);
+    while start < content.len() && !content.is_char_boundary(start) {
         start += 1;
     }
-    output.content = output.content[start..].to_string();
-    output.truncated = true;
+    *content = content[start..].to_string();
+    true
 }
 
-fn acp_terminal_exit_status(status: std::process::ExitStatus) -> TerminalExitStatus {
-    let mut exit_status = TerminalExitStatus::new();
-    if let Some(code) = status.code().and_then(|code| u32::try_from(code).ok()) {
-        exit_status = exit_status.exit_code(Some(code));
-    }
-    #[cfg(unix)]
-    {
-        use std::os::unix::process::ExitStatusExt as _;
-        if let Some(signal) = status.signal() {
-            exit_status = exit_status.signal(Some(signal.to_string()));
-        }
-    }
-    exit_status
+fn acp_terminal_exit_status_from_code(exit_code: Option<i32>) -> TerminalExitStatus {
+    TerminalExitStatus::new()
+        .exit_code(exit_code.and_then(|exit_code| u32::try_from(exit_code).ok()))
 }
 
 fn acp_terminal_not_found() -> agent_client_protocol::Error {
     agent_client_protocol::util::internal_error("ACP terminal id was not found")
-}
-
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
-pub struct AcpRuntimeHandleKey {
-    pub conversation_id: String,
-    pub generation_id: String,
-    pub session_id: String,
-}
-
-#[derive(Clone, Debug, Default)]
-pub struct AcpRuntimeRegistry {
-    handles: Arc<parking_lot::Mutex<HashMap<AcpRuntimeHandleKey, AcpRuntimeHandle>>>,
-}
-
-#[derive(Clone, Debug)]
-struct AcpRuntimeHandle {
-    command_tx: mpsc::UnboundedSender<AcpRuntimeCommand>,
-}
-
-#[derive(Clone, Debug)]
-enum AcpRuntimeCommand {
-    CancelSession,
-}
-
-#[derive(Debug)]
-pub struct AcpRegisteredRuntimeHandle {
-    key: AcpRuntimeHandleKey,
-    registry: AcpRuntimeRegistry,
 }
 
 struct AcpChildGuard(async_process::Child);
@@ -854,6 +965,12 @@ impl Drop for AcpChildGuard {
 impl AcpStdioLauncher {
     pub fn config(&self) -> &AcpLaunchConfig {
         &self.config
+    }
+
+    pub fn with_diagnostic_sender(mut self, diagnostic_tx: mpsc::Sender<String>) -> Self {
+        // Stderr is diagnostics-only and never participates in the ACP wire stream.
+        self.diagnostic_tx = Some(diagnostic_tx);
+        self
     }
 
     fn spawn_process(
@@ -896,19 +1013,6 @@ impl AcpStdioLauncher {
     }
 }
 
-fn configure_acp_tokio_process(command: &mut tokio::process::Command) {
-    #[cfg(windows)]
-    {
-        // ACP managed terminals are protocol-managed background processes, not
-        // visible OxideTerm panes. Keep their captured stdio off the desktop.
-        command.creation_flags(ACP_BACKGROUND_PROCESS_CREATE_NO_WINDOW);
-    }
-    #[cfg(not(windows))]
-    {
-        let _ = command;
-    }
-}
-
 fn configure_acp_async_process(command: &mut async_process::Command) {
     #[cfg(windows)]
     {
@@ -927,13 +1031,21 @@ impl<R: Role> ConnectTo<R> for AcpStdioLauncher {
         self,
         client: impl ConnectTo<R::Counterpart>,
     ) -> Result<(), agent_client_protocol::Error> {
+        let diagnostic_tx = self.diagnostic_tx.clone();
         let (stdin, stdout, stderr, child) = self.spawn_process()?;
         let mut child = AcpChildGuard(child);
         let stderr_future = async move {
             if let Some(stderr) = stderr {
                 let mut lines = futures::io::BufReader::new(stderr).lines();
-                while lines.next().await.is_some() {
-                    // Drain stderr so the child cannot block on a full pipe.
+                while let Some(line) = lines.next().await {
+                    let Ok(line) = line else {
+                        break;
+                    };
+                    if let Some(diagnostic_tx) = diagnostic_tx.as_ref() {
+                        // Diagnostics are best-effort. A noisy agent must not
+                        // grow an unbounded queue behind the GPUI consumer.
+                        let _ = diagnostic_tx.try_send(sanitize_acp_diagnostic_line(&line));
+                    }
                 }
             }
         };
@@ -1014,14 +1126,10 @@ pub fn build_sdk_acp_agent(config: &AcpLaunchConfig) -> Result<AcpAgent, AcpLaun
     }
 
     let command = config.command.trim();
-    let env = acp_env_variables(config)?;
-    let name = acp_agent_name(config);
-    let server = McpServer::Stdio(
-        McpServerStdio::new(name, command)
-            .args(config.args.clone())
-            .env(env),
-    );
-    Ok(AcpAgent::new(server))
+    let sdk_config = AcpAgentConfig::new(command)
+        .args(config.args.clone())
+        .envs(config.env.clone());
+    Ok(AcpAgent::new(sdk_config))
 }
 
 pub fn build_acp_stdio_launcher(
@@ -1029,7 +1137,26 @@ pub fn build_acp_stdio_launcher(
 ) -> Result<AcpStdioLauncher, AcpLaunchConfigError> {
     validate_launch_config(&config)?;
     acp_env_variables(&config)?;
-    Ok(AcpStdioLauncher { config })
+    Ok(AcpStdioLauncher {
+        config,
+        diagnostic_tx: None,
+    })
+}
+
+fn sanitize_acp_diagnostic_line(line: &str) -> String {
+    const MAX_DIAGNOSTIC_BYTES: usize = 2 * 1024;
+
+    let mut line = crate::sanitize_for_persistence(line);
+    if line.len() <= MAX_DIAGNOSTIC_BYTES {
+        return line;
+    }
+    let mut boundary = MAX_DIAGNOSTIC_BYTES;
+    while !line.is_char_boundary(boundary) {
+        boundary = boundary.saturating_sub(1);
+    }
+    line.truncate(boundary);
+    line.push('…');
+    line
 }
 
 pub fn acp_launch_command_available(
@@ -1037,6 +1164,34 @@ pub fn acp_launch_command_available(
 ) -> Result<bool, AcpLaunchConfigError> {
     validate_launch_config(config)?;
     Ok(resolve_acp_command(config.command.trim()).exists())
+}
+
+pub fn acp_auth_methods(methods: &[AuthMethod]) -> Vec<AcpAuthMethod> {
+    methods
+        .iter()
+        .map(|method| {
+            let (kind, environment_variables) = match method {
+                AuthMethod::Agent(_) => (AcpAuthMethodKind::Agent, Vec::new()),
+                AuthMethod::EnvVar(method) => (
+                    AcpAuthMethodKind::Environment,
+                    method
+                        .vars
+                        .iter()
+                        .map(|variable| variable.name.clone())
+                        .collect(),
+                ),
+                AuthMethod::Terminal(_) => (AcpAuthMethodKind::Terminal, Vec::new()),
+                _ => (AcpAuthMethodKind::Unsupported, Vec::new()),
+            };
+            AcpAuthMethod {
+                method_id: method.id().to_string(),
+                name: method.name().to_string(),
+                description: method.description().map(str::to_string),
+                kind,
+                environment_variables,
+            }
+        })
+        .collect()
 }
 
 pub fn build_acp_initialize_request(
@@ -1137,6 +1292,8 @@ pub async fn with_acp_agent_runtime_events<R>(
 ) -> Result<R, agent_client_protocol::Error> {
     let session_update_tx = event_tx.clone();
     let request_permission_tx = event_tx.clone();
+    let create_elicitation_tx = event_tx.clone();
+    let complete_elicitation_tx = event_tx.clone();
     let read_text_file_tx = event_tx.clone();
     let write_text_file_tx = event_tx.clone();
     let create_terminal_tx = event_tx.clone();
@@ -1169,6 +1326,28 @@ pub async fn with_acp_agent_runtime_events<R>(
                 responder.respond_with_result(response)
             },
             agent_client_protocol::on_receive_request!(),
+        )
+        .on_receive_request(
+            async move |request: CreateElicitationRequest, responder, _connection| {
+                let response = forward_client_request(&create_elicitation_tx, |response_tx| {
+                    AcpClientEvent::CreateElicitation {
+                        request,
+                        response_tx,
+                    }
+                })
+                .await;
+                responder.respond_with_result(response)
+            },
+            agent_client_protocol::on_receive_request!(),
+        )
+        .on_receive_notification(
+            async move |notification: CompleteElicitationNotification, _connection| {
+                send_client_event(
+                    &complete_elicitation_tx,
+                    AcpClientEvent::CompleteElicitation(notification),
+                )
+            },
+            agent_client_protocol::on_receive_notification!(),
         )
         .on_receive_request(
             async move |request: ReadTextFileRequest, responder, _connection| {
@@ -1276,98 +1455,6 @@ pub async fn with_acp_agent_runtime_events<R>(
         .await
 }
 
-#[allow(clippy::too_many_arguments)]
-pub async fn run_acp_prompt_session_events(
-    transport: impl ConnectTo<Client> + 'static,
-    client_version: String,
-    policy: AcpHostCapabilityPolicy,
-    session_cwd: PathBuf,
-    existing_session_id: Option<String>,
-    config_selection: Option<AcpSessionConfigSelection>,
-    mcp_servers: Vec<McpServer>,
-    prompt: String,
-    event_tx: AcpClientEventSender,
-    registry: AcpRuntimeRegistry,
-    conversation_id: String,
-    generation_id: String,
-) -> Result<AcpPromptSessionOutcome, agent_client_protocol::Error> {
-    let latest_config_options = Arc::new(Mutex::new(None));
-    let relay_config_options = Arc::clone(&latest_config_options);
-    let (runtime_event_tx, mut runtime_event_rx) = mpsc::unbounded_channel();
-    let event_relay = tokio::spawn(async move {
-        while let Some(event) = runtime_event_rx.recv().await {
-            if let AcpClientEvent::SessionUpdate(notification) = &event
-                && let SessionUpdate::ConfigOptionUpdate(update) = &notification.update
-            {
-                // The notification is a complete snapshot and may race the prompt response.
-                *relay_config_options.lock().await = Some((
-                    notification.session_id.to_string(),
-                    acp_session_config_options(&update.config_options),
-                ));
-            }
-            if event_tx.send(event).is_err() {
-                break;
-            }
-        }
-    });
-    let session_event_tx = runtime_event_tx.clone();
-    let result = with_acp_agent_runtime_events(
-        transport,
-        client_version,
-        policy,
-        runtime_event_tx,
-        async move |runtime| {
-            let mut session = runtime
-                .start_or_resume_session(existing_session_id, session_cwd, mcp_servers)
-                .await?;
-            let session_id = session.session_id().to_string();
-            let session_metadata = session.meta().clone().map(serde_json::Value::Object);
-            if let Some(selection) =
-                config_selection.filter(|selection| session.supports_config_selection(selection))
-            {
-                let response = runtime
-                    .set_session_config_option(
-                        session_id.clone(),
-                        selection.config_id,
-                        selection.value_id,
-                    )
-                    .await?;
-                // The response is an authoritative full snapshot, not a patch.
-                session.replace_config_options(response.config_options);
-            }
-            let _registered_handle = runtime.register_session_handle(
-                registry,
-                AcpRuntimeHandleKey {
-                    conversation_id,
-                    generation_id,
-                    session_id: session_id.clone(),
-                },
-            )?;
-            session.send_prompt(prompt)?;
-            forward_acp_session_updates_to_client_events(&mut session, &session_event_tx).await?;
-            let session_config_options = acp_session_config_options(session.config_options());
-            Ok(AcpPromptSessionOutcome {
-                session_id,
-                session_metadata,
-                session_config_options,
-            })
-        },
-    )
-    .await;
-    let _ = event_relay.await;
-    match result {
-        Ok(mut outcome) => {
-            if let Some((session_id, options)) = latest_config_options.lock().await.take()
-                && session_id == outcome.session_id
-            {
-                outcome.session_config_options = options;
-            }
-            Ok(outcome)
-        }
-        Err(error) => Err(error),
-    }
-}
-
 impl AcpAgentRuntime {
     pub fn initialize_response(&self) -> &InitializeResponse {
         &self.initialize_response
@@ -1437,37 +1524,37 @@ impl AcpAgentRuntime {
                 .resume
                 .is_some()
             {
-                if let Ok(response) = self
+                let response = self
                     .resume_session(
-                        ResumeSessionRequest::new(session_id.clone(), cwd.clone())
-                            .mcp_servers(mcp_servers.clone()),
+                        ResumeSessionRequest::new(session_id.clone(), cwd).mcp_servers(mcp_servers),
                     )
-                    .await
-                {
-                    return self.attach_existing_session(
-                        session_id,
-                        response.modes,
-                        response.config_options,
-                        response.meta,
-                    );
-                }
+                    .await?;
+                return self.attach_existing_session(
+                    session_id,
+                    response.modes,
+                    response.config_options,
+                    response.meta,
+                );
             }
             if self.initialize_response.agent_capabilities.load_session {
-                if let Ok(response) = self
+                let response = self
                     .load_session(
-                        LoadSessionRequest::new(session_id.clone(), cwd.clone())
-                            .mcp_servers(mcp_servers.clone()),
+                        LoadSessionRequest::new(session_id.clone(), cwd).mcp_servers(mcp_servers),
                     )
-                    .await
-                {
-                    return self.attach_existing_session(
-                        session_id,
-                        response.modes,
-                        response.config_options,
-                        response.meta,
-                    );
-                }
+                    .await?;
+                return self.attach_existing_session(
+                    session_id,
+                    response.modes,
+                    response.config_options,
+                    response.meta,
+                );
             }
+
+            // A saved ACP thread must never be replaced silently. Starting a
+            // new session here would make the visible transcript and the
+            // agent-owned history disagree while presenting one conversation.
+            return Err(agent_client_protocol::Error::method_not_found()
+                .data("agent cannot restore the saved ACP session"));
         }
 
         self.start_session(NewSessionRequest::new(cwd).mcp_servers(mcp_servers))
@@ -1477,13 +1564,10 @@ impl AcpAgentRuntime {
     fn attach_existing_session(
         &self,
         session_id: String,
-        modes: Option<agent_client_protocol::schema::SessionModeState>,
+        modes: Option<SessionModeState>,
         config_options: Option<Vec<SessionConfigOption>>,
-        meta: Option<agent_client_protocol::schema::Meta>,
+        meta: Option<Meta>,
     ) -> Result<AcpActiveSession, agent_client_protocol::Error> {
-        // The SDK's active update handler is attached through
-        // NewSessionResponse; load/resume responses carry the same state
-        // except for the id, which comes from persisted conversation metadata.
         let response = NewSessionResponse::new(session_id)
             .modes(modes)
             .config_options(config_options)
@@ -1496,9 +1580,11 @@ impl AcpAgentRuntime {
         response: NewSessionResponse,
     ) -> Result<AcpActiveSession, agent_client_protocol::Error> {
         let config_options = response.config_options.clone().unwrap_or_default();
-        let inner = self.connection.attach_session(response, Vec::new())?;
         Ok(AcpActiveSession {
-            inner,
+            connection: self.connection.clone(),
+            session_id: response.session_id,
+            modes: response.modes,
+            meta: response.meta,
             config_options,
         })
     }
@@ -1587,31 +1673,6 @@ impl AcpAgentRuntime {
             .send_notification(CancelNotification::new(session_id))
     }
 
-    pub fn register_session_handle(
-        &self,
-        registry: AcpRuntimeRegistry,
-        key: AcpRuntimeHandleKey,
-    ) -> Result<AcpRegisteredRuntimeHandle, agent_client_protocol::Error> {
-        let (command_tx, mut command_rx) = mpsc::unbounded_channel();
-        let connection = self.connection.clone();
-        let session_id = key.session_id.clone();
-        connection.clone().spawn(async move {
-            while let Some(command) = command_rx.recv().await {
-                match command {
-                    AcpRuntimeCommand::CancelSession => {
-                        // Stop uses the SDK connection that owns the session so
-                        // cancellation reaches the right ACP agent process.
-                        connection
-                            .send_notification(CancelNotification::new(session_id.clone()))?;
-                    }
-                }
-            }
-            Ok(())
-        })?;
-        registry.insert_handle(key.clone(), AcpRuntimeHandle { command_tx });
-        Ok(AcpRegisteredRuntimeHandle { key, registry })
-    }
-
     pub async fn set_session_mode(
         &self,
         session_id: impl Into<SessionId>,
@@ -1630,7 +1691,22 @@ impl AcpAgentRuntime {
         config_id: impl Into<SessionConfigId>,
         value: impl Into<SessionConfigValueId>,
     ) -> Result<SetSessionConfigOptionResponse, agent_client_protocol::Error> {
+        let value = value.into();
         // Config options are negotiated per session in NewSessionResponse/ResumeSessionResponse.
+        self.connection
+            .send_request(SetSessionConfigOptionRequest::new(
+                session_id, config_id, value,
+            ))
+            .block_task()
+            .await
+    }
+
+    pub async fn set_session_config_value(
+        &self,
+        session_id: impl Into<SessionId>,
+        config_id: impl Into<SessionConfigId>,
+        value: agent_client_protocol::schema::v1::SessionConfigOptionValue,
+    ) -> Result<SetSessionConfigOptionResponse, agent_client_protocol::Error> {
         self.connection
             .send_request(SetSessionConfigOptionRequest::new(
                 session_id, config_id, value,
@@ -1658,26 +1734,32 @@ impl AcpAgentRuntime {
 
 impl AcpActiveSession {
     pub fn session_id(&self) -> &SessionId {
-        self.inner.session_id()
+        &self.session_id
     }
 
-    pub fn meta(&self) -> &Option<agent_client_protocol::schema::Meta> {
-        self.inner.meta()
+    pub fn modes(&self) -> Option<&SessionModeState> {
+        self.modes.as_ref()
+    }
+
+    pub fn meta(&self) -> &Option<Meta> {
+        &self.meta
     }
 
     pub fn config_options(&self) -> &[SessionConfigOption] {
         &self.config_options
     }
 
-    pub fn send_prompt(
-        &mut self,
+    pub async fn send_prompt(
+        &self,
         prompt: impl ToString,
-    ) -> Result<(), agent_client_protocol::Error> {
-        self.inner.send_prompt(prompt)
-    }
-
-    pub async fn read_update(&mut self) -> Result<SessionMessage, agent_client_protocol::Error> {
-        self.inner.read_update().await
+    ) -> Result<PromptResponse, agent_client_protocol::Error> {
+        self.connection
+            .send_request(PromptRequest::new(
+                self.session_id.clone(),
+                vec![prompt.to_string().into()],
+            ))
+            .block_task()
+            .await
     }
 
     fn replace_config_options(&mut self, options: Vec<SessionConfigOption>) {
@@ -1700,86 +1782,34 @@ impl AcpActiveSession {
                         }),
                         _ => false,
                     },
+                    SessionConfigKind::Boolean(_) => {
+                        matches!(selection.value_id.as_str(), "true" | "false")
+                    }
                     _ => false,
                 }
         })
     }
-}
 
-impl AcpRuntimeHandleKey {
-    pub fn new(
-        conversation_id: impl Into<String>,
-        generation_id: impl Into<String>,
-        session_id: impl Into<String>,
-    ) -> Self {
-        Self {
-            conversation_id: conversation_id.into(),
-            generation_id: generation_id.into(),
-            session_id: session_id.into(),
-        }
-    }
-}
-
-impl AcpRuntimeRegistry {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    pub fn cancel_session(
+    fn config_value_for_selection(
         &self,
-        key: &AcpRuntimeHandleKey,
-    ) -> Result<(), agent_client_protocol::Error> {
-        let handle = self.handles.lock().get(key).cloned();
-        let Some(handle) = handle else {
-            return Ok(());
-        };
-        handle
-            .command_tx
-            .send(AcpRuntimeCommand::CancelSession)
-            .map_err(|_| agent_client_protocol::util::internal_error("ACP runtime handle closed"))
-    }
-
-    pub fn cancel_generation(
-        &self,
-        conversation_id: &str,
-        generation_id: &str,
-    ) -> Result<(), agent_client_protocol::Error> {
-        let handles = self
-            .handles
-            .lock()
+        selection: &AcpSessionConfigSelection,
+    ) -> Option<agent_client_protocol::schema::v1::SessionConfigOptionValue> {
+        self.config_options
             .iter()
-            .filter(|(key, _)| {
-                key.conversation_id == conversation_id && key.generation_id == generation_id
+            .find(|option| option.id.to_string() == selection.config_id)
+            .and_then(|option| match &option.kind {
+                SessionConfigKind::Select(_) => Some(
+                    agent_client_protocol::schema::v1::SessionConfigOptionValue::value_id(
+                        selection.value_id.clone(),
+                    ),
+                ),
+                SessionConfigKind::Boolean(_) => selection
+                    .value_id
+                    .parse::<bool>()
+                    .ok()
+                    .map(agent_client_protocol::schema::v1::SessionConfigOptionValue::boolean),
+                _ => None,
             })
-            .map(|(_, handle)| handle.clone())
-            .collect::<Vec<_>>();
-        for handle in handles {
-            handle
-                .command_tx
-                .send(AcpRuntimeCommand::CancelSession)
-                .map_err(|_| {
-                    agent_client_protocol::util::internal_error("ACP runtime handle closed")
-                })?;
-        }
-        Ok(())
-    }
-
-    pub fn contains(&self, key: &AcpRuntimeHandleKey) -> bool {
-        self.handles.lock().contains_key(key)
-    }
-
-    fn insert_handle(&self, key: AcpRuntimeHandleKey, handle: AcpRuntimeHandle) {
-        self.handles.lock().insert(key, handle);
-    }
-
-    fn remove_handle(&self, key: &AcpRuntimeHandleKey) {
-        self.handles.lock().remove(key);
-    }
-}
-
-impl Drop for AcpRegisteredRuntimeHandle {
-    fn drop(&mut self) {
-        self.registry.remove_handle(&self.key);
     }
 }
 
@@ -1817,35 +1847,9 @@ where
         .map_err(|_| agent_client_protocol::util::internal_error("ACP client response dropped"))?
 }
 
-async fn forward_acp_session_updates_to_client_events(
-    session: &mut AcpActiveSession,
-    event_tx: &AcpClientEventSender,
-) -> Result<(), agent_client_protocol::Error> {
-    loop {
-        match session.read_update().await? {
-            SessionMessage::SessionMessage(dispatch) => {
-                MatchDispatch::new(dispatch)
-                    .if_notification(async |notification: SessionNotification| {
-                        if let SessionUpdate::ConfigOptionUpdate(update) = &notification.update {
-                            // ACP sends full config snapshots, so replace local state atomically.
-                            session.replace_config_options(update.config_options.clone());
-                        }
-                        send_client_event(event_tx, AcpClientEvent::SessionUpdate(notification))
-                    })
-                    .await
-                    .otherwise_ignore()?;
-            }
-            SessionMessage::StopReason(_) => break,
-            // Future SDK message kinds should not break the current turn.
-            _ => {}
-        }
-    }
-    Ok(())
-}
-
-fn text_content(content: &agent_client_protocol::schema::ContentBlock) -> Option<&str> {
+fn text_content(content: &ContentBlock) -> Option<&str> {
     match content {
-        agent_client_protocol::schema::ContentBlock::Text(text) => Some(text.text.as_str()),
+        ContentBlock::Text(text) => Some(text.text.as_str()),
         _ => None,
     }
 }
@@ -1910,7 +1914,7 @@ fn acp_tool_arguments(
     raw_input: Option<&serde_json::Value>,
     raw_output: Option<&serde_json::Value>,
     status: Option<ToolCallStatus>,
-    content: Option<&Vec<agent_client_protocol::schema::ToolCallContent>>,
+    content: Option<&Vec<ToolCallContent>>,
 ) -> String {
     let mut arguments = serde_json::Map::new();
     if let Some(raw_input) = raw_input {
@@ -2028,25 +2032,16 @@ fn acp_env_variables(config: &AcpLaunchConfig) -> Result<Vec<EnvVariable>, AcpLa
     Ok(env)
 }
 
-fn acp_agent_name(config: &AcpLaunchConfig) -> &str {
-    if config.display_name.trim().is_empty() {
-        config.id.trim()
-    } else {
-        config.display_name.trim()
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use agent_client_protocol::schema::{
+    use agent_client_protocol::schema::v1::{
         AgentAuthCapabilities, AuthMethodAgent, CloseSessionResponse, ContentBlock, ContentChunk,
-        CreateTerminalRequest, LogoutCapabilities, LogoutResponse, NewSessionResponse,
-        PermissionOption, PermissionOptionKind, PromptRequest, PromptResponse, ReadTextFileRequest,
-        ReleaseTerminalRequest, RequestPermissionRequest, SessionCapabilities,
-        SessionCloseCapabilities, SessionConfigSelectGroup, SessionConfigSelectOption,
-        SessionResumeCapabilities, StopReason, TerminalOutputRequest, ToolCallUpdate,
-        ToolCallUpdateFields, WaitForTerminalExitRequest, WriteTextFileRequest,
+        LogoutCapabilities, LogoutResponse, NewSessionResponse, PermissionOption,
+        PermissionOptionKind, PromptRequest, PromptResponse, ReadTextFileRequest,
+        RequestPermissionRequest, SessionCapabilities, SessionCloseCapabilities,
+        SessionConfigSelectGroup, SessionConfigSelectOption, StopReason, ToolCallUpdate,
+        ToolCallUpdateFields, WriteTextFileRequest,
     };
 
     fn launch_config() -> AcpLaunchConfig {
@@ -2078,14 +2073,16 @@ mod tests {
     fn sdk_agent_uses_structured_stdio_config() {
         let agent = build_sdk_acp_agent(&launch_config()).expect("sdk acp agent");
 
-        let McpServer::Stdio(stdio) = agent.server() else {
-            panic!("stdio server");
-        };
-        assert_eq!(stdio.name, "Codex Local");
-        assert_eq!(stdio.command, PathBuf::from("codex"));
-        assert_eq!(stdio.args, vec!["--acp"]);
-        assert_eq!(stdio.env[0].name, "API_KEY");
-        assert_eq!(stdio.env[0].value, "env-secret");
+        assert_eq!(agent.config().command(), Path::new("codex"));
+        assert_eq!(agent.config().arguments(), &["--acp"]);
+        assert_eq!(
+            agent
+                .config()
+                .environment()
+                .get("API_KEY")
+                .map(String::as_str),
+            Some("env-secret")
+        );
     }
 
     #[test]
@@ -2188,6 +2185,20 @@ mod tests {
     }
 
     #[test]
+    fn agent_stderr_diagnostics_are_redacted_and_bounded() {
+        let raw_secret = "diagnostic-secret-value";
+        let oversized = format!(
+            "Authorization: Bearer {raw_secret} {}",
+            "x".repeat(3 * 1024)
+        );
+        let sanitized = sanitize_acp_diagnostic_line(&oversized);
+
+        assert!(!sanitized.contains(raw_secret));
+        assert!(sanitized.contains("Authorization: Bearer [REDACTED]"));
+        assert!(sanitized.len() <= 2 * 1024 + '…'.len_utf8());
+    }
+
+    #[test]
     fn sdk_agent_rejects_cwd_until_custom_launcher_exists() {
         let mut config = launch_config();
         config.cwd = Some(PathBuf::from("/workspace"));
@@ -2220,6 +2231,7 @@ mod tests {
         assert!(!request.client_capabilities.fs.read_text_file);
         assert!(!request.client_capabilities.fs.write_text_file);
         assert!(!request.client_capabilities.terminal);
+        assert!(request.client_capabilities.elicitation.is_none());
         assert_eq!(
             request.client_info.as_ref().map(|info| info.name.as_str()),
             Some("OxideTerm")
@@ -2318,44 +2330,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn terminal_registry_runs_command_and_reports_output() {
-        let root = tempfile::tempdir().expect("root tempdir");
-        let registry = AcpTerminalRegistry::new();
-        let create = registry
-            .create_terminal(
-                root.path(),
-                &CreateTerminalRequest::new("session-1", "rustc")
-                    .args(vec!["--version".to_string()])
-                    .output_byte_limit(Some(256)),
-            )
-            .await
-            .expect("create terminal");
-        let terminal_id = create.terminal_id.to_string();
-        let exit = registry
-            .wait_for_terminal_exit(&WaitForTerminalExitRequest::new(
-                "session-1",
-                terminal_id.clone(),
-            ))
-            .await
-            .expect("wait terminal");
-        assert_eq!(exit.exit_status.exit_code, Some(0));
-
-        let output = registry
-            .terminal_output(&TerminalOutputRequest::new(
-                "session-1",
-                terminal_id.clone(),
-            ))
-            .await
-            .expect("terminal output");
-        assert!(output.output.contains("rustc"));
-
-        registry
-            .release_terminal(&ReleaseTerminalRequest::new("session-1", terminal_id))
-            .await
-            .expect("release terminal");
-    }
-
-    #[tokio::test]
     async fn initialize_agent_sends_v1_request_to_sdk_agent() {
         let fake_agent = Agent.builder().on_receive_request(
             async move |request: InitializeRequest, responder, _connection| {
@@ -2403,10 +2377,7 @@ mod tests {
         .await
         .expect_err("missing binary should fail initialize");
 
-        assert_eq!(
-            error.code,
-            agent_client_protocol::schema::ErrorCode::InternalError
-        );
+        assert_eq!(error.code, agent_client_protocol::ErrorCode::InternalError);
     }
 
     #[tokio::test]
@@ -2429,10 +2400,7 @@ mod tests {
         .await
         .expect_err("unsupported protocol version should fail initialize");
 
-        assert_eq!(
-            error.code,
-            agent_client_protocol::schema::ErrorCode::InternalError
-        );
+        assert_eq!(error.code, agent_client_protocol::ErrorCode::InternalError);
     }
 
     #[tokio::test]
@@ -2456,10 +2424,7 @@ mod tests {
         .await
         .expect_err("close requires advertised capability");
 
-        assert_eq!(
-            error.code,
-            agent_client_protocol::schema::ErrorCode::MethodNotFound
-        );
+        assert_eq!(error.code, agent_client_protocol::ErrorCode::MethodNotFound);
     }
 
     #[tokio::test]
@@ -2586,11 +2551,11 @@ mod tests {
             AcpHostCapabilityPolicy::default(),
             async |runtime| {
                 runtime.authenticate("agent-auth").await?;
-                let mut session = runtime
+                let session = runtime
                     .start_session(NewSessionRequest::new(PathBuf::from("/workspace")))
                     .await?;
                 assert_eq!(session.config_options().len(), 1);
-                session.send_prompt("hello")?;
+                session.send_prompt("hello").await?;
                 runtime.cancel_session(session.session_id().clone())?;
                 runtime.close_session(session.session_id().clone()).await?;
                 runtime.logout().await?;
@@ -2599,180 +2564,6 @@ mod tests {
         )
         .await
         .expect("runtime lifecycle");
-    }
-
-    #[tokio::test]
-    async fn prompt_runtime_resumes_existing_session_id() {
-        let fake_agent = Agent
-            .builder()
-            .on_receive_request(
-                async move |request: InitializeRequest, responder, _connection| {
-                    let capabilities = AgentCapabilities::new().session_capabilities(
-                        SessionCapabilities::new().resume(SessionResumeCapabilities::new()),
-                    );
-                    responder.respond(
-                        InitializeResponse::new(request.protocol_version)
-                            .agent_capabilities(capabilities),
-                    )
-                },
-                agent_client_protocol::on_receive_request!(),
-            )
-            .on_receive_request(
-                async move |request: ResumeSessionRequest, responder, _connection| {
-                    assert_eq!(request.session_id.to_string(), "session-existing");
-                    assert_eq!(request.cwd, PathBuf::from("/workspace"));
-                    assert_eq!(request.mcp_servers.len(), 1);
-                    let McpServer::Stdio(server) = &request.mcp_servers[0] else {
-                        panic!("expected test MCP stdio server");
-                    };
-                    assert_eq!(server.name, "OxideTerm Host Tools");
-                    responder.respond(ResumeSessionResponse::new())
-                },
-                agent_client_protocol::on_receive_request!(),
-            )
-            .on_receive_request(
-                async move |request: PromptRequest, responder, _connection| {
-                    assert_eq!(request.session_id.to_string(), "session-existing");
-                    responder.respond(PromptResponse::new(StopReason::EndTurn))
-                },
-                agent_client_protocol::on_receive_request!(),
-            );
-        let (event_tx, _event_rx) = mpsc::unbounded_channel();
-
-        let outcome = run_acp_prompt_session_events(
-            fake_agent,
-            "2.0.0-test".to_string(),
-            AcpHostCapabilityPolicy::default(),
-            PathBuf::from("/workspace"),
-            Some("session-existing".to_string()),
-            None,
-            vec![McpServer::Stdio(McpServerStdio::new(
-                "OxideTerm Host Tools",
-                "test-mcp-server",
-            ))],
-            "hello".to_string(),
-            event_tx,
-            AcpRuntimeRegistry::new(),
-            "conversation-1".to_string(),
-            "generation-1".to_string(),
-        )
-        .await
-        .expect("resume existing session");
-
-        assert_eq!(outcome.session_id, "session-existing");
-        assert_eq!(outcome.session_metadata, None);
-    }
-
-    #[tokio::test]
-    async fn prompt_runtime_replays_session_model_before_prompt() {
-        let selection_applied = Arc::new(std::sync::atomic::AtomicBool::new(false));
-        let selected_for_set = Arc::clone(&selection_applied);
-        let selected_for_prompt = Arc::clone(&selection_applied);
-        let model_options = || {
-            vec![
-                SessionConfigOption::select(
-                    "model",
-                    "Model",
-                    "model-b",
-                    vec![
-                        SessionConfigSelectOption::new("model-a", "Model A"),
-                        SessionConfigSelectOption::new("model-b", "Model B"),
-                    ],
-                )
-                .category(SessionConfigOptionCategory::Model),
-            ]
-        };
-        let initial_model_options = vec![
-            SessionConfigOption::select(
-                "model",
-                "Model",
-                "model-a",
-                vec![
-                    SessionConfigSelectOption::new("model-a", "Model A"),
-                    SessionConfigSelectOption::new("model-b", "Model B"),
-                ],
-            )
-            .category(SessionConfigOptionCategory::Model),
-        ];
-        let fake_agent = Agent
-            .builder()
-            .on_receive_request(
-                async move |request: InitializeRequest, responder, _connection| {
-                    responder.respond(
-                        InitializeResponse::new(request.protocol_version)
-                            .agent_capabilities(AgentCapabilities::new()),
-                    )
-                },
-                agent_client_protocol::on_receive_request!(),
-            )
-            .on_receive_request(
-                async move |_request: NewSessionRequest, responder, _connection| {
-                    responder.respond(
-                        NewSessionResponse::new("session-1")
-                            .config_options(initial_model_options.clone()),
-                    )
-                },
-                agent_client_protocol::on_receive_request!(),
-            )
-            .on_receive_request(
-                async move |request: SetSessionConfigOptionRequest, responder, _connection| {
-                    assert_eq!(request.config_id.to_string(), "model");
-                    assert_eq!(request.value.to_string(), "model-b");
-                    selected_for_set.store(true, Ordering::SeqCst);
-                    responder.respond(SetSessionConfigOptionResponse::new(model_options()))
-                },
-                agent_client_protocol::on_receive_request!(),
-            )
-            .on_receive_request(
-                async move |_request: PromptRequest, responder, connection| {
-                    assert!(selected_for_prompt.load(Ordering::SeqCst));
-                    connection.send_notification(SessionNotification::new(
-                        "session-1",
-                        SessionUpdate::ConfigOptionUpdate(
-                            agent_client_protocol::schema::ConfigOptionUpdate::new(vec![
-                                SessionConfigOption::select(
-                                    "model",
-                                    "Model",
-                                    "model-a",
-                                    vec![
-                                        SessionConfigSelectOption::new("model-a", "Model A"),
-                                        SessionConfigSelectOption::new("model-b", "Model B"),
-                                    ],
-                                )
-                                .category(SessionConfigOptionCategory::Model),
-                            ]),
-                        ),
-                    ))?;
-                    responder.respond(PromptResponse::new(StopReason::EndTurn))
-                },
-                agent_client_protocol::on_receive_request!(),
-            );
-        let (event_tx, _event_rx) = mpsc::unbounded_channel();
-
-        let outcome = run_acp_prompt_session_events(
-            fake_agent,
-            "2.0.0-test".to_string(),
-            AcpHostCapabilityPolicy::default(),
-            PathBuf::from("/workspace"),
-            None,
-            Some(AcpSessionConfigSelection {
-                config_id: "model".to_string(),
-                value_id: "model-b".to_string(),
-            }),
-            Vec::new(),
-            "hello".to_string(),
-            event_tx,
-            AcpRuntimeRegistry::new(),
-            "conversation-1".to_string(),
-            "generation-1".to_string(),
-        )
-        .await
-        .expect("session model selection");
-
-        assert_eq!(
-            outcome.session_config_options[0].current_value_id,
-            "model-a"
-        );
     }
 
     #[tokio::test]
@@ -2827,93 +2618,30 @@ mod tests {
             },
             event_tx,
             async move |runtime| {
-                let mut session = runtime
+                let session = runtime
                     .start_session(NewSessionRequest::new(PathBuf::from("/workspace")))
                     .await?;
-                session.send_prompt("hello")?;
-                match event_rx.recv().await.expect("client event") {
-                    AcpClientEvent::ReadTextFile {
-                        request,
-                        response_tx,
-                    } => {
-                        assert_eq!(request.session_id.to_string(), "session-1");
-                        assert_eq!(request.path, PathBuf::from("/workspace/file.txt"));
-                        response_tx
-                            .send(Ok(ReadTextFileResponse::new("from-host")))
-                            .expect("send read response");
+                let (prompt_result, ()) = tokio::join!(session.send_prompt("hello"), async {
+                    match event_rx.recv().await.expect("client event") {
+                        AcpClientEvent::ReadTextFile {
+                            request,
+                            response_tx,
+                        } => {
+                            assert_eq!(request.session_id.to_string(), "session-1");
+                            assert_eq!(request.path, PathBuf::from("/workspace/file.txt"));
+                            response_tx
+                                .send(Ok(ReadTextFileResponse::new("from-host")))
+                                .expect("send read response");
+                        }
+                        _ => panic!("unexpected client event"),
                     }
-                    _ => panic!("unexpected client event"),
-                }
-                match session.read_update().await? {
-                    agent_client_protocol::SessionMessage::StopReason(StopReason::EndTurn) => {}
-                    _ => panic!("unexpected session update"),
-                }
+                });
+                assert_eq!(prompt_result?.stop_reason, StopReason::EndTurn);
                 Ok(())
             },
         )
         .await
         .expect("runtime with client events");
-    }
-
-    #[tokio::test]
-    async fn runtime_registry_cancel_uses_registered_session_connection() {
-        let (cancel_seen_tx, cancel_seen_rx) = oneshot::channel();
-        let cancel_seen_tx = Arc::new(parking_lot::Mutex::new(Some(cancel_seen_tx)));
-        let fake_agent = Agent
-            .builder()
-            .on_receive_request(
-                async move |request: InitializeRequest, responder, _connection| {
-                    responder.respond(
-                        InitializeResponse::new(request.protocol_version)
-                            .agent_capabilities(AgentCapabilities::new()),
-                    )
-                },
-                agent_client_protocol::on_receive_request!(),
-            )
-            .on_receive_request(
-                async move |_request: NewSessionRequest, responder, _connection| {
-                    responder.respond(NewSessionResponse::new("session-1"))
-                },
-                agent_client_protocol::on_receive_request!(),
-            )
-            .on_receive_notification(
-                {
-                    let cancel_seen_tx = cancel_seen_tx.clone();
-                    async move |notification: CancelNotification, _connection| {
-                        assert_eq!(notification.session_id.to_string(), "session-1");
-                        if let Some(sender) = cancel_seen_tx.lock().take() {
-                            let _ = sender.send(());
-                        }
-                        Ok(())
-                    }
-                },
-                agent_client_protocol::on_receive_notification!(),
-            );
-        let registry = AcpRuntimeRegistry::new();
-        let key = AcpRuntimeHandleKey::new("conversation-1", "generation-1", "session-1");
-
-        with_acp_agent_runtime(
-            fake_agent,
-            "2.0.0-test".to_string(),
-            AcpHostCapabilityPolicy::default(),
-            async |runtime| {
-                let session = runtime
-                    .start_session(NewSessionRequest::new(PathBuf::from("/workspace")))
-                    .await?;
-                let guard = runtime.register_session_handle(registry.clone(), key.clone())?;
-                assert!(registry.contains(&key));
-                registry.cancel_generation("conversation-1", "generation-1")?;
-                cancel_seen_rx
-                    .await
-                    .map_err(agent_client_protocol::Error::into_internal_error)?;
-                drop(session);
-                drop(guard);
-                assert!(!registry.contains(&key));
-                Ok(())
-            },
-        )
-        .await
-        .expect("registry cancel");
     }
 
     #[test]
@@ -3004,9 +2732,6 @@ mod tests {
             .await
             .expect("response sent")
             .expect_err("host request rejected");
-        assert_eq!(
-            error.code,
-            agent_client_protocol::schema::ErrorCode::MethodNotFound
-        );
+        assert_eq!(error.code, agent_client_protocol::ErrorCode::MethodNotFound);
     }
 }
