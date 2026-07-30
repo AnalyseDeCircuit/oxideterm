@@ -130,6 +130,12 @@ impl WorkspaceApp {
             return None;
         };
         let pane = active_pane.read(cx);
+        if pane.ai_screen_is_alternate_buffer() {
+            // Full-screen applications own Enter and may display arbitrary
+            // password-like text. Privilege assistance is shell-screen only.
+            log_privilege_prompt_helper(format_args!("state unavailable: alternate screen active"));
+            return None;
+        }
         let visible_text = pane.privilege_prompt_text_snapshot();
         let visible_shape = privilege_prompt_text_shape(&visible_text);
         let tracked_prompt = pane
@@ -240,6 +246,16 @@ impl WorkspaceApp {
             return false;
         }
 
+        let Some(active_pane) = self.active_pane(cx) else {
+            return false;
+        };
+        if !active_pane.read(cx).has_privilege_prompt_inline_hint() {
+            // Enter is confirmation only after the same pane exposes the
+            // current fill affordance. A fallback screen match alone must not
+            // consume input in a full-screen application.
+            return false;
+        }
+
         log_privilege_prompt_helper(format_args!("root enter: evaluating privilege helper"));
         let Some(state) = self.active_privilege_prompt_state(cx) else {
             log_privilege_prompt_helper(format_args!("root enter: no prompt state"));
@@ -263,7 +279,7 @@ impl WorkspaceApp {
             "root enter: filling prompt_kind={}",
             privilege_prompt_kind_name(&state.prompt)
         ));
-        self.fill_privilege_prompt_match(matched.clone(), window, cx);
+        self.fill_privilege_prompt_match(matched.clone(), state.prompt, window, cx);
         true
     }
 
@@ -304,13 +320,14 @@ impl WorkspaceApp {
             "terminal submit request: filling prompt_kind={}",
             privilege_prompt_kind_name(&state.prompt)
         ));
-        self.fill_privilege_prompt_match(matched.clone(), window, cx);
+        self.fill_privilege_prompt_match(matched.clone(), state.prompt, window, cx);
         true
     }
 
     pub(super) fn fill_privilege_prompt_match(
         &mut self,
         matched: MatchedPrivilegeCredential,
+        confirmed_prompt: PrivilegePromptMatch,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -339,7 +356,7 @@ impl WorkspaceApp {
         let secret_line = zeroize::Zeroizing::new(format!("{}\n", secret.expose_secret()));
         let sent = self.active_pane(cx).is_some_and(|pane| {
             pane.update(cx, |pane, cx| {
-                pane.send_privilege_secret_input_bytes(secret_line.as_bytes(), cx)
+                pane.send_privilege_secret_input_bytes(secret_line.as_bytes(), confirmed_prompt, cx)
             })
         });
         log_privilege_prompt_helper(format_args!("fill: write attempted sent={sent}"));

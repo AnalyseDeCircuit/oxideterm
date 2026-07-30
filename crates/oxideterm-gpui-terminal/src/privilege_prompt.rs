@@ -1,4 +1,5 @@
 use std::time::{Duration, Instant};
+use zeroize::Zeroizing;
 
 const MAX_PROMPT_TAIL_CHARS: usize = 4_096;
 const MAX_TRACKED_INPUT_CHARS: usize = 512;
@@ -114,10 +115,10 @@ fn privilege_prompt_tracker_state_name(state: &PrivilegePromptTrackerState) -> &
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct PrivilegePromptTracker {
-    input_line: String,
-    output_tail: String,
+    input_line: Zeroizing<String>,
+    output_tail: Zeroizing<String>,
     next_command_id: u64,
     state: PrivilegePromptTrackerState,
     state_generation: u64,
@@ -126,8 +127,8 @@ pub struct PrivilegePromptTracker {
 impl Default for PrivilegePromptTracker {
     fn default() -> Self {
         Self {
-            input_line: String::new(),
-            output_tail: String::new(),
+            input_line: Zeroizing::new(String::new()),
+            output_tail: Zeroizing::new(String::new()),
             next_command_id: 1,
             state: PrivilegePromptTrackerState::Idle,
             state_generation: 0,
@@ -138,6 +139,11 @@ impl Default for PrivilegePromptTracker {
 impl PrivilegePromptTracker {
     pub(crate) fn state_generation(&self) -> u64 {
         self.state_generation
+    }
+
+    pub(crate) fn requires_output_observation(&self, now: Instant) -> bool {
+        self.next_expiry_deadline()
+            .is_some_and(|deadline| now < deadline)
     }
 
     pub(crate) fn next_expiry_deadline(&self) -> Option<Instant> {
@@ -221,7 +227,7 @@ impl PrivilegePromptTracker {
                 byte if byte.is_ascii_graphic() || byte == b' ' => {
                     if self.input_line.chars().count() >= MAX_TRACKED_INPUT_CHARS {
                         let tail = tail_chars(&self.input_line, MAX_TRACKED_INPUT_CHARS - 1);
-                        self.input_line = tail.to_string();
+                        self.input_line = Zeroizing::new(tail.to_string());
                     }
                     self.input_line.push(char::from(byte));
                 }
@@ -252,7 +258,7 @@ impl PrivilegePromptTracker {
         self.output_tail.push_str(text);
         let trimmed = tail_chars(&self.output_tail, MAX_PROMPT_TAIL_CHARS);
         if trimmed.len() != self.output_tail.len() {
-            self.output_tail = trimmed.to_string();
+            self.output_tail = Zeroizing::new(trimmed.to_string());
         }
 
         let retry_notice = output_contains_retry_notice(text);
@@ -336,9 +342,48 @@ impl PrivilegePromptTracker {
                 filled_at: now,
                 retry_count,
             };
+            // The accepted prompt must not be rediscovered when a full-screen
+            // program starts with cursor-control bytes but no printable line.
+            self.output_tail.clear();
             self.advance_state_generation();
         };
         self.input_line.clear();
+    }
+
+    pub fn mark_confirmed_secret_filled(
+        &mut self,
+        confirmed_prompt: PrivilegePromptMatch,
+        now: Instant,
+    ) {
+        let (command_id, prompt, retry_count) = match &self.state {
+            PrivilegePromptTrackerState::PromptVisible {
+                command_id,
+                prompt,
+                retry_count,
+                ..
+            }
+            | PrivilegePromptTrackerState::ManualEntry {
+                command_id,
+                prompt,
+                retry_count,
+                ..
+            } if same_prompt_kind(prompt, &confirmed_prompt) => {
+                (*command_id, prompt.clone(), *retry_count)
+            }
+            _ => (None, confirmed_prompt, 0),
+        };
+        // Workspace calls this path only after it confirms a visible prompt
+        // and one scoped credential. Preserve that confirmation even if the
+        // decoded-output event arrived before output observation was armed.
+        self.state = PrivilegePromptTrackerState::Filled {
+            command_id,
+            prompt,
+            filled_at: now,
+            retry_count,
+        };
+        self.output_tail.clear();
+        self.input_line.clear();
+        self.advance_state_generation();
     }
 
     pub fn snapshot(&self, now: Instant) -> Option<PrivilegePromptSnapshot> {
@@ -377,7 +422,7 @@ impl PrivilegePromptTracker {
     }
 
     fn commit_input_line(&mut self, now: Instant) {
-        let line = self.input_line.trim().to_string();
+        let line = Zeroizing::new(self.input_line.trim().to_string());
         self.commit_command_line(&line, now);
         self.input_line.clear();
     }
@@ -1164,10 +1209,12 @@ mod tests {
         let mut tracker = PrivilegePromptTracker::default();
         assert_eq!(tracker.state_generation(), 0);
         assert_eq!(tracker.next_expiry_deadline(), None);
+        assert!(!tracker.requires_output_observation(now));
 
         tracker.observe_submitted_command("sudo true", now);
         let command_generation = tracker.state_generation();
         assert!(command_generation > 0);
+        assert!(tracker.requires_output_observation(now));
         assert_eq!(
             tracker.next_expiry_deadline(),
             now.checked_add(PRIVILEGE_COMMAND_CONTEXT_TTL)
@@ -1181,6 +1228,7 @@ mod tests {
         );
 
         tracker.mark_secret_filled(now);
+        assert!(tracker.requires_output_observation(now));
         assert_eq!(
             tracker.next_expiry_deadline(),
             now.checked_add(PRIVILEGE_PROMPT_FILLED_TTL)
@@ -1188,6 +1236,7 @@ mod tests {
         assert!(!tracker.expire_at(now));
         assert!(tracker.expire_at(now + PRIVILEGE_PROMPT_FILLED_TTL));
         assert_eq!(tracker.next_expiry_deadline(), None);
+        assert!(!tracker.requires_output_observation(now + PRIVILEGE_PROMPT_FILLED_TTL));
     }
 
     #[test]
@@ -1599,6 +1648,45 @@ mod tests {
                 retry_count: 1,
             })
         );
+    }
+
+    #[test]
+    fn tracker_does_not_reopen_filled_prompt_on_full_screen_entry() {
+        let start = Instant::now();
+        let mut tracker = PrivilegePromptTracker::default();
+
+        tracker.observe_user_input_bytes(b"sudo vim /etc/hosts\r", start);
+        tracker.observe_output_text(
+            "[sudo] password for alice:",
+            start + Duration::from_millis(10),
+        );
+        tracker.mark_secret_filled(start + Duration::from_millis(20));
+        tracker.observe_output_text(
+            "\x1b[?1049h\x1b[22;0;0t\x1b[H\x1b[2J",
+            start + Duration::from_millis(30),
+        );
+
+        assert_eq!(tracker.snapshot(start + Duration::from_millis(30)), None);
+        assert!(tracker.suppresses_fallback_prompt_detection(start + Duration::from_millis(30)));
+    }
+
+    #[test]
+    fn tracker_suppresses_fallback_after_confirmed_fill_without_output_event() {
+        let start = Instant::now();
+        let mut tracker = PrivilegePromptTracker::default();
+
+        tracker.observe_user_input_bytes(b"sudo vim /etc/hosts\r", start);
+        tracker.observe_user_input_bytes(b"\r", start + Duration::from_millis(10));
+        tracker.mark_confirmed_secret_filled(
+            PrivilegePromptMatch::Sudo {
+                username: Some("alice".to_string()),
+                prompt_text: "[sudo] password for alice:".to_string(),
+            },
+            start + Duration::from_millis(20),
+        );
+
+        assert_eq!(tracker.snapshot(start + Duration::from_millis(20)), None);
+        assert!(tracker.suppresses_fallback_prompt_detection(start + Duration::from_millis(20)));
     }
 
     #[test]

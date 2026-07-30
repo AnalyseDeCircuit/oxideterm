@@ -21,7 +21,7 @@ impl TerminalPane {
             self.snapshot.rows,
             options,
         ));
-        self.set_recording_output_events_enabled(true);
+        self.sync_terminal_output_events_enabled();
         cx.emit(TerminalPaneEvent::RecordingStatusChanged);
         cx.notify();
     }
@@ -29,7 +29,7 @@ impl TerminalPane {
     pub fn pause_recording(&mut self, cx: &mut Context<Self>) {
         if let Some(recorder) = self.recorder.as_mut() {
             recorder.pause();
-            self.set_recording_output_events_enabled(false);
+            self.sync_terminal_output_events_enabled();
             cx.emit(TerminalPaneEvent::RecordingStatusChanged);
             cx.notify();
         }
@@ -38,7 +38,7 @@ impl TerminalPane {
     pub fn resume_recording(&mut self, cx: &mut Context<Self>) {
         if let Some(recorder) = self.recorder.as_mut() {
             recorder.resume();
-            self.set_recording_output_events_enabled(true);
+            self.sync_terminal_output_events_enabled();
             cx.emit(TerminalPaneEvent::RecordingStatusChanged);
             cx.notify();
         }
@@ -46,7 +46,7 @@ impl TerminalPane {
 
     pub fn discard_recording(&mut self, cx: &mut Context<Self>) {
         if self.recorder.take().is_some() {
-            self.set_recording_output_events_enabled(false);
+            self.sync_terminal_output_events_enabled();
             cx.emit(TerminalPaneEvent::RecordingStatusChanged);
             cx.notify();
         }
@@ -54,7 +54,7 @@ impl TerminalPane {
 
     pub fn stop_recording(&mut self, cx: &mut Context<Self>) -> Option<String> {
         let recorder = self.recorder.take()?;
-        self.set_recording_output_events_enabled(false);
+        self.sync_terminal_output_events_enabled();
         cx.emit(TerminalPaneEvent::RecordingStatusChanged);
         cx.notify();
         Some(recorder.stop())
@@ -98,11 +98,6 @@ impl TerminalPane {
         cx.notify();
     }
 
-    fn set_recording_output_events_enabled(&mut self, enabled: bool) {
-        // Output events duplicate decoded terminal bytes and are only consumed by
-        // TerminalRecorder, so keep them disabled outside active recording.
-        self.terminal.lock().set_output_events_enabled(enabled);
-    }
 }
 
 fn asciicast_palette(theme: oxideterm_theme::TerminalTheme) -> String {

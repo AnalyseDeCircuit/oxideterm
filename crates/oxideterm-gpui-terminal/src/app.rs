@@ -39,12 +39,14 @@ use crate::command_facts::{
     TerminalAutosuggestInputState, TerminalCommandFact,
 };
 use crate::privilege_prompt::{
-    PrivilegeInputObservation, PrivilegePromptSnapshot, PrivilegePromptTracker,
+    PrivilegeInputObservation, PrivilegePromptMatch, PrivilegePromptSnapshot,
+    PrivilegePromptTracker,
 };
 use crate::terminal_ui::*;
 use crate::terminal_view::*;
 use oxideterm_terminal_recording::{
-    TerminalRecorder, TerminalRecordingOptions, TerminalRecordingStatus, TerminalRecordingTheme,
+    TerminalRecorder, TerminalRecordingOptions, TerminalRecordingState, TerminalRecordingStatus,
+    TerminalRecordingTheme,
 };
 
 mod image_cache;
@@ -967,6 +969,25 @@ impl TerminalPane {
             .suppresses_fallback_prompt_detection(Instant::now())
     }
 
+    pub fn has_privilege_prompt_inline_hint(&self) -> bool {
+        self.privilege_prompt_inline_hint.is_some()
+    }
+
+    pub(crate) fn sync_terminal_output_events_enabled(&mut self) {
+        let recording_requires_output = self
+            .recorder
+            .as_ref()
+            .is_some_and(|recorder| recorder.status().state == TerminalRecordingState::Recording);
+        let privilege_helper_requires_output = self
+            .privilege_prompt_tracker
+            .requires_output_observation(Instant::now());
+        // Recording and privilege detection independently consume decoded
+        // output. Disabling either consumer must not starve the other.
+        self.terminal.lock().set_output_events_enabled(
+            recording_requires_output || privilege_helper_requires_output,
+        );
+    }
+
     fn finish_privilege_prompt_tracker_update(
         &mut self,
         previous_state_generation: u64,
@@ -975,6 +996,7 @@ impl TerminalPane {
         if self.privilege_prompt_tracker.state_generation() == previous_state_generation {
             return;
         }
+        self.sync_terminal_output_events_enabled();
         self.schedule_privilege_prompt_expiry(cx);
         cx.emit(TerminalPaneEvent::PrivilegePromptStateChanged);
     }
@@ -998,6 +1020,7 @@ impl TerminalPane {
                     pane.schedule_privilege_prompt_expiry(cx);
                     return;
                 }
+                pane.sync_terminal_output_events_enabled();
                 // Expiry carries no prompt payload. Workspace reads only the
                 // active pane and clears any now-stale inline hint.
                 cx.emit(TerminalPaneEvent::PrivilegePromptStateChanged);
@@ -1204,6 +1227,7 @@ impl TerminalPane {
         self.privilege_prompt_expiry_generation =
             self.privilege_prompt_expiry_generation.wrapping_add(1);
         self.privilege_prompt_expiry_task = None;
+        self.sync_terminal_output_events_enabled();
         cx.emit(TerminalPaneEvent::PrivilegePromptStateChanged);
         self.command_fact_ledger = CommandFactLedger::default();
         self.last_pty_resize = Some(resize);
@@ -1553,6 +1577,7 @@ impl TerminalPane {
     pub fn send_privilege_secret_input_bytes(
         &mut self,
         bytes: &[u8],
+        confirmed_prompt: PrivilegePromptMatch,
         cx: &mut Context<Self>,
     ) -> bool {
         if bytes.is_empty() || !self.terminal_accepts_input() {
@@ -1565,7 +1590,7 @@ impl TerminalPane {
         if self.terminal.lock().write_protocol_bytes(bytes).is_ok() {
             let previous_state_generation = self.privilege_prompt_tracker.state_generation();
             self.privilege_prompt_tracker
-                .mark_secret_filled(Instant::now());
+                .mark_confirmed_secret_filled(confirmed_prompt, Instant::now());
             self.finish_privilege_prompt_tracker_update(previous_state_generation, cx);
             self.clear_privilege_prompt_inline_hint();
             self.last_terminal_input = Instant::now();
@@ -1692,9 +1717,18 @@ impl TerminalPane {
         }
 
         let cleared_command_mark_selection = self.clear_command_mark_selection_for_tui_mode(mode);
+        let cleared_privilege_prompt_hint = if mode.contains(TermMode::ALT_SCREEN) {
+            // Full-screen applications own the alternate screen and Enter.
+            // Clear terminal-local ghost text even when no tracker event fires
+            // during the mode transition.
+            self.clear_privilege_prompt_inline_hint()
+        } else {
+            false
+        };
         let mut needs_notify = event_effect.needs_notify || report.changed;
         if (self.preferences.show_performance_overlay && render_stats_changed)
             || cleared_command_mark_selection
+            || cleared_privilege_prompt_hint
         {
             needs_notify = true;
         }
