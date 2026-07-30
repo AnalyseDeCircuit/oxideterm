@@ -1098,17 +1098,12 @@ impl WorkspaceApp {
             return div().into_any_element();
         }
 
-        let mut row = div()
-            .flex_none()
-            .h(px(34.0))
+        let mut content_row = div()
+            .h_full()
             .px(px(8.0))
             .flex()
             .items_center()
-            .gap(px(5.0))
-            .overflow_x_scrollbar()
-            .border_t_1()
-            .border_color(rgb(self.tokens.ui.border))
-            .bg(rgb(self.tokens.ui.bg));
+            .gap(px(5.0));
         for category in categories {
             let category_icon = terminal_quick_bar_icon(category.icon);
             let category_commands = commands
@@ -1119,7 +1114,7 @@ impl WorkspaceApp {
             if category_commands.is_empty() {
                 continue;
             }
-            row = row.child(
+            content_row = content_row.child(
                 div()
                     .flex_none()
                     .flex()
@@ -1136,7 +1131,7 @@ impl WorkspaceApp {
             );
             for command in category_commands {
                 let command_text = command.command;
-                row = row.child(
+                content_row = content_row.child(
                     action_chip(
                         &self.tokens,
                         command.name,
@@ -1157,7 +1152,17 @@ impl WorkspaceApp {
                 );
             }
         }
-        row.into_any_element()
+        // Scrollable transfers the viewport style to its outer wrapper, so the
+        // content row must remain a child to preserve horizontal flex layout.
+        div()
+            .flex_none()
+            .h(px(34.0))
+            .overflow_x_scrollbar()
+            .border_t_1()
+            .border_color(rgb(self.tokens.ui.border))
+            .bg(rgb(self.tokens.ui.bg))
+            .child(content_row)
+            .into_any_element()
     }
 }
 
