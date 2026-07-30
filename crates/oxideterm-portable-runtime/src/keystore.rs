@@ -46,6 +46,9 @@ pub enum PortableKeystoreError {
     #[error("Secret not found for ID: {0}")]
     NotFound(String),
 
+    #[error("Multiple legacy secret entries match one portable account")]
+    AmbiguousLegacyAccounts,
+
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
 
@@ -303,6 +306,26 @@ pub fn store_secret(
     persist_session_to_path(&path, session)
 }
 
+/// Stores the canonical portable account and removes obsolete username-bound aliases.
+pub fn store_secret_replacing_legacy_accounts(
+    service: &str,
+    account: &str,
+    legacy_account_suffix: &str,
+    secret: &str,
+) -> Result<(), PortableKeystoreError> {
+    let path = portable_keystore_path()?;
+    let mut guard = PORTABLE_KEYSTORE_SESSION.write();
+    let session = guard.as_mut().ok_or(PortableKeystoreError::Locked)?;
+    store_secret_replacing_legacy_accounts_at_path(
+        &path,
+        session,
+        service,
+        account,
+        legacy_account_suffix,
+        secret,
+    )
+}
+
 pub fn get_secret(
     service: &str,
     account: &str,
@@ -318,6 +341,24 @@ pub fn get_secret(
         .ok_or_else(|| PortableKeystoreError::NotFound(account.to_string()))
 }
 
+/// Loads a canonical portable account or atomically migrates one legacy alias.
+pub fn get_secret_migrating_legacy_account(
+    service: &str,
+    account: &str,
+    legacy_account_suffix: &str,
+) -> Result<Zeroizing<String>, PortableKeystoreError> {
+    let path = portable_keystore_path()?;
+    let mut guard = PORTABLE_KEYSTORE_SESSION.write();
+    let session = guard.as_mut().ok_or(PortableKeystoreError::Locked)?;
+    get_secret_migrating_legacy_account_at_path(
+        &path,
+        session,
+        service,
+        account,
+        legacy_account_suffix,
+    )
+}
+
 pub fn delete_secret(service: &str, account: &str) -> Result<(), PortableKeystoreError> {
     let path = portable_keystore_path()?;
     let mut guard = PORTABLE_KEYSTORE_SESSION.write();
@@ -331,6 +372,24 @@ pub fn delete_secret(service: &str, account: &str) -> Result<(), PortableKeystor
     persist_session_to_path(&path, session)
 }
 
+/// Deletes a canonical portable account together with every obsolete legacy alias.
+pub fn delete_secret_with_legacy_accounts(
+    service: &str,
+    account: &str,
+    legacy_account_suffix: &str,
+) -> Result<(), PortableKeystoreError> {
+    let path = portable_keystore_path()?;
+    let mut guard = PORTABLE_KEYSTORE_SESSION.write();
+    let session = guard.as_mut().ok_or(PortableKeystoreError::Locked)?;
+    delete_secret_with_legacy_accounts_at_path(
+        &path,
+        session,
+        service,
+        account,
+        legacy_account_suffix,
+    )
+}
+
 pub fn secret_exists(service: &str, account: &str) -> Result<bool, PortableKeystoreError> {
     let guard = PORTABLE_KEYSTORE_SESSION.read();
     let session = guard.as_ref().ok_or(PortableKeystoreError::Locked)?;
@@ -340,6 +399,173 @@ pub fn secret_exists(service: &str, account: &str) -> Result<bool, PortableKeyst
         .get(service)
         .and_then(|accounts| accounts.get(account))
         .is_some())
+}
+
+fn store_secret_replacing_legacy_accounts_at_path(
+    path: &Path,
+    session: &mut PortableKeystoreSession,
+    service: &str,
+    account: &str,
+    legacy_account_suffix: &str,
+    secret: &str,
+) -> Result<(), PortableKeystoreError> {
+    let (previous, legacy_entries) = {
+        let accounts = session
+            .payload
+            .services
+            .entry(service.to_string())
+            .or_default();
+        let legacy_accounts = matching_legacy_accounts(accounts, account, legacy_account_suffix);
+        let legacy_entries = remove_accounts(accounts, legacy_accounts);
+        let previous = accounts.remove(account);
+        accounts.insert(account.to_string(), Zeroizing::new(secret.to_string()));
+        (previous, legacy_entries)
+    };
+
+    if let Err(error) = persist_session_to_path(path, session) {
+        // Restore the unlocked in-memory session if durable persistence fails.
+        let accounts = session
+            .payload
+            .services
+            .entry(service.to_string())
+            .or_default();
+        accounts.remove(account);
+        if let Some(previous) = previous {
+            accounts.insert(account.to_string(), previous);
+        }
+        restore_accounts(accounts, legacy_entries);
+        remove_empty_service(&mut session.payload, service);
+        return Err(error);
+    }
+
+    // Removed values stay zeroizing and are wiped when these owners drop.
+    Ok(())
+}
+
+fn get_secret_migrating_legacy_account_at_path(
+    path: &Path,
+    session: &mut PortableKeystoreSession,
+    service: &str,
+    account: &str,
+    legacy_account_suffix: &str,
+) -> Result<Zeroizing<String>, PortableKeystoreError> {
+    let Some(accounts) = session.payload.services.get_mut(service) else {
+        return Err(PortableKeystoreError::NotFound(account.to_string()));
+    };
+    if let Some(secret) = accounts.get(account) {
+        // The returned copy is an unavoidable output owner and remains zeroizing.
+        return Ok(Zeroizing::new(secret.to_string()));
+    }
+
+    let mut legacy_accounts = matching_legacy_accounts(accounts, account, legacy_account_suffix);
+    if legacy_accounts.len() > 1 {
+        return Err(PortableKeystoreError::AmbiguousLegacyAccounts);
+    }
+    let Some(legacy_account) = legacy_accounts.pop() else {
+        return Err(PortableKeystoreError::NotFound(account.to_string()));
+    };
+    let secret = accounts
+        .remove(&legacy_account)
+        .ok_or_else(|| PortableKeystoreError::NotFound(account.to_string()))?;
+    accounts.insert(account.to_string(), secret);
+
+    if let Err(error) = persist_session_to_path(path, session) {
+        // Roll the alias move back without cloning the secret value.
+        let accounts = session
+            .payload
+            .services
+            .get_mut(service)
+            .expect("portable service disappeared during migration");
+        let secret = accounts
+            .remove(account)
+            .expect("canonical portable account disappeared during migration");
+        accounts.insert(legacy_account, secret);
+        return Err(error);
+    }
+
+    let secret = session
+        .payload
+        .services
+        .get(service)
+        .and_then(|accounts| accounts.get(account))
+        .expect("migrated portable account disappeared after persistence");
+    // Authentication receives one zeroizing owner; the encrypted session keeps
+    // the durable canonical copy until the vault is locked.
+    Ok(Zeroizing::new(secret.to_string()))
+}
+
+fn delete_secret_with_legacy_accounts_at_path(
+    path: &Path,
+    session: &mut PortableKeystoreSession,
+    service: &str,
+    account: &str,
+    legacy_account_suffix: &str,
+) -> Result<(), PortableKeystoreError> {
+    let removed_entries = {
+        let Some(accounts) = session.payload.services.get_mut(service) else {
+            return persist_session_to_path(path, session);
+        };
+        let mut accounts_to_remove =
+            matching_legacy_accounts(accounts, account, legacy_account_suffix);
+        accounts_to_remove.push(account.to_string());
+        remove_accounts(accounts, accounts_to_remove)
+    };
+    remove_empty_service(&mut session.payload, service);
+
+    if let Err(error) = persist_session_to_path(path, session) {
+        let accounts = session
+            .payload
+            .services
+            .entry(service.to_string())
+            .or_default();
+        restore_accounts(accounts, removed_entries);
+        remove_empty_service(&mut session.payload, service);
+        return Err(error);
+    }
+
+    // Deleted secret values are wiped when the removed zeroizing owners drop.
+    Ok(())
+}
+
+fn matching_legacy_accounts(
+    accounts: &BTreeMap<String, Zeroizing<String>>,
+    account: &str,
+    legacy_account_suffix: &str,
+) -> Vec<String> {
+    accounts
+        .keys()
+        .filter(|candidate| {
+            candidate.as_str() != account && candidate.ends_with(legacy_account_suffix)
+        })
+        .cloned()
+        .collect()
+}
+
+fn remove_accounts(
+    accounts: &mut BTreeMap<String, Zeroizing<String>>,
+    accounts_to_remove: Vec<String>,
+) -> Vec<(String, Zeroizing<String>)> {
+    accounts_to_remove
+        .into_iter()
+        .filter_map(|account| accounts.remove(&account).map(|secret| (account, secret)))
+        .collect()
+}
+
+fn restore_accounts(
+    accounts: &mut BTreeMap<String, Zeroizing<String>>,
+    removed_entries: Vec<(String, Zeroizing<String>)>,
+) {
+    accounts.extend(removed_entries);
+}
+
+fn remove_empty_service(payload: &mut PortableKeystorePayload, service: &str) {
+    if payload
+        .services
+        .get(service)
+        .is_some_and(BTreeMap::is_empty)
+    {
+        payload.services.remove(service);
+    }
 }
 
 #[cfg(test)]
@@ -451,5 +677,151 @@ mod tests {
             .get("svc")
             .and_then(|accounts| accounts.get("account"));
         assert_eq!(updated_secret.map(|secret| secret.as_str()), Some("value"));
+    }
+
+    #[test]
+    fn legacy_username_account_is_migrated_and_persisted() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join(PORTABLE_KEYSTORE_FILENAME);
+        let mut session = sample_session("secret123");
+        session
+            .payload
+            .services
+            .entry("svc".to_string())
+            .or_default()
+            .insert(
+                "old-user@managed-key-id".to_string(),
+                Zeroizing::new("private-key-material".to_string()),
+            );
+        persist_session_to_path(&path, &session).unwrap();
+
+        let secret = get_secret_migrating_legacy_account_at_path(
+            &path,
+            &mut session,
+            "svc",
+            "portable:v1:managed-key-id",
+            "@managed-key-id",
+        )
+        .unwrap();
+
+        assert_eq!(secret.as_str(), "private-key-material");
+        let restored = load_session_from_path(&path, "secret123").unwrap();
+        let accounts = restored.payload.services.get("svc").unwrap();
+        assert!(accounts.contains_key("portable:v1:managed-key-id"));
+        assert!(!accounts.contains_key("old-user@managed-key-id"));
+    }
+
+    #[test]
+    fn ambiguous_legacy_accounts_are_not_guessed_or_modified() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join(PORTABLE_KEYSTORE_FILENAME);
+        let mut session = sample_session("secret123");
+        let accounts = session
+            .payload
+            .services
+            .entry("svc".to_string())
+            .or_default();
+        accounts.insert(
+            "alice@credential-id".to_string(),
+            Zeroizing::new("alice-secret".to_string()),
+        );
+        accounts.insert(
+            "bob@credential-id".to_string(),
+            Zeroizing::new("bob-secret".to_string()),
+        );
+        persist_session_to_path(&path, &session).unwrap();
+
+        let error = get_secret_migrating_legacy_account_at_path(
+            &path,
+            &mut session,
+            "svc",
+            "portable:v1:credential-id",
+            "@credential-id",
+        )
+        .unwrap_err();
+
+        assert!(matches!(
+            error,
+            PortableKeystoreError::AmbiguousLegacyAccounts
+        ));
+        let accounts = session.payload.services.get("svc").unwrap();
+        assert!(accounts.contains_key("alice@credential-id"));
+        assert!(accounts.contains_key("bob@credential-id"));
+        assert!(!accounts.contains_key("portable:v1:credential-id"));
+    }
+
+    #[test]
+    fn canonical_store_replaces_all_legacy_aliases() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join(PORTABLE_KEYSTORE_FILENAME);
+        let mut session = sample_session("secret123");
+        let accounts = session
+            .payload
+            .services
+            .entry("svc".to_string())
+            .or_default();
+        accounts.insert(
+            "alice@credential-id".to_string(),
+            Zeroizing::new("old-alice-secret".to_string()),
+        );
+        accounts.insert(
+            "bob@credential-id".to_string(),
+            Zeroizing::new("old-bob-secret".to_string()),
+        );
+        persist_session_to_path(&path, &session).unwrap();
+
+        store_secret_replacing_legacy_accounts_at_path(
+            &path,
+            &mut session,
+            "svc",
+            "portable:v1:credential-id",
+            "@credential-id",
+            "new-secret",
+        )
+        .unwrap();
+
+        let restored = load_session_from_path(&path, "secret123").unwrap();
+        let accounts = restored.payload.services.get("svc").unwrap();
+        assert_eq!(
+            accounts
+                .get("portable:v1:credential-id")
+                .map(|secret| secret.as_str()),
+            Some("new-secret")
+        );
+        assert!(!accounts.contains_key("alice@credential-id"));
+        assert!(!accounts.contains_key("bob@credential-id"));
+    }
+
+    #[test]
+    fn canonical_delete_removes_all_legacy_aliases() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join(PORTABLE_KEYSTORE_FILENAME);
+        let mut session = sample_session("secret123");
+        let accounts = session
+            .payload
+            .services
+            .entry("svc".to_string())
+            .or_default();
+        accounts.insert(
+            "portable:v1:credential-id".to_string(),
+            Zeroizing::new("current-secret".to_string()),
+        );
+        accounts.insert(
+            "old-user@credential-id".to_string(),
+            Zeroizing::new("legacy-secret".to_string()),
+        );
+        persist_session_to_path(&path, &session).unwrap();
+
+        delete_secret_with_legacy_accounts_at_path(
+            &path,
+            &mut session,
+            "svc",
+            "portable:v1:credential-id",
+            "@credential-id",
+        )
+        .unwrap();
+
+        let restored = load_session_from_path(&path, "secret123").unwrap();
+        assert!(!restored.payload.services.contains_key("svc"));
     }
 }

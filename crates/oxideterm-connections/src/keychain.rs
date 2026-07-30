@@ -8,6 +8,8 @@ use std::{
     sync::{Arc, Mutex},
 };
 const SERVICE_NAME: &str = "com.oxideterm.ssh";
+const PORTABLE_ACCOUNT_PREFIX: &str = "portable:v1:";
+const LEGACY_ACCOUNT_SEPARATOR: &str = "@";
 
 #[derive(Clone, Debug)]
 pub(crate) struct ConnectionKeychain {
@@ -95,17 +97,19 @@ impl ConnectionKeychain {
         }
 
         if portable_keychain_enabled()? {
-            let account = self.account(id);
-            return portable_keystore::store_secret(
+            let account = portable_account(id);
+            let legacy_suffix = legacy_portable_account_suffix(id);
+            return portable_keystore::store_secret_replacing_legacy_accounts(
                 &self.service,
                 &account,
+                &legacy_suffix,
                 secret.expose_secret(),
             )
             .with_context(|| format!("failed to store password in portable keystore for {id}"));
         }
 
         NativeSecretStore::new(&self.service)
-            .store(&self.account(id), secret.expose_secret())
+            .store(&self.native_account(id), secret.expose_secret())
             .with_context(|| format!("failed to store password in OS keychain for {id}"))
     }
 
@@ -125,8 +129,13 @@ impl ConnectionKeychain {
         }
 
         if portable_keychain_enabled()? {
-            let account = self.account(id);
-            return match portable_keystore::get_secret(&self.service, &account) {
+            let account = portable_account(id);
+            let legacy_suffix = legacy_portable_account_suffix(id);
+            return match portable_keystore::get_secret_migrating_legacy_account(
+                &self.service,
+                &account,
+                &legacy_suffix,
+            ) {
                 Ok(secret) => Ok(Some(SecretString::from(secret))),
                 Err(PortableKeystoreError::NotFound(_)) => Ok(None),
                 Err(error) => Err(error).with_context(|| {
@@ -142,7 +151,7 @@ impl ConnectionKeychain {
         }
 
         NativeSecretStore::new(&self.service)
-            .get_and_relax(&self.account(id))
+            .get_and_relax(&self.native_account(id))
             // Move the keychain result directly into its zeroizing domain owner
             // so no unmanaged String copy survives this boundary.
             .map(|secret| secret.map(SecretString::from))
@@ -160,23 +169,54 @@ impl ConnectionKeychain {
         }
 
         if portable_keychain_enabled()? {
-            let account = self.account(id);
-            return portable_keystore::delete_secret(&self.service, &account).with_context(|| {
-                format!("failed to delete password from portable keystore for {id}")
-            });
+            let account = portable_account(id);
+            let legacy_suffix = legacy_portable_account_suffix(id);
+            return portable_keystore::delete_secret_with_legacy_accounts(
+                &self.service,
+                &account,
+                &legacy_suffix,
+            )
+            .with_context(|| format!("failed to delete password from portable keystore for {id}"));
         }
 
         NativeSecretStore::new(&self.service)
-            .delete(&self.account(id))
+            .delete(&self.native_account(id))
             .with_context(|| format!("failed to delete password from OS keychain for {id}"))
     }
 
-    fn account(&self, id: &str) -> String {
+    fn native_account(&self, id: &str) -> String {
         format!("{}@{}", whoami::username(), id)
     }
+}
+
+fn portable_account(id: &str) -> String {
+    // Portable Vault authentication, rather than the host OS account, owns
+    // access to this stable entry across machines and system users.
+    format!("{PORTABLE_ACCOUNT_PREFIX}{id}")
+}
+
+fn legacy_portable_account_suffix(id: &str) -> String {
+    format!("{LEGACY_ACCOUNT_SEPARATOR}{id}")
 }
 
 fn portable_keychain_enabled() -> Result<bool> {
     oxideterm_portable_runtime::is_portable_mode()
         .context("failed to determine OxideTerm portable mode")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn portable_account_is_independent_of_host_username() {
+        assert_eq!(
+            portable_account("managed-key-id"),
+            "portable:v1:managed-key-id"
+        );
+        assert_eq!(
+            legacy_portable_account_suffix("managed-key-id"),
+            "@managed-key-id"
+        );
+    }
 }
