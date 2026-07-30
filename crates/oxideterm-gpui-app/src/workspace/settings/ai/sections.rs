@@ -4,7 +4,6 @@ pub(in crate::workspace) const AI_ACP_AGENT_TEXTAREA_MIN_H: f32 = 72.0; // Tauri
 pub(in crate::workspace) const AI_TOOL_NUMBER_INPUT_W: f32 = 96.0; // Tauri w-24.
 pub(in crate::workspace) const AI_ACP_AGENT_FIELD_MIN_WIDTH: f32 = 220.0; // Keep ACP form fields readable on narrow settings panes.
 pub(in crate::workspace) const AI_ACP_AGENT_TEXTAREA_FIELD_MIN_WIDTH: f32 = 240.0; // Multiline command fields need more room than compact selects.
-pub(in crate::workspace) const AI_ACP_AGENT_AUTH_TOKEN_MIN_WIDTH: f32 = 220.0; // Let token actions wrap without crushing the secret input.
 pub(in crate::workspace) const AI_ACP_AGENT_CAPABILITY_MIN_WIDTH: f32 = 150.0; // Capability checkboxes should wrap as chips, not grid columns.
 pub(in crate::workspace) const AI_READONLY_VALUE_WIDTH: f32 = 180.0; // Keep compact status fields aligned with text inputs.
 
@@ -213,7 +212,6 @@ impl WorkspaceApp {
                         ),
                     )),
             )
-            .child(self.ai_acp_agent_auth_token_input(index, agent, cx))
             .child(
                 div()
                     .w_full()
@@ -307,152 +305,6 @@ impl WorkspaceApp {
             }),
         )
         .into_any_element()
-    }
-
-    pub(in crate::workspace) fn ai_acp_agent_auth_token_input(
-        &self,
-        index: usize,
-        agent: &oxideterm_settings::AcpAgentConfig,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let input = SettingsInput::AiAcpAgentAuthToken(index);
-        let (focused, save_disabled) = {
-            let ai_workspace = self.ai_entity.read(cx);
-            let focused = ai_workspace.focused_settings_input() == Some(input);
-            let save_disabled = ai_workspace
-                .settings_input_value(input)
-                .is_none_or(|draft| draft.trim().is_empty());
-            (focused, save_disabled)
-        };
-        let remove_disabled =
-            agent.auth.status != oxideterm_settings::AcpAgentAuthStatus::Authenticated;
-        let save_agent_id = agent.id.clone();
-        let remove_agent_id = agent.id.clone();
-
-        div()
-            .flex()
-            .flex_col()
-            .gap(px(4.0))
-            .child(
-                div()
-                    .text_size(px(12.0))
-                    .text_color(rgb(self.tokens.ui.text_muted))
-                    .child(self.i18n.t("settings_view.ai.acp_agent_auth_token")),
-            )
-            .child(
-                div()
-                    .w_full()
-                    .min_w(px(0.0))
-                    .flex()
-                    .flex_wrap()
-                    .gap(px(8.0))
-                    .child(
-                        div()
-                            .min_w(px(0.0))
-                            .flex_1()
-                            .flex_basis(px(AI_ACP_AGENT_AUTH_TOKEN_MIN_WIDTH))
-                            .child(self.ai_provider_secret_input(
-                                input,
-                                "",
-                                if agent.auth.status
-                                    == oxideterm_settings::AcpAgentAuthStatus::Authenticated
-                                {
-                                    self.i18n.t("settings_view.ai.acp_agent_auth_token_saved")
-                                } else {
-                                    self.i18n
-                                        .t("settings_view.ai.acp_agent_auth_token_placeholder")
-                                },
-                                focused,
-                                cx,
-                            )),
-                    )
-                    .child(
-                        self.workspace_toolbar_action_button(
-                            self.i18n.t("settings_view.ai.save"),
-                            None,
-                            ToolbarButtonOptions {
-                                button: ButtonOptions {
-                                    variant: ButtonVariant::Secondary,
-                                    size: ButtonSize::Sm,
-                                    radius: ButtonRadius::Md,
-                                    disabled: save_disabled,
-                                },
-                                height: Some(32.0),
-                                font_size: Some(self.tokens.metrics.ui_text_xs),
-                                ..ToolbarButtonOptions::default()
-                            },
-                            cx.listener(move |this, _event, _window, cx| {
-                                this.save_ai_acp_agent_auth_token(index, save_agent_id.clone(), cx);
-                                cx.stop_propagation();
-                            }),
-                        )
-                        .into_any_element(),
-                    )
-                    .child(
-                        self.workspace_toolbar_action_button(
-                            self.i18n.t("settings_view.ai.remove"),
-                            None,
-                            ToolbarButtonOptions {
-                                button: ButtonOptions {
-                                    variant: ButtonVariant::Ghost,
-                                    size: ButtonSize::Sm,
-                                    radius: ButtonRadius::Md,
-                                    disabled: remove_disabled,
-                                },
-                                height: Some(32.0),
-                                font_size: Some(self.tokens.metrics.ui_text_xs),
-                                text_color: Some(rgb(self.tokens.ui.error)),
-                                hover_text_color: Some(rgb(self.tokens.ui.error)),
-                                hover_background: Some(rgba((self.tokens.ui.error << 8) | 0x1a)),
-                                ..ToolbarButtonOptions::default()
-                            },
-                            cx.listener(move |this, _event, _window, cx| {
-                                this.delete_ai_acp_agent_auth_token(
-                                    index,
-                                    remove_agent_id.clone(),
-                                    cx,
-                                );
-                                cx.stop_propagation();
-                            }),
-                        )
-                        .into_any_element(),
-                    ),
-            )
-            .into_any_element()
-    }
-
-    pub(in crate::workspace) fn save_ai_acp_agent_auth_token(
-        &mut self,
-        index: usize,
-        agent_id: String,
-        cx: &mut Context<Self>,
-    ) {
-        // The ACP token draft is converted to a zeroizing owner at the
-        // UI/backend boundary and is never applied through persisted settings.
-        let input = SettingsInput::AiAcpAgentAuthToken(index);
-        let Some(token) = self
-            .ai_entity
-            .update(cx, |ai, _cx| ai.take_acp_auth_token(input))
-        else {
-            cx.notify();
-            return;
-        };
-        self.ai_entity.update(cx, |ai, cx| {
-            ai.store_acp_auth_token(agent_id, token, cx);
-        });
-        cx.notify();
-    }
-
-    pub(in crate::workspace) fn delete_ai_acp_agent_auth_token(
-        &mut self,
-        _index: usize,
-        agent_id: String,
-        cx: &mut Context<Self>,
-    ) {
-        self.ai_entity.update(cx, |ai, cx| {
-            ai.remove_acp_auth_token(agent_id, cx);
-        });
-        cx.notify();
     }
 
     pub(in crate::workspace) fn ai_labeled_text_input(

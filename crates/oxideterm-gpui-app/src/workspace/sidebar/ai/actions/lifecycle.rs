@@ -133,6 +133,9 @@ impl WorkspaceApp {
     }
 
     pub(in crate::workspace) fn delete_ai_conversation(&mut self, id: &str, cx: &mut App) {
+        self.acp_entity.update(cx, |entity, _cx| {
+            entity.close_thread(id, false);
+        });
         let has_conversations = self.ai_entity.update(cx, |ai, _cx| {
             let has_conversations = ai.delete_conversation(id);
             ai.persist_chat_state();
@@ -146,6 +149,9 @@ impl WorkspaceApp {
     pub(in crate::workspace) fn clear_ai_conversations(&mut self, cx: &mut App) {
         // Cancel the live generation before clearing its routing identifier.
         self.cancel_ai_chat_stream_without_notify(cx);
+        self.acp_entity.update(cx, |entity, _cx| {
+            entity.close_all_threads(false);
+        });
         self.ai_entity.update(cx, |ai, _cx| {
             ai.clear_conversations();
             ai.persist_chat_state();
@@ -165,14 +171,13 @@ impl WorkspaceApp {
             .active_conversation_id
             .clone();
         if let Some(conversation_id) = active_conversation_id.as_deref() {
-            let generation_id = self.ai_entity.read(cx).chat_stream_generation().to_string();
-            // ACP Stop must target the live generation before local task abort
-            // drops the registered session handle.
+            // The ACP entity is the sole process/session owner. Route Stop to
+            // it before invalidating the UI generation so the protocol cancel
+            // reaches the still-live session.
             let _ = self
-                .ai_entity
+                .acp_entity
                 .read(cx)
-                .acp_runtime_registry()
-                .cancel_generation(conversation_id, &generation_id);
+                .cancel_active_turn(conversation_id);
         }
         let (conversation_id, stopped_turns) = self.ai_entity.update(cx, |ai, _cx| {
             ai.cancel_chat_stream();

@@ -370,10 +370,18 @@ impl WorkspaceApp {
                 }),
             );
             if self.ai_acp_model_discovery_is_pending(&agent_id, cx) {
-                return panel.child(row.opacity(0.7)).into_any_element();
+                return self
+                    .append_ai_acp_session_controls(
+                        panel.child(row.opacity(0.7)),
+                        &agent_id,
+                        session_state.as_ref(),
+                        config_options.as_deref(),
+                        None,
+                        cx,
+                    )
+                    .into_any_element();
             }
-            return panel
-                .child(
+            panel = panel.child(
                     row
                     .on_mouse_down(
                         MouseButton::Left,
@@ -386,6 +394,15 @@ impl WorkspaceApp {
                             cx.stop_propagation();
                         }),
                     ),
+                );
+            return self
+                .append_ai_acp_session_controls(
+                    panel,
+                    &agent_id,
+                    session_state.as_ref(),
+                    config_options.as_deref(),
+                    None,
+                    cx,
                 )
                 .into_any_element();
         };
@@ -458,6 +475,132 @@ impl WorkspaceApp {
                 ),
             );
         }
-        panel.into_any_element()
+        self.append_ai_acp_session_controls(
+            panel,
+            &agent_id,
+            session_state.as_ref(),
+            config_options.as_deref(),
+            Some(option.config_id.as_str()),
+            cx,
+        )
+        .into_any_element()
+    }
+
+    fn append_ai_acp_session_controls(
+        &self,
+        mut panel: Div,
+        agent_id: &str,
+        session_state: Option<&AiAcpSessionState>,
+        config_options: Option<&[oxideterm_ai::AcpSessionConfigOption]>,
+        model_config_id: Option<&str>,
+        cx: &mut Context<Self>,
+    ) -> Div {
+        if let Some(session_state) = session_state
+            && !session_state.available_modes.is_empty()
+        {
+            panel = panel.child(
+                div()
+                    .mt(px(self.tokens.spacing.one))
+                    .px(px(self.tokens.spacing.two))
+                    .py(px(self.tokens.spacing.one))
+                    .text_size(px(10.0))
+                    .font_weight(gpui::FontWeight::SEMIBOLD)
+                    .text_color(rgb(self.tokens.ui.text_muted))
+                    .child(self.i18n.t("ai.model_selector.session_mode")),
+            );
+            for mode in &session_state.available_modes {
+                let active =
+                    session_state.current_mode_id.as_deref() == Some(mode.mode_id.as_str());
+                let agent_id_for_click = agent_id.to_string();
+                let mode_id = mode.mode_id.clone();
+                panel = panel.child(
+                    ai_model_selector_model_row(
+                        &self.tokens,
+                        mode.name.clone(),
+                        active,
+                        false,
+                        active.then(|| {
+                            Self::render_lucide_icon(
+                                LucideIcon::Check,
+                                12.0,
+                                rgb(self.tokens.ui.accent),
+                            )
+                        }),
+                    )
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(move |this, _event, _window, cx| {
+                            this.select_ai_acp_mode_from_selector(
+                                agent_id_for_click.clone(),
+                                mode_id.clone(),
+                                cx,
+                            );
+                            cx.stop_propagation();
+                        }),
+                    ),
+                );
+            }
+        }
+
+        for config_option in config_options
+            .unwrap_or_default()
+            .iter()
+            .filter(|candidate| Some(candidate.config_id.as_str()) != model_config_id)
+            .filter(|candidate| !candidate.choices.is_empty())
+        {
+            panel = panel.child(
+                div()
+                    .mt(px(self.tokens.spacing.one))
+                    .px(px(self.tokens.spacing.two))
+                    .py(px(self.tokens.spacing.one))
+                    .text_size(px(10.0))
+                    .font_weight(gpui::FontWeight::SEMIBOLD)
+                    .text_color(rgb(self.tokens.ui.text_muted))
+                    .child(config_option.name.clone()),
+            );
+            let selected_value_id = session_state
+                .and_then(|state| {
+                    state
+                        .config_selections
+                        .iter()
+                        .find(|selection| selection.config_id == config_option.config_id)
+                })
+                .map(|selection| selection.value_id.as_str())
+                .unwrap_or(config_option.current_value_id.as_str());
+            for choice in &config_option.choices {
+                let active = choice.value_id == selected_value_id;
+                let agent_id_for_click = agent_id.to_string();
+                let config_id = config_option.config_id.clone();
+                let value_id = choice.value_id.clone();
+                panel = panel.child(
+                    ai_model_selector_model_row(
+                        &self.tokens,
+                        choice.label.clone(),
+                        active,
+                        false,
+                        active.then(|| {
+                            Self::render_lucide_icon(
+                                LucideIcon::Check,
+                                12.0,
+                                rgb(self.tokens.ui.accent),
+                            )
+                        }),
+                    )
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(move |this, _event, _window, cx| {
+                            this.select_ai_acp_config_from_selector(
+                                agent_id_for_click.clone(),
+                                config_id.clone(),
+                                value_id.clone(),
+                                cx,
+                            );
+                            cx.stop_propagation();
+                        }),
+                    ),
+                );
+            }
+        }
+        panel
     }
 }

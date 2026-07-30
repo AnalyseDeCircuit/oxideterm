@@ -1,5 +1,12 @@
 {
   "ai": {
+    "acp": {
+      "auth_required": "需要驗證",
+      "authenticate": "驗證",
+      "auth_environment_hint": "請在代理設定中配置所需環境變數",
+      "auth_terminal_hint": "請在外部完成互動式終端驗證，然後重試",
+      "auth_unsupported_hint": "暫不支援此驗證方式"
+    },
     "chat": {
       "header": "聊天",
       "get_started": "開始使用 OxideSens",
@@ -125,6 +132,7 @@
       "manage_providers": "管理供應商",
       "no_provider": "未設定供應商",
       "select_model": "選擇模型",
+      "session_mode": "工作階段模式",
       "no_model_selected": "尚未選擇模型。請從聊天模型選單中選擇。",
       "agent_decides": "由 Agent 決定",
       "agent_model_unavailable": "自動選擇（代理程式未公開模型）",

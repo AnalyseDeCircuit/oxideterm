@@ -476,6 +476,14 @@ impl WorkspaceApp {
                 workspace.enqueue_ai_window_effect(event, cx);
             },
         );
+        let acp_entity =
+            cx.new(|cx| acp_workspace::AcpWorkspaceEntity::new(forwarding_runtime.clone(), cx));
+        let acp_entity_subscription = cx.subscribe(
+            &acp_entity,
+            |workspace, _acp_entity, _event: &acp_workspace::AcpWorkspaceEvent, cx| {
+                workspace.forward_acp_workspace_deliveries(cx);
+            },
+        );
         let ai_runtime_context = cx.new(|cx| {
             ai_runtime_context::AiRuntimeContextEntity::attach_release_shutdown(cx);
             ai_runtime_context::AiRuntimeContextEntity::new()
@@ -592,8 +600,10 @@ impl WorkspaceApp {
                 && settings.ai.enabled,
             context_sidebar_motion_generation: 0,
             ai_entity,
+            acp_entity,
             ai_runtime_context,
             _ai_entity_subscription: ai_entity_subscription,
+            _acp_entity_subscription: acp_entity_subscription,
             active_context_sidebar_panel: ContextSidebarPanel::Assistant,
             needs_active_pane_focus: false,
             active_sidebar_section: SidebarSection::from_settings_key(

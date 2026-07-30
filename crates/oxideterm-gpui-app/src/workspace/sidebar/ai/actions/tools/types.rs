@@ -27,7 +27,6 @@ pub(in crate::workspace) struct AiOrchestratorRuntimeSnapshot {
 pub(in crate::workspace) struct AiModelBackendServices {
     pub(in crate::workspace) rag_store: std::sync::Arc<oxideterm_ai::RagStore>,
     pub(in crate::workspace) ai_mcp_registry: oxideterm_ai::McpRegistry,
-    pub(in crate::workspace) ai_acp_runtime_registry: oxideterm_ai::AcpRuntimeRegistry,
     pub(in crate::workspace) ai_key_store: oxideterm_ai::AiProviderKeyStore,
     pub(in crate::workspace) ai_providers: Vec<serde_json::Value>,
     pub(in crate::workspace) ai_embedding_config: Option<serde_json::Value>,
@@ -48,7 +47,6 @@ pub(in crate::workspace) struct AiModelRuntimeState {
 }
 
 pub(in crate::workspace) struct AiAcpChatLaunch {
-    pub(in crate::workspace) agent_id: String,
     pub(in crate::workspace) launch_config: oxideterm_ai::AcpLaunchConfig,
     pub(in crate::workspace) session_cwd: std::path::PathBuf,
     pub(in crate::workspace) host_policy: oxideterm_ai::AcpHostCapabilityPolicy,
@@ -102,11 +100,15 @@ pub(in crate::workspace) enum AiSftpTransferError {
 
 pub(in crate::workspace) enum AiStreamDeliveryEvent {
     Stream(AiStreamEvent),
-    AcpClientEvent(oxideterm_ai::AcpClientEvent),
+    AcpClientEvent {
+        agent_id: String,
+        event: oxideterm_ai::AcpClientEvent,
+    },
     AcpSessionStarted {
         session_id: String,
         session_metadata: Option<serde_json::Value>,
         session_config_options: Vec<oxideterm_ai::AcpSessionConfigOption>,
+        session_modes: Option<oxideterm_ai::AcpSessionModeState>,
         agent_id: String,
     },
     Guardrail {

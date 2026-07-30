@@ -1,5 +1,12 @@
 {
   "ai": {
+    "acp": {
+      "auth_required": "Cần xác thực",
+      "authenticate": "Xác thực",
+      "auth_environment_hint": "Đặt các biến môi trường bắt buộc trong cài đặt tác nhân",
+      "auth_terminal_hint": "Hoàn tất xác thực thiết bị đầu cuối tương tác ở bên ngoài rồi thử lại",
+      "auth_unsupported_hint": "Phương thức xác thực này không được hỗ trợ"
+    },
     "chat": {
       "header": "Trò chuyện",
       "get_started": "Bắt đầu với OxideSens",
@@ -125,6 +132,7 @@
       "manage_providers": "Quản lý nhà cung cấp",
       "no_provider": "Chưa cấu hình nhà cung cấp",
       "select_model": "Chọn mô hình",
+      "session_mode": "Chế độ phiên",
       "no_model_selected": "Chưa chọn mô hình. Hãy chọn một mô hình trong menu mô hình của cuộc trò chuyện.",
       "agent_decides": "Do tác tử quyết định",
       "agent_model_unavailable": "Tự động chọn (tác tử không công bố mô hình)",

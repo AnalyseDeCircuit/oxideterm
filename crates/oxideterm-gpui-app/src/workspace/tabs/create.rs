@@ -67,6 +67,17 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Result<()> {
+        self.create_local_terminal_tab_with_owned_session(terminal_config, title, window, cx)
+            .map(|_| ())
+    }
+
+    pub(in crate::workspace) fn create_local_terminal_tab_with_owned_session(
+        &mut self,
+        terminal_config: LocalPtyConfig,
+        title: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Result<(TerminalSessionId, SharedTerminalSession)> {
         // Shell Launcher selections must use the same tab and pane lifecycle as
         // the default-shell shortcut; only the PTY configuration differs.
         let tab_id = self.alloc_tab_id(cx);
@@ -83,6 +94,7 @@ impl WorkspaceApp {
             )
             .expect("failed to initialize terminal pane")
         });
+        let shared_session = pane.read(cx).shared_session();
 
         self.register_terminal_pane(pane_id, session_id, pane.clone(), window, cx);
         self.refresh_native_plugin_terminal_hooks(cx);
@@ -104,7 +116,7 @@ impl WorkspaceApp {
         pane.update(cx, |pane, cx| pane.focus(window, cx));
         self.reveal_active_tab(window, cx);
         cx.notify();
-        Ok(())
+        Ok((session_id, shared_session))
     }
 
     pub(in crate::workspace) fn create_telnet_terminal_tab(

@@ -23,6 +23,8 @@ impl AiWorkspaceEntity {
         stream_config: &AiChatStreamConfig,
         active_participant: Option<String>,
     ) -> String {
+        let message_id = message.id.clone();
+        let backend = ai_message_backend_for_stream(stream_config);
         let first_user_message = message.content.clone();
         let conversation_id = self.conversation_state_mut().ensure_conversation(
             candidate_id,
@@ -65,6 +67,13 @@ impl AiWorkspaceEntity {
                     );
                 }
             }
+            // Provenance is safe structural metadata used to avoid replaying
+            // messages that the selected ACP session already owns.
+            oxideterm_ai::store_ai_message_backend_provenance(
+                conversation,
+                &message_id,
+                backend,
+            );
         }
         // Save the message and session metadata as one projection.
         self.persist_chat_state();
@@ -129,6 +138,7 @@ impl AiWorkspaceEntity {
         new_user_id: String,
         edited_content: String,
         model: String,
+        backend: oxideterm_ai::AiMessageBackendProvenance,
         now_ms: i64,
     ) -> Option<String> {
         let conversation = self.conversation_state_mut().active_conversation_mut()?;
@@ -157,7 +167,7 @@ impl AiWorkspaceEntity {
         let context = original.context.take();
         conversation.messages.truncate(message_index);
         conversation.messages.push(AiChatMessage {
-            id: new_user_id,
+            id: new_user_id.clone(),
             role: AiChatRole::User,
             content: edited_content,
             timestamp_ms: now_ms,
@@ -174,6 +184,13 @@ impl AiWorkspaceEntity {
             branches: Some(branches),
             suggestions: Vec::new(),
         });
+        // Editing starts a new turn, so the replacement must carry the backend
+        // owner selected for that turn instead of inheriting the removed branch.
+        oxideterm_ai::store_ai_message_backend_provenance(
+            conversation,
+            &new_user_id,
+            backend,
+        );
         conversation.message_count = conversation.messages.len();
         conversation.updated_at_ms = now_ms;
         let conversation_id = conversation.id.clone();
@@ -416,7 +433,7 @@ impl WorkspaceApp {
         let message = AiChatMessage {
             id: self.next_ai_chat_id(now, cx),
             role: AiChatRole::User,
-            content,
+            content: content.clone(),
             timestamp_ms: now,
             model: Some(stream_config.model.clone()),
             context,
@@ -441,8 +458,17 @@ impl WorkspaceApp {
             .participants
             .first()
             .map(|participant| participant.name.clone());
-        let request_content =
-            (!parsed_input.clean_text.is_empty()).then_some(parsed_input.clean_text);
+        let request_text = if stream_config.execution_backend == AiExecutionBackend::Acp
+            && parsed_input.slash_command.is_some()
+            && slash_command.is_none()
+        {
+            // Agent-advertised ACP commands are protocol input, not OxideTerm
+            // system prompts. Preserve the slash prefix for the agent.
+            content
+        } else {
+            parsed_input.clean_text
+        };
+        let request_content = (!request_text.is_empty()).then_some(request_text);
         let conversation_id = self.ai_entity.update(cx, |ai, _cx| {
             ai.begin_sidebar_user_turn(
                 id,
@@ -476,6 +502,18 @@ impl WorkspaceApp {
         task_system_prompt: Option<String>,
         cx: &mut Context<Self>,
     ) {
+        if stream_config.execution_backend == AiExecutionBackend::Acp {
+            // ACP is a session protocol, not a provider completion backend.
+            // It owns history and authentication after connection negotiation.
+            self.start_acp_chat_thread(
+                conversation_id,
+                stream_config,
+                request_content,
+                task_system_prompt,
+                cx,
+            );
+            return;
+        }
         let requires_key = ai_provider_chat_requires_key(&stream_config.provider_type);
         let Some(provider_id) = stream_config.provider_id.clone() else {
             self.start_ai_chat_stream_after_rag_lookup(
@@ -773,12 +811,14 @@ impl WorkspaceApp {
         let now = ai_now_ms();
         let new_user_id = self.next_ai_chat_id(now, cx);
         let request_content = Some(edited_content.clone());
+        let backend = ai_message_backend_for_stream(&stream_config);
         let conversation_id = self.ai_entity.update(cx, |ai, _cx| {
             ai.replace_active_user_message(
                 &message_id,
                 new_user_id,
                 edited_content,
                 stream_config.model.clone(),
+                backend,
                 now,
             )
         });

@@ -1,3 +1,32 @@
+fn synchronize_ai_acp_config_selections(
+    config_options: &[oxideterm_ai::AcpSessionConfigOption],
+    model_selection: &mut Option<oxideterm_ai::AcpSessionConfigSelection>,
+    config_selections: &mut Vec<oxideterm_ai::AcpSessionConfigSelection>,
+) {
+    // The protocol response is the authoritative complete catalog. Rebuild
+    // selections from its current values so rejected or agent-adjusted choices
+    // can never remain persisted as if they had succeeded.
+    *config_selections = config_options
+        .iter()
+        .filter(|option| {
+            option
+                .choices
+                .iter()
+                .any(|choice| choice.value_id == option.current_value_id)
+        })
+        .map(|option| oxideterm_ai::AcpSessionConfigSelection {
+            config_id: option.config_id.clone(),
+            value_id: option.current_value_id.clone(),
+        })
+        .collect();
+    *model_selection = oxideterm_ai::acp_model_config_option(config_options).and_then(|option| {
+        config_selections
+            .iter()
+            .find(|selection| selection.config_id == option.config_id)
+            .cloned()
+    });
+}
+
 pub(in crate::workspace) fn apply_ai_acp_session_started_to_conversations(
     conversations: &mut [AiConversation],
     current_generation: u64,
@@ -6,6 +35,7 @@ pub(in crate::workspace) fn apply_ai_acp_session_started_to_conversations(
     session_id: &str,
     session_metadata: Option<serde_json::Value>,
     session_config_options: Vec<oxideterm_ai::AcpSessionConfigOption>,
+    session_modes: Option<oxideterm_ai::AcpSessionModeState>,
     agent_id: &str,
 ) -> bool {
     if current_generation != delivery_generation {
@@ -19,18 +49,20 @@ pub(in crate::workspace) fn apply_ai_acp_session_started_to_conversations(
     };
 
     conversation.session_id = Some(session_id.to_string());
-    let model_selection = ai_acp_session_state(conversation)
-        .filter(|state| state.agent_id == agent_id)
-        .and_then(|state| state.model_selection)
-        .filter(|selection| {
-            session_config_options.iter().any(|option| {
-                option.config_id == selection.config_id
-                    && option
-                        .choices
-                        .iter()
-                        .any(|choice| choice.value_id == selection.value_id)
-            })
-        });
+    let previous_state =
+        ai_acp_session_state(conversation).filter(|state| state.agent_id == agent_id);
+    let mut model_selection = previous_state
+        .as_ref()
+        .and_then(|state| state.model_selection.clone());
+    let mut config_selections = previous_state
+        .as_ref()
+        .map(|state| state.config_selections.clone())
+        .unwrap_or_default();
+    synchronize_ai_acp_config_selections(
+        &session_config_options,
+        &mut model_selection,
+        &mut config_selections,
+    );
     let metadata = conversation
         .session_metadata
         .get_or_insert_with(|| serde_json::json!({ "conversationId": conversation_id }));
@@ -48,6 +80,31 @@ pub(in crate::workspace) fn apply_ai_acp_session_started_to_conversations(
             metadata: session_metadata,
             config_options: session_config_options,
             model_selection,
+            config_selections,
+            current_mode_id: session_modes
+                .as_ref()
+                .map(|modes| modes.current_mode_id.clone()),
+            available_modes: session_modes
+                .as_ref()
+                .map(|modes| modes.available_modes.clone())
+                .unwrap_or_default(),
+            available_commands: previous_state
+                .as_ref()
+                .map(|state| state.available_commands.clone())
+                .unwrap_or_default(),
+            plan: previous_state
+                .as_ref()
+                .and_then(|state| state.plan.clone()),
+            usage: previous_state
+                .as_ref()
+                .and_then(|state| state.usage.clone()),
+            title: previous_state
+                .as_ref()
+                .and_then(|state| state.title.clone()),
+            handoff_cursor: previous_state
+                .as_ref()
+                .filter(|state| state.session_id.is_empty() || state.session_id == session_id)
+                .and_then(|state| state.handoff_cursor.clone()),
         };
         if let Ok(value) = serde_json::to_value(state) {
             object.insert(AI_ACP_SESSION_METADATA_KEY.to_string(), value);
@@ -78,6 +135,88 @@ enum AiStreamApplyOutcome {
 }
 
 impl AiWorkspaceEntity {
+    pub(in crate::workspace) fn mark_acp_handoff_cursor(
+        &mut self,
+        conversation_id: &str,
+        agent_id: &str,
+        message_id: &str,
+    ) -> bool {
+        let Some(conversation) = self
+            .conversation_state_mut()
+            .conversations
+            .iter_mut()
+            .find(|conversation| conversation.id == conversation_id)
+        else {
+            return false;
+        };
+        if !store_ai_acp_handoff_cursor_in_conversation(conversation, agent_id, message_id) {
+            return false;
+        }
+        // Advance only after the ACP prompt completed successfully. Failed or
+        // cancelled turns retain the previous cursor so context is never lost.
+        self.persist_chat_state();
+        true
+    }
+
+    pub(in crate::workspace) fn apply_acp_session_state_update(
+        &mut self,
+        conversation_id: &str,
+        update: oxideterm_ai::AcpSessionStateUpdate,
+    ) -> bool {
+        let Some(conversation) = self
+            .conversation_state_mut()
+            .conversations
+            .iter_mut()
+            .find(|conversation| conversation.id == conversation_id)
+        else {
+            return false;
+        };
+        let Some(mut state) = ai_acp_session_state(conversation) else {
+            return false;
+        };
+        match update {
+            oxideterm_ai::AcpSessionStateUpdate::ConfigOptions(config_options) => {
+                synchronize_ai_acp_config_selections(
+                    &config_options,
+                    &mut state.model_selection,
+                    &mut state.config_selections,
+                );
+                state.config_options = config_options;
+            }
+            oxideterm_ai::AcpSessionStateUpdate::CurrentMode(mode_id) => {
+                state.current_mode_id = Some(mode_id);
+            }
+            oxideterm_ai::AcpSessionStateUpdate::AvailableCommands(commands) => {
+                state.available_commands = commands;
+            }
+            oxideterm_ai::AcpSessionStateUpdate::Plan(plan) => state.plan = Some(plan),
+            oxideterm_ai::AcpSessionStateUpdate::SessionInfo { title, .. } => {
+                if let Some(title) = title
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|title| !title.is_empty())
+                {
+                    conversation.title = title.to_string();
+                    conversation.updated_at_ms = ai_now_ms();
+                }
+                state.title = title;
+            }
+            oxideterm_ai::AcpSessionStateUpdate::Usage(usage) => state.usage = Some(usage),
+        }
+        let metadata = conversation
+            .session_metadata
+            .get_or_insert_with(|| serde_json::json!({}));
+        let Some(metadata) = metadata.as_object_mut() else {
+            return false;
+        };
+        let Ok(value) = serde_json::to_value(state) else {
+            return false;
+        };
+        metadata.insert(AI_ACP_SESSION_METADATA_KEY.to_string(), value);
+        self.persist_chat_state();
+        true
+    }
+
     fn apply_acp_session_started_state(
         &mut self,
         generation: u64,
@@ -85,6 +224,7 @@ impl AiWorkspaceEntity {
         session_id: &str,
         session_metadata: Option<serde_json::Value>,
         session_config_options: Vec<oxideterm_ai::AcpSessionConfigOption>,
+        session_modes: Option<oxideterm_ai::AcpSessionModeState>,
         agent_id: &str,
     ) -> bool {
         let current_generation = self.chat_stream_generation();
@@ -96,6 +236,7 @@ impl AiWorkspaceEntity {
             session_id,
             session_metadata,
             session_config_options,
+            session_modes,
             agent_id,
         );
         if applied {
@@ -224,6 +365,34 @@ impl AiWorkspaceEntity {
     }
 }
 
+pub(in crate::workspace) fn store_ai_acp_handoff_cursor_in_conversation(
+    conversation: &mut AiConversation,
+    agent_id: &str,
+    message_id: &str,
+) -> bool {
+    let Some(mut state) =
+        ai_acp_session_state(conversation).filter(|state| state.agent_id == agent_id)
+    else {
+        return false;
+    };
+    let Some(cursor) = oxideterm_ai::acp_conversation_handoff_cursor(conversation, message_id)
+    else {
+        return false;
+    };
+    state.handoff_cursor = Some(cursor);
+    let metadata = conversation
+        .session_metadata
+        .get_or_insert_with(|| serde_json::json!({}));
+    let Some(metadata) = metadata.as_object_mut() else {
+        return false;
+    };
+    let Ok(value) = serde_json::to_value(state) else {
+        return false;
+    };
+    metadata.insert(AI_ACP_SESSION_METADATA_KEY.to_string(), value);
+    true
+}
+
 impl WorkspaceApp {
     pub(in crate::workspace) fn apply_ai_acp_session_started(
         &mut self,
@@ -232,6 +401,7 @@ impl WorkspaceApp {
         session_id: &str,
         session_metadata: Option<serde_json::Value>,
         session_config_options: Vec<oxideterm_ai::AcpSessionConfigOption>,
+        session_modes: Option<oxideterm_ai::AcpSessionModeState>,
         agent_id: &str,
         cx: &mut App,
     ) -> bool {
@@ -242,6 +412,7 @@ impl WorkspaceApp {
                 session_id,
                 session_metadata,
                 session_config_options,
+                session_modes,
                 agent_id,
             )
         });

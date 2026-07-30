@@ -1,5 +1,12 @@
 {
   "ai": {
+    "acp": {
+      "auth_required": "認証が必要です",
+      "authenticate": "認証",
+      "auth_environment_hint": "エージェント設定で必要な環境変数を設定してください",
+      "auth_terminal_hint": "外部で対話型ターミナル認証を完了してから再試行してください",
+      "auth_unsupported_hint": "この認証方式はサポートされていません"
+    },
     "chat": {
       "header": "チャット",
       "get_started": "OxideSens を始める",
@@ -125,6 +132,7 @@
       "manage_providers": "プロバイダーを管理",
       "no_provider": "プロバイダー未設定",
       "select_model": "モデルを選択",
+      "session_mode": "セッションモード",
       "no_model_selected": "モデルが選択されていません。チャットのモデルメニューから選択してください。",
       "agent_decides": "Agent が決定",
       "agent_model_unavailable": "自動選択（Agent はモデルを公開していません）",

@@ -1,5 +1,12 @@
 {
   "ai": {
+    "acp": {
+      "auth_required": "Authentication required",
+      "authenticate": "Authenticate",
+      "auth_environment_hint": "Set the required environment variables in the agent settings",
+      "auth_terminal_hint": "Complete interactive terminal authentication externally, then retry",
+      "auth_unsupported_hint": "This authentication method is not supported"
+    },
     "chat": {
       "title": "OxideSens",
       "header": "Chat",
@@ -125,6 +132,7 @@
       "manage_providers": "Manage Providers",
       "no_provider": "No provider configured",
       "select_model": "Select model",
+      "session_mode": "Session mode",
       "no_model_selected": "No model selected. Select one from the chat model menu.",
       "agent_decides": "Agent decides",
       "agent_model_unavailable": "Automatic selection (model not exposed by agent)",

@@ -1,5 +1,12 @@
 {
   "ai": {
+    "acp": {
+      "auth_required": "Se requiere autenticación",
+      "authenticate": "Autenticar",
+      "auth_environment_hint": "Configura las variables de entorno necesarias en los ajustes del agente",
+      "auth_terminal_hint": "Completa externamente la autenticación interactiva del terminal y vuelve a intentarlo",
+      "auth_unsupported_hint": "Este método de autenticación no es compatible"
+    },
     "chat": {
       "header": "Chat",
       "get_started": "Comenzar con OxideSens",
@@ -125,6 +132,7 @@
       "manage_providers": "Gestionar proveedores",
       "no_provider": "Ningún proveedor configurado",
       "select_model": "Seleccionar modelo",
+      "session_mode": "Modo de sesión",
       "no_model_selected": "No hay ningún modelo seleccionado. Selecciona uno en el menú de modelos del chat.",
       "agent_decides": "Lo decide el agente",
       "agent_model_unavailable": "Selección automática (el agente no informa el modelo)",

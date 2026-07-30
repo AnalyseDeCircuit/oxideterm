@@ -642,7 +642,6 @@ impl WorkspaceApp {
         AiModelBackendServices {
             rag_store: ai.rag_store(),
             ai_mcp_registry: ai.mcp_registry().clone(),
-            ai_acp_runtime_registry: ai.acp_runtime_registry().clone(),
             ai_key_store: ai.key_store().clone(),
             ai_providers: settings.ai.providers.clone(),
             ai_embedding_config: settings.ai.embedding_config.clone(),
@@ -758,7 +757,6 @@ impl WorkspaceApp {
             cwd: agent.cwd.as_deref().map(std::path::PathBuf::from),
         };
         Ok(Some(AiAcpChatLaunch {
-            agent_id,
             launch_config,
             session_cwd,
             host_policy,
@@ -773,6 +771,21 @@ impl WorkspaceApp {
     ) {
         self.ai_entity.update(cx, |ai, _cx| {
             ai.resolve_tool_approval(&tool_call_id, approved);
+        });
+        cx.notify();
+    }
+
+    pub(in crate::workspace) fn resolve_ai_acp_permission(
+        &mut self,
+        tool_call_id: String,
+        option_id: Option<String>,
+        cx: &mut Context<Self>,
+    ) {
+        self.ai_entity.update(cx, |ai, _cx| {
+            ai.resolve_acp_permission_choice(&tool_call_id, option_id);
+        });
+        self.acp_entity.update(cx, |entity, _cx| {
+            entity.remove_file_write_preview(&tool_call_id);
         });
         cx.notify();
     }

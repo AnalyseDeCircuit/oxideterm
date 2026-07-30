@@ -1,5 +1,12 @@
 {
   "ai": {
+    "acp": {
+      "auth_required": "需要认证",
+      "authenticate": "认证",
+      "auth_environment_hint": "请在代理设置中配置所需环境变量",
+      "auth_terminal_hint": "请在外部完成交互式终端认证，然后重试",
+      "auth_unsupported_hint": "暂不支持此认证方式"
+    },
     "chat": {
       "title": "OxideSens",
       "header": "聊天",
@@ -125,6 +132,7 @@
       "manage_providers": "管理提供商",
       "no_provider": "未配置提供商",
       "select_model": "选择模型",
+      "session_mode": "会话模式",
       "no_model_selected": "尚未选择模型。请从聊天模型菜单中选择。",
       "agent_decides": "由 Agent 决定",
       "agent_model_unavailable": "自动选择（代理未公开模型）",

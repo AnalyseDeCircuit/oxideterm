@@ -33,6 +33,9 @@ impl WorkspaceApp {
             .when_some(self.render_ai_reasoning_indicator(cx), |bar, indicator| {
                 bar.child(indicator)
             })
+            .when_some(self.render_ai_acp_plan_indicator(cx), |bar, indicator| {
+                bar.child(indicator)
+            })
             .child(self.render_ai_safety_indicator(cx))
             .child(self.render_ai_tool_indicator(cx))
             .into_any_element()
@@ -261,11 +264,146 @@ window.focus(&this.focus_handle, cx);
             self.context_sidebar_content_background(self.tokens.ui.bg),
         )
             .relative()
+            .when_some(self.render_ai_acp_authentication_prompt(cx), |root, prompt| {
+                root.child(prompt)
+            })
             .when(self.ai_should_show_context_chips(cx), |root| {
                 root.child(self.render_ai_context_chips(cx))
             })
             .child(frame)
             .into_any_element()
+    }
+
+    fn render_ai_acp_authentication_prompt(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let conversation_id = self
+            .ai_entity
+            .read(cx)
+            .conversation_state()
+            .active_conversation_id
+            .clone()?;
+        let methods = self
+            .acp_entity
+            .read(cx)
+            .authentication_methods(&conversation_id)?;
+        if methods.is_empty() {
+            return None;
+        }
+
+        let mut method_list = div().flex().flex_col().gap(px(6.0));
+        for method in methods {
+            let method_id = method.method_id.clone();
+            let target_conversation_id = conversation_id.clone();
+            let supported = method.kind == oxideterm_ai::AcpAuthMethodKind::Agent;
+            let setup_hint = match method.kind {
+                oxideterm_ai::AcpAuthMethodKind::Agent => None,
+                oxideterm_ai::AcpAuthMethodKind::Environment => {
+                    let variables = method.environment_variables.join(", ");
+                    Some(if variables.is_empty() {
+                        self.i18n.t("ai.acp.auth_environment_hint")
+                    } else {
+                        format!(
+                            "{}: {variables}",
+                            self.i18n.t("ai.acp.auth_environment_hint")
+                        )
+                    })
+                }
+                oxideterm_ai::AcpAuthMethodKind::Terminal => {
+                    Some(self.i18n.t("ai.acp.auth_terminal_hint"))
+                }
+                oxideterm_ai::AcpAuthMethodKind::Unsupported => {
+                    Some(self.i18n.t("ai.acp.auth_unsupported_hint"))
+                }
+            };
+            method_list = method_list.child(
+                div()
+                    .w_full()
+                    .min_w_0()
+                    .flex()
+                    .items_center()
+                    .gap(px(8.0))
+                    .child(
+                        div()
+                            .min_w_0()
+                            .flex_1()
+                            .flex()
+                            .flex_col()
+                            .child(
+                                div()
+                                    .text_size(px(11.0))
+                                    .font_weight(gpui::FontWeight::SEMIBOLD)
+                                    .text_color(rgb(self.tokens.ui.text))
+                                    .child(method.name),
+                            )
+                            .when_some(method.description, |column, description| {
+                                column.child(
+                                    div()
+                                        .text_size(px(10.0))
+                                        .text_color(rgb(self.tokens.ui.text_muted))
+                                        .child(description),
+                                )
+                            })
+                            .when_some(setup_hint, |column, hint| {
+                                column.child(
+                                    div()
+                                        .text_size(px(10.0))
+                                        .text_color(rgb(self.tokens.ui.text_muted))
+                                        .child(hint),
+                                )
+                            }),
+                    )
+                    .when(supported, |row| {
+                        row.child(
+                            self.workspace_toolbar_action_button(
+                                self.i18n.t("ai.acp.authenticate"),
+                                None,
+                                ToolbarButtonOptions {
+                                    button: ButtonOptions {
+                                        variant: ButtonVariant::Secondary,
+                                        size: ButtonSize::Sm,
+                                        radius: ButtonRadius::Md,
+                                        disabled: false,
+                                    },
+                                    height: Some(28.0),
+                                    font_size: Some(self.tokens.metrics.ui_text_xs),
+                                    ..ToolbarButtonOptions::default()
+                                },
+                                cx.listener(move |this, _event, _window, cx| {
+                                    this.acp_entity.update(cx, |entity, _cx| {
+                                        entity.authenticate(
+                                            &target_conversation_id,
+                                            method_id.clone(),
+                                        );
+                                    });
+                                    cx.stop_propagation();
+                                }),
+                            ),
+                        )
+                    }),
+            );
+        }
+
+        Some(
+            div()
+                .mx(px(8.0))
+                .mt(px(8.0))
+                .p(px(8.0))
+                .rounded(px(self.tokens.radii.md))
+                .border_1()
+                .border_color(rgba((self.tokens.ui.warning << 8) | 0x66))
+                .bg(rgba((self.tokens.ui.warning << 8) | 0x0f))
+                .flex()
+                .flex_col()
+                .gap(px(6.0))
+                .child(
+                    div()
+                        .text_size(px(11.0))
+                        .font_weight(gpui::FontWeight::SEMIBOLD)
+                        .text_color(rgb(self.tokens.ui.warning))
+                        .child(self.i18n.t("ai.acp.auth_required")),
+                )
+                .child(method_list)
+                .into_any_element(),
+        )
     }
 
     pub(in crate::workspace) fn render_ai_safety_indicator(
@@ -619,8 +757,9 @@ window.focus(&this.focus_handle, cx);
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let breakdown = self.ai_context_token_breakdown(cx);
-        let total_tokens = breakdown.total;
-        let max_tokens = breakdown.max_tokens;
+        let acp_usage = self.active_ai_acp_usage(cx);
+        let (total_tokens, max_tokens) =
+            acp_usage.unwrap_or((breakdown.total, breakdown.max_tokens));
         let percentage = if max_tokens == 0 {
             0.0
         } else {
@@ -647,7 +786,7 @@ window.focus(&this.focus_handle, cx);
                 }),
             ),
         )
-        .on_mouse_down(
+        .when(acp_usage.is_none(), |indicator| indicator.on_mouse_down(
             MouseButton::Left,
             cx.listener(|this, _event, _window, cx| {
                 let next_open = !this.ai_entity.read(cx).chat_ui().context_popover_open;
@@ -658,7 +797,10 @@ window.focus(&this.focus_handle, cx);
                 cx.stop_propagation();
                 cx.notify();
             }),
-        );
+        ));
+        if acp_usage.is_some() {
+            return indicator.into_any_element();
+        }
         let workspace = cx.entity();
         select_anchor_probe(
             SelectAnchorId::AiContextPopover,
@@ -666,6 +808,82 @@ window.focus(&this.focus_handle, cx);
             Self::deferred_ai_select_anchor_update(workspace),
         )
         .into_any_element()
+    }
+
+    fn active_ai_acp_usage(&self, cx: &App) -> Option<(usize, usize)> {
+        if self.settings_store.settings().ai.active_backend != AiActiveBackend::Acp {
+            return None;
+        }
+        let usage = self
+            .ai_entity
+            .read(cx)
+            .conversation_state()
+            .active_conversation()
+            .and_then(ai_acp_session_state)?
+            .usage?;
+        let used = usage.get("used")?.as_u64()?.try_into().ok()?;
+        let size = usage.get("size")?.as_u64()?.try_into().ok()?;
+        Some((used, size))
+    }
+
+    fn render_ai_acp_plan_indicator(&self, cx: &App) -> Option<AnyElement> {
+        if self.settings_store.settings().ai.active_backend != AiActiveBackend::Acp {
+            return None;
+        }
+        let plan = self
+            .ai_entity
+            .read(cx)
+            .conversation_state()
+            .active_conversation()
+            .and_then(ai_acp_session_state)?
+            .plan?;
+        let entries = plan
+            .pointer("/plan/entries")
+            .or_else(|| plan.get("entries"))
+            .and_then(serde_json::Value::as_array)?;
+        if entries.is_empty() {
+            return None;
+        }
+        let completed = entries
+            .iter()
+            .filter(|entry| {
+                entry.get("status").and_then(serde_json::Value::as_str) == Some("completed")
+            })
+            .count();
+        let active_content = entries
+            .iter()
+            .find(|entry| {
+                entry.get("status").and_then(serde_json::Value::as_str) == Some("in_progress")
+            })
+            .or_else(|| {
+                entries.iter().find(|entry| {
+                    entry.get("status").and_then(serde_json::Value::as_str) == Some("pending")
+                })
+            })
+            .and_then(|entry| entry.get("content"))
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default();
+        Some(
+            div()
+                .flex()
+                .min_w_0()
+                .items_center()
+                .gap(px(4.0))
+                .text_size(px(10.0))
+                .text_color(rgb(self.tokens.ui.text_muted))
+                .child(Self::render_lucide_icon(
+                    LucideIcon::ListChecks,
+                    11.0,
+                    rgb(self.tokens.ui.text_muted),
+                ))
+                .child(format!("{completed}/{}", entries.len()))
+                .when(!active_content.is_empty(), |indicator| {
+                    indicator
+                        .child("·")
+                        .child(div().min_w_0().truncate().child(active_content.to_string()))
+                })
+                .into_any_element(),
+        )
     }
 
     pub(in crate::workspace) fn render_ai_context_popover(
@@ -1055,10 +1273,51 @@ window.focus(&this.focus_handle, cx);
         &self,
         cx: &App,
     ) -> Vec<AiAutocompleteCandidate> {
-        if !self.ai_entity.read(cx).chat_ui().input_focused || self.ai_entity.read(cx).chat_ui().autocomplete_suppressed {
+        let ai = self.ai_entity.read(cx);
+        if !ai.chat_ui().input_focused || ai.chat_ui().autocomplete_suppressed {
             return Vec::new();
         }
-        ai_autocomplete_candidates(&self.ai_entity.read(cx).chat_ui().draft, self.ai_entity.read(cx).chat_ui().draft.len())
+        let draft = &ai.chat_ui().draft;
+        let mut candidates = ai_autocomplete_candidates(draft, draft.len());
+        if self.settings_store.settings().ai.active_backend != AiActiveBackend::Acp
+            || ai_input_token_at_cursor(draft, draft.len()).token_type
+                != Some(oxideterm_ai::AiInputTokenType::Slash)
+        {
+            return candidates;
+        }
+
+        let partial = ai_input_token_at_cursor(draft, draft.len())
+            .partial
+            .to_lowercase();
+        let Some(session) = ai
+            .conversation_state()
+            .active_conversation()
+            .and_then(ai_acp_session_state)
+        else {
+            return candidates;
+        };
+        for command in session.available_commands {
+            let Some(name) = command.get("name").and_then(serde_json::Value::as_str) else {
+                continue;
+            };
+            if !name.to_lowercase().starts_with(&partial)
+                || candidates.iter().any(|candidate| candidate.name == name)
+            {
+                continue;
+            }
+            candidates.push(AiAutocompleteCandidate {
+                kind: AiAutocompleteKind::Slash,
+                name: name.to_string(),
+                description: command
+                    .get("description")
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or_default()
+                    .to_string(),
+                description_is_i18n_key: false,
+                accepts_value: command.get("input").is_some_and(|input| !input.is_null()),
+            });
+        }
+        candidates
     }
 
     pub(in crate::workspace) fn render_ai_autocomplete_popup(
@@ -1080,8 +1339,12 @@ window.focus(&this.focus_handle, cx);
                 ai_autocomplete_item(
                     &self.tokens,
                     prefix,
-                    item.name,
-                    self.i18n.t(item.description_key),
+                    item.name.clone(),
+                    if item.description_is_i18n_key {
+                        self.i18n.t(&item.description)
+                    } else {
+                        item.description.clone()
+                    },
                     index == active_index,
                 )
                 .on_mouse_down(

@@ -33,6 +33,62 @@ impl AiWorkspaceEntity {
         }
         stored
     }
+
+    fn set_active_acp_config_selection(
+        &mut self,
+        agent_id: &str,
+        discovered_options: Vec<oxideterm_ai::AcpSessionConfigOption>,
+        config_id: &str,
+        value_id: &str,
+    ) -> bool {
+        let Some(conversation) = self.conversation_state_mut().active_conversation_mut() else {
+            return false;
+        };
+        let stored = store_ai_acp_config_selection_in_conversation(
+            conversation,
+            agent_id,
+            discovered_options,
+            config_id,
+            value_id,
+            false,
+        );
+        if stored {
+            self.persist_chat_state();
+        }
+        stored
+    }
+
+    fn set_active_acp_mode(&mut self, agent_id: &str, mode_id: &str) -> bool {
+        let Some(conversation) = self.conversation_state_mut().active_conversation_mut() else {
+            return false;
+        };
+        let Some(mut state) =
+            ai_acp_session_state(conversation).filter(|state| state.agent_id == agent_id)
+        else {
+            return false;
+        };
+        if !state
+            .available_modes
+            .iter()
+            .any(|mode| mode.mode_id == mode_id)
+        {
+            return false;
+        }
+        state.current_mode_id = Some(mode_id.to_string());
+        let Some(metadata) = conversation
+            .session_metadata
+            .as_mut()
+            .and_then(serde_json::Value::as_object_mut)
+        else {
+            return false;
+        };
+        let Ok(value) = serde_json::to_value(state) else {
+            return false;
+        };
+        metadata.insert(AI_ACP_SESSION_METADATA_KEY.to_string(), value);
+        self.persist_chat_state();
+        true
+    }
 }
 
 impl WorkspaceApp {
@@ -624,15 +680,33 @@ impl WorkspaceApp {
         let Some(discovered_options) = self.ai_acp_model_options_for_agent(&agent_id, cx) else {
             return;
         };
-        let stored = self.ai_entity.update(cx, |ai, _cx| {
-            ai.set_active_acp_model_selection(
-                &agent_id,
-                discovered_options,
-                &config_id,
-                &value_id,
-            )
+        let conversation_id = self
+            .ai_entity
+            .read(cx)
+            .conversation_state()
+            .active_conversation()
+            .map(|conversation| conversation.id.clone());
+        let sent_to_session = conversation_id.as_deref().is_some_and(|conversation_id| {
+            self.acp_entity.update(cx, |entity, _cx| {
+                entity.set_config_selection(
+                    conversation_id,
+                    oxideterm_ai::AcpSessionConfigSelection {
+                        config_id: config_id.clone(),
+                        value_id: value_id.clone(),
+                    },
+                )
+            })
         });
-        if !stored {
+        let accepted = sent_to_session
+            || self.ai_entity.update(cx, |ai, _cx| {
+                ai.set_active_acp_model_selection(
+                    &agent_id,
+                    discovered_options,
+                    &config_id,
+                    &value_id,
+                )
+            });
+        if !accepted {
             return;
         }
         self.edit_settings(
@@ -643,6 +717,79 @@ impl WorkspaceApp {
             cx,
         );
         self.close_ai_model_selector(cx);
+        cx.notify();
+    }
+
+    pub(in crate::workspace) fn select_ai_acp_config_from_selector(
+        &mut self,
+        agent_id: String,
+        config_id: String,
+        value_id: String,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(conversation_id) = self
+            .ai_entity
+            .read(cx)
+            .conversation_state()
+            .active_conversation()
+            .map(|conversation| conversation.id.clone())
+        else {
+            return;
+        };
+        let Some(discovered_options) = self
+            .active_ai_acp_session_state(&agent_id, cx)
+            .map(|state| state.config_options)
+            .or_else(|| self.ai_acp_model_options_for_agent(&agent_id, cx))
+        else {
+            return;
+        };
+        let selection = oxideterm_ai::AcpSessionConfigSelection {
+            config_id: config_id.clone(),
+            value_id: value_id.clone(),
+        };
+        let sent_to_session = self.acp_entity.update(cx, |entity, _cx| {
+            entity.set_config_selection(&conversation_id, selection)
+        });
+        let accepted = sent_to_session
+            || self.ai_entity.update(cx, |ai, _cx| {
+                ai.set_active_acp_config_selection(
+                    &agent_id,
+                    discovered_options,
+                    &config_id,
+                    &value_id,
+                )
+            });
+        if !accepted {
+            return;
+        }
+        cx.notify();
+    }
+
+    pub(in crate::workspace) fn select_ai_acp_mode_from_selector(
+        &mut self,
+        agent_id: String,
+        mode_id: String,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(conversation_id) = self
+            .ai_entity
+            .read(cx)
+            .conversation_state()
+            .active_conversation()
+            .map(|conversation| conversation.id.clone())
+        else {
+            return;
+        };
+        let sent_to_session = self.acp_entity.update(cx, |entity, _cx| {
+            entity.set_mode(&conversation_id, mode_id.clone())
+        });
+        let accepted = sent_to_session
+            || self
+                .ai_entity
+                .update(cx, |ai, _cx| ai.set_active_acp_mode(&agent_id, &mode_id));
+        if !accepted {
+            return;
+        }
         cx.notify();
     }
 
@@ -736,6 +883,24 @@ pub(in crate::workspace) fn store_ai_acp_model_selection_in_conversation(
     config_id: &str,
     value_id: &str,
 ) -> bool {
+    store_ai_acp_config_selection_in_conversation(
+        conversation,
+        agent_id,
+        discovered_options,
+        config_id,
+        value_id,
+        true,
+    )
+}
+
+pub(in crate::workspace) fn store_ai_acp_config_selection_in_conversation(
+    conversation: &mut AiConversation,
+    agent_id: &str,
+    discovered_options: Vec<oxideterm_ai::AcpSessionConfigOption>,
+    config_id: &str,
+    value_id: &str,
+    is_model_selection: bool,
+) -> bool {
     let mut state = ai_acp_session_state(conversation)
         .filter(|state| state.agent_id == agent_id)
         .unwrap_or_else(|| AiAcpSessionState {
@@ -744,6 +909,14 @@ pub(in crate::workspace) fn store_ai_acp_model_selection_in_conversation(
             metadata: None,
             config_options: discovered_options,
             model_selection: None,
+            config_selections: Vec::new(),
+            current_mode_id: None,
+            available_modes: Vec::new(),
+            available_commands: Vec::new(),
+            plan: None,
+            usage: None,
+            title: None,
+            handoff_cursor: None,
         });
     let Some(option) = state
         .config_options
@@ -763,10 +936,17 @@ pub(in crate::workspace) fn store_ai_acp_model_selection_in_conversation(
     // An empty session id marks a pre-prompt choice. The prompt path creates a
     // real session and applies this value before sending the user's message.
     option.current_value_id = value_id.to_string();
-    state.model_selection = Some(oxideterm_ai::AcpSessionConfigSelection {
+    let selection = oxideterm_ai::AcpSessionConfigSelection {
         config_id: config_id.to_string(),
         value_id: value_id.to_string(),
-    });
+    };
+    if is_model_selection {
+        state.model_selection = Some(selection.clone());
+    }
+    state
+        .config_selections
+        .retain(|existing| existing.config_id != config_id);
+    state.config_selections.push(selection);
     let conversation_id = conversation.id.clone();
     let metadata = conversation.session_metadata.get_or_insert_with(|| {
         serde_json::json!({
