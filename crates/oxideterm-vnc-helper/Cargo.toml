@@ -8,7 +8,7 @@ version.workspace = true
 des = "0.9"
 flate2 = "1.1.9"
 image = { version = "0.25.10", default-features = false, features = ["bmp", "gif", "jpeg", "png", "tiff", "webp"] }
-ironrdp-cliprdr-format = { git = "https://github.com/AnalyseDeCircuit/IronRDP", rev = "031e15de53d16cce026fa898272e088355323fff" }
+ironrdp-cliprdr-format = { git = "https://github.com/AnalyseDeCircuit/IronRDP", rev = "e3d47f376a9e47bb5b77dfb61576d2cfb3c6b070" }
 native-tls = { version = "0.2", features = ["vendored"] }
 openh264 = { version = "0.9", default-features = false, features = ["libloading"] }
 oxideterm-pcm-audio = { path = "../oxideterm-pcm-audio" }

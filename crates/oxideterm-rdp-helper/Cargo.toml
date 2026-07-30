@@ -9,14 +9,14 @@ default = []
 
 [dependencies]
 cpal = "0.16"
-ironrdp = { git = "https://github.com/AnalyseDeCircuit/IronRDP", rev = "031e15de53d16cce026fa898272e088355323fff", features = ["cliprdr", "connector", "displaycontrol", "dvc", "graphics", "input", "pdu", "rdpsnd", "session", "svc"] }
-ironrdp-cliprdr-format = { git = "https://github.com/AnalyseDeCircuit/IronRDP", rev = "031e15de53d16cce026fa898272e088355323fff" }
-ironrdp-core = { git = "https://github.com/AnalyseDeCircuit/IronRDP", rev = "031e15de53d16cce026fa898272e088355323fff" }
-ironrdp-displaycontrol = { git = "https://github.com/AnalyseDeCircuit/IronRDP", rev = "031e15de53d16cce026fa898272e088355323fff" }
-ironrdp-egfx = { git = "https://github.com/AnalyseDeCircuit/IronRDP", rev = "031e15de53d16cce026fa898272e088355323fff", features = ["openh264-libloading"] }
-ironrdp-graphics = { git = "https://github.com/AnalyseDeCircuit/IronRDP", rev = "031e15de53d16cce026fa898272e088355323fff" }
-ironrdp-tls = { git = "https://github.com/AnalyseDeCircuit/IronRDP", rev = "031e15de53d16cce026fa898272e088355323fff", default-features = false, features = ["native-tls"] }
-ironrdp-tokio = { git = "https://github.com/AnalyseDeCircuit/IronRDP", rev = "031e15de53d16cce026fa898272e088355323fff", features = ["reqwest"] }
+ironrdp = { git = "https://github.com/AnalyseDeCircuit/IronRDP", rev = "e3d47f376a9e47bb5b77dfb61576d2cfb3c6b070", features = ["cliprdr", "connector", "displaycontrol", "dvc", "graphics", "input", "pdu", "rdpsnd", "session", "svc"] }
+ironrdp-cliprdr-format = { git = "https://github.com/AnalyseDeCircuit/IronRDP", rev = "e3d47f376a9e47bb5b77dfb61576d2cfb3c6b070" }
+ironrdp-core = { git = "https://github.com/AnalyseDeCircuit/IronRDP", rev = "e3d47f376a9e47bb5b77dfb61576d2cfb3c6b070" }
+ironrdp-displaycontrol = { git = "https://github.com/AnalyseDeCircuit/IronRDP", rev = "e3d47f376a9e47bb5b77dfb61576d2cfb3c6b070" }
+ironrdp-egfx = { git = "https://github.com/AnalyseDeCircuit/IronRDP", rev = "e3d47f376a9e47bb5b77dfb61576d2cfb3c6b070", features = ["openh264-libloading"] }
+ironrdp-graphics = { git = "https://github.com/AnalyseDeCircuit/IronRDP", rev = "e3d47f376a9e47bb5b77dfb61576d2cfb3c6b070" }
+ironrdp-tls = { git = "https://github.com/AnalyseDeCircuit/IronRDP", rev = "e3d47f376a9e47bb5b77dfb61576d2cfb3c6b070", default-features = false, features = ["native-tls"] }
+ironrdp-tokio = { git = "https://github.com/AnalyseDeCircuit/IronRDP", rev = "e3d47f376a9e47bb5b77dfb61576d2cfb3c6b070", features = ["reqwest"] }
 native-tls = { version = "0.2", features = ["vendored"] }
 oxideterm-pcm-audio = { path = "../oxideterm-pcm-audio" }
 oxideterm-remote-desktop = { path = "../oxideterm-remote-desktop" }
