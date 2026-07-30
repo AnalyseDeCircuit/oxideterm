@@ -762,13 +762,22 @@ impl WorkspaceApp {
             return false;
         };
         let route = owner.key_route(event.keystroke.key.as_str());
-        if route.dispatch_owner.is_some()
-            && owner.allows_modal_ime()
-            && self.defer_active_ime_key(&event.keystroke, window, cx)
-        {
-            // The root capture handler immediately repeats this check and
-            // yields to the platform pipeline for the top modal input.
-            return false;
+        if route.dispatch_owner.is_some() && owner.allows_modal_ime() {
+            if self.defer_active_ime_key(&event.keystroke, window, cx) {
+                // The root capture handler immediately repeats this check and
+                // yields to the platform pipeline for the top modal input.
+                return false;
+            }
+            if self.handle_active_text_input_edit_shortcut(&event.keystroke, cx)
+                || self.handle_active_text_input_delete_selection(&event.keystroke, cx)
+                || self.handle_active_text_input_newline(&event.keystroke, cx)
+                || self.handle_active_text_input_transpose(&event.keystroke, cx)
+                || self.handle_active_text_input_navigation(&event.keystroke, cx)
+            {
+                // Editable controls inside the top modal own mutation and
+                // navigation keys before modal-level Escape/Enter handling.
+                return true;
+            }
         }
         let Some(owner) = route.dispatch_owner else {
             return route.consumes_key();
@@ -1231,5 +1240,16 @@ mod tests {
         let escape = owner.key_route("escape");
         assert!(escape.consumes_key());
         assert_eq!(escape.dispatch_owner, Some(owner));
+    }
+
+    #[test]
+    fn managed_key_modal_routes_visible_ime_before_modal_actions() {
+        let owner = ActiveWindowModalOwner::ActiveTabWindowModal {
+            kind: ActiveTabWindowModalKind::ManagedKey,
+            phase: VISIBLE,
+        };
+
+        assert!(owner.allows_modal_ime());
+        assert_eq!(owner.key_route("v").dispatch_owner, Some(owner));
     }
 }

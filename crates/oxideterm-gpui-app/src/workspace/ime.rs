@@ -2247,7 +2247,10 @@ impl WorkspaceApp {
         let Some(text) = cx.read_from_clipboard().and_then(|item| item.text()) else {
             return true;
         };
-        let text = normalize_clipboard_text_for_ime_target(target, &text);
+        // Clipboard reads can contain private keys or passphrases. Own both the
+        // platform result and normalized copy with zeroizing drop semantics.
+        let clipboard_text = Zeroizing::new(text);
+        let text = normalize_clipboard_text_for_ime_target(target, &clipboard_text);
         let replacement_range = self.ime_selection_range_for_target(target, cx);
         let caret = replacement_range
             .as_ref()
@@ -2933,12 +2936,28 @@ fn connection_field_value_mut(
     }
 }
 
-fn normalize_clipboard_text_for_ime_target(target: WorkspaceImeTarget, text: &str) -> String {
-    let normalized = text.replace("\r\n", "\n").replace('\r', "\n");
+fn normalize_clipboard_text_for_ime_target(
+    target: WorkspaceImeTarget,
+    text: &str,
+) -> Zeroizing<String> {
+    // Normalize in one zeroizing allocation so CRLF conversion never creates
+    // an unprotected intermediate copy of secret clipboard contents.
+    let mut normalized = Zeroizing::new(String::with_capacity(text.len()));
+    let mut characters = text.chars().peekable();
+    while let Some(character) = characters.next() {
+        if character == '\r' {
+            if characters.peek() == Some(&'\n') {
+                characters.next();
+            }
+            normalized.push('\n');
+        } else {
+            normalized.push(character);
+        }
+    }
     if ime_target_accepts_newline(target) {
         normalized
     } else {
-        normalized.lines().collect::<Vec<_>>().join(" ")
+        Zeroizing::new(normalized.lines().collect::<Vec<_>>().join(" "))
     }
 }
 
@@ -3210,9 +3229,9 @@ mod tests {
         ime_target_should_blink_caret, ime_text_snapshot, keystroke_commits_platform_text,
         keystroke_uses_text_edit_modifier, line_end_for_utf16_offset, line_range_for_utf16_offset,
         line_start_for_utf16_offset, next_utf16_boundary, next_word_boundary,
-        path_completion_owns_vertical_navigation, platform_text_commit_is_duplicate,
-        previous_utf16_boundary, previous_word_boundary, secret_ime_proxy,
-        soft_wrapped_line_ranges_utf16, transpose_text_at_utf16_offset,
+        normalize_clipboard_text_for_ime_target, path_completion_owns_vertical_navigation,
+        platform_text_commit_is_duplicate, previous_utf16_boundary, previous_word_boundary,
+        secret_ime_proxy, soft_wrapped_line_ranges_utf16, transpose_text_at_utf16_offset,
         utf16_offset_for_char_index, vertical_line_navigation_destination,
         word_range_for_utf16_offset, workspace_ime_target_for_plain_host_tools_input,
     };
@@ -3643,6 +3662,29 @@ mod tests {
             ime_text_snapshot(WorkspaceImeTarget::Search, secret),
             secret
         );
+    }
+
+    #[test]
+    fn managed_private_key_clipboard_normalization_preserves_pem_lines() {
+        let normalized = normalize_clipboard_text_for_ime_target(
+            WorkspaceImeTarget::Settings(SettingsInput::ManagedKeyPastePrivateKey),
+            "-----BEGIN TEST KEY-----\r\nfake-material\r-----END TEST KEY-----",
+        );
+
+        assert_eq!(
+            normalized.as_str(),
+            "-----BEGIN TEST KEY-----\nfake-material\n-----END TEST KEY-----"
+        );
+    }
+
+    #[test]
+    fn single_line_secret_clipboard_normalization_flattens_line_breaks() {
+        let normalized = normalize_clipboard_text_for_ime_target(
+            WorkspaceImeTarget::Settings(SettingsInput::ManagedKeyPastePassphrase),
+            "fake\r\npassphrase",
+        );
+
+        assert_eq!(normalized.as_str(), "fake passphrase");
     }
 
     #[test]
