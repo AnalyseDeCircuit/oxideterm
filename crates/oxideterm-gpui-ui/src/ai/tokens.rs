@@ -47,9 +47,9 @@ pub(super) const AI_TOOL_STRUCTURED_MAX_HEIGHT: f32 = 160.0; // Tauri structured
 pub(super) const AI_TOOL_OUTPUT_MAX_HEIGHT: f32 = 200.0; // Tauri raw output max-h-[200px].
 pub(super) const AI_CONTEXT_POPOVER_WIDTH: f32 = 240.0; // Tauri w-60.
 pub(super) const AI_CONTEXT_MINI_BAR_HEIGHT: f32 = 4.0; // Tauri h-1.
-pub(super) const AI_CONTEXT_RING_SIZE: f32 = 16.0; // Preserve the usage shape at compact footer scale.
-pub(super) const AI_CONTEXT_RING_STROKE_WIDTH: f32 = 2.5; // Separate track and progress without filling the ring.
-pub(super) const AI_CONTEXT_RING_TRACK_ALPHA: u32 = 0xcc; // Keep the track distinct without competing with used capacity.
+pub(super) const AI_CONTEXT_RING_SIZE: f32 = 13.0; // Keep the context gauge subordinate to its token label.
+pub(super) const AI_CONTEXT_RING_STROKE_WIDTH: f32 = 1.5; // Preserve a crisp ring without resembling a loading spinner.
+pub(super) const AI_CONTEXT_RING_TRACK_ALPHA: u32 = 0x70; // Leave enough contrast for the colored progress arc to remain distinct.
 pub(super) const AI_SAFETY_INDICATOR_MAX_WIDTH: f32 = 92.0; // Localized safety labels need a little more room than tool status.
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

@@ -1,4 +1,4 @@
-// Hallmark · pre-emit critique: P5 H5 E5 S5 R5 V5
+// Hallmark · pre-emit critique: P5 H4 E5 S5 R5 V4
 use gpui::{
     Bounds, Div, FontWeight, InteractiveElement, IntoElement, ParentElement, Path, PathBuilder,
     Pixels, Styled, canvas, div, point, prelude::*, px, relative, rgb, rgba,
@@ -97,15 +97,10 @@ pub fn ai_context_usage_indicator(
         AiTone::Accent
     };
     let progress = ai_context_usage_fraction(usage.percentage);
-    // The compact ring needs stronger colors than large panel borders. The
-    // theme guarantees primary text contrast on both base and panel surfaces,
-    // so its softened form remains a reliable track across built-in themes.
-    let track_color = bg_alpha(tokens, tokens.ui.text, AI_CONTEXT_RING_TRACK_ALPHA);
-    let progress_color = rgb(if usage.danger || usage.warning {
-        tone_color(tokens, tone)
-    } else {
-        tokens.ui.text
-    });
+    // Keep the track quiet and reserve semantic color for the used portion.
+    // This reads as capacity at compact scale instead of a loading spinner.
+    let track_color = bg_alpha(tokens, tokens.ui.text_muted, AI_CONTEXT_RING_TRACK_ALPHA);
+    let progress_color = rgb(tone_color(tokens, tone));
     div()
         .flex()
         .flex_none()
