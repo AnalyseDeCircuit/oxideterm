@@ -851,11 +851,13 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let root = temp.path();
         fs::create_dir_all(root.join("data/plugins")).unwrap();
+        fs::create_dir_all(root.join("data/skills/server-audit")).unwrap();
         fs::create_dir_all(root.join("custom-data")).unwrap();
         fs::create_dir_all(root.join("resources")).unwrap();
         fs::create_dir_all(root.join("tools")).unwrap();
         fs::write(root.join("data/keystore.vault"), "secret").unwrap();
         fs::write(root.join("data/plugins/example.wasm"), "plugin").unwrap();
+        fs::write(root.join("data/skills/server-audit/SKILL.md"), "user skill").unwrap();
         fs::write(root.join("custom-data/settings.json"), "settings").unwrap();
         fs::write(root.join("portable.json"), r#"{"dataDir":"custom-data"}"#).unwrap();
         fs::write(root.join("user-note.txt"), "keep me").unwrap();
@@ -894,6 +896,10 @@ mod tests {
         assert_eq!(
             fs::read_to_string(root.join("data/plugins/example.wasm")).unwrap(),
             "plugin"
+        );
+        assert_eq!(
+            fs::read_to_string(root.join("data/skills/server-audit/SKILL.md")).unwrap(),
+            "user skill"
         );
         assert_eq!(
             fs::read_to_string(root.join("custom-data/settings.json")).unwrap(),
@@ -1037,6 +1043,11 @@ mod tests {
             &mut archive,
             &format!("{package_root}/data/plugins/example.wasm"),
             b"user data placeholder",
+        );
+        write_zip_entry(
+            &mut archive,
+            &format!("{package_root}/data/skills/example/SKILL.md"),
+            b"packaged skill placeholder",
         );
         archive.finish().unwrap();
 

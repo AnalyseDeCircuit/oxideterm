@@ -9,7 +9,7 @@ use std::{
 use fs2::FileExt;
 use parking_lot::RwLock;
 
-use crate::{PortableError, portable_info};
+use crate::{PORTABLE_SKILLS_DIRNAME, PortableError, portable_info};
 
 static PORTABLE_INSTANCE_LOCK: std::sync::LazyLock<RwLock<Option<PortableInstanceLock>>> =
     std::sync::LazyLock::new(|| RwLock::new(None));
@@ -34,7 +34,12 @@ pub fn acquire_portable_instance_lock() -> Result<(), PortableError> {
         return Ok(());
     }
 
-    std::fs::create_dir_all(&info.data_dir).map_err(PortableError::InstanceLockIo)?;
+    ensure_portable_user_directories(&info.data_dir).map_err(|source| {
+        PortableError::PortableDataDirectory {
+            path: info.data_dir.clone(),
+            source,
+        }
+    })?;
     let file = OpenOptions::new()
         .create(true)
         .read(true)
@@ -51,5 +56,29 @@ pub fn acquire_portable_instance_lock() -> Result<(), PortableError> {
             Err(PortableError::InstanceLocked(info.data_dir.clone()))
         }
         Err(error) => Err(PortableError::InstanceLockIo(error)),
+    }
+}
+
+fn ensure_portable_user_directories(data_dir: &std::path::Path) -> std::io::Result<()> {
+    std::fs::create_dir_all(data_dir)?;
+    // Create the user-visible extension points during startup so a fresh
+    // portable installation is immediately ready to receive Agent Skills.
+    std::fs::create_dir_all(data_dir.join(PORTABLE_SKILLS_DIRNAME))
+}
+
+#[cfg(test)]
+mod tests {
+    use tempfile::tempdir;
+
+    use super::*;
+
+    #[test]
+    fn portable_startup_creates_the_skills_directory() {
+        let temp = tempdir().unwrap();
+        let data_dir = temp.path().join("portable-data");
+
+        ensure_portable_user_directories(&data_dir).unwrap();
+
+        assert!(data_dir.join(PORTABLE_SKILLS_DIRNAME).is_dir());
     }
 }

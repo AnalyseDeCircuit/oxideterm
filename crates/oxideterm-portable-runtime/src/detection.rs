@@ -13,6 +13,7 @@ pub const PORTABLE_MARKER_FILENAME: &str = "portable";
 pub const PORTABLE_CONFIG_FILENAME: &str = "portable.json";
 pub const PORTABLE_DEFAULT_DATA_DIRNAME: &str = "data";
 pub const PORTABLE_KEYSTORE_FILENAME: &str = "keystore.vault";
+pub const PORTABLE_SKILLS_DIRNAME: &str = "skills";
 pub(crate) const PORTABLE_INSTANCE_LOCK_FILENAME: &str = ".portable.lock";
 
 static PORTABLE_INFO: OnceLock<PortableInfo> = OnceLock::new();
@@ -83,6 +84,13 @@ pub enum PortableError {
 
     #[error("Portable instance is already running for data dir: {0}")]
     InstanceLocked(PathBuf),
+
+    #[error("Failed to initialize portable data directory {path}: {source}")]
+    PortableDataDirectory {
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
 
     #[error("Failed to create portable instance lock: {0}")]
     InstanceLockIo(#[source] std::io::Error),
@@ -269,6 +277,15 @@ pub fn portable_ssh_dir() -> Result<Option<PathBuf>, PortableError> {
     Ok(info.is_portable.then(|| info.data_dir.join(".ssh")))
 }
 
+pub fn portable_skills_dir() -> Result<Option<PathBuf>, PortableError> {
+    let info = portable_info()?;
+    // Skills are user-owned portable data. Keeping them below dataDir ensures
+    // application updates never replace them with packaged program files.
+    Ok(info
+        .is_portable
+        .then(|| info.data_dir.join(PORTABLE_SKILLS_DIRNAME)))
+}
+
 pub fn portable_keystore_file_path() -> Result<Option<PathBuf>, PortableError> {
     let info = portable_info()?;
     Ok(info.is_portable.then(|| info.keystore_path.clone()))
@@ -299,6 +316,12 @@ mod tests {
         assert_eq!(
             info.data_dir,
             temp.path().join(PORTABLE_DEFAULT_DATA_DIRNAME)
+        );
+        assert_eq!(
+            info.data_dir.join(PORTABLE_SKILLS_DIRNAME),
+            temp.path()
+                .join(PORTABLE_DEFAULT_DATA_DIRNAME)
+                .join(PORTABLE_SKILLS_DIRNAME)
         );
     }
 
@@ -354,6 +377,12 @@ mod tests {
             temp.path()
                 .join("portable-store")
                 .join(PORTABLE_KEYSTORE_FILENAME)
+        );
+        assert_eq!(
+            info.data_dir.join(PORTABLE_SKILLS_DIRNAME),
+            temp.path()
+                .join("portable-store")
+                .join(PORTABLE_SKILLS_DIRNAME)
         );
     }
 
