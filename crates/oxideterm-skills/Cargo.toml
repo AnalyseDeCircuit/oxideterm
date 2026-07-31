@@ -1,0 +1,12 @@
+[package]
+name = "oxideterm-skills"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
+[dependencies]
+dirs.workspace = true
+serde.workspace = true
+serde_yaml.workspace = true
+sha2.workspace = true
+thiserror.workspace = true
