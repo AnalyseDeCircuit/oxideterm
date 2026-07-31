@@ -13,7 +13,7 @@ Use the activity bar as the entry point for app surfaces:
 - Sessions: create, open, group, and monitor SSH work.
 - File manager and SFTP: browse files and manage transfers.
 - Connection pool, monitor, and Host Tools: inspect connection runtime state, resource snapshots, processes, containers, services, tmux, logs, ports, and metrics.
-- Graphics/VNC: open visual sessions attached to a connected node.
+- Graphics/VNC: open saved RDP/VNC profiles or visual sessions launched from a connected node.
 - Plugins: manage installed plugins and plugin settings.
 - Cloud sync: inspect sync status and run sync actions.
 - Notifications: review recent warnings and errors.
@@ -104,7 +104,7 @@ Runtime state answers different questions than saved profiles:
 - Terminal session: which visible shell is attached to the runtime?
 - SFTP session: is file browsing using a live transport?
 - Host Tools snapshot: what did the last resource sampler observe?
-- Graphics/VNC session: is the visual viewer connected to a live node-owned session?
+- Graphics/VNC session: is the viewer connected to its saved profile/helper or live node-owned session?
 
 Use Host Tools for read-oriented host inspection. Keep destructive host actions explicit and review app confirmation output before running them.
 

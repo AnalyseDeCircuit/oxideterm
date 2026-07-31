@@ -1,8 +1,13 @@
 # Agent Skills in OxideSens
 
-OxideSens supports the Agent Skills `SKILL.md` convention for both native model
-providers and ACP agents. OxideTerm owns discovery and loading so the same
-workflow catalog is available regardless of the selected AI backend.
+> **Status**: Implemented in OxideTerm `2.0.15`
+> **Last reviewed**: 2026-07-31
+
+OxideSens supports the Agent Skills `SKILL.md` convention for the native model
+toolchain. ACP sessions can request the same bounded loader through OxideTerm's
+tool bridge, but ACP itself does not yet have a standard host-managed Skills
+capability negotiation. An ACP agent may also perform its own native discovery;
+that path is separate from OxideTerm's catalog and permissions.
 
 ## Discovery
 
@@ -43,10 +48,11 @@ must stay inside that directory after symlink resolution, and must contain
 valid UTF-8 text. `SKILL.md` itself is loaded only through `load_skill`.
 
 OxideTerm records the loaded skill identifier and content hash in conversation
-metadata. Repeated loads are marked in the tool result, while the instructions
-remain available to a different backend after a native-model/ACP switch. If
-the file changes, resources remain unavailable until the updated skill is
-loaded.
+metadata. Repeated loads are marked in the tool result. Loaded instructions can
+remain in conversation metadata across a native-model/ACP switch, but the
+selected backend still receives them only through its available tool/context
+boundary. If the file changes, resources remain unavailable until the updated
+skill is loaded.
 
 ## Safety boundary
 
@@ -70,7 +76,7 @@ Open **Settings → OxideSens → Tools → Agent Skills** to:
 - refresh the registry after adding or removing skill directories.
 
 ACP currently has no standard capability negotiation for host-managed skills.
-OxideTerm therefore exposes the same bounded loader tools through its ACP MCP
-bridge and tells the agent to use that catalog. An ACP implementation may also
-have its own native skill discovery, but it cannot use that path to bypass
-OxideTerm tool permissions.
+OxideTerm therefore exposes bounded loader tools through its ACP MCP bridge and
+instructs the agent to use that catalog. An ACP implementation may also have
+its own native skill discovery, but it cannot use that path to bypass OxideTerm
+tool permissions.

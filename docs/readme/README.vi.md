@@ -54,7 +54,7 @@ Kết nối và dữ liệu vận hành vẫn do bạn kiểm soát. OxideSens d
 | Một nút từ xa, nhiều công cụ | Terminal, SFTP, chuyển tiếp cổng, RDP/VNC, trzsz, IDE native, giám sát và OxideSens AI cùng thuộc một workspace |
 | Ứng dụng desktop không có Electron hoặc WebView đi kèm | GPUI vẽ giao diện trực tiếp trên bề mặt GPU mà không phân phối runtime trình duyệt |
 | Quy trình vận hành local-first | SSH, Telnet, SFTP, chuyển tiếp, RDP/VNC, shell cục bộ, terminal nối tiếp và cấu hình hoạt động không cần đăng ký |
-| OxideSens AI BYOK thay vì tín dụng nền tảng | OxideSens dùng endpoint OpenAI, Anthropic, Gemini, Ollama hoặc tương thích OpenAI của bạn, với MCP, RAG và các thao tác workspace đã được phê duyệt |
+| OxideSens AI BYOK thay vì tín dụng nền tảng | OxideSens dùng endpoint OpenAI, Anthropic, Gemini, Ollama hoặc tương thích OpenAI của bạn, với MCP, RAG, điều khiển suy luận theo nhà cung cấp và các thao tác workspace đã được phê duyệt |
 | Độ ổn định khi kết nối lại | Grace Period thăm dò kết nối cũ trong 30 giây trước khi thay thế, để ứng dụng TUI vượt qua các gián đoạn mạng ngắn |
 | SSH Rust thuần và an toàn thông tin xác thực | Ngăn xếp SSH dùng `russh` + `ring` không cần OpenSSL/libssh2; thông tin xác thực đã lưu dùng móc khóa hệ thống và gói `.oxide` dùng ChaCha20-Poly1305 + Argon2id |
 
@@ -87,7 +87,7 @@ OxideTerm giữ kết nối, tệp, chuyển tiếp, công cụ máy chủ, tự
 | **Luồng dữ liệu terminal** | WebSocket → vòng lặp sự kiện JS → xterm.js | Đầu vào Rust → thay đổi `TerminalState` → kết xuất GPUI |
 | **Vòng đời kết nối** | Tách giữa lớp frontend và backend | Một quy trình kết nối và kết nối lại trong cùng tiến trình |
 | **Ngữ cảnh AI** | Sao chép qua cầu nối ứng dụng | Tạo từ workspace đang hoạt động với phê duyệt của người dùng |
-| **Runtime plugin** | Môi trường script của trình duyệt | Runtime WASM giới hạn theo khả năng |
+| **Runtime plugin** | Môi trường script của trình duyệt | Đường chạy manifest-only, WASM giới hạn theo khả năng và process cần được tin cậy rõ ràng |
 | **CLI** | Cần ứng dụng desktop đang chạy | Binary độc lập, liên kết trực tiếp các crate |
 | **Ranh giới runtime** | Trình bao desktop cùng runtime trình duyệt | Tiến trình native không có runtime trình duyệt đi kèm |
 
@@ -97,12 +97,12 @@ OxideTerm giữ kết nối, tệp, chuyển tiếp, công cụ máy chủ, tự
 
 | Danh mục | Tính năng |
 |---|---|
-| **Terminal và kết nối** | Shell cục bộ, SSH, Telnet, serial, khung chia, chế độ nhập tự do, multi-hop và kết nối lại ổn định |
+| **Terminal và kết nối** | Shell cục bộ, SSH, Telnet, serial, khung chia, chế độ nhập tự do, gửi lệnh nâng cao đến nhiều mục tiêu, multi-hop và kết nối lại ổn định |
 | **Tệp và chỉnh sửa từ xa** | SFTP, hàng đợi truyền, dấu trang, ghi an toàn, cây dự án và chỉnh sửa theo tab |
 | **Chuyển tiếp và mạng** | Chuyển tiếp cục bộ, từ xa và SOCKS5 động, quy tắc đã lưu và gỡ lỗi socket |
 | **Vận hành máy chủ và màn hình từ xa** | Giám sát, tiến trình, dịch vụ, log, cổng, tác vụ, đĩa, gói, container, tmux, RDP và VNC |
-| **OxideSens và tự động hóa** | Nhà cung cấp AI riêng, MCP, RAG cục bộ, hành động được duyệt, đồng bộ mã hóa và CLI |
-| **Mở rộng và cá nhân hóa** | Plugin WASM, tab tùy chỉnh, lệnh nhanh, chủ đề, hình nền, phím tắt và 11 ngôn ngữ |
+| **OxideSens và tự động hóa** | Nhà cung cấp AI riêng, MCP, RAG cục bộ, Agent Skills, hành động được duyệt, đồng bộ mã hóa và CLI |
+| **Mở rộng và cá nhân hóa** | Plugin manifest-only, WASM và process, tab tùy chỉnh, lệnh nhanh, chủ đề, hình nền, phím tắt và 11 ngôn ngữ |
 
 ---
 
@@ -135,8 +135,8 @@ GPUI Render Loop
 Các crate miền
   NodeRouter → SshConnectionRegistry
   TerminalState ← SSH PTY channel
-  SftpSession / ForwardManager / IdeWorkspace
-  AiProvider / CloudSyncService / PluginHost
+  SftpSession / ForwardingRuntime / IdeWorkspace
+  Ai/ACP Entities / CloudSync / Plugin Runtimes
 ```
 
 Không có ranh giới tuần tự hóa giữa giao diện và phần nền SSH/terminal. Dữ liệu terminal sửa `TerminalState` trực tiếp; GPUI đọc trạng thái và phát lệnh vẽ GPU.
@@ -156,17 +156,17 @@ Không có ranh giới tuần tự hóa giữa giao diện và phần nền SSH/
 1. Phát hiện SSH keepalive timeout mà không bị JavaScript timer throttling
 2. Chụp lại bảng terminal, truyền tải SFTP, chuyển tiếp và tệp IDE
 3. Probe kết nối cũ trong 30 giây Grace Period để TUI apps có thể sống qua thay đổi mạng
-4. Nếu không phục hồi được, kết nối lại, khôi phục chuyển tiếp, tiếp tục truyền tải và mở lại tệp IDE
+4. Nếu không phục hồi được, kết nối lại, khôi phục chuyển tiếp, tiếp tục hoặc thử lại truyền tải theo chính sách và mở lại tệp IDE
 
-Pipeline: `queued → snapshot → grace-period → ssh-connect → await-terminal → restore-forwards → resume-transfers → restore-ide → verify → done`
+Pipeline: `queued → snapshot → grace-period → ssh-connect → await-terminal → restore-forwards → retry-or-resume-transfers → restore-ide → verify → done`
 
 ### SSH pool kết nối và node routing
 
 
-- Một SSH connection vật lý có thể phục vụ bảng terminal, SFTP, chuyển tiếp cổng và IDE work
+- Ở chế độ mặc định, một SSH connection vật lý có thể phục vụ terminal, SFTP, chuyển tiếp cổng và IDE; terminal có thể dùng connection riêng khi chính sách yêu cầu
 - Mỗi kết nối đi qua `connecting → active → idle → link_down → reconnecting`
 - UI gọi theo `nodeId`; `NodeRouter` resolve `connectionId` đang active một cách atomic
-- `NodeRuntimeStore` lưu topology snapshots vào `session_tree.json`
+- `NodeRuntimeStore` giữ trạng thái runtime của node và xuất topology snapshot; helper của workspace ghi snapshot vào `session_tree.json`, còn handle đang chạy được dựng lại khi khởi động
 - Lỗi máy chủ trung chuyển sẽ truyền trạng thái `link_down` tới các nút phía sau
 
 ### OxideSens AI
@@ -201,7 +201,7 @@ Kết xuất terminal được mô hình hóa trước thành trạng thái Rust
 
 Tệp từ xa là một phần của cùng không gian làm việc của nút, không phải tính năng tách rời:
 
-- SFTP sessions được resolve qua `NodeRouter`, nên kết nối lại có thể thay underlying SSH connection mà không đổi node address của UI
+- SFTP sessions được resolve qua `NodeRouter` cùng connection generation; khi kết nối lại có thể lấy lại session hợp lệ, nhưng thao tác của generation cũ không bao giờ bị âm thầm thay bằng connection mới
 - Hàng đợi truyền theo dõi hướng, tiến độ, trạng thái thử lại và giới hạn tốc độ độc lập với các khung tệp đang hiển thị
 - Tab IDE lưu cùng bộ đệm chưa lưu, đường dẫn từ xa, trạng thái xung đột và siêu dữ liệu khôi phục
 - Khi backend hỗ trợ, remote writes dùng staged/atomic behavior để tránh partial writes trong edit flow thông thường
@@ -210,7 +210,7 @@ Tệp từ xa là một phần của cùng không gian làm việc của nút, k
 
 Nhánh gốc giữ phần mở rộng và bề mặt hỗ trợ trong ranh giới Rust gốc:
 
-- Plugins chạy trong wasmtime sandbox với năng lực host có kiểu thay vì biến toàn cục trình duyệt
+- Plugin hỗ trợ đường chạy manifest-only, WASM và process thông thường. WASM dùng Wasmtime/WASI hoặc sidecar với lời gọi host được kiểm soát; process plugin là tiến trình cục bộ không có sandbox cấp hệ điều hành.
 - CLI link trực tiếp crate miền cho doctor, settings, connections, forwards, gói di động, backups và reports
 - Chẩn đoán ưu tiên số đếm, đường dẫn, cờ tính năng và gợi ý đã che thay vì payload thô có bí mật
 - CLI flows có thay đổi state dùng dry-run plans, `--yes` guards và rollback backups khi phù hợp
@@ -276,7 +276,7 @@ cargo run -p oxideterm-cli -- completion install zsh --force
 | Môi trường chạy | Tokio + DashMap | Xử lý bất đồng bộ và bản đồ đồng thời |
 | SSH | russh (`ring`) | Không dùng OpenSSL/libssh2 trong ngăn xếp SSH; hỗ trợ SSH Agent |
 | Terminal | portable-pty + alacritty_terminal | PTY cục bộ, mô phỏng terminal và đồ họa Sixel/Kitty |
-| Plugin | wasmtime | Cách ly WASM với API máy chủ gốc |
+| Plugin | Wasmtime/WASI và process | Manifest-only, lời gọi host WASM được kiểm soát và process cục bộ cần được tin cậy rõ ràng |
 | AI và tìm kiếm | SSE + BM25 + HNSW | Truyền dữ liệu nhà cung cấp, bigram CJK và hợp nhất RRF |
 | Trình soạn thảo | tree-sitter (cú pháp), bộ đệm riêng | Đa ngôn ngữ, dựa trên SFTP |
 | Mã hóa | ChaCha20-Poly1305 + Argon2id | AEAD + KDF dùng nhiều bộ nhớ (256 MB) |
@@ -293,7 +293,7 @@ cargo run -p oxideterm-cli -- completion install zsh --force
 | `.oxide` | ChaCha20-Poly1305 + Argon2id |
 | Ghi bằng CLI | Kế hoạch chạy thử, bảo vệ `--yes`, bản sao lưu khôi phục |
 | Khóa máy chủ | TOFU với `~/.ssh/known_hosts`, từ chối thay đổi không mong đợi |
-| Plugin | Cách ly wasmtime và API máy chủ dựa trên năng lực |
+| Plugin | manifest-only, API host WASM được kiểm soát và process cục bộ cần được tin cậy rõ ràng |
 
 ## Lưu ý về sử dụng hợp pháp
 

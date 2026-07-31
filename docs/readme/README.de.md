@@ -54,7 +54,7 @@ Verbindungen und Betriebsdaten bleiben unter Ihrer Kontrolle. Für OxideSens ver
 | Ein Remote-Knoten, viele Werkzeuge | Terminal, SFTP, Portweiterleitung, RDP/VNC, trzsz, native IDE, Monitoring und OxideSens AI bleiben an denselben Arbeitsbereich gebunden |
 | Eine Desktop-App ohne Electron oder gebündelte WebView | GPUI zeichnet die Oberfläche direkt auf einer GPU-Fläche, ohne Browser-Laufzeit auszuliefern |
 | Local-first-Betriebsabläufe | SSH, Telnet, SFTP, Weiterleitung, RDP/VNC, lokale Shell, serielle Terminals und Konfiguration funktionieren ohne Anmeldung |
-| BYOK-OxideSens-AI statt Plattformguthaben | OxideSens verwendet Ihren OpenAI-, Anthropic-, Gemini-, Ollama- oder OpenAI-kompatiblen Endpunkt mit MCP, RAG und genehmigten Arbeitsbereichsaktionen |
+| BYOK-OxideSens-AI statt Plattformguthaben | OxideSens verwendet Ihren OpenAI-, Anthropic-, Gemini-, Ollama- oder OpenAI-kompatiblen Endpunkt mit MCP, RAG, anbieterabhängigen Denkstufen und genehmigten Arbeitsbereichsaktionen |
 | Stabiles Wiederverbinden | Grace Period prüft die alte Verbindung 30 Sekunden lang, bevor sie ersetzt wird, damit TUI-Anwendungen kurze Netzunterbrechungen überstehen |
 | Reines Rust-SSH und Schutz von Zugangsdaten | Der SSH-Stack nutzt `russh` + `ring` ohne OpenSSL/libssh2; gespeicherte Zugangsdaten liegen im Betriebssystem-Schlüsselbund und `.oxide`-Pakete verwenden ChaCha20-Poly1305 + Argon2id |
 
@@ -87,7 +87,7 @@ OxideTerm hält Verbindungen, Dateien, Weiterleitungen, Host-Werkzeuge, Automati
 | **Terminal-Datenfluss** | WebSocket → JS-Ereignisschleife → xterm.js | Rust-Eingabe → `TerminalState`-Änderung → GPUI-Rendern |
 | **Verbindungslebenszyklus** | Auf Frontend- und Backend-Schichten verteilt | Eine In-Process-Pipeline für Verbindung und Wiederverbindung |
 | **KI-Kontext** | Über eine Anwendungsbrücke kopiert | Mit Nutzerfreigabe aus dem aktiven Arbeitsbereich aufgebaut |
-| **Plugin-Laufzeit** | Browser-Skripting-Umgebung | Capability-begrenzte WASM-Laufzeit |
+| **Plugin-Laufzeit** | Browser-Skripting-Umgebung | Manifest-only-, begrenzte WASM- und vertrauensabhängige Prozesspfade |
 | **CLI** | Erfordert eine laufende Desktop-App | Eigenständiges Programm mit direkter Crate-Verknüpfung |
 | **Runtime-Grenze** | Desktop-Wrapper plus Browser-Laufzeit | Nativer Prozess ohne gebündelte Browser-Laufzeit |
 
@@ -97,12 +97,12 @@ OxideTerm hält Verbindungen, Dateien, Weiterleitungen, Host-Werkzeuge, Automati
 
 | Kategorie | Funktionen |
 |---|---|
-| **Terminal und Verbindungen** | Lokale Shells, SSH, Telnet, seriell, geteilte Bereiche, freier Eingabemodus, Multi-Hop-Routen und stabile Wiederverbindung |
+| **Terminal und Verbindungen** | Lokale Shells, SSH, Telnet, seriell, geteilte Bereiche, freier Eingabemodus, erweiterte Befehlsübertragung an mehrere Ziele, Multi-Hop-Routen und stabile Wiederverbindung |
 | **Dateien und Remote-Bearbeitung** | SFTP, Übertragungswarteschlangen, Lesezeichen, sichere Schreibvorgänge, Projektbäume und Mehrfachbearbeitung |
 | **Weiterleitung und Netzwerk** | Lokale, entfernte und dynamische SOCKS5-Weiterleitung, gespeicherte Regeln und Socket-Debugging |
 | **Host-Betrieb und Remote-Desktop** | Überwachung, Prozesse, Dienste, Logs, Ports, Aufgaben, Datenträger, Pakete, Container, tmux, RDP und VNC |
-| **OxideSens und Automatisierung** | Eigene KI-Anbieter, MCP, lokales RAG, freigegebene Aktionen, verschlüsselte Cloud-Synchronisierung und CLI |
-| **Erweiterungen und Personalisierung** | WASM-Plugins, eigene Tabs, Schnellbefehle, Themes, Hintergrundbilder, Tastenkürzel und 11 Sprachen |
+| **OxideSens und Automatisierung** | Eigene KI-Anbieter, MCP, lokales RAG, Agent Skills, freigegebene Aktionen, verschlüsselte Cloud-Synchronisierung und CLI |
+| **Erweiterungen und Personalisierung** | Manifest-only-, WASM- und Prozess-Plugins, eigene Tabs, Schnellbefehle, Themes, Hintergrundbilder, Tastenkürzel und 11 Sprachen |
 
 ---
 
@@ -135,8 +135,8 @@ GPUI Render Loop
 Domain Crates
   NodeRouter → SshConnectionRegistry
   TerminalState ← SSH PTY channel
-  SftpSession / ForwardManager / IdeWorkspace
-  AiProvider / CloudSyncService / PluginHost
+  SftpSession / ForwardingRuntime / IdeWorkspace
+  Ai/ACP Entities / CloudSync / Plugin Runtimes
 ```
 
 Zwischen UI und SSH/Terminal-Backend gibt es keine Serialisierungsgrenze. Terminal-Bytes mutieren `TerminalState` direkt; GPUI liest den State und erzeugt GPU draw calls.
@@ -156,17 +156,17 @@ Zwischen UI und SSH/Terminal-Backend gibt es keine Serialisierungsgrenze. Termin
 1. SSH-keepalive timeout erkennen, ohne JavaScript timer throttling
 2. Terminal-Panes, SFTP-Transfers, Forwards und IDE-Dateien snapshotten
 3. Die alte Verbindung 30 Sekunden lang während der Grace Period prüfen, damit TUI-Apps Netzwerkwechsel überstehen können
-4. Wenn die Wiederherstellung scheitert: neu verbinden, Forwards wiederherstellen, Transfers fortsetzen und IDE-Dateien erneut öffnen
+4. Wenn die Wiederherstellung scheitert: neu verbinden, Forwards wiederherstellen, Transfers je nach Strategie fortsetzen oder neu versuchen und IDE-Dateien erneut öffnen
 
-Pipeline: `queued → snapshot → grace-period → ssh-connect → await-terminal → restore-forwards → resume-transfers → restore-ide → verify → done`
+Pipeline: `queued → snapshot → grace-period → ssh-connect → await-terminal → restore-forwards → retry-or-resume-transfers → restore-ide → verify → done`
 
 ### SSH-Verbindungspool und Node-Routing
 
 
-- Eine physische SSH-Verbindung kann Terminal-Panes, SFTP, Port-Forwards und IDE-Arbeit bedienen
+- Im Standardmodus kann eine physische SSH-Verbindung Terminal-Panes, SFTP, Port-Forwards und IDE-Arbeit bedienen; ein Terminal kann bei Bedarf eine eigene Verbindung verwenden
 - Jede Verbindung durchläuft `connecting → active → idle → link_down → reconnecting`
 - UI-Kommandos adressieren `nodeId`; `NodeRouter` löst die aktive `connectionId` atomar auf
-- `NodeRuntimeStore` persistiert Topologie-Snapshots in `session_tree.json`
+- `NodeRuntimeStore` hält den Node-Laufzeitstatus und exportiert Topologie-Snapshots; Workspace-Helfer schreiben diese Snapshots in `session_tree.json`, während Live-Handles beim Start neu aufgebaut werden
 - Jump-Host-Ausfälle propagieren `link_down` auf nachgelagerte Nodes
 
 ### OxideSens KI
@@ -201,7 +201,7 @@ Terminal-Rendering wird zuerst als Rust-State modelliert und anschließend von G
 
 Remote-Dateien sind Teil desselben Node-Workspace und keine getrennte Nebenfunktion:
 
-- SFTP-Sessions werden über `NodeRouter` aufgelöst, sodass Reconnect die darunterliegende SSH-Verbindung tauschen kann, ohne die Node-Adresse der UI zu ändern
+- SFTP-Sessions werden über `NodeRouter` mit einer Verbindungsgeneration aufgelöst; Reconnect kann eine gültige Sitzung neu erwerben, aber eine Operation der alten Generation wird nie still durch eine neue Verbindung ersetzt
 - Transfer Queues verfolgen Richtung, Fortschritt, Retry-Zustand und Speed Limits unabhängig von den sichtbaren Datei-Panes
 - IDE-Tabs halten Dirty Buffers, Remote-Pfade, Conflict State und Restore-Metadaten zusammen
 - Remote Writes nutzen staged/atomic behavior, wo das Backend es unterstützt, damit normale Edit-Flows keine Partial Writes sehen
@@ -210,7 +210,7 @@ Remote-Dateien sind Teil desselben Node-Workspace und keine getrennte Nebenfunkt
 
 Erweiterungen und Support-Flächen folgen klaren Rust-eigenen Grenzen:
 
-- Plugins laufen in einer wasmtime-Sandbox mit typisierten Host-Fähigkeiten statt Browser-Globals
+- Plugins unterstützen Manifest-only-, WASM- und normale Prozesspfade. WASM nutzt Wasmtime/WASI oder einen Sidecar mit kontrollierten Host-Aufrufen; Prozess-Plugins sind lokale Prozesse ohne Betriebssystem-Sandbox.
 - Die CLI linkt direkt gegen Domain Crates für doctor, settings, connections, forwards, portable bundles, backups und reports
 - Diagnosen bevorzugen Zähler, Pfade, Feature-Flags und redigierte Hinweise statt roher payloads mit Geheimnisse
 - Mutierende CLI-Flows nutzen dry-run plans, `--yes` guards und rollback backups, wo anwendbar
@@ -276,7 +276,7 @@ cargo run -p oxideterm-cli -- completion install zsh --force
 | Laufzeit | Tokio + DashMap | Asynchrone Laufzeit und nebenläufige Maps |
 | SSH | russh (`ring`) | Kein OpenSSL/libssh2 im SSH-Stack; SSH Agent |
 | Terminal | portable-pty + alacritty_terminal | Lokale PTYs, Terminalemulation, Sixel- und Kitty-Grafik |
-| Plugins | wasmtime | WASM-Isolation mit nativer Host-API |
+| Plugins | Wasmtime/WASI und Prozesspfade | Manifest-only, kontrollierte WASM-Host-Aufrufe sowie ausdrücklich vertrauensbedürftige lokale Prozesse |
 | KI und Suche | SSE + BM25 + HNSW | Anbieter-Streaming, CJK-Bigramme und RRF-Fusion |
 | Editor | tree-sitter (Syntax), eigener Puffer | Mehrsprachig, SFTP-gestützt |
 | Verschlüsselung | ChaCha20-Poly1305 + Argon2id | AEAD + speicherintensive KDF (256 MB) |
@@ -293,7 +293,7 @@ cargo run -p oxideterm-cli -- completion install zsh --force
 | `.oxide` | ChaCha20-Poly1305 + Argon2id |
 | CLI-Schreibzugriffe | dry-run plans, `--yes` guards, rollback backups |
 | Host-Schlüssel | TOFU mit `~/.ssh/known_hosts`, unerwartete Änderungen werden abgelehnt |
-| Plugins | wasmtime-Isolation und fähigkeitsbasierte Host-API |
+| Plugins | Manifest-only, kontrollierte WASM-Host-API und vertrauensabhängige lokale Prozesse |
 
 ## Hinweis zur rechtmäßigen Nutzung
 

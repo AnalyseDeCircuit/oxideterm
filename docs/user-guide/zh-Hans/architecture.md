@@ -1,9 +1,9 @@
 # OxideTerm Native 架构设计
 
-> **版本**: Native 用户指南架构草案
-> **上次更新**: 2026-06-19
-> **工作区版本**: Cargo workspace `2.0.0-gpui-preview.11`
-> **参考写法**: 参考 Tauri 架构文档的组织方式，并按 Rust/GPUI Native 应用重写。
+> **版本**: Native 桌面架构
+> **上次更新**: 2026-07-31
+> **工作区版本**: Cargo workspace `2.0.15`
+> **参考写法**: 参考 Tauri 架构文档的组织方式并保留其迁移语境；Rust/GPUI Native 应用源码是实现的事实来源。
 
 本文档描述 OxideTerm Native 的系统架构、设计决策和核心组件。写法遵循 Tauri 参考文档的结构：先说明设计理念，再给出整体架构图，随后按通信平面、分层、核心组件和生命周期展开。
 
@@ -47,7 +47,7 @@
 1. **桌面应用优先** - GPUI 桌面应用是主要用户界面，CLI 是自动化和诊断伴侣工具。
 2. **终端响应优先** - 终端输入、输出、尺寸变化和渲染属于延迟敏感热路径。
 3. **节点优先的远端工作区** - 远端工作流以稳定 SSH 节点为锚点，不以临时终端面板为锚点。
-4. **一个连接，多个消费者** - 终端、SFTP、转发、IDE、AI 工具和插件可以共享同一个远端节点。
+4. **默认共享连接** - 终端、SFTP、转发和 IDE 可以共享节点注册表连接；AI 与插件通过经过校验的能力句柄、快照或钩子使用节点能力，不成为物理连接消费者。
 5. **生命周期归属明确** - 保存配置、在线节点、终端会话、SFTP 会话、转发、编辑器缓冲区和标签页分别有不同所有者。
 6. **本地优先状态** - SSH、SFTP、本地终端、设置、插件和 AI 供应商配置不依赖 OxideTerm 云账号。
 7. **凭据边界清晰** - 导航元数据、设置、AI 提示词、日志、支持包和插件标签不是凭据存储。
@@ -58,7 +58,7 @@
 | 关注点 | Native Rust/GPUI 方向 |
 |---|---|
 | 用户体验 | 在一个桌面工作区中统一终端、文件、转发、IDE、AI、设置和插件 |
-| 后端所有权 | 长生命周期运行时状态由 Rust 领域 crate 持有，而不是散落在界面状态中 |
+| 后端所有权 | 核心规则和模型位于 Rust 领域 crate；`oxideterm-gpui-app` 持有协调 Entity、订阅和最终运行时关闭逻辑，而不是把它们当作临时界面状态 |
 | 终端路径 | 终端输入输出与重型管理任务隔离 |
 | 安全性 | SSH、SFTP、转发、持久化、凭据和 AI 边界都有明确 Rust 领域 |
 | 可移植性 | 桌面包可以携带应用资源、agent 二进制、图标和 CLI 伴侣工具 |
@@ -94,7 +94,7 @@ flowchart TB
         ForwardRuntime["转发管理器"]
         IdeRuntime["IDE 文件系统 / 编辑器状态"]
         HostToolsRuntime["主机工具采样器"]
-        GraphicsRuntime["WSL Graphics · VNC Worker"]
+        GraphicsRuntime["WSL Graphics · Remote Desktop Helpers · VNC Worker"]
         ModemRuntime["Modem 传输引擎"]
         AiRuntime["AI 上下文 · 工具 · RAG · MCP"]
         PluginRuntime["插件注册表 · 宿主 API · 设置"]
@@ -172,7 +172,7 @@ flowchart LR
         SshHost["SSH 主机"]
         SftpHost["SFTP 子系统"]
         RemotePorts["转发目标"]
-        Agent["可选远端 Agent"]
+        Agent["可选远程文件/代码 Agent<br/>Linux musl 目标"]
     end
 
     subgraph External["外部服务"]
@@ -200,7 +200,7 @@ flowchart LR
 
 ### 用户侧摘要
 
-应用是围绕稳定远端节点构建的桌面工作区。标签页和面板是视图；保存连接是配置；SSH 节点是在线或正在重连的运行时对象；终端会话、SFTP 会话、IDE 工作区、转发、AI 目标和插件能力都是这些节点的消费者。
+应用是围绕稳定远端节点构建的桌面工作区。标签页和面板是视图；保存连接是配置；SSH 节点是在线或正在重连的运行时对象；终端会话、SFTP 会话、IDE 工作区和转发直接消费节点能力，AI 目标和插件页面则通过经过校验的能力句柄、宿主快照或终端钩子使用节点能力。
 
 这种分离解释了常见行为：
 
@@ -317,14 +317,14 @@ flowchart TB
 
 ### 第一层：GPUI 应用外壳
 
-主要由 `oxideterm-gpui-app` 承担。
+主要由 `oxideterm-gpui-app` 承担；它既是 GPUI 页面层，也是长期应用实体的协调器。
 
 职责：
 
 - 创建桌面窗口。
 - 渲染活动栏、标签页、面板树、对话框和设置页面。
 - 将用户操作路由到领域 crate。
-- 区分界面状态和持久领域状态。
+- 区分界面状态和持久领域状态，同时持有运行时实体句柄、订阅、任务投递和最终关闭所有权。
 - 提供应用级通知和命令面板动作。
 
 代表模块：
@@ -427,7 +427,9 @@ flowchart TB
 - 云同步后端。
 - AI 供应商请求。
 
-关键规则是所有权：一个运行时对象应有唯一清晰所有者，界面视图通过明确句柄或快照消费它。
+关键规则是所有权：一个运行时对象应有唯一清晰所有者。应用层可以持有负责协调的
+Entity 及其生命周期，而可复用规则仍位于领域 crate；界面视图通过明确句柄、订阅或
+快照消费运行时状态。
 
 ### 第四层：持久化与凭据存储
 
@@ -443,18 +445,19 @@ Tauri Oxide-Next 架构识别出一个结构性问题：SFTP、IDE 和转发不�
 
 Native 保留同样的用户侧模型。
 
-### 目标拓扑
+### 当前拓扑
 
 ```text
 保存连接
   -> 节点身份
-       -> SSH 连接句柄
+       -> 节点运行时（`NodeRuntimeStore` + `NodeRouter`）
+            -> 共享或独占 SSH 连接句柄
        -> 终端会话
        -> SFTP 会话
        -> 转发规则
        -> IDE 工作区
-       -> AI 目标
-       -> 插件消费者
+       -> AI 能力句柄
+       -> 插件宿主快照和钩子
 ```
 
 ```mermaid
@@ -466,8 +469,8 @@ flowchart TB
     NodeRuntime --> Sftp["SFTP 会话<br/>文件浏览 · 传输 · 预览"]
     NodeRuntime --> Ide["IDE 工作区<br/>文件树 · 编辑器缓冲区 · 保存路径"]
     NodeRuntime --> Forward["转发规则<br/>本地 · 远端 · 动态"]
-    NodeRuntime --> AiTarget["AI 目标<br/>命令 · 文件 · 观察结果"]
-    NodeRuntime --> PluginConsumers["插件消费者<br/>快照 · 宿主 API 调用"]
+    NodeRuntime --> AiTarget["AI 能力句柄<br/>命令 · 文件 · 观察结果"]
+    NodeRuntime --> PluginConsumers["插件宿主快照<br/>宿主 API 调用 · 终端钩子"]
 
     Shell --> TerminalTabs["可见终端标签页"]
     Sftp --> SftpTabs["SFTP / 文件管理器标签页"]
@@ -487,11 +490,20 @@ flowchart TB
 | SFTP 视图 | 节点文件工作流 | 当前 SFTP 通道 |
 | IDE 工作区 | 项目和编辑上下文 | 当前文件操作通道 |
 | 转发规则 | 期望隧道 | 当前监听器或任务 |
-| AI 目标 | 工具侧快照 | 当前目标状态 |
+| AI 目标 | 工具侧快照和能力句柄 | 当前目标状态与连接代次 |
 
 ### 用户规则
 
 远端操作失败时，先检查节点。不要假设当前聚焦标签页就是整个运行时的所有者。
+
+### 跳板机所有权
+
+跳板机路由有两层相关但不同的所有权：
+
+- `NodeRuntimeStore` 保存逻辑父子节点树。
+- `ConnectionRegistry` 保存物理父连接关系；只要子连接依赖父连接，就保留父连接消费者。
+- 子连接不能根据相同主机名猜测父节点，而要使用精确的节点和连接身份。
+- 显式断开时先释放子树，再释放父连接，避免子节点终端静默拆掉仍被使用的跳板机。
 
 ---
 
@@ -602,38 +614,43 @@ SSH 终端职责：
 
 ---
 
-## SSH 连接池
+## SSH 连接注册表与运行时
 
 SSH 连接池把远端运行时状态和界面标签页分离。
 
 ### 职责
 
 - 跟踪活跃、空闲、已失效、正在重连和失败连接。
-- 在可能时让多个消费者共享一个连接。
-- 暴露监控快照。
-- 支持重连编排。
-- 避免 SFTP、转发、IDE、终端、AI 和插件消费者各自创建无关传输状态。
+- 在可能时让多个消费者共享一个连接，也可以按配置为终端创建独占连接。
+- 持有物理连接状态、注册表消费者、健康探测和空闲回收。
+- 向工作区运行时和监控页面暴露连接快照。
+- 将重连调度放在 `WorkspaceRuntimeEntity`，而不是监控页面。
 
 ### 消费者模型
 
 ```text
-SSH 连接
+共享 SSH 连接
   |-- 终端消费者
   |-- SFTP 消费者
   |-- 转发消费者
   |-- IDE 消费者
-  |-- AI 工具消费者
-  `-- 插件消费者
+  `-- NodeRouter 消费者
+
+独占终端连接
+  `-- 拥有独立注册表键和物理传输的终端消费者
+
+AI 和插件通过能力句柄、宿主快照或终端钩子使用能力。它们不是
+`ConnectionConsumer` 变体，也不是物理连接所有者。
 ```
 
 ### 监控模型
 
-连接监控应回答：
+连接监控读取注册表和工作区运行时状态，应回答：
 
 - 哪些节点在线？
 - 哪些节点正在重连？
 - 哪些节点失败？
-- 哪些消费者已附着？
+- 哪些注册表消费者已附着？
 - 哪些转发或传输需要处理？
 
 ### 主机工具模型
@@ -658,7 +675,11 @@ SSH 连接
 - `oxideterm-connection-monitor` 持有采样命令、解析逻辑、行签名、过滤器、动作命令构造和领域 DTO。
 - `oxideterm-gpui-app` 负责渲染监控页面、确认用户动作，并通过所属节点/运行时边界分发命令。
 - 资源快照是运行时观察结果，可以刷新、失效或失败，但不会修改保存连接配置。
-- 重型或重复采样不得阻塞终端输入，也不能成为 SSH 连接归属的事实来源。
+- `ConnectionRegistry` 持有物理 SSH 状态、健康探测、消费者登记和空闲清理。
+- `WorkspaceRuntimeEntity` 调度活动探测、处理节点事件，并启动或取消重连任务。
+- `ForwardingRuntimeService` 持有转发监听器和桥接任务。
+- 监控页面不拥有 SSH 传输或重连生命周期。
+- 重型或重复主机采样不得阻塞终端输入，也不能成为 SSH 连接归属的事实来源。
 
 ---
 
@@ -750,7 +771,7 @@ IDE 文件操作可以使用远端文件层，但 IDE 不是简单 SFTP 表格�
 RDP、VNC 和 X11 的详细所有权边界记录在 [远程桌面边界](../../design/remote-desktop-boundary.zh-Hans.md)。Native 当前应把视觉远程能力分成三条相关但独立的路径：
 
 - **WSL 图形**：`oxideterm-wsl-graphics` 拥有 WSL 发行版探测、VNC server 启动、桌面/应用子进程和清理。
-- **远程桌面**：未来 RDP/VNC 连接类型应使用协议无关的远程桌面领域层和进程外 helper。
+- **远程桌面**：`oxideterm-remote-desktop` 和 `oxideterm-gpui-remote-desktop` 负责共享模型、查看器状态和 provider registry；`oxideterm-rdp-helper` 与 `oxideterm-vnc-helper` 通过 stdio 边界负责协议引擎。RDP 对当前兼容范围之外的集成返回明确的 unsupported 错误，VNC 使用直接 TCP/RFB 路径。
 - **SSH X11 转发**：`oxideterm-x11-forwarding` 拥有 DISPLAY、xauth、假 cookie、setup rewrite 和 SSH X11 channel 桥接语义；它不是完整桌面查看器。
 
 ### 职责
@@ -765,7 +786,7 @@ RDP、VNC 和 X11 的详细所有权边界记录在 [远程桌面边界](../../d
 
 图形运行时拥有 server/session 进程生命周期。GPUI 查看器拥有客户端连接、当前 framebuffer、指针几何和输入分发。关闭查看器应根据用户选择停止或分离图形会话，但不应重写保存的 SSH 连接配置。
 
-对未来 RDP/VNC 会话，应用应在 tab/session 层拥有 helper 生命周期，而 `oxideterm-connections` 拥有保存配置元数据和凭据引用。RDP/VNC 协议代码应该放在 helper binary 或协议专属 crate 中，而不是放进 `oxideterm-gpui-app`。
+对于 RDP/VNC 会话，`oxideterm-connections` 拥有保存配置元数据和凭据引用，应用 tab/session 拥有 helper 进程生命周期，GPUI 查看器拥有 framebuffer 和输入状态。RDP/VNC 协议代码放在 helper binary 或协议专属 crate 中，而不是放进 `oxideterm-gpui-app`；只有通过节点启动时，SSH 节点才提供 tunnel 或节点上下文。
 
 ---
 
@@ -783,8 +804,6 @@ RDP、VNC 和 X11 的详细所有权边界记录在 [远程桌面边界](../../d
 - SFTP 传输。
 - 转发规则。
 - IDE 工作区。
-- AI 目标。
-- 插件消费者。
 - 通知和错误。
 
 ### 概念管线
@@ -798,6 +817,9 @@ RDP、VNC 和 X11 的详细所有权边界记录在 [远程桌面边界](../../d
   -> 恢复或重试传输
   -> 重新打开或刷新 IDE 状态
   -> 更新监控和通知
+
+AI 和插件能力句柄不是直接重连阶段。它们通过运行时边界观察节点或连接
+代次变化，并在后续调用中失效、刷新或重新获取资源。
 ```
 
 ### 用户流程
@@ -841,7 +863,10 @@ RDP、VNC 和 X11 的详细所有权边界记录在 [远程桌面边界](../../d
 
 ### CLI 关系
 
-CLI 伴侣工具可以为脚本化流程检查和修改设置。探索性或视觉配置应使用桌面设置页面。
+CLI 伴侣工具是共享持久化模型的脚本和维护入口，覆盖设置、连接、转发、插件、
+快捷命令、凭据、便携包、诊断、报告、批处理计划、备份和云同步。除临时 GUI SSH
+启动外，它不拥有桌面进程中的在线节点或终端运行时。修改型命令通常使用 dry-run
+计划和 `--yes` 确认。探索性或视觉配置应使用桌面设置页面。
 
 ---
 
@@ -851,7 +876,11 @@ CLI 伴侣工具可以为脚本化流程检查和修改设置。探索性或视�
 
 ### 云同步
 
-云同步将选定本地状态与配置的远端后端对齐。执行 push、pull、apply 或冲突解决这类改变方向的操作前，应能检查状态。
+云同步将选定本地状态与配置的远端后端对齐。当前模型支持 WebDAV、HTTP JSON、
+Dropbox、OneDrive、Google Drive、GitHub Gist、S3 和 Git，并支持按分区选择同步范围。
+自动上传、冲突阻止、同步历史和最多五个本地回滚备份由本地状态机管理。UI 与 CLI
+共用结构化同步模型；在线节点和终端缓冲区不是同步对象。执行 push、pull、apply 或
+冲突解决这类改变方向的操作前，应能检查状态。
 
 ### 备份
 
@@ -877,6 +906,16 @@ CLI 伴侣工具可以为脚本化流程检查和修改设置。探索性或视�
 ## OxideSens AI 架构
 
 OxideSens 是理解工作区上下文的助手。它使用已配置供应商和本地应用上下文，不需要 OxideTerm 账号。
+
+Agent Skills 是用于可重复工作流的受限说明层。AI 运行时会发现 `SKILL.md` 目录，只在需要时加载完整说明和资源，并把已加载技能的内容哈希记录到对话元数据中。加载技能不会授予运行时权限；终端、文件、凭据、网络等动作仍必须经过现有能力和批准检查。
+
+聊天界面还会根据当前模型解析服务商适配的推理级别。已知模型会依据能力数据规范化；
+已知供应商的未知模型使用该供应商的请求格式，未知供应商才会被视为不支持。
+
+OxideSens 有两条执行后端。原生供应商后端直接流式调用配置的模型协议；ACP 后端通过
+独立的 agent 进程、ACP session、模型选择和 session 配置运行。两者共享应用上下文、
+策略和界面，但传输、工具注入、推理配置和生命周期不同。ACP 不使用原生供应商的
+`reasoning_effort` 字段；相关选项属于 ACP session 配置。
 
 ### 上下文来源
 
@@ -1071,7 +1110,7 @@ flowchart TB
 
 | 模块 | 职责 | 用户可见结果 |
 |---|---|---|
-| `workspace.rs` 与 `workspace/root/*` | 持有顶层工作区状态、窗口组合、初始化和根渲染 | 应用进入统一桌面工作区，而不是多个割裂工具 |
+| `workspace.rs` 与 `workspace/root/*` | 组合顶层工作区并构造应用服务；长期节点和重连所有权位于 `workspace/runtime_entity.rs` 与领域 crate | 应用进入统一桌面工作区，同时不会让根视图成为所有传输的所有者 |
 | `workspace/tabs/*` | 创建、选择、渲染和重连绑定到标签页的视图 | 终端、SFTP、IDE 和工具页可以独立打开、关闭和恢复 |
 | `workspace/pane_tree.rs` | 持有分屏面板布局状态 | 用户可以调整工作区布局，而不改变节点或会话归属 |
 | `workspace/sidebar/*` | 渲染活动导航、保存会话、AI 侧边栏和侧边栏状态 | 活动页面变化时，导航仍保持稳定 |
@@ -1081,14 +1120,18 @@ flowchart TB
 | `workspace/sftp/*` | 渲染远端文件浏览、对话框、预览、冲突和传输动作 | SFTP 是节点级文件管理器，不是终端附属功能 |
 | `workspace/file_manager/*` | 渲染本地文件浏览、书签、预览对话框和外部打开动作 | 本地文件工作流与远端文件使用一致的桌面模式 |
 | `workspace/graphics.rs` 与 `workspace/graphics_vnc.rs` | 渲染图形会话、连接 VNC viewer，并路由指针/键盘输入 | 远端视觉工作流是独立应用页面，不是终端 scrollback |
+| `workspace/remote_desktop/*` | 解析远程桌面目标、打开查看器标签页，并把 provider/helper 生命周期接入工作区 | RDP/VNC 会话复用标签页外壳，同时把协议工作留在应用 crate 之外 |
+| `workspace/runtime_entity.rs` | 持有长期节点订阅、重连 worker、运行时关闭和终端消费者登记 | 关闭终端消费者不会意外关闭共享节点或传输 |
 | `workspace/ide.rs` 与 IDE crate | 打开文件夹、路由文件操作、管理编辑器状态 | 远端编辑体现为工作区，而不是裸 SFTP 操作 |
 | `workspace/forwards/*` | 渲染转发表单、规则、状态和动作 | 端口转发可见、可恢复、可从桌面应用管理 |
 | `workspace/settings/*` | 渲染终端、外观、AI、SFTP、IDE、提权凭据、便携运行时、更新和快捷键设置页 | 配置以应用为主入口，并通过共享设置模型持久化 |
 | `workspace/cloud_sync/*` | 渲染同步状态、确认流程和备份动作 | 云同步与备份操作显式展示，尽量可预演和可恢复 |
-| `workspace/plugin_manager.rs`, `plugin_runtime.rs`, `plugin_lifecycle/*`, `plugin_settings_store.rs` | 管理插件发现、生命周期、宿主 API 快照、设置、凭据和界面调用 | 插件可以扩展应用页面，但不拥有核心运行时状态 |
-| `workspace/sidebar/ai/*` | 渲染 AI 对话、模型选择、流式输出、上下文、工具事件和对话记录状态 | OxideSens 是集成在工作区内的助手，并有明确工具边界 |
+| `workspace/plugin_entity.rs`、`plugin_manager.rs`、`plugin_lifecycle/*`、`plugin_ui.rs` | 协调插件发现、生命周期、宿主 API 快照、设置、凭据和界面调用 | 插件可以扩展应用页面，但不拥有核心运行时状态 |
+| `workspace/sidebar/ai/*` | 渲染 AI 对话、模型选择、流式输出、上下文、Agent Skills、工具事件和对话记录状态 | OxideSens 是集成在工作区内的助手，并有明确工具边界 |
+| `workspace/acp_workspace.rs` 与 `oxideterm-acp-*` 集成 | 协调 ACP agent 配置、session、模型选项和 ACP 主机工具桥接，并与原生供应商路径并列 | ACP session 有独立的 agent/session 生命周期，不应被当作普通供应商流 |
 | `workspace/terminal_context_actions.rs` | 构建选择、搜索、传输和命令路由等终端右键动作 | 终端动作使用统一应用菜单风格，同时仍通过明确 session API 分发 |
-| `workspace/quick_commands*` 与 `terminal_command_bar/*` | 存储快捷命令和命令行补全来源 | 重复终端动作可以变成可复用的桌面控件 |
+| `workspace/quick_commands*` 与 `terminal_command_bar/*` | 存储快捷命令、命令行补全来源和发送器控件 | 重复终端动作可以变成可复用的桌面控件 |
+| `workspace/terminal_command_sender.rs` 与 `terminal_command_bar/sender.rs` | `TerminalCommandSenderEntity` 管理定时、重复、多目标终端输入、目标快照、取消和进度 | 任务不依赖根视图轮询，也不会创建 SSH 连接；Entity 仍由 `WorkspaceApp` 协调，并使用已经存在的终端目标 |
 | `workspace/local_terminal_background.rs` 与 `workspace/root/background.rs` | 解析应用和终端背景图片渲染 | 背景图片属于视觉设置，不是终端缓冲区内容 |
 | `workspace/notification_center.rs` | 收集并渲染可操作的应用通知 | 后台失败和恢复动作不会阻塞终端输入，但仍然可见 |
 | `workspace/onboarding/*` | 渲染首次启动设置和设置状态 | 用户可以从主应用完成配置，而不是从 CLI 文档开始 |
@@ -1100,7 +1143,7 @@ flowchart TB
 | `oxideterm-ssh/src/config.rs` | 定义 SSH 连接配置和面向校验的类型 | 保存元数据与在线传输句柄分离 |
 | `connection_registry.rs` | 跟踪可复用 SSH 连接和连接池身份 | 多个消费者可以共享节点，而不是各自持有 socket |
 | `router.rs` 与 `router/node_router.rs` | 把工作路由到节点，并强制节点身份 | 用户动作面向节点，而不是偶然存在的终端标签页 |
-| `router/runtime_store.rs` | 存储消费者和监控器使用的在线节点状态 | 运行时状态可以查询，但不会变成持久连接配置 |
+| `router/runtime_store.rs` | 保存进程内节点状态并导出拓扑快照 | 由 `WorkspaceApp` helper 写入快照；运行时句柄、终端端点和在线身份重新构建，不会被序列化 |
 | `router/events.rs` | 发布节点和连接事件 | 界面和工具可以接收状态变化，而不是直接轮询每个领域 |
 | `reconnect.rs` | 描述重连策略和重试行为 | 断线尽可能变成可恢复生命周期事件 |
 | `monitor.rs` | 把底层状态转换为监控页面使用的健康状态 | 连接监控能展示健康状态，但不暴露传输内部细节 |
@@ -1144,6 +1187,8 @@ flowchart TB
 | `context_sanitizer.rs` | 在模型或工具边界前脱敏敏感值 | AI 上下文属于输出边界 |
 | `key_store.rs` 与 `touch_id.rs` | 存储和解锁供应商密钥 | 供应商凭据不进入普通设置文本 |
 | `providers/*` 与 `streaming/*` | 发现模型、选择供应商、构造请求、解析流式响应 | 供应商差异隐藏在统一流式语义后面 |
+| `reasoning.rs` | 根据供应商和已知模型能力规范化推理级别 | 不输出不支持的供应商格式；ACP 使用 session 选项 |
+| `acp/*` | 持有 ACP 传输、agent 生命周期、session 配置和协议状态 | ACP 是独立于原生模型供应商的执行后端 |
 | `orchestrator.rs` | 定义 orchestrator 工具名称、schema 和分发契约 | 面向模型的工具定义保持稳定 |
 | `policy.rs` | 决定哪些工具动作需要批准或拒绝 | 危险或会改变状态的动作不能只因模型要求就执行 |
 | `persistence.rs` | 存储对话和 AI 持久状态 | 在启用时，长对话可跨应用重启保留 |
@@ -1161,7 +1206,7 @@ flowchart TB
 | 转发 | `oxideterm-forwarding`, 应用转发模块 | 规则是配置；监听器是运行时状态 |
 | 提权凭据 | 设置提权页面、终端提权提示、凭据感知存储 | 作用域和提示匹配器是配置；secret 值留在普通设置之外 |
 | 终端 modem 传输 | `oxideterm-modem-transfer`, `oxideterm-gpui-terminal` modem worker | 协议状态属于终端运行时；文件选择和进度属于 UI |
-| 图形会话 | `oxideterm-wsl-graphics`, 应用图形/VNC 模块 | session/server 生命周期与 viewer framebuffer、终端缓冲区分离 |
+| 图形会话 | `oxideterm-wsl-graphics`, `oxideterm-remote-desktop`, `oxideterm-gpui-remote-desktop`, `oxideterm-rdp-helper`, `oxideterm-vnc-helper`, 应用图形/远程桌面模块 | WSL 生命周期、远程协议 helper、viewer framebuffer 和终端缓冲区各自归属清晰 |
 | 插件 | `oxideterm-plugin-*`, 插件管理器和生命周期模块 | manifest、设置、宿主 API 调用和插件凭据有各自边界 |
 | 云同步 | `oxideterm-cloud-sync`, `oxideterm-gpui-cloud-sync`, 应用云同步模块 | 同步计划、备份创建和应用步骤都是显式控制平面操作 |
 | 便携运行时 | `oxideterm-portable-runtime`, 设置中的便携运行时模块 | 便携元数据和加密载荷处理与普通设置页分离 |
@@ -1620,7 +1665,7 @@ stateDiagram-v2
 | 传输 | 传输管理器 | 按配置保留传输历史 | 默认无 | 只保留部分状态或历史 | 操作支持时可重试 | 重试、取消、清理部分文件 |
 | 转发规则 | 转发页面 / 运行时 | 转发配置 | 远端侧使用 SSH 认证层 | 规则保留 | 监听器必须重启 | 重启或修改端口 |
 | 主机工具快照 | 连接监控 / profiler | 在线采样不持久化 | SSH 认证层 | 否 | 重连后刷新 | 刷新、重新执行动作或重连节点 |
-| 图形会话 | 图形运行时 / VNC 查看器 | 在线 viewer 不持久化 | 通常只依赖 SSH/session 启动 | 否 | 可行时重连 viewer/session | 重连、停止或重新启动 |
+| 图形会话 | 保存的 RDP/VNC provider 与 helper，或节点图形运行时 / VNC 查看器 | 配置元数据可以持久化；在线 viewer 不持久化 | 根据路径使用 provider 凭据或 SSH/session 启动 | 在线 viewer 否 | 可行时重连 provider/helper 或节点会话 | 重连、停止或重新启动 |
 | IDE 工作区 | IDE 页面 / 运行时 | 最近工作区和设置 | 远端侧使用 SSH 认证层 | 最近记录保留 | 重连后重新打开或刷新 | 保存、重新加载、解决冲突 |
 | 编辑器缓冲区 | IDE / 编辑器状态 | 只有保存后才写入文件 | 默认无 | 未保存内容取决于恢复策略 | 节点重连不会自动保存 | 保存、重新加载、丢弃 |
 | AI 对话 | AI 侧边栏 / 运行时 | AI 持久化 | 供应商密钥存储 | 启用时保留 | 除非工具目标是节点，否则不依赖连接 | 继续、压缩、删除 |
@@ -1651,11 +1696,9 @@ flowchart LR
         Sync["同步 / 备份事件"]
     end
 
-    subgraph EventLayer["事件层"]
-        Bus["工作区事件总线"]
-        Coalesce["合并 / 去重"]
-        Redact["凭据脱敏"]
-        Severity["严重级别映射"]
+    subgraph EntityLayer["领域实体与投递通道"]
+        RuntimeEntities["工作区 / 领域实体"]
+        Delivery["订阅 / 有界任务通道"]
     end
 
     subgraph Consumers["消费者"]
@@ -1666,28 +1709,32 @@ flowchart LR
         Logs["诊断日志"]
     end
 
-    SSH --> Bus
-    Term --> Bus
-    Modem --> Bus
-    Graphics --> Bus
-    SFTP --> Bus
-    HostTools --> Bus
-    Forward --> Bus
-    IDE --> Bus
-    AI --> Bus
-    Plugin --> Bus
-    Sync --> Bus
-    Bus --> Coalesce --> Redact --> Severity
-    Severity --> ActiveSurface
-    Severity --> Notifications
-    Severity --> Badges
-    Severity --> Transcript
-    Severity --> Logs
+    SSH --> RuntimeEntities
+    Term --> RuntimeEntities
+    Modem --> RuntimeEntities
+    Graphics --> RuntimeEntities
+    SFTP --> RuntimeEntities
+    HostTools --> RuntimeEntities
+    Forward --> RuntimeEntities
+    IDE --> RuntimeEntities
+    AI --> RuntimeEntities
+    Plugin --> RuntimeEntities
+    Sync --> RuntimeEntities
+    RuntimeEntities --> Delivery
+    Delivery --> ActiveSurface
+    Delivery --> Notifications
+    Delivery --> Badges
+    Delivery --> Transcript
+    Delivery --> Logs
 ```
 
 ### 事件来源
 
-应用从多个领域接收结构化事件：
+应用从多个领域实体和任务通道接收结构化事件。当前不存在所有事件必须经过
+的单一工作区事件总线。每个实体各自持有订阅、投递唤醒、状态投影和取消规则；
+通知严重级别判断与凭据脱敏发生在具体输出边界。
+
+应用会收到以下事件：
 
 - SSH 节点状态变化。
 - 终端就绪和进程状态。
@@ -1786,16 +1833,17 @@ flowchart LR
 | 共享 GPUI 组件和平台辅助 | `oxideterm-gpui-ui`, `oxideterm-gpui-platform`, `oxideterm-theme` |
 | 终端渲染和终端领域 | `oxideterm-gpui-terminal`, `oxideterm-terminal`, `oxideterm-terminal-*` |
 | 终端 modem 传输 | `oxideterm-modem-transfer`, 终端 modem worker 集成 |
-| SSH、节点路由、重连 | `oxideterm-ssh`, `oxideterm-topology` |
+| SSH、节点路由、重连 | `oxideterm-ssh`, `oxideterm-topology`, `oxideterm-session-adapter` |
 | 主机工具和连接监控 | `oxideterm-connection-monitor`, 应用连接监控页面 |
 | SFTP 与传输 | `oxideterm-sftp` |
 | 保存连接 | `oxideterm-connections` |
 | 转发 | `oxideterm-forwarding`, 应用转发页面 |
-| 图形和 VNC 会话 | `oxideterm-wsl-graphics`, 应用图形/VNC 页面 |
+| 图形和远程桌面会话 | `oxideterm-wsl-graphics`, `oxideterm-remote-desktop`, `oxideterm-gpui-remote-desktop`, `oxideterm-rdp-helper`, `oxideterm-vnc-helper`, 应用图形/远程桌面页面 |
 | IDE 和编辑器 | `oxideterm-gpui-ide`, `oxideterm-gpui-editor`, `oxideterm-ide-core`, `oxideterm-ide-fs`, `oxideterm-editor-*` |
 | 设置和提权凭据 | `oxideterm-settings`, `oxideterm-settings-model`, `oxideterm-gpui-settings-view`, 应用凭据感知边界 |
-| AI、RAG、MCP、工具策略 | `oxideterm-ai`, 应用 AI 侧边栏 |
-| 插件 | `oxideterm-plugin-*`, 应用插件生命周期 |
+| AI、RAG、MCP、推理和工具策略 | `oxideterm-ai`, `oxideterm-ai-tasks`, `oxideterm-skills`, 应用 AI 侧边栏 |
+| ACP agent session 和主机工具 | `oxideterm-acp-adapter`, `oxideterm-acp-host-tools`, `workspace/acp_workspace.rs` |
+| 插件 | `oxideterm-plugin-manifest`, `oxideterm-plugin-registry`, `oxideterm-plugin-host-api`, `oxideterm-plugin-wasm-runtime`, `oxideterm-plugin-runtime-install`, 应用插件 Entity |
 | 云同步和便携运行时 | `oxideterm-cloud-sync`, `oxideterm-gpui-cloud-sync`, `oxideterm-portable-runtime` |
 | 通知、启动器、更新 | `oxideterm-notification-center`, `oxideterm-launcher`, `oxideterm-update` |
 | CLI 伴侣工具 | `oxideterm-cli` |

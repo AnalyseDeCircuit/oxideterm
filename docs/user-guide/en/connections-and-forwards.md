@@ -37,7 +37,7 @@ Saved profiles and live runtime nodes are different things:
 - Terminal session: a visible shell attached to an SSH node.
 - SFTP session: a file browsing or transfer surface attached to an SSH node.
 - Host Tools snapshot: a resource view sampled through the owning SSH node.
-- Graphics/VNC session: a visual viewer attached to a node-owned graphics runtime.
+- Graphics/VNC session: a viewer backed by a saved RDP/VNC profile or a node-owned graphics runtime.
 
 Use Connection Pool and Connection Monitor when a terminal looks stuck, SFTP cannot read a directory, Host Tools look stale, a graphics/VNC viewer disconnects, or reconnect behavior is unclear. Reconnect the runtime from the app state; do not delete and recreate the saved profile just to reconnect.
 
@@ -49,7 +49,7 @@ Typical flow:
 2. Select a saved connection or create one.
 3. Open the connection.
 4. Wait for the SSH node and terminal tab to become live.
-5. If needed, open SFTP, IDE, Host Tools, graphics/VNC, or forwarding from the same connected node.
+5. If needed, open SFTP, IDE, Host Tools, or forwarding from the same connected node, or open a saved RDP/VNC profile.
 
 For unstable hosts, keep Connection Monitor open while testing. It shows whether a node is connected, connecting, stale, or unavailable.
 
@@ -61,9 +61,9 @@ Resource snapshots can become stale independently of the terminal tab. Refresh t
 
 ## Graphics And VNC
 
-Graphics/VNC sessions are visual app surfaces attached to a connected node. They are useful when a remote workflow needs a desktop or graphical application rather than terminal output.
+Graphics/VNC sessions are visual app surfaces backed either by a saved RDP/VNC profile or by a connected node's graphics runtime. They are useful when a remote workflow needs a desktop or graphical application rather than terminal output.
 
-The viewer state is separate from terminal scrollback and saved connection data. If the viewer disconnects, reconnect or restart the graphics session from the node context; do not duplicate the saved SSH profile.
+The viewer state is separate from terminal scrollback. If a profile-backed viewer disconnects, reconnect its provider/helper; if a node-launched viewer disconnects, reconnect or restart it from the node context. Do not duplicate a saved SSH profile just to repair a viewer.
 
 ## Serial Terminals
 

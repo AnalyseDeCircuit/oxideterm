@@ -10,7 +10,7 @@ Check the relevant surface before editing files or running repair commands:
 - Connection Monitor: check whether the node is connected, connecting, stale, reconnecting, or unavailable.
 - Host Tools: check whether resource snapshots are fresh and whether an action failed with a visible error.
 - Terminal tab: confirm the shell accepts input, whether a command is still running, and whether a terminal helper prompt is active.
-- Graphics/VNC: confirm the owning node is live and the viewer is connected.
+- Graphics/VNC: confirm the saved profile/provider or owning node is live and the viewer is connected.
 - SFTP or File Manager: confirm the target node is live before retrying directory reads or transfers.
 - Settings: check recent changes to terminal background images, privilege credentials, SSH, AI, cloud sync, plugin, or update settings.
 - Notifications: review recent warnings and errors.
@@ -27,7 +27,7 @@ For SFTP or forwarding issues, check the owning SSH node in Connection Monitor. 
 
 For Host Tools issues, refresh the tool page first. If the sampler or action still fails, reconnect the owning node and retry the smallest action. Avoid using Host Tools for hidden cleanup or recursive disk scans.
 
-For graphics/VNC issues, check the owning node, reconnect the viewer, then restart the graphics session if the backing process stopped. Viewer state is separate from terminal output and saved connection data.
+For graphics/VNC issues, check the saved profile/provider or owning node, reconnect the viewer, then restart the helper or graphics session if its backing process stopped. Viewer state is separate from terminal output and saved connection data.
 
 For terminal background issues, reopen Settings and confirm the background image is enabled for the current tab type. Native currently treats the background as a selected image slot; adding a new image replaces the current selection.
 

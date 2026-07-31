@@ -54,7 +54,7 @@ OxideTerm 是面向 SSH 與遠端維運的開源工作區。終端、檔案、�
 | 一個遠端節點，多種工具 | 終端、SFTP、連接埠轉發、RDP/VNC、trzsz、原生 IDE、監控和 OxideSens AI 都附屬於同一工作區 |
 | 沒有 Electron 或捆綁 WebView 的桌面應用程式 | GPUI 直接在 GPU 表面繪製介面，無需附帶瀏覽器執行環境 |
 | 本機優先的維運流程 | SSH、Telnet、SFTP、轉發、RDP/VNC、本機 Shell、序列埠終端和設定無需註冊即可使用 |
-| 自帶金鑰的 OxideSens AI，而非平台額度 | OxideSens 使用你的 OpenAI、Anthropic、Gemini、Ollama 或 OpenAI 相容端點，並支援 MCP、RAG 和經核准的工作區操作 |
+| 自帶金鑰的 OxideSens AI，而非平台額度 | OxideSens 使用你的 OpenAI、Anthropic、Gemini、Ollama 或 OpenAI 相容端點，並支援 MCP、本機 RAG、依服務商適配的推理控制和經核准的工作區操作 |
 | 重連穩定性 | Grace Period 會在替換連線前探測舊連線 30 秒，讓 TUI 應用程式能穿越短暫的網路中斷 |
 | 純 Rust SSH 與憑證安全 | SSH 堆疊透過 `russh` + `ring` 提供，不依賴 OpenSSL/libssh2；已儲存憑證使用系統鑰匙圈，`.oxide` 套件使用 ChaCha20-Poly1305 + Argon2id |
 
@@ -97,12 +97,12 @@ OxideTerm 將連線、檔案、轉發、主機工具、自動化與 AI 上下文
 
 | 類別 | 功能 |
 |---|---|
-| **終端與連線** | 本機 Shell、SSH、Telnet、序列埠、分割窗格、自由輸入模式、多跳路由與穩定重連 |
+| **終端與連線** | 本機 Shell、SSH、Telnet、序列埠、分割窗格、自由輸入模式、高階多目標命令傳送、多跳路由與穩定重連 |
 | **檔案與遠端編輯** | SFTP、傳輸佇列、收藏夾、安全寫入、專案樹與多分頁編輯 |
 | **轉發與網路** | 本機、遠端與動態 SOCKS5 轉發、已儲存規則與 Socket 除錯 |
 | **主機維運與遠端桌面** | 監控、行程、服務、日誌、連接埠、工作、磁碟、套件、容器、tmux、RDP 與 VNC |
-| **OxideSens 與自動化** | 自有 AI 服務商、MCP、本機 RAG、已核准操作、加密雲端同步與 CLI |
-| **擴充與個人化** | WASM 插件、自訂分頁、快速命令、主題、背景圖片、快捷鍵與 11 種介面語言 |
+| **OxideSens 與自動化** | 自有 AI 服務商、MCP、本機 RAG、Agent Skills、已核准操作、加密雲端同步與 CLI |
+| **擴充與個人化** | manifest-only、WASM 與程序外掛、自訂分頁、快速命令、主題、背景圖片、快捷鍵與 11 種介面語言 |
 
 ---
 
@@ -135,8 +135,8 @@ GPUI 渲染迴圈
 領域 Crate
   NodeRouter → SshConnectionRegistry
   TerminalState ← SSH PTY channel
-  SftpSession / ForwardManager / IdeWorkspace
-  AiProvider / CloudSyncService / PluginHost
+  SftpSession / ForwardingRuntime / IdeWorkspace
+  Ai/ACP Entities / CloudSync / Plugin Runtimes
 ```
 
 介面與 SSH/終端後端之間沒有序列化邊界。終端位元組直接修改 `TerminalState`，GPUI 讀取狀態並發出 GPU 繪製命令。
@@ -156,9 +156,9 @@ GPUI 渲染迴圈
 1. 透過 SSH keepalive 偵測連線逾時，沒有 JavaScript timer throttle
 2. 快照終端分割窗格、SFTP 傳輸、連接埠轉發與 IDE 檔案狀態
 3. **Grace Period**：先探測舊連線 30 秒，網路切換時 TUI 應用有機會原地存活
-4. 舊連線無法恢復時，新 SSH 連線會恢復轉發、續傳並重新開啟 IDE 檔案
+4. 舊連線無法恢復時，新 SSH 連線會恢復轉發，並依傳輸策略重試或續傳，再重新開啟 IDE 檔案
 
-Pipeline: `queued → snapshot → grace-period → ssh-connect → await-terminal → restore-forwards → resume-transfers → restore-ide → verify → done`
+Pipeline: `queued → snapshot → grace-period → ssh-connect → await-terminal → restore-forwards → retry-or-resume-transfers → restore-ide → verify → done`
 
 ### SSH 連線池與節點路由
 
@@ -166,7 +166,7 @@ Pipeline: `queued → snapshot → grace-period → ssh-connect → await-termin
 - 一個實體 SSH 連線可被 terminal、SFTP、port forward 和 IDE 同時使用
 - 每條連線都有 `connecting → active → idle → link_down → reconnecting` 狀態機
 - UI 只按 `nodeId` 操作，`NodeRouter` 原子解析到底層 `connectionId`
-- `NodeRuntimeStore` 將節點拓撲快照持久化到 `session_tree.json`
+- `NodeRuntimeStore` 保存程序內節點執行狀態並匯出拓撲快照；由工作區 helper 將快照寫入 `session_tree.json`，啟動時重新建立執行中的 handle
 - 跳板機失效會級聯標記下游節點為 `link_down`
 
 ### OxideSens AI
@@ -201,7 +201,7 @@ OxideSens 採用 BYOK 模式，並在行程內建立上下文：
 
 遠端檔案屬於同一個 node 工作區，而不是割裂的附屬功能：
 
-- SFTP session 透過 `NodeRouter` 解析，重連替換底層 SSH connection 時 UI 的 node address 不變
+- SFTP session 透過 `NodeRouter` 與連線代次解析；重連時可以重新取得有效 session，但舊代次操作不會被新連線靜默替換
 - 傳輸佇列獨立追蹤方向、進度、重試狀態與速度限制，不依賴目前可見的檔案窗格
 - IDE 分頁同時保存未儲存緩衝區、遠端路徑、衝突狀態與復原中繼資料
 - Backend 支援時，remote writes 使用 staged/atomic behavior，避免普通 editing flow 出現 partial writes
@@ -210,7 +210,7 @@ OxideSens 採用 BYOK 模式，並在行程內建立上下文：
 
 原生分支把擴充功能與支援介面保持在 Rust 原生邊界內：
 
-- 外掛在 wasmtime 沙箱中執行，使用型別化宿主能力，而不是瀏覽器全域物件
+- 外掛支援 manifest-only、WASM 與一般程序三種路徑。WASM 使用 Wasmtime/WASI 或具受控宿主呼叫的 sidecar；程序外掛是沒有作業系統級沙箱的本機程序，需要另外判斷信任邊界。
 - CLI 直接連結領域 crate，涵蓋 doctor、settings、connections、forwards、便攜包、備份與報告
 - 診斷優先輸出計數、路徑、功能旗標與脫敏提示，避免暴露含密鑰的原始負載
 - 會修改狀態的 CLI flows 使用 dry-run 計畫、`--yes` guards 與回滾備份
@@ -276,7 +276,7 @@ cargo run -p oxideterm-cli -- completion install zsh --force
 | 執行環境 | Tokio + DashMap | 非同步執行環境與並行映射 |
 | SSH | russh（`ring`） | SSH 堆疊不依賴 OpenSSL/libssh2，支援 SSH Agent |
 | 終端 | portable-pty + alacritty_terminal | 本機偽終端、終端模擬與 Sixel/Kitty 圖形 |
-| 外掛 | wasmtime | WASM 隔離與原生主機 API |
+| 外掛 | Wasmtime/WASI 與程序路徑 | manifest-only、受控 WASM 宿主呼叫，以及需要明確授權的本機程序 |
 | AI 與檢索 | SSE + BM25 + HNSW | 提供商串流、CJK 雙字詞與 RRF 融合 |
 | 編輯器 | tree-sitter（語法）、自訂緩衝區 | 多語言，基於 SFTP |
 | 加密 | ChaCha20-Poly1305 + Argon2id | AEAD + 記憶體困難型 KDF（256 MB） |
@@ -293,7 +293,7 @@ cargo run -p oxideterm-cli -- completion install zsh --force
 | `.oxide` | ChaCha20-Poly1305 + Argon2id |
 | CLI 寫入 | dry-run 計畫、`--yes` 保護和回滾備份 |
 | 主機金鑰 | 使用 `~/.ssh/known_hosts` 的 TOFU，拒絕未預期變更 |
-| 外掛 | wasmtime 隔離與基於能力的宿主 API |
+| 外掛 | manifest-only、受控 WASM 宿主 API 或需要明確授權的本機程序 |
 
 ## 合法使用提醒
 

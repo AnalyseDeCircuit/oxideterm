@@ -276,11 +276,15 @@ correctness.
   unless forwarding was requested, and must relay accepted channels to the local
   agent socket with a concurrency limit.
 - SSH tabs, SFTP, port forwards, and IDE consumers must acquire SSH connections
-  through the registry/router path. Long-term shape is one authenticated
-  physical SSH connection per connection key, with many channel consumers.
+  through the registry/router path. By default, one connection key maps to one
+  registry connection shared by many channel consumers; a terminal may opt into
+  a dedicated registry key and physical connection when its connection policy
+  requires isolation.
 - The registry may own the authenticated physical SSH handle; consumers open
   channels from that shared handle instead of creating redundant physical
-  connections for the same connection key.
+  connections for the same connection key. AI and plugin integrations use
+  capability handles, host snapshots, or terminal hooks rather than pretending
+  to be registry-level physical connection consumers.
 - Session tests should avoid real network calls unless explicitly marked as
   integration tests.
 

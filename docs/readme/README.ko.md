@@ -83,7 +83,7 @@ OxideTerm는 연결, 파일, 포워딩, 호스트 도구, 자동화, AI 컨텍�
 | **터미널 데이터 흐름** | WebSocket → JS 이벤트 루프 → xterm.js | Rust 입력 → `TerminalState` 변경 → GPUI 렌더링 |
 | **연결 수명 주기** | 프런트엔드와 백엔드 계층에 분산 | 프로세스 내부의 단일 연결 및 재연결 파이프라인 |
 | **AI 컨텍스트** | 애플리케이션 브리지를 통해 복사 | 사용자 승인 아래 활성 작업 공간에서 구성 |
-| **플러그인 런타임** | 브라우저 스크립트 환경 | 기능 범위가 제한된 WASM 런타임 |
+| **플러그인 런타임** | 브라우저 스크립트 환경 | manifest-only, 기능 제한 WASM, 명시적 신뢰가 필요한 프로세스 경로 |
 | **CLI** | 데스크톱 앱 실행이 필요 | Crate에 직접 연결한 독립 바이너리 |
 | **런타임 경계** | 데스크톱 래퍼와 브라우저 런타임 | 번들 브라우저 런타임 없는 네이티브 프로세스 |
 
@@ -93,12 +93,12 @@ OxideTerm는 연결, 파일, 포워딩, 호스트 도구, 자동화, AI 컨텍�
 
 | 범주 | 기능 |
 |---|---|
-| **터미널 및 연결** | 로컬 셸, SSH, Telnet, 시리얼, 분할 창, 자유 입력 모드, 멀티홉, 안정적인 재연결 |
+| **터미널 및 연결** | 로컬 셸, SSH, Telnet, 시리얼, 분할 창, 자유 입력 모드, 여러 대상에 대한 고급 명령 전송, 멀티홉, 안정적인 재연결 |
 | **파일 및 원격 편집** | SFTP, 전송 대기열, 즐겨찾기, 안전한 쓰기, 프로젝트 트리, 탭 편집 |
 | **포워딩 및 네트워크** | 로컬·원격·동적 SOCKS5 포워딩, 저장된 규칙, 소켓 디버깅 |
 | **호스트 운영 및 원격 데스크톱** | 모니터링, 프로세스, 서비스, 로그, 포트, 작업, 디스크, 패키지, 컨테이너, tmux, RDP, VNC |
-| **OxideSens 및 자동화** | 자체 AI 공급자, MCP, 로컬 RAG, 승인된 작업, 암호화 동기화, CLI |
-| **확장 및 개인화** | WASM 플러그인, 사용자 탭, 빠른 명령, 테마, 배경, 단축키, 11개 언어 |
+| **OxideSens 및 자동화** | 자체 AI 공급자, MCP, 로컬 RAG, Agent Skills, 공급자별 추론 제어, 승인된 작업, 암호화 동기화, CLI |
+| **확장 및 개인화** | manifest-only, WASM, 프로세스 플러그인, 사용자 탭, 빠른 명령, 테마, 배경, 단축키, 11개 언어 |
 
 ---
 
@@ -131,8 +131,8 @@ GPUI 렌더링 루프
 도메인 Crate
   NodeRouter → SshConnectionRegistry
   TerminalState ← SSH PTY channel
-  SftpSession / ForwardManager / IdeWorkspace
-  AiProvider / CloudSyncService / PluginHost
+  SftpSession / ForwardingRuntime / IdeWorkspace
+  Ai/ACP Entities / CloudSync / Plugin Runtimes
 ```
 
 UI와 SSH/터미널 백엔드 사이에는 직렬화 경계가 없습니다. 터미널 바이트는 `TerminalState`를 직접 변경하고 GPUI는 상태를 읽어 GPU 그리기 명령을 발행합니다.
@@ -159,10 +159,10 @@ Pipeline: `queued → snapshot → grace-period → ssh-connect → await-termin
 ### SSH 연결 풀 및 노드 라우팅
 
 
-- 하나의 물리 SSH connection이 터미널 패널, SFTP, 포트 포워딩, IDE work를 공유
+- 기본 모드에서는 하나의 물리 SSH connection이 터미널 패널, SFTP, 포트 포워딩, IDE work를 공유하며, 터미널은 필요할 때 전용 connection을 사용할 수 있음
 - 각 연결은 `connecting → active → idle → link_down → reconnecting` 상태를 이동
 - UI는 `nodeId`로 command를 보내고 `NodeRouter`가 active `connectionId`를 atomic하게 resolve
-- `NodeRuntimeStore`가 topology 스냅샷s를 `session_tree.json`에 persist
+- `NodeRuntimeStore`는 노드 런타임 상태와 topology 스냅샷을 보유하며, workspace helper가 이를 `session_tree.json`에 기록하고 시작 시 실제 handle을 다시 구성
 - 점프 호스트 장애는 하위 노드에 `link_down` 상태를 연쇄 전파
 
 ### OxideSens AI
@@ -197,7 +197,7 @@ UI는 GPUI로 직접 그려지며 DOM/CSS/JavaScript rendering pipeline이 없�
 
 원격 파일은 분리된 부가 기능이 아니라 같은 노드 작업 공간의 일부입니다.
 
-- SFTP sessions는 `NodeRouter`를 통해 resolve되어 재연결가 underlying SSH connection을 교체해도 UI의 node address는 유지됩니다
+- SFTP sessions는 `NodeRouter`와 connection generation으로 resolve됩니다. 재연결 시 유효한 session을 다시 얻을 수 있지만, 이전 generation의 작업을 새 connection으로 조용히 교체하지 않습니다
 - 전송 대기열은 보이는 파일 창과 독립적으로 방향, 진행률, 재시도 상태, 속도 제한을 추적합니다
 - IDE 탭은 수정된 버퍼, 원격 경로, 충돌 상태, 복원 메타데이터를 함께 보관합니다
 - Backend가 지원하면 remote writes는 staged/atomic behavior를 사용해 일반 edit flow에서 partial writes를 줄입니다
@@ -206,7 +206,7 @@ UI는 GPUI로 직접 그려지며 DOM/CSS/JavaScript rendering pipeline이 없�
 
 확장 기능과 지원 기능은 Rust가 소유하는 명확한 경계 안에서 동작합니다.
 
-- 플러그인은 브라우저 전역 객체 대신 타입화된 호스트 기능을 사용하며 wasmtime 샌드박스에서 실행됩니다
+- 플러그인은 manifest-only, WASM, 일반 프로세스 경로를 지원합니다. WASM은 Wasmtime/WASI 또는 제어된 호스트 호출을 가진 sidecar를 사용하며, 프로세스 플러그인은 운영 체제 샌드박스가 없는 로컬 프로세스입니다.
 - CLI는 도메인 crate에 직접 링크되어 doctor, settings, connections, 포워딩, 휴대용 번들, 백업, 보고서를 다룹니다
 - 진단은 비밀이 포함된 원시 페이로드보다 개수, 경로, 기능 플래그, 마스킹된 힌트를 우선합니다
 - 상태를 변경하는 CLI 흐름은 dry-run 계획, `--yes` 보호, 롤백 백업을 사용합니다
@@ -272,7 +272,7 @@ cargo run -p oxideterm-cli -- completion install zsh --force
 | 런타임 | Tokio + DashMap | 비동기 실행과 동시성 맵 |
 | SSH | russh (`ring`) | SSH 스택에 OpenSSL/libssh2 없음, SSH Agent 지원 |
 | 터미널 | portable-pty + alacritty_terminal | 로컬 PTY, 터미널 에뮬레이션, Sixel/Kitty 그래픽 |
-| 플러그인 | wasmtime | 네이티브 호스트 API를 갖춘 WASM 격리 |
+| 플러그인 | Wasmtime/WASI 및 프로세스 | manifest-only, 제어된 WASM 호스트 호출, 명시적 신뢰가 필요한 로컬 프로세스 |
 | AI 및 검색 | SSE + BM25 + HNSW | 제공자 스트리밍, CJK 바이그램, RRF 결합 |
 | 편집기 | tree-sitter(구문), 사용자 버퍼 | 다국어, SFTP 기반 |
 | 암호화 | ChaCha20-Poly1305 + Argon2id | AEAD + 메모리 하드 KDF(256 MB) |
@@ -289,7 +289,7 @@ cargo run -p oxideterm-cli -- completion install zsh --force
 | `.oxide` | ChaCha20-Poly1305 + Argon2id |
 | CLI writes | dry-run 계획, `--yes` 보호, 롤백 백업 |
 | 호스트 키 | `~/.ssh/known_hosts`를 사용하는 TOFU, 예기치 않은 변경 거부 |
-| Plugins | wasmtime 격리와 능력 기반 호스트 API |
+| Plugins | Wasmtime/WASI, sidecar WASM 및 프로세스 | 제어된 WASM 호스트 호출과 OS 샌드박스가 없는 신뢰 기반 로컬 프로세스 |
 
 ## 적법한 사용 안내
 

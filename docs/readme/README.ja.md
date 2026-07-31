@@ -93,12 +93,12 @@ OxideTerm は接続、ファイル、転送、ホストツール、自動化、A
 
 | カテゴリ | 機能 |
 |---|---|
-| **ターミナルと接続** | ローカルシェル、SSH、Telnet、シリアル、分割ペイン、自由入力モード、マルチホップ、安定した再接続 |
+| **ターミナルと接続** | ローカルシェル、SSH、Telnet、シリアル、分割ペイン、自由入力モード、複数ターゲットへの高度なコマンド送信、マルチホップ、安定した再接続 |
 | **ファイルとリモート編集** | SFTP、転送キュー、ブックマーク、安全な書き込み、プロジェクトツリー、タブ編集 |
 | **転送とネットワーク** | ローカル・リモート・動的 SOCKS5 転送、保存ルール、ソケットデバッグ |
 | **ホスト運用とリモートデスクトップ** | 監視、プロセス、サービス、ログ、ポート、タスク、ディスク、パッケージ、コンテナ、tmux、RDP、VNC |
-| **OxideSens と自動化** | 自分の AI プロバイダー、MCP、ローカル RAG、承認済み操作、暗号化同期、CLI |
-| **拡張とカスタマイズ** | WASM プラグイン、カスタムタブ、クイックコマンド、テーマ、背景、ショートカット、11 言語 |
+| **OxideSens と自動化** | 自分の AI プロバイダー、MCP、ローカル RAG、Agent Skills、プロバイダー対応の推論コントロール、承認済み操作、暗号化同期、CLI |
+| **拡張とカスタマイズ** | manifest-only、WASM、プロセス型プラグイン、カスタムタブ、クイックコマンド、テーマ、背景、ショートカット、11 言語 |
 
 ---
 
@@ -131,8 +131,8 @@ GPUI 描画ループ
 ドメイン Crate
   NodeRouter → SshConnectionRegistry
   TerminalState ← SSH PTY channel
-  SftpSession / ForwardManager / IdeWorkspace
-  AiProvider / CloudSyncService / PluginHost
+  SftpSession / ForwardingRuntime / IdeWorkspace
+  Ai/ACP Entities / CloudSync / Plugin Runtimes
 ```
 
 UI と SSH/ターミナルバックエンドの間にシリアライズ境界はありません。ターミナルのバイト列は `TerminalState` を直接変更し、GPUI が状態を読み取って GPU 描画命令を発行します。
@@ -159,9 +159,9 @@ Pipeline: `queued → snapshot → grace-period → ssh-connect → await-termin
 ### SSH 接続プールとノードルーティング
 
 
-- 1 つの物理 SSH connection がターミナルペイン、SFTP、ポート転送、IDE 作業を共有
+- デフォルトでは 1 つの物理 SSH connection をターミナル、SFTP、ポート転送、IDE が共有し、必要に応じてターミナルは専用 connection を使える
 - UI は `nodeId` でコマンドを出し、`NodeRouter` がアクティブな `connectionId` をアトミックに解決
-- `NodeRuntimeStore` がトポロジースナップショットを `session_tree.json` に永続化
+- `NodeRuntimeStore` はノードの実行時状態とトポロジースナップショットを保持し、workspace の helper が `session_tree.json` に書き出す。起動時には実行中の handle が再構築される
 - ジャンプホスト障害は下流ノードへ `link_down` を連鎖的に伝播
 
 ### OxideSens AI
@@ -196,7 +196,7 @@ UI は GPUI で直接描画され、DOM/CSS/JavaScript rendering pipeline はあ
 
 リモートファイルは分離された付属機能ではなく、同じノードワークスペースの一部です。
 
-- SFTP sessions は `NodeRouter` 経由で解決され、再接続が基盤の SSH 接続を差し替えても UI のノードアドレスは変わりません
+- SFTP sessions は `NodeRouter` と接続 generation で解決され、再接続では有効な session を再取得できますが、古い generation の操作を新しい接続へ暗黙に差し替えません
 - 転送キューは表示中のファイルペインから独立して方向、進捗、再試行状態、速度制限を追跡します
 - IDE タブは未保存バッファ、リモートパス、競合状態、復元メタデータをまとめて保持します
 - Backend が対応する場合、remote writes は staged/atomic behavior を使い、通常の edit flow に partial writes を出しにくくします
@@ -205,7 +205,7 @@ UI は GPUI で直接描画され、DOM/CSS/JavaScript rendering pipeline はあ
 
 拡張機能とサポート機能は、Rust が所有する明確な境界内で動作します。
 
-- Plugins はブラウザーのグローバルではなく型付きホスト機能を使い、wasmtime サンドボックスで実行されます
+- Plugins は manifest-only、WASM、通常のプロセスの実行経路をサポートします。WASM は Wasmtime/WASI または制御された host 呼び出しを持つ sidecar を使い、プロセス型は OS サンドボックスのないローカルプロセスです。
 - CLI はドメイン crate に直接リンクし、doctor、settings、connections、転送、ポータブルバンドル、バックアップ、レポートを扱います
 - 診断は秘密を含む生ペイロードではなく、件数、パス、機能フラグ、マスク済みヒントを優先します
 - 状態を変更する CLI 処理はドライラン計画、`--yes` 保護、ロールバック用バックアップを使います
@@ -271,7 +271,7 @@ cargo run -p oxideterm-cli -- completion install zsh --force
 | ランタイム | Tokio + DashMap | 非同期処理と並行マップ |
 | SSH | russh (`ring`) | SSH スタックは OpenSSL/libssh2 に非依存、SSH Agent 対応 |
 | ターミナル | portable-pty + alacritty_terminal | ローカル PTY、端末エミュレーション、Sixel/Kitty グラフィックス |
-| プラグイン | wasmtime | ネイティブホスト API を備えた WASM 分離 |
+| プラグイン | Wasmtime/WASI とプロセス | manifest-only、制御された WASM host 呼び出し、明示的な信頼が必要なローカルプロセス |
 | AI と検索 | SSE + BM25 + HNSW | プロバイダー配信、CJK バイグラム、RRF 統合 |
 | エディター | tree-sitter（構文）、独自バッファー | 多言語対応、SFTP 対応 |
 | 暗号化 | ChaCha20-Poly1305 + Argon2id | AEAD + メモリハード KDF（256 MB） |
@@ -288,7 +288,7 @@ cargo run -p oxideterm-cli -- completion install zsh --force
 | `.oxide` | ChaCha20-Poly1305 + Argon2id |
 | CLI 書き込み | ドライラン計画、`--yes` 保護、ロールバック用バックアップ |
 | ホスト鍵 | `~/.ssh/known_hosts` を使う TOFU、予期しない変更は拒否 |
-| プラグイン | wasmtime による分離と能力ベースのホスト API |
+| プラグイン | manifest-only、制御された WASM host API、または信頼が必要なローカルプロセス |
 
 ## 適法な利用に関する注意
 

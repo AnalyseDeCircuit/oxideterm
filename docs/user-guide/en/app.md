@@ -25,7 +25,7 @@ Primary areas:
 - Connection monitor and Host Tools: health, reconnect status, processes, Docker, services, tmux, packages, logs, ports, filesystems, and metrics.
 - Connection matrix: a broader connection overview.
 - File manager and SFTP: browse, preview, upload, download, and edit remote files.
-- Graphics/VNC: open visual remote sessions when a connected node supports them.
+- Graphics/VNC: open a saved RDP/VNC profile, or open node-launched graphics when a connected SSH node provides it.
 - Plugins: install, enable, disable, and configure plugins.
 - Cloud sync: sync app state and inspect sync status.
 - Notifications: review app events and warnings.
@@ -54,6 +54,12 @@ Terminal-adjacent helpers stay tied to the active terminal pane:
 - When an X/Y/ZMODEM prompt appears after a real transfer command such as `rz`, `sz`, `rx`, or `rb`, choose the local file or directory and watch progress from the visible prompt/notification.
 - Manage privilege credentials from Settings. Do not place sudo/su passwords in connection names, notes, quick commands, AI prompts, logs, or support bundles.
 
+### Advanced command sender
+
+Use the advanced command sender when the same input must be delivered to one or more terminal panes on a schedule. It supports text or hexadecimal input, line or character pacing, repeat counts, and current, all, or explicitly selected terminal targets.
+
+The sender freezes its target panes when a job starts. Changing tabs or opening panes does not widen a running job, and a closed target is skipped rather than replaced or reconnected. Hiding the sender panel does not cancel an active job; stop it explicitly when needed. Progress counts local terminal-input acceptance, not remote command completion.
+
 ## Saved Connections
 
 Use saved connections for hosts you connect to repeatedly. A saved connection can include:
@@ -72,7 +78,7 @@ From the Sessions area, select a saved connection and open it. The app creates r
 
 If a host disconnects, use the connection pool or monitor to understand whether the runtime is reconnecting, stale, or unavailable. Reconnect from the app state instead of recreating the saved profile.
 
-Host Tools and graphics/VNC sessions also belong to the connected node. Opening or closing those views should not rewrite the saved profile, and stale resource snapshots should be refreshed or reconnected from the node state.
+Host Tools belong to the connected node. A graphics/VNC session may instead belong to a saved RDP/VNC profile; node-launched graphics use the SSH node as their runtime owner. Opening or closing these views should not rewrite saved profiles, and stale state should be refreshed through the owning profile or node.
 
 ## SFTP and Remote Files
 
@@ -110,11 +116,13 @@ Use auto-start only for forwards that should start whenever the owning connectio
 
 Use Host Tools from the connected-node context when you need a read-oriented view of processes, containers, services, tmux, packages, logs, ports, filesystems, scheduled tasks, or host metrics. Actions that change host state should be reviewed in the app confirmation flow before execution.
 
-Use graphics/VNC sessions for remote visual workflows. The viewer is an app surface attached to the connected node; rendered frames are not terminal output, and closing the viewer is separate from deleting the saved connection.
+Use graphics/VNC sessions for remote visual workflows. A viewer is backed either by a saved RDP/VNC profile and its helper process or by a node-owned graphics runtime; rendered frames are not terminal output, and closing the viewer is separate from deleting saved connection data.
 
 ## AI Sidebar
 
 The AI sidebar is intended to work with the current app context. It can inspect targets, use terminal and file tools when tool use is enabled, and summarize or act on the current workspace state.
+
+When the selected provider and model expose reasoning controls, the chat surface shows a provider-aware **Thinking Effort** menu. Known models are normalized against capability data; an unknown model with a known provider uses that provider's request format, while an unknown provider is treated as unsupported. ACP sessions use their own session options rather than the native provider reasoning field.
 
 Good AI workflow:
 
@@ -125,6 +133,10 @@ Good AI workflow:
 5. Check tool results before accepting follow-up changes.
 
 Never paste secrets into AI prompts. Use the app's provider key and secret storage surfaces for API keys or credentials.
+
+### Agent Skills
+
+OxideSens can discover bounded `SKILL.md` workflows from the workspace, user data directories, and enabled native plugins. Open **Settings → OxideSens → Tools → Agent Skills** to review discovered skills, enable or disable them, and refresh the catalog. Loading a skill provides instructions only; it does not grant terminal, file, credential, or network permissions. Every resulting action still goes through the existing tool policy and approval mode. See the [Agent Skills reference](../../agent-skills.md) for discovery precedence and resource limits.
 
 ## Settings
 

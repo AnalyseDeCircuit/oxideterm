@@ -54,7 +54,7 @@ OxideTerm 是面向 SSH 与远程运维的开源工作区。终端、文件、�
 | 一个远程节点，多种工具 | 终端、SFTP、端口转发、RDP/VNC、trzsz、原生 IDE、监控和 OxideSens AI 都归属于同一工作区 |
 | 没有 Electron 或捆绑 WebView 的桌面应用 | GPUI 直接在 GPU 表面绘制界面，无需附带浏览器运行时 |
 | 本地优先的运维流程 | SSH、Telnet、SFTP、转发、RDP/VNC、本地 Shell、串口终端和配置无需注册即可使用 |
-| 自带密钥的 OxideSens AI，而非平台额度 | OxideSens 使用你的 OpenAI、Anthropic、Gemini、Ollama 或 OpenAI 兼容端点，并支持 MCP、RAG 和经批准的工作区操作 |
+| 自带密钥的 OxideSens AI，而非平台额度 | OxideSens 使用你的 OpenAI、Anthropic、Gemini、Ollama 或 OpenAI 兼容端点，并支持 MCP、本地 RAG、按服务商适配的推理控制和经批准的工作区操作 |
 | 重连稳定性 | Grace Period 会在替换连接前探测旧连接 30 秒，让 TUI 应用能穿越短暂的网络中断 |
 | 纯 Rust SSH 与凭证安全 | SSH 栈通过 `russh` + `ring` 提供，不依赖 OpenSSL/libssh2；已保存凭证使用系统钥匙串，`.oxide` 包使用 ChaCha20-Poly1305 + Argon2id |
 
@@ -87,7 +87,7 @@ OxideTerm 将连接、文件、转发、主机工具、自动化与 AI 上下文
 | **终端数据流** | WebSocket → JavaScript 事件循环 → xterm.js | Rust 输入 → `TerminalState` 变更 → GPUI 渲染 |
 | **连接生命周期** | 分散在前端与后端层 | 单一进程内连接与重连流水线 |
 | **AI 上下文** | 通过应用桥接复制 | 在用户批准下从活动工作区构建 |
-| **插件运行时** | 浏览器脚本环境 | 基于能力范围的 WASM 运行时 |
+| **插件运行时** | 浏览器脚本环境 | manifest-only、能力受限的 WASM 与需要信任判断的进程路径 |
 | **CLI** | 需要桌面应用正在运行 | 独立二进制，直接链接 crate |
 | **运行时边界** | 桌面外壳加浏览器运行时 | 不带捆绑浏览器运行时的原生进程 |
 
@@ -97,12 +97,12 @@ OxideTerm 将连接、文件、转发、主机工具、自动化与 AI 上下文
 
 | 类别 | 功能 |
 |---|---|
-| **终端与连接** | 本地 Shell、SSH、Telnet、串口、分屏、自由输入模式、多跳路由与稳定重连 |
+| **终端与连接** | 本地 Shell、SSH、Telnet、串口、分屏、自由输入模式、高级多目标命令发送、多跳路由与稳定重连 |
 | **文件与远程编辑** | SFTP、传输队列、收藏夹、安全写入、项目树与多标签编辑 |
 | **转发与网络** | 本地、远程与动态 SOCKS5 转发、已保存规则与 Socket 调试 |
 | **主机运维与远程桌面** | 监控、进程、服务、日志、端口、任务、磁盘、软件包、容器、tmux、RDP 与 VNC |
-| **OxideSens 与自动化** | 自有 AI 服务商、MCP、本地 RAG、已批准操作、加密云同步与 CLI |
-| **扩展与个性化** | WASM 插件、自定义标签页、快速命令、主题、背景图片、快捷键与 11 种界面语言 |
+| **OxideSens 与自动化** | 自有 AI 服务商、MCP、本地 RAG、Agent Skills、已批准操作、加密云同步与 CLI |
+| **扩展与个性化** | manifest-only、WASM 与进程插件、自定义标签页、快速命令、主题、背景图片、快捷键与 11 种界面语言 |
 
 ---
 
@@ -135,8 +135,8 @@ GPUI 渲染循环
 领域 Crate
   NodeRouter → SshConnectionRegistry
   TerminalState ← SSH PTY channel
-  SftpSession / ForwardManager / IdeWorkspace
-  AiProvider / CloudSyncService / PluginHost
+  SftpSession / ForwardingRuntime / IdeWorkspace
+  Ai/ACP Entities / CloudSync / Plugin Runtimes
 ```
 
 界面与 SSH/终端后端之间没有序列化边界。终端字节直接修改 `TerminalState`，GPUI 读取状态并发出 GPU 绘制命令。
@@ -156,17 +156,17 @@ GPUI 渲染循环
 1. 通过 SSH keepalive 检测连接超时，没有 JavaScript timer throttle
 2. 快照终端 pane、SFTP 传输、端口转发和 IDE 文件状态
 3. **Grace Period**：先探测旧连接 30 秒，网络切换时 TUI 应用有机会原地存活
-4. 旧连接无法恢复时，新 SSH 连接会恢复转发、续传并重新打开 IDE 文件
+4. 旧连接无法恢复时，新 SSH 连接会恢复转发，并按传输策略重试或续传，再重新打开 IDE 文件
 
-Pipeline: `queued → snapshot → grace-period → ssh-connect → await-terminal → restore-forwards → resume-transfers → restore-ide → verify → done`
+Pipeline: `queued → snapshot → grace-period → ssh-connect → await-terminal → restore-forwards → retry-or-resume-transfers → restore-ide → verify → done`
 
 ### SSH 连接池与节点路由
 
 
-- 一个物理 SSH 连接可被 terminal、SFTP、port forward 和 IDE 同时消费
+- 默认模式下，一个物理 SSH 连接可被 terminal、SFTP、port forward 和 IDE 共享；终端按策略也可以使用独占连接
 - 每条连接都有 `connecting → active → idle → link_down → reconnecting` 状态机
 - UI 只按 `nodeId` 操作，`NodeRouter` 原子解析到底层 `connectionId`
-- `NodeRuntimeStore` 将节点拓扑快照持久化到 `session_tree.json`
+- `NodeRuntimeStore` 保存进程内节点运行时状态并导出拓扑快照；由工作区 helper 将快照写入 `session_tree.json`，启动时重新构建运行中的句柄
 - 跳板机失效会级联标记下游节点为 `link_down`
 
 ### OxideSens AI
@@ -201,7 +201,7 @@ OxideSens 采用 BYOK 模式，并在进程内构建上下文：
 
 远程文件属于同一个 node 工作区，而不是割裂的附属功能：
 
-- SFTP session 通过 `NodeRouter` 解析，重连替换底层 SSH 连接时 UI 的 node address 不变
+- SFTP session 通过 `NodeRouter` 和连接代次解析；重连时可以重新获取有效 session，但旧代次操作不会被新连接静默替换
 - 传输队列独立跟踪方向、进度、重试状态和限速，不依赖当前可见文件 pane
 - IDE 标签页同时保存未保存缓冲区、远程路径、冲突状态和恢复元数据
 - 后端支持时，远程写入走 staged/atomic 行为，减少普通编辑流程里的半写入文件
@@ -210,7 +210,7 @@ OxideSens 采用 BYOK 模式，并在进程内构建上下文：
 
 原生分支把扩展和支持功能保持在 Rust 原生边界内：
 
-- 插件运行在 wasmtime 沙箱中，使用类型化宿主能力，而不是浏览器全局对象
+- 插件支持 manifest-only、WASM 和普通进程三种路径。WASM 使用 Wasmtime/WASI 或带受控宿主调用的 sidecar；进程插件是没有操作系统级沙箱的本地进程，需要单独判断信任边界。
 - CLI 直接链接领域 crate，覆盖 doctor、settings、connections、forwards、便携包、备份和报告
 - 诊断优先输出计数、路径、功能标志与脱敏提示，避免暴露带秘密的原始 payload
 - 会修改状态的 CLI 流程使用 dry-run 计划、`--yes` guards 和回滚备份
@@ -279,7 +279,7 @@ cargo run -p oxideterm-cli -- --config-dir ./fixture-config doctor --strict
 | 运行时 | Tokio + DashMap | 异步运行时与并发映射 |
 | SSH | russh（`ring`） | SSH 栈不依赖 OpenSSL/libssh2，支持 SSH Agent |
 | 终端 | portable-pty + alacritty_terminal | 本地伪终端、终端模拟与 Sixel/Kitty 图形 |
-| 插件 | wasmtime | WASM 隔离与原生宿主 API |
+| 插件 | Wasmtime/WASI 与进程路径 | manifest-only、受控 WASM 宿主调用，以及需要明确授权的本地进程 |
 | AI 与检索 | SSE + BM25 + HNSW | 提供商流式传输、CJK 双字词与 RRF 融合 |
 | 编辑器 | tree-sitter（语法）、自定义缓冲区 | 多语言，基于 SFTP |
 | 加密 | ChaCha20-Poly1305 + Argon2id | AEAD + 内存困难型 KDF（256 MB） |
@@ -296,7 +296,7 @@ cargo run -p oxideterm-cli -- --config-dir ./fixture-config doctor --strict
 | `.oxide` | ChaCha20-Poly1305 + Argon2id |
 | CLI 写操作 | dry-run 计划、`--yes` 保护和回滚备份 |
 | 主机密钥 | 使用 `~/.ssh/known_hosts` 的 TOFU，拒绝意外变更 |
-| 插件 | wasmtime 隔离与基于能力的宿主 API |
+| 插件 | manifest-only、受控 WASM 宿主 API 或需要明确授权的本地进程 |
 
 ## 合法使用提醒
 

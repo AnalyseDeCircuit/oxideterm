@@ -2,7 +2,11 @@
 
 ## Install Shape
 
-Native packages bundle the desktop app, icons, remote agent binaries, and the standalone `oxideterm` CLI companion. The desktop app is the main entry point.
+Native packages bundle the desktop app, icons, Linux musl remote file/code-agent
+binaries, and the standalone `oxideterm` CLI companion. The remote agent uses
+stdio JSON-RPC for structured file, search, Git, and symbol operations; it is
+not an SSH authentication agent and does not own terminal, SFTP, or forwarding
+connections. The desktop app is the main entry point.
 
 On macOS, packaged artifacts include a `.dmg`, an `.app.zip`, and a portable archive. Linux and Windows portable packages use platform-appropriate archive formats.
 
@@ -28,7 +32,7 @@ After the first local terminal and first SSH connection work, check the app surf
 - Connection monitor and Host Tools: connection health, stale nodes, reconnect state, host resources, and action results.
 - File manager or SFTP: remote directory browsing and transfers.
 - Terminal helpers: context menu actions, command bar actions, background image settings, and X/Y/ZMODEM transfer prompts.
-- Graphics/VNC: visual remote sessions when the connected node supports them.
+- Graphics/VNC: saved RDP/VNC profiles or node-launched visual sessions when the target supports them.
 - IDE workspace: remote project folders and editor tabs.
 - AI sidebar: current workspace context and tool approvals.
 - Plugins: installed plugins and plugin settings.

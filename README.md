@@ -41,6 +41,7 @@ OxideTerm is an open-source, local-first workspace for connecting to servers and
 - Manage SSH, Telnet, Serial, RDP/VNC, SFTP, port forwards, local shells, and lightweight editing in one native workspace
 - Keep remote work alive through network hiccups with Grace Period reconnect
 - Ask OxideSens AI to inspect live sessions and perform approved workspace actions through your own AI provider
+- Load bounded Agent Skills and use the advanced terminal command sender for scheduled, repeatable, multi-target input
 
 Your connections and operational data stay under your control. OxideTerm requires no account, uses your own AI provider when OxideSens is enabled, and keeps the desktop experience free of Electron and bundled browser runtimes.
 
@@ -53,7 +54,7 @@ Your connections and operational data stay under your control. OxideTerm require
 | One remote node, many tools | Terminal, SFTP, port forwarding, RDP/VNC, trzsz, native IDE, monitoring, and OxideSens AI stay attached to the same workspace |
 | A desktop app without Electron or a bundled WebView | GPUI draws the interface directly on a GPU surface, without shipping a browser runtime |
 | Local-first operations workflows | SSH, Telnet, SFTP, forwarding, RDP/VNC, local shell, serial terminals, and config work without signup |
-| BYOK OxideSens AI instead of platform credits | OxideSens uses your OpenAI/Anthropic/Gemini/Ollama/OpenAI-compatible endpoint with MCP, RAG, and approved workspace actions |
+| BYOK OxideSens AI instead of platform credits | OxideSens uses your OpenAI/Anthropic/Gemini/Ollama/OpenAI-compatible endpoint with MCP, RAG, provider-aware reasoning controls, and approved workspace actions |
 | Reconnect stability | Grace Period probes the old connection for 30s before replacing it, so TUI apps can survive short network drops |
 | Pure-Rust SSH and credential safety | The SSH stack uses `russh` + `ring` without OpenSSL/libssh2; stored credentials use the OS keychain, and `.oxide` bundles use ChaCha20-Poly1305 + Argon2id |
 
@@ -86,7 +87,7 @@ OxideTerm keeps terminal rendering, connection state, reconnect orchestration, f
 | **Terminal data flow** | WebSocket → JS event loop → xterm.js | Rust input → `TerminalState` mutation → GPUI render |
 | **Connection lifecycle** | Split across frontend and backend layers | One in-process connection and reconnect pipeline |
 | **AI context** | Copied through an application bridge | Built from the active workspace with user approval |
-| **Plugin runtime** | Browser scripting environment | Capability-scoped WASM runtime |
+| **Plugin runtime** | Browser scripting environment | Manifest-only, capability-scoped WASM, and trusted process runtimes |
 | **CLI** | Requires the desktop app running | Standalone binary, direct crate linkage |
 | **Runtime boundary** | Desktop wrapper plus browser runtime | Native process with no bundled browser runtime |
 
@@ -96,12 +97,12 @@ OxideTerm keeps terminal rendering, connection state, reconnect orchestration, f
 
 | Category | Features |
 |---|---|
-| **Terminal & Connections** | Local shells, SSH, Telnet, serial, split panes, Free Type Mode, shell integration, command marks, recording, trzsz transfers, terminal graphics, multi-hop routes, host-key verification, Agent forwarding, 2FA, and Grace Period reconnect |
+| **Terminal & Connections** | Local shells, SSH, Telnet, serial, split panes, Free Type Mode, shell integration, command marks, recording, trzsz transfers, terminal graphics, advanced multi-target command sending, multi-hop routes, host-key verification, Agent forwarding, 2FA, and Grace Period reconnect |
 | **Files & Remote Editing** | SFTP browsing, transfer queues, speed limits, progress and ETA, bookmarks, safe writes, local file management, remote project trees, multi-tab editing, conflict handling, and workspace restore |
 | **Forwarding & Networking** | Local, remote, and dynamic SOCKS5 forwarding, saved rules, reconnect-aware restore, remote port detection, connection topology, and ad-hoc socket debugging |
 | **Host Operations & Remote Desktop** | Host monitoring, processes, services, logs, ports, tasks, disks, packages, containers, tmux, built-in RDP and VNC, clipboard, input, reconnect, and viewport-aware sizing |
-| **OxideSens & Automation** | BYOK providers, MCP, local RAG, approved workspace actions, command policy, chat history, encrypted cloud sync, portable `.oxide` bundles, and a standalone CLI for automation and diagnostics |
-| **Extensions & Personalization** | Capability-scoped WASM plugins, custom tabs and settings, Quick Commands, themes, background images, configurable shortcuts, and 11 interface languages |
+| **OxideSens & Automation** | BYOK providers, MCP, local RAG, Agent Skills, approved workspace actions, command policy, chat history, encrypted cloud sync, portable `.oxide` bundles, and a standalone CLI for automation and diagnostics |
+| **Extensions & Personalization** | Manifest-only, capability-scoped WASM, and process plugins, custom tabs and settings, Quick Commands, themes, background images, configurable shortcuts, and 11 interface languages |
 
 ---
 
@@ -139,8 +140,8 @@ GPUI and the terminal/SSH backend share one Rust process; optional remote agents
 │             Domain Crates (Rust async)           │
 │  NodeRouter → SshConnectionRegistry             │
 │  TerminalState ← SSH PTY channel (russh)        │
-│  SftpSession · ForwardManager · IdeWorkspace    │
-│  AiProvider · CloudSyncService · PluginHost     │
+│  SftpSession · ForwardingRuntime · IdeWorkspace │
+│  Ai/ACP Entities · CloudSync · Plugin Runtimes  │
 └─────────────────────────────────────────────────┘
 ```
 
@@ -170,13 +171,16 @@ Pipeline: `queued → snapshot → grace-period → ssh-connect → await-termin
 
 ### 🛡️ SSH Connection Pool
 
-`SshConnectionRegistry` is backed by `DashMap` and shared by workspace consumers:
+`SshConnectionRegistry` is backed by `DashMap`; the workspace uses it through `NodeRouter` and runtime entities:
 
-- **One connection, many consumers**: terminal panes, SFTP, port forwards, and IDE share one physical SSH connection
+- **Default shared connection**: terminal panes, SFTP, port forwards, and IDE can share one physical SSH connection
+- **Optional dedicated terminal**: a terminal policy can create its own registry key and physical connection without changing the shared node connection
 - **State machine per connection**: `connecting → active → idle → link_down → reconnecting`
 - **Node-first addressing**: everything is resolved by `nodeId` → `connectionId` by `NodeRouter`
-- **NodeRuntimeStore**: serializable snapshot of all nodes, persisted to `session_tree.json` on every topology change, restored on startup
+- **NodeRuntimeStore**: in-process node runtime and serializable topology snapshot; `WorkspaceApp` helpers persist the snapshot to `session_tree.json`, while live handles are rebuilt on startup
 - **Cascade propagation**: jump host failure → downstream nodes automatically marked `link_down`
+
+`ConnectionRegistry` owns physical connections, health state, consumers, and idle cleanup. `WorkspaceRuntimeEntity` schedules probes and reconnect jobs. AI and plugins use capability handles, host snapshots, or terminal hooks rather than registering as physical connection consumers.
 
 ### 🤖 OxideSens AI
 
@@ -211,7 +215,7 @@ Terminal rendering is modeled as Rust state first, then drawn by GPUI:
 
 Remote files are part of the same node workspace rather than a separate disconnected feature:
 
-- SFTP sessions are resolved through `NodeRouter`, so reconnect can swap the underlying SSH connection without changing the UI's node address
+- SFTP sessions are resolved through `NodeRouter` and carry a connection generation; reconnect reacquires an eligible session, but an old-generation operation is never silently replaced by a new connection
 - Transfer queues track direction, progress, retry state, and speed limits independently from the visible file panes
 - IDE tabs keep dirty buffers, remote paths, conflict state, and restore metadata together
 - Remote writes use staged/atomic behavior where the backend supports it, keeping partial writes out of normal edit flows
@@ -220,8 +224,8 @@ Remote files are part of the same node workspace rather than a separate disconne
 
 Extension and support surfaces stay inside explicit Rust-owned boundaries:
 
-- Plugins run in a wasmtime sandbox with typed host capabilities instead of browser globals
-- The CLI links directly to domain crates for doctor, settings, connections, forwards, portable bundles, backups, and reports
+- Plugins support manifest-only, WASM, and ordinary process paths. WASM uses Wasmtime/WASI or a sidecar with controlled host calls; process plugins are local processes without an OS sandbox. Legacy Tauri ESM plugins may be shown but are not executed by Native.
+- The CLI links directly to domain crates for settings, connections, forwards, plugins, quick commands, secrets, portable bundles, diagnostics, reports, batch plans, backups, and cloud sync
 - Diagnostics prefer counts, paths, feature flags, and redacted hints over raw secret-bearing payloads
 - Mutating CLI flows use dry-run plans, `--yes` guards, and rollback backups where applicable
 
@@ -309,7 +313,7 @@ cargo run -p oxideterm-cli -- --config-dir ./fixture-config doctor --strict
 | **Terminal emulation** | alacritty_terminal | VT100–VT500, Sixel, Kitty graphics |
 | **Editor** | tree-sitter (syntax), custom buffer | Multi-language, SFTP-backed |
 | **Encryption** | ChaCha20-Poly1305 + Argon2id | AEAD + memory-hard KDF (256 MB) |
-| **Plugin sandbox** | wasmtime | WASM isolation with native host API |
+| **Plugin runtime** | Wasmtime/WASI, sidecar WASM, and process paths | Controlled WASM host calls; process plugins are local and not OS-sandboxed |
 | **AI streaming** | SSE (OpenAI/Anthropic/Gemini) | In-process, no IPC boundary |
 | **RAG** | BM25 + HNSW vector index | CJK bigram tokenizer, RRF fusion |
 | **i18n** | oxideterm-i18n (custom) | Built-in loader, 11 shipped locales |
@@ -327,7 +331,7 @@ cargo run -p oxideterm-cli -- --config-dir ./fixture-config doctor --strict
 | **`.oxide` export** | ChaCha20-Poly1305 + Argon2id (256 MB memory, 4 iterations) |
 | **CLI writes** | Dry-run plans, `--yes` guards, rollback backups for state-changing commands |
 | **Host keys** | TOFU with `~/.ssh/known_hosts`, rejects unexpected changes |
-| **Plugin sandbox** | WASM isolation via wasmtime, capability-based host API |
+| **Plugin boundary** | Manifest-only, controlled WASM host API, or trusted local process |
 
 ---
 

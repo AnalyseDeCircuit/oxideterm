@@ -1,9 +1,9 @@
 # OxideTerm Native Architecture
 
-> **Version**: Native user-guide architecture draft
-> **Last updated**: 2026-06-19
-> **Workspace version**: Cargo workspace `2.0.0-gpui-preview.11`
-> **Reference style**: based on the Tauri architecture documents, rewritten for the Rust/GPUI native app.
+> **Version**: Native desktop architecture
+> **Last updated**: 2026-07-31
+> **Workspace version**: Cargo workspace `2.0.15`
+> **Reference style**: based on the Tauri architecture documents and retained for migration context; the Rust/GPUI native app is the implementation source of truth.
 
 This document describes the OxideTerm Native system architecture, design decisions, and core components. It follows the same architectural writing style as the Tauri reference: start with principles, show the whole system, separate data and control paths, then describe each subsystem and its lifecycle.
 
@@ -47,7 +47,7 @@ This document describes the OxideTerm Native system architecture, design decisio
 1. **Desktop app first** - The GPUI desktop app is the primary user surface. The CLI is a companion for automation and diagnostics.
 2. **Terminal responsiveness** - Terminal input, output, resize, and rendering are latency-sensitive hot-path work.
 3. **Node-first remote workspace** - Remote workflows are anchored by a stable SSH node, not by a transient terminal pane.
-4. **One connection, many consumers** - Terminal, SFTP, forwarding, IDE, AI tools, and plugins can consume the same remote node.
+4. **Default shared connection** - Terminal, SFTP, forwarding, and IDE can share a node's registry connection; AI and plugins use validated capability handles, snapshots, or hooks rather than becoming physical connection consumers.
 5. **Explicit lifecycle ownership** - Saved profiles, live nodes, terminal sessions, SFTP sessions, forwards, editor buffers, and tabs have different owners.
 6. **Local-first state** - SSH, SFTP, local terminal, settings, plugins, and AI provider configuration work without an OxideTerm cloud account.
 7. **Secret separation** - Navigation metadata, settings, AI prompts, logs, support bundles, and plugin labels are not secret storage.
@@ -58,7 +58,7 @@ This document describes the OxideTerm Native system architecture, design decisio
 | Concern | Native Rust/GPUI Direction |
 |---|---|
 | User experience | One desktop workspace for terminal, files, forwarding, IDE, AI, settings, and plugins |
-| Backend ownership | Long-lived runtime state is held by Rust domain crates instead of ad hoc UI state |
+| Backend ownership | Core rules and models live in Rust domain crates; `oxideterm-gpui-app` owns coordinating Entities, subscriptions, and final runtime shutdown instead of treating them as ad hoc view state |
 | Terminal path | Terminal input/output stays isolated from heavy management work |
 | Safety | SSH, SFTP, forwarding, persistence, secrets, and AI boundaries are explicit Rust domains |
 | Portability | Desktop package can include app resources, agent binaries, icons, and CLI companion |
@@ -94,7 +94,7 @@ flowchart TB
         ForwardRuntime["Forwarding Manager"]
         IdeRuntime["IDE FS / Editor State"]
         HostToolsRuntime["Host Tools Samplers"]
-        GraphicsRuntime["WSL Graphics · VNC Worker"]
+        GraphicsRuntime["WSL Graphics · Remote Desktop Helpers · VNC Worker"]
         ModemRuntime["Modem Transfer Engine"]
         AiRuntime["AI Context · Tools · RAG · MCP"]
         PluginRuntime["Plugin Registry · Host API · Settings"]
@@ -172,7 +172,7 @@ flowchart LR
         SshHost["SSH Hosts"]
         SftpHost["SFTP Subsystems"]
         RemotePorts["Forward Targets"]
-        Agent["Optional Remote Agent"]
+        Agent["Optional Remote File/Code Agent<br/>Linux musl targets"]
     end
 
     subgraph External["External Services"]
@@ -200,7 +200,7 @@ flowchart LR
 
 ### User-Facing Summary
 
-The app is a workspace shell around stable remote nodes. Tabs and panes are views. Saved connections are profiles. SSH nodes are live or reconnecting runtime objects. Terminal sessions, SFTP sessions, IDE workspaces, forwards, AI targets, and plugin capabilities consume those nodes.
+The app is a workspace shell around stable remote nodes. Tabs and panes are views. Saved connections are profiles. SSH nodes are live or reconnecting runtime objects. Terminal sessions, SFTP sessions, IDE workspaces, and forwards consume node capabilities directly; AI targets and plugin surfaces use validated capability handles, host snapshots, or terminal hooks.
 
 That separation explains common behavior:
 
@@ -317,14 +317,16 @@ flowchart TB
 
 ### Layer 1: GPUI Application Shell
 
-Owned mainly by `oxideterm-gpui-app`.
+Owned mainly by `oxideterm-gpui-app`, which is both the GPUI surface layer and
+the coordinator for long-lived application entities.
 
 Responsibilities:
 
 - Create the desktop window.
 - Render the activity bar, tabs, pane tree, dialogs, and settings surfaces.
 - Route user actions to domain crates.
-- Keep UI state separate from durable domain state.
+- Keep UI state separate from durable domain state while holding runtime entity
+  handles, subscriptions, task delivery, and final shutdown ownership.
 - Provide app-level notifications and command palette actions.
 
 Representative modules:
@@ -427,7 +429,10 @@ Runtime integrations bridge UI requests to active resources:
 - Cloud sync backend.
 - AI provider requests.
 
-The important rule is ownership: a runtime object should have one clear owner, and UI views should consume it through explicit handles or snapshots.
+The important rule is ownership: a runtime object should have one clear owner.
+The app layer may own the coordinating Entity and its lifecycle while reusable
+rules remain in domain crates; UI views consume runtime state through explicit
+handles, subscriptions, or snapshots.
 
 ### Layer 4: Persistence And Secret Storage
 
@@ -443,18 +448,19 @@ The Tauri Oxide-Next architecture identified a structural problem: SFTP, IDE, an
 
 Native keeps the same user-facing model.
 
-### Target Topology
+### Current Topology
 
 ```text
 saved connection
   -> node identity
-       -> SSH connection handle
+       -> node runtime (`NodeRuntimeStore` + `NodeRouter`)
+            -> shared or dedicated SSH connection handle
        -> terminal session(s)
        -> SFTP session
        -> forward rules
        -> IDE workspace
-       -> AI targets
-       -> plugin consumers
+       -> AI capability handles
+       -> plugin host snapshots and hooks
 ```
 
 ```mermaid
@@ -466,8 +472,8 @@ flowchart TB
     NodeRuntime --> Sftp["SFTP Sessions<br/>file browser · transfers · preview"]
     NodeRuntime --> Ide["IDE Workspace<br/>tree · editor buffers · save path"]
     NodeRuntime --> Forward["Forward Rules<br/>local · remote · dynamic"]
-    NodeRuntime --> AiTarget["AI Targets<br/>commands · files · observations"]
-    NodeRuntime --> PluginConsumers["Plugin Consumers<br/>snapshots · host API calls"]
+    NodeRuntime --> AiTarget["AI Capability Handles<br/>commands · files · observations"]
+    NodeRuntime --> PluginConsumers["Plugin Host Snapshots<br/>host API calls · terminal hooks"]
 
     Shell --> TerminalTabs["Visible Terminal Tabs"]
     Sftp --> SftpTabs["SFTP / File Manager Tabs"]
@@ -492,6 +498,18 @@ flowchart TB
 ### User Rule
 
 When something remote fails, check the node first. Do not assume the focused tab is the owner of the whole runtime.
+
+### Jump-Host Ownership
+
+Jump-host routing has two related ownership layers:
+
+- `NodeRuntimeStore` records the logical parent/child node tree.
+- `ConnectionRegistry` records the physical parent connection relationship and
+  retains a parent consumer while a child connection depends on it.
+- A child connection must not infer its parent from a matching hostname; it uses
+  the exact node and connection identities.
+- Explicit disconnect releases the child subtree before releasing the parent
+  connection, so a child terminal cannot silently tear down a still-used hop.
 
 ---
 
@@ -602,38 +620,43 @@ Closing a terminal pane closes that pane. It should not be interpreted as deleti
 
 ---
 
-## SSH Connection Pool
+## SSH Connection Registry And Runtime
 
 The SSH connection pool keeps remote runtime state separate from UI tabs.
 
 ### Responsibilities
 
 - Track active, idle, stale, reconnecting, and failed connections.
-- Share one connection across multiple consumers where possible.
-- Expose monitor snapshots.
-- Support reconnect orchestration.
-- Keep SFTP, forwarding, IDE, terminal, AI, and plugin consumers from each creating unrelated transport state.
+- Share one connection across multiple consumers where possible, or create a dedicated terminal connection when configured.
+- Own physical connection state, registry consumers, health probes, and idle reclamation.
+- Expose connection snapshots to the workspace runtime and monitor surfaces.
+- Keep reconnect scheduling in `WorkspaceRuntimeEntity`, not in the monitor surface.
 
 ### Consumer Model
 
 ```text
-SSH connection
+Shared SSH connection
   |-- terminal consumer
   |-- SFTP consumer
   |-- forwarding consumer
   |-- IDE consumer
-  |-- AI tool consumer
-  `-- plugin consumer
+  `-- NodeRouter consumer
+
+Dedicated terminal connection
+  `-- terminal consumer with its own registry key and physical transport
+
+AI and plugins use capability handles, host snapshots, or terminal hooks. They
+are not `ConnectionConsumer` variants and are not physical connection owners.
 ```
 
 ### Monitor Model
 
-Connection Monitor should answer:
+Connection Monitor reads registry and workspace-runtime state to answer:
 
 - Which nodes are active?
 - Which are reconnecting?
 - Which have failed?
-- Which consumers are attached?
+- Which registry consumers are attached?
 - Which forwards or transfers need attention?
 
 ### Host Tools Model
@@ -658,7 +681,11 @@ Architecture rules:
 - `oxideterm-connection-monitor` owns sampler commands, parser logic, row signatures, filters, action command construction, and domain DTOs.
 - `oxideterm-gpui-app` renders the monitor, confirms user actions, and dispatches commands through the owning node/runtime boundary.
 - Resource snapshots are runtime observations. They can refresh, become stale, or fail without mutating saved connection profiles.
-- Heavy or repeated sampling must not block terminal input or become the source of truth for SSH connection ownership.
+- `ConnectionRegistry` owns physical SSH state, health probes, consumer bookkeeping, and idle cleanup.
+- `WorkspaceRuntimeEntity` schedules active probes, handles node events, and starts or cancels reconnect jobs.
+- `ForwardingRuntimeService` owns forwarding listeners and bridge tasks.
+- The monitor surface owns neither SSH transport nor reconnect lifecycle.
+- Heavy or repeated host sampling must not block terminal input or become the source of truth for SSH connection ownership.
 
 ---
 
@@ -750,7 +777,7 @@ Graphics sessions are visual runtime surfaces. They are separate from terminal b
 The detailed RDP/VNC/X11 ownership boundary is tracked in [Remote Desktop Boundary](../../design/remote-desktop-boundary.md). Native currently treats visual remoting as three related but separate paths:
 
 - **WSL Graphics**: `oxideterm-wsl-graphics` owns WSL distro probing, VNC server startup, desktop/app child processes, and cleanup.
-- **Remote Desktop**: future RDP/VNC connection types should use a protocol-neutral remote desktop domain and out-of-process helpers.
+- **Remote Desktop**: `oxideterm-remote-desktop` and `oxideterm-gpui-remote-desktop` own the shared model, viewer state, and provider registry; `oxideterm-rdp-helper` and `oxideterm-vnc-helper` own protocol engines behind stdio. RDP reports explicit unsupported errors for integrations outside the current compatibility scope, while VNC uses the direct TCP/RFB path.
 - **SSH X11 forwarding**: `oxideterm-x11-forwarding` owns DISPLAY, xauth, fake-cookie, setup rewrite, and SSH X11 channel bridge semantics; it is not a full desktop viewer.
 
 ### Responsibilities
@@ -765,7 +792,7 @@ The detailed RDP/VNC/X11 ownership boundary is tracked in [Remote Desktop Bounda
 
 The graphics runtime owns the server/session process lifecycle. The GPUI viewer owns the client connection, current framebuffer, pointer geometry, and input dispatch. Closing the viewer should stop or detach the graphics session according to the chosen action, but it should not rewrite saved SSH connection profiles.
 
-For future RDP/VNC sessions, the app should own helper lifecycle at the tab/session level while `oxideterm-connections` owns saved profile metadata and secret references. RDP/VNC protocol code should live in helper binaries or protocol-specific crates, not in `oxideterm-gpui-app`.
+For RDP/VNC sessions, `oxideterm-connections` owns saved profile metadata and secret references, while the app tab/session owns the helper process lifecycle and the GPUI viewer owns framebuffer and input state. RDP/VNC protocol code lives in helper binaries or protocol-specific crates, not in `oxideterm-gpui-app`; an SSH node supplies tunnel or node context only when the session is launched through that node.
 
 ---
 
@@ -783,8 +810,6 @@ A recovery attempt may need:
 - SFTP transfers.
 - Forward rules.
 - IDE workspaces.
-- AI targets.
-- Plugin consumers.
 - Notifications and errors.
 
 ### Conceptual Pipeline
@@ -798,6 +823,10 @@ detect stale state
   -> resume or retry transfers
   -> reopen or refresh IDE state
   -> update monitor and notifications
+
+AI and plugin capability handles are not direct reconnect stages. They observe
+node or connection generation changes through their runtime boundary and must
+invalidate, refresh, or reacquire resources on a later call.
 ```
 
 ### User Workflow
@@ -841,7 +870,13 @@ Privilege credential entries are split: labels, prompt matchers, enabled state, 
 
 ### CLI Relationship
 
-The CLI companion can inspect and mutate settings for scripted workflows. For exploratory or visual configuration, use the desktop Settings surface.
+The CLI companion is the script and maintenance entry point for the shared
+persistent model. It covers settings, connections, forwards, plugins, quick
+commands, secrets, portable bundles, diagnostics, reports, batch plans,
+backups, and cloud sync. Except for temporary GUI SSH launch, it does not own
+live nodes or terminal runtime inside the desktop process. Mutating commands
+normally use dry-run plans and `--yes` confirmation. For exploratory or visual
+configuration, use the desktop Settings surface.
 
 ---
 
@@ -851,7 +886,14 @@ Cloud sync, backups, and `.oxide` bundles operate on persisted state, not on liv
 
 ### Cloud Sync
 
-Cloud sync aligns selected local state with a configured remote backend. It should be inspectable before direction-changing actions such as push, pull, apply, or conflict resolution.
+Cloud sync aligns selected local state with a configured remote backend. The
+current model supports WebDAV, HTTP JSON, Dropbox, OneDrive, Google Drive,
+GitHub Gist, S3, and Git backends, with selectable sync partitions. Automatic
+upload, conflict blocking, sync history, and up to five local rollback backups
+are local state-machine behavior. UI and CLI use the same structured sync
+model; live nodes and terminal buffers are not sync objects. It should be
+inspectable before direction-changing actions such as push, pull, apply, or
+conflict resolution.
 
 ### Backups
 
@@ -877,6 +919,18 @@ Every import, restore, or sync apply should be previewable. Support bundles shou
 ## OxideSens AI Architecture
 
 OxideSens is a workspace-aware assistant. It uses configured providers and local app context; it does not require an OxideTerm account.
+
+Agent Skills are a bounded instruction layer for repeatable workflows. The AI runtime discovers `SKILL.md` catalogs, loads full instructions and resources only on demand, and records the loaded skill hash in conversation metadata. Loading a skill does not grant runtime authority; terminal, file, credential, network, and other actions still require the existing capability and approval checks.
+
+The chat surface also resolves a provider-aware reasoning level for the selected model. Known models are normalized against capability data; an unknown model with a known provider uses that provider's request format, while an unknown provider is treated as unsupported.
+
+OxideSens has two execution backends. The native provider backend streams the
+configured model protocol directly; the ACP backend uses an independent agent
+process, ACP session, model selection, and session configuration. They share
+the application context, policy, and UI, but their transport, tool injection,
+reasoning configuration, and lifecycle are different. ACP does not use the
+native provider's `reasoning_effort` field; its options belong to the ACP
+session configuration.
 
 ### Context Sources
 
@@ -1071,7 +1125,7 @@ flowchart TB
 
 | Module | Responsibility | User-Visible Result |
 |---|---|---|
-| `workspace.rs` and `workspace/root/*` | Own the top-level workspace state, window composition, initialization, and root rendering | The app opens into one coherent desktop workspace instead of separate tools |
+| `workspace.rs` and `workspace/root/*` | Compose the top-level workspace and construct app services; long-lived node/reconnect ownership lives in `workspace/runtime_entity.rs` and domain crates | The app opens into one coherent desktop workspace without making the root view the owner of every transport |
 | `workspace/tabs/*` | Create, select, render, and reconnect tab-bound views | Terminal, SFTP, IDE, and utility pages can be opened, closed, and restored independently |
 | `workspace/pane_tree.rs` | Hold split-pane layout state | Users can arrange work without changing the underlying node or session ownership |
 | `workspace/sidebar/*` | Render activity navigation, saved sessions, AI sidebar, and sidebar state | Navigation stays stable while the active work surface changes |
@@ -1081,14 +1135,18 @@ flowchart TB
 | `workspace/sftp/*` | Render remote file browsing, dialogs, previews, conflicts, and transfer actions | SFTP is a node-level file manager, not a terminal add-on |
 | `workspace/file_manager/*` | Render local file browsing, bookmarks, preview dialogs, and external open actions | Local file workflows use the same desktop patterns as remote files |
 | `workspace/graphics.rs` and `workspace/graphics_vnc.rs` | Render graphics sessions, connect the VNC viewer, and route pointer/keyboard input | Visual remote workflows are separate app surfaces, not terminal scrollback |
+| `workspace/remote_desktop/*` | Resolve remote desktop targets, open viewer tabs, and bridge provider/helper lifecycle into the workspace | RDP/VNC sessions use the same tab shell while keeping protocol work outside the app crate |
+| `workspace/runtime_entity.rs` | Own long-lived node subscriptions, reconnect workers, runtime shutdown, and terminal-consumer bookkeeping | Closing a terminal consumer does not accidentally close a shared node or transport |
 | `workspace/ide.rs` and IDE crates | Open folders, route file operations, and manage editor state | Remote editing is presented as a workspace, not as raw SFTP operations |
 | `workspace/forwards/*` | Render forwarding forms, rules, state, and actions | Port forwarding is visible and recoverable from the desktop app |
 | `workspace/settings/*` | Render settings pages for terminal, appearance, AI, SFTP, IDE, privilege credentials, portable runtime, updates, and keybindings | Configuration is app-first and persists through the shared settings model |
 | `workspace/cloud_sync/*` | Render sync status, confirmations, and backup actions | Cloud sync and backup operations are explicit and reversible where possible |
-| `workspace/plugin_manager.rs`, `plugin_runtime.rs`, `plugin_lifecycle/*`, `plugin_settings_store.rs` | Manage plugin discovery, lifecycle, host API snapshots, settings, secrets, and UI host calls | Plugins can extend app surfaces without owning core runtime state |
-| `workspace/sidebar/ai/*` | Render AI conversations, model selection, streaming, context, tool events, and transcript state | OxideSens appears as an integrated workspace assistant with explicit tool boundaries |
+| `workspace/plugin_entity.rs`, `plugin_manager.rs`, `plugin_lifecycle/*`, `plugin_ui.rs` | Coordinate plugin discovery, lifecycle, host API snapshots, settings, secrets, and UI host calls | Plugins can extend app surfaces without owning core runtime state |
+| `workspace/sidebar/ai/*` | Render AI conversations, model selection, streaming, context, Agent Skills, tool events, and transcript state | OxideSens appears as an integrated workspace assistant with explicit tool boundaries |
+| `workspace/acp_workspace.rs` and `oxideterm-acp-*` integration | Coordinate ACP agent configuration, sessions, model options, and ACP host-tool bridging beside the native provider path | ACP sessions have an independent agent/session lifecycle and are not ordinary provider streams |
 | `workspace/terminal_context_actions.rs` | Build terminal context-menu actions for selection, search, transfers, and command routing | Terminal actions share app menu style while still dispatching through explicit session APIs |
-| `workspace/quick_commands*` and `terminal_command_bar/*` | Store quick commands and command-line completion providers | Repeated terminal actions become reusable desktop controls |
+| `workspace/quick_commands*` and `terminal_command_bar/*` | Store quick commands, command-line completion providers, and sender controls | Repeated terminal actions become reusable desktop controls |
+| `workspace/terminal_command_sender.rs` and `terminal_command_bar/sender.rs` | `TerminalCommandSenderEntity` owns scheduled, repeatable, multi-target terminal input, target snapshots, cancellation, and progress | Jobs do not depend on root-view polling or create SSH connections; the Entity remains coordinated by `WorkspaceApp` and uses existing terminal targets |
 | `workspace/local_terminal_background.rs` and `workspace/root/background.rs` | Resolve app and terminal background image rendering | Background images are visual settings, not terminal buffer content |
 | `workspace/notification_center.rs` | Collect and render actionable app notifications | Background failures and recovery actions are visible without blocking terminal input |
 | `workspace/onboarding/*` | Render first-run setup and setup state | Users can configure the main app without starting from CLI documentation |
@@ -1100,7 +1158,7 @@ flowchart TB
 | `oxideterm-ssh/src/config.rs` | Define SSH connection configuration and validation-facing types | Saved metadata is kept separate from live transport handles |
 | `connection_registry.rs` | Track reusable SSH connections and pool identity | Multiple consumers can share a node without each owning a socket |
 | `router.rs` and `router/node_router.rs` | Route work to nodes and enforce node identity | User actions target nodes, not incidental terminal tabs |
-| `router/runtime_store.rs` | Store live node state used by consumers and monitors | Runtime state is queryable without becoming durable profile data |
+| `router/runtime_store.rs` | Store in-process node state and export topology snapshots | `WorkspaceApp` helpers persist snapshots; runtime handles, terminal endpoints, and live identities are rebuilt rather than serialized |
 | `router/events.rs` | Publish node and connection events | UI and tools receive state changes without polling every domain directly |
 | `reconnect.rs` | Describe reconnect policy and retry behavior | Disconnects become recoverable lifecycle events where possible |
 | `monitor.rs` | Convert lower-level state into monitor-facing health | Connection Monitor can show health without exposing transport internals |
@@ -1144,6 +1202,8 @@ flowchart TB
 | `context_sanitizer.rs` | Redact sensitive values before model or tool boundaries | AI context is an output boundary |
 | `key_store.rs` and `touch_id.rs` | Store and unlock provider keys | Provider credentials stay out of normal settings text |
 | `providers/*` and `streaming/*` | Discover models, select providers, build requests, and parse streaming responses | Provider differences are hidden behind shared streaming semantics |
+| `reasoning.rs` | Normalize reasoning levels against provider and known-model capabilities | Unsupported provider formats are not emitted; ACP uses session options instead |
+| `acp/*` | Own ACP transport, agent lifecycle, session configuration, and protocol state | ACP is a separate execution backend from native model providers |
 | `orchestrator.rs` | Define orchestrator tool names, schemas, and dispatch contracts | Tool definitions remain stable for model-facing behavior |
 | `policy.rs` | Decide which tool actions need approval or rejection | Dangerous or state-changing actions are not executed solely because a model requested them |
 | `persistence.rs` | Store conversations and AI durable state | Long-running chat history survives app restarts where configured |
@@ -1161,7 +1221,7 @@ flowchart TB
 | Forwarding | `oxideterm-forwarding`, app forwarding modules | Rules are configuration; listeners are runtime state |
 | Privilege credentials | Settings privilege page, terminal privilege prompt, secret-aware storage | Scope and prompt matchers are configuration; secret values stay outside ordinary settings |
 | Terminal modem transfers | `oxideterm-modem-transfer`, `oxideterm-gpui-terminal` modem worker | Protocol state is terminal-runtime work; file selection and progress are UI concerns |
-| Graphics sessions | `oxideterm-wsl-graphics`, app graphics/VNC modules | Session/server lifecycle is separate from viewer framebuffer and terminal buffers |
+| Graphics sessions | `oxideterm-wsl-graphics`, `oxideterm-remote-desktop`, `oxideterm-gpui-remote-desktop`, `oxideterm-rdp-helper`, `oxideterm-vnc-helper`, app graphics/remote-desktop modules | WSL lifecycle, remote protocol helpers, viewer framebuffer, and terminal buffers have separate owners |
 | Plugins | `oxideterm-plugin-*`, plugin manager and lifecycle modules | Manifests, settings, host API calls, and plugin secrets have separate boundaries |
 | Cloud sync | `oxideterm-cloud-sync`, `oxideterm-gpui-cloud-sync`, app cloud-sync modules | Sync plans, backup creation, and apply steps are explicit control-plane operations |
 | Portable runtime | `oxideterm-portable-runtime`, settings portable-runtime modules | Portable metadata and encrypted payload handling are separate from normal settings pages |
@@ -1620,7 +1680,7 @@ stateDiagram-v2
 | Transfer | Transfer manager | Transfer history where configured | None by default | Partial/history only | Can retry if operation supports it | Retry, cancel, clean partial file |
 | Forward rule | Forwarding surface/runtime | Forward configuration | SSH auth layer for remote side | Yes for rule | Listener must restart | Restart or edit ports |
 | Host tool snapshot | Connection monitor / profiler | None as a live sample | SSH auth layer | No | Refresh after reconnect | Refresh, rerun action, or reconnect node |
-| Graphics session | Graphics runtime / VNC viewer | None as a live viewer | Usually none beyond SSH/session launch | No | Reconnect viewer/session where possible | Reconnect, stop, or launch again |
+| Graphics session | Saved RDP/VNC provider and helper, or node graphics runtime / VNC viewer | Profile metadata may persist; live viewer does not | Provider credentials or SSH/session startup, depending on path | No live viewer | Reconnect provider/helper or node session when possible | Reconnect, stop, or launch again |
 | IDE workspace | IDE surface/runtime | Recent workspace/settings | SSH auth layer for remote side | Recent entry yes | Reopen or refresh after reconnect | Save, reload, resolve conflict |
 | Editor buffer | IDE/editor state | File only after save | None by default | Unsaved content depends on recovery policy | Node reconnect does not save it | Save, reload, discard |
 | AI conversation | AI sidebar/runtime | AI persistence | Provider key store | Yes when enabled | Not node-dependent unless tools target nodes | Continue, compact, delete |
@@ -1651,11 +1711,9 @@ flowchart LR
         Sync["Sync / backup events"]
     end
 
-    subgraph EventLayer["Event Layer"]
-        Bus["Workspace Event Bus"]
-        Coalesce["Coalescing / de-duplication"]
-        Redact["Secret redaction"]
-        Severity["Severity mapping"]
+    subgraph EntityLayer["Domain Entities And Delivery Channels"]
+        RuntimeEntities["Workspace / domain entities"]
+        Delivery["Subscriptions / bounded task channels"]
     end
 
     subgraph Consumers["Consumers"]
@@ -1666,28 +1724,34 @@ flowchart LR
         Logs["Diagnostic Logs"]
     end
 
-    SSH --> Bus
-    Term --> Bus
-    Modem --> Bus
-    Graphics --> Bus
-    SFTP --> Bus
-    HostTools --> Bus
-    Forward --> Bus
-    IDE --> Bus
-    AI --> Bus
-    Plugin --> Bus
-    Sync --> Bus
-    Bus --> Coalesce --> Redact --> Severity
-    Severity --> ActiveSurface
-    Severity --> Notifications
-    Severity --> Badges
-    Severity --> Transcript
-    Severity --> Logs
+    SSH --> RuntimeEntities
+    Term --> RuntimeEntities
+    Modem --> RuntimeEntities
+    Graphics --> RuntimeEntities
+    SFTP --> RuntimeEntities
+    HostTools --> RuntimeEntities
+    Forward --> RuntimeEntities
+    IDE --> RuntimeEntities
+    AI --> RuntimeEntities
+    Plugin --> RuntimeEntities
+    Sync --> RuntimeEntities
+    RuntimeEntities --> Delivery
+    Delivery --> ActiveSurface
+    Delivery --> Notifications
+    Delivery --> Badges
+    Delivery --> Transcript
+    Delivery --> Logs
 ```
 
 ### Event Sources
 
-The app receives structured events from multiple domains:
+The app receives structured events from multiple domain entities and task
+channels. There is no single workspace event bus through which every event
+must pass. Each entity owns its subscriptions, delivery wakeups, state
+projection, and cancellation rules; notification severity and secret
+redaction happen at the concrete output boundary.
+
+The app receives events such as:
 
 - SSH node status changes.
 - Terminal readiness and process state.
@@ -1786,16 +1850,17 @@ Staleness means "the app cannot prove this state is current." It does not automa
 | Shared GPUI components and platform helpers | `oxideterm-gpui-ui`, `oxideterm-gpui-platform`, `oxideterm-theme` |
 | Terminal rendering and terminal domain | `oxideterm-gpui-terminal`, `oxideterm-terminal`, `oxideterm-terminal-*` |
 | Terminal modem transfers | `oxideterm-modem-transfer`, terminal modem worker integration |
-| SSH, node routing, reconnect | `oxideterm-ssh`, `oxideterm-topology` |
+| SSH, node routing, reconnect | `oxideterm-ssh`, `oxideterm-topology`, `oxideterm-session-adapter` |
 | Host Tools and connection monitoring | `oxideterm-connection-monitor`, app connection monitor surface |
 | SFTP and transfers | `oxideterm-sftp` |
 | Saved connections | `oxideterm-connections` |
 | Forwarding | `oxideterm-forwarding`, app forwarding surface |
-| Graphics and VNC sessions | `oxideterm-wsl-graphics`, app graphics/VNC surface |
+| Graphics and remote desktop sessions | `oxideterm-wsl-graphics`, `oxideterm-remote-desktop`, `oxideterm-gpui-remote-desktop`, `oxideterm-rdp-helper`, `oxideterm-vnc-helper`, app graphics/remote-desktop surfaces |
 | IDE and editor | `oxideterm-gpui-ide`, `oxideterm-gpui-editor`, `oxideterm-ide-core`, `oxideterm-ide-fs`, `oxideterm-editor-*` |
 | Settings and privilege credentials | `oxideterm-settings`, `oxideterm-settings-model`, `oxideterm-gpui-settings-view`, secret-aware app boundary |
-| AI, RAG, MCP, tool policy | `oxideterm-ai`, app AI sidebar |
-| Plugins | `oxideterm-plugin-*`, app plugin lifecycle |
+| AI, RAG, MCP, reasoning, and tool policy | `oxideterm-ai`, `oxideterm-ai-tasks`, `oxideterm-skills`, app AI sidebar |
+| ACP agent sessions and host tools | `oxideterm-acp-adapter`, `oxideterm-acp-host-tools`, `workspace/acp_workspace.rs` |
+| Plugins | `oxideterm-plugin-manifest`, `oxideterm-plugin-registry`, `oxideterm-plugin-host-api`, `oxideterm-plugin-wasm-runtime`, `oxideterm-plugin-runtime-install`, app plugin entities |
 | Cloud sync and portable runtime | `oxideterm-cloud-sync`, `oxideterm-gpui-cloud-sync`, `oxideterm-portable-runtime` |
 | Notifications, launcher, update | `oxideterm-notification-center`, `oxideterm-launcher`, `oxideterm-update` |
 | CLI companion | `oxideterm-cli` |
