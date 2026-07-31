@@ -7,6 +7,19 @@
       "auth_terminal_hint": "Schließen Sie die interaktive Terminal-Authentifizierung extern ab und versuchen Sie es erneut",
       "auth_unsupported_hint": "Diese Authentifizierungsmethode wird nicht unterstützt"
     },
+    "background_tasks": {
+      "title": "Hintergrundaufgaben",
+      "run_count": "{{count}} Durchläufe",
+      "queued": "Eingereiht",
+      "running": "Wird ausgeführt",
+      "waiting": "Wartet",
+      "completed_state": "Abgeschlossen",
+      "failed_state": "Fehlgeschlagen",
+      "cancelled": "Abgebrochen",
+      "completed": "Hintergrundaufgabe abgeschlossen",
+      "failed": "Hintergrundaufgabe fehlgeschlagen",
+      "notification_body": "Nach {{count}} Durchläufen beendet."
+    },
     "chat": {
       "header": "Chat",
       "get_started": "Mit OxideSens beginnen",
@@ -261,7 +274,17 @@
         "open_app_surface": "Ansicht öffnen",
         "get_state": "Status lesen",
         "remember_preference": "Präferenz merken",
-        "recall_preferences": "Präferenzen abrufen"
+        "recall_preferences": "Präferenzen abrufen",
+        "create_background_task": "Hintergrundaufgabe erstellen",
+        "list_background_tasks": "Hintergrundaufgaben auflisten",
+        "get_background_task": "Hintergrundaufgabe prüfen",
+        "cancel_background_task": "Hintergrundaufgabe abbrechen",
+        "inspect_host_tools": "Host-Werkzeuge prüfen",
+        "control_host_tool": "Host-Werkzeug steuern",
+        "list_forwards": "Weiterleitungen auflisten",
+        "manage_forward": "Weiterleitung verwalten",
+        "list_plugins": "Plugins auflisten",
+        "manage_plugin": "Plugin verwalten"
       },
       "risk_labels": {
         "read": "Lesen",
@@ -325,8 +348,9 @@
       "command_record": "Command record",
       "policy_reason_tool_disabled": "Tool durch Richtlinie deaktiviert",
       "policy_reason_read_only": "Nur-Lese-Aktion automatisch erlaubt",
+      "policy_reason_read_only_mode": "Nur-Lese-Modus hat eine schreibende Aktion blockiert",
       "policy_reason_credential": "Anmeldeinformations-Aktion erfordert den Benutzer",
-      "policy_reason_bypass": "Bypass-Modus hat gefährlichen Befehl erlaubt",
+      "policy_reason_bypass": "Umgehungsmodus hat einen gefährlichen Befehl erlaubt",
       "policy_reason_destructive": "Gefährlicher Befehl erfordert Freigabe",
       "policy_reason_auto_approved": "Durch Tool-Richtlinie erlaubt",
       "policy_reason_requires_approval": "Tool-Richtlinie erfordert Freigabe",
@@ -362,26 +386,30 @@
     "tool_status": {
       "enabled": "Tools an",
       "rounds_short": "{{count}}",
+      "tools_short": "{{count}} Tools",
       "disabled": "Tools aus",
       "disabled_short": "Aus",
       "disabled_count": "{{count}} deaktiviert",
       "open_settings": "KI-Tool-Einstellungen öffnen"
     },
     "safety_mode": {
-      "default_label": "Default",
-      "bypass_label": "Bypass",
+      "default_label": "Standard",
+      "read_only_label": "Nur Lesen",
+      "bypass_label": "Umgehen",
       "default_title": "Standard-Sicherheitsmodus: gefährliche Befehle benötigen Freigabe",
-      "bypass_title": "Bypass-Modus ist für diesen Chat aktiv",
+      "bypass_title": "Umgehungsmodus ist für diesen Chat aktiv",
       "menu_title": "Sicherheitsmodus",
-      "default_mode": "Default mode",
+      "default_mode": "Standardmodus",
       "default_desc": "Gefährliche Befehle benötigen vor der Ausführung eine Freigabe.",
-      "bypass_mode": "Bypass mode",
+      "read_only_mode": "Nur-Lese-Modus",
+      "read_only_desc": "Erlaubt nur Lesezugriffe. Ausführen, Schreiben, Interaktionen und destruktive Werkzeuge werden blockiert.",
+      "bypass_mode": "Umgehungsmodus",
       "bypass_desc": "Überspringt Freigaben für gefährliche Befehle in diesem Chat nach Bestätigung.",
       "open_settings": "Tool-Aufruf-Einstellungen öffnen",
-      "confirm_title": "Bypass-Modus aktivieren?",
+      "confirm_title": "Umgehungsmodus aktivieren?",
       "confirm_description": "Nur für diesen Chat werden gefährliche Befehle ohne einzelne Freigabe ausgeführt. Tool-Aufrufe werden weiter protokolliert. Passwörter, sudo-Abfragen, Passphrasen und Zugangsdaten müssen weiterhin von dir eingegeben werden.",
-      "confirm_enable": "Bypass aktivieren",
-      "confirm_cancel": "Default behalten"
+      "confirm_enable": "Umgehung aktivieren",
+      "confirm_cancel": "Standardmodus beibehalten"
     },
     "slash": {
       "explain": "Erklären",

@@ -7,6 +7,19 @@
       "auth_terminal_hint": "请在外部完成交互式终端认证，然后重试",
       "auth_unsupported_hint": "暂不支持此认证方式"
     },
+    "background_tasks": {
+      "title": "后台任务",
+      "run_count": "已运行 {{count}} 次",
+      "queued": "已排队",
+      "running": "运行中",
+      "waiting": "等待中",
+      "completed_state": "已完成",
+      "failed_state": "失败",
+      "cancelled": "已取消",
+      "completed": "后台任务已完成",
+      "failed": "后台任务失败",
+      "notification_body": "任务在运行 {{count}} 次后结束。"
+    },
     "chat": {
       "title": "OxideSens",
       "header": "聊天",
@@ -261,7 +274,17 @@
         "open_app_surface": "打开界面",
         "get_state": "读取状态",
         "remember_preference": "记住偏好",
-        "recall_preferences": "读取偏好"
+        "recall_preferences": "读取偏好",
+        "create_background_task": "创建后台任务",
+        "list_background_tasks": "列出后台任务",
+        "get_background_task": "查看后台任务",
+        "cancel_background_task": "取消后台任务",
+        "inspect_host_tools": "检查主机工具",
+        "control_host_tool": "控制主机工具",
+        "list_forwards": "列出端口转发",
+        "manage_forward": "管理端口转发",
+        "list_plugins": "列出插件",
+        "manage_plugin": "管理插件"
       },
       "risk_labels": {
         "read": "只读",
@@ -325,8 +348,9 @@
       "command_record": "命令记录",
       "policy_reason_tool_disabled": "工具已被策略禁用",
       "policy_reason_read_only": "只读操作自动允许",
+      "policy_reason_read_only_mode": "只读模式已拒绝非读取操作",
       "policy_reason_credential": "凭据敏感操作必须由用户处理",
-      "policy_reason_bypass": "Bypass 模式已允许危险命令",
+      "policy_reason_bypass": "免审模式已允许危险命令",
       "policy_reason_destructive": "危险命令需要审批",
       "policy_reason_auto_approved": "工具策略已允许",
       "policy_reason_requires_approval": "工具策略要求审批",
@@ -362,26 +386,30 @@
     "tool_status": {
       "enabled": "工具调用开启",
       "rounds_short": "{{count}}",
+      "tools_short": "{{count}} 个工具",
       "disabled": "工具调用关闭",
       "disabled_short": "关闭",
       "disabled_count": "已禁用 {{count}} 个",
       "open_settings": "打开 AI 工具设置"
     },
     "safety_mode": {
-      "default_label": "Default",
-      "bypass_label": "Bypass",
+      "default_label": "默认",
+      "read_only_label": "只读",
+      "bypass_label": "免审",
       "default_title": "默认安全模式：危险命令需要审批",
-      "bypass_title": "当前对话已启用 Bypass 模式",
+      "bypass_title": "当前对话已启用免审模式",
       "menu_title": "安全模式",
-      "default_mode": "Default mode",
+      "default_mode": "默认模式",
       "default_desc": "危险命令执行前需要你逐条审批。",
-      "bypass_mode": "Bypass mode",
+      "read_only_mode": "只读模式",
+      "read_only_desc": "只允许读取信息；执行、写入、交互和破坏性工具都会被拒绝。",
+      "bypass_mode": "免审模式",
       "bypass_desc": "确认后，当前对话中的危险命令不再逐条审批。",
       "open_settings": "打开工具调用设置",
-      "confirm_title": "启用 Bypass 模式？",
+      "confirm_title": "启用免审模式？",
       "confirm_description": "仅当前对话生效。危险命令将不再逐条审批，但工具调用仍会记录。密码、sudo 提示、密钥口令和凭据仍必须由你手动处理。",
-      "confirm_enable": "启用 Bypass",
-      "confirm_cancel": "保持 Default"
+      "confirm_enable": "启用免审模式",
+      "confirm_cancel": "保持默认模式"
     },
     "slash": {
       "explain": "解释",

@@ -7,6 +7,19 @@
       "auth_terminal_hint": "Conclua externamente a autenticação interativa no terminal e tente novamente",
       "auth_unsupported_hint": "Este método de autenticação não é compatível"
     },
+    "background_tasks": {
+      "title": "Tarefas em segundo plano",
+      "run_count": "{{count}} execuções",
+      "queued": "Na fila",
+      "running": "Em execução",
+      "waiting": "Aguardando",
+      "completed_state": "Concluída",
+      "failed_state": "Falhou",
+      "cancelled": "Cancelada",
+      "completed": "Tarefa em segundo plano concluída",
+      "failed": "Falha na tarefa em segundo plano",
+      "notification_body": "Finalizada após {{count}} execuções."
+    },
     "chat": {
       "header": "Chat",
       "get_started": "Começar com OxideSens",
@@ -261,7 +274,17 @@
         "open_app_surface": "Abrir tela",
         "get_state": "Ler estado",
         "remember_preference": "Memorizar preferência",
-        "recall_preferences": "Ler preferências"
+        "recall_preferences": "Ler preferências",
+        "create_background_task": "Criar tarefa em segundo plano",
+        "list_background_tasks": "Listar tarefas em segundo plano",
+        "get_background_task": "Inspecionar tarefa em segundo plano",
+        "cancel_background_task": "Cancelar tarefa em segundo plano",
+        "inspect_host_tools": "Inspecionar ferramentas do host",
+        "control_host_tool": "Controlar ferramenta do host",
+        "list_forwards": "Listar encaminhamentos",
+        "manage_forward": "Gerenciar encaminhamento",
+        "list_plugins": "Listar plugins",
+        "manage_plugin": "Gerenciar plugin"
       },
       "risk_labels": {
         "read": "Leitura",
@@ -325,8 +348,9 @@
       "command_record": "Command record",
       "policy_reason_tool_disabled": "Ferramenta desativada pela política",
       "policy_reason_read_only": "Ação somente leitura permitida automaticamente",
+      "policy_reason_read_only_mode": "O modo somente leitura bloqueou uma ação que não era de leitura",
       "policy_reason_credential": "Ação sensível a credenciais requer o usuário",
-      "policy_reason_bypass": "Modo Bypass permitiu um comando perigoso",
+      "policy_reason_bypass": "Modo de omissão permitiu um comando perigoso",
       "policy_reason_destructive": "Comando perigoso requer aprovação",
       "policy_reason_auto_approved": "Permitido pela política de ferramentas",
       "policy_reason_requires_approval": "Política de ferramentas requer aprovação",
@@ -362,26 +386,30 @@
     "tool_status": {
       "enabled": "Ferramentas ativas",
       "rounds_short": "{{count}}",
+      "tools_short": "{{count}} ferramentas",
       "disabled": "Ferramentas desativadas",
       "disabled_short": "Off",
       "disabled_count": "{{count}} desativadas",
       "open_settings": "Abrir configurações de ferramentas de IA"
     },
     "safety_mode": {
-      "default_label": "Default",
-      "bypass_label": "Bypass",
+      "default_label": "Padrão",
+      "read_only_label": "Somente leitura",
+      "bypass_label": "Omitir",
       "default_title": "Modo seguro padrão: comandos perigosos exigem aprovação",
-      "bypass_title": "Modo Bypass ativo para este chat",
+      "bypass_title": "Modo de omissão ativo para este chat",
       "menu_title": "Modo de segurança",
-      "default_mode": "Default mode",
+      "default_mode": "Modo padrão",
       "default_desc": "Comandos perigosos exigem aprovação antes da execução.",
-      "bypass_mode": "Bypass mode",
+      "read_only_mode": "Modo somente leitura",
+      "read_only_desc": "Permite apenas leituras. Execução, escrita, interação e ferramentas destrutivas são bloqueadas.",
+      "bypass_mode": "Modo de omissão",
       "bypass_desc": "Pula aprovações de comandos perigosos neste chat após confirmação.",
       "open_settings": "Abrir configurações de uso de ferramentas",
-      "confirm_title": "Ativar modo Bypass?",
+      "confirm_title": "Ativar modo de omissão?",
       "confirm_description": "Apenas neste chat, comandos perigosos serão executados sem aprovação individual. Chamadas de ferramentas continuarão registradas. Senhas, prompts sudo, passphrases e credenciais ainda devem ser tratados por você.",
-      "confirm_enable": "Ativar Bypass",
-      "confirm_cancel": "Manter Default"
+      "confirm_enable": "Ativar omissão",
+      "confirm_cancel": "Manter modo padrão"
     },
     "slash": {
       "explain": "Explicar",

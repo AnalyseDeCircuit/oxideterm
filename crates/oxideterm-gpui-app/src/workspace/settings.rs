@@ -13,7 +13,7 @@ use oxideterm_settings::{
 };
 use oxideterm_settings_model::{
     AcpAgentPreset, AiProviderModelChipItem, AiProviderModelPanel, AiSettingsPage,
-    AiToolPolicyGroup, CliCompanionStatus, KnowledgeDeleteTarget,
+    AiToolPolicyGroup, AiToolPolicyGroupState, CliCompanionStatus, KnowledgeDeleteTarget,
     SETTINGS_SECTION_HEADER_ITEM_COUNT, SettingsDynamicSectionCounts, SettingsInputDraftApply,
     TERMINAL_THEME_COLOR_FIELDS, ThemeColorField, ThemeEditorSection, ThemeEditorState,
     UI_THEME_COLOR_FIELDS, ai_add_acp_agent, ai_add_acp_agent_preset,
@@ -29,8 +29,8 @@ use oxideterm_settings_model::{
     parse_color_hex, persisted_settings_input_value, plugin_setting_draft_to_value,
     plugin_setting_input_value, reconnect_attempt_label, reconnect_base_delay_options,
     reconnect_delay_label, reconnect_max_attempt_options, reconnect_max_delay_options,
-    save_theme_editor_snapshot_to_settings, set_ai_user_context_window,
-    settings_multiline_line_ranges, settings_multiline_line_selection,
+    save_theme_editor_snapshot_to_settings, set_ai_tool_policy_group_approval,
+    set_ai_user_context_window, settings_multiline_line_ranges, settings_multiline_line_selection,
     settings_section_list_identity as settings_model_section_list_identity,
     settings_section_list_item_count as settings_model_section_list_item_count,
     take_cloud_sync_form_input_value, theme_editor_from_settings,
@@ -66,7 +66,7 @@ use oxideterm_gpui_ui::{
         SplitFooterButtonEdge, SplitFooterButtonOptions, ToolbarButtonIconPosition,
         ToolbarButtonOptions, split_footer_button,
     },
-    checkbox::checkbox,
+    checkbox::{CheckboxOptions, CheckboxState, checkbox, checkbox_with_state},
     form_field,
     modal::{
         dialog_content, dialog_description, dialog_footer, dialog_header, dialog_title,

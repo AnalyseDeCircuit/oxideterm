@@ -776,6 +776,8 @@ window.focus(&this.focus_handle, cx);
             reasoning_effort: Some(reasoning_effort),
             safety_mode: AiPolicySafetyMode::Default,
             profile_id: None,
+            memory_context: None,
+            memory_entry_ids: Vec::new(),
             tool_policy: AiToolUsePolicy::default(),
             tools: Vec::new(),
             tool_choice: oxideterm_ai::AiToolChoice::Auto,

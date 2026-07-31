@@ -104,7 +104,13 @@ pub(crate) fn load_terminal_font_open_critical(
     register_faces(text_system, &faces)
 }
 
-pub(crate) fn load_terminal_cjk_fallback_regular(text_system: &TextSystem) -> Result<()> {
+pub(crate) fn load_terminal_cjk_fallback_regular(
+    text_system: &TextSystem,
+    cjk_font_family: &str,
+) -> Result<()> {
+    if !should_load_terminal_cjk_fallback(cjk_font_family) {
+        return Ok(());
+    }
     register_faces(text_system, &[BundledTerminalFace::MapleRegular])
 }
 
@@ -148,6 +154,11 @@ fn critical_faces_for_settings(settings: &PersistedSettings) -> Vec<BundledTermi
         faces.push(BundledTerminalFace::MapleRegular);
     }
     faces
+}
+
+fn should_load_terminal_cjk_fallback(cjk_font_family: &str) -> bool {
+    let cjk_font_family = cjk_font_family.trim();
+    cjk_font_family.is_empty() || cjk_font_family == oxideterm_settings::MAPLE_MONO_SUBSET_FAMILY
 }
 
 fn secondary_faces_for_explicit_settings(settings: &PersistedSettings) -> Vec<BundledTerminalFace> {
@@ -304,6 +315,17 @@ mod tests {
         let faces = critical_faces_for_settings(&settings);
 
         assert!(!faces.contains(&BundledTerminalFace::MapleRegular));
+    }
+
+    #[test]
+    fn terminal_cjk_fallback_loads_only_for_auto_or_maple() {
+        assert!(should_load_terminal_cjk_fallback(""));
+        assert!(should_load_terminal_cjk_fallback("   "));
+        assert!(should_load_terminal_cjk_fallback(
+            oxideterm_settings::MAPLE_MONO_SUBSET_FAMILY
+        ));
+        assert!(!should_load_terminal_cjk_fallback("PingFang SC"));
+        assert!(!should_load_terminal_cjk_fallback("Noto Sans Mono CJK SC"));
     }
 
     #[test]

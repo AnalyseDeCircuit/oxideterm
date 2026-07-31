@@ -7,6 +7,19 @@
       "auth_terminal_hint": "외부에서 대화형 터미널 인증을 완료한 후 다시 시도하세요",
       "auth_unsupported_hint": "이 인증 방식은 지원되지 않습니다"
     },
+    "background_tasks": {
+      "title": "백그라운드 작업",
+      "run_count": "{{count}}회 실행",
+      "queued": "대기열",
+      "running": "실행 중",
+      "waiting": "대기 중",
+      "completed_state": "완료",
+      "failed_state": "실패",
+      "cancelled": "취소됨",
+      "completed": "백그라운드 작업 완료",
+      "failed": "백그라운드 작업 실패",
+      "notification_body": "{{count}}회 실행 후 종료되었습니다."
+    },
     "chat": {
       "header": "채팅",
       "get_started": "OxideSens 시작하기",
@@ -261,7 +274,17 @@
         "open_app_surface": "화면 열기",
         "get_state": "상태 읽기",
         "remember_preference": "환경설정 기억",
-        "recall_preferences": "환경설정 불러오기"
+        "recall_preferences": "환경설정 불러오기",
+        "create_background_task": "백그라운드 작업 만들기",
+        "list_background_tasks": "백그라운드 작업 목록",
+        "get_background_task": "백그라운드 작업 확인",
+        "cancel_background_task": "백그라운드 작업 취소",
+        "inspect_host_tools": "호스트 도구 확인",
+        "control_host_tool": "호스트 도구 제어",
+        "list_forwards": "포워딩 목록",
+        "manage_forward": "포워딩 관리",
+        "list_plugins": "플러그인 목록",
+        "manage_plugin": "플러그인 관리"
       },
       "risk_labels": {
         "read": "읽기",
@@ -325,8 +348,9 @@
       "command_record": "Command record",
       "policy_reason_tool_disabled": "정책으로 도구가 비활성화됨",
       "policy_reason_read_only": "읽기 전용 작업은 자동 허용",
+      "policy_reason_read_only_mode": "읽기 전용 모드가 읽기 이외의 작업을 거부함",
       "policy_reason_credential": "자격 증명 관련 작업은 사용자 처리가 필요",
-      "policy_reason_bypass": "Bypass 모드가 위험 명령을 허용함",
+      "policy_reason_bypass": "승인 우회 모드가 위험 명령을 허용함",
       "policy_reason_destructive": "위험 명령은 승인이 필요",
       "policy_reason_auto_approved": "도구 정책으로 허용됨",
       "policy_reason_requires_approval": "도구 정책상 승인 필요",
@@ -362,26 +386,30 @@
     "tool_status": {
       "enabled": "도구 켜짐",
       "rounds_short": "{{count}}",
+      "tools_short": "도구 {{count}}개",
       "disabled": "도구 꺼짐",
       "disabled_short": "끔",
       "disabled_count": "{{count}}개 비활성화",
       "open_settings": "AI 도구 설정 열기"
     },
     "safety_mode": {
-      "default_label": "Default",
-      "bypass_label": "Bypass",
+      "default_label": "기본",
+      "read_only_label": "읽기 전용",
+      "bypass_label": "승인 우회",
       "default_title": "기본 안전 모드: 위험한 명령은 승인이 필요합니다",
-      "bypass_title": "이 채팅에서 Bypass 모드가 활성화됨",
+      "bypass_title": "이 채팅에서 승인 우회 모드가 활성화됨",
       "menu_title": "안전 모드",
-      "default_mode": "Default mode",
+      "default_mode": "기본 모드",
       "default_desc": "위험한 명령은 실행 전 승인이 필요합니다.",
-      "bypass_mode": "Bypass mode",
+      "read_only_mode": "읽기 전용 모드",
+      "read_only_desc": "읽기만 허용합니다. 실행, 쓰기, 상호작용 및 파괴적인 도구는 거부됩니다.",
+      "bypass_mode": "승인 우회 모드",
       "bypass_desc": "확인 후 이 채팅에서 위험한 명령 승인을 건너뜁니다.",
       "open_settings": "도구 사용 설정 열기",
-      "confirm_title": "Bypass 모드를 활성화할까요?",
+      "confirm_title": "승인 우회 모드를 활성화할까요?",
       "confirm_description": "이 채팅에서만 위험한 명령이 개별 승인 없이 실행됩니다. 도구 호출은 계속 기록됩니다. 비밀번호, sudo 프롬프트, 패스프레이즈, 자격 증명은 계속 사용자가 직접 처리해야 합니다.",
-      "confirm_enable": "Bypass 활성화",
-      "confirm_cancel": "Default 유지"
+      "confirm_enable": "승인 우회 활성화",
+      "confirm_cancel": "기본 모드 유지"
     },
     "slash": {
       "explain": "설명",

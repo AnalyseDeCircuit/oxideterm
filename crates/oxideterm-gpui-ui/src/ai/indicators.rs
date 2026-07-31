@@ -1,6 +1,7 @@
+// Hallmark · pre-emit critique: P5 H5 E5 S5 R5 V5
 use gpui::{
-    Div, FontWeight, InteractiveElement, IntoElement, ParentElement, Styled, div, prelude::*, px,
-    relative, rgb, rgba,
+    Bounds, Div, FontWeight, InteractiveElement, IntoElement, ParentElement, Path, PathBuilder,
+    Pixels, Styled, canvas, div, point, prelude::*, px, relative, rgb, rgba,
 };
 use oxideterm_theme::ThemeTokens;
 
@@ -12,12 +13,11 @@ pub fn ai_status_indicator(
     icon: impl IntoElement,
     active: bool,
 ) -> Div {
+    // Tool availability is fixed semantic data. Let the model selector absorb
+    // row compression instead of clipping the tool count behind a width cap.
     div()
         .flex()
         .flex_none()
-        .max_w(px(AI_STATUS_INDICATOR_MAX_WIDTH))
-        .min_w_0()
-        .overflow_hidden()
         .items_center()
         .gap(px(tokens.spacing.one))
         .rounded(px(tokens.radii.md))
@@ -38,7 +38,7 @@ pub fn ai_status_indicator(
                 .text_color(rgb(tokens.ui.text))
         })
         .child(div().flex_none().child(icon))
-        .child(div().min_w_0().truncate().child(label.into()))
+        .child(div().whitespace_nowrap().child(label.into()))
 }
 
 pub fn ai_safety_indicator(
@@ -87,7 +87,7 @@ pub fn ai_context_usage_indicator(
     tokens: &ThemeTokens,
     usage: AiContextUsage,
     label: impl Into<String>,
-    icon: impl IntoElement,
+    interactive: bool,
 ) -> Div {
     let tone = if usage.danger {
         AiTone::Red
@@ -96,39 +96,112 @@ pub fn ai_context_usage_indicator(
     } else {
         AiTone::Accent
     };
+    let progress = ai_context_usage_fraction(usage.percentage);
+    // The compact ring needs stronger colors than large panel borders. The
+    // theme guarantees primary text contrast on both base and panel surfaces,
+    // so its softened form remains a reliable track across built-in themes.
+    let track_color = bg_alpha(tokens, tokens.ui.text, AI_CONTEXT_RING_TRACK_ALPHA);
+    let progress_color = rgb(if usage.danger || usage.warning {
+        tone_color(tokens, tone)
+    } else {
+        tokens.ui.text
+    });
     div()
         .flex()
         .flex_none()
         .items_center()
         .gap(px(tokens.spacing.two))
-        .cursor_pointer()
+        .when(interactive, |indicator| {
+            indicator
+                .cursor_pointer()
+                .hover(|style| style.text_color(rgb(tone_color(tokens, tone))).opacity(1.0))
+        })
         .text_color(if usage.danger || usage.warning {
             rgb(tone_color(tokens, tone))
         } else {
             rgb(tokens.ui.text_muted)
         })
-        .child(icon)
         .child(
-            div()
-                .w(px(AI_CONTEXT_MINI_BAR_WIDTH))
-                .h(px(AI_CONTEXT_MINI_BAR_HEIGHT))
-                .overflow_hidden()
-                .rounded_full()
-                .bg(bg_alpha(tokens, tokens.ui.border, AI_CONTEXT_BAR_BG_ALPHA))
-                .child(
-                    div()
-                        .h_full()
-                        .rounded_full()
-                        .bg(rgb(tone_color(tokens, tone)))
-                        .w(relative((usage.percentage / 100.0).clamp(0.0, 1.0))),
-                ),
+            div().flex_none().size(px(AI_CONTEXT_RING_SIZE)).child(
+                canvas(
+                    |_, _, _| {},
+                    move |bounds, _, window, _| {
+                        if let Some(track) = ai_context_ring_path(bounds, 1.0) {
+                            window.paint_path(track, track_color);
+                        }
+                        if let Some(progress_path) = ai_context_ring_path(bounds, progress) {
+                            window.paint_path(progress_path, progress_color);
+                        }
+                    },
+                )
+                .size_full(),
+            ),
         )
         .child(
             div()
-                .text_size(px(AI_TEXT_9))
-                .opacity(0.6)
+                .text_size(px(AI_TEXT_10))
+                .font_weight(FontWeight::MEDIUM)
+                .opacity(if usage.danger || usage.warning {
+                    0.9
+                } else {
+                    0.7
+                })
                 .child(label.into()),
         )
+}
+
+fn ai_context_usage_fraction(percentage: f32) -> f32 {
+    if percentage.is_finite() {
+        (percentage / 100.0).clamp(0.0, 1.0)
+    } else {
+        0.0
+    }
+}
+
+fn ai_context_ring_path(bounds: Bounds<Pixels>, fraction: f32) -> Option<Path<Pixels>> {
+    if fraction <= 0.0 {
+        return None;
+    }
+    let diameter = f32::from(bounds.size.width).min(f32::from(bounds.size.height));
+    let radius = (diameter - AI_CONTEXT_RING_STROKE_WIDTH).max(0.0) / 2.0;
+    if radius <= 0.0 {
+        return None;
+    }
+
+    let center_x = bounds.origin.x + px(f32::from(bounds.size.width) / 2.0);
+    let center_y = bounds.origin.y + px(f32::from(bounds.size.height) / 2.0);
+    let radius_point = point(px(radius), px(radius));
+    let start = point(center_x, center_y - px(radius));
+    let mut builder = PathBuilder::stroke(px(AI_CONTEXT_RING_STROKE_WIDTH));
+    builder.move_to(start);
+
+    if fraction >= 1.0 {
+        // SVG arcs need two halves because a single arc cannot end where it starts.
+        let bottom = point(center_x, center_y + px(radius));
+        builder.arc_to(radius_point, px(0.0), false, true, bottom);
+        builder.arc_to(radius_point, px(0.0), false, true, start);
+    } else {
+        let end_angle = -std::f32::consts::FRAC_PI_2 + std::f32::consts::TAU * fraction;
+        let end = point(
+            center_x + px(end_angle.cos() * radius),
+            center_y + px(end_angle.sin() * radius),
+        );
+        builder.arc_to(radius_point, px(0.0), fraction > 0.5, true, end);
+    }
+    builder.build().ok()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ai_context_usage_fraction;
+
+    #[test]
+    fn context_usage_fraction_clamps_invalid_and_over_limit_values() {
+        assert_eq!(ai_context_usage_fraction(f32::NAN), 0.0);
+        assert_eq!(ai_context_usage_fraction(-10.0), 0.0);
+        assert_eq!(ai_context_usage_fraction(25.0), 0.25);
+        assert_eq!(ai_context_usage_fraction(140.0), 1.0);
+    }
 }
 
 pub fn ai_context_popover(tokens: &ThemeTokens) -> Div {

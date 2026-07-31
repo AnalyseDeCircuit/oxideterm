@@ -7,6 +7,19 @@
       "auth_terminal_hint": "Terminez l’authentification interactive du terminal en externe, puis réessayez",
       "auth_unsupported_hint": "Cette méthode d’authentification n’est pas prise en charge"
     },
+    "background_tasks": {
+      "title": "Tâches en arrière-plan",
+      "run_count": "{{count}} exécutions",
+      "queued": "En attente",
+      "running": "En cours",
+      "waiting": "En veille",
+      "completed_state": "Terminée",
+      "failed_state": "Échec",
+      "cancelled": "Annulée",
+      "completed": "Tâche en arrière-plan terminée",
+      "failed": "Échec de la tâche en arrière-plan",
+      "notification_body": "Terminée après {{count}} exécutions."
+    },
     "chat": {
       "header": "Chat",
       "get_started": "Commencer avec OxideSens",
@@ -261,7 +274,17 @@
         "open_app_surface": "Ouvrir une vue",
         "get_state": "Lire l’état",
         "remember_preference": "Mémoriser la préférence",
-        "recall_preferences": "Relire les préférences"
+        "recall_preferences": "Relire les préférences",
+        "create_background_task": "Créer une tâche en arrière-plan",
+        "list_background_tasks": "Lister les tâches en arrière-plan",
+        "get_background_task": "Inspecter la tâche en arrière-plan",
+        "cancel_background_task": "Annuler la tâche en arrière-plan",
+        "inspect_host_tools": "Inspecter les outils de l’hôte",
+        "control_host_tool": "Contrôler un outil de l’hôte",
+        "list_forwards": "Lister les redirections",
+        "manage_forward": "Gérer la redirection",
+        "list_plugins": "Lister les extensions",
+        "manage_plugin": "Gérer l’extension"
       },
       "risk_labels": {
         "read": "Lecture",
@@ -325,8 +348,9 @@
       "command_record": "Command record",
       "policy_reason_tool_disabled": "Outil désactivé par la politique",
       "policy_reason_read_only": "Action en lecture seule autorisée automatiquement",
+      "policy_reason_read_only_mode": "Le mode lecture seule a bloqué une action non consultative",
       "policy_reason_credential": "Action sensible aux identifiants réservée à l’utilisateur",
-      "policy_reason_bypass": "Le mode Bypass a autorisé une commande dangereuse",
+      "policy_reason_bypass": "Le mode contournement a autorisé une commande dangereuse",
       "policy_reason_destructive": "Commande dangereuse nécessitant approbation",
       "policy_reason_auto_approved": "Autorisé par la politique des outils",
       "policy_reason_requires_approval": "La politique des outils exige une approbation",
@@ -362,26 +386,30 @@
     "tool_status": {
       "enabled": "Outils activés",
       "rounds_short": "{{count}}",
+      "tools_short": "{{count}} outils",
       "disabled": "Outils désactivés",
       "disabled_short": "Off",
       "disabled_count": "{{count}} désactivés",
       "open_settings": "Ouvrir les paramètres des outils IA"
     },
     "safety_mode": {
-      "default_label": "Default",
-      "bypass_label": "Bypass",
+      "default_label": "Par défaut",
+      "read_only_label": "Lecture seule",
+      "bypass_label": "Contourner",
       "default_title": "Mode de sécurité par défaut : les commandes dangereuses demandent une approbation",
-      "bypass_title": "Le mode Bypass est actif pour cette discussion",
+      "bypass_title": "Le mode contournement est actif pour cette discussion",
       "menu_title": "Mode de sécurité",
-      "default_mode": "Default mode",
+      "default_mode": "Mode par défaut",
       "default_desc": "Les commandes dangereuses demandent une approbation avant exécution.",
-      "bypass_mode": "Bypass mode",
+      "read_only_mode": "Mode lecture seule",
+      "read_only_desc": "Autorise uniquement la lecture. L’exécution, l’écriture, les interactions et les outils destructifs sont bloqués.",
+      "bypass_mode": "Mode contournement",
       "bypass_desc": "Ignore les approbations de commandes dangereuses dans cette discussion après confirmation.",
       "open_settings": "Ouvrir les paramètres d’utilisation des outils",
-      "confirm_title": "Activer le mode Bypass ?",
+      "confirm_title": "Activer le mode contournement ?",
       "confirm_description": "Pour cette discussion seulement, les commandes dangereuses s'exécuteront sans approbation individuelle. Les appels d'outils restent enregistrés. Les mots de passe, invites sudo, phrases secrètes et identifiants doivent toujours être saisis par vous.",
-      "confirm_enable": "Activer Bypass",
-      "confirm_cancel": "Garder Default"
+      "confirm_enable": "Activer le contournement",
+      "confirm_cancel": "Garder le mode par défaut"
     },
     "slash": {
       "explain": "Expliquer",

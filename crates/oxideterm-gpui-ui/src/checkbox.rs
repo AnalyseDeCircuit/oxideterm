@@ -1,3 +1,4 @@
+// Hallmark · pre-emit critique: P5 H5 E5 S5 R5 V5
 use gpui::{
     BoxShadow, CursorStyle, Div, ParentElement, Styled, div, point, prelude::*, px, rgb, rgba, svg,
 };
@@ -12,6 +13,17 @@ const CHECKBOX_FOCUS_RING_ALPHA: u32 = 0xb3; // Tauri focus-visible:ring-theme-a
 const CHECKBOX_FOCUS_RING_WIDTH: f32 = 2.0; // Tauri focus-visible:ring-2.
 const CHECKBOX_FOCUS_RING_OFFSET: f32 = 1.0; // Tauri focus-visible:ring-offset-1.
 const CHECKBOX_ICON_PATH: &str = "lucide/check.svg";
+const CHECKBOX_INDETERMINATE_MARK_WIDTH: f32 = 8.0;
+const CHECKBOX_INDETERMINATE_MARK_HEIGHT: f32 = 2.0;
+
+/// Visual mark state for binary and group-level checkbox controls.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum CheckboxState {
+    #[default]
+    Unchecked,
+    Checked,
+    Indeterminate,
+}
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct CheckboxOptions {
@@ -29,12 +41,53 @@ pub fn checkbox_with(
     checked: bool,
     options: CheckboxOptions,
 ) -> Div {
+    checkbox_with_state(
+        tokens,
+        label,
+        if checked {
+            CheckboxState::Checked
+        } else {
+            CheckboxState::Unchecked
+        },
+        options,
+    )
+}
+
+/// Renders a checkbox that can communicate a partially selected group.
+pub fn checkbox_with_state(
+    tokens: &ThemeTokens,
+    label: String,
+    state: CheckboxState,
+    options: CheckboxOptions,
+) -> Div {
     let theme = tokens.ui;
     let has_label = !label.is_empty();
+    let selected = state != CheckboxState::Unchecked;
     let mark_animation_id = (
         gpui::SharedString::from(format!("checkbox-mark-{label}")),
-        checked as usize,
+        state as usize,
     );
+    let mark = match state {
+        CheckboxState::Indeterminate => div()
+            .w(px(CHECKBOX_INDETERMINATE_MARK_WIDTH))
+            .h(px(CHECKBOX_INDETERMINATE_MARK_HEIGHT))
+            .rounded_full()
+            .bg(rgb(CHECKBOX_CHECKED_TEXT))
+            .into_any_element(),
+        CheckboxState::Checked | CheckboxState::Unchecked => {
+            // Keep the check mounted so both checking and unchecking can
+            // animate without delaying the input state transition.
+            crate::motion::animated_checkmark(
+                tokens,
+                mark_animation_id,
+                svg()
+                    .path(CHECKBOX_ICON_PATH)
+                    .size(px(tokens.metrics.ui_checkbox_icon_size))
+                    .text_color(rgb(CHECKBOX_CHECKED_TEXT)),
+                state == CheckboxState::Checked,
+            )
+        }
+    };
     let checkbox = div()
         .flex()
         .flex_row()
@@ -57,12 +110,12 @@ pub fn checkbox_with(
                 .justify_center()
                 .rounded(px(tokens.radii.xs))
                 .border_1()
-                .border_color(if checked {
+                .border_color(if selected {
                     rgb(theme.accent)
                 } else {
                     rgb(theme.border)
                 })
-                .bg(if checked {
+                .bg(if selected {
                     rgba((theme.accent << 8) | CHECKBOX_CHECKED_BG_ALPHA)
                 } else {
                     rgba((theme.bg << 8) | CHECKBOX_UNCHECKED_BG_ALPHA)
@@ -70,17 +123,7 @@ pub fn checkbox_with(
                 .when(options.focused, |box_el| {
                     box_el.shadow(checkbox_focus_ring(tokens))
                 })
-                // Keep the mark mounted so both checking and unchecking can
-                // animate without delaying the input state transition.
-                .child(crate::motion::animated_checkmark(
-                    tokens,
-                    mark_animation_id,
-                    svg()
-                        .path(CHECKBOX_ICON_PATH)
-                        .size(px(tokens.metrics.ui_checkbox_icon_size))
-                        .text_color(rgb(CHECKBOX_CHECKED_TEXT)),
-                    checked,
-                )),
+                .child(mark),
         );
 
     if has_label {

@@ -1551,6 +1551,16 @@ impl WorkspaceApp {
 
     fn active_ime_text_with_marked_text(&self, cx: &App) -> Option<String> {
         let target = self.active_ime_target(cx)?;
+        self.ime_text_with_marked_text_for_target(target, cx)
+    }
+
+    /// Builds the virtual text buffer seen by the platform while an IME
+    /// composition temporarily replaces the target's selected range.
+    pub(super) fn ime_text_with_marked_text_for_target(
+        &self,
+        target: WorkspaceImeTarget,
+        cx: &App,
+    ) -> Option<String> {
         let mut text = self.text_for_ime_target(target, cx)?;
         if let Some(marked) = self.marked_text_state_for_target(target, cx) {
             let marked_projection = ime_text_snapshot(target, &marked.text);
@@ -1561,6 +1571,16 @@ impl WorkspaceApp {
             );
         }
         Some(text)
+    }
+
+    /// Returns the composition range inside the virtual text buffer.
+    pub(super) fn ime_marked_virtual_range_for_target(
+        &self,
+        target: WorkspaceImeTarget,
+        cx: &App,
+    ) -> Option<Range<usize>> {
+        self.marked_text_state_for_target(target, cx)
+            .map(WorkspaceImeMarkedText::virtual_range)
     }
 
     fn marked_text_replacement_range_for_platform_range(

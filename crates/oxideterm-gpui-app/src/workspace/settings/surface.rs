@@ -1150,9 +1150,27 @@ impl WorkspaceApp {
             settings.ai.enabled,
             self.active_context_sidebar_panel,
         );
-        self.sidebar_width = settings.sidebar_ui.width as f32;
-        let ai_sidebar_width = (settings.sidebar_ui.ai_sidebar_width as f32)
-            .clamp(AI_SIDEBAR_MIN_WIDTH, AI_SIDEBAR_MAX_WIDTH);
+        let viewport_width = self
+            .ai_entity
+            .read(cx)
+            .chat_ui()
+            .overlay_window_size
+            .map(|size| size.0)
+            .unwrap_or(self.tokens.metrics.window_min_width);
+        // External settings reloads use the same responsive limits as pointer
+        // resizing, so persisted pixel widths cannot bypass the live viewport.
+        self.sidebar_width = crate::workspace::sidebar::clamp_responsive_sidebar_width(
+            settings.sidebar_ui.width as f32,
+            viewport_width,
+            self.tokens.metrics.sidebar_min_width,
+            self.tokens.metrics.sidebar_max_width,
+        );
+        let ai_sidebar_width = crate::workspace::sidebar::clamp_responsive_sidebar_width(
+            settings.sidebar_ui.ai_sidebar_width as f32,
+            viewport_width,
+            AI_SIDEBAR_ABSOLUTE_MIN_WIDTH,
+            AI_SIDEBAR_ABSOLUTE_MAX_WIDTH,
+        );
         self.ai_entity.update(cx, |ai, _cx| {
             ai.set_chat_sidebar_width(ai_sidebar_width);
         });

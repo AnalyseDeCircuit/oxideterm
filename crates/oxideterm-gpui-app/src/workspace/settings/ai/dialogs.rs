@@ -154,7 +154,16 @@ impl WorkspaceApp {
                 .ai
                 .custom_system_prompt
                 .clone(),
-            AiTextEditorDialog::Memory => self.settings_store.settings().ai.memory.content.clone(),
+            AiTextEditorDialog::Memory => self
+                .settings_store
+                .settings()
+                .ai
+                .memory
+                .entries
+                .iter()
+                .find(|entry| entry.id == "manual-user-memory")
+                .map(|entry| entry.content.clone())
+                .unwrap_or_else(|| self.settings_store.settings().ai.memory.content.clone()),
         };
         self.prepare_modal_interaction_boundary(cx);
         let tokens = self.tokens;
@@ -230,7 +239,43 @@ impl WorkspaceApp {
         self.edit_settings(
             move |settings| match dialog {
                 AiTextEditorDialog::SystemPrompt => settings.ai.custom_system_prompt = text,
-                AiTextEditorDialog::Memory => settings.ai.memory.content = text,
+                AiTextEditorDialog::Memory => {
+                    let now_ms = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .map(|duration| duration.as_millis().min(i64::MAX as u128) as i64)
+                        .unwrap_or(0);
+                    settings.ai.memory.content.clear();
+                    if let Some(entry) = settings
+                        .ai
+                        .memory
+                        .entries
+                        .iter_mut()
+                        .find(|entry| entry.id == "manual-user-memory")
+                    {
+                        entry.content = text;
+                        entry.updated_at_ms = now_ms;
+                        entry.revision = entry.revision.saturating_add(1);
+                    } else if !text.trim().is_empty() {
+                        settings
+                            .ai
+                            .memory
+                            .entries
+                            .push(oxideterm_settings::AiMemoryEntry {
+                                id: "manual-user-memory".to_string(),
+                                content: text,
+                                scope_kind: oxideterm_settings::AiMemoryScopeKind::User,
+                                scope_id: None,
+                                memory_kind: oxideterm_settings::AiMemoryKind::LongTerm,
+                                source: oxideterm_settings::AiMemorySource::Manual,
+                                created_at_ms: now_ms,
+                                updated_at_ms: now_ms,
+                                last_used_at_ms: None,
+                                use_count: 0,
+                                expires_at_ms: None,
+                                revision: 1,
+                            });
+                    }
+                }
             },
             cx,
         );

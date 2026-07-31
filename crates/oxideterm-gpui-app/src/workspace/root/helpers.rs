@@ -26,6 +26,15 @@ pub(in crate::workspace) fn tab_background_key(kind: &TabKind) -> &'static str {
 }
 
 pub(in crate::workspace) fn current_window_size(window: &Window) -> (f32, f32) {
+    // Pointer and overlay coordinates use the drawable viewport. On Windows,
+    // inner bounds may describe the restored window while it is maximized.
+    let viewport = window.viewport_size();
+    let viewport_size = (f32::from(viewport.width), f32::from(viewport.height));
+    if viewport_size.0 > 0.0 && viewport_size.1 > 0.0 {
+        return viewport_size;
+    }
+    // A newly created native window can briefly report an empty viewport
+    // before its first layout; inner bounds are only a bootstrap fallback.
     let bounds = window.inner_window_bounds().get_bounds();
     (f32::from(bounds.size.width), f32::from(bounds.size.height))
 }

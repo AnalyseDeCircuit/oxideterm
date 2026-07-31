@@ -7,6 +7,19 @@
       "auth_terminal_hint": "Hoàn tất xác thực thiết bị đầu cuối tương tác ở bên ngoài rồi thử lại",
       "auth_unsupported_hint": "Phương thức xác thực này không được hỗ trợ"
     },
+    "background_tasks": {
+      "title": "Tác vụ nền",
+      "run_count": "{{count}} lần chạy",
+      "queued": "Đã xếp hàng",
+      "running": "Đang chạy",
+      "waiting": "Đang chờ",
+      "completed_state": "Đã hoàn tất",
+      "failed_state": "Thất bại",
+      "cancelled": "Đã hủy",
+      "completed": "Tác vụ nền đã hoàn tất",
+      "failed": "Tác vụ nền thất bại",
+      "notification_body": "Đã kết thúc sau {{count}} lần chạy."
+    },
     "chat": {
       "header": "Trò chuyện",
       "get_started": "Bắt đầu với OxideSens",
@@ -261,7 +274,17 @@
         "open_app_surface": "Mở giao diện",
         "get_state": "Đọc trạng thái",
         "remember_preference": "Ghi nhớ tùy chọn",
-        "recall_preferences": "Đọc tùy chọn"
+        "recall_preferences": "Đọc tùy chọn",
+        "create_background_task": "Tạo tác vụ nền",
+        "list_background_tasks": "Liệt kê tác vụ nền",
+        "get_background_task": "Kiểm tra tác vụ nền",
+        "cancel_background_task": "Hủy tác vụ nền",
+        "inspect_host_tools": "Kiểm tra công cụ máy chủ",
+        "control_host_tool": "Điều khiển công cụ máy chủ",
+        "list_forwards": "Liệt kê chuyển tiếp",
+        "manage_forward": "Quản lý chuyển tiếp",
+        "list_plugins": "Liệt kê tiện ích",
+        "manage_plugin": "Quản lý tiện ích"
       },
       "risk_labels": {
         "read": "Chỉ đọc",
@@ -325,8 +348,9 @@
       "command_record": "Command record",
       "policy_reason_tool_disabled": "Công cụ bị tắt bởi chính sách",
       "policy_reason_read_only": "Tác vụ chỉ đọc được tự động cho phép",
+      "policy_reason_read_only_mode": "Chế độ chỉ đọc đã chặn tác vụ không phải đọc",
       "policy_reason_credential": "Tác vụ nhạy cảm thông tin xác thực cần người dùng xử lý",
-      "policy_reason_bypass": "Chế độ Bypass đã cho phép lệnh nguy hiểm",
+      "policy_reason_bypass": "Chế độ bỏ qua đã cho phép lệnh nguy hiểm",
       "policy_reason_destructive": "Lệnh nguy hiểm cần phê duyệt",
       "policy_reason_auto_approved": "Được cho phép bởi chính sách công cụ",
       "policy_reason_requires_approval": "Chính sách công cụ yêu cầu phê duyệt",
@@ -362,26 +386,30 @@
     "tool_status": {
       "enabled": "Công cụ bật",
       "rounds_short": "{{count}}",
+      "tools_short": "{{count}} công cụ",
       "disabled": "Công cụ tắt",
       "disabled_short": "Tắt",
       "disabled_count": "{{count}} đã tắt",
       "open_settings": "Mở cài đặt công cụ AI"
     },
     "safety_mode": {
-      "default_label": "Default",
-      "bypass_label": "Bypass",
+      "default_label": "Mặc định",
+      "read_only_label": "Chỉ đọc",
+      "bypass_label": "Bỏ qua",
       "default_title": "Chế độ an toàn mặc định: lệnh nguy hiểm cần phê duyệt",
-      "bypass_title": "Chế độ Bypass đang bật cho cuộc trò chuyện này",
+      "bypass_title": "Chế độ bỏ qua đang bật cho cuộc trò chuyện này",
       "menu_title": "Chế độ an toàn",
-      "default_mode": "Default mode",
+      "default_mode": "Chế độ mặc định",
       "default_desc": "Lệnh nguy hiểm cần được phê duyệt trước khi chạy.",
-      "bypass_mode": "Bypass mode",
+      "read_only_mode": "Chế độ chỉ đọc",
+      "read_only_desc": "Chỉ cho phép đọc. Các công cụ thực thi, ghi, tương tác và phá hủy đều bị chặn.",
+      "bypass_mode": "Chế độ bỏ qua",
       "bypass_desc": "Bỏ qua phê duyệt lệnh nguy hiểm trong cuộc trò chuyện này sau khi xác nhận.",
       "open_settings": "Mở cài đặt sử dụng công cụ",
-      "confirm_title": "Bật chế độ Bypass?",
+      "confirm_title": "Bật chế độ bỏ qua?",
       "confirm_description": "Chỉ trong cuộc trò chuyện này, lệnh nguy hiểm sẽ chạy mà không cần phê duyệt từng lệnh. Lệnh gọi công cụ vẫn được ghi lại. Mật khẩu, lời nhắc sudo, passphrase và thông tin đăng nhập vẫn phải do bạn xử lý.",
-      "confirm_enable": "Bật Bypass",
-      "confirm_cancel": "Giữ Default"
+      "confirm_enable": "Bật bỏ qua",
+      "confirm_cancel": "Giữ chế độ mặc định"
     },
     "slash": {
       "explain": "Giải thích",

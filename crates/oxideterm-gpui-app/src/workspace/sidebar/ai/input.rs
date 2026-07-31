@@ -1,11 +1,6 @@
 impl WorkspaceApp {
     pub(in crate::workspace) fn active_ai_safety_mode(&self, cx: &App) -> AiSafetyMode {
-        self.ai_entity.read(cx).conversation_state()
-            .active_conversation_id
-            .as_ref()
-            .filter(|id| self.ai_entity.read(cx).safety_bypass_conversations().contains(*id))
-            .map(|_| AiSafetyMode::Bypass)
-            .unwrap_or(AiSafetyMode::Default)
+        self.ai_entity.read(cx).active_conversation_safety_mode()
     }
 
     pub(in crate::workspace) fn render_ai_sidebar_model_bar(
@@ -63,13 +58,18 @@ impl WorkspaceApp {
         let target = WorkspaceImeTarget::AiChatInput;
         let focused = self.ai_entity.read(cx).chat_ui().input_focused;
         let autocomplete_items = self.ai_chat_autocomplete_items(cx);
-        let marked_text = self.marked_text_for_target(target, cx).unwrap_or_default();
+        let draft = self.ai_entity.read(cx).chat_ui().draft.clone();
+        let marked_range = self.ime_marked_virtual_range_for_target(target, cx);
         let selected_range = self.ime_selected_range_for_target(target, cx);
-        let showing_placeholder = self.ai_entity.read(cx).chat_ui().draft.is_empty() && marked_text.is_empty();
+        let showing_placeholder = draft.is_empty() && marked_range.is_none();
         let input_text = if showing_placeholder {
             placeholder
         } else {
-            self.ai_entity.read(cx).chat_ui().draft.clone()
+            // IME composition is a virtual replacement of the draft selection.
+            // Render that projection inline instead of appending marked text as
+            // another visual line below the editor.
+            self.ime_text_with_marked_text_for_target(target, cx)
+                .unwrap_or(draft)
         };
         let caret_offset = selected_range
             .as_ref()
@@ -99,7 +99,10 @@ impl WorkspaceApp {
             let line = visual_line.text;
             let line_len = visual_line.utf16_len();
             let line_range = visual_line.utf16_start..visual_line.utf16_end;
-            let line_selection = if showing_placeholder {
+            let line_marked_range = marked_range
+                .as_ref()
+                .and_then(|marked| ai_input_local_marked_range(marked, &line_range));
+            let line_selection = if showing_placeholder || marked_range.is_some() {
                 None
             } else {
                 selected_range.as_ref().and_then(|selection| {
@@ -108,7 +111,7 @@ impl WorkspaceApp {
                     (start < end).then_some(start - line_range.start..end - line_range.start)
                 })
             };
-            let line_caret = if showing_placeholder {
+            let line_caret = if showing_placeholder || marked_range.is_some() {
                 None
             } else {
                 caret_offset
@@ -137,21 +140,18 @@ impl WorkspaceApp {
                         line_selection,
                         line_caret,
                         self.input_caret.visible(),
+                        line_marked_range,
                     ))
                     .when(
-                        focused && is_last_line && !showing_placeholder && selected_range.is_none(),
+                        focused
+                            && is_last_line
+                            && !showing_placeholder
+                            && selected_range.is_none()
+                            && marked_range.is_none(),
                         |line| {
                             line.child(text_caret(&self.tokens, self.input_caret.visible()))
                         },
                     ),
-            );
-        }
-        if focused && !marked_text.is_empty() {
-            input = input.child(
-                div()
-                    .underline()
-                    .text_color(rgb(self.tokens.ui.text))
-                    .child(marked_text.to_string()),
             );
         }
         let input = input
@@ -413,7 +413,13 @@ window.focus(&this.focus_handle, cx);
         let mode = self.active_ai_safety_mode(cx);
         let icon = match mode {
             AiSafetyMode::Default => LucideIcon::ShieldCheck,
+            AiSafetyMode::ReadOnly => LucideIcon::Shield,
             AiSafetyMode::Bypass => LucideIcon::ShieldAlert,
+        };
+        let label = match mode {
+            AiSafetyMode::Default => self.i18n.t("ai.safety_mode.default_label"),
+            AiSafetyMode::ReadOnly => self.i18n.t("ai.safety_mode.read_only_label"),
+            AiSafetyMode::Bypass => self.i18n.t("ai.safety_mode.bypass_label"),
         };
         div()
             .relative()
@@ -423,11 +429,7 @@ window.focus(&this.focus_handle, cx);
                 ai_safety_indicator(
                     &self.tokens,
                     mode,
-                    if mode == AiSafetyMode::Bypass {
-                        self.i18n.t("ai.safety_mode.bypass_label")
-                    } else {
-                        self.i18n.t("ai.safety_mode.default_label")
-                    },
+                    label,
                     Self::render_lucide_icon(
                         icon,
                         10.0,
@@ -486,6 +488,12 @@ window.focus(&this.focus_handle, cx);
                     )),
             )
             .child(self.render_ai_safety_menu_item(
+                AiSafetyMode::ReadOnly,
+                self.i18n.t("ai.safety_mode.read_only_mode"),
+                self.i18n.t("ai.safety_mode.read_only_desc"),
+                cx,
+            ))
+            .child(self.render_ai_safety_menu_item(
                 AiSafetyMode::Default,
                 self.i18n.t("ai.safety_mode.default_mode"),
                 self.i18n.t("ai.safety_mode.default_desc"),
@@ -513,11 +521,20 @@ window.focus(&this.focus_handle, cx);
                         .py(px(self.tokens.spacing.two))
                         .text_size(px(12.0))
                         .text_color(rgb(self.tokens.ui.text))
-                        .child(Self::render_lucide_icon(
-                            LucideIcon::Settings,
-                            14.0,
-                            rgb(self.tokens.ui.text_muted),
-                        ))
+                        .child(
+                            div()
+                                .flex_none()
+                                .w(px(16.0))
+                                .h(px(16.0))
+                                .flex()
+                                .items_center()
+                                .justify_center()
+                                .child(Self::render_lucide_icon(
+                                    LucideIcon::Settings,
+                                    14.0,
+                                    rgb(self.tokens.ui.text_muted),
+                                )),
+                        )
                         .child(self.render_display_text_with_role(
                             SelectableTextRole::NonSelectable,
                             "ai-safety-menu",
@@ -545,33 +562,48 @@ window.focus(&this.focus_handle, cx);
         description: String,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let bypass = mode == AiSafetyMode::Bypass;
-        let icon = if bypass {
-            LucideIcon::ShieldAlert
-        } else {
-            LucideIcon::ShieldCheck
+        let icon = match mode {
+            AiSafetyMode::Default => LucideIcon::ShieldCheck,
+            AiSafetyMode::ReadOnly => LucideIcon::Shield,
+            AiSafetyMode::Bypass => LucideIcon::ShieldAlert,
         };
+        let bypass = mode == AiSafetyMode::Bypass;
         let title_color = if bypass {
             self.tokens.ui.warning
         } else {
             self.tokens.ui.text
         };
-        let mode_key = if bypass { "bypass" } else { "default" };
+        let mode_key = match mode {
+            AiSafetyMode::Default => "default",
+            AiSafetyMode::ReadOnly => "read-only",
+            AiSafetyMode::Bypass => "bypass",
+        };
         let item = div()
             .flex()
             .items_start()
             .gap(px(self.tokens.spacing.two))
             .px(px(self.tokens.spacing.three))
             .py(px(self.tokens.spacing.two))
-            .child(Self::render_lucide_icon(
-                icon,
-                14.0,
-                rgb(if bypass {
-                    self.tokens.ui.warning
-                } else {
-                    self.tokens.ui.accent
-                }),
-            ))
+            .child(
+                div()
+                    .flex_none()
+                    .w(px(16.0))
+                    .h(px(16.0))
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    // A fixed icon slot keeps every label aligned even when
+                    // individual SVG paths have different optical bounds.
+                    .child(Self::render_lucide_icon(
+                        icon,
+                        14.0,
+                        rgb(if bypass {
+                            self.tokens.ui.warning
+                        } else {
+                            self.tokens.ui.accent
+                        }),
+                    )),
+            )
             .child(
                 div()
                     .min_w_0()
@@ -618,6 +650,7 @@ window.focus(&this.focus_handle, cx);
             move |this, _event, window, cx| {
                 match mode {
                     AiSafetyMode::Default => this.set_ai_safety_mode_default(cx),
+                    AiSafetyMode::ReadOnly => this.set_ai_safety_mode_read_only(cx),
                     AiSafetyMode::Bypass => {
                         if this.active_ai_safety_mode(cx) != AiSafetyMode::Bypass {
                             // The safety menu is itself a floating overlay.
@@ -711,11 +744,16 @@ window.focus(&this.focus_handle, cx);
     ) -> AnyElement {
         let tool_use = &self.settings_store.settings().ai.tool_use;
         let enabled = tool_use.enabled;
-        let max_rounds = tool_use.max_rounds.unwrap_or(10);
+        let tool_policy = ai_tool_use_policy_from_settings(tool_use);
+        let active_tool_count = ai_active_tool_count(
+            enabled,
+            &tool_policy,
+            self.ai_entity.read(cx).mcp_registry(),
+        );
         let label = if enabled {
             self.i18n
-                .t("ai.tool_status.rounds_short")
-                .replace("{{count}}", &max_rounds.to_string())
+                .t("ai.tool_status.tools_short")
+                .replace("{{count}}", &active_tool_count.to_string())
         } else {
             self.i18n.t("ai.tool_status.disabled_short")
         };
@@ -774,17 +812,7 @@ window.focus(&this.focus_handle, cx);
             &self.tokens,
             usage,
             ai_format_tokens(total_tokens),
-            Self::render_lucide_icon(
-                LucideIcon::Info,
-                12.0,
-                rgb(if usage.danger {
-                    self.tokens.ui.error
-                } else if usage.warning {
-                    self.tokens.ui.warning
-                } else {
-                    self.tokens.ui.text_muted
-                }),
-            ),
+            acp_usage.is_none(),
         )
         .when(acp_usage.is_none(), |indicator| indicator.on_mouse_down(
             MouseButton::Left,
@@ -1378,22 +1406,39 @@ pub(in crate::workspace) fn ai_input_line_segments(
     selection_range: Option<std::ops::Range<usize>>,
     caret_offset: Option<usize>,
     caret_visible: bool,
+    marked_range: Option<std::ops::Range<usize>>,
 ) -> Div {
     // Reuse the shared input renderer so caret and selection overlays never
     // split the editable line into separate layout text runs.
-    text_input_value_segments_with_color(
-        tokens,
-        line,
-        false,
-        selection_range,
-        caret_offset,
-        caret_visible,
-        Some(tokens.ui.text),
-    )
+    let segments = if let Some(marked_range) = marked_range {
+        text_input_value_segments_with_marked_range(tokens, line, marked_range)
+    } else {
+        text_input_value_segments_with_color(
+            tokens,
+            line,
+            false,
+            selection_range,
+            caret_offset,
+            caret_visible,
+            Some(tokens.ui.text),
+        )
+    };
+    segments
     .min_w_0()
     .max_w_full()
     .flex()
     .items_center()
+}
+
+pub(in crate::workspace) fn ai_input_local_marked_range(
+    marked_range: &std::ops::Range<usize>,
+    line_range: &std::ops::Range<usize>,
+) -> Option<std::ops::Range<usize>> {
+    // A composition may cross a soft-wrap boundary. Each rendered line owns
+    // only the intersecting UTF-16 segment of the virtual marked range.
+    let start = marked_range.start.max(line_range.start);
+    let end = marked_range.end.min(line_range.end);
+    (start < end).then(|| start - line_range.start..end - line_range.start)
 }
 
 #[derive(Clone, Copy)]
@@ -1645,4 +1690,18 @@ pub(in crate::workspace) fn ai_tool_call_estimated_tokens(tool_call: &serde_json
 
 pub(in crate::workspace) fn ai_estimated_tool_definitions_tokens() -> usize {
     ai_tool_definitions_estimated_tokens(&oxideterm_ai::orchestrator_tool_definitions())
+}
+
+#[cfg(test)]
+mod input_render_tests {
+    use super::ai_input_local_marked_range;
+
+    #[test]
+    fn marked_range_is_projected_once_across_visual_lines() {
+        let marked = 2..6;
+
+        assert_eq!(ai_input_local_marked_range(&marked, &(0..4)), Some(2..4));
+        assert_eq!(ai_input_local_marked_range(&marked, &(4..8)), Some(0..2));
+        assert_eq!(ai_input_local_marked_range(&marked, &(8..12)), None);
+    }
 }

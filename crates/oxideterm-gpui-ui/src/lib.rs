@@ -49,7 +49,7 @@ pub use button::{
     action_chip_foreground, button, button_focus_visible, context_chip, icon_button,
     split_footer_button, tauri_focus_visible_ring, toolbar_button,
 };
-pub use checkbox::{CheckboxOptions, checkbox, checkbox_with};
+pub use checkbox::{CheckboxOptions, CheckboxState, checkbox, checkbox_with, checkbox_with_state};
 pub use command_panel::{CommandPanelOptions, command_panel, command_panel_body};
 pub use confirm::{
     ConfirmDialogAction, ConfirmDialogVariant, ConfirmDialogView, confirm_dialog,

@@ -884,7 +884,13 @@ impl WorkspaceApp {
         settings: &PersistedSettings,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let has_saved_memory = !settings.ai.memory.content.trim().is_empty();
+        let has_saved_memory = !settings.ai.memory.content.trim().is_empty()
+            || settings
+                .ai
+                .memory
+                .entries
+                .iter()
+                .any(|entry| !entry.content.trim().is_empty());
         settings_ai_editor_summary_section(
             &self.tokens,
             settings_ai_icon_heading(
@@ -1524,6 +1530,41 @@ impl WorkspaceApp {
         group: AiToolPolicyGroup,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        let group_state = group.state();
+        let group_for_toggle = group.clone();
+        let next_bulk_value = group.next_bulk_value();
+        let group_checkbox_state = match group_state {
+            AiToolPolicyGroupState::Locked | AiToolPolicyGroupState::AllApproved => {
+                CheckboxState::Checked
+            }
+            AiToolPolicyGroupState::PartiallyApproved => CheckboxState::Indeterminate,
+            AiToolPolicyGroupState::NoneApproved => CheckboxState::Unchecked,
+        };
+        let mut group_control = checkbox_with_state(
+            &self.tokens,
+            String::new(),
+            group_checkbox_state,
+            CheckboxOptions {
+                disabled: group_state == AiToolPolicyGroupState::Locked,
+                ..CheckboxOptions::default()
+            },
+        );
+        if let Some(approved) = next_bulk_value {
+            group_control = group_control.on_mouse_down(
+                MouseButton::Left,
+                cx.listener(move |this, _event, _window, cx| {
+                    let group = group_for_toggle.clone();
+                    this.edit_settings(
+                        move |settings| {
+                            set_ai_tool_policy_group_approval(settings, &group, approved);
+                        },
+                        cx,
+                    );
+                    cx.stop_propagation();
+                }),
+            );
+        }
+
         let mut items = Vec::new();
         for item in group.items {
             let tool_key = item.key.map(str::to_string);
@@ -1564,6 +1605,7 @@ impl WorkspaceApp {
             &self.tokens,
             self.i18n.t(group.title_key),
             self.i18n.t(group.description_key),
+            group_control.into_any_element(),
             items,
         )
     }

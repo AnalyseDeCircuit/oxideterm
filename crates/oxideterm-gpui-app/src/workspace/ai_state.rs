@@ -329,7 +329,7 @@ pub(in crate::workspace) struct AiWorkspaceEntity {
     persistence_store: Option<oxideterm_ai::AiChatPersistenceStore>,
     chat_initialized: bool,
     chat_initialization_error: Option<AiChatInitializationError>,
-    safety_bypass_conversations: HashSet<String>,
+    safety_modes_by_conversation: HashMap<String, oxideterm_gpui_ui::ai::AiSafetyMode>,
     chat_loading: bool,
     next_chat_sequence: u64,
     pending_tool_approvals: HashMap<String, tokio::sync::oneshot::Sender<bool>>,
@@ -1082,7 +1082,7 @@ impl AiWorkspaceEntity {
             persistence_store: None,
             chat_initialized: false,
             chat_initialization_error: None,
-            safety_bypass_conversations: HashSet::new(),
+            safety_modes_by_conversation: HashMap::new(),
             chat_loading: false,
             next_chat_sequence: 0,
             pending_tool_approvals: HashMap::new(),
@@ -1521,8 +1521,15 @@ impl AiWorkspaceEntity {
         self.chat_initialization_error.as_ref()
     }
 
-    pub(in crate::workspace) fn safety_bypass_conversations(&self) -> &HashSet<String> {
-        &self.safety_bypass_conversations
+    pub(in crate::workspace) fn active_conversation_safety_mode(
+        &self,
+    ) -> oxideterm_gpui_ui::ai::AiSafetyMode {
+        self.conversation_state
+            .active_conversation_id
+            .as_ref()
+            .and_then(|id| self.safety_modes_by_conversation.get(id))
+            .copied()
+            .unwrap_or(oxideterm_gpui_ui::ai::AiSafetyMode::Default)
     }
 
     pub(in crate::workspace) fn ensure_chat_initialized(
@@ -1611,7 +1618,7 @@ impl AiWorkspaceEntity {
 
     pub(in crate::workspace) fn delete_conversation(&mut self, id: &str) -> bool {
         self.conversation_state.delete_conversation(id);
-        self.safety_bypass_conversations.remove(id);
+        self.safety_modes_by_conversation.remove(id);
         if self.chat_ui.renaming_conversation_id.as_deref() == Some(id) {
             self.clear_conversation_rename();
         }
@@ -1631,19 +1638,24 @@ impl AiWorkspaceEntity {
 
     pub(in crate::workspace) fn clear_conversations(&mut self) {
         self.conversation_state.clear_conversations();
-        self.safety_bypass_conversations.clear();
+        self.safety_modes_by_conversation.clear();
         self.clear_conversation_rename();
     }
 
-    pub(in crate::workspace) fn set_active_conversation_safety_bypass(&mut self, bypass: bool) {
+    pub(in crate::workspace) fn set_active_conversation_safety_mode(
+        &mut self,
+        mode: oxideterm_gpui_ui::ai::AiSafetyMode,
+    ) {
         let Some(conversation_id) = self.conversation_state.active_conversation_id.as_ref() else {
             return;
         };
-        if bypass {
-            self.safety_bypass_conversations
-                .insert(conversation_id.clone());
+        if mode == oxideterm_gpui_ui::ai::AiSafetyMode::Default {
+            self.safety_modes_by_conversation.remove(conversation_id);
         } else {
-            self.safety_bypass_conversations.remove(conversation_id);
+            // Non-default safety modes are scoped to one conversation and are
+            // deliberately discarded with that conversation.
+            self.safety_modes_by_conversation
+                .insert(conversation_id.clone(), mode);
         }
     }
 
@@ -5567,7 +5579,12 @@ mod entity_tests {
                     suggestions: Vec::new(),
                 },
             );
-            entity.set_active_conversation_safety_bypass(true);
+            entity
+                .set_active_conversation_safety_mode(oxideterm_gpui_ui::ai::AiSafetyMode::ReadOnly);
+            assert_eq!(
+                entity.active_conversation_safety_mode(),
+                oxideterm_gpui_ui::ai::AiSafetyMode::ReadOnly
+            );
             entity.set_chat_loading(true);
             assert_eq!(entity.next_chat_id(200), "chat-200-1");
 
@@ -5583,7 +5600,10 @@ mod entity_tests {
             );
 
             assert!(!entity.delete_conversation("conversation-a"));
-            assert!(entity.safety_bypass_conversations().is_empty());
+            assert_eq!(
+                entity.active_conversation_safety_mode(),
+                oxideterm_gpui_ui::ai::AiSafetyMode::Default
+            );
         });
     }
 

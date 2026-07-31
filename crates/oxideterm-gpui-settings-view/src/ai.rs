@@ -741,14 +741,14 @@ pub fn settings_ai_tool_expanded_body(
 }
 
 pub fn settings_ai_tool_policy_grid(groups: Vec<AnyElement>) -> AnyElement {
-    // Policy categories share one vertical reading order so related approval
-    // controls do not jump between columns at different viewport widths.
+    // A compact vertical hierarchy keeps policy families scannable without
+    // introducing a second modal or nested card surface.
     div()
         .w_full()
         .min_w(px(0.0))
         .flex()
         .flex_col()
-        .gap(px(24.0))
+        .gap(px(16.0))
         .children(groups)
         .into_any_element()
 }
@@ -763,7 +763,7 @@ pub fn settings_ai_tool_policy_item(
     div()
         .w_full()
         .min_w(px(0.0))
-        .py(px(10.0))
+        .py(px(8.0))
         .border_b_1()
         .border_color(rgba((tokens.ui.border << 8) | AI_TOOL_POLICY_DIVIDER_ALPHA))
         .flex()
@@ -771,8 +771,9 @@ pub fn settings_ai_tool_policy_item(
         .justify_between()
         .gap(px(12.0))
         .text_size(px(tokens.metrics.ui_text_xs))
+        .line_height(px(18.0))
         .text_color(rgb(tokens.ui.text_muted))
-        .child(div().min_w(px(0.0)).flex_1().truncate().child(label))
+        .child(div().min_w(px(0.0)).flex_1().child(label))
         .child(div().flex_none().child(control))
         .into_any_element()
 }
@@ -781,6 +782,7 @@ pub fn settings_ai_tool_policy_group(
     tokens: &ThemeTokens,
     title: String,
     description: String,
+    control: AnyElement,
     items: Vec<AnyElement>,
 ) -> AnyElement {
     // The parent tool-use section owns the surface chrome. Groups contribute
@@ -792,10 +794,20 @@ pub fn settings_ai_tool_policy_group(
         .flex_col()
         .child(
             div()
-                .text_size(px(tokens.metrics.ui_text_sm))
-                .font_weight(gpui::FontWeight::MEDIUM)
-                .text_color(rgb(tokens.ui.text))
-                .child(title),
+                .flex()
+                .items_center()
+                .justify_between()
+                .gap(px(12.0))
+                .child(
+                    div()
+                        .min_w(px(0.0))
+                        .flex_1()
+                        .text_size(px(tokens.metrics.ui_text_sm))
+                        .font_weight(gpui::FontWeight::MEDIUM)
+                        .text_color(rgb(tokens.ui.text))
+                        .child(title),
+                )
+                .child(div().flex_none().child(control)),
         )
         .child(
             div()
@@ -805,7 +817,14 @@ pub fn settings_ai_tool_policy_group(
                 .text_color(rgb(tokens.ui.text_muted))
                 .child(description),
         )
-        .child(div().mt(px(8.0)).flex().flex_col().children(items))
+        .child(
+            div()
+                .mt(px(6.0))
+                .ml(px(16.0))
+                .flex()
+                .flex_col()
+                .children(items),
+        )
         .into_any_element()
 }
 

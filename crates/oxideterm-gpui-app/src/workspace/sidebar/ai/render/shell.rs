@@ -127,6 +127,9 @@ impl WorkspaceApp {
                 .when_some(self.render_ai_compaction_notice(cx), |panel, notice| {
                     panel.child(notice)
                 })
+                .when_some(self.render_ai_background_tasks(cx), |panel, tasks| {
+                    panel.child(tasks)
+                })
                 .child(
                     div()
                         .w_full()

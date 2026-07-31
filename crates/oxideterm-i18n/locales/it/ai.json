@@ -7,6 +7,19 @@
       "auth_terminal_hint": "Completa esternamente l’autenticazione interattiva del terminale, quindi riprova",
       "auth_unsupported_hint": "Questo metodo di autenticazione non è supportato"
     },
+    "background_tasks": {
+      "title": "Attività in background",
+      "run_count": "{{count}} esecuzioni",
+      "queued": "In coda",
+      "running": "In esecuzione",
+      "waiting": "In attesa",
+      "completed_state": "Completata",
+      "failed_state": "Non riuscita",
+      "cancelled": "Annullata",
+      "completed": "Attività in background completata",
+      "failed": "Attività in background non riuscita",
+      "notification_body": "Terminata dopo {{count}} esecuzioni."
+    },
     "chat": {
       "header": "Chat",
       "get_started": "Inizia con OxideSens",
@@ -261,7 +274,17 @@
         "open_app_surface": "Apri vista",
         "get_state": "Leggi stato",
         "remember_preference": "Memorizza preferenza",
-        "recall_preferences": "Leggi preferenze"
+        "recall_preferences": "Leggi preferenze",
+        "create_background_task": "Crea attività in background",
+        "list_background_tasks": "Elenca attività in background",
+        "get_background_task": "Esamina attività in background",
+        "cancel_background_task": "Annulla attività in background",
+        "inspect_host_tools": "Esamina strumenti host",
+        "control_host_tool": "Controlla strumento host",
+        "list_forwards": "Elenca inoltri",
+        "manage_forward": "Gestisci inoltro",
+        "list_plugins": "Elenca plugin",
+        "manage_plugin": "Gestisci plugin"
       },
       "risk_labels": {
         "read": "Lettura",
@@ -325,8 +348,9 @@
       "command_record": "Command record",
       "policy_reason_tool_disabled": "Strumento disattivato dalla policy",
       "policy_reason_read_only": "Azione in sola lettura consentita automaticamente",
+      "policy_reason_read_only_mode": "La modalità di sola lettura ha bloccato un'azione non di lettura",
       "policy_reason_credential": "Azione sensibile alle credenziali richiede l’utente",
-      "policy_reason_bypass": "La modalità Bypass ha consentito un comando pericoloso",
+      "policy_reason_bypass": "La modalità di aggiramento ha consentito un comando pericoloso",
       "policy_reason_destructive": "Comando pericoloso richiede approvazione",
       "policy_reason_auto_approved": "Consentito dalla policy degli strumenti",
       "policy_reason_requires_approval": "La policy degli strumenti richiede approvazione",
@@ -362,26 +386,30 @@
     "tool_status": {
       "enabled": "Strumenti attivi",
       "rounds_short": "{{count}}",
+      "tools_short": "{{count}} strumenti",
       "disabled": "Strumenti disattivati",
       "disabled_short": "Off",
       "disabled_count": "{{count}} disattivati",
       "open_settings": "Apri impostazioni strumenti IA"
     },
     "safety_mode": {
-      "default_label": "Default",
-      "bypass_label": "Bypass",
+      "default_label": "Predefinita",
+      "read_only_label": "Sola lettura",
+      "bypass_label": "Aggira",
       "default_title": "Modalità sicura predefinita: i comandi pericolosi richiedono approvazione",
-      "bypass_title": "La modalità Bypass è attiva per questa chat",
+      "bypass_title": "La modalità di aggiramento è attiva per questa chat",
       "menu_title": "Modalità sicurezza",
-      "default_mode": "Default mode",
+      "default_mode": "Modalità predefinita",
       "default_desc": "I comandi pericolosi richiedono approvazione prima dell'esecuzione.",
-      "bypass_mode": "Bypass mode",
+      "read_only_mode": "Modalità di sola lettura",
+      "read_only_desc": "Consente solo letture. Esecuzione, scrittura, interazione e strumenti distruttivi vengono bloccati.",
+      "bypass_mode": "Modalità di aggiramento",
       "bypass_desc": "Salta le approvazioni dei comandi pericolosi in questa chat dopo conferma.",
       "open_settings": "Apri impostazioni uso strumenti",
-      "confirm_title": "Attivare la modalità Bypass?",
+      "confirm_title": "Attivare la modalità di aggiramento?",
       "confirm_description": "Solo per questa chat, i comandi pericolosi verranno eseguiti senza approvazione singola. Le chiamate agli strumenti saranno comunque registrate. Password, prompt sudo, passphrase e credenziali devono essere gestiti da te.",
-      "confirm_enable": "Attiva Bypass",
-      "confirm_cancel": "Mantieni Default"
+      "confirm_enable": "Attiva aggiramento",
+      "confirm_cancel": "Mantieni la modalità predefinita"
     },
     "slash": {
       "explain": "Spiega",

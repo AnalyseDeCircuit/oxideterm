@@ -7,6 +7,19 @@
       "auth_terminal_hint": "外部で対話型ターミナル認証を完了してから再試行してください",
       "auth_unsupported_hint": "この認証方式はサポートされていません"
     },
+    "background_tasks": {
+      "title": "バックグラウンドタスク",
+      "run_count": "{{count}} 回実行",
+      "queued": "待機中",
+      "running": "実行中",
+      "waiting": "次回待機中",
+      "completed_state": "完了",
+      "failed_state": "失敗",
+      "cancelled": "キャンセル済み",
+      "completed": "バックグラウンドタスクが完了しました",
+      "failed": "バックグラウンドタスクが失敗しました",
+      "notification_body": "{{count}} 回の実行後に終了しました。"
+    },
     "chat": {
       "header": "チャット",
       "get_started": "OxideSens を始める",
@@ -261,7 +274,17 @@
         "open_app_surface": "画面を開く",
         "get_state": "状態を読む",
         "remember_preference": "設定を記憶",
-        "recall_preferences": "記憶を読む"
+        "recall_preferences": "記憶を読む",
+        "create_background_task": "バックグラウンドタスクを作成",
+        "list_background_tasks": "バックグラウンドタスクを一覧表示",
+        "get_background_task": "バックグラウンドタスクを確認",
+        "cancel_background_task": "バックグラウンドタスクをキャンセル",
+        "inspect_host_tools": "ホストツールを確認",
+        "control_host_tool": "ホストツールを操作",
+        "list_forwards": "転送を一覧表示",
+        "manage_forward": "転送を管理",
+        "list_plugins": "プラグインを一覧表示",
+        "manage_plugin": "プラグインを管理"
       },
       "risk_labels": {
         "read": "読み取り",
@@ -325,8 +348,9 @@
       "command_record": "Command record",
       "policy_reason_tool_disabled": "ポリシーでツールが無効",
       "policy_reason_read_only": "読み取り専用操作は自動許可",
+      "policy_reason_read_only_mode": "読み取り専用モードが読み取り以外の操作を拒否",
       "policy_reason_credential": "認証情報に関わる操作はユーザー操作が必要",
-      "policy_reason_bypass": "Bypass モードで危険コマンドを許可",
+      "policy_reason_bypass": "承認省略モードで危険コマンドを許可",
       "policy_reason_destructive": "危険コマンドには承認が必要",
       "policy_reason_auto_approved": "ツールポリシーで許可",
       "policy_reason_requires_approval": "ツールポリシーで承認が必要",
@@ -362,26 +386,30 @@
     "tool_status": {
       "enabled": "ツール有効",
       "rounds_short": "{{count}}",
+      "tools_short": "{{count}} ツール",
       "disabled": "ツール無効",
       "disabled_short": "無効",
       "disabled_count": "{{count}} 個無効",
       "open_settings": "AIツール設定を開く"
     },
     "safety_mode": {
-      "default_label": "Default",
-      "bypass_label": "Bypass",
+      "default_label": "既定",
+      "read_only_label": "読み取り専用",
+      "bypass_label": "承認省略",
       "default_title": "既定の安全モード: 危険なコマンドには承認が必要です",
-      "bypass_title": "このチャットで Bypass モードが有効です",
+      "bypass_title": "このチャットで承認省略モードが有効です",
       "menu_title": "安全モード",
-      "default_mode": "Default mode",
+      "default_mode": "既定モード",
       "default_desc": "危険なコマンドは実行前に承認が必要です。",
-      "bypass_mode": "Bypass mode",
+      "read_only_mode": "読み取り専用モード",
+      "read_only_desc": "読み取りだけを許可します。実行、書き込み、対話操作、破壊的なツールは拒否されます。",
+      "bypass_mode": "承認省略モード",
       "bypass_desc": "確認後、このチャットの危険なコマンド承認を省略します。",
       "open_settings": "ツール使用設定を開く",
-      "confirm_title": "Bypass モードを有効にしますか？",
+      "confirm_title": "承認省略モードを有効にしますか？",
       "confirm_description": "このチャットだけで、危険なコマンドが個別承認なしで実行されます。ツール呼び出しは記録されます。パスワード、sudo プロンプト、パスフレーズ、認証情報は引き続きあなたが入力する必要があります。",
-      "confirm_enable": "Bypass を有効化",
-      "confirm_cancel": "Default のまま"
+      "confirm_enable": "承認省略を有効化",
+      "confirm_cancel": "既定モードのまま"
     },
     "slash": {
       "explain": "説明",
