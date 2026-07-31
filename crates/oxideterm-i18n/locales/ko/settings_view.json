@@ -871,7 +871,7 @@
       "tool_use_disabled_tools_hint": "이 도구들은 OxideSens에 노출되지 않습니다. 이 상태는 보통 이전 채팅 내 도구 스위처나 보안 디버깅에서 온 것입니다.",
       "tool_use_restore_disabled_tools": "모든 도구 복원",
       "tool_use_max_rounds": "최대 도구 라운드",
-      "tool_use_max_rounds_hint": "OxideSens가 루프를 중지하기 전, 답변 하나에서 허용되는 도구/모델 왕복 횟수입니다. 기본값: 10.",
+      "tool_use_max_rounds_hint": "OxideSens가 루프를 중지하기 전, 답변 하나에서 허용되는 도구/모델 왕복 횟수입니다. 기본값: 25.",
       "tool_use_policy_summary": "읽기 전용 작업은 자동으로 허용됩니다. 터미널, 리소스, 백그라운드, 호스트, 포워딩, 플러그인 변경은 아래 정책을 따릅니다.",
       "tool_policy_read_title": "읽기 전용 탐색",
       "tool_policy_read_desc": "대상 탐색, 터미널 관찰, 백그라운드 작업 확인, Host Tools, 포트 포워딩, 플러그인 목록은 항상 자동으로 허용됩니다.",

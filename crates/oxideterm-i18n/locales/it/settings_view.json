@@ -871,7 +871,7 @@
       "tool_use_disabled_tools_hint": "Questi strumenti non saranno esposti a OxideSens. Questo stato di solito proviene dal vecchio selettore strumenti nella chat o da debug di sicurezza.",
       "tool_use_restore_disabled_tools": "Ripristina tutti gli strumenti",
       "tool_use_max_rounds": "Round massimi degli strumenti",
-      "tool_use_max_rounds_hint": "Numero massimo di round strumento/modello per risposta prima che OxideSens fermi il ciclo. Predefinito: 10.",
+      "tool_use_max_rounds_hint": "Numero massimo di round strumento/modello per risposta prima che OxideSens fermi il ciclo. Predefinito: 25.",
       "tool_use_policy_summary": "Le azioni di sola lettura sono automatiche; le modifiche a terminale, risorse, attività, host, inoltri e plugin seguono la politica qui sotto.",
       "tool_policy_read_title": "Rilevamento in sola lettura",
       "tool_policy_read_desc": "Rilevamento target, osservazione del terminale, attività in background, Host Tools, inoltri ed elenchi plugin sono sempre consentiti.",

@@ -871,7 +871,7 @@
       "tool_use_disabled_tools_hint": "These tools will not be exposed to OxideSens. This state usually comes from the legacy in-chat tool switcher or safety debugging.",
       "tool_use_restore_disabled_tools": "Restore all tools",
       "tool_use_max_rounds": "Max Tool Rounds",
-      "tool_use_max_rounds_hint": "Maximum tool/model round trips per reply before OxideSens stops the loop. Default: 10.",
+      "tool_use_max_rounds_hint": "Maximum tool/model round trips per reply before OxideSens stops the loop. Default: 25.",
       "tool_use_max_calls_per_round": "Max Tool Calls Per Round",
       "tool_use_max_calls_per_round_hint": "Maximum tool calls the model may request in one round. Default: 8.",
       "tool_use_policy_summary": "Read-only actions are automatic; terminal, resource, background, host, forwarding, and plugin changes follow the policy below.",

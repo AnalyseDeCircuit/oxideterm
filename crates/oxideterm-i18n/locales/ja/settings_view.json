@@ -871,7 +871,7 @@
       "tool_use_disabled_tools_hint": "これらのツールは OxideSens に公開されません。この状態は通常、旧チャット内ツール切り替えまたは安全性デバッグに由来します。",
       "tool_use_restore_disabled_tools": "すべてのツールを復元",
       "tool_use_max_rounds": "最大ツールラウンド数",
-      "tool_use_max_rounds_hint": "OxideSens がループを停止するまでの、1 回の返信あたりのツール/モデル往復の上限です。既定値: 10。",
+      "tool_use_max_rounds_hint": "OxideSens がループを停止するまでの、1 回の返信あたりのツール/モデル往復の上限です。既定値: 25。",
       "tool_use_policy_summary": "読み取り専用アクションは自動です。ターミナル、リソース、バックグラウンド、ホスト、転送、プラグインの変更は下のポリシーに従います。",
       "tool_policy_read_title": "読み取り専用の検出",
       "tool_policy_read_desc": "ターゲット検出、ターミナル観察、バックグラウンドタスクの確認、Host Tools、ポート転送、プラグイン一覧は常に自動許可されます。",

@@ -871,7 +871,7 @@
       "tool_use_disabled_tools_hint": "这些工具不会暴露给 OxideSens。此状态通常来自旧版聊天内工具开关或安全调试。",
       "tool_use_restore_disabled_tools": "恢复所有工具",
       "tool_use_max_rounds": "最大工具轮数",
-      "tool_use_max_rounds_hint": "每次回复中允许的工具/模型往返上限，达到后 OxideSens 会停止循环。默认：10。",
+      "tool_use_max_rounds_hint": "每次回复中允许的工具/模型往返上限，达到后 OxideSens 会停止循环。默认：25。",
       "tool_use_max_calls_per_round": "每轮最大工具调用数",
       "tool_use_max_calls_per_round_hint": "模型在单轮中最多可以请求的工具调用数量。默认：8。",
       "tool_use_policy_summary": "只读操作自动允许；终端、资源、后台任务、主机、转发和插件修改遵循下方策略。",

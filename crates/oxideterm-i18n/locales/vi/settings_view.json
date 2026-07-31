@@ -871,7 +871,7 @@
       "tool_use_disabled_tools_hint": "Các công cụ này sẽ không được hiển thị cho OxideSens. Trạng thái này thường đến từ bộ chuyển công cụ cũ trong chat hoặc gỡ lỗi an toàn.",
       "tool_use_restore_disabled_tools": "Khôi phục tất cả công cụ",
       "tool_use_max_rounds": "Số vòng công cụ tối đa",
-      "tool_use_max_rounds_hint": "Số lượt công cụ/mô hình tối đa cho mỗi câu trả lời trước khi OxideSens dừng vòng lặp. Mặc định: 10.",
+      "tool_use_max_rounds_hint": "Số lượt công cụ/mô hình tối đa cho mỗi câu trả lời trước khi OxideSens dừng vòng lặp. Mặc định: 25.",
       "tool_use_policy_summary": "Tác vụ chỉ đọc được tự động cho phép; thay đổi terminal, tài nguyên, tác vụ nền, máy chủ, chuyển tiếp và plugin tuân theo chính sách bên dưới.",
       "tool_policy_read_title": "Khám phá chỉ đọc",
       "tool_policy_read_desc": "Khám phá mục tiêu, quan sát terminal, xem tác vụ nền, Host Tools, chuyển tiếp cổng và danh sách plugin luôn được tự động cho phép.",
