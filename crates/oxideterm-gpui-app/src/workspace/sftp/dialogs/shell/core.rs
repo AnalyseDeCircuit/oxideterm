@@ -476,8 +476,8 @@ impl WorkspaceApp {
                 .child(self.render_sftp_text_button(
                     self.i18n.t("sftp.dialogs.cancel"),
                     false,
-                    cx.listener(move |this, _event, _window, cx| {
-                        this.cancel_sftp_editor_close_confirm(name.clone(), cx);
+                    cx.listener(move |this, _event, window, cx| {
+                        this.cancel_sftp_editor_close_confirm(name.clone(), window, cx);
                         cx.stop_propagation();
                         cx.notify();
                     }),

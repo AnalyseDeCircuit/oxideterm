@@ -462,7 +462,7 @@ impl WorkspaceApp {
                     .active_tab(cx)
                     .is_some_and(|tab| tab.kind == TabKind::Sftp)
                 {
-                    let _ = this.handle_sftp_key(event, cx);
+                    let _ = this.handle_sftp_key(event, window, cx);
                     window.prevent_default();
                     cx.stop_propagation();
                 } else if this

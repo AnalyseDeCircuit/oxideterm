@@ -1114,6 +1114,12 @@ impl SftpWorkspaceEntity {
         self.dialog.is_some()
     }
 
+    pub(in crate::workspace) fn dialog_phase(&self) -> oxideterm_gpui_ui::motion::ExitPhase {
+        // Root keyboard routing must stop treating a fading editor as an
+        // interactive child before its payload is finally retired.
+        self.dialog_presence.phase()
+    }
+
     pub(in crate::workspace::sftp) fn start_folder_picker(
         &mut self,
         selection: impl std::future::Future<Output = Option<String>> + 'static,

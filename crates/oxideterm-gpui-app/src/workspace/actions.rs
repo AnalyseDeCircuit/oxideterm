@@ -719,7 +719,7 @@ impl WorkspaceApp {
             .active_tab(cx)
             .is_some_and(|tab| tab.kind == TabKind::Sftp)
         {
-            let _ = self.handle_sftp_key(event, cx);
+            let _ = self.handle_sftp_key(event, window, cx);
             return;
         }
 

@@ -13,10 +13,10 @@ impl WorkspaceApp {
         dismissible_dialog_backdrop()
             .on_mouse_down(
                 MouseButton::Left,
-                cx.listener(move |this, _event, _window, cx| {
+                cx.listener(move |this, _event, window, cx| {
                     // Tauri IDE/SFTP save-confirm dialogs close through
                     // onOpenChange(false) -> cancel, never discard.
-                    this.cancel_sftp_editor_close_confirm(backdrop_name.clone(), cx);
+                    this.cancel_sftp_editor_close_confirm(backdrop_name.clone(), window, cx);
                     cx.stop_propagation();
                     cx.notify();
                 }),
@@ -104,8 +104,12 @@ impl WorkspaceApp {
                                     .child(self.i18n.t("sftp.dialogs.cancel"))
                                     .on_mouse_down(
                                         MouseButton::Left,
-                                        cx.listener(move |this, _event, _window, cx| {
-                                            this.cancel_sftp_editor_close_confirm(name.clone(), cx);
+                                        cx.listener(move |this, _event, window, cx| {
+                                            this.cancel_sftp_editor_close_confirm(
+                                                name.clone(),
+                                                window,
+                                                cx,
+                                            );
                                             cx.stop_propagation();
                                             cx.notify();
                                         }),

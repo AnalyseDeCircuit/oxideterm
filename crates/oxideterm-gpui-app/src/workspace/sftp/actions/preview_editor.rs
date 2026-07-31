@@ -155,11 +155,8 @@ impl WorkspaceApp {
                 sftp.sync_preview_editor_state(&editor, cx);
             })
         });
-        let focus_handle = editor.read(cx).focus_handle(cx);
-        window.focus(&focus_handle, cx);
-
         self.sftp_view.update(cx, |sftp, cx| {
-            sftp.preview_editor = Some(editor);
+            sftp.preview_editor = Some(editor.clone());
             sftp.preview_editor_observer = Some(observer);
             sftp.preview_editor_initial_content = initial_editor_text.clone();
             sftp.preview_editor_observed_content = initial_editor_text;
@@ -178,6 +175,10 @@ impl WorkspaceApp {
             });
             cx.notify();
         });
+        // Commit modal ownership before focusing so root key routing observes
+        // the editor and its FocusId in the same interaction.
+        let focus_handle = editor.read(cx).focus_handle(cx);
+        window.focus(&focus_handle, cx);
     }
 
     pub(in crate::workspace::sftp) fn save_sftp_preview_editor(&mut self, cx: &mut Context<Self>) {
@@ -227,12 +228,20 @@ impl WorkspaceApp {
     pub(in crate::workspace::sftp) fn cancel_sftp_editor_close_confirm(
         &mut self,
         name: String,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.sftp_view.update(cx, |sftp, cx| {
+        let editor = self.sftp_view.update(cx, |sftp, cx| {
             sftp.set_dialog(SftpDialog::Editor { name });
             cx.notify();
+            sftp.preview_editor.clone()
         });
+        if let Some(editor) = editor {
+            // Cancel returns ownership to the same document editor for mouse,
+            // backdrop, and keyboard dismissal paths.
+            let focus_handle = editor.read(cx).focus_handle(cx);
+            window.focus(&focus_handle, cx);
+        }
     }
 
     pub(in crate::workspace::sftp) fn discard_sftp_editor_changes(

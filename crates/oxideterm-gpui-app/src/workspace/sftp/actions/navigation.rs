@@ -4,6 +4,7 @@ impl WorkspaceApp {
     pub(in crate::workspace) fn handle_sftp_key(
         &mut self,
         event: &KeyDownEvent,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
         let key = event.keystroke.key.as_str();
@@ -35,7 +36,7 @@ impl WorkspaceApp {
             match key {
                 "escape" => {
                     if let Some(SftpDialog::EditorCloseConfirm { name }) = dialog {
-                        self.cancel_sftp_editor_close_confirm(name, cx);
+                        self.cancel_sftp_editor_close_confirm(name, window, cx);
                     } else {
                         self.close_sftp_dialog(cx);
                     }

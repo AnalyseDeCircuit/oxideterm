@@ -17,6 +17,7 @@ pub(in crate::workspace) enum ActiveTabWindowModalKind {
     SessionManagerDelete,
     ForwardEdit,
     ForwardDelete,
+    SftpEditor,
     SftpDialog,
     FileManagerDialog,
 }
@@ -253,7 +254,16 @@ impl ActiveWindowModalOwner {
 
     fn key_route(self, key: &str) -> ActiveWindowModalKeyRoute {
         let visible = self.phase() == oxideterm_gpui_ui::motion::ExitPhase::Visible;
-        let focused_child_owns_key = visible && self == Self::AiTextEditor && key != "escape";
+        let focused_child_owns_key = visible
+            && (self == Self::AiTextEditor
+                || matches!(
+                    self,
+                    Self::ActiveTabWindowModal {
+                        kind: ActiveTabWindowModalKind::SftpEditor,
+                        ..
+                    }
+                ))
+            && key != "escape";
         ActiveWindowModalKeyRoute {
             // Document editors must receive navigation and mutation keys at
             // their focused element; the modal keeps Escape at the capture layer.
@@ -732,13 +742,18 @@ impl WorkspaceApp {
                 }
             }
             TabKind::Sftp => {
-                self.sftp_view
-                    .read(cx)
-                    .dialog_is_open()
-                    .then_some(ActiveTabWindowModalSnapshot {
-                        kind: ActiveTabWindowModalKind::SftpDialog,
-                        phase: visible,
-                    })
+                let sftp = self.sftp_view.read(cx);
+                sftp.dialog_is_open().then(|| ActiveTabWindowModalSnapshot {
+                    kind: if matches!(
+                        sftp.dialog(),
+                        Some(crate::workspace::sftp::SftpDialog::Editor { .. })
+                    ) {
+                        ActiveTabWindowModalKind::SftpEditor
+                    } else {
+                        ActiveTabWindowModalKind::SftpDialog
+                    },
+                    phase: sftp.dialog_phase(),
+                })
             }
             TabKind::FileManager => self.file_manager.read(cx).dialog.is_some().then_some(
                 ActiveTabWindowModalSnapshot {
@@ -1012,7 +1027,9 @@ impl WorkspaceApp {
             ActiveTabWindowModalKind::ForwardDelete => {
                 self.handle_forward_delete_confirm_key(event, cx)
             }
-            ActiveTabWindowModalKind::SftpDialog => self.handle_sftp_key(event, cx),
+            ActiveTabWindowModalKind::SftpEditor | ActiveTabWindowModalKind::SftpDialog => {
+                self.handle_sftp_key(event, window, cx)
+            }
             ActiveTabWindowModalKind::FileManagerDialog => self.handle_file_manager_key(event, cx),
         }
     }
@@ -1240,6 +1257,31 @@ mod tests {
         let escape = owner.key_route("escape");
         assert!(escape.consumes_key());
         assert_eq!(escape.dispatch_owner, Some(owner));
+    }
+
+    #[test]
+    fn sftp_editor_yields_document_keys_only_while_visible() {
+        let visible_owner = ActiveWindowModalOwner::ActiveTabWindowModal {
+            kind: ActiveTabWindowModalKind::SftpEditor,
+            phase: VISIBLE,
+        };
+
+        for key in ["enter", "backspace", "left", "tab", "x"] {
+            let route = visible_owner.key_route(key);
+            assert!(!route.consumes_key(), "{key} must reach the focused editor");
+            assert_eq!(route.dispatch_owner, None);
+        }
+        let escape = visible_owner.key_route("escape");
+        assert!(escape.consumes_key());
+        assert_eq!(escape.dispatch_owner, Some(visible_owner));
+
+        let exiting_owner = ActiveWindowModalOwner::ActiveTabWindowModal {
+            kind: ActiveTabWindowModalKind::SftpEditor,
+            phase: EXITING,
+        };
+        let exiting_key = exiting_owner.key_route("x");
+        assert!(exiting_key.consumes_key());
+        assert_eq!(exiting_key.dispatch_owner, None);
     }
 
     #[test]
