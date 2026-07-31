@@ -5,9 +5,10 @@ use std::{
 
 use gpui::{App, Context, Window};
 use oxideterm_connections::{
-    ConnectionTerminalOptions, SaveConnectionRequest, SaveRemoteDesktopProfileRequest,
-    SaveSerialProfileRequest, SaveTelnetProfileRequest, SavedConnectionRuntimeSecrets,
-    SavedUpstreamProxyProtocol, SecretString, first_available_default_key_path,
+    ConnectionTerminalOptions, ConnectionX11ForwardingMode, ConnectionX11ForwardingOptions,
+    SaveConnectionRequest, SaveRemoteDesktopProfileRequest, SaveSerialProfileRequest,
+    SaveTelnetProfileRequest, SavedConnectionRuntimeSecrets, SavedUpstreamProxyProtocol,
+    SecretString, first_available_default_key_path,
 };
 use oxideterm_remote_desktop::{
     RemoteDesktopConnectionProfile, RemoteDesktopEndpoint, RemoteDesktopProtocol,
@@ -19,7 +20,7 @@ use oxideterm_ssh::{
     NativeSessionTreeConnectPlan, NativeSessionTreeConnectStep, NodeId, NodeReadiness,
     NodeTreeExpansion, ProxyHopConfig, SshConfig, SshPromptError, SshPromptHandler,
     SshTransportClient, UpstreamProxyAuth, UpstreamProxyConfig, UpstreamProxyProtocol,
-    check_host_key_with_upstream_proxy,
+    X11ForwardPolicy, X11ForwardTrust, check_host_key_with_upstream_proxy,
 };
 use tokio::sync::oneshot;
 
@@ -52,6 +53,46 @@ mod conversion;
 mod save;
 
 use conversion::*;
+
+fn x11_forward_policy(options: ConnectionX11ForwardingOptions) -> Option<X11ForwardPolicy> {
+    if !options.enabled {
+        return None;
+    }
+    match options.mode {
+        ConnectionX11ForwardingMode::Trusted => Some(X11ForwardPolicy::trusted()),
+        ConnectionX11ForwardingMode::Untrusted if options.untrusted_timeout_seconds == 0 => {
+            Some(X11ForwardPolicy::untrusted().without_timeout())
+        }
+        ConnectionX11ForwardingMode::Untrusted => Some(
+            X11ForwardPolicy::untrusted()
+                .with_timeout_millis(u64::from(options.untrusted_timeout_seconds) * 1_000),
+        ),
+    }
+}
+
+fn connection_x11_options(policy: Option<X11ForwardPolicy>) -> ConnectionX11ForwardingOptions {
+    let Some(policy) = policy else {
+        return ConnectionX11ForwardingOptions::default();
+    };
+    let mode = match policy.trust {
+        X11ForwardTrust::Trusted => ConnectionX11ForwardingMode::Trusted,
+        X11ForwardTrust::Untrusted => ConnectionX11ForwardingMode::Untrusted,
+    };
+    let default_timeout = ConnectionX11ForwardingOptions::default().untrusted_timeout_seconds;
+    let untrusted_timeout_seconds = match (policy.trust, policy.timeout_millis) {
+        (X11ForwardTrust::Untrusted, None) => 0,
+        (_, Some(value)) => u32::try_from(value / 1_000)
+            .ok()
+            .filter(|value| *value > 0)
+            .unwrap_or(default_timeout),
+        (X11ForwardTrust::Trusted, None) => default_timeout,
+    };
+    ConnectionX11ForwardingOptions {
+        enabled: true,
+        mode,
+        untrusted_timeout_seconds,
+    }
+}
 
 /// Carries the original zeroizing allocations from persistence into one runtime start.
 struct SavedConnectionRuntimeHandoff {

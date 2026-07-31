@@ -26,6 +26,7 @@ use signature::Verifier;
 use ssh_encoding::{Decode, Encode, Reader};
 use ssh_key::{PublicKey, Signature};
 use tokio::time::Instant;
+use zeroize::Zeroizing;
 
 use super::super::*;
 use super::*;
@@ -1207,7 +1208,7 @@ impl Session {
                     "x11-req" => {
                         let single_connection = map_err!(u8::decode(r))? != 0;
                         let x11_auth_protocol = map_err!(String::decode(r))?;
-                        let x11_auth_cookie = map_err!(String::decode(r))?;
+                        let x11_auth_cookie = Zeroizing::new(map_err!(String::decode(r))?);
                         let x11_screen_number = map_err!(u32::decode(r))?;
                         map_err!(ensure_end(r))?;
 
@@ -1216,7 +1217,10 @@ impl Session {
                                 .send(ChannelMsg::RequestX11 {
                                     want_reply: true,
                                     single_connection,
-                                    x11_authentication_cookie: x11_auth_cookie.clone(),
+                                    x11_authentication_cookie:
+                                        crate::channels::X11AuthenticationCookie::new(
+                                            x11_auth_cookie.as_str(),
+                                        ),
                                     x11_authentication_protocol: x11_auth_protocol.clone(),
                                     x11_screen_number,
                                 })
@@ -1228,7 +1232,7 @@ impl Session {
                                 channel_num,
                                 single_connection,
                                 &x11_auth_protocol,
-                                &x11_auth_cookie,
+                                x11_auth_cookie.as_str(),
                                 x11_screen_number,
                                 self,
                             )

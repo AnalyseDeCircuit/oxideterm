@@ -17,6 +17,7 @@ mod error;
 mod local_auth;
 mod plan;
 mod policy;
+mod prepare;
 mod protocol;
 mod registry;
 mod remote_xauth;
@@ -35,7 +36,10 @@ pub use endpoint::X11LocalEndpoint;
 pub use error::{X11ForwardingError, X11Result};
 pub use local_auth::X11LocalAuthorityResolver;
 pub use plan::X11ForwardPlan;
-pub use policy::{X11AuthFallbackMode, X11ForwardPolicy, X11ForwardTrust};
+pub use policy::{
+    DEFAULT_X11_UNTRUSTED_TIMEOUT_MILLIS, X11AuthFallbackMode, X11ForwardPolicy, X11ForwardTrust,
+};
+pub use prepare::{X11PreparedForwarding, prepare_x11_forwarding};
 pub use protocol::{
     X11AuthFailureResponse, X11ByteOrder, X11SetupAuthentication, X11SetupRequest,
     build_auth_failure_response, inspect_setup_authentication, inspect_setup_request,

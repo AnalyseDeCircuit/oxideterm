@@ -106,6 +106,7 @@ pub struct ConnectionDraft {
     pub agent_forwarding_socket: Option<String>,
     pub legacy_ssh_compatibility: bool,
     pub dedicated_new_terminal_connection: bool,
+    pub x11_forwarding: crate::ConnectionX11ForwardingOptions,
     pub post_connect_command: String,
     pub terminal: ConnectionTerminalOptions,
 }
@@ -143,6 +144,7 @@ pub fn saved_connection_from_ssh_host(host: SshConfigHost) -> Result<SavedConnec
             agent_forwarding: host.agent_forwarding,
             identity_agent: host.identity_agent,
             agent_forwarding_socket: host.agent_forwarding_socket,
+            x11_forwarding: host.x11_forwarding,
             ..ConnectionOptions::default()
         },
         created_at: now,
@@ -216,6 +218,7 @@ pub fn save_request_from_draft(
         agent_forwarding_socket: draft.agent_forwarding_socket,
         legacy_ssh_compatibility: draft.legacy_ssh_compatibility,
         dedicated_new_terminal_connection: draft.dedicated_new_terminal_connection,
+        x11_forwarding: draft.x11_forwarding,
         post_connect_command: (!draft.post_connect_command.trim().is_empty())
             .then(|| draft.post_connect_command.trim().to_string()),
         terminal: draft.terminal,
@@ -570,6 +573,7 @@ mod tests {
             identity_agent: None,
             agent_forwarding_socket: None,
             legacy_ssh_compatibility: false,
+            x11_forwarding: crate::ConnectionX11ForwardingOptions::default(),
             dedicated_new_terminal_connection: false,
             post_connect_command: String::new(),
             terminal: ConnectionTerminalOptions::default(),

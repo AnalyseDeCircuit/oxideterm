@@ -3,6 +3,8 @@
 
 use serde::{Deserialize, Serialize};
 
+pub const DEFAULT_X11_UNTRUSTED_TIMEOUT_MILLIS: u64 = 20 * 60 * 1_000;
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum X11ForwardTrust {
@@ -62,8 +64,27 @@ impl Default for X11ForwardPolicy {
     fn default() -> Self {
         Self {
             trust: X11ForwardTrust::Untrusted,
-            timeout_millis: None,
+            timeout_millis: Some(DEFAULT_X11_UNTRUSTED_TIMEOUT_MILLIS),
             fallback: X11AuthFallbackMode::RequireRealAuth,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn untrusted_policy_defaults_to_openssh_twenty_minute_timeout() {
+        assert_eq!(
+            X11ForwardPolicy::untrusted().timeout_millis,
+            Some(DEFAULT_X11_UNTRUSTED_TIMEOUT_MILLIS)
+        );
+        assert_eq!(
+            X11ForwardPolicy::untrusted()
+                .without_timeout()
+                .timeout_millis,
+            None
+        );
     }
 }

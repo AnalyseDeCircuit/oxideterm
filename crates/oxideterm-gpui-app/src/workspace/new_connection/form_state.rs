@@ -1,9 +1,9 @@
 use std::fmt;
 
 use oxideterm_connections::{
-    AuthType, ConnectionInfo, ConnectionTerminalOptions, RemoteDesktopProfile,
-    SavedUpstreamProxyProtocol, TransportUsernameTransition, transport_port_replacement,
-    transport_username_transition,
+    AuthType, ConnectionInfo, ConnectionTerminalOptions, ConnectionX11ForwardingOptions,
+    RemoteDesktopProfile, SavedUpstreamProxyProtocol, TransportUsernameTransition,
+    transport_port_replacement, transport_username_transition,
 };
 pub(in crate::workspace) use oxideterm_connections::{
     ConnectionTransport as NewConnectionTransport, RDP_DEFAULT_PORT_TEXT, SSH_DEFAULT_PORT_TEXT,
@@ -463,6 +463,7 @@ pub(in crate::workspace) struct NewConnectionForm {
     pub(in crate::workspace) agent_forwarding_socket: Option<String>,
     pub(in crate::workspace) legacy_ssh_compatibility: bool,
     pub(in crate::workspace) dedicated_new_terminal_connection: bool,
+    pub(in crate::workspace) x11_forwarding: ConnectionX11ForwardingOptions,
     pub(in crate::workspace) terminal: ConnectionTerminalOptions,
     pub(in crate::workspace) agent_available: Option<bool>,
     pub(in crate::workspace) save_connection: bool,
@@ -550,6 +551,7 @@ impl fmt::Debug for NewConnectionForm {
                 "dedicated_new_terminal_connection",
                 &self.dedicated_new_terminal_connection,
             )
+            .field("x11_forwarding", &self.x11_forwarding)
             .field("terminal", &self.terminal)
             .field("agent_available", &self.agent_available)
             .field("save_connection", &self.save_connection)
@@ -620,6 +622,7 @@ impl Default for NewConnectionForm {
             agent_forwarding_socket: None,
             legacy_ssh_compatibility: false,
             dedicated_new_terminal_connection: false,
+            x11_forwarding: ConnectionX11ForwardingOptions::default(),
             terminal: ConnectionTerminalOptions::default(),
             agent_available: None,
             save_connection: false,

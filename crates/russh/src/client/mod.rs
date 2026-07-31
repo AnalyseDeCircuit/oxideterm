@@ -1553,7 +1553,7 @@ impl Session {
                 want_reply,
                 single_connection,
                 &x11_authentication_protocol,
-                &x11_authentication_cookie,
+                x11_authentication_cookie.as_str(),
                 x11_screen_number,
             )?,
             Msg::Channel(
@@ -2412,6 +2412,20 @@ pub trait Handler: Sized + Send {
     }
 
     /// Called when the server opens an X11 channel.
+    ///
+    /// The default rejects the channel because RFC 4254 permits it only after
+    /// the client has successfully requested X11 forwarding for a session.
+    #[allow(unused_variables)]
+    fn should_accept_x11_server_channel(
+        &mut self,
+        channel: ChannelId,
+        originator_address: &str,
+        originator_port: u32,
+    ) -> impl Future<Output = bool> + Send {
+        async { false }
+    }
+
+    /// Called after an X11 channel passes the explicit admission check.
     #[allow(unused_variables)]
     fn server_channel_open_x11(
         &mut self,

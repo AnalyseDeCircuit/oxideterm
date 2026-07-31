@@ -13,7 +13,7 @@ use crate::{
     },
     upstream_proxy::UpstreamProxyConfig,
 };
-use oxideterm_x11_forwarding::X11SshRequest;
+use oxideterm_x11_forwarding::X11ForwardPolicy;
 
 fn agent_endpoint_key_suffix(label: &str, endpoint: Option<&str>) -> String {
     let endpoint = ssh_agent_endpoint_pool_identity(endpoint);
@@ -71,8 +71,9 @@ pub struct SshConfig {
     pub agent_forwarding_socket: Option<String>,
     #[serde(default)]
     pub legacy_ssh_compatibility: bool,
-    #[serde(default, skip)]
-    pub x11_forwarding: Option<X11SshRequest>,
+    /// X11 stores only non-secret policy; DISPLAY and cookies are resolved per shell.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub x11_forwarding: Option<X11ForwardPolicy>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub post_connect_command: Option<String>,
 }
@@ -509,6 +510,16 @@ mod tests {
     fn builds_stable_connection_key() {
         let config = SshConfig::password("192.168.1.10", 22, "root", "pw");
         assert_eq!(config.connection_key(), "root@192.168.1.10:22|");
+    }
+
+    #[test]
+    fn x11_policy_does_not_split_physical_connection_pool_identity() {
+        let mut config = SshConfig::password("192.168.1.10", 22, "root", "pw");
+        let without_x11 = config.connection_key();
+        config.x11_forwarding = Some(X11ForwardPolicy::untrusted().with_timeout_millis(1_200_000));
+
+        assert_eq!(config.connection_key(), without_x11);
+        assert!(!format!("{config:?}").contains("MIT-MAGIC-COOKIE-1"));
     }
 
     #[test]

@@ -24,6 +24,7 @@ OxideTerm vendors russh for several independently required behaviors:
 - sntrup761/X25519 hybrid key exchange on every supported desktop platform;
 - owned channel writes and owned stream halves used by the SFTP pipeline;
 - explicit zeroization and redaction of authentication and key-exchange data;
+- explicit X11 channel admission and zeroizing X11 cookie transport;
 - workspace-wide RustCrypto dependency compatibility with IronRDP.
 
 The original compatibility issue was RSA SHA-2 authentication. Newer OpenSSH
@@ -133,6 +134,28 @@ Keep these patches when updating russh:
   - Redact DH private exponents and shared secrets while retaining safe public
     diagnostics.
   - Do not log passwords in russh examples.
+  - Store queued X11 authentication cookies in a redacted `Zeroizing<String>`
+    wrapper so `ChannelMsg` debug output and normal message drop cannot retain
+    or expose the bearer credential.
+  - Treat the shared outgoing packet queue as transient plaintext: never trace
+    packet payload bytes, wipe each packet after encryption, and wipe pending
+    bytes again when the encrypted session is dropped. The X11 wrapper alone is
+    insufficient once its cookie has been encoded into the SSH packet buffer.
+
+### X11 Channel Admission
+
+- `src/client/mod.rs` and `src/client/encrypted.rs`
+  - Keep `Handler::should_accept_x11_server_channel` as an explicit gate before
+    sending channel-open confirmation. Its default must reject, because RFC
+    4254 permits server-opened X11 channels only after a successful client
+    request.
+  - Reject failed admission with `SSH_OPEN_ADMINISTRATIVELY_PROHIBITED`; X11 is
+    a known channel type whose use was not authorized for the connection.
+  - Do not move this check into `server_channel_open_x11`; that callback runs
+    after the protocol has already confirmed the channel.
+- `src/channels/mod.rs` and `src/server/encrypted.rs`
+  - Keep `X11AuthenticationCookie` zeroizing and redacted while preserving the
+    existing public `request_x11` call shape through `AsRef<str>`.
 
 Mechanical cleanups such as replacing `cloned()` with `copied()` or removing
 unnecessary clones are not vendor contracts. Re-evaluate those normally during
@@ -146,6 +169,7 @@ coverage first:
 ```sh
 cargo fmt --check
 cargo test -p russh
+cargo test -p russh x11_cookie_debug_is_redacted
 cargo test -p russh --test test_sntrup_kex
 cargo test -p oxideterm-ssh
 cargo test -p oxideterm-sftp

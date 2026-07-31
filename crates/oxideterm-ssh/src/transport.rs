@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use std::{
-    collections::HashSet,
+    collections::{HashMap, HashSet},
     future::Future,
     path::PathBuf,
     pin::Pin,
@@ -14,7 +14,10 @@ use std::{
 };
 
 use oxideterm_sftp::{SftpChannelOpener, SftpError, SftpExecChannelOpener};
-use oxideterm_x11_forwarding::{X11RemoteDisplayAllocator, X11RemoteXauthUpdate, X11SshRequest};
+use oxideterm_x11_forwarding::{
+    X11AuthSpoofRegistry, X11ForwardPolicy, X11LocalEndpoint, X11RegisteredSetupDecision,
+    X11RemoteDisplayAllocator, X11RemoteXauthUpdate, X11SetupBuffer, X11SpoofedAuth, X11SshRequest,
+};
 use parking_lot::RwLock;
 use russh::{
     AgentAuthError, Channel, ChannelMsg, MethodKind, Pty, Signer as RusshSigner, client,
@@ -624,6 +627,7 @@ pub struct SshTransportClient {
 include!("transport/connection.rs");
 include!("transport/signers.rs");
 include!("transport/output.rs");
+include!("transport/x11.rs");
 include!("transport/client.rs");
 include!("transport/handler.rs");
 include!("transport/auth.rs");

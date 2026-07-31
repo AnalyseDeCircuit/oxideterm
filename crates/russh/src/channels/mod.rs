@@ -4,10 +4,30 @@ use bytes::Bytes;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::sync::mpsc::{Receiver, Sender};
 use tokio::sync::{Mutex, Notify};
+use zeroize::Zeroizing;
 
 use crate::{ChannelId, ChannelOpenFailure, Error, Pty, Sig};
 
 pub mod io;
+
+/// Owns an X11 bearer cookie without exposing it through Debug or normal drop.
+pub struct X11AuthenticationCookie(Zeroizing<String>);
+
+impl X11AuthenticationCookie {
+    pub fn new(value: impl AsRef<str>) -> Self {
+        Self(Zeroizing::new(value.as_ref().to_string()))
+    }
+
+    pub fn as_str(&self) -> &str {
+        self.0.as_str()
+    }
+}
+
+impl std::fmt::Debug for X11AuthenticationCookie {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("<redacted X11 authentication cookie>")
+    }
+}
 
 #[cfg(feature = "_bench")]
 pub mod benchmark;
@@ -69,7 +89,7 @@ pub enum ChannelMsg {
         want_reply: bool,
         single_connection: bool,
         x11_authentication_protocol: String,
-        x11_authentication_cookie: String,
+        x11_authentication_cookie: X11AuthenticationCookie,
         x11_screen_number: u32,
     },
     /// (client only)
@@ -265,7 +285,7 @@ impl<S: From<(ChannelId, ChannelMsg)> + Send + Sync + 'static> ChannelWriteHalf<
     /// channel. See
     /// [RFC4254](https://tools.ietf.org/html/rfc4254#section-6.3.1)
     /// for security issues related to cookies.
-    pub async fn request_x11<A: Into<String>, B: Into<String>>(
+    pub async fn request_x11<A: Into<String>, B: AsRef<str>>(
         &self,
         want_reply: bool,
         single_connection: bool,
@@ -277,7 +297,7 @@ impl<S: From<(ChannelId, ChannelMsg)> + Send + Sync + 'static> ChannelWriteHalf<
             want_reply,
             single_connection,
             x11_authentication_protocol: x11_authentication_protocol.into(),
-            x11_authentication_cookie: x11_authentication_cookie.into(),
+            x11_authentication_cookie: X11AuthenticationCookie::new(x11_authentication_cookie),
             x11_screen_number,
         })
         .await
@@ -562,7 +582,7 @@ impl<S: From<(ChannelId, ChannelMsg)> + Send + Sync + 'static> Channel<S> {
     /// channel. See
     /// [RFC4254](https://tools.ietf.org/html/rfc4254#section-6.3.1)
     /// for security issues related to cookies.
-    pub async fn request_x11<A: Into<String>, B: Into<String>>(
+    pub async fn request_x11<A: Into<String>, B: AsRef<str>>(
         &self,
         want_reply: bool,
         single_connection: bool,
@@ -705,6 +725,14 @@ mod tests {
     use tokio::sync::mpsc;
 
     use super::*;
+
+    #[test]
+    fn x11_cookie_debug_is_redacted() {
+        let cookie = X11AuthenticationCookie::new("x11-cookie-marker");
+
+        assert_eq!(cookie.as_str(), "x11-cookie-marker");
+        assert!(!format!("{cookie:?}").contains("x11-cookie-marker"));
+    }
 
     fn test_write_half(
         window_size: WindowSizeRef,

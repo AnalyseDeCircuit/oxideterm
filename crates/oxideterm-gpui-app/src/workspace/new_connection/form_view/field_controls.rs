@@ -2611,11 +2611,15 @@ impl WorkspaceApp {
     pub(super) fn render_connection_terminal_options(&self, cx: &mut Context<Self>) -> AnyElement {
         // Saved host controls are optional overrides so application defaults
         // continue to govern legacy records and temporary local terminals.
-        let Some((terminal, dedicated_new_terminal_connection)) = self
-            .connection_form_state(cx)
-            .form
-            .as_ref()
-            .map(|form| (form.terminal, form.dedicated_new_terminal_connection))
+        let Some((terminal, dedicated_new_terminal_connection, x11_forwarding, transport)) =
+            self.connection_form_state(cx).form.as_ref().map(|form| {
+                (
+                    form.terminal,
+                    form.dedicated_new_terminal_connection,
+                    form.x11_forwarding,
+                    form.transport,
+                )
+            })
         else {
             return div().into_any_element();
         };
@@ -2752,6 +2756,117 @@ impl WorkspaceApp {
                             ),
                     ),
             )
+            .when(transport == NewConnectionTransport::Ssh, |section| {
+                section.child(
+                    div()
+                        .flex()
+                        .flex_col()
+                        .gap(px(self.tokens.spacing.two))
+                        .pt(px(self.tokens.spacing.two))
+                        .border_t_1()
+                        .border_color(rgb(self.tokens.ui.border))
+                        .child(self.render_connection_checkbox(
+                            self.i18n.t("ssh.form.x11_forwarding"),
+                            x11_forwarding.enabled,
+                            |form| form.x11_forwarding.enabled = !form.x11_forwarding.enabled,
+                            cx,
+                        ))
+                        .child(
+                            self.render_connection_hint(
+                                self.i18n.t("ssh.form.x11_forwarding_hint"),
+                            ),
+                        )
+                        .when(x11_forwarding.enabled, |content| {
+                            let mode_options = [
+                                (
+                                    ConnectionX11ForwardingMode::Untrusted,
+                                    "ssh.form.x11_mode_untrusted",
+                                ),
+                                (
+                                    ConnectionX11ForwardingMode::Trusted,
+                                    "ssh.form.x11_mode_trusted",
+                                ),
+                            ]
+                            .into_iter()
+                            .enumerate()
+                            .map(|(index, (mode, label_key))| {
+                                segmented_tab(
+                                    &self.tokens,
+                                    self.i18n.t(label_key),
+                                    x11_forwarding.mode == mode,
+                                )
+                                .id(SharedString::from(format!("x11-mode-{index}")))
+                                .on_mouse_down(
+                                    MouseButton::Left,
+                                    cx.listener(move |this, _event, _window, cx| {
+                                        this.update_connection_form_state(cx, |state| {
+                                            if let Some(form) = state.form.as_mut() {
+                                                form.x11_forwarding.mode = mode;
+                                            }
+                                        });
+                                        cx.notify();
+                                    }),
+                                )
+                            });
+                            content
+                                .child(form_field(
+                                    &self.tokens,
+                                    self.i18n.t("ssh.form.x11_mode"),
+                                    segmented_tabs(&self.tokens).children(mode_options),
+                                ))
+                                .child(
+                                    self.render_connection_hint(
+                                        self.i18n.t("ssh.form.x11_mode_hint"),
+                                    ),
+                                )
+                        })
+                        .when(
+                            x11_forwarding.enabled
+                                && x11_forwarding.mode == ConnectionX11ForwardingMode::Untrusted,
+                            |content| {
+                                let timeout_options = [
+                                    (300u32, "ssh.form.x11_timeout_5_minutes"),
+                                    (1_200u32, "ssh.form.x11_timeout_20_minutes"),
+                                    (3_600u32, "ssh.form.x11_timeout_1_hour"),
+                                    (0u32, "ssh.form.x11_timeout_none"),
+                                ]
+                                .into_iter()
+                                .enumerate()
+                                .map(
+                                    |(index, (seconds, label_key))| {
+                                        segmented_tab(
+                                            &self.tokens,
+                                            self.i18n.t(label_key),
+                                            x11_forwarding.untrusted_timeout_seconds == seconds,
+                                        )
+                                        .id(SharedString::from(format!("x11-timeout-{index}")))
+                                        .on_mouse_down(
+                                            MouseButton::Left,
+                                            cx.listener(move |this, _event, _window, cx| {
+                                                this.update_connection_form_state(cx, |state| {
+                                                    if let Some(form) = state.form.as_mut() {
+                                                        form.x11_forwarding
+                                                            .untrusted_timeout_seconds = seconds;
+                                                    }
+                                                });
+                                                cx.notify();
+                                            }),
+                                        )
+                                    },
+                                );
+                                content
+                                    .child(form_field(
+                                        &self.tokens,
+                                        self.i18n.t("ssh.form.x11_timeout"),
+                                        segmented_tabs(&self.tokens).children(timeout_options),
+                                    ))
+                                    .child(self.render_connection_hint(
+                                        self.i18n.t("ssh.form.x11_timeout_hint"),
+                                    ))
+                            },
+                        ),
+                )
+            })
             .into_any_element()
     }
 

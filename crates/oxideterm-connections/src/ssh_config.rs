@@ -7,7 +7,10 @@ use std::{
 use anyhow::{Context, Result, anyhow, bail};
 
 use crate::ssh_paths::{default_ssh_dir, expand_home_path};
-use crate::{ConnectionStore, SecretString, saved_connection_from_ssh_host};
+use crate::{
+    ConnectionStore, ConnectionX11ForwardingMode, ConnectionX11ForwardingOptions, SecretString,
+    saved_connection_from_ssh_host,
+};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct SshConfigHost {
@@ -20,6 +23,7 @@ pub struct SshConfigHost {
     pub identity_agent: Option<String>,
     pub agent_forwarding: bool,
     pub agent_forwarding_socket: Option<String>,
+    pub x11_forwarding: ConnectionX11ForwardingOptions,
     pub proxy_chain: Vec<SshConfigProxyHop>,
     pub proxy_command: Option<Vec<SecretString>>,
     pub already_imported: bool,
@@ -65,6 +69,9 @@ struct SshHostOptions {
     certificate_file: Option<String>,
     identity_agent: Option<String>,
     forward_agent: Option<String>,
+    forward_x11: Option<String>,
+    forward_x11_trusted: Option<String>,
+    forward_x11_timeout: Option<String>,
     proxy_jump: Option<String>,
     proxy_command: Option<Vec<SecretString>>,
 }
@@ -270,6 +277,13 @@ fn apply_option(options: &mut SshHostOptions, key: &str, values: &[String]) {
         "forwardagent" if options.forward_agent.is_none() => {
             options.forward_agent = Some(value.clone())
         }
+        "forwardx11" if options.forward_x11.is_none() => options.forward_x11 = Some(value.clone()),
+        "forwardx11trusted" if options.forward_x11_trusted.is_none() => {
+            options.forward_x11_trusted = Some(value.clone())
+        }
+        "forwardx11timeout" if options.forward_x11_timeout.is_none() => {
+            options.forward_x11_timeout = Some(value.clone())
+        }
         "proxyjump" if options.proxy_jump.is_none() && options.proxy_command.is_none() => {
             options.proxy_jump = Some(value.clone())
         }
@@ -306,6 +320,18 @@ fn merge_first_options(base: &mut SshHostOptions, update: &SshHostOptions) {
         .forward_agent
         .clone()
         .or_else(|| update.forward_agent.clone());
+    base.forward_x11 = base
+        .forward_x11
+        .clone()
+        .or_else(|| update.forward_x11.clone());
+    base.forward_x11_trusted = base
+        .forward_x11_trusted
+        .clone()
+        .or_else(|| update.forward_x11_trusted.clone());
+    base.forward_x11_timeout = base
+        .forward_x11_timeout
+        .clone()
+        .or_else(|| update.forward_x11_timeout.clone());
     if base.proxy_jump.is_none() && base.proxy_command.is_none() {
         base.proxy_jump = update.proxy_jump.clone();
         base.proxy_command = update.proxy_command.clone();
@@ -372,6 +398,7 @@ fn resolve_ssh_config_host(alias: &str, blocks: &[SshHostBlock]) -> Result<SshCo
         options.user.as_deref(),
         options.port,
     )?;
+    let x11_forwarding = resolve_x11_forwarding(&options)?;
     let mut proxy_chain = Vec::new();
     let mut active_aliases = HashSet::from([alias.to_ascii_lowercase()]);
     let mut emitted_aliases = HashSet::new();
@@ -413,10 +440,94 @@ fn resolve_ssh_config_host(alias: &str, blocks: &[SshHostBlock]) -> Result<SshCo
         identity_agent,
         agent_forwarding,
         agent_forwarding_socket,
+        x11_forwarding,
         proxy_chain,
         proxy_command,
         already_imported: false,
     })
+}
+
+fn resolve_x11_forwarding(options: &SshHostOptions) -> Result<ConnectionX11ForwardingOptions> {
+    let enabled = options
+        .forward_x11
+        .as_deref()
+        .map(parse_yes_no)
+        .transpose()?
+        .unwrap_or(false);
+    let trusted = options
+        .forward_x11_trusted
+        .as_deref()
+        .map(parse_yes_no)
+        .transpose()?
+        .unwrap_or(false);
+    let timeout = options
+        .forward_x11_timeout
+        .as_deref()
+        .map(parse_ssh_time_seconds)
+        .transpose()?
+        .unwrap_or(crate::DEFAULT_X11_UNTRUSTED_TIMEOUT_SECONDS);
+    Ok(ConnectionX11ForwardingOptions {
+        enabled,
+        mode: if trusted {
+            ConnectionX11ForwardingMode::Trusted
+        } else {
+            ConnectionX11ForwardingMode::Untrusted
+        },
+        untrusted_timeout_seconds: timeout,
+    })
+}
+
+fn parse_yes_no(value: &str) -> Result<bool> {
+    if value.eq_ignore_ascii_case("yes") {
+        Ok(true)
+    } else if value.eq_ignore_ascii_case("no") {
+        Ok(false)
+    } else {
+        bail!("invalid yes/no SSH option value")
+    }
+}
+
+fn parse_ssh_time_seconds(value: &str) -> Result<u32> {
+    let value = value.trim();
+    if value.is_empty() {
+        bail!("empty SSH time value");
+    }
+    let mut total = 0u64;
+    let mut digits = String::new();
+    for character in value.chars() {
+        if character.is_ascii_digit() {
+            digits.push(character);
+            continue;
+        }
+        let amount = digits
+            .parse::<u64>()
+            .map_err(|_| anyhow!("invalid SSH time value"))?;
+        digits.clear();
+        let multiplier = match character.to_ascii_lowercase() {
+            's' => 1,
+            'm' => 60,
+            'h' => 60 * 60,
+            'd' => 24 * 60 * 60,
+            'w' => 7 * 24 * 60 * 60,
+            _ => bail!("unsupported SSH time unit"),
+        };
+        let seconds = amount
+            .checked_mul(multiplier)
+            .ok_or_else(|| anyhow!("SSH time value is too large"))?;
+        total = total
+            .checked_add(seconds)
+            .ok_or_else(|| anyhow!("SSH time value is too large"))?;
+    }
+    if !digits.is_empty() {
+        total = total
+            .checked_add(
+                digits
+                    .parse::<u64>()
+                    .map_err(|_| anyhow!("invalid SSH time value"))?,
+            )
+            .ok_or_else(|| anyhow!("SSH time value is too large"))?;
+    }
+    u32::try_from(total).map_err(|_| anyhow!("SSH time value is too large"))
 }
 
 fn append_proxy_jump_chain(
@@ -941,6 +1052,65 @@ mod tests {
         assert_eq!(host.hostname.as_deref(), Some("prod.example.com"));
         assert_eq!(host.port, Some(2200));
         let _ = fs::remove_dir_all(directory);
+    }
+
+    #[test]
+    fn x11_options_import_trust_and_compound_timeout() {
+        let blocks = vec![block(
+            &["workstation"],
+            SshHostOptions {
+                forward_x11: Some("yes".to_string()),
+                forward_x11_trusted: Some("yes".to_string()),
+                forward_x11_timeout: Some("1h30m".to_string()),
+                ..SshHostOptions::default()
+            },
+        )];
+
+        let host = resolve_ssh_config_host("workstation", &blocks).unwrap();
+
+        assert!(host.x11_forwarding.enabled);
+        assert_eq!(
+            host.x11_forwarding.mode,
+            ConnectionX11ForwardingMode::Trusted
+        );
+        assert_eq!(host.x11_forwarding.untrusted_timeout_seconds, 5_400);
+    }
+
+    #[test]
+    fn x11_options_default_to_disabled_untrusted_policy() {
+        let host = resolve_ssh_config_host(
+            "workstation",
+            &[block(&["workstation"], SshHostOptions::default())],
+        )
+        .unwrap();
+
+        assert_eq!(
+            host.x11_forwarding,
+            ConnectionX11ForwardingOptions::default()
+        );
+    }
+
+    #[test]
+    fn x11_options_preserve_openssh_connection_lifetime_timeout() {
+        let blocks = vec![block(
+            &["workstation"],
+            SshHostOptions {
+                forward_x11: Some("yes".to_string()),
+                forward_x11_timeout: Some("0".to_string()),
+                ..SshHostOptions::default()
+            },
+        )];
+
+        let host = resolve_ssh_config_host("workstation", &blocks).unwrap();
+
+        assert!(host.x11_forwarding.enabled);
+        assert_eq!(host.x11_forwarding.untrusted_timeout_seconds, 0);
+    }
+
+    #[test]
+    fn x11_timeout_accepts_openssh_zero_and_rejects_overflow() {
+        assert_eq!(parse_ssh_time_seconds("0").unwrap(), 0);
+        assert!(parse_ssh_time_seconds("18446744073709551615w").is_err());
     }
 
     #[test]

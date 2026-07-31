@@ -121,6 +121,7 @@ impl WorkspaceApp {
                 identity_agent: identity_agent_from_form(&form.identity_agent),
                 agent_forwarding_socket: form.agent_forwarding_socket.clone(),
                 legacy_ssh_compatibility: form.legacy_ssh_compatibility,
+                x11_forwarding: x11_forward_policy(form.x11_forwarding),
                 proxy_chain,
                 upstream_proxy,
                 strict_host_key_checking: true,

@@ -162,6 +162,7 @@ pub(super) fn form_from_runtime_config(
     form.identity_agent = config.identity_agent.clone().unwrap_or_default();
     form.agent_forwarding_socket = config.agent_forwarding_socket.clone();
     form.legacy_ssh_compatibility = config.legacy_ssh_compatibility;
+    form.x11_forwarding = connection_x11_options(config.x11_forwarding);
     form.save_password = auth_fields.save_password;
 
     if let Some(chain) = config.proxy_chain {

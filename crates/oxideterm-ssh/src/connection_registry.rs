@@ -64,6 +64,7 @@ pub enum ConnectionConsumer {
     Terminal(String),
     Sftp(String),
     PortForward(String),
+    X11Forward(String),
     Ide(String),
     NodeRouter(String),
 }
@@ -1584,7 +1585,9 @@ fn topology_consumer_summary(
         match consumer {
             ConnectionConsumer::Terminal(_) => summary.terminals += 1,
             ConnectionConsumer::Sftp(_) => summary.sftp += 1,
-            ConnectionConsumer::PortForward(_) => summary.port_forwards += 1,
+            ConnectionConsumer::PortForward(_) | ConnectionConsumer::X11Forward(_) => {
+                summary.port_forwards += 1
+            }
             ConnectionConsumer::Ide(_) => summary.ide += 1,
             ConnectionConsumer::NodeRouter(_) => summary.node_router += 1,
         }
@@ -1817,7 +1820,9 @@ impl From<&ConnectionConsumer> for ConnectionMonitorConsumerKind {
         match consumer {
             ConnectionConsumer::Terminal(_) => Self::Terminal,
             ConnectionConsumer::Sftp(_) => Self::Sftp,
-            ConnectionConsumer::PortForward(_) => Self::PortForward,
+            ConnectionConsumer::PortForward(_) | ConnectionConsumer::X11Forward(_) => {
+                Self::PortForward
+            }
             ConnectionConsumer::Ide(_) | ConnectionConsumer::NodeRouter(_) => Self::Other,
         }
     }

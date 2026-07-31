@@ -33,6 +33,7 @@ mod tests {
             identity_agent: None,
             agent_forwarding_socket: None,
             legacy_ssh_compatibility: false,
+            x11_forwarding: ConnectionX11ForwardingOptions::default(),
             dedicated_new_terminal_connection: false,
             post_connect_command: None,
             terminal: ConnectionTerminalOptions::default(),
@@ -47,6 +48,7 @@ mod tests {
     fn terminal_options_round_trip_without_changing_legacy_defaults() {
         let default_options = serde_json::to_value(ConnectionOptions::default()).unwrap();
         assert!(default_options.get("terminal").is_none());
+        assert!(default_options.get("x11_forwarding").is_none());
         assert!(
             default_options
                 .get("dedicated_new_terminal_connection")
@@ -83,6 +85,33 @@ mod tests {
         let legacy: ConnectionOptions = serde_json::from_value(serde_json::json!({})).unwrap();
         assert!(legacy.terminal.inherits_application_defaults());
         assert!(!legacy.dedicated_new_terminal_connection);
+        assert_eq!(
+            legacy.x11_forwarding,
+            ConnectionX11ForwardingOptions::default()
+        );
+    }
+
+    #[test]
+    fn x11_policy_round_trips_without_runtime_authority_material() {
+        let options = ConnectionOptions {
+            x11_forwarding: ConnectionX11ForwardingOptions {
+                enabled: true,
+                mode: ConnectionX11ForwardingMode::Trusted,
+                untrusted_timeout_seconds: 900,
+            },
+            ..ConnectionOptions::default()
+        };
+
+        let serialized = serde_json::to_value(&options).unwrap();
+        assert_eq!(serialized["x11_forwarding"]["enabled"], true);
+        assert_eq!(serialized["x11_forwarding"]["mode"], "trusted");
+        assert_eq!(serialized["x11_forwarding"]["untrusted_timeout_seconds"], 900);
+        let text = serialized.to_string();
+        assert!(!text.contains("DISPLAY"));
+        assert!(!text.contains("MIT-MAGIC-COOKIE-1"));
+
+        let decoded: ConnectionOptions = serde_json::from_value(serialized).unwrap();
+        assert_eq!(decoded.x11_forwarding, options.x11_forwarding);
     }
 
     #[test]
@@ -1645,6 +1674,11 @@ mod tests {
             identity_agent: None,
             agent_forwarding_socket: None,
             legacy_ssh_compatibility: true,
+            x11_forwarding: ConnectionX11ForwardingOptions {
+                enabled: true,
+                mode: ConnectionX11ForwardingMode::Untrusted,
+                untrusted_timeout_seconds: 1_800,
+            },
             dedicated_new_terminal_connection: true,
             post_connect_command: Some("uname -a".to_string()),
             terminal: ConnectionTerminalOptions::default(),
@@ -1669,6 +1703,14 @@ mod tests {
         assert_eq!(imported.options.term_type.as_deref(), Some("xterm-direct"));
         assert!(imported.options.agent_forwarding);
         assert!(imported.options.legacy_ssh_compatibility);
+        assert_eq!(
+            imported.options.x11_forwarding,
+            ConnectionX11ForwardingOptions {
+                enabled: true,
+                mode: ConnectionX11ForwardingMode::Untrusted,
+                untrusted_timeout_seconds: 1_800,
+            }
+        );
         assert!(imported.options.dedicated_new_terminal_connection);
         assert_eq!(
             imported.options.post_connect_command.as_deref(),

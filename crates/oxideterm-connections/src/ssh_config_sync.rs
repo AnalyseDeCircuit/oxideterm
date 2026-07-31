@@ -122,12 +122,14 @@ fn sync_resolved_ssh_config_hosts(
         let resolved_agent_forwarding = resolved.options.agent_forwarding;
         let resolved_identity_agent = resolved.options.identity_agent.clone();
         let resolved_agent_forwarding_socket = resolved.options.agent_forwarding_socket.clone();
+        let resolved_x11_forwarding = resolved.options.x11_forwarding;
         resolved.options = existing.options;
         // These fields remain owned by the imported OpenSSH config while
         // unrelated application-specific connection options stay untouched.
         resolved.options.agent_forwarding = resolved_agent_forwarding;
         resolved.options.identity_agent = resolved_identity_agent;
         resolved.options.agent_forwarding_socket = resolved_agent_forwarding_socket;
+        resolved.options.x11_forwarding = resolved_x11_forwarding;
         resolved.upstream_proxy = existing.upstream_proxy;
         resolved.post_connect_command = existing.post_connect_command;
         pending.push(resolved);
@@ -148,6 +150,7 @@ fn ssh_config_fields_match(existing: &SavedConnection, resolved: &SavedConnectio
         && existing.options.agent_forwarding == resolved.options.agent_forwarding
         && existing.options.identity_agent == resolved.options.identity_agent
         && existing.options.agent_forwarding_socket == resolved.options.agent_forwarding_socket
+        && existing.options.x11_forwarding == resolved.options.x11_forwarding
         && existing.proxy_chain.len() == resolved.proxy_chain.len()
         && existing
             .proxy_chain
@@ -318,6 +321,7 @@ mod tests {
                 identity_agent: None,
                 agent_forwarding_socket: None,
                 legacy_ssh_compatibility: false,
+                x11_forwarding: crate::ConnectionX11ForwardingOptions::default(),
                 dedicated_new_terminal_connection: false,
                 post_connect_command: None,
                 terminal: ConnectionTerminalOptions::default(),

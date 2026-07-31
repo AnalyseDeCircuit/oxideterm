@@ -11,3 +11,4 @@ subtle.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
 zeroize.workspace = true
+tempfile = "3.23"
