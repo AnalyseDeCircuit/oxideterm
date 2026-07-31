@@ -211,6 +211,10 @@ pub fn text_input_with_content_align(
         } else {
             rgb(theme.text)
         })
+        // Text inputs are single-line controls. This also constrains the
+        // custom caret/selection overlay, whose StyledText otherwise wraps
+        // when a centered flex child is measured below its content width.
+        .whitespace_nowrap()
         .cursor(CursorStyle::IBeam)
         .overflow_hidden()
         .child({
