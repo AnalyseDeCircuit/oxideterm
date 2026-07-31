@@ -140,6 +140,8 @@ pub struct AiChatMessageMetadata {
     pub compacted_at_ms: Option<i64>,
     #[serde(default)]
     pub original_messages: Option<Vec<AiChatMessage>>,
+    #[serde(default)]
+    pub original_user_count: Option<usize>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -159,6 +161,9 @@ pub struct AiConversation {
     pub session_metadata: Option<serde_json::Value>,
     #[serde(default = "default_messages_loaded")]
     pub messages_loaded: bool,
+    // Keep additive fields at the end because MessagePack stores structs positionally.
+    #[serde(default)]
+    pub turn_count: usize,
 }
 
 fn default_messages_loaded() -> bool {

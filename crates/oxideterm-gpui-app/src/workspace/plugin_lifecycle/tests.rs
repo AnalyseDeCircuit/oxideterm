@@ -985,6 +985,7 @@ fn ai_host_calls_return_sanitized_messages_and_provider_info() {
             session_id: None,
             session_metadata: None,
             messages_loaded: true,
+            turn_count: 1,
         }],
         active_conversation_id: Some("conversation-1".to_string()),
     };

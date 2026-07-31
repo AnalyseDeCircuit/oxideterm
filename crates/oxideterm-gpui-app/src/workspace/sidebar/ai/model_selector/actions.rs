@@ -799,10 +799,10 @@ impl WorkspaceApp {
         model: &str,
         cx: &mut Context<Self>,
     ) {
-        let Some(conversation) = self.ai_entity.read(cx).conversation_state().active_conversation() else {
+        let Some(_conversation) = self.ai_entity.read(cx).conversation_state().active_conversation() else {
             return;
         };
-        let total_tokens = ai_conversation_message_tokens(conversation);
+        let total_tokens = self.ai_context_token_breakdown(cx).total;
         if total_tokens == 0 {
             return;
         }
@@ -996,6 +996,7 @@ mod acp_model_selection_tests {
             session_id: None,
             session_metadata: None,
             messages_loaded: true,
+            turn_count: 0,
         };
         let options = vec![oxideterm_ai::AcpSessionConfigOption {
             config_id: "model".to_string(),
@@ -1049,6 +1050,7 @@ mod acp_model_selection_tests {
             session_id: None,
             session_metadata: Some(serde_json::json!({ "other": true })),
             messages_loaded: true,
+            turn_count: 0,
         };
 
         store_ai_reasoning_level_in_conversation(

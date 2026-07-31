@@ -2,6 +2,51 @@ use crate::{
     AiChatMessage, AiChatRole, AiChatState, AiConversation, current_terminal_context_system_message,
 };
 
+pub fn ai_conversation_turn_count(messages: &[AiChatMessage]) -> usize {
+    let mut turns = 0usize;
+    for message in messages {
+        if let Some(original_user_count) = message
+            .summary_ref
+            .as_ref()
+            .filter(|summary| {
+                summary.get("kind").and_then(serde_json::Value::as_str) == Some("conversation")
+            })
+            .and_then(|summary| summary.get("originalUserCount"))
+            .and_then(serde_json::Value::as_u64)
+            .and_then(|count| usize::try_from(count).ok())
+        {
+            turns = turns.saturating_add(original_user_count);
+            continue;
+        }
+        if let Some(metadata) = message
+            .metadata
+            .as_ref()
+            .filter(|metadata| metadata.kind == "compaction-anchor")
+        {
+            let compacted_turns = metadata.original_user_count.or_else(|| {
+                let snapshots = metadata.original_messages.as_ref()?;
+                let snapshot_is_complete = metadata
+                    .original_count
+                    .is_none_or(|original_count| original_count <= snapshots.len());
+                snapshot_is_complete.then(|| ai_conversation_turn_count(snapshots))
+            });
+            if let Some(compacted_turns) = compacted_turns {
+                turns = turns.saturating_add(compacted_turns);
+            } else if let Some(original_count) = metadata.original_count {
+                // Older anchors only retained a physical count. Their histories
+                // were user-led and alternating, so this is a migration fallback.
+                turns = turns.saturating_add(original_count.div_ceil(2));
+            }
+            continue;
+        }
+        match message.role {
+            AiChatRole::User => turns = turns.saturating_add(1),
+            AiChatRole::Assistant | AiChatRole::System | AiChatRole::Tool => {}
+        }
+    }
+    turns
+}
+
 impl AiChatState {
     pub fn create_conversation(
         &mut self,
@@ -31,6 +76,7 @@ impl AiChatState {
             origin: "sidebar".to_string(),
             profile_id,
             message_count: 0,
+            turn_count: 0,
             session_id: None,
             session_metadata,
             messages_loaded: true,
@@ -116,6 +162,7 @@ impl AiChatState {
             conversation.updated_at_ms = message.timestamp_ms;
             conversation.messages.push(message);
             conversation.message_count = conversation.messages.len();
+            conversation.turn_count = ai_conversation_turn_count(&conversation.messages);
         }
     }
 

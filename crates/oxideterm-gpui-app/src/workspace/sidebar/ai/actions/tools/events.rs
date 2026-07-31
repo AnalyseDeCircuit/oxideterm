@@ -68,6 +68,32 @@ pub(in crate::workspace) fn send_ai_guardrail(
     )
 }
 
+pub(in crate::workspace) fn send_ai_prompt_usage(
+    ui_tx: &AiStreamDeliverySender,
+    generation: u64,
+    conversation_id: &str,
+    assistant_id: &str,
+    last_user_message_id: Option<String>,
+    provider_id: String,
+    model: String,
+    breakdown: oxideterm_ai::AiPromptTokenBreakdown,
+    max_tokens: usize,
+) -> Result<(), std::sync::mpsc::SendError<AiStreamDelivery>> {
+    send_ai_stream_delivery(
+        ui_tx,
+        generation,
+        conversation_id,
+        assistant_id,
+        AiStreamDeliveryEvent::PromptUsage {
+            last_user_message_id,
+            provider_id,
+            model,
+            breakdown,
+            max_tokens,
+        },
+    )
+}
+
 #[allow(clippy::too_many_arguments)]
 pub(in crate::workspace) fn send_ai_assistant_round(
     ui_tx: &AiStreamDeliverySender,

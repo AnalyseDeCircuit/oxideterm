@@ -45,6 +45,12 @@ fn ai_chat_message_base_signature(message: &AiChatMessage) -> u64 {
         std::hash::Hash::hash(&metadata.kind, &mut hasher);
         std::hash::Hash::hash(&metadata.original_count, &mut hasher);
     }
+    if let Some(transcript_ref) = message.transcript_ref.as_ref() {
+        ai_chat_hash_json_value(transcript_ref, &mut hasher);
+    }
+    if let Some(summary_ref) = message.summary_ref.as_ref() {
+        ai_chat_hash_json_value(summary_ref, &mut hasher);
+    }
     for tool_call in &message.tool_calls {
         ai_chat_hash_json_value(tool_call, &mut hasher);
     }
@@ -867,7 +873,7 @@ window.focus(&this.focus_handle, cx);
 
     pub(in crate::workspace) fn ai_context_message_usage_counts(&self, cx: &App) -> (usize, usize) {
         let breakdown = self.ai_context_token_breakdown(cx);
-        (breakdown.messages, breakdown.max_tokens)
+        (breakdown.total, breakdown.max_tokens)
     }
 
     pub(in crate::workspace) fn render_ai_summarize_confirm_dialog(

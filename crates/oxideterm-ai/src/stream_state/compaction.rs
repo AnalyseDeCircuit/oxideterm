@@ -2,8 +2,6 @@
 
 use crate::{AiChatMessage, AiChatRole, sanitize_for_persistence};
 
-use super::history::ai_message_estimated_tokens;
-
 #[derive(Clone)]
 pub struct AiCompactionPlan {
     pub compact_messages: Vec<AiChatMessage>,
@@ -15,13 +13,35 @@ pub fn ai_compaction_plan(
     context_window: usize,
     silent: bool,
 ) -> Option<AiCompactionPlan> {
+    ai_compaction_plan_with_estimator(
+        messages,
+        context_window,
+        silent,
+        super::history::ai_message_estimated_tokens,
+    )
+}
+
+pub fn ai_compaction_plan_for_provider(
+    messages: &[AiChatMessage],
+    context_window: usize,
+    silent: bool,
+    provider_type: &str,
+) -> Option<AiCompactionPlan> {
+    ai_compaction_plan_with_estimator(messages, context_window, silent, |message| {
+        super::history::ai_message_payload_estimated_tokens(message, provider_type)
+    })
+}
+
+fn ai_compaction_plan_with_estimator(
+    messages: &[AiChatMessage],
+    context_window: usize,
+    silent: bool,
+    estimate_message: impl Fn(&AiChatMessage) -> usize,
+) -> Option<AiCompactionPlan> {
     if messages.len() < 4 {
         return None;
     }
-    let total_tokens = messages
-        .iter()
-        .map(ai_message_estimated_tokens)
-        .sum::<usize>();
+    let total_tokens = messages.iter().map(&estimate_message).sum::<usize>();
     let mut budget = ((context_window as f32) * 0.4).floor() as usize;
     if !silent && total_tokens > 0 {
         budget = budget.min(((total_tokens as f32) * 0.6).floor() as usize);
@@ -29,7 +49,7 @@ pub fn ai_compaction_plan(
     let mut keep_start = messages.len();
     let mut used = 0usize;
     for (index, message) in messages.iter().enumerate().rev() {
-        let tokens = ai_message_estimated_tokens(message);
+        let tokens = estimate_message(message);
         if keep_start < messages.len() && used.saturating_add(tokens) > budget {
             break;
         }

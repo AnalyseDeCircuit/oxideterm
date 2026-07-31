@@ -102,6 +102,29 @@ pub(in crate::workspace) async fn run_ai_chat_tool_loop(
             }),
         );
         let provider_history = oxideterm_ai::sanitize_api_messages_for_provider(history.clone());
+        let _ = send_ai_prompt_usage(
+            &ui_tx,
+            generation,
+            &conversation_id,
+            &assistant_id,
+            provider_history
+                .iter()
+                .rev()
+                .find(|message| message.role == AiChatRole::User)
+                .map(|message| message.id.clone()),
+            provider_config
+                .provider_id
+                .clone()
+                .unwrap_or_else(|| provider_config.provider_type.clone()),
+            provider_config.model.clone(),
+            ai_prompt_token_breakdown(
+                &provider_history,
+                &provider_config.tools,
+                &provider_config.provider_type,
+                response_reserve,
+            ),
+            model_runtime.context_window,
+        );
         tokio::spawn(stream_chat_completion(
             provider_config,
             provider_history,
@@ -981,17 +1004,16 @@ pub(in crate::workspace) async fn run_ai_chat_tool_loop(
         if round_index >= 1 {
             condense_ai_tool_messages(&mut history);
         }
-        let system_message_tokens = history
-            .iter()
-            .filter(|message| message.role == AiChatRole::System)
-            .map(ai_message_estimated_tokens)
-            .sum::<usize>();
-        let total_message_tokens = history
-            .iter()
-            .map(ai_message_estimated_tokens)
-            .sum::<usize>();
-        let system_budget = system_message_tokens
-            .saturating_add(ai_tool_definitions_estimated_tokens(&config.tools));
+        let budget_history = oxideterm_ai::sanitize_api_messages_for_provider(history.clone());
+        let prompt_breakdown = ai_prompt_token_breakdown(
+            &budget_history,
+            &config.tools,
+            &config.provider_type,
+            response_reserve,
+        );
+        let system_budget = prompt_breakdown
+            .system_instructions
+            .saturating_add(prompt_breakdown.tool_definitions);
         let regular_messages = history
             .iter()
             .filter(|message| message.role != AiChatRole::System)
@@ -1001,7 +1023,7 @@ pub(in crate::workspace) async fn run_ai_chat_tool_loop(
             context_window: model_runtime.context_window,
             response_reserve,
             system_budget,
-            history_tokens: total_message_tokens.saturating_sub(system_message_tokens),
+            history_tokens: prompt_breakdown.history_tokens(),
             trimmable_history_tokens: None,
             summary_eligible_tokens: Some(summary_eligible_tokens),
             can_summarize: summary_eligible_tokens > 0,
@@ -1029,7 +1051,7 @@ pub(in crate::workspace) async fn run_ai_chat_tool_loop(
                     "source": "background",
                     "model": config.model.clone(),
                     "summarizationMode": "background",
-                    "contextLengthBefore": total_message_tokens,
+                    "contextLengthBefore": prompt_breakdown.prompt_tokens(),
                     "numRounds": round_number,
                     "numRoundsSinceLastSummarization": 1,
                 }),

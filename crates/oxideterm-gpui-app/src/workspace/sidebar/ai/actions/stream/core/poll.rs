@@ -52,6 +52,27 @@ impl WorkspaceApp {
                 continue;
             }
             match delivery.event {
+                AiStreamDeliveryEvent::PromptUsage {
+                    last_user_message_id,
+                    provider_id,
+                    model,
+                    breakdown,
+                    max_tokens,
+                } => {
+                    self.flush_pending_ai_stream_text(&mut pending_text, cx);
+                    let usage = AiPreparedPromptUsage {
+                        conversation_id: delivery.conversation_id,
+                        last_user_message_id,
+                        provider_id,
+                        model,
+                        breakdown: ai_context_token_breakdown_from_prompt(
+                            breakdown,
+                            max_tokens,
+                        ),
+                    };
+                    self.ai_entity
+                        .update(cx, |ai, _cx| ai.set_prepared_prompt_usage(usage));
+                }
                 AiStreamDeliveryEvent::Stream(AiStreamEvent::Content(chunk)) => {
                     self.merge_or_flush_pending_ai_stream_text(
                         &mut pending_text,

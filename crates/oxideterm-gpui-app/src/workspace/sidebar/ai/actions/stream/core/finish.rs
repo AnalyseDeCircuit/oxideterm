@@ -39,6 +39,7 @@ impl AiWorkspaceEntity {
         let compacted_until_entry_id =
             ai_transcript_boundary_id(plan.compact_messages.last(), "end");
         let total_compacted = ai_compaction_original_count(&plan.compact_messages);
+        let total_compacted_turns = ai_conversation_turn_count(&plan.compact_messages);
         let snapshot_messages = ai_compaction_anchor_snapshot(&plan.compact_messages);
         let summary_entry_id = format!("transcript-summary-created-{anchor_id}");
         let transcript_ref = serde_json::json!({
@@ -64,6 +65,7 @@ impl AiWorkspaceEntity {
                 original_count: Some(total_compacted),
                 compacted_at_ms: Some(now_ms),
                 original_messages: Some(snapshot_messages),
+                original_user_count: Some(total_compacted_turns),
             }),
             tool_call_id: None,
             tool_calls: Vec::new(),
@@ -78,6 +80,8 @@ impl AiWorkspaceEntity {
             .chain(appended)
             .collect();
         conversation.updated_at_ms = now_ms;
+        conversation.message_count = conversation.messages.len();
+        conversation.turn_count = ai_conversation_turn_count(&conversation.messages);
         let metadata = conversation
             .session_metadata
             .get_or_insert_with(|| serde_json::json!({ "conversationId": conversation_id }));
@@ -139,6 +143,7 @@ impl AiWorkspaceEntity {
         let summary_source_transcript_ref =
             ai_summary_source_transcript_ref(&conversation.messages, conversation_id);
         let summary_round_id = ai_latest_summary_round_id(&conversation.messages);
+        let original_user_count = ai_conversation_turn_count(&conversation.messages);
         let summary_entry_id = format!("transcript-summary-created-{summary_id}");
         let transcript_ref = serde_json::json!({
             "conversationId": conversation_id,
@@ -150,6 +155,7 @@ impl AiWorkspaceEntity {
             "kind": "conversation",
             "roundId": summary_round_id,
             "transcriptRef": summary_source_transcript_ref,
+            "originalUserCount": original_user_count,
         });
         conversation.messages = vec![AiChatMessage {
             id: summary_id.to_string(),
@@ -182,6 +188,8 @@ impl AiWorkspaceEntity {
             }
         }
         conversation.updated_at_ms = now_ms;
+        conversation.message_count = conversation.messages.len();
+        conversation.turn_count = ai_conversation_turn_count(&conversation.messages);
         self.persist_chat_state();
         Some((summary_source_transcript_ref, summary_round_id))
     }

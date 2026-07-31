@@ -100,6 +100,13 @@ pub(in crate::workspace) enum AiSftpTransferError {
 
 pub(in crate::workspace) enum AiStreamDeliveryEvent {
     Stream(AiStreamEvent),
+    PromptUsage {
+        last_user_message_id: Option<String>,
+        provider_id: String,
+        model: String,
+        breakdown: oxideterm_ai::AiPromptTokenBreakdown,
+        max_tokens: usize,
+    },
     AcpClientEvent {
         agent_id: String,
         event: oxideterm_ai::AcpClientEvent,

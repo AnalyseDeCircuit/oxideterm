@@ -425,6 +425,14 @@ impl WorkspaceApp {
         if trimmed_count > 0 {
             self.show_ai_trim_notice(trimmed_count, cx);
         }
+        let context_window = self.ai_active_model_context_window(&config);
+        self.record_ai_prepared_prompt_usage(
+            &conversation_id,
+            &config,
+            &history,
+            context_window,
+            cx,
+        );
         let now = ai_now_ms();
         let assistant_id = self.next_ai_chat_id(now, cx);
         let request_message = self.ai_entity.read(cx).conversation_state()
@@ -575,7 +583,7 @@ impl WorkspaceApp {
             .ai_runtime_context
             .update(cx, |runtime, _cx| runtime.begin_tool_session(generation));
         let model_runtime = AiModelRuntimeState {
-            context_window: self.ai_active_model_context_window(&config),
+            context_window,
         };
         let services = self.ai_model_backend_services(cx);
         let task = self.forwarding_runtime.spawn(run_ai_chat_tool_loop(

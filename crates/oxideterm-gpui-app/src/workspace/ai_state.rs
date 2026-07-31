@@ -722,6 +722,10 @@ impl AiWorkspaceEntity {
         self.chat_ui.model_switch_warning_percentage = percentage;
     }
 
+    pub(in crate::workspace) fn set_prepared_prompt_usage(&mut self, usage: AiPreparedPromptUsage) {
+        self.chat_ui.prepared_prompt_usage = Some(usage);
+    }
+
     pub(in crate::workspace) fn show_context_trim_notice(&mut self, count: usize) -> u64 {
         self.chat_ui.context_trim_notice_count = Some(count);
         self.chat_ui.context_trim_notice_sequence =
@@ -4151,6 +4155,7 @@ pub(super) struct AiChatWorkspaceState {
     pub(super) message_signature_cache: RefCell<AiChatMessageSignatureCache>,
     pub(super) markdown_cache: RefCell<AiMarkdownDocumentCache>,
     pub(super) context_token_cache: RefCell<AiContextTokenBreakdownCache>,
+    pub(super) prepared_prompt_usage: Option<AiPreparedPromptUsage>,
     pub(super) conversation_list_open: bool,
     pub(super) menu_open: bool,
     pub(super) reasoning_menu_open: bool,
@@ -4217,6 +4222,7 @@ impl AiChatWorkspaceState {
             message_signature_cache: RefCell::new(AiChatMessageSignatureCache::default()),
             markdown_cache: RefCell::new(AiMarkdownDocumentCache::default()),
             context_token_cache: RefCell::new(AiContextTokenBreakdownCache::default()),
+            prepared_prompt_usage: None,
             conversation_list_open: false,
             menu_open: false,
             reasoning_menu_open: false,

@@ -410,12 +410,13 @@ mod ai_turn_order_tests {
     #[test]
     fn context_indicator_tool_definition_tokens_use_real_orchestrator_schema() {
         let tools = oxideterm_ai::orchestrator_tool_definitions();
+        let breakdown = ai_prompt_token_breakdown(&[], &tools, "openai", 0);
 
         assert_eq!(
-            ai_estimated_tool_definitions_tokens(),
+            breakdown.tool_definitions,
             ai_tool_definitions_estimated_tokens(&tools)
         );
-        assert!(ai_estimated_tool_definitions_tokens() > tools.len() * 10);
+        assert!(breakdown.tool_definitions > tools.len() * 10);
     }
 
     #[test]
@@ -472,33 +473,19 @@ mod ai_turn_order_tests {
     }
 
     #[test]
-    fn context_indicator_tool_result_tokens_only_count_user_and_assistant_messages() {
-        let tool_call = serde_json::json!({
-            "arguments": "{\"command\":\"echo hi\"}",
-            "result": { "output": "large tool output" },
-        });
-        let mut system = test_message("system", AiChatRole::System, String::new());
-        system.tool_calls = vec![tool_call.clone()];
-        let mut assistant = test_message("assistant", AiChatRole::Assistant, String::new());
-        assistant.tool_calls = vec![tool_call];
-        let conversation = AiConversation {
-            id: "conv-1".to_string(),
-            title: "Conversation".to_string(),
-            messages: vec![system, assistant.clone()],
-            created_at_ms: 0,
-            updated_at_ms: 0,
-            origin: "sidebar".to_string(),
-            profile_id: None,
-            message_count: 2,
-            session_id: None,
-            session_metadata: None,
-            messages_loaded: true,
+    fn context_indicator_excludes_future_output_reserve_from_used_context() {
+        let core = oxideterm_ai::AiPromptTokenBreakdown {
+            system_instructions: 100,
+            tool_definitions: 200,
+            reserved_output: 400,
+            messages: 300,
+            tool_results: 50,
         };
 
-        assert_eq!(
-            ai_conversation_tool_result_tokens(&conversation),
-            ai_tool_call_estimated_tokens(&assistant.tool_calls[0])
-        );
+        let breakdown = ai_context_token_breakdown_from_prompt(core, 8_192);
+
+        assert_eq!(breakdown.total, 650);
+        assert_eq!(breakdown.reserved_output, 400);
     }
 
     #[test]
@@ -515,6 +502,7 @@ mod ai_turn_order_tests {
             session_id: None,
             session_metadata: None,
             messages_loaded: true,
+            turn_count: 0,
         }];
 
         let stale_applied = apply_ai_acp_session_started_to_conversations(
@@ -667,6 +655,7 @@ mod ai_turn_order_tests {
                 }
             })),
             messages_loaded: true,
+            turn_count: 0,
         };
 
         assert!(!store_ai_acp_handoff_cursor_in_conversation(
@@ -1037,6 +1026,7 @@ mod ai_turn_order_tests {
                 original_count: Some(4),
                 compacted_at_ms: Some(1),
                 original_messages: None,
+                original_user_count: None,
             }),
             tool_call_id: None,
             tool_calls: Vec::new(),
@@ -1169,6 +1159,7 @@ mod ai_turn_order_tests {
                 original_count: Some(compacted.len()),
                 compacted_at_ms: Some(1),
                 original_messages: Some(compacted),
+                original_user_count: Some(2),
             }),
             tool_call_id: None,
             tool_calls: Vec::new(),
@@ -2113,6 +2104,7 @@ mod ai_turn_order_tests {
                     original_count: Some(4),
                     compacted_at_ms: Some(1),
                     original_messages: None,
+                    original_user_count: None,
                 }),
                 tool_call_id: None,
                 tool_calls: Vec::new(),
@@ -2252,6 +2244,7 @@ mod ai_turn_order_tests {
             session_id: None,
             session_metadata: None,
             messages_loaded: true,
+            turn_count: 0,
         };
 
         let stopped = finalize_streaming_ai_messages_on_cancel(&mut conversation);
@@ -2329,6 +2322,7 @@ mod ai_turn_order_tests {
             session_id: None,
             session_metadata: None,
             messages_loaded: true,
+            turn_count: 0,
         };
 
         let stopped = finalize_streaming_ai_messages_on_cancel(&mut conversation);

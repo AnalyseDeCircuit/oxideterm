@@ -7,9 +7,36 @@ use crate::{
 
 use super::turn::{set_ai_turn_status, update_ai_tool_call_status};
 
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct AiPromptTokenBreakdown {
+    pub system_instructions: usize,
+    pub tool_definitions: usize,
+    pub reserved_output: usize,
+    pub messages: usize,
+    pub tool_results: usize,
+}
+
+impl AiPromptTokenBreakdown {
+    pub fn total(&self) -> usize {
+        self.system_instructions
+            .saturating_add(self.tool_definitions)
+            .saturating_add(self.reserved_output)
+            .saturating_add(self.messages)
+            .saturating_add(self.tool_results)
+    }
+
+    pub fn prompt_tokens(&self) -> usize {
+        self.total().saturating_sub(self.reserved_output)
+    }
+
+    pub fn history_tokens(&self) -> usize {
+        self.messages.saturating_add(self.tool_results)
+    }
+}
+
 pub fn ai_message_estimated_tokens(message: &AiChatMessage) -> usize {
-    // Tauri's chat token budget only counts message.content here; tool-call
-    // details are accounted separately in the context indicator.
+    // Keep this content-only primitive for callers that intentionally budget
+    // visible history. Request-level accounting uses the payload estimator.
     ai_estimated_tokens(&message.content)
 }
 
@@ -22,6 +49,140 @@ pub fn ai_tool_definitions_estimated_tokens(tools: &[AiToolDefinition]) -> usize
                 + ai_estimated_tokens(&tool.parameters.to_string())
         })
         .sum()
+}
+
+pub fn ai_prompt_token_breakdown(
+    messages: &[AiChatMessage],
+    tools: &[AiToolDefinition],
+    provider_type: &str,
+    reserved_output: usize,
+) -> AiPromptTokenBreakdown {
+    let mut breakdown = AiPromptTokenBreakdown {
+        tool_definitions: ai_tool_definitions_estimated_tokens(tools),
+        reserved_output,
+        ..AiPromptTokenBreakdown::default()
+    };
+    for message in messages {
+        let provider_state_tokens = ai_provider_parts_estimated_tokens(message, provider_type);
+        if message.role == AiChatRole::Assistant
+            && let Some(provider_state_tokens) = provider_state_tokens
+        {
+            // Gemini replays signed parts instead of rebuilding the visible
+            // assistant message, so counting both would double the same turn.
+            breakdown.tool_results = breakdown.tool_results.saturating_add(provider_state_tokens);
+            continue;
+        }
+        let content_tokens = ai_message_estimated_tokens(message);
+        match message.role {
+            AiChatRole::System => {
+                breakdown.system_instructions =
+                    breakdown.system_instructions.saturating_add(content_tokens);
+            }
+            AiChatRole::Tool => {
+                breakdown.tool_results = breakdown
+                    .tool_results
+                    .saturating_add(content_tokens)
+                    .saturating_add(
+                        message
+                            .tool_call_id
+                            .as_deref()
+                            .map(ai_estimated_tokens)
+                            .unwrap_or(0),
+                    );
+            }
+            AiChatRole::User | AiChatRole::Assistant => {
+                breakdown.messages = breakdown.messages.saturating_add(content_tokens);
+            }
+        }
+        if message.role == AiChatRole::Assistant {
+            // Tool calls, preserved reasoning, and signed provider parts are
+            // protocol history even though they are not visible chat text.
+            breakdown.tool_results = breakdown
+                .tool_results
+                .saturating_add(ai_tool_calls_estimated_tokens(&message.tool_calls))
+                .saturating_add(ai_replayed_reasoning_estimated_tokens(
+                    message,
+                    provider_type,
+                ));
+        }
+    }
+    breakdown
+}
+
+pub fn ai_message_payload_estimated_tokens(message: &AiChatMessage, provider_type: &str) -> usize {
+    if message.role == AiChatRole::Assistant
+        && let Some(provider_state_tokens) =
+            ai_provider_parts_estimated_tokens(message, provider_type)
+    {
+        return provider_state_tokens;
+    }
+    let mut tokens = ai_message_estimated_tokens(message);
+    if message.role == AiChatRole::Tool {
+        tokens = tokens.saturating_add(
+            message
+                .tool_call_id
+                .as_deref()
+                .map(ai_estimated_tokens)
+                .unwrap_or(0),
+        );
+    }
+    if message.role == AiChatRole::Assistant {
+        tokens = tokens
+            .saturating_add(ai_tool_calls_estimated_tokens(&message.tool_calls))
+            .saturating_add(ai_replayed_reasoning_estimated_tokens(
+                message,
+                provider_type,
+            ));
+    }
+    tokens
+}
+
+fn ai_tool_calls_estimated_tokens(tool_calls: &[serde_json::Value]) -> usize {
+    tool_calls
+        .iter()
+        .map(|tool_call| {
+            let id = tool_call
+                .get("id")
+                .and_then(serde_json::Value::as_str)
+                .map(ai_estimated_tokens)
+                .unwrap_or(0);
+            let name = tool_call
+                .get("name")
+                .and_then(serde_json::Value::as_str)
+                .map(ai_estimated_tokens)
+                .unwrap_or(0);
+            let arguments = tool_call
+                .get("arguments")
+                .and_then(serde_json::Value::as_str)
+                .map(ai_estimated_tokens)
+                .unwrap_or(0);
+            id.saturating_add(name).saturating_add(arguments)
+        })
+        .sum()
+}
+
+fn ai_replayed_reasoning_estimated_tokens(message: &AiChatMessage, provider_type: &str) -> usize {
+    let provider_replays_reasoning = !matches!(provider_type, "anthropic" | "gemini")
+        && (!message.tool_calls.is_empty() || provider_type == "kimi");
+    if !provider_replays_reasoning {
+        return 0;
+    }
+    message
+        .thinking_content
+        .as_deref()
+        .map(ai_estimated_tokens)
+        .unwrap_or(0)
+}
+
+fn ai_provider_parts_estimated_tokens(
+    message: &AiChatMessage,
+    provider_type: &str,
+) -> Option<usize> {
+    (provider_type == "gemini")
+        .then(|| super::turn::ai_provider_parts(message, provider_type))
+        .flatten()
+        .and_then(|parts| serde_json::to_string(parts).ok())
+        .map(|serialized| ai_estimated_tokens(&serialized))
 }
 
 pub fn ai_summary_eligible_tokens(messages: &[&AiChatMessage]) -> usize {
@@ -175,6 +336,7 @@ pub fn finalize_streaming_ai_messages_on_cancel(
             .messages
             .retain(|message| !remove_ids.contains(&message.id));
         conversation.message_count = conversation.messages.len();
+        conversation.turn_count = crate::ai_conversation_turn_count(&conversation.messages);
     }
     stopped_turns
 }
@@ -373,13 +535,54 @@ pub fn trim_ai_stream_history_to_budget(
     context_window: usize,
     response_reserve: usize,
 ) -> usize {
+    trim_ai_stream_history_to_budget_with_overhead(history, context_window, response_reserve, 0)
+}
+
+pub fn trim_ai_stream_history_to_budget_with_overhead(
+    history: &mut Vec<AiChatMessage>,
+    context_window: usize,
+    response_reserve: usize,
+    fixed_prompt_overhead: usize,
+) -> usize {
+    trim_ai_stream_history_with_estimator(
+        history,
+        context_window,
+        response_reserve,
+        fixed_prompt_overhead,
+        ai_message_estimated_tokens,
+    )
+}
+
+pub fn trim_ai_stream_history_to_request_budget(
+    history: &mut Vec<AiChatMessage>,
+    tools: &[AiToolDefinition],
+    provider_type: &str,
+    context_window: usize,
+    response_reserve: usize,
+) -> usize {
+    trim_ai_stream_history_with_estimator(
+        history,
+        context_window,
+        response_reserve,
+        ai_tool_definitions_estimated_tokens(tools),
+        |message| ai_message_payload_estimated_tokens(message, provider_type),
+    )
+}
+
+fn trim_ai_stream_history_with_estimator(
+    history: &mut Vec<AiChatMessage>,
+    context_window: usize,
+    response_reserve: usize,
+    fixed_prompt_overhead: usize,
+    estimate_message: impl Fn(&AiChatMessage) -> usize,
+) -> usize {
     if history.is_empty() {
         return 0;
     }
     let system_tokens = history
         .iter()
         .filter(|message| message.role == AiChatRole::System)
-        .map(ai_message_estimated_tokens)
+        .map(&estimate_message)
         .sum::<usize>();
     let regular_indices = history
         .iter()
@@ -399,10 +602,11 @@ pub fn trim_ai_stream_history_to_budget(
     let budget = ((context_window as f32) * AI_HISTORY_BUDGET_RATIO).floor() as usize;
     let budget = budget
         .saturating_sub(response_reserve)
-        .saturating_sub(system_tokens);
+        .saturating_sub(system_tokens)
+        .saturating_sub(fixed_prompt_overhead);
     if budget == 0 {
-        // Tauri keeps the most recent history message even when fixed prompt
-        // overhead leaves no budget for accumulated conversation history.
+        // Preserve the latest request even when fixed prompt overhead consumes
+        // the entire history budget.
         let keep_index = regular_indices[total_regular - 1];
         *history = history
             .drain(..)
@@ -413,18 +617,16 @@ pub fn trim_ai_stream_history_to_budget(
             .collect();
         return total_regular.saturating_sub(1);
     }
-
     let mut kept_indices = std::collections::HashSet::<usize>::new();
     let mut used = 0usize;
     for index in regular_indices.iter().rev().copied() {
-        let tokens = ai_message_estimated_tokens(&history[index]);
+        let tokens = estimate_message(&history[index]);
         if used.saturating_add(tokens) > budget && !kept_indices.is_empty() {
             break;
         }
         used = used.saturating_add(tokens);
         kept_indices.insert(index);
     }
-
     let kept_regular = kept_indices.len();
     if kept_regular >= total_regular {
         return 0;

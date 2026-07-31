@@ -76,7 +76,12 @@ impl WorkspaceApp {
         };
         let context_window = self.ai_active_model_context_window(&config);
         if silent && !force {
-            let total_tokens = messages.iter().map(ai_message_estimated_tokens).sum::<usize>();
+            let total_tokens = messages
+                .iter()
+                .map(|message| {
+                    ai_message_payload_estimated_tokens(message, &config.provider_type)
+                })
+                .sum::<usize>();
             let reserve = ai_response_reserve(context_window);
             let prompt_budget = compute_ai_prompt_budget(context_window, reserve, 0, None);
             let auto_compact_threshold = if prompt_budget.usable_prompt_budget > 0 {
@@ -106,7 +111,12 @@ impl WorkspaceApp {
                 return Err(resume_after);
             }
         }
-        let Some(plan) = ai_compaction_plan(&messages, context_window, silent) else {
+        let Some(plan) = ai_compaction_plan_for_provider(
+            &messages,
+            context_window,
+            silent,
+            &config.provider_type,
+        ) else {
             self.ai_entity
                 .update(cx, |ai, _cx| ai.finish_compaction(&conversation_id));
             return Err(resume_after);

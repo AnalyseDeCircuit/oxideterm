@@ -549,14 +549,22 @@ struct AiContextTokenBreakdownKey {
     provider_id: String,
     model: String,
     max_tokens: usize,
-    system_prompt_fingerprint: u64,
-    tool_use_enabled: bool,
+    request_configuration_fingerprint: u64,
 }
 
 #[derive(Default)]
 struct AiContextTokenBreakdownCache {
     key: Option<AiContextTokenBreakdownKey>,
     breakdown_without_draft: Option<AiContextTokenBreakdown>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct AiPreparedPromptUsage {
+    conversation_id: String,
+    last_user_message_id: Option<String>,
+    provider_id: String,
+    model: String,
+    breakdown: AiContextTokenBreakdown,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

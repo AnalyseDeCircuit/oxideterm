@@ -260,6 +260,7 @@ mod tests {
             session_id: None,
             session_metadata: None,
             messages_loaded: true,
+            turn_count: 0,
         }
     }
 

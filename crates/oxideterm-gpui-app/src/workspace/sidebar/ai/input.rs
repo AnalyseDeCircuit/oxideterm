@@ -797,9 +797,12 @@ window.focus(&this.focus_handle, cx);
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let breakdown = self.ai_context_token_breakdown(cx);
+        let acp_backend_active =
+            self.settings_store.settings().ai.active_backend == AiActiveBackend::Acp;
         let acp_usage = self.active_ai_acp_usage(cx);
-        let (total_tokens, max_tokens) =
-            acp_usage.unwrap_or((breakdown.total, breakdown.max_tokens));
+        let (total_tokens, max_tokens) = acp_usage
+            .or_else(|| (!acp_backend_active).then_some((breakdown.total, breakdown.max_tokens)))
+            .unwrap_or((0, 0));
         let percentage = if max_tokens == 0 {
             0.0
         } else {
@@ -813,10 +816,14 @@ window.focus(&this.focus_handle, cx);
         let indicator = ai_context_usage_indicator(
             &self.tokens,
             usage,
-            ai_format_tokens(total_tokens),
-            acp_usage.is_none(),
+            if acp_backend_active && acp_usage.is_none() {
+                "—".to_string()
+            } else {
+                ai_format_tokens(total_tokens)
+            },
+            !acp_backend_active,
         )
-        .when(acp_usage.is_none(), |indicator| indicator.on_mouse_down(
+        .when(!acp_backend_active, |indicator| indicator.on_mouse_down(
             MouseButton::Left,
             cx.listener(|this, _event, _window, cx| {
                 let next_open = !this.ai_entity.read(cx).chat_ui().context_popover_open;
@@ -828,7 +835,7 @@ window.focus(&this.focus_handle, cx);
                 cx.notify();
             }),
         ));
-        if acp_usage.is_some() {
+        if acp_backend_active {
             return indicator.into_any_element();
         }
         let workspace = cx.entity();
@@ -1127,82 +1134,234 @@ window.focus(&this.focus_handle, cx);
         cx: &App,
     ) -> AiContextTokenBreakdown {
         let settings = self.settings_store.settings();
-        let providers = ai_provider_views(&settings.ai.providers);
-        let active_provider =
-            active_provider_view(&providers, settings.ai.active_provider_id.as_deref());
-        let model = active_model_selection(settings.ai.active_model.as_deref()).unwrap_or_default();
-        let provider_id = active_provider
-            .map(|provider| provider.id.as_str())
-            .unwrap_or("");
-        let max_tokens = ai_context_window_from_maps(
-            &settings.ai.user_context_windows,
-            &settings.ai.model_context_windows,
-            provider_id,
-            &model,
-        )
-        .unwrap_or(AI_COMPACTION_DEFAULT_CONTEXT_WINDOW);
-        let system_prompt = settings.ai.custom_system_prompt.trim();
+        let config = self.resolve_ai_stream_config(cx).ok();
+        let provider_id = config
+            .as_ref()
+            .and_then(|config| config.provider_id.as_deref())
+            .unwrap_or("acp")
+            .to_string();
+        let model = config
+            .as_ref()
+            .map(|config| config.model.clone())
+            .unwrap_or_else(|| active_model_selection(settings.ai.active_model.as_deref()).unwrap_or_default());
+        let max_tokens = config
+            .as_ref()
+            .map(|config| self.ai_active_model_context_window(config))
+            .unwrap_or(AI_COMPACTION_DEFAULT_CONTEXT_WINDOW);
+        let conversation_fingerprint = {
+            let ai = self.ai_entity.read(cx);
+            ai_conversation_token_fingerprint(
+                ai.conversation_state().active_conversation(),
+                &ai.chat_ui().message_signature_cache,
+            )
+        };
         let conversation = self.ai_entity.read(cx).conversation_state().active_conversation();
+        if let Some(prepared) = self
+            .ai_entity
+            .read(cx)
+            .chat_ui()
+            .prepared_prompt_usage
+            .as_ref()
+            .filter(|prepared| {
+                conversation.is_some_and(|conversation| conversation.id == prepared.conversation_id)
+                    && conversation
+                        .and_then(|conversation| {
+                            conversation
+                                .messages
+                                .iter()
+                                .rev()
+                                .find(|message| message.role == AiChatRole::User)
+                        })
+                        .map(|message| message.id.as_str())
+                        == prepared.last_user_message_id.as_deref()
+                    && conversation.is_some_and(|conversation| {
+                        conversation.messages.last().is_some_and(|message| {
+                            message.role == AiChatRole::User
+                                || (message.role == AiChatRole::Assistant
+                                    && message.is_streaming)
+                        })
+                    })
+                    && prepared.provider_id == provider_id
+                    && prepared.model == model
+            })
+        {
+            return prepared.breakdown.clone();
+        }
+        let request_configuration_fingerprint = config
+            .as_ref()
+            .map(|config| self.ai_request_configuration_fingerprint(config))
+            .unwrap_or(0);
         let cache_key = AiContextTokenBreakdownKey {
             conversation_id: conversation.map(|conversation| conversation.id.clone()),
-            conversation_fingerprint: ai_conversation_token_fingerprint(conversation),
-            provider_id: provider_id.to_string(),
-            model: model,
+            conversation_fingerprint,
+            provider_id: provider_id.clone(),
+            model: model.clone(),
             max_tokens,
-            system_prompt_fingerprint: ai_text_shape_fingerprint(system_prompt),
-            tool_use_enabled: settings.ai.tool_use.enabled,
+            request_configuration_fingerprint,
         };
         {
             let cache = self.ai_entity.read(cx).chat_ui().context_token_cache.borrow();
             if cache.key.as_ref() == Some(&cache_key)
                 && let Some(cached) = cache.breakdown_without_draft.as_ref()
             {
-                return ai_context_breakdown_with_draft(cached.clone(), &self.ai_entity.read(cx).chat_ui().draft);
+                return cached.clone();
             }
         }
-        let system_instructions = ai_estimated_tokens(if system_prompt.is_empty() {
-            DEFAULT_AI_SYSTEM_PROMPT
-        } else {
-            system_prompt
-        });
-        let tool_definitions = if settings.ai.tool_use.enabled {
-            ai_estimated_tool_definitions_tokens()
-        } else {
-            0
-        };
-        let reserved_output = ai_response_reserve(max_tokens);
-        let message_tokens = conversation
-            .map(|conversation| {
+        let breakdown_without_draft = if let Some(config) = config.as_ref() {
+            let mut history = self.compose_ai_stream_history(
                 conversation
-                    .messages
-                    .iter()
-                    .filter(|message| {
-                        matches!(message.role, AiChatRole::User | AiChatRole::Assistant)
-                    })
-                    .map(ai_message_estimated_tokens)
-                    .sum::<usize>()
-            })
-            .unwrap_or(0);
-        let tool_results = conversation
-            .map(ai_conversation_tool_result_tokens)
-            .unwrap_or(0);
-        let breakdown_without_draft = AiContextTokenBreakdown {
-            system_instructions,
-            tool_definitions,
-            reserved_output,
-            messages: message_tokens,
-            tool_results,
-            total: system_instructions
-                .saturating_add(tool_definitions)
-                .saturating_add(reserved_output)
-                .saturating_add(message_tokens)
-                .saturating_add(tool_results),
-            max_tokens,
+                    .map(|conversation| conversation.messages.clone())
+                    .unwrap_or_default(),
+                config,
+                None,
+                None,
+                None,
+            );
+            if let Some(conversation) = conversation
+                && let Some(transcript_lookup_prompt) = self
+                    .ai_transcript_lookup_prompt_for_conversation(
+                        &conversation.id,
+                        config,
+                        None,
+                        None,
+                        None,
+                        cx,
+                    )
+            {
+                history.insert(
+                    1,
+                    AiChatMessage {
+                        id: "transcript-lookup-reference".to_string(),
+                        role: AiChatRole::System,
+                        content: transcript_lookup_prompt,
+                        timestamp_ms: 0,
+                        model: None,
+                        context: None,
+                        is_streaming: false,
+                        thinking_content: None,
+                        metadata: None,
+                        tool_call_id: None,
+                        tool_calls: Vec::new(),
+                        turn: None,
+                        transcript_ref: None,
+                        summary_ref: None,
+                        branches: None,
+                        suggestions: Vec::new(),
+                    },
+                );
+            }
+            let reserved_output = config
+                .max_response_tokens
+                .and_then(|tokens| usize::try_from(tokens).ok())
+                .filter(|tokens| *tokens > 0)
+                .unwrap_or_else(|| ai_response_reserve(max_tokens));
+            // Match the send path exactly: the idle indicator describes the
+            // next provider request, including history that would be trimmed.
+            trim_ai_stream_history_to_request_budget(
+                &mut history,
+                &config.tools,
+                &config.provider_type,
+                max_tokens,
+                reserved_output,
+            );
+            ai_context_token_breakdown_from_prompt(
+                ai_prompt_token_breakdown(
+                    &history,
+                    &config.tools,
+                    &config.provider_type,
+                    reserved_output,
+                ),
+                max_tokens,
+            )
+        } else {
+            AiContextTokenBreakdown {
+                system_instructions: 0,
+                tool_definitions: 0,
+                reserved_output: 0,
+                messages: 0,
+                tool_results: 0,
+                total: 0,
+                max_tokens,
+            }
         };
         let mut cache = self.ai_entity.read(cx).chat_ui().context_token_cache.borrow_mut();
         cache.key = Some(cache_key);
         cache.breakdown_without_draft = Some(breakdown_without_draft.clone());
-        ai_context_breakdown_with_draft(breakdown_without_draft, &self.ai_entity.read(cx).chat_ui().draft)
+        breakdown_without_draft
+    }
+
+    fn ai_request_configuration_fingerprint(&self, config: &AiChatStreamConfig) -> u64 {
+        let settings = self.settings_store.settings();
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        std::hash::Hash::hash(&self.settings_store.updated_at(), &mut hasher);
+        std::hash::Hash::hash(&config.provider_id, &mut hasher);
+        std::hash::Hash::hash(&config.provider_type, &mut hasher);
+        std::hash::Hash::hash(&config.model, &mut hasher);
+        std::hash::Hash::hash(&config.max_response_tokens, &mut hasher);
+        std::hash::Hash::hash(&config.tool_policy.enabled, &mut hasher);
+        ai_hash_text_shape(settings.ai.custom_system_prompt.trim(), &mut hasher);
+        if let Some(memory_context) = config.memory_context.as_deref() {
+            ai_hash_text_shape(memory_context, &mut hasher);
+        }
+        let providers = ai_provider_views(&settings.ai.providers);
+        if let Some(provider) = active_provider_view(&providers, config.provider_id.as_deref()) {
+            ai_hash_text_shape(&provider.name, &mut hasher);
+        }
+        for tool in &config.tools {
+            ai_hash_text_shape(&tool.name, &mut hasher);
+            ai_hash_text_shape(&tool.description, &mut hasher);
+            ai_chat_hash_json_value(&tool.parameters, &mut hasher);
+        }
+        if settings.ai.skills.enabled {
+            // Skill content hashes make catalog edits invalidate the prompt
+            // without rebuilding the full catalog string on every repaint.
+            for skill in self.skill_registry.read().records().filter(|skill| skill.enabled) {
+                ai_hash_text_shape(&skill.id, &mut hasher);
+                ai_hash_text_shape(&skill.content_hash, &mut hasher);
+                std::hash::Hash::hash(&skill.priority, &mut hasher);
+            }
+        }
+        std::hash::Hasher::finish(&hasher)
+    }
+
+    pub(in crate::workspace) fn record_ai_prepared_prompt_usage(
+        &mut self,
+        conversation_id: &str,
+        config: &AiChatStreamConfig,
+        history: &[AiChatMessage],
+        max_tokens: usize,
+        cx: &mut Context<Self>,
+    ) {
+        let reserved_output = config
+            .max_response_tokens
+            .and_then(|tokens| usize::try_from(tokens).ok())
+            .filter(|tokens| *tokens > 0)
+            .unwrap_or_else(|| ai_response_reserve(max_tokens));
+        let breakdown = ai_context_token_breakdown_from_prompt(
+            ai_prompt_token_breakdown(
+                history,
+                &config.tools,
+                &config.provider_type,
+                reserved_output,
+            ),
+            max_tokens,
+        );
+        let usage = AiPreparedPromptUsage {
+            conversation_id: conversation_id.to_string(),
+            last_user_message_id: history
+                .iter()
+                .rev()
+                .find(|message| message.role == AiChatRole::User)
+                .map(|message| message.id.clone()),
+            provider_id: config
+                .provider_id
+                .clone()
+                .unwrap_or_else(|| config.provider_type.clone()),
+            model: config.model.clone(),
+            breakdown,
+        };
+        self.ai_entity
+            .update(cx, |ai, _cx| ai.set_prepared_prompt_usage(usage));
     }
 
     pub(in crate::workspace) fn ai_should_show_context_chips(
@@ -1581,18 +1740,26 @@ pub(in crate::workspace) fn ai_context_percent(tokens: usize, max_tokens: usize)
     }
 }
 
-pub(in crate::workspace) fn ai_context_breakdown_with_draft(
-    mut breakdown: AiContextTokenBreakdown,
-    draft: &str,
+pub(in crate::workspace) fn ai_context_token_breakdown_from_prompt(
+    breakdown: oxideterm_ai::AiPromptTokenBreakdown,
+    max_tokens: usize,
 ) -> AiContextTokenBreakdown {
-    let draft_tokens = ai_estimated_tokens(draft);
-    breakdown.messages = breakdown.messages.saturating_add(draft_tokens);
-    breakdown.total = breakdown.total.saturating_add(draft_tokens);
-    breakdown
+    AiContextTokenBreakdown {
+        system_instructions: breakdown.system_instructions,
+        tool_definitions: breakdown.tool_definitions,
+        reserved_output: breakdown.reserved_output,
+        messages: breakdown.messages,
+        tool_results: breakdown.tool_results,
+        // The ring reports context already sent to the model. Output reserve
+        // remains visible in the popover but is not presented as used input.
+        total: breakdown.prompt_tokens(),
+        max_tokens,
+    }
 }
 
 pub(in crate::workspace) fn ai_conversation_token_fingerprint(
     conversation: Option<&AiConversation>,
+    signature_cache: &std::cell::RefCell<AiChatMessageSignatureCache>,
 ) -> u64 {
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     let Some(conversation) = conversation else {
@@ -1600,38 +1767,15 @@ pub(in crate::workspace) fn ai_conversation_token_fingerprint(
     };
     std::hash::Hash::hash(&conversation.id, &mut hasher);
     std::hash::Hash::hash(&conversation.messages.len(), &mut hasher);
+    let mut signature_cache = signature_cache.borrow_mut();
+    signature_cache.select_conversation(&conversation.id);
     for message in &conversation.messages {
-        std::hash::Hash::hash(&message.id, &mut hasher);
-        std::hash::Hash::hash(&ai_role_fingerprint(&message.role), &mut hasher);
-        std::hash::Hash::hash(&message.is_streaming, &mut hasher);
-        std::hash::Hash::hash(&message.timestamp_ms, &mut hasher);
-        ai_hash_text_shape(&message.content, &mut hasher);
-        if let Some(context) = message.context.as_deref() {
-            ai_hash_text_shape(context, &mut hasher);
-        }
-        if let Some(thinking) = message.thinking_content.as_deref() {
-            ai_hash_text_shape(thinking, &mut hasher);
-        }
-        std::hash::Hash::hash(&message.tool_calls.len(), &mut hasher);
-        for tool_call in &message.tool_calls {
-            ai_hash_tool_call_shape(tool_call, &mut hasher);
-        }
+        // Streaming already invalidates the changed row in this shared cache,
+        // so long conversations are not rehashed during unrelated repaints.
+        let signature = signature_cache
+            .signature_for(&message.id, || ai_chat_message_base_signature(message));
+        std::hash::Hash::hash(&signature, &mut hasher);
     }
-    std::hash::Hasher::finish(&hasher)
-}
-
-pub(in crate::workspace) fn ai_role_fingerprint(role: &AiChatRole) -> u8 {
-    match role {
-        AiChatRole::User => 0,
-        AiChatRole::Assistant => 1,
-        AiChatRole::System => 2,
-        AiChatRole::Tool => 3,
-    }
-}
-
-pub(in crate::workspace) fn ai_text_shape_fingerprint(text: &str) -> u64 {
-    let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    ai_hash_text_shape(text, &mut hasher);
     std::hash::Hasher::finish(&hasher)
 }
 
@@ -1639,75 +1783,9 @@ pub(in crate::workspace) fn ai_hash_text_shape(
     text: &str,
     hasher: &mut std::collections::hash_map::DefaultHasher,
 ) {
-    let bytes = text.as_bytes();
-    std::hash::Hash::hash(&bytes.len(), hasher);
-    let head = bytes.len().min(32);
-    std::hash::Hash::hash(&&bytes[..head], hasher);
-    if bytes.len() > head {
-        let tail = bytes.len().saturating_sub(32);
-        std::hash::Hash::hash(&&bytes[tail..], hasher);
-    }
-}
-
-pub(in crate::workspace) fn ai_hash_tool_call_shape(
-    tool_call: &serde_json::Value,
-    hasher: &mut std::collections::hash_map::DefaultHasher,
-) {
-    for key in ["id", "name", "status", "risk"] {
-        if let Some(value) = tool_call.get(key).and_then(serde_json::Value::as_str) {
-            ai_hash_text_shape(value, hasher);
-        }
-    }
-    if let Some(arguments) = tool_call
-        .get("arguments")
-        .and_then(serde_json::Value::as_str)
-    {
-        ai_hash_text_shape(arguments, hasher);
-    }
-    if let Some(output) = tool_call
-        .get("result")
-        .and_then(|result| result.get("output"))
-        .and_then(serde_json::Value::as_str)
-    {
-        ai_hash_text_shape(output, hasher);
-    } else {
-        std::hash::Hash::hash(&tool_call.as_object().map(|object| object.len()), hasher);
-    }
-}
-
-pub(in crate::workspace) fn ai_conversation_tool_result_tokens(
-    conversation: &AiConversation,
-) -> usize {
-    conversation
-        .messages
-        .iter()
-        .filter(|message| matches!(message.role, AiChatRole::User | AiChatRole::Assistant))
-        .flat_map(|message| message.tool_calls.iter())
-        .map(ai_tool_call_estimated_tokens)
-        .sum()
-}
-
-pub(in crate::workspace) fn ai_tool_call_estimated_tokens(tool_call: &serde_json::Value) -> usize {
-    let arguments = tool_call
-        .get("arguments")
-        .and_then(serde_json::Value::as_str)
-        .map(ai_estimated_tokens)
-        .unwrap_or(0);
-    let result_output = tool_call
-        .get("result")
-        .and_then(|result| result.get("output"))
-        .and_then(serde_json::Value::as_str)
-        .map(ai_estimated_tokens)
-        .unwrap_or(0);
-    if arguments > 0 || result_output > 0 {
-        arguments.saturating_add(result_output)
-    } else {
-        ai_estimated_tokens(&tool_call.to_string())
-    }
-}
-
-pub(in crate::workspace) fn ai_estimated_tool_definitions_tokens() -> usize {
-    ai_tool_definitions_estimated_tokens(&oxideterm_ai::orchestrator_tool_definitions())
+    // Context usage cache correctness matters more than sampling a few bytes;
+    // equal-length edits in the middle of a prompt must invalidate the entry.
+    std::hash::Hash::hash(text.as_bytes(), hasher);
 }
 
 #[cfg(test)]

@@ -439,17 +439,70 @@ impl WorkspaceApp {
             rag_system_prompt.as_deref(),
             cx,
         );
-        let mut history = self.ai_entity.read(cx).conversation_state()
+        let history = self.ai_entity.read(cx).conversation_state()
             .conversations
             .iter()
             .find(|conversation| conversation.id == conversation_id)
             .map(|conversation| conversation.messages.clone())?;
+        let mut history = self.compose_ai_stream_history(
+            history,
+            config,
+            request_content,
+            task_system_prompt.as_deref(),
+            rag_system_prompt.as_deref(),
+        );
+        let context_window = self.ai_active_model_context_window(config);
+        if let Some(transcript_lookup_prompt) = transcript_lookup_prompt {
+            history.insert(
+                1,
+                AiChatMessage {
+                    id: "transcript-lookup-reference".to_string(),
+                    role: AiChatRole::System,
+                    content: transcript_lookup_prompt,
+                    timestamp_ms: 0,
+                    model: None,
+                    context: None,
+                    thinking_content: None,
+                    is_streaming: false,
+                    metadata: None,
+                    tool_call_id: None,
+                    tool_calls: Vec::new(),
+                    turn: None,
+                    transcript_ref: None,
+                    summary_ref: None,
+                    branches: None,
+                    suggestions: Vec::new(),
+                },
+            );
+        }
+        let trimmed_count = trim_ai_stream_history_to_request_budget(
+            &mut history,
+            &config.tools,
+            &config.provider_type,
+            context_window,
+            config
+                .max_response_tokens
+                .and_then(|tokens| usize::try_from(tokens).ok())
+                .filter(|tokens| *tokens > 0)
+                .unwrap_or_else(|| ai_response_reserve(context_window)),
+        );
+        Some((history, trimmed_count))
+    }
+
+    pub(in crate::workspace) fn compose_ai_stream_history(
+        &self,
+        mut history: Vec<AiChatMessage>,
+        config: &AiChatStreamConfig,
+        request_content: Option<String>,
+        task_system_prompt: Option<&str>,
+        rag_system_prompt: Option<&str>,
+    ) -> Vec<AiChatMessage> {
         apply_chat_request_overrides(&mut history, request_content, None);
         normalize_ai_stream_history_for_provider(&mut history);
         let mut base_system_prompt = self.build_ai_base_system_prompt(
             config,
-            rag_system_prompt.as_deref(),
-            task_system_prompt.as_deref(),
+            rag_system_prompt,
+            task_system_prompt,
         );
         if let Some(prompt) = ai_orchestrator_obligation_prompt_for_history(config, &history) {
             base_system_prompt.push_str("\n\n");
@@ -476,40 +529,7 @@ impl WorkspaceApp {
                 suggestions: Vec::new(),
             },
         );
-        let context_window = self.ai_active_model_context_window(config);
-        if let Some(transcript_lookup_prompt) = transcript_lookup_prompt {
-            history.insert(
-                1,
-                AiChatMessage {
-                    id: "transcript-lookup-reference".to_string(),
-                    role: AiChatRole::System,
-                    content: transcript_lookup_prompt,
-                    timestamp_ms: 0,
-                    model: None,
-                    context: None,
-                    thinking_content: None,
-                    is_streaming: false,
-                    metadata: None,
-                    tool_call_id: None,
-                    tool_calls: Vec::new(),
-                    turn: None,
-                    transcript_ref: None,
-                    summary_ref: None,
-                    branches: None,
-                    suggestions: Vec::new(),
-                },
-            );
-        }
-        let trimmed_count = trim_ai_stream_history_to_budget(
-            &mut history,
-            context_window,
-            config
-                .max_response_tokens
-                .and_then(|tokens| usize::try_from(tokens).ok())
-                .filter(|tokens| *tokens > 0)
-                .unwrap_or_else(|| ai_response_reserve(context_window)),
-        );
-        Some((history, trimmed_count))
+        history
     }
 
     pub(in crate::workspace) fn ai_send_budget_decision(
@@ -526,49 +546,32 @@ impl WorkspaceApp {
             .and_then(|tokens| usize::try_from(tokens).ok())
             .filter(|tokens| *tokens > 0)
             .unwrap_or_else(|| ai_response_reserve(context_window));
-        let base_system_tokens = ai_estimated_tokens(&self.build_ai_base_system_prompt(
+        let history = self.compose_ai_stream_history(
+            conversation.messages.clone(),
             config,
-            rag_system_prompt,
+            request_content.map(str::to_string),
             task_system_prompt,
-        ))
-        .saturating_add(ai_tool_definitions_estimated_tokens(&config.tools));
-        let obligation_tokens = request_content
-            .map(str::to_string)
-            .or_else(|| {
-                conversation
-                    .messages
-                    .iter()
-                    .rev()
-                    .find(|message| message.role == AiChatRole::User)
-                    .map(|message| message.content.clone())
-            })
-            .and_then(|request| ai_orchestrator_obligation_prompt_for_text(config, &request))
-            .map(|prompt| ai_estimated_tokens(&prompt))
-            .unwrap_or(0);
-        let anchor_tokens = conversation
-            .messages
+            rag_system_prompt,
+        );
+        let breakdown = ai_prompt_token_breakdown(
+            &history,
+            &config.tools,
+            &config.provider_type,
+            response_reserve,
+        );
+        let regular_messages = history
             .iter()
-            .filter(|message| is_ai_compaction_anchor(message))
-            .map(ai_message_estimated_tokens)
-            .sum::<usize>();
-        let regular_messages = conversation
-            .messages
-            .iter()
-            .filter(|message| !is_ai_compaction_anchor(message))
+            .filter(|message| message.role != AiChatRole::System)
             .collect::<Vec<_>>();
-        let history_tokens = regular_messages
-            .iter()
-            .map(|message| ai_message_estimated_tokens(message))
-            .sum::<usize>();
         let summary_eligible_tokens = ai_summary_eligible_tokens(&regular_messages);
         Some(determine_ai_compression_level(AiPromptBudgetInput {
             context_window,
             response_reserve,
-            system_budget: base_system_tokens
-                .saturating_add(obligation_tokens)
-                .saturating_add(anchor_tokens),
-            history_tokens,
-            trimmable_history_tokens: Some(history_tokens),
+            system_budget: breakdown
+                .system_instructions
+                .saturating_add(breakdown.tool_definitions),
+            history_tokens: breakdown.history_tokens(),
+            trimmable_history_tokens: Some(breakdown.history_tokens()),
             summary_eligible_tokens: Some(summary_eligible_tokens),
             can_summarize: summary_eligible_tokens > 0,
             can_lookup_transcript: ai_find_prompt_transcript_lookup_reference(
@@ -593,37 +596,25 @@ impl WorkspaceApp {
         decision: Option<AiPromptBudgetDecision>,
         trimmed_count: usize,
     ) -> serde_json::Value {
-        let base_system_tokens = ai_estimated_tokens(&self.build_ai_base_system_prompt(
+        let context_window = self.ai_active_model_context_window(config);
+        let response_reserve = config
+            .max_response_tokens
+            .and_then(|tokens| usize::try_from(tokens).ok())
+            .filter(|tokens| *tokens > 0)
+            .unwrap_or_else(|| ai_response_reserve(context_window));
+        let history = self.compose_ai_stream_history(
+            conversation.messages.clone(),
             config,
-            rag_system_prompt,
+            request_content.map(str::to_string),
             task_system_prompt,
-        ))
-        .saturating_add(ai_tool_definitions_estimated_tokens(&config.tools));
-        let obligation_tokens = request_content
-            .map(str::to_string)
-            .or_else(|| {
-                conversation
-                    .messages
-                    .iter()
-                    .rev()
-                    .find(|message| message.role == AiChatRole::User)
-                    .map(|message| message.content.clone())
-            })
-            .and_then(|request| ai_orchestrator_obligation_prompt_for_text(config, &request))
-            .map(|prompt| ai_estimated_tokens(&prompt))
-            .unwrap_or(0);
-        let anchor_tokens = conversation
-            .messages
-            .iter()
-            .filter(|message| is_ai_compaction_anchor(message))
-            .map(ai_message_estimated_tokens)
-            .sum::<usize>();
-        let history_tokens = conversation
-            .messages
-            .iter()
-            .filter(|message| !is_ai_compaction_anchor(message))
-            .map(ai_message_estimated_tokens)
-            .sum::<usize>();
+            rag_system_prompt,
+        );
+        let breakdown = ai_prompt_token_breakdown(
+            &history,
+            &config.tools,
+            &config.provider_type,
+            response_reserve,
+        );
         let transcript_lookup_tokens = decision
             .filter(|decision| decision.level >= 3)
             .and_then(|_| ai_find_prompt_transcript_lookup_reference(&conversation.messages))
@@ -640,13 +631,12 @@ impl WorkspaceApp {
             "budgetLevel": decision.map(|decision| decision.level).unwrap_or(0),
             "previousLevel": previous_level,
             "nextLevel": decision.map(|decision| decision.level).unwrap_or(0),
-            "contextWindow": self.ai_active_model_context_window(config),
-            "responseReserve": config.max_response_tokens,
-            "systemBudget": base_system_tokens
-                .saturating_add(obligation_tokens)
-                .saturating_add(anchor_tokens)
+            "contextWindow": context_window,
+            "responseReserve": response_reserve,
+            "systemBudget": breakdown.system_instructions
+                .saturating_add(breakdown.tool_definitions)
                 .saturating_add(transcript_lookup_tokens),
-            "historyTokens": history_tokens,
+            "historyTokens": breakdown.history_tokens(),
             "trimmedCount": trimmed_count,
         })
     }

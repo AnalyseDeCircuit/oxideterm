@@ -2007,6 +2007,7 @@ fn chat_persistence_loads_tauri_message_field_order_with_context_snapshot() {
     assert_eq!(message.content, "hello from tauri");
     assert_eq!(message.context.as_deref(), Some("terminal context"));
     assert_eq!(message.model.as_deref(), Some("tauri-model"));
+    assert_eq!(conversation.turn_count, 1);
 }
 
 #[test]

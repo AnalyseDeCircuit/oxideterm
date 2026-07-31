@@ -82,7 +82,17 @@ impl AiChatPersistenceStore {
 
     pub fn load_state(&self) -> Result<AiChatState> {
         self.initialize()?;
-        let metas = self.list_conversations()?;
+        let mut metas = self.list_conversations()?;
+        for meta in &mut metas {
+            if meta.turn_count.is_none()
+                && meta.message_count > 0
+                && let Some(conversation) = self.load_conversation(&meta.id)?
+            {
+                // Version 3 metadata predates the user-submission count. Decode
+                // the stored roles once instead of guessing from row parity.
+                meta.turn_count = Some(conversation.turn_count);
+            }
+        }
         let active_conversation_id = metas.first().map(|meta| meta.id.clone());
         let mut conversations = metas
             .into_iter()
@@ -143,6 +153,7 @@ impl AiChatPersistenceStore {
         let mut conversation = conversation_from_meta(meta);
         conversation.messages = messages;
         conversation.message_count = conversation.messages.len();
+        conversation.turn_count = crate::ai_conversation_turn_count(&conversation.messages);
         conversation.messages_loaded = true;
         Ok(Some(conversation))
     }
@@ -217,6 +228,9 @@ impl AiChatPersistenceStore {
                         rmp_serde::from_slice::<ConversationMeta>(existing.value())
                 {
                     meta.message_count = existing_meta.message_count;
+                    // Preserve an established count, while allowing the exact
+                    // legacy-role backfill from load_state to become durable.
+                    meta.turn_count = existing_meta.turn_count.or(meta.turn_count);
                     meta.updated_at = meta.updated_at.max(existing_meta.updated_at);
                 }
                 let meta_bytes = rmp_serde::to_vec(&meta)?;
@@ -590,6 +604,7 @@ fn conversation_from_meta(meta: ConversationMeta) -> AiConversation {
         origin: meta.origin,
         profile_id,
         message_count: meta.message_count,
+        turn_count: meta.turn_count.unwrap_or_default(),
         session_id: meta.session_id,
         session_metadata: meta.session_metadata,
         messages_loaded: false,
@@ -622,6 +637,11 @@ fn meta_from_conversation(conversation: &AiConversation) -> ConversationMeta {
         } else {
             conversation.message_count
         },
+        turn_count: Some(if conversation.messages_loaded {
+            crate::ai_conversation_turn_count(&conversation.messages)
+        } else {
+            conversation.turn_count
+        }),
         session_id: conversation.session_id.clone(),
         origin: if conversation.origin.is_empty() {
             default_origin()
@@ -1397,6 +1417,9 @@ pub struct ConversationMeta {
     pub origin: String,
     #[serde(default)]
     pub session_metadata: Option<Value>,
+    // Keep additive fields at the end because MessagePack stores structs positionally.
+    #[serde(default)]
+    pub turn_count: Option<usize>,
 }
 
 #[allow(dead_code)]

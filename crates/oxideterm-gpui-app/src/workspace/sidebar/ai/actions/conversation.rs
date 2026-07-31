@@ -109,6 +109,7 @@ impl AiWorkspaceEntity {
             .rposition(|message| message.role == AiChatRole::User)?;
         conversation.messages.truncate(last_user_index + 1);
         conversation.message_count = conversation.messages.len();
+        conversation.turn_count = ai_conversation_turn_count(&conversation.messages);
         conversation.updated_at_ms = now_ms;
         let conversation_id = conversation.id.clone();
         self.persist_chat_state();
@@ -127,6 +128,7 @@ impl AiWorkspaceEntity {
             return false;
         }
         conversation.message_count = conversation.messages.len();
+        conversation.turn_count = ai_conversation_turn_count(&conversation.messages);
         conversation.updated_at_ms = now_ms;
         self.persist_chat_state();
         true
@@ -192,6 +194,7 @@ impl AiWorkspaceEntity {
             backend,
         );
         conversation.message_count = conversation.messages.len();
+        conversation.turn_count = ai_conversation_turn_count(&conversation.messages);
         conversation.updated_at_ms = now_ms;
         let conversation_id = conversation.id.clone();
         self.persist_chat_state();
@@ -252,6 +255,7 @@ impl AiWorkspaceEntity {
         }
         conversation.messages = new_messages;
         conversation.message_count = conversation.messages.len();
+        conversation.turn_count = ai_conversation_turn_count(&conversation.messages);
         conversation.updated_at_ms = now_ms;
         self.persist_chat_state();
         true

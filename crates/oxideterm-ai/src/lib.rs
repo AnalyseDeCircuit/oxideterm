@@ -53,7 +53,7 @@ pub use acp::{
     resolve_acp_write_text_file_target, store_ai_message_backend_provenance,
     with_acp_agent_runtime, with_acp_agent_runtime_events, write_acp_validated_text_file,
 };
-pub use chat::{apply_chat_request_overrides, generate_chat_title};
+pub use chat::{ai_conversation_turn_count, apply_chat_request_overrides, generate_chat_title};
 pub use context_sanitizer::{
     preference_is_safe_to_persist, sanitize_api_messages_for_provider,
     sanitize_chat_state_for_persistence, sanitize_for_ai, sanitize_for_persistence,
