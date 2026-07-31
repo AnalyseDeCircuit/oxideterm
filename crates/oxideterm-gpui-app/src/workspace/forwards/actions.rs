@@ -267,7 +267,7 @@ impl WorkspaceApp {
         Some((bind_port, Some(target_port)))
     }
 
-    pub(super) fn start_forward_operation(
+    pub(in crate::workspace) fn start_forward_operation(
         &mut self,
         tab_id: TabId,
         node_id: NodeId,
@@ -407,7 +407,7 @@ impl WorkspaceApp {
         }
     }
 
-    fn start_port_scan(
+    pub(in crate::workspace) fn start_port_scan(
         &mut self,
         node_id: NodeId,
         restart_degraded_profiler: bool,
@@ -443,7 +443,7 @@ impl WorkspaceApp {
         cx.notify();
     }
 
-    fn node_is_ready_for_forwarding(&self, node_id: &NodeId) -> bool {
+    pub(in crate::workspace) fn node_is_ready_for_forwarding(&self, node_id: &NodeId) -> bool {
         self.ssh_nodes
             .get(node_id)
             .is_some_and(|node| node.readiness == NodeReadiness::Ready)

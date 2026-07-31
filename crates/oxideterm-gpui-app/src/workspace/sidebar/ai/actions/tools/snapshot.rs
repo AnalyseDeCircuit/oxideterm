@@ -299,10 +299,33 @@ impl WorkspaceApp {
                     continue;
                 };
                 let serial_config = self.serial_terminal_configs.get(&session_id);
-                let is_serial_terminal = serial_config.is_some();
                 let is_local_terminal = tab.kind == TabKind::LocalTerminal;
+                let (
+                    session_kind,
+                    terminal_buffer,
+                    terminal_screen,
+                    accepts_input,
+                    terminal_running,
+                ) = {
+                    let pane = pane.read(cx);
+                    let screen = pane.ai_screen_snapshot();
+                    let is_alternate_buffer = pane.ai_screen_is_alternate_buffer();
+                    (
+                        pane.session_kind(),
+                        pane.ai_buffer_snapshot(),
+                        ai_terminal_screen_snapshot_json(&screen, is_alternate_buffer),
+                        pane.ai_accepts_input(),
+                        pane.lifecycle().is_running(),
+                    )
+                };
+                let is_serial_terminal =
+                    session_kind == oxideterm_terminal::TerminalSessionKind::Serial;
+                let is_telnet_terminal =
+                    session_kind == oxideterm_terminal::TerminalSessionKind::Telnet;
                 let terminal_type = if is_serial_terminal {
                     "serial"
+                } else if is_telnet_terminal {
+                    "telnet"
                 } else if is_local_terminal {
                     "local_terminal"
                 } else {
@@ -311,19 +334,10 @@ impl WorkspaceApp {
                 let mut refs = BTreeMap::new();
                 refs.insert("sessionId".to_string(), session_id.0.to_string());
                 refs.insert("tabId".to_string(), tab.id.0.to_string());
-                let (terminal_buffer, terminal_screen, accepts_input, terminal_running) = {
-                    let pane = pane.read(cx);
-                    let screen = pane.ai_screen_snapshot();
-                    let is_alternate_buffer = pane.ai_screen_is_alternate_buffer();
-                    (
-                        pane.ai_buffer_snapshot(),
-                        ai_terminal_screen_snapshot_json(&screen, is_alternate_buffer),
-                        pane.ai_accepts_input(),
-                        pane.lifecycle().is_running(),
-                    )
-                };
                 let label = if let Some(config) = serial_config {
                     format!("Serial {}", config.port_path)
+                } else if is_telnet_terminal {
+                    format!("Telnet {}", tab.title)
                 } else if is_local_terminal {
                     format!("Local terminal {}", tab.title)
                 } else {
@@ -339,6 +353,12 @@ impl WorkspaceApp {
                         "stopBits": config.stop_bits,
                         "parity": format!("{:?}", config.parity).to_lowercase(),
                         "flowControl": format!("{:?}", config.flow_control).to_lowercase(),
+                    })
+                } else if is_telnet_terminal {
+                    serde_json::json!({
+                        "paneId": pane_id.0,
+                        "terminalType": terminal_type,
+                        "terminalTransport": "telnet",
                     })
                 } else if is_local_terminal {
                     // Tauri's local terminal store overwrites registry metadata
@@ -371,12 +391,21 @@ impl WorkspaceApp {
                         "opening"
                     }
                     .to_string(),
-                    capabilities: vec![
+                    capabilities: {
+                        let mut capabilities = vec![
                         "terminal.observe".to_string(),
                         "terminal.send".to_string(),
                         "terminal.wait".to_string(),
                         "state.list".to_string(),
-                    ],
+                        ];
+                        if is_serial_terminal || is_telnet_terminal {
+                            capabilities.push("transport.state".to_string());
+                        }
+                        if is_serial_terminal {
+                            capabilities.push("serial.control".to_string());
+                        }
+                        capabilities
+                    },
                     refs,
                     metadata,
                     terminal_buffer: Some(terminal_buffer),
@@ -626,6 +655,7 @@ impl WorkspaceApp {
             memory: ai_memory_settings_json(
                 settings.ai.memory.enabled,
                 &settings.ai.memory.content,
+                &settings.ai.memory.entries,
             ),
             health_state,
             transfers_state: transfers,
@@ -804,6 +834,7 @@ impl WorkspaceApp {
 
     pub(in crate::workspace) fn execute_ai_ui_orchestrator_tool(
         &mut self,
+        conversation_id: &str,
         tool_session_id: &ToolSessionId,
         tool_call_id: String,
         tool_name: String,
@@ -830,6 +861,15 @@ impl WorkspaceApp {
             "send_terminal_input" => {
                 self.execute_ai_send_terminal_input(tool_session_id, &args, window, cx)
             }
+            "wait_terminal_output" => current_snapshot.fail(
+                "Terminal waiting requires the asynchronous runtime broker.",
+                "runtime_capability_unavailable",
+                "Retry the wait through the current tool session.",
+                "read",
+            ),
+            "get_terminal_command_status" => {
+                self.execute_ai_get_terminal_command_status(tool_session_id, &args, cx)
+            }
             "read_resource" => self.execute_ai_read_stable_resource(&args, cx),
             "write_resource" => self.execute_ai_write_settings_resource(&args, window, cx),
             "transfer_resource" => current_snapshot.fail(
@@ -842,6 +882,221 @@ impl WorkspaceApp {
                 self.execute_ai_open_app_surface(tool_session_id, &args, window, cx)
             }
             "get_state" => self.execute_ai_get_state(tool_session_id, &args, cx),
+            "inspect_host_tools" => {
+                let result =
+                    self.execute_ai_inspect_host_tools(tool_session_id, &args, cx);
+                ai_application_action_result(
+                    &current_snapshot,
+                    result,
+                    "Host Tools inspection completed.",
+                    "read",
+                )
+            }
+            "control_host_tool" => {
+                let result =
+                    self.execute_ai_control_host_tool(tool_session_id, &args, cx);
+                ai_application_action_result(
+                    &current_snapshot,
+                    result,
+                    "Host Tools action accepted.",
+                    "execute",
+                )
+            }
+            "list_forwards" => {
+                let result = self.execute_ai_list_forwards(tool_session_id, &args, cx);
+                ai_application_action_result(
+                    &current_snapshot,
+                    result,
+                    "Forwarding rules listed.",
+                    "read",
+                )
+            }
+            "manage_forward" => {
+                let result = self.execute_ai_manage_forward(tool_session_id, &args, cx);
+                ai_application_action_result(
+                    &current_snapshot,
+                    result,
+                    "Forwarding action accepted.",
+                    "write",
+                )
+            }
+            "list_plugins" => {
+                let data = self.execute_ai_list_plugins(cx);
+                current_snapshot.ok(
+                    "Installed plugins listed.",
+                    serde_json::to_string_pretty(&data).unwrap_or_default(),
+                    data,
+                    "read",
+                )
+            }
+            "manage_plugin" => {
+                let result = self.execute_ai_manage_plugin(&args, window, cx);
+                ai_application_action_result(
+                    &current_snapshot,
+                    result,
+                    "Plugin action accepted.",
+                    "write",
+                )
+            }
+            "list_transport_profiles" => {
+                let data = self.execute_ai_list_transport_profiles();
+                current_snapshot.ok(
+                    "Saved transport profiles listed.",
+                    serde_json::to_string_pretty(&data).unwrap_or_default(),
+                    data,
+                    "read",
+                )
+            }
+            "open_transport_profile" => {
+                let result = self.execute_ai_open_transport_profile(&args, window, cx);
+                ai_application_action_result(
+                    &current_snapshot,
+                    result,
+                    "Transport profile open request accepted.",
+                    "interactive",
+                )
+            }
+            "get_transport_session_state" => {
+                let result =
+                    self.execute_ai_get_transport_session_state(tool_session_id, &args, cx);
+                ai_application_action_result(
+                    &current_snapshot,
+                    result,
+                    "Transport session state read.",
+                    "read",
+                )
+            }
+            "manage_serial_session" => {
+                let result =
+                    self.execute_ai_manage_serial_session(tool_session_id, &args, cx);
+                ai_application_action_result(
+                    &current_snapshot,
+                    result,
+                    "Serial session action completed.",
+                    "interactive",
+                )
+            }
+            "manage_telnet_session" => {
+                let result =
+                    self.execute_ai_manage_telnet_session(tool_session_id, &args, cx);
+                ai_application_action_result(
+                    &current_snapshot,
+                    result,
+                    "Telnet session action completed.",
+                    "interactive",
+                )
+            }
+            "list_remote_desktop_sessions" => {
+                let data = self.execute_ai_list_remote_desktop_sessions(cx);
+                current_snapshot.ok(
+                    "Remote desktop sessions listed.",
+                    serde_json::to_string_pretty(&data).unwrap_or_default(),
+                    data,
+                    "read",
+                )
+            }
+            "manage_remote_desktop_session" => {
+                let result = self.execute_ai_manage_remote_desktop_session(&args, window, cx);
+                ai_application_action_result(
+                    &current_snapshot,
+                    result,
+                    "Remote desktop session action accepted.",
+                    "interactive",
+                )
+            }
+            "get_cloud_sync_state" => {
+                let data = self.execute_ai_get_cloud_sync_state(cx);
+                current_snapshot.ok(
+                    "Cloud Sync state inspected.",
+                    serde_json::to_string_pretty(&data).unwrap_or_default(),
+                    data,
+                    "read",
+                )
+            }
+            "manage_cloud_sync" => {
+                let result = self.execute_ai_manage_cloud_sync(&args, window, cx);
+                ai_application_action_result(
+                    &current_snapshot,
+                    result,
+                    "Cloud Sync action accepted.",
+                    "write",
+                )
+            }
+            "list_credentials" => {
+                let result = self.execute_ai_list_credentials(&args);
+                ai_application_action_result(
+                    &current_snapshot,
+                    result,
+                    "Credential metadata listed.",
+                    "read",
+                )
+            }
+            "manage_credential" => {
+                let result = self.execute_ai_manage_credential(&args, window, cx);
+                ai_application_action_result(
+                    &current_snapshot,
+                    result,
+                    "Credential management action accepted.",
+                    "write",
+                )
+            }
+            "list_memory_entries" => {
+                let data = self.execute_ai_list_memory_entries(&args);
+                current_snapshot.ok(
+                    "Memory entries listed.",
+                    serde_json::to_string_pretty(&data).unwrap_or_default(),
+                    data,
+                    "read",
+                )
+            }
+            "manage_memory_entry" => {
+                let result = self.execute_ai_manage_memory_entry(&args, cx);
+                ai_application_action_result(
+                    &current_snapshot,
+                    result,
+                    "Memory entry action completed.",
+                    "write",
+                )
+            }
+            "create_background_task" => {
+                let result =
+                    self.execute_ai_create_background_task(conversation_id, &args, cx);
+                ai_application_action_result(
+                    &current_snapshot,
+                    result,
+                    "Background task created.",
+                    "write",
+                )
+            }
+            "list_background_tasks" => {
+                let data = self.execute_ai_list_background_tasks(conversation_id, cx);
+                current_snapshot.ok(
+                    "Background tasks listed.",
+                    serde_json::to_string_pretty(&data).unwrap_or_default(),
+                    data,
+                    "read",
+                )
+            }
+            "get_background_task" => {
+                let result =
+                    self.execute_ai_get_background_task(conversation_id, &args, cx);
+                ai_application_action_result(
+                    &current_snapshot,
+                    result,
+                    "Background task inspected.",
+                    "read",
+                )
+            }
+            "cancel_background_task" => {
+                let result =
+                    self.execute_ai_cancel_background_task(conversation_id, &args, cx);
+                ai_application_action_result(
+                    &current_snapshot,
+                    result,
+                    "Background task cancelled.",
+                    "write",
+                )
+            }
             "remember_preference" => self.execute_ai_remember_preference(&args, cx),
             "recall_preferences" => {
                 let memory_content = ai_memory_trimmed_content(&current_snapshot.memory);
@@ -1056,6 +1311,7 @@ impl WorkspaceApp {
 
     pub(in crate::workspace) fn start_ai_ui_orchestrator_tool_execution(
         &mut self,
+        conversation_id: String,
         tool_session_id: ToolSessionId,
         tool_call_id: String,
         tool_name: String,
@@ -1087,6 +1343,7 @@ impl WorkspaceApp {
         };
         if tool_name == "connect_target" {
             self.start_ai_connect_target_execution(
+                &conversation_id,
                 tool_session_id,
                 tool_call_id,
                 tool_name,
@@ -1127,7 +1384,20 @@ impl WorkspaceApp {
             );
             return;
         }
+        if tool_name == "wait_terminal_output" {
+            self.start_ai_wait_terminal_output_execution(
+                tool_session_id,
+                tool_call_id,
+                tool_name,
+                args,
+                post_user_approval,
+                sender,
+                cx,
+            );
+            return;
+        }
         let result = self.execute_ai_ui_orchestrator_tool(
+            &conversation_id,
             &tool_session_id,
             tool_call_id,
             tool_name,
@@ -1438,6 +1708,13 @@ impl WorkspaceApp {
             }
             return Ok(args);
         }
+        if matches!(
+            tool_name,
+            "inspect_host_tools" | "control_host_tool" | "list_forwards" | "manage_forward"
+        ) {
+            self.ai_node_for_tool_authority(tool_session_id, &args, cx)?;
+            return Ok(args);
+        }
         let raw_handle_id = args.get("handle_id").and_then(serde_json::Value::as_str);
         match tool_name {
             "run_command" => {
@@ -1445,18 +1722,25 @@ impl WorkspaceApp {
                     .read(cx)
                     .validate_run_command_handle(tool_session_id, raw_handle_id)?;
             }
-            "observe_terminal" => {
+            "observe_terminal" | "get_transport_session_state" => {
                 self.ai_runtime_context.read(cx).validate_terminal_handle(
                     tool_session_id,
                     raw_handle_id,
                     oxideterm_ai::RuntimeCapability::TerminalObserve,
                 )?;
             }
-            "send_terminal_input" => {
+            "send_terminal_input" | "manage_serial_session" | "manage_telnet_session" => {
                 self.ai_runtime_context.read(cx).validate_terminal_handle(
                     tool_session_id,
                     raw_handle_id,
                     oxideterm_ai::RuntimeCapability::TerminalSendInput,
+                )?;
+            }
+            "wait_terminal_output" | "get_terminal_command_status" => {
+                self.ai_runtime_context.read(cx).validate_terminal_handle(
+                    tool_session_id,
+                    raw_handle_id,
+                    oxideterm_ai::RuntimeCapability::TerminalObserve,
                 )?;
             }
             _ => {}
@@ -1479,11 +1763,20 @@ impl WorkspaceApp {
                 | "run_command"
                 | "observe_terminal"
                 | "send_terminal_input"
+                | "get_transport_session_state"
+                | "manage_serial_session"
+                | "manage_telnet_session"
+                | "wait_terminal_output"
+                | "get_terminal_command_status"
                 | "read_resource"
                 | "write_resource"
                 | "transfer_resource"
                 | "open_app_surface"
                 | "get_state"
+                | "inspect_host_tools"
+                | "control_host_tool"
+                | "list_forwards"
+                | "manage_forward"
         ) {
             self.prepare_ai_runtime_authority(tool_session_id, tool_name, args.clone(), cx)
                 .map(|_| ())
@@ -1494,6 +1787,7 @@ impl WorkspaceApp {
 
     pub(in crate::workspace) fn start_ai_connect_target_execution(
         &mut self,
+        conversation_id: &str,
         tool_session_id: ToolSessionId,
         tool_call_id: String,
         tool_name: String,
@@ -1504,6 +1798,7 @@ impl WorkspaceApp {
     ) {
         let started = std::time::Instant::now();
         let base = self.execute_ai_ui_orchestrator_tool(
+            conversation_id,
             &tool_session_id,
             tool_call_id.clone(),
             tool_name.clone(),
@@ -1716,14 +2011,35 @@ impl WorkspaceApp {
             target_snapshot.terminal_buffer.as_deref().unwrap_or_default(),
             max_chars,
         );
+        let command_records = self
+            .ai_terminal_pane_for_session(session_id, cx)
+            .map(|pane| {
+                pane.read(cx)
+                    .ai_command_records()
+                    .into_iter()
+                    .rev()
+                    .take(5)
+                    .map(|record| ai_terminal_command_record_json(&record))
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        let screen = target_snapshot
+            .terminal_screen
+            .clone()
+            .unwrap_or_else(|| serde_json::json!({ "lines": [] }));
         snapshot
             .ok(
                 "Terminal observed.",
                 output.clone(),
                 serde_json::json!({
                     "buffer": output,
-                    "screen": target_snapshot.terminal_screen.clone().unwrap_or_else(|| serde_json::json!({ "lines": [] })),
+                    "screen": screen,
                     "waitingForInput": looks_waiting_for_input(target_snapshot.terminal_buffer.as_deref().unwrap_or_default()),
+                    "tuiState": ai_terminal_tui_state(
+                        target_snapshot.terminal_screen.as_ref(),
+                        target_snapshot.terminal_buffer.as_deref().unwrap_or_default(),
+                    ),
+                    "recentCommands": command_records,
                 }),
                 "read",
             )
@@ -1765,16 +2081,6 @@ impl WorkspaceApp {
                         .is_some_and(|value| value == &session_id.0.to_string())
             })
             .cloned();
-        if args.get("control").and_then(serde_json::Value::as_str).is_some() {
-            return snapshot
-                .fail(
-                    "Terminal control input is not available through this tool.",
-                    "terminal_control_disabled",
-                    "Use run_command for shell commands. This tool sends only literal interactive input or Enter.",
-                    "interactive",
-                )
-                .with_optional_target(target);
-        }
         let Some((_pane_id, pane)) = self.reveal_ai_terminal_session(session_id, window, cx) else {
             return snapshot
                 .fail(
@@ -1809,7 +2115,7 @@ impl WorkspaceApp {
                 .with_optional_target(target);
         }
         pane.update(cx, |pane, cx| {
-            pane.send_ai_input_bytes(payload.as_bytes(), cx);
+            pane.send_ai_input_bytes(&payload, cx);
         });
         snapshot
             .ok(
@@ -1817,6 +2123,86 @@ impl WorkspaceApp {
                 "Input sent.",
                 serde_json::Value::Null,
                 "interactive",
+            )
+            .with_optional_target(target)
+    }
+
+    pub(in crate::workspace) fn execute_ai_get_terminal_command_status(
+        &self,
+        tool_session_id: &ToolSessionId,
+        args: &serde_json::Value,
+        cx: &mut Context<Self>,
+    ) -> AiActionResultLite {
+        let snapshot = self.ai_orchestrator_snapshot(cx);
+        let raw_handle_id = args.get("handle_id").and_then(serde_json::Value::as_str);
+        let session_id = match self.ai_runtime_context.read(cx).validate_terminal_handle(
+            tool_session_id,
+            raw_handle_id,
+            oxideterm_ai::RuntimeCapability::TerminalObserve,
+        ) {
+            Ok(session_id) => session_id,
+            Err(error) => {
+                return snapshot.fail(
+                    "Runtime terminal is unavailable.",
+                    error.public_code(),
+                    "Rediscover the current terminal before reading command status.",
+                    "read",
+                );
+            }
+        };
+        let target = snapshot
+            .targets
+            .iter()
+            .find(|target| {
+                target.kind == "terminal-session"
+                    && target
+                        .refs
+                        .get("sessionId")
+                        .is_some_and(|value| value == &session_id.0.to_string())
+            })
+            .cloned();
+        let Some(pane) = self.ai_terminal_pane_for_session(session_id, cx) else {
+            return snapshot
+                .fail(
+                    "Runtime terminal is unavailable.",
+                    "runtime_owner_closed",
+                    "The terminal pane is no longer registered.",
+                    "read",
+                )
+                .with_optional_target(target);
+        };
+        let command_id = args
+            .get("command_id")
+            .and_then(serde_json::Value::as_str);
+        let limit = args
+            .get("limit")
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or(5) as usize;
+        let records = pane
+            .read(cx)
+            .ai_command_records()
+            .into_iter()
+            .rev()
+            .filter(|record| command_id.is_none_or(|id| record.command_id == id))
+            .take(if command_id.is_some() { 1 } else { limit })
+            .map(|record| ai_terminal_command_record_json(&record))
+            .collect::<Vec<_>>();
+        if command_id.is_some() && records.is_empty() {
+            return snapshot
+                .fail(
+                    "Terminal command is not tracked.",
+                    "terminal_command_not_found",
+                    "The command mark is unavailable or has expired from the terminal ledger.",
+                    "read",
+                )
+                .with_optional_target(target);
+        }
+        snapshot
+            .ok(
+                "Terminal command status read.",
+                serde_json::to_string_pretty(&records).unwrap_or_default(),
+                serde_json::json!({ "commands": records }),
+                "read",
             )
             .with_optional_target(target)
     }
@@ -1969,9 +2355,11 @@ impl WorkspaceApp {
             return;
         }
         let before = pane.read(cx).ai_buffer_snapshot();
-        pane.update(cx, |pane, cx| {
-            pane.begin_command_mark(&command, TerminalCommandMarkDetectionSource::Ai, cx);
+        let command_id = pane.update(cx, |pane, cx| {
+            let command_id =
+                pane.begin_command_mark(&command, TerminalCommandMarkDetectionSource::Ai, cx);
             pane.send_command_line(&command, cx);
+            command_id
         });
         if args.get("await_output").and_then(serde_json::Value::as_bool) == Some(false) {
             let result = snapshot.to_executed_tool_result(
@@ -1984,6 +2372,7 @@ impl WorkspaceApp {
                         serde_json::json!({
                             "executionState": "sent",
                             "visibleInTerminal": true,
+                            "commandId": command_id,
                         }),
                         "interactive",
                     )
@@ -2018,10 +2407,19 @@ impl WorkspaceApp {
                             oxideterm_ai::RuntimeCapability::TerminalRunCommand,
                         )
                         .ok();
-                    (current_session == Some(session_id))
-                        .then(|| pane.read(cx).ai_buffer_snapshot())
+                    (current_session == Some(session_id)).then(|| {
+                        let pane = pane.read(cx);
+                        (
+                            pane.ai_buffer_snapshot(),
+                            command_id.as_ref().and_then(|command_id| {
+                                pane.ai_command_records()
+                                    .into_iter()
+                                    .find(|record| record.command_id == *command_id)
+                            }),
+                        )
+                    })
                 });
-                let current = match current {
+                let (current, command_record) = match current {
                     Ok(Some(current)) => current,
                     Ok(None) => {
                         owner_closed = true;
@@ -2033,7 +2431,13 @@ impl WorkspaceApp {
                     last = current.clone();
                     changed_at = std::time::Instant::now();
                 }
-                if current != before && changed_at.elapsed() >= Duration::from_millis(400) {
+                let command_completed = command_record.as_ref().is_some_and(|record| {
+                    record.status != oxideterm_gpui_terminal::TerminalCommandFactStatus::Open
+                });
+                let fallback_output_stable = command_id.is_none()
+                    && current != before
+                    && changed_at.elapsed() >= Duration::from_millis(400);
+                if command_completed || fallback_output_stable {
                     let result = weak.update(cx, |this, cx| {
                         let current_snapshot = this
                             .ai_orchestrator_snapshot_for_tool_session(Some(&tool_session_id), cx);
@@ -2045,9 +2449,11 @@ impl WorkspaceApp {
                                     "Terminal command output captured.",
                                     terminal_delta_output(&before, &current),
                                     serde_json::json!({
-                                        "executionState": "output_captured",
+                                        "executionState": if command_completed { "completed" } else { "output_captured" },
                                         "visibleInTerminal": true,
                                         "waitingForInput": looks_waiting_for_input(&current),
+                                        "commandId": command_id,
+                                        "exitCode": command_record.as_ref().and_then(|record| record.exit_code),
                                     }),
                                     "interactive",
                                 )
@@ -2114,6 +2520,164 @@ impl WorkspaceApp {
                         verified: None,
                         state_version: None,
                     },
+                    started.elapsed().as_millis(),
+                )
+            });
+            if let (Some(sender), Ok(result)) = (sender.take(), result) {
+                let _ = sender.send(result);
+            }
+        })
+        .detach();
+    }
+
+    pub(in crate::workspace) fn start_ai_wait_terminal_output_execution(
+        &mut self,
+        tool_session_id: ToolSessionId,
+        tool_call_id: String,
+        tool_name: String,
+        args: serde_json::Value,
+        post_user_approval: bool,
+        sender: tokio::sync::oneshot::Sender<AiExecutedToolResult>,
+        cx: &mut Context<Self>,
+    ) {
+        let started = std::time::Instant::now();
+        let snapshot = self.ai_orchestrator_snapshot_for_tool_session(Some(&tool_session_id), cx);
+        let raw_handle_id = args.get("handle_id").and_then(serde_json::Value::as_str);
+        let handle_id = raw_handle_id
+            .and_then(|value| oxideterm_ai::RuntimeHandleId::parse(value.to_string()).ok());
+        let session_id = match self.ai_runtime_context.read(cx).validate_terminal_handle(
+            &tool_session_id,
+            handle_id
+                .as_ref()
+                .map(oxideterm_ai::RuntimeHandleId::as_str),
+            oxideterm_ai::RuntimeCapability::TerminalObserve,
+        ) {
+            Ok(session_id) => session_id,
+            Err(error) => {
+                let result = snapshot.to_executed_tool_result(
+                    tool_call_id,
+                    tool_name,
+                    snapshot.fail(
+                        "Runtime terminal is unavailable.",
+                        ai_runtime_validation_public_code(&error, post_user_approval),
+                        ai_runtime_validation_recovery_message(post_user_approval),
+                        "read",
+                    ),
+                    started.elapsed().as_millis(),
+                );
+                let _ = sender.send(result);
+                return;
+            }
+        };
+        let Some(pane) = self.ai_terminal_pane_for_session(session_id, cx) else {
+            let result = snapshot.to_executed_tool_result(
+                tool_call_id,
+                tool_name,
+                snapshot.fail(
+                    "Runtime terminal is unavailable.",
+                    "runtime_owner_closed",
+                    "The terminal pane is no longer registered.",
+                    "read",
+                ),
+                started.elapsed().as_millis(),
+            );
+            let _ = sender.send(result);
+            return;
+        };
+        let initial_buffer = pane.read(cx).ai_buffer_snapshot();
+        let initial_alternate_screen = pane.read(cx).ai_screen_is_alternate_buffer();
+        let timeout_secs = args
+            .get("timeout_secs")
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or(30);
+        let max_chars = args
+            .get("max_chars")
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or(4_000) as usize;
+        cx.spawn(async move |weak, cx| {
+            let mut sender = Some(sender);
+            let deadline = std::time::Instant::now() + Duration::from_secs(timeout_secs);
+            while std::time::Instant::now() < deadline {
+                if sender.as_ref().is_none_or(tokio::sync::oneshot::Sender::is_closed) {
+                    return;
+                }
+                let observation = weak.update(cx, |this, cx| {
+                    // Revalidate the opaque handle on every observation so a
+                    // retained pane cannot outlive the tool session authority.
+                    let current_session = this
+                        .ai_runtime_context
+                        .read(cx)
+                        .validate_terminal_handle(
+                            &tool_session_id,
+                            handle_id
+                                .as_ref()
+                                .map(oxideterm_ai::RuntimeHandleId::as_str),
+                            oxideterm_ai::RuntimeCapability::TerminalObserve,
+                        )
+                        .ok();
+                    if current_session != Some(session_id) {
+                        return None;
+                    }
+                    let pane = pane.read(cx);
+                    Some((
+                        pane.ai_buffer_snapshot(),
+                        pane.ai_screen_is_alternate_buffer(),
+                        pane.ai_command_records(),
+                    ))
+                });
+                let Ok(Some((buffer, alternate_screen, records))) = observation else {
+                    break;
+                };
+                if let Some(matched) = ai_terminal_wait_match(
+                    &args,
+                    &initial_buffer,
+                    &buffer,
+                    initial_alternate_screen,
+                    alternate_screen,
+                    &records,
+                ) {
+                    let result = weak.update(cx, |this, cx| {
+                        let current_snapshot = this
+                            .ai_orchestrator_snapshot_for_tool_session(Some(&tool_session_id), cx);
+                        let output = trim_tail_chars(&buffer, max_chars);
+                        current_snapshot.to_executed_tool_result(
+                            tool_call_id.clone(),
+                            tool_name.clone(),
+                            current_snapshot.ok(
+                                "Terminal wait condition satisfied.",
+                                output.clone(),
+                                serde_json::json!({
+                                    "matched": matched,
+                                    "buffer": output,
+                                    "waitingForInput": looks_waiting_for_input(&buffer),
+                                    "tuiState": if alternate_screen { "alternate_screen" } else { "shell" },
+                                }),
+                                "read",
+                            ),
+                            started.elapsed().as_millis(),
+                        )
+                    });
+                    if let (Some(sender), Ok(result)) = (sender.take(), result) {
+                        let _ = sender.send(result);
+                    }
+                    return;
+                }
+                Timer::after(Duration::from_millis(100)).await;
+            }
+            let result = weak.update(cx, |this, cx| {
+                let current_snapshot =
+                    this.ai_orchestrator_snapshot_for_tool_session(Some(&tool_session_id), cx);
+                current_snapshot.to_executed_tool_result(
+                    tool_call_id,
+                    tool_name,
+                    current_snapshot.fail(
+                        "Terminal wait timed out.",
+                        "terminal_wait_timeout",
+                        format!(
+                            "The requested terminal condition was not observed within {timeout_secs} seconds."
+                        ),
+                        "read",
+                    ),
                     started.elapsed().as_millis(),
                 )
             });
@@ -2260,21 +2824,46 @@ impl WorkspaceApp {
             );
         }
         let preference = preference.to_string();
+        let now_ms = ai_memory_now_ms();
+        let normalized = ai_normalized_memory_content(&preference);
         self.edit_settings(
-            |settings| {
-                let current = settings.ai.memory.content.trim();
-                settings.ai.memory.content = [current, &format!("- {preference}")]
-                    .into_iter()
-                    .filter(|value| !value.is_empty())
-                    .collect::<Vec<_>>()
-                    .join("\n");
+            move |settings| {
+                if let Some(existing) = settings.ai.memory.entries.iter_mut().find(|entry| {
+                    entry.scope_kind == oxideterm_settings::AiMemoryScopeKind::User
+                        && entry.scope_id.is_none()
+                        && ai_normalized_memory_content(&entry.content) == normalized
+                }) {
+                    existing.last_used_at_ms = Some(now_ms);
+                    existing.use_count = existing.use_count.saturating_add(1);
+                    existing.updated_at_ms = now_ms;
+                    existing.revision = existing.revision.saturating_add(1);
+                    return;
+                }
+                settings
+                    .ai
+                    .memory
+                    .entries
+                    .push(oxideterm_settings::AiMemoryEntry {
+                        id: uuid::Uuid::new_v4().to_string(),
+                        content: preference,
+                        scope_kind: oxideterm_settings::AiMemoryScopeKind::User,
+                        scope_id: None,
+                        memory_kind: oxideterm_settings::AiMemoryKind::LongTerm,
+                        source: oxideterm_settings::AiMemorySource::Assistant,
+                        created_at_ms: now_ms,
+                        updated_at_ms: now_ms,
+                        last_used_at_ms: None,
+                        use_count: 0,
+                        expires_at_ms: None,
+                        revision: 1,
+                    });
             },
             cx,
         );
         snapshot.ok(
             "Preference remembered.",
-            preference.clone(),
-            serde_json::Value::Null,
+            "The preference was saved as a user-scoped memory entry.",
+            serde_json::json!({ "scopeKind": "user", "memoryKind": "long_term" }),
             "write",
         )
     }
@@ -2527,6 +3116,21 @@ impl WorkspaceApp {
         }
     }
 
+
+    fn ai_terminal_pane_for_session(
+        &self,
+        session_id: TerminalSessionId,
+        cx: &App,
+    ) -> Option<gpui::Entity<oxideterm_gpui_terminal::TerminalPane>> {
+        // The tab host is the terminal-pane owner; reading command facts must
+        // not activate a tab or create a second session.
+        let location = self.tab_host.read(cx).terminal_location(session_id)?;
+        self.tab_host
+            .read(cx)
+            .panes()
+            .get(&location.pane_id)
+            .cloned()
+    }
 
     pub(in crate::workspace) fn reveal_ai_terminal_session(
         &mut self,

@@ -348,6 +348,21 @@ impl PluginWorkspaceEntity {
         Ok(())
     }
 
+    pub(in crate::workspace) fn set_plugin_setting_value(
+        &mut self,
+        plugin_id: &str,
+        setting_id: &str,
+        value: serde_json::Value,
+    ) -> Result<(), String> {
+        // AI-provided settings must remain on the declared non-secret settings
+        // path; plugin-scoped secrets have a separate user-approved host API.
+        if oxideterm_ai::sanitize_json_for_ai(&value) != value {
+            return Err("Secret-like plugin settings must be entered by the user.".to_string());
+        }
+        self.registry_mut()
+            .set_plugin_setting_value(plugin_id, setting_id, value)
+    }
+
     pub(in crate::workspace) fn runtime_host(
         &self,
     ) -> Arc<tokio::sync::Mutex<plugin_runtime::NativePluginRuntimeHost>> {
@@ -471,6 +486,21 @@ impl PluginWorkspaceEntity {
         command: String,
         host_api_resolver: plugin_runtime::NativeHostApiResolver,
     ) {
+        self.start_runtime_command_with_arguments(
+            plugin_id,
+            command,
+            serde_json::Value::Null,
+            host_api_resolver,
+        );
+    }
+
+    pub(in crate::workspace) fn start_runtime_command_with_arguments(
+        &self,
+        plugin_id: String,
+        command: String,
+        arguments: serde_json::Value,
+        host_api_resolver: plugin_runtime::NativeHostApiResolver,
+    ) {
         if self.release_shutdown_started {
             return;
         }
@@ -483,7 +513,7 @@ impl PluginWorkspaceEntity {
                 .dispatch_command(
                     &plugin_id,
                     command,
-                    serde_json::Value::Null,
+                    arguments,
                     NATIVE_PLUGIN_LIFECYCLE_TIMEOUT,
                 )
                 .await;

@@ -133,6 +133,9 @@ impl WorkspaceApp {
     }
 
     pub(in crate::workspace) fn delete_ai_conversation(&mut self, id: &str, cx: &mut App) {
+        self.ai_background_tasks.update(cx, |tasks, _cx| {
+            tasks.cancel_owner(id);
+        });
         self.acp_entity.update(cx, |entity, _cx| {
             entity.close_thread(id, false);
         });
@@ -151,6 +154,9 @@ impl WorkspaceApp {
         self.cancel_ai_chat_stream_without_notify(cx);
         self.acp_entity.update(cx, |entity, _cx| {
             entity.close_all_threads(false);
+        });
+        self.ai_background_tasks.update(cx, |tasks, _cx| {
+            tasks.cancel_all();
         });
         self.ai_entity.update(cx, |ai, _cx| {
             ai.clear_conversations();

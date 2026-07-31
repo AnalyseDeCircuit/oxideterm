@@ -1754,7 +1754,7 @@ impl HostToolsEntity {
         self.start_schedule_action(request, runtime, cx)
     }
 
-    fn start_schedule_action(
+    pub(in crate::workspace::connection_monitor) fn start_schedule_action(
         &mut self,
         request: HostScheduleActionRequest,
         runtime: tokio::runtime::Handle,

@@ -1536,7 +1536,7 @@ impl HostToolsEntity {
         self.start_docker_action(request, runtime, cx)
     }
 
-    fn start_docker_action(
+    pub(in crate::workspace::connection_monitor) fn start_docker_action(
         &mut self,
         request: HostDockerActionRequest,
         runtime: tokio::runtime::Handle,

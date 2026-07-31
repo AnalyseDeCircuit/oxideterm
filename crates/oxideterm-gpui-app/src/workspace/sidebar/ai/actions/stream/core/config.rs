@@ -19,7 +19,152 @@ pub(in crate::workspace) fn ai_stream_tool_definitions(
     tools
 }
 
+pub(in crate::workspace) fn ai_active_tool_count(
+    tool_use_enabled: bool,
+    tool_policy: &oxideterm_ai::AiToolUsePolicy,
+    mcp_registry: &oxideterm_ai::McpRegistry,
+) -> usize {
+    // The compact status must reflect tools that policy permits, rather than
+    // reusing an unrelated execution limit such as max tool rounds.
+    ai_stream_tool_definitions(tool_use_enabled, tool_policy, mcp_registry)
+        .into_iter()
+        .filter(|tool| {
+            !tool_policy
+                .disabled_tools
+                .iter()
+                .any(|disabled| disabled == &tool.name)
+        })
+        .count()
+}
+
 impl WorkspaceApp {
+    fn ai_scoped_memory_context(
+        &self,
+        maximum_chars: usize,
+        cx: &App,
+    ) -> (Option<String>, Vec<String>) {
+        let memory = &self.settings_store.settings().ai.memory;
+        if !memory.enabled {
+            return (None, Vec::new());
+        }
+        if memory.entries.is_empty() {
+            let legacy = oxideterm_ai::sanitize_for_ai(memory.content.trim());
+            return ((!legacy.is_empty()).then_some(legacy), Vec::new());
+        }
+
+        let now_ms = ai_memory_now_ms();
+        let user_id = whoami::username();
+        // OxideTerm currently has one application workspace. Keep its stable
+        // identity explicit so it can be migrated if multi-workspace support arrives.
+        let workspace_id = oxideterm_settings::AI_APPLICATION_WORKSPACE_MEMORY_SCOPE_ID;
+        let project_id = self
+            .active_terminal_cwd_snapshot(cx)
+            .map(|snapshot| snapshot.path().to_string());
+        let host_id = self
+            .active_ssh_terminal_node_id(cx)
+            .and_then(|node_id| self.node_router.resolve_connection_now(&node_id).ok())
+            .map(|connection| connection.connection_id.to_string());
+        let mut entries = memory
+            .entries
+            .iter()
+            .filter(|entry| !entry.is_expired(now_ms))
+            .filter(|entry| {
+                entry.applies_to(
+                    Some(user_id.as_str()),
+                    Some(workspace_id),
+                    project_id.as_deref(),
+                    host_id.as_deref(),
+                )
+            })
+            .collect::<Vec<_>>();
+        entries.sort_by_key(|entry| {
+            let priority = match entry.scope_kind {
+                oxideterm_settings::AiMemoryScopeKind::Host => 0,
+                oxideterm_settings::AiMemoryScopeKind::Project => 1,
+                oxideterm_settings::AiMemoryScopeKind::Workspace => 2,
+                oxideterm_settings::AiMemoryScopeKind::User => 3,
+            };
+            (priority, std::cmp::Reverse(entry.updated_at_ms))
+        });
+
+        let mut seen = std::collections::HashSet::new();
+        let mut selected_ids = Vec::new();
+        let mut selected = String::new();
+        for entry in entries
+            .into_iter()
+            .filter(|entry| seen.insert(ai_normalized_memory_content(&entry.content)))
+        {
+            let line = format!(
+                "- [{}:{}] {}",
+                ai_memory_scope_label(entry.scope_kind),
+                entry.scope_id.as_deref().unwrap_or("current"),
+                oxideterm_ai::sanitize_for_ai(&entry.content)
+            );
+            let separator_chars = usize::from(!selected.is_empty());
+            let used_chars = selected.chars().count();
+            let remaining_chars = maximum_chars.saturating_sub(used_chars + separator_chars);
+            if remaining_chars == 0 {
+                break;
+            }
+            if !selected.is_empty() {
+                selected.push('\n');
+            }
+            selected_ids.push(entry.id.clone());
+            if line.chars().count() <= remaining_chars {
+                selected.push_str(&line);
+                continue;
+            }
+            // Record usage only for entries that actually cross the model boundary.
+            selected.extend(line.chars().take(remaining_chars));
+            break;
+        }
+        ((!selected.is_empty()).then_some(selected), selected_ids)
+    }
+
+    fn ai_memory_character_budget(&self, provider_id: Option<&str>, model: &str) -> usize {
+        let settings = self.settings_store.settings();
+        provider_id
+            .and_then(|provider_id| {
+                ai_context_window_from_maps(
+                    &settings.ai.user_context_windows,
+                    &settings.ai.model_context_windows,
+                    provider_id,
+                    model,
+                )
+            })
+            .unwrap_or(AI_COMPACTION_DEFAULT_CONTEXT_WINDOW)
+            .saturating_mul(4)
+            .saturating_div(8)
+            .clamp(4_000, 32_000)
+    }
+
+    pub(in crate::workspace) fn record_ai_memory_usage(
+        &mut self,
+        entry_ids: &[String],
+        cx: &mut Context<Self>,
+    ) {
+        if entry_ids.is_empty() {
+            return;
+        }
+        let entry_ids = entry_ids.iter().cloned().collect::<std::collections::HashSet<_>>();
+        let now_ms = ai_memory_now_ms();
+        self.edit_settings(
+            move |settings| {
+                for entry in settings
+                    .ai
+                    .memory
+                    .entries
+                    .iter_mut()
+                    .filter(|entry| entry_ids.contains(&entry.id))
+                {
+                    entry.last_used_at_ms = Some(now_ms);
+                    entry.use_count = entry.use_count.saturating_add(1);
+                }
+            },
+            cx,
+        );
+    }
+
     pub(in crate::workspace) fn should_force_ai_pre_send_compaction(
         &self,
         conversation_id: &str,
@@ -55,6 +200,10 @@ impl WorkspaceApp {
     ) -> Result<AiChatStreamConfig, String> {
         let settings = self.settings_store.settings();
         let tool_policy = ai_tool_use_policy_from_settings(&settings.ai.tool_use);
+        let active_profile_id = self
+            .active_ssh_terminal_node_id(cx)
+            .and_then(|node_id| self.node_router.resolve_connection_now(&node_id).ok())
+            .map(|connection| connection.connection_id.to_string());
         if settings.ai.active_backend == AiActiveBackend::Acp {
             let acp_agent_id = settings
                 .ai
@@ -76,6 +225,8 @@ impl WorkspaceApp {
                     .map(|choice| choice.label.clone())
                 })
                 .unwrap_or_else(|| self.ai_acp_agent_model_fallback_label(&acp_agent_id, cx));
+            let (memory_context, memory_entry_ids) =
+                self.ai_scoped_memory_context(self.ai_memory_character_budget(None, &model_label), cx);
             return Ok(AiChatStreamConfig {
                 execution_backend: AiExecutionBackend::Acp,
                 provider_id: None,
@@ -90,9 +241,12 @@ impl WorkspaceApp {
                 reasoning_effort: None,
                 safety_mode: match self.active_ai_safety_mode(cx) {
                     AiSafetyMode::Bypass => AiPolicySafetyMode::Bypass,
+                    AiSafetyMode::ReadOnly => AiPolicySafetyMode::ReadOnly,
                     AiSafetyMode::Default => AiPolicySafetyMode::Default,
                 },
-                profile_id: None,
+                profile_id: active_profile_id,
+                memory_context,
+                memory_entry_ids,
                 tool_policy,
                 tools: Vec::new(),
                 tool_choice: oxideterm_ai::AiToolChoice::Auto,
@@ -106,6 +260,10 @@ impl WorkspaceApp {
         let model = active_model_selection(settings.ai.active_model.as_deref()).ok_or_else(|| {
             self.i18n.t("ai.model_selector.no_model_selected")
         })?;
+        let (memory_context, memory_entry_ids) = self.ai_scoped_memory_context(
+            self.ai_memory_character_budget(Some(&provider.id), &model),
+            cx,
+        );
         let max_response_tokens =
             ai_chat_request_max_response_tokens(settings, &provider.id, &model);
         let configured_reasoning_effort = settings
@@ -147,9 +305,12 @@ impl WorkspaceApp {
             reasoning_effort: Some(reasoning_effort),
             safety_mode: match self.active_ai_safety_mode(cx) {
                 AiSafetyMode::Bypass => AiPolicySafetyMode::Bypass,
+                AiSafetyMode::ReadOnly => AiPolicySafetyMode::ReadOnly,
                 AiSafetyMode::Default => AiPolicySafetyMode::Default,
             },
-            profile_id: None,
+            profile_id: active_profile_id,
+            memory_context,
+            memory_entry_ids,
             tool_policy,
             tools,
             tool_choice: oxideterm_ai::AiToolChoice::Auto,
@@ -225,9 +386,12 @@ impl WorkspaceApp {
             reasoning_effort: Some(reasoning_effort),
             safety_mode: match self.active_ai_safety_mode(cx) {
                 AiSafetyMode::Bypass => AiPolicySafetyMode::Bypass,
+                AiSafetyMode::ReadOnly => AiPolicySafetyMode::ReadOnly,
                 AiSafetyMode::Default => AiPolicySafetyMode::Default,
             },
             profile_id: None,
+            memory_context: None,
+            memory_entry_ids: Vec::new(),
             tool_policy: AiToolUsePolicy::default(),
             tools: Vec::new(),
             tool_choice: oxideterm_ai::AiToolChoice::Auto,
@@ -601,9 +765,18 @@ impl WorkspaceApp {
             "\nYou are currently the model \"{}\", provided by {}.",
             safe_model, safe_provider_label
         ));
-        if let Some(memory) =
-            ai_user_memory_prompt(&settings.ai.memory.content, settings.ai.memory.enabled)
-        {
+        let memory_character_budget = self
+            .ai_active_model_context_window(config)
+            .saturating_mul(4)
+            .saturating_div(8)
+            .clamp(4_000, 32_000);
+        if let Some(memory) = config.memory_context.as_deref().and_then(|memory| {
+            oxideterm_ai::ai_user_memory_prompt_with_limit(
+                memory,
+                settings.ai.memory.enabled,
+                memory_character_budget,
+            )
+        }) {
             prompt.push_str("\n\n");
             prompt.push_str(&memory);
         }

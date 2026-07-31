@@ -45,6 +45,7 @@ use super::{
 
 // Real modules keep forwarding UI dependencies and visibility boundaries compiler-checked.
 mod actions;
+mod ai;
 mod components;
 mod entity;
 mod forms;
@@ -64,9 +65,8 @@ pub(in crate::workspace) use reconnect::{
     forward_rule_from_reconnect_snapshot, reconnect_forward_rule_from_rule,
     release_reconnect_forward_bindings,
 };
-use runtime_service::{
-    ForwardingQuickAction, ForwardingRuntimeOperation, ForwardingRuntimeSnapshot,
-};
+pub(in crate::workspace) use runtime_service::ForwardingRuntimeOperation;
+use runtime_service::{ForwardingQuickAction, ForwardingRuntimeSnapshot};
 pub(in crate::workspace) use runtime_service::{
     ForwardingRuntimeService, ReconnectForwardRestoreRequest,
 };

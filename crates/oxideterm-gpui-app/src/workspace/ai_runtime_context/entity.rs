@@ -524,6 +524,28 @@ impl AiRuntimeContextEntity {
             .ok_or_else(|| RuntimeValidationError::new(RuntimeValidationFailure::OwnerClosed))
     }
 
+    /// Resolves node inspection authority without granting terminal or SFTP capabilities.
+    pub(in crate::workspace) fn validate_node_handle(
+        &self,
+        tool_session_id: &ToolSessionId,
+        raw_handle_id: Option<&str>,
+    ) -> Result<NodeId, RuntimeValidationError> {
+        let validated = self.validate_handle_for_kind(
+            tool_session_id,
+            raw_handle_id,
+            RuntimeCapability::NodeInspect,
+            RuntimeOwnerKind::SshNode,
+        )?;
+        self.node_owners
+            .iter()
+            .find_map(|(node_id, owner)| {
+                (owner.key == *validated.owner_key()
+                    && owner.generation == validated.owner_generation())
+                .then(|| node_id.clone())
+            })
+            .ok_or_else(|| RuntimeValidationError::new(RuntimeValidationFailure::OwnerClosed))
+    }
+
     /// Validates run-command authority without permitting a terminal handle to
     /// be reinterpreted as the app-wide local shell service, or vice versa.
     pub(in crate::workspace) fn validate_run_command_handle(

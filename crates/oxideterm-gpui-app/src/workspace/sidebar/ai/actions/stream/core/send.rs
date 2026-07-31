@@ -121,6 +121,13 @@ impl WorkspaceApp {
         if let Some(instructions) = task_system_prompt.filter(|value| !value.trim().is_empty()) {
             append_prompt_section("OxideTerm Instructions", &instructions);
         }
+        if let Some(memory) = config
+            .memory_context
+            .as_deref()
+            .filter(|value| !value.trim().is_empty())
+        {
+            append_prompt_section("OxideTerm Scoped Memory", memory);
+        }
         if let Some(context) = request_message
             .as_ref()
             .and_then(|message| message.context.as_deref())
@@ -160,9 +167,12 @@ impl WorkspaceApp {
             );
             ai.set_chat_loading(true);
         });
-        let (generation, _) = self
+        let (generation, ui_tx) = self
             .ai_entity
             .update(cx, |ai, _cx| ai.begin_chat_stream());
+        let tool_session_id = self
+            .ai_runtime_context
+            .update(cx, |runtime, _cx| runtime.begin_tool_session(generation));
         let turn_id = format!("{conversation_id}:{generation}");
         let mut config_selections = self
             .ai_entity
@@ -188,6 +198,7 @@ impl WorkspaceApp {
             .find(|conversation| conversation.id == conversation_id)
             .and_then(ai_acp_session_state)
             .and_then(|state| state.current_mode_id);
+        let application_tool_services = self.ai_model_backend_services(cx);
         let started = self.acp_entity.update(cx, |entity, _cx| {
             entity.start_turn(crate::workspace::acp_workspace::AcpThreadStart {
                 route: crate::workspace::acp_workspace::AcpTurnRoute {
@@ -197,6 +208,18 @@ impl WorkspaceApp {
                 },
                 launch_config: launch.launch_config,
                 host_policy: launch.host_policy,
+                application_tool_turn: AcpApplicationToolTurn {
+                    services: application_tool_services,
+                    tool_policy: config.tool_policy.clone(),
+                    safety_mode: config.safety_mode,
+                    profile_id: config.profile_id.clone(),
+                    ui_tx,
+                    generation,
+                    tool_session_id,
+                    conversation_id: conversation_id.clone(),
+                    assistant_id: assistant_id.clone(),
+                    cancelled: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+                },
                 request: oxideterm_ai::AcpManagedPromptRequest {
                     thread_id: conversation_id.clone(),
                     turn_id,

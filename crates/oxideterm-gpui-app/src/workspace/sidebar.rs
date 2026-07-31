@@ -195,11 +195,14 @@ mod titlebar;
 #[cfg(test)]
 pub(in crate::workspace) use ai::AiCompactionDeliveryKind;
 pub(in crate::workspace) use ai::{
-    AiCompactionDelivery, AiCompactionDeliverySender, AiInlinePanelState, AiStreamDelivery,
-    AiStreamDeliveryEvent, AiStreamDeliverySender, ai_now_ms,
+    AcpApplicationToolTurn, AiCompactionDelivery, AiCompactionDeliverySender, AiInlinePanelState,
+    AiStreamDelivery, AiStreamDeliveryEvent, AiStreamDeliverySender, ai_now_ms,
+    handle_acp_application_tool_call,
 };
 use helpers::*;
-pub(in crate::workspace) use state::context_sidebar_panel_visible;
+pub(in crate::workspace) use state::{
+    clamp_responsive_sidebar_width, context_sidebar_panel_visible,
+};
 
 #[cfg(test)]
 mod sidebar_persistence_tests {

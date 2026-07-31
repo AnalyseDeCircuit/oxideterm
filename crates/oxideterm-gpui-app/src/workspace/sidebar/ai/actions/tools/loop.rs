@@ -793,7 +793,7 @@ pub(in crate::workspace) async fn run_ai_chat_tool_loop(
                     pre_execution_rejected_ai_tool_result(
                         call.id.clone(),
                         call.name.clone(),
-                        "tool_disabled",
+                        decision.reason_code.clone(),
                         decision.reason_code.clone(),
                     )
                 }
@@ -1149,7 +1149,7 @@ fn replace_ai_runtime_context_message(history: &mut Vec<AiChatMessage>, content:
 }
 
 
-async fn resolve_ai_candidate_selection_if_needed(
+pub(in crate::workspace) async fn resolve_ai_candidate_selection_if_needed(
     ui_tx: &AiStreamDeliverySender,
     generation: u64,
     conversation_id: &str,

@@ -1,4 +1,7 @@
 include!("tools/types.rs");
+include!("tools/acp_bridge.rs");
+include!("tools/application.rs");
+include!("tools/background.rs");
 include!("tools/snapshot.rs");
 include!("tools/loop.rs");
 include!("tools/events.rs");

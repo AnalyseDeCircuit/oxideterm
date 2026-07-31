@@ -120,6 +120,7 @@ pub(in crate::workspace) fn ai_policy_safety_mode_label(
 ) -> &'static str {
     match mode {
         oxideterm_ai::AiPolicySafetyMode::Default => "default",
+        oxideterm_ai::AiPolicySafetyMode::ReadOnly => "read_only",
         oxideterm_ai::AiPolicySafetyMode::Bypass => "bypass",
     }
 }
@@ -297,20 +298,144 @@ pub(in crate::workspace) fn truncate_ai_execution_stderr_summary(
     format!("{head}...[truncated]")
 }
 
-pub(in crate::workspace) fn ai_terminal_input_payload(args: &serde_json::Value) -> String {
+pub(in crate::workspace) fn ai_terminal_input_payload(args: &serde_json::Value) -> Vec<u8> {
+    if let Some(key) = args.get("key").and_then(serde_json::Value::as_str) {
+        return ai_terminal_key_bytes(key).map_or_else(Vec::new, <[u8]>::to_vec);
+    }
     let mut payload = args
         .get("text")
         .and_then(serde_json::Value::as_str)
         .unwrap_or_default()
-        .to_string();
+        .as_bytes()
+        .to_vec();
     if args
         .get("append_enter")
         .and_then(serde_json::Value::as_bool)
         .unwrap_or(false)
     {
-        payload.push('\r');
+        payload.push(b'\r');
     }
     payload
+}
+
+fn ai_terminal_key_bytes(key: &str) -> Option<&'static [u8]> {
+    // These are terminal protocol bytes, not platform key events, so the same
+    // payload remains valid for local, SSH, Telnet, and serial sessions.
+    match key {
+        "ctrl_c" => Some(b"\x03"),
+        "ctrl_d" => Some(b"\x04"),
+        "ctrl_z" => Some(b"\x1a"),
+        "escape" => Some(b"\x1b"),
+        "enter" => Some(b"\r"),
+        "tab" => Some(b"\t"),
+        "backspace" => Some(b"\x7f"),
+        "up" => Some(b"\x1b[A"),
+        "down" => Some(b"\x1b[B"),
+        "right" => Some(b"\x1b[C"),
+        "left" => Some(b"\x1b[D"),
+        "home" => Some(b"\x1b[H"),
+        "end" => Some(b"\x1b[F"),
+        "page_up" => Some(b"\x1b[5~"),
+        "page_down" => Some(b"\x1b[6~"),
+        "delete" => Some(b"\x1b[3~"),
+        _ => None,
+    }
+}
+
+pub(in crate::workspace) fn ai_terminal_tui_state(
+    screen: Option<&serde_json::Value>,
+    buffer: &str,
+) -> &'static str {
+    if screen
+        .and_then(|screen| screen.get("isAlternateBuffer"))
+        .and_then(serde_json::Value::as_bool)
+        == Some(true)
+    {
+        return "alternate_screen";
+    }
+    if looks_waiting_for_input(buffer) {
+        return "prompt";
+    }
+    "shell"
+}
+
+pub(in crate::workspace) fn ai_terminal_command_record_json(
+    record: &oxideterm_gpui_terminal::TerminalAiCommandRecord,
+) -> serde_json::Value {
+    let status = match record.status {
+        oxideterm_gpui_terminal::TerminalCommandFactStatus::Open => "running",
+        oxideterm_gpui_terminal::TerminalCommandFactStatus::Closed => "completed",
+        oxideterm_gpui_terminal::TerminalCommandFactStatus::Stale => "stale",
+    };
+    serde_json::json!({
+        "commandId": record.command_id,
+        "command": oxideterm_ai::sanitize_for_ai(&record.command),
+        "status": status,
+        "startedAt": record.started_at,
+        "finishedAt": record.finished_at,
+        "exitCode": record.exit_code,
+    })
+}
+
+pub(in crate::workspace) fn ai_terminal_wait_match(
+    args: &serde_json::Value,
+    initial_buffer: &str,
+    current_buffer: &str,
+    initial_alternate_screen: bool,
+    current_alternate_screen: bool,
+    command_records: &[oxideterm_gpui_terminal::TerminalAiCommandRecord],
+) -> Option<serde_json::Value> {
+    let condition = args
+        .get("condition")
+        .and_then(serde_json::Value::as_str)?;
+    match condition {
+        "changed" if current_buffer != initial_buffer => {
+            Some(serde_json::json!({ "condition": condition }))
+        }
+        "contains" => {
+            let expected = args.get("text").and_then(serde_json::Value::as_str)?;
+            let case_sensitive = args
+                .get("case_sensitive")
+                .and_then(serde_json::Value::as_bool)
+                .unwrap_or(true);
+            let matched = if case_sensitive {
+                current_buffer.contains(expected)
+            } else {
+                current_buffer
+                    .to_lowercase()
+                    .contains(&expected.to_lowercase())
+            };
+            matched.then(|| serde_json::json!({ "condition": condition }))
+        }
+        "prompt" if looks_waiting_for_input(current_buffer) => {
+            Some(serde_json::json!({ "condition": condition }))
+        }
+        "tui_entered" if !initial_alternate_screen && current_alternate_screen => {
+            Some(serde_json::json!({ "condition": condition }))
+        }
+        "tui_exited" if initial_alternate_screen && !current_alternate_screen => {
+            Some(serde_json::json!({ "condition": condition }))
+        }
+        "command_completed" => {
+            let command_id = args
+                .get("command_id")
+                .and_then(serde_json::Value::as_str)?;
+            command_records
+                .iter()
+                .find(|record| {
+                    record.command_id == command_id
+                        && record.status
+                            != oxideterm_gpui_terminal::TerminalCommandFactStatus::Open
+                })
+                .map(|record| {
+                    serde_json::json!({
+                        "condition": condition,
+                        "command": ai_terminal_command_record_json(record),
+                    })
+                })
+        }
+        _ => None,
+    }
 }
 
 pub(in crate::workspace) fn ai_terminal_screen_snapshot_json(
@@ -761,7 +886,7 @@ mod tests {
 
     #[test]
     pub(in crate::workspace) fn recall_preferences_memory_data_preserves_tauri_enabled_flag() {
-        let memory = ai_memory_settings_json(false, "  - use compact output\n");
+        let memory = ai_memory_settings_json(false, "  - use compact output\n", &[]);
 
         assert_eq!(memory.get("enabled"), Some(&serde_json::json!(false)));
         assert_eq!(ai_memory_content(&memory), "  - use compact output\n");
@@ -1163,5 +1288,65 @@ mod tests {
             Some(&serde_json::json!("user_rejected"))
         );
         assert!(result.envelope.pointer("/meta/verified").is_none());
+    }
+
+    #[test]
+    fn terminal_control_keys_map_to_protocol_bytes() {
+        assert_eq!(
+            ai_terminal_input_payload(&serde_json::json!({ "key": "ctrl_c" })),
+            b"\x03"
+        );
+        assert_eq!(
+            ai_terminal_input_payload(&serde_json::json!({ "key": "page_down" })),
+            b"\x1b[6~"
+        );
+    }
+
+    #[test]
+    fn terminal_wait_matches_only_the_requested_completed_command() {
+        let records = vec![oxideterm_gpui_terminal::TerminalAiCommandRecord {
+            command_id: "command-1".to_string(),
+            command: "printf done".to_string(),
+            source: oxideterm_terminal::TerminalCommandMarkDetectionSource::Ai,
+            status: oxideterm_gpui_terminal::TerminalCommandFactStatus::Closed,
+            started_at: 10,
+            finished_at: Some(20),
+            exit_code: Some(0),
+            start_line: 1,
+            end_line: Some(2),
+        }];
+
+        let matched = ai_terminal_wait_match(
+            &serde_json::json!({
+                "condition": "command_completed",
+                "command_id": "command-1"
+            }),
+            "",
+            "done",
+            false,
+            false,
+            &records,
+        );
+
+        assert_eq!(
+            matched
+                .as_ref()
+                .and_then(|value| value.pointer("/command/exitCode")),
+            Some(&serde_json::json!(0))
+        );
+        assert!(
+            ai_terminal_wait_match(
+                &serde_json::json!({
+                    "condition": "command_completed",
+                    "command_id": "command-2"
+                }),
+                "",
+                "done",
+                false,
+                false,
+                &records,
+            )
+            .is_none()
+        );
     }
 }

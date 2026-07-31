@@ -64,6 +64,7 @@ use oxideterm_gpui_ui::{
     modal::overlay_content_boundary,
     text_input::{
         text_caret, text_input, text_input_anchor_probe, text_input_value_segments_with_color,
+        text_input_value_segments_with_marked_range,
     },
 };
 use oxideterm_settings::{AcpAgentConfig, AcpAgentRuntimeState, AiActiveBackend, AiThinkingStyle};

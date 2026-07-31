@@ -1926,7 +1926,7 @@ impl HostToolsEntity {
         }
     }
 
-    fn start_tmux_action(
+    pub(in crate::workspace::connection_monitor) fn start_tmux_action(
         &mut self,
         request: HostTmuxActionRequest,
         runtime: tokio::runtime::Handle,
@@ -1964,7 +1964,7 @@ impl HostToolsEntity {
         self.start_tmux_action_command(command, request, runtime, cx)
     }
 
-    fn start_tmux_action_command(
+    pub(in crate::workspace::connection_monitor) fn start_tmux_action_command(
         &mut self,
         command: zeroize::Zeroizing<String>,
         request: HostTmuxActionRun,

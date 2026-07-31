@@ -442,6 +442,29 @@ mod ai_turn_order_tests {
     }
 
     #[test]
+    fn compact_tool_count_tracks_enabled_catalog_instead_of_round_limit() {
+        let registry = oxideterm_ai::McpRegistry::new(oxideterm_ai::AiProviderKeyStore::new());
+        let baseline_policy = oxideterm_ai::AiToolUsePolicy {
+            enabled: true,
+            ..oxideterm_ai::AiToolUsePolicy::default()
+        };
+        let baseline_count = ai_active_tool_count(true, &baseline_policy, &registry);
+
+        assert!(baseline_count > 10);
+        assert_eq!(ai_active_tool_count(false, &baseline_policy, &registry), 0);
+
+        let mut restricted_policy = baseline_policy;
+        restricted_policy.disabled_tools = vec![
+            "run_command".to_string(),
+            "list_mcp_resources".to_string(),
+        ];
+        assert_eq!(
+            ai_active_tool_count(true, &restricted_policy, &registry),
+            baseline_count - 2
+        );
+    }
+
+    #[test]
     fn context_indicator_tool_result_tokens_only_count_user_and_assistant_messages() {
         let tool_call = serde_json::json!({
             "arguments": "{\"command\":\"echo hi\"}",
@@ -1720,6 +1743,8 @@ mod ai_turn_order_tests {
             reasoning_effort: Some("auto".to_string()),
             safety_mode: AiPolicySafetyMode::Default,
             profile_id: None,
+            memory_context: None,
+            memory_entry_ids: Vec::new(),
             tool_policy,
             tools: Vec::new(),
             tool_choice: oxideterm_ai::AiToolChoice::Auto,

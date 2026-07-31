@@ -368,6 +368,19 @@ pub(in crate::workspace) struct RemoteDesktopSessionEntity {
 }
 
 impl RemoteDesktopSessionEntity {
+    pub(in crate::workspace) fn ai_can_disconnect(&self) -> bool {
+        matches!(
+            self.state.snapshot().status,
+            RemoteDesktopSessionStatus::Connecting
+                | RemoteDesktopSessionStatus::Connected
+                | RemoteDesktopSessionStatus::Reconnecting
+        )
+    }
+
+    pub(in crate::workspace) fn ai_can_reconnect(&self) -> bool {
+        remote_desktop_reconnect_mode(self.state.snapshot().status).is_some()
+    }
+
     fn new(
         tab_id: TabId,
         profile: RemoteDesktopConnectionProfile,
@@ -512,6 +525,38 @@ impl RemoteDesktopWorkspaceEntity {
     ) -> Option<Entity<RemoteDesktopSessionEntity>> {
         self.session_subscriptions.remove(&tab_id);
         self.sessions.remove(&tab_id)
+    }
+
+    pub(in crate::workspace) fn ai_snapshot(&self, cx: &App) -> serde_json::Value {
+        let sessions = self
+            .sessions
+            .iter()
+            .map(|(tab_id, session)| {
+                let session = session.read(cx);
+                let snapshot = session.state.snapshot();
+                serde_json::json!({
+                    "tabId": tab_id.0.to_string(),
+                    "profileId": session.profile.id,
+                    "label": snapshot.title,
+                    "protocol": format!("{:?}", snapshot.protocol).to_lowercase(),
+                    "host": session.profile.endpoint.host,
+                    "port": session.profile.endpoint.port,
+                    "status": format!("{:?}", snapshot.status).to_lowercase(),
+                    "readOnly": snapshot.read_only,
+                    "hasFrame": snapshot.has_frame,
+                    "size": snapshot.size.map(|size| serde_json::json!({
+                        "width": size.width,
+                        "height": size.height,
+                    })),
+                    "errorCategory": snapshot.error_category
+                        .map(|category| format!("{category:?}").to_lowercase()),
+                    "negotiatedCapabilities": snapshot.negotiated_capabilities,
+                    "canDisconnect": session.ai_can_disconnect(),
+                    "canReconnect": remote_desktop_reconnect_mode(snapshot.status).is_some(),
+                })
+            })
+            .collect::<Vec<_>>();
+        serde_json::json!({ "sessions": sessions })
     }
 }
 

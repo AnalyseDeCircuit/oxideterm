@@ -19,13 +19,13 @@ const FORWARDING_SESSION_SHUTTING_DOWN: &str = "workspace forwarding session is 
 const WORKSPACE_SESSION_SERVICE_SHUTDOWN_GRACE_PERIOD: Duration = Duration::from_secs(5);
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(super) enum ForwardingQuickAction {
+pub(in crate::workspace) enum ForwardingQuickAction {
     Jupyter,
     Tensorboard,
     Vscode,
 }
 
-pub(super) enum ForwardingRuntimeOperation {
+pub(in crate::workspace) enum ForwardingRuntimeOperation {
     Create {
         rule: ForwardRule,
         check_health: bool,

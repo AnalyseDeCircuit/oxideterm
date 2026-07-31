@@ -387,12 +387,13 @@ pub(in crate::workspace) fn ai_local_exec_timeout_secs(timeout_secs: u64) -> u64
 pub(in crate::workspace) fn ai_memory_settings_json(
     enabled: bool,
     content: &str,
+    entries: &[oxideterm_settings::AiMemoryEntry],
 ) -> serde_json::Value {
-    // Tauri recall_preferences returns settings.ai.memory verbatim, including
-    // the enabled flag even when the content is empty.
+    // Keep the legacy content field while exposing the itemized model.
     serde_json::json!({
         "enabled": enabled,
         "content": content,
+        "entries": entries.iter().map(ai_memory_entry_json).collect::<Vec<_>>(),
     })
 }
 

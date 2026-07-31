@@ -427,6 +427,7 @@ impl WorkspaceApp {
                 return;
             }
         };
+        self.record_ai_memory_usage(&stream_config.memory_entry_ids, cx);
         let now = ai_now_ms();
         let title = generate_chat_title(&content);
         let id = self.next_ai_chat_id(now, cx);
@@ -654,6 +655,7 @@ impl WorkspaceApp {
                 return;
             }
         };
+        self.record_ai_memory_usage(&stream_config.memory_entry_ids, cx);
         let conversation_id = self.ai_entity.update(cx, |ai, _cx| {
             ai.truncate_active_conversation_after_last_user(ai_now_ms())
         });
@@ -708,8 +710,19 @@ impl WorkspaceApp {
 
     pub(in crate::workspace) fn set_ai_safety_mode_default(&mut self, cx: &mut Context<Self>) {
         self.ai_entity.update(cx, |ai, _cx| {
-            ai.set_active_conversation_safety_bypass(false);
+            ai.set_active_conversation_safety_mode(AiSafetyMode::Default);
         });
+        self.close_ai_safety_mode_menu(cx);
+    }
+
+    pub(in crate::workspace) fn set_ai_safety_mode_read_only(&mut self, cx: &mut Context<Self>) {
+        self.ai_entity.update(cx, |ai, _cx| {
+            ai.set_active_conversation_safety_mode(AiSafetyMode::ReadOnly);
+        });
+        self.close_ai_safety_mode_menu(cx);
+    }
+
+    fn close_ai_safety_mode_menu(&mut self, cx: &mut Context<Self>) {
         self.ai_entity.update(cx, |ai, _cx| {
             ai.set_chat_popover_open(AiChatPopover::Safety, false);
         });
@@ -719,13 +732,9 @@ impl WorkspaceApp {
 
     pub(in crate::workspace) fn confirm_ai_safety_bypass(&mut self, cx: &mut Context<Self>) {
         self.ai_entity.update(cx, |ai, _cx| {
-            ai.set_active_conversation_safety_bypass(true);
+            ai.set_active_conversation_safety_mode(AiSafetyMode::Bypass);
         });
-        self.ai_entity.update(cx, |ai, _cx| {
-            ai.set_chat_popover_open(AiChatPopover::Safety, false);
-        });
-        self.restore_ai_chat_input_focus_after_safety_mode_change(cx);
-        cx.notify();
+        self.close_ai_safety_mode_menu(cx);
     }
 
     pub(in crate::workspace) fn restore_ai_chat_input_focus_after_safety_mode_change(
@@ -807,6 +816,7 @@ impl WorkspaceApp {
                 return;
             }
         };
+        self.record_ai_memory_usage(&stream_config.memory_entry_ids, cx);
 
         let now = ai_now_ms();
         let new_user_id = self.next_ai_chat_id(now, cx);

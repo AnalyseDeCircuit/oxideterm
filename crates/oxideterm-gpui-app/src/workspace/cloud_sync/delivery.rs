@@ -390,7 +390,7 @@ impl WorkspaceApp {
         ));
     }
 
-    pub(super) fn start_cloud_sync_upload_preview(&mut self, cx: &mut Context<Self>) {
+    pub(in crate::workspace) fn start_cloud_sync_upload_preview(&mut self, cx: &mut Context<Self>) {
         if self.cloud_sync.read(cx).controller.delivery_rx.is_some() {
             self.mark_cloud_sync_operation_in_progress(cx);
             return;

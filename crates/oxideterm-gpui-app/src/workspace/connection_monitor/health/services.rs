@@ -1626,7 +1626,7 @@ impl HostToolsEntity {
         self.start_service_action(request, runtime, cx)
     }
 
-    fn start_service_action(
+    pub(in crate::workspace::connection_monitor) fn start_service_action(
         &mut self,
         request: HostServiceActionRequest,
         runtime: tokio::runtime::Handle,

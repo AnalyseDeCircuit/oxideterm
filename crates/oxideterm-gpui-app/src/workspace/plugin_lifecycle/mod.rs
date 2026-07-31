@@ -1418,7 +1418,7 @@ impl WorkspaceApp {
         });
     }
 
-    fn native_plugin_host_api_resolver(
+    pub(in crate::workspace) fn native_plugin_host_api_resolver(
         &self,
         cx: &mut Context<Self>,
     ) -> plugin_runtime::NativeHostApiResolver {

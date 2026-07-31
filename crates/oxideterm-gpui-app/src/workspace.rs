@@ -1,5 +1,6 @@
 mod acp_workspace;
 mod actions;
+mod ai_background_tasks;
 mod ai_lazy;
 mod ai_runtime_context;
 mod ai_state;
@@ -202,12 +203,13 @@ use oxideterm_render_policy::{
 };
 use oxideterm_session_adapter::{
     reconnect_max_attempts_from_settings, reconnect_timing_from_settings,
-    sftp_runtime_settings_from_settings, terminal_backspace_sequence_from_connection,
-    terminal_delete_sequence_from_connection, terminal_encoding_from_connection,
+    sftp_runtime_settings_from_settings,
+    terminal_backspace_sequence_from_connection, terminal_delete_sequence_from_connection,
+    terminal_encoding_from_connection,
     terminal_encoding_from_settings as session_terminal_encoding,
 };
 use oxideterm_settings::{
-    AI_SIDEBAR_MAX_WIDTH, AI_SIDEBAR_MIN_WIDTH, BackgroundFit, BackgroundScope,
+    AI_SIDEBAR_ABSOLUTE_MAX_WIDTH, AI_SIDEBAR_ABSOLUTE_MIN_WIDTH, BackgroundFit, BackgroundScope,
     CursorStyle as SettingsCursorStyle, FontFamily, FrostedGlassMode, HighlightRuleRenderMode,
     Language, MAX_TERMINAL_BACKGROUND_OPACITY, MAX_WINDOW_OPACITY, MIN_TERMINAL_BACKGROUND_OPACITY,
     MIN_WINDOW_OPACITY, PersistedSettings, SettingsStore, background_images_directory,
@@ -753,6 +755,8 @@ pub(crate) struct WorkspaceApp {
     context_sidebar_motion_generation: u64,
     ai_entity: Entity<ai_state::AiWorkspaceEntity>,
     acp_entity: Entity<acp_workspace::AcpWorkspaceEntity>,
+    ai_background_tasks: Entity<ai_background_tasks::AiBackgroundTaskEntity>,
+    _ai_background_tasks_subscription: Subscription,
     ai_runtime_context: Entity<ai_runtime_context::AiRuntimeContextEntity>,
     _ai_entity_subscription: Subscription,
     _acp_entity_subscription: Subscription,

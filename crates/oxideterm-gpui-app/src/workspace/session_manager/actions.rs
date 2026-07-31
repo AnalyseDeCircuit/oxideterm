@@ -480,7 +480,7 @@ impl WorkspaceApp {
         }
     }
 
-    pub(super) fn open_saved_serial_profile(
+    pub(in crate::workspace) fn open_saved_serial_profile(
         &mut self,
         id: &str,
         window: &mut Window,
@@ -520,7 +520,7 @@ impl WorkspaceApp {
         }
     }
 
-    pub(super) fn open_saved_telnet_profile(
+    pub(in crate::workspace) fn open_saved_telnet_profile(
         &mut self,
         id: &str,
         window: &mut Window,
@@ -555,7 +555,7 @@ impl WorkspaceApp {
         }
     }
 
-    pub(super) fn open_saved_remote_desktop_profile(
+    pub(in crate::workspace) fn open_saved_remote_desktop_profile(
         &mut self,
         id: &str,
         window: &mut Window,

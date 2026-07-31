@@ -355,6 +355,39 @@ pub(super) struct CloudSyncWorkspaceEntity {
 impl EventEmitter<CloudSyncWorkspaceEvent> for CloudSyncWorkspaceEntity {}
 
 impl CloudSyncWorkspaceEntity {
+    pub(in crate::workspace) fn operation_in_flight(&self) -> bool {
+        self.controller.delivery_rx.is_some() || self.controller.active_action.is_some()
+    }
+
+    pub(in crate::workspace) fn ai_snapshot(&self) -> serde_json::Value {
+        let state = self.controller.store.state();
+        let settings = &state.settings;
+        serde_json::json!({
+            "backend": format!("{:?}", settings.backend_type).to_lowercase(),
+            "configured": !settings.endpoint.trim().is_empty()
+                || !settings.git_repository.trim().is_empty()
+                || !settings.s3_bucket.trim().is_empty(),
+            "status": format!("{:?}", state.status).to_lowercase(),
+            "activeAction": self.controller.active_action,
+            "progress": self.controller.progress.as_ref().map(|progress| serde_json::json!({
+                "stage": format!("{:?}", progress.stage).to_lowercase(),
+                "current": progress.current,
+                "total": progress.total,
+                "message": progress.message,
+            })),
+            "localDirty": state.local_dirty,
+            "remoteExists": state.remote_exists,
+            "blockedByConflict": state.auto_upload_blocked_by_conflict,
+            "hasConflict": state.conflict_details.is_some(),
+            "lastSyncAt": state.last_sync_at,
+            "lastUploadAt": state.last_upload_at,
+            "lastCheckAt": state.last_check_at,
+            "lastError": state.last_error,
+            "historyCount": state.sync_history.len(),
+            "autoUploadEnabled": settings.auto_upload_enabled,
+        })
+    }
+
     pub(super) fn new(
         store: oxideterm_cloud_sync::state::CloudSyncStateStore,
         cx: &mut Context<Self>,

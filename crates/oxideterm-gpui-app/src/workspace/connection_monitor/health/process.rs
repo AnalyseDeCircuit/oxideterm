@@ -1365,7 +1365,7 @@ impl HostToolsEntity {
         self.start_process_action(request, runtime, cx)
     }
 
-    fn start_process_action(
+    pub(in crate::workspace::connection_monitor) fn start_process_action(
         &mut self,
         request: HostProcessActionRun,
         runtime: tokio::runtime::Handle,

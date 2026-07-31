@@ -756,7 +756,10 @@ impl WorkspaceApp {
 }
 
 impl HostToolsEntity {
-    pub(super) fn log_snapshot_for(&self, connection_id: &str) -> Option<ResourceLogSnapshot> {
+    pub(in crate::workspace::connection_monitor) fn log_snapshot_for(
+        &self,
+        connection_id: &str,
+    ) -> Option<ResourceLogSnapshot> {
         self.host_logs
             .snapshot
             .as_ref()

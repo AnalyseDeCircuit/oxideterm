@@ -74,6 +74,7 @@ pub(in crate::workspace) struct AcpThreadStart {
     pub(in crate::workspace) route: AcpTurnRoute,
     pub(in crate::workspace) launch_config: oxideterm_ai::AcpLaunchConfig,
     pub(in crate::workspace) host_policy: oxideterm_ai::AcpHostCapabilityPolicy,
+    pub(in crate::workspace) application_tool_turn: super::sidebar::AcpApplicationToolTurn,
     pub(in crate::workspace) request: oxideterm_ai::AcpManagedPromptRequest,
 }
 
@@ -96,11 +97,30 @@ pub(in crate::workspace) struct AcpWorkspaceEntity {
     session_threads: HashMap<AcpSessionOwner, String>,
     turn_routes: HashMap<String, AcpTurnRoute>,
     turn_tasks: HashMap<String, tokio::task::JoinHandle<()>>,
+    application_tool_bridges: HashMap<String, AcpApplicationToolBridge>,
     terminals: HashMap<String, AcpVisibleTerminal>,
     file_write_previews: HashMap<String, zeroize::Zeroizing<String>>,
     diagnostics: HashMap<String, VecDeque<String>>,
     auth_methods: HashMap<String, Vec<oxideterm_ai::AcpAuthMethod>>,
     deliveries: VecDeque<AcpWorkspaceDelivery>,
+}
+
+struct AcpApplicationToolBridge {
+    server: oxideterm_acp_host_tools::AcpHostToolsServer,
+    active_turn:
+        std::sync::Arc<parking_lot::RwLock<Option<super::sidebar::AcpApplicationToolTurn>>>,
+    relay: tokio::task::JoinHandle<()>,
+}
+
+impl AcpApplicationToolBridge {
+    fn stop(self) {
+        if let Some(turn) = self.active_turn.write().take() {
+            turn.cancel();
+        }
+        self.relay.abort();
+        // Dropping the server closes the listener and cancels in-flight HTTP requests.
+        drop(self.server);
+    }
 }
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
@@ -126,6 +146,20 @@ pub(in crate::workspace) struct AcpVisibleTerminal {
 }
 
 impl EventEmitter<AcpWorkspaceEvent> for AcpWorkspaceEntity {}
+
+fn acp_application_tool_definitions() -> Vec<oxideterm_acp_host_tools::AcpHostToolDefinition> {
+    // ACP receives the canonical provider catalog instead of maintaining a second schema list.
+    oxideterm_ai::orchestrator_tool_definitions()
+        .into_iter()
+        .map(|definition| {
+            oxideterm_acp_host_tools::AcpHostToolDefinition::new(
+                definition.name,
+                definition.description,
+                definition.parameters,
+            )
+        })
+        .collect()
+}
 
 impl AcpWorkspaceEntity {
     pub(in crate::workspace) fn new(
@@ -154,6 +188,9 @@ impl AcpWorkspaceEntity {
             for (_, terminal) in entity.terminals.drain() {
                 terminal.session.lock().shutdown();
             }
+            for (_, bridge) in entity.application_tool_bridges.drain() {
+                bridge.stop();
+            }
             entity.file_write_previews.clear();
             let agent_ids = entity
                 .threads
@@ -173,6 +210,7 @@ impl AcpWorkspaceEntity {
             session_threads: HashMap::new(),
             turn_routes: HashMap::new(),
             turn_tasks: HashMap::new(),
+            application_tool_bridges: HashMap::new(),
             terminals: HashMap::new(),
             file_write_previews: HashMap::new(),
             diagnostics: HashMap::new(),
@@ -181,7 +219,7 @@ impl AcpWorkspaceEntity {
         }
     }
 
-    pub(in crate::workspace) fn start_turn(&mut self, start: AcpThreadStart) -> bool {
+    pub(in crate::workspace) fn start_turn(&mut self, mut start: AcpThreadStart) -> bool {
         let turn_id = start.request.turn_id.clone();
         if self.turn_tasks.contains_key(&turn_id) {
             return false;
@@ -216,6 +254,43 @@ impl AcpWorkspaceEntity {
                     .await;
             });
         }
+        if !self.application_tool_bridges.contains_key(&conversation_id) {
+            let Ok((server, mut calls)) = oxideterm_acp_host_tools::start_acp_host_tools_server(
+                self.task_runtime.handle(),
+                acp_application_tool_definitions(),
+            ) else {
+                return false;
+            };
+            let active_turn = std::sync::Arc::new(parking_lot::RwLock::new(None));
+            let relay_turn = active_turn.clone();
+            let relay = self.task_runtime.spawn(async move {
+                while let Some(call) = calls.recv().await {
+                    let turn = relay_turn.read().clone();
+                    super::sidebar::handle_acp_application_tool_call(call, turn).await;
+                }
+            });
+            self.application_tool_bridges.insert(
+                conversation_id.clone(),
+                AcpApplicationToolBridge {
+                    server,
+                    active_turn,
+                    relay,
+                },
+            );
+        }
+        let bridge = self
+            .application_tool_bridges
+            .get(&conversation_id)
+            .expect("ACP application tool bridge was created above");
+        if let Some(previous_turn) = bridge
+            .active_turn
+            .write()
+            .replace(start.application_tool_turn)
+        {
+            previous_turn.cancel();
+        }
+        // The manager installs MCP servers only when it creates or resumes the session.
+        start.request.mcp_servers = vec![bridge.server.mcp_server()];
         let thread = self
             .threads
             .entry(conversation_id.clone())
@@ -359,6 +434,9 @@ impl AcpWorkspaceEntity {
                 task.abort();
             }
             self.turn_routes.remove(turn_id);
+        }
+        if let Some(bridge) = self.application_tool_bridges.remove(conversation_id) {
+            bridge.stop();
         }
         let Some(session_id) = thread.session_id.as_deref() else {
             return;
@@ -623,6 +701,11 @@ impl AcpWorkspaceEntity {
                 result,
                 ..
             } => {
+                if let Some(bridge) = self.application_tool_bridges.get(thread_id) {
+                    if let Some(turn) = bridge.active_turn.write().take() {
+                        turn.cancel();
+                    }
+                }
                 if let Some(task) = self.turn_tasks.remove(turn_id) {
                     drop(task);
                 }
@@ -985,6 +1068,19 @@ impl WorkspaceApp {
 mod tests {
     use super::*;
     use gpui::AppContext;
+
+    #[test]
+    fn acp_application_tools_match_the_provider_catalog() {
+        let provider_tools = oxideterm_ai::orchestrator_tool_definitions();
+        let acp_tools = acp_application_tool_definitions();
+
+        assert_eq!(provider_tools.len(), acp_tools.len());
+        for (provider, acp) in provider_tools.iter().zip(&acp_tools) {
+            assert_eq!(provider.name, acp.name);
+            assert_eq!(provider.description, acp.description);
+            assert_eq!(provider.parameters, acp.input_schema);
+        }
+    }
 
     #[test]
     fn session_owner_keeps_equal_agent_session_ids_isolated() {

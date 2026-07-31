@@ -40,6 +40,19 @@ impl WorkspaceApp {
         let plugin_registry = plugin_host::NativePluginRegistry::discover(settings_store.path());
         let local_shells = scan_shells();
         let tokens = tokens_from_settings(&settings);
+        let initial_viewport_width = current_window_size(window).0;
+        let initial_sidebar_width = sidebar::clamp_responsive_sidebar_width(
+            settings.sidebar_ui.width as f32,
+            initial_viewport_width,
+            tokens.metrics.sidebar_min_width,
+            tokens.metrics.sidebar_max_width,
+        );
+        let initial_context_sidebar_width = sidebar::clamp_responsive_sidebar_width(
+            settings.sidebar_ui.ai_sidebar_width as f32,
+            initial_viewport_width,
+            AI_SIDEBAR_ABSOLUTE_MIN_WIDTH,
+            AI_SIDEBAR_ABSOLUTE_MAX_WIDTH,
+        );
         let overlay_exit_duration = oxideterm_gpui_ui::motion::duration(
             &tokens,
             oxideterm_gpui_ui::motion::MotionDuration::Control,
@@ -464,8 +477,7 @@ impl WorkspaceApp {
                 cx,
             );
             entity.configure_chat_surface(
-                (settings.sidebar_ui.ai_sidebar_width as f32)
-                    .clamp(AI_SIDEBAR_MIN_WIDTH, AI_SIDEBAR_MAX_WIDTH),
+                initial_context_sidebar_width,
                 Some(current_window_size(window)),
             );
             entity
@@ -482,6 +494,15 @@ impl WorkspaceApp {
             &acp_entity,
             |workspace, _acp_entity, _event: &acp_workspace::AcpWorkspaceEvent, cx| {
                 workspace.forward_acp_workspace_deliveries(cx);
+            },
+        );
+        let ai_background_tasks = cx.new(|cx| {
+            ai_background_tasks::AiBackgroundTaskEntity::new(forwarding_runtime.clone(), cx)
+        });
+        let ai_background_tasks_subscription = cx.subscribe(
+            &ai_background_tasks,
+            |workspace, _tasks, event: &ai_background_tasks::AiBackgroundTaskEvent, cx| {
+                workspace.handle_ai_background_task_event(*event, cx);
             },
         );
         let ai_runtime_context = cx.new(|cx| {
@@ -594,13 +615,15 @@ impl WorkspaceApp {
             sidebar_collapsed: settings.sidebar_ui.collapsed,
             sidebar_rendered: !settings.sidebar_ui.collapsed,
             sidebar_motion_generation: 0,
-            sidebar_width: settings.sidebar_ui.width as f32,
+            sidebar_width: initial_sidebar_width,
             context_sidebar_rendered: !settings.sidebar_ui.ai_sidebar_collapsed
                 && !settings.sidebar_ui.zen_mode
                 && settings.ai.enabled,
             context_sidebar_motion_generation: 0,
             ai_entity,
             acp_entity,
+            ai_background_tasks,
+            _ai_background_tasks_subscription: ai_background_tasks_subscription,
             ai_runtime_context,
             _ai_entity_subscription: ai_entity_subscription,
             _acp_entity_subscription: acp_entity_subscription,
@@ -756,7 +779,8 @@ impl WorkspaceApp {
             overlay,
             _overlay_observation: overlay_observation,
         };
-        let ai_overlay_bounds = cx.observe_window_bounds(window, |this, window, cx| {
+        let workspace_window_bounds = cx.observe_window_bounds(window, |this, window, cx| {
+            this.clamp_sidebar_widths_to_viewport(current_window_size(window).0, cx);
             this.update_ai_sidebar_overlay_for_window_bounds(window, cx);
         });
         let ai_knowledge_activation = cx.observe_window_activation(window, |this, window, cx| {
@@ -765,7 +789,7 @@ impl WorkspaceApp {
             }
         });
         workspace.ai_entity.update(cx, |ai, _cx| {
-            ai.retain_window_observers(ai_overlay_bounds, ai_knowledge_activation);
+            ai.retain_window_observers(workspace_window_bounds, ai_knowledge_activation);
         });
         workspace.sync_ai_workspace_visibility(cx);
         if workspace.ai_sidebar_visible() {
@@ -807,7 +831,10 @@ impl WorkspaceApp {
     ) -> TerminalUiPreferences {
         // The large CJK fallback is terminal-only, so keep an empty workspace
         // lean and register it immediately before the first terminal is built.
-        if let Err(error) = bundled_fonts::load_terminal_cjk_fallback_regular(&cx.text_system()) {
+        let cjk_font_family = &self.settings_store.settings().terminal.cjk_font_family;
+        if let Err(error) =
+            bundled_fonts::load_terminal_cjk_fallback_regular(&cx.text_system(), cjk_font_family)
+        {
             eprintln!(
                 "failed to load bundled CJK terminal fallback; falling back to system fonts: {error}"
             );

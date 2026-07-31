@@ -935,6 +935,7 @@ impl WorkspaceApp {
                         continue;
                     }
                     self.start_ai_ui_orchestrator_tool_execution(
+                        delivery.conversation_id.clone(),
                         tool_session_id,
                         tool_call_id,
                         name,
