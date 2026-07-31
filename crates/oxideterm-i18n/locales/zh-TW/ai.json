@@ -42,7 +42,7 @@
       "delete_conversation": "刪除對話",
       "rename_conversation": "重新命名對話",
       "save_conversation_title": "儲存標題",
-      "messages_count": "{{count}} 則訊息",
+      "turns_count": "{{count}} 輪對話",
       "today": "今天",
       "yesterday": "昨天",
       "double_click_rename": "雙擊重新命名",

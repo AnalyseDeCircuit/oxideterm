@@ -237,9 +237,9 @@ impl WorkspaceApp {
         cx.notify();
     }
 
-    pub(in crate::workspace) fn ai_messages_count_label(&self, count: usize) -> String {
+    pub(in crate::workspace) fn ai_conversation_turns_label(&self, count: usize) -> String {
         self.i18n
-            .t("ai.chat.messages_count")
+            .t("ai.chat.turns_count")
             .replace("{{count}}", &count.to_string())
     }
 

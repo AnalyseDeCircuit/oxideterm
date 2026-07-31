@@ -42,7 +42,7 @@
       "delete_conversation": "Xóa cuộc trò chuyện",
       "rename_conversation": "Đổi tên cuộc trò chuyện",
       "save_conversation_title": "Lưu tiêu đề",
-      "messages_count": "{{count}} tin nhắn",
+      "turns_count": "{{count}} lượt",
       "today": "Hôm nay",
       "yesterday": "Hôm qua",
       "double_click_rename": "Nhấp đúp để đổi tên",

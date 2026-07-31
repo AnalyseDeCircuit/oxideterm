@@ -42,7 +42,7 @@
       "delete_conversation": "会話を削除",
       "rename_conversation": "会話名を変更",
       "save_conversation_title": "タイトルを保存",
-      "messages_count": "{{count}} 件のメッセージ",
+      "turns_count": "{{count}} ターン",
       "today": "今日",
       "yesterday": "昨日",
       "double_click_rename": "ダブルクリックで名前を変更",

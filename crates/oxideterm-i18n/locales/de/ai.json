@@ -42,7 +42,7 @@
       "delete_conversation": "Unterhaltung löschen",
       "rename_conversation": "Unterhaltung umbenennen",
       "save_conversation_title": "Titel speichern",
-      "messages_count": "{{count}} Nachrichten",
+      "turns_count": "{{count}} Gesprächsrunden",
       "today": "Heute",
       "yesterday": "Gestern",
       "double_click_rename": "Doppelklicken zum Umbenennen",

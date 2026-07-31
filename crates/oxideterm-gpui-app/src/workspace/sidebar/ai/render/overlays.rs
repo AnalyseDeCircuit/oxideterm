@@ -15,7 +15,7 @@ struct AiConversationListRow {
     id: Arc<str>,
     title: String,
     cli_origin: bool,
-    message_count: usize,
+    turn_count: usize,
     updated_at_ms: i64,
     active: bool,
 }
@@ -304,11 +304,7 @@ impl WorkspaceApp {
                     id: Arc::from(conversation.id.as_str()),
                     title: conversation.title.clone(),
                     cli_origin: conversation.origin == "cli",
-                    message_count: if conversation.messages_loaded {
-                        conversation.messages.len()
-                    } else {
-                        conversation.message_count
-                    },
+                    turn_count: conversation.turn_count,
                     updated_at_ms: conversation.updated_at_ms,
                     active: state.active_conversation_id.as_deref()
                         == Some(conversation.id.as_str()),
@@ -391,7 +387,7 @@ impl WorkspaceApp {
         let is_active = conversation.active;
         let meta = format!(
             "{} · {}",
-            self.ai_messages_count_label(conversation.message_count),
+            self.ai_conversation_turns_label(conversation.turn_count),
             time_label(
                 conversation.updated_at_ms,
                 &self.i18n.t("ai.chat.today"),

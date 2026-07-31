@@ -42,7 +42,7 @@
       "delete_conversation": "Eliminar conversación",
       "rename_conversation": "Renombrar conversación",
       "save_conversation_title": "Guardar título",
-      "messages_count": "{{count}} mensajes",
+      "turns_count": "{{count}} turnos",
       "today": "Hoy",
       "yesterday": "Ayer",
       "double_click_rename": "Doble clic para renombrar",
