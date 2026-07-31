@@ -20,7 +20,32 @@ pub const AI_TOOL_GET_CLOUD_SYNC_STATE: &str = "get_cloud_sync_state";
 pub const AI_TOOL_MANAGE_CLOUD_SYNC: &str = "manage_cloud_sync";
 pub const AI_TOOL_LIST_CREDENTIALS: &str = "list_credentials";
 pub const AI_TOOL_MANAGE_CREDENTIAL: &str = "manage_credential";
+pub const AI_TOOL_LOAD_SKILL: &str = "load_skill";
+pub const AI_TOOL_READ_SKILL_RESOURCE: &str = "read_skill_resource";
 pub const AI_APPLICATION_WORKSPACE_MEMORY_SCOPE_ID: &str = "application-workspace";
+
+fn default_ai_skills_enabled() -> bool {
+    true
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AiSkillsSettings {
+    #[serde(default = "default_ai_skills_enabled")]
+    pub enabled: bool,
+    /// Canonical SKILL.md files or skill roots disabled by the user.
+    #[serde(default)]
+    pub disabled_paths: Vec<String>,
+}
+
+impl Default for AiSkillsSettings {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            disabled_paths: Vec::new(),
+        }
+    }
+}
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -160,6 +185,8 @@ impl Default for AiToolUseSettings {
             (AI_TOOL_LIST_REMOTE_DESKTOP_SESSIONS, true),
             (AI_TOOL_GET_CLOUD_SYNC_STATE, true),
             (AI_TOOL_LIST_CREDENTIALS, true),
+            (AI_TOOL_LOAD_SKILL, true),
+            (AI_TOOL_READ_SKILL_RESOURCE, true),
             ("connect_target", false),
             ("run_command", false),
             ("send_terminal_input", false),
@@ -348,6 +375,8 @@ pub struct AiSettings {
     pub custom_system_prompt: String,
     pub memory: AiMemorySettings,
     #[serde(default)]
+    pub skills: AiSkillsSettings,
+    #[serde(default)]
     pub model_max_response_tokens: Map<String, Value>,
     pub tool_use: AiToolUseSettings,
     pub context_sources: AiContextSources,
@@ -386,6 +415,7 @@ impl Default for AiSettings {
             user_context_windows: Map::new(),
             custom_system_prompt: String::new(),
             memory: AiMemorySettings::default(),
+            skills: AiSkillsSettings::default(),
             model_max_response_tokens: Map::new(),
             tool_use: AiToolUseSettings::default(),
             context_sources: AiContextSources::default(),
@@ -445,6 +475,15 @@ mod ai_model_tests {
 
         assert!(!entry.is_expired(99));
         assert!(entry.is_expired(100));
+    }
+
+    #[test]
+    fn skills_default_to_enabled_for_existing_settings_files() {
+        let skills: AiSkillsSettings =
+            serde_json::from_value(json!({})).expect("skills settings");
+
+        assert!(skills.enabled);
+        assert!(skills.disabled_paths.is_empty());
     }
 
     #[test]

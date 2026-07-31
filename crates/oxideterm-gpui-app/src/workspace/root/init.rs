@@ -38,6 +38,38 @@ impl WorkspaceApp {
         // Legacy Tauri ESM plugins remain visible in Plugin Manager, but
         // the native path never evaluates JS or creates a WebView runtime.
         let plugin_registry = plugin_host::NativePluginRegistry::discover(settings_store.path());
+        // Capture one stable root for this window. Shell `cd` must not silently
+        // replace the available workflow catalog.
+        let skill_workspace_root = std::env::current_dir().ok();
+        let plugin_roots = plugin_registry
+            .plugins()
+            .iter()
+            .filter(|plugin| {
+                matches!(
+                    plugin.state,
+                    plugin_host::NativePluginState::ReadyManifestOnly
+                        | plugin_host::NativePluginState::ReadyWasm
+                        | plugin_host::NativePluginState::ReadyProcess
+                        | plugin_host::NativePluginState::Active
+                )
+            })
+            .map(|plugin| plugin.install_dir.clone())
+            .collect();
+        let disabled_paths = settings
+            .ai
+            .skills
+            .disabled_paths
+            .iter()
+            .map(std::path::PathBuf::from)
+            .collect();
+        let skill_registry =
+            oxideterm_skills::SkillRegistry::discover(&oxideterm_skills::SkillDiscoveryOptions {
+                workspace_root: skill_workspace_root.clone(),
+                settings_path: Some(settings_store.path().to_path_buf()),
+                plugin_roots,
+                disabled_paths,
+            });
+        let skill_registry = std::sync::Arc::new(parking_lot::RwLock::new(skill_registry));
         let local_shells = scan_shells();
         let tokens = tokens_from_settings(&settings);
         let initial_viewport_width = current_window_size(window).0;
@@ -622,6 +654,9 @@ impl WorkspaceApp {
             context_sidebar_motion_generation: 0,
             ai_entity,
             acp_entity,
+            skill_registry,
+            skill_workspace_root,
+            loaded_conversation_skills: HashMap::new(),
             ai_background_tasks,
             _ai_background_tasks_subscription: ai_background_tasks_subscription,
             ai_runtime_context,

@@ -332,6 +332,19 @@ fn migrate_ai_tool_use_settings(settings: &mut Value, raw: &Value) {
         .get("autoApproveTools")
         .is_some_and(Value::is_object)
     {
+        // Existing settings files predate newly added application tools.
+        // Merge only missing defaults so user decisions remain authoritative
+        // while the policy UI and exposed tool catalog stay synchronized.
+        if let Some(auto_approve) = settings
+            .get_mut("ai")
+            .and_then(|ai| ai.get_mut("toolUse"))
+            .and_then(|tool_use| tool_use.get_mut("autoApproveTools"))
+            .and_then(Value::as_object_mut)
+        {
+            for (name, value) in AiToolUseSettings::default().auto_approve_tools {
+                auto_approve.entry(name).or_insert(value);
+            }
+        }
         return;
     }
 
@@ -1177,6 +1190,36 @@ mod tests {
                 .get("write_resource:file")
                 .and_then(Value::as_bool),
             Some(false)
+        );
+    }
+
+    #[test]
+    fn existing_tool_policy_receives_new_skill_tool_defaults() {
+        let sanitized = sanitize_settings_value(json!({
+            "ai": {
+                "toolUse": {
+                    "autoApproveTools": {
+                        "run_command": true
+                    }
+                }
+            }
+        }))
+        .expect("sanitize settings");
+
+        let policy = sanitized.settings.ai.tool_use.auto_approve_tools;
+        assert_eq!(
+            policy.get("run_command").and_then(Value::as_bool),
+            Some(true)
+        );
+        assert_eq!(
+            policy.get(AI_TOOL_LOAD_SKILL).and_then(Value::as_bool),
+            Some(true)
+        );
+        assert_eq!(
+            policy
+                .get(AI_TOOL_READ_SKILL_RESOURCE)
+                .and_then(Value::as_bool),
+            Some(true)
         );
     }
 

@@ -747,6 +747,7 @@ window.focus(&this.focus_handle, cx);
         let tool_policy = ai_tool_use_policy_from_settings(tool_use);
         let active_tool_count = ai_active_tool_count(
             enabled,
+            self.settings_store.settings().ai.skills.enabled,
             &tool_policy,
             self.ai_entity.read(cx).mcp_registry(),
         );
@@ -1307,16 +1308,32 @@ window.focus(&this.focus_handle, cx);
         }
         let draft = &ai.chat_ui().draft;
         let mut candidates = ai_autocomplete_candidates(draft, draft.len());
-        if self.settings_store.settings().ai.active_backend != AiActiveBackend::Acp
-            || ai_input_token_at_cursor(draft, draft.len()).token_type
-                != Some(oxideterm_ai::AiInputTokenType::Slash)
-        {
+        let input_token = ai_input_token_at_cursor(draft, draft.len());
+        if input_token.token_type != Some(oxideterm_ai::AiInputTokenType::Slash) {
             return candidates;
         }
-
-        let partial = ai_input_token_at_cursor(draft, draft.len())
-            .partial
-            .to_lowercase();
+        let partial = input_token.partial.to_lowercase();
+        if self.settings_store.settings().ai.skills.enabled {
+            for skill in self.skill_registry.read().catalog() {
+                if !skill.id.to_lowercase().starts_with(&partial)
+                    || candidates
+                        .iter()
+                        .any(|candidate| candidate.name == skill.id)
+                {
+                    continue;
+                }
+                candidates.push(AiAutocompleteCandidate {
+                    kind: AiAutocompleteKind::Slash,
+                    name: skill.id,
+                    description: skill.description,
+                    description_is_i18n_key: false,
+                    accepts_value: true,
+                });
+            }
+        }
+        if self.settings_store.settings().ai.active_backend != AiActiveBackend::Acp {
+            return candidates;
+        }
         let Some(session) = ai
             .conversation_state()
             .active_conversation()

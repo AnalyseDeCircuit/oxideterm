@@ -75,6 +75,8 @@ pub const ORCHESTRATOR_TOOL_NAMES: &[&str] = &[
     "get_state",
     "remember_preference",
     "recall_preferences",
+    "load_skill",
+    "read_skill_resource",
     "create_background_task",
     "list_background_tasks",
     "get_background_task",

@@ -7694,6 +7694,7 @@ dependencies = [
  "oxideterm-settings",
  "oxideterm-settings-model",
  "oxideterm-sftp",
+ "oxideterm-skills",
  "oxideterm-ssh",
  "oxideterm-ssh-launch",
  "oxideterm-terminal",

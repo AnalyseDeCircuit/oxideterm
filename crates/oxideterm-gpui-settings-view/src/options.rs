@@ -425,6 +425,10 @@ pub fn set_ai_tool_use_enabled(settings: &mut PersistedSettings, value: bool) {
     settings.ai.tool_use.enabled = value;
 }
 
+pub fn set_ai_skills_enabled(settings: &mut PersistedSettings, value: bool) {
+    settings.ai.skills.enabled = value;
+}
+
 pub fn set_ai_tool_use_max_rounds(settings: &mut PersistedSettings, value: i64) {
     settings.ai.tool_use.max_rounds = Some(value);
 }

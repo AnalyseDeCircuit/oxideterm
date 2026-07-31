@@ -119,6 +119,8 @@ fn orchestrator_tool_definitions_preserve_core_names_and_order() {
             "get_state",
             "remember_preference",
             "recall_preferences",
+            "load_skill",
+            "read_skill_resource",
             "create_background_task",
             "list_background_tasks",
             "get_background_task",
@@ -196,6 +198,35 @@ fn orchestrator_send_terminal_input_exposes_bounded_control_keys() {
 }
 
 #[test]
+fn orchestrator_skill_tools_are_bounded_read_actions() {
+    let loaded = canonicalize_orchestrator_tool_arguments(
+        "load_skill",
+        serde_json::json!({ "id": "release-review" }),
+    )
+    .expect("valid skill load");
+    assert_eq!(loaded["id"], "release-review");
+    assert!(
+        canonicalize_orchestrator_tool_arguments(
+            "read_skill_resource",
+            serde_json::json!({
+                "id": "release-review",
+                "path": "references/checklist.md",
+                "unexpected": true
+            }),
+        )
+        .is_err()
+    );
+    assert_eq!(
+        orchestrator_risk_for_tool("load_skill", None),
+        AiActionRisk::Read
+    );
+    assert_eq!(
+        orchestrator_risk_for_tool("read_skill_resource", None),
+        AiActionRisk::Read
+    );
+}
+
+#[test]
 fn v2_terminal_and_connection_tools_reject_legacy_target_authority() {
     let tools = orchestrator_tool_definitions();
     for name in [
@@ -266,7 +297,7 @@ fn v2_terminal_and_connection_tools_reject_legacy_target_authority() {
 
 #[test]
 fn orchestrator_v2_authority_inventory_covers_every_tool() {
-    let inventory = serde_json::json!({
+    let mut inventory = serde_json::json!({
         "list_targets": { "authority": "discovery", "fields": [] },
         "select_target": { "authority": "discovery", "fields": [] },
         "connect_target": { "authority": "stable_resource", "fields": ["resource_ref"] },
@@ -306,6 +337,20 @@ fn orchestrator_v2_authority_inventory_covers_every_tool() {
         "list_memory_entries": { "authority": "memory_store", "fields": [] },
         "manage_memory_entry": { "authority": "memory_store", "fields": [] }
     });
+    inventory
+        .as_object_mut()
+        .expect("the contract inventory is an object")
+        .insert(
+            "load_skill".to_string(),
+            serde_json::json!({ "authority": "skill_registry", "fields": [] }),
+        );
+    inventory
+        .as_object_mut()
+        .expect("the contract inventory is an object")
+        .insert(
+            "read_skill_resource".to_string(),
+            serde_json::json!({ "authority": "loaded_skill", "fields": [] }),
+        );
     let tools = orchestrator_tool_definitions();
     let inventory = inventory
         .as_object()

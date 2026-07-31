@@ -280,6 +280,13 @@ impl WorkspaceApp {
             (AiSettingsPage::Tools, 1) => {
                 let settings = self.settings_store.settings();
                 self.ai_disabled_settings_card(
+                    self.ai_skills_section(settings, cx),
+                    settings.ai.enabled,
+                )
+            }
+            (AiSettingsPage::Tools, 2) => {
+                let settings = self.settings_store.settings();
+                self.ai_disabled_settings_card(
                     self.ai_mcp_servers_section(settings, cx),
                     settings.ai.enabled,
                 )
@@ -553,6 +560,15 @@ impl WorkspaceApp {
                             .read(cx)
                             .settings_section_expanded(AiSettingsViewSection::ToolUse)
                             .hash(&mut hasher);
+                    }
+                    (AiSettingsPage::Tools, 3) => {
+                        let registry = self.skill_registry.read();
+                        for skill in registry.records() {
+                            skill.id.hash(&mut hasher);
+                            skill.enabled.hash(&mut hasher);
+                            skill.content_hash.hash(&mut hasher);
+                        }
+                        registry.diagnostics().len().hash(&mut hasher);
                     }
                     _ => {}
                 }
@@ -1056,6 +1072,7 @@ impl WorkspaceApp {
         // Re-apply the same runtime side effects used by edit_settings instead
         // of relying on stale in-memory settings or browser-style stores.
         self.apply_loaded_settings_to_runtime(&settings, cx);
+        self.refresh_ai_skill_registry();
         self.emit_native_plugin_settings_events(&previous_settings, &settings, cx);
         self.queue_cloud_sync_dirty_refresh(cx);
         self.sync_tab_titles(cx);

@@ -1028,6 +1028,233 @@ impl WorkspaceApp {
         )
     }
 
+    pub(in crate::workspace) fn ai_skills_section(
+        &self,
+        settings: &PersistedSettings,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let registry = self.skill_registry.read();
+        let records = registry.records().cloned().collect::<Vec<_>>();
+        let diagnostic_count = registry.diagnostics().len();
+        drop(registry);
+        let enabled_count = records.iter().filter(|record| record.enabled).count();
+        let mut section = div()
+            .w_full()
+            .min_w(px(0.0))
+            .flex()
+            .flex_col()
+            .gap(px(12.0))
+            .child(
+                div()
+                    .w_full()
+                    .min_w(px(0.0))
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .gap(px(12.0))
+                    .child(settings_ai_icon_heading(
+                        Self::render_lucide_icon(
+                            LucideIcon::BookOpen,
+                            16.0,
+                            rgb(self.tokens.ui.text),
+                        ),
+                        self.ai_section_title("settings_view.ai.skills_title"),
+                    ))
+                    .child(self.workspace_toolbar_action_button(
+                        self.i18n.t("settings_view.ai.skills_refresh"),
+                        Some(Self::render_lucide_icon(
+                            LucideIcon::RefreshCw,
+                            12.0,
+                            rgb(self.tokens.ui.text),
+                        )),
+                        ToolbarButtonOptions {
+                            button: ButtonOptions {
+                                variant: ButtonVariant::Outline,
+                                size: ButtonSize::Sm,
+                                radius: ButtonRadius::Md,
+                                disabled: false,
+                            },
+                            ..ToolbarButtonOptions::default()
+                        },
+                        cx.listener(|this, _event, _window, cx| {
+                            this.refresh_ai_skill_registry();
+                            cx.stop_propagation();
+                            cx.notify();
+                        }),
+                    )),
+            )
+            .child(
+                div()
+                    .text_size(px(self.tokens.metrics.ui_text_xs))
+                    .text_color(rgb(self.tokens.ui.text_muted))
+                    .line_height(px(18.0))
+                    .child(self.i18n.t("settings_view.ai.skills_hint")),
+            )
+            .child(self.bool_row(
+                "settings_view.ai.skills_enabled",
+                "settings_view.ai.skills_enabled_hint",
+                settings.ai.skills.enabled,
+                set_ai_skills_enabled,
+                cx,
+            ))
+            .child(
+                div()
+                    .text_size(px(self.tokens.metrics.ui_text_xs))
+                    .text_color(rgb(self.tokens.ui.text_muted))
+                    .child(
+                        self.i18n
+                            .t("settings_view.ai.skills_summary")
+                            .replace("{{enabled}}", &enabled_count.to_string())
+                            .replace("{{total}}", &records.len().to_string())
+                            .replace("{{diagnostics}}", &diagnostic_count.to_string()),
+                    ),
+            );
+
+        if records.is_empty() {
+            return section
+                .child(
+                    div()
+                        .py(px(8.0))
+                        .text_size(px(self.tokens.metrics.ui_text_xs))
+                        .text_color(rgb(self.tokens.ui.text_muted))
+                        .child(self.i18n.t("settings_view.ai.skills_empty")),
+                )
+                .into_any_element();
+        }
+
+        for record in records {
+            let skill_path = record.skill_path.to_string_lossy().into_owned();
+            let checked = record.enabled;
+            let source = match record.origin {
+                oxideterm_skills::SkillOrigin::AgentStandard => ".agents",
+                oxideterm_skills::SkillOrigin::OxideTerm => "OxideTerm",
+                oxideterm_skills::SkillOrigin::ClaudeCompatible => ".claude",
+                oxideterm_skills::SkillOrigin::CopilotCompatible => ".github",
+                oxideterm_skills::SkillOrigin::OpenCodeCompatible => ".opencode",
+                oxideterm_skills::SkillOrigin::Plugin => "skills/",
+            };
+            let scope_key = match record.scope {
+                oxideterm_skills::SkillScope::Workspace => {
+                    "settings_view.ai.skills_scope_workspace"
+                }
+                oxideterm_skills::SkillScope::User => "settings_view.ai.skills_scope_user",
+                oxideterm_skills::SkillScope::Plugin => "settings_view.ai.skills_scope_plugin",
+            };
+            section = section.child(
+                div()
+                    .w_full()
+                    .min_w(px(0.0))
+                    .border_t_1()
+                    .border_color(rgba((self.tokens.ui.border << 8) | 0x66))
+                    .pt(px(10.0))
+                    .flex()
+                    .items_start()
+                    .justify_between()
+                    .gap(px(12.0))
+                    .child(
+                        div()
+                            .min_w(px(0.0))
+                            .flex_1()
+                            .flex()
+                            .flex_col()
+                            .gap(px(3.0))
+                            .child(
+                                div()
+                                    .text_size(px(self.tokens.metrics.ui_text_sm))
+                                    .font_weight(gpui::FontWeight::MEDIUM)
+                                    .text_color(rgb(self.tokens.ui.text))
+                                    .child(record.name),
+                            )
+                            .child(
+                                div()
+                                    .text_size(px(self.tokens.metrics.ui_text_xs))
+                                    .text_color(rgb(self.tokens.ui.text_muted))
+                                    .child(record.description),
+                            )
+                            .child(
+                                div()
+                                    .text_size(px(10.0))
+                                    .text_color(rgb(self.tokens.ui.text_muted))
+                                    .child(format!("{} · {}", self.i18n.t(scope_key), source)),
+                            ),
+                    )
+                    .child(
+                        checkbox(&self.tokens, String::new(), checked).on_mouse_down(
+                            MouseButton::Left,
+                            cx.listener(move |this, _event, _window, cx| {
+                                let skill_path = skill_path.clone();
+                                this.edit_settings(
+                                    move |settings| {
+                                        if checked {
+                                            if !settings
+                                                .ai
+                                                .skills
+                                                .disabled_paths
+                                                .iter()
+                                                .any(|path| path == &skill_path)
+                                            {
+                                                settings.ai.skills.disabled_paths.push(skill_path);
+                                            }
+                                        } else {
+                                            settings
+                                                .ai
+                                                .skills
+                                                .disabled_paths
+                                                .retain(|path| path != &skill_path);
+                                        }
+                                    },
+                                    cx,
+                                );
+                                this.refresh_ai_skill_registry();
+                                cx.stop_propagation();
+                                cx.notify();
+                            }),
+                        ),
+                    ),
+            );
+        }
+        section.into_any_element()
+    }
+
+    pub(in crate::workspace) fn refresh_ai_skill_registry(&mut self) {
+        let plugin_registry =
+            plugin_host::NativePluginRegistry::discover(self.settings_store.path());
+        let plugin_roots = plugin_registry
+            .plugins()
+            .iter()
+            .filter(|plugin| {
+                matches!(
+                    plugin.state,
+                    plugin_host::NativePluginState::ReadyManifestOnly
+                        | plugin_host::NativePluginState::ReadyWasm
+                        | plugin_host::NativePluginState::ReadyProcess
+                        | plugin_host::NativePluginState::Active
+                )
+            })
+            .map(|plugin| plugin.install_dir.clone())
+            .collect();
+        let disabled_paths = self
+            .settings_store
+            .settings()
+            .ai
+            .skills
+            .disabled_paths
+            .iter()
+            .map(std::path::PathBuf::from)
+            .collect();
+        let registry =
+            oxideterm_skills::SkillRegistry::discover(&oxideterm_skills::SkillDiscoveryOptions {
+                workspace_root: self.skill_workspace_root.clone(),
+                settings_path: Some(self.settings_store.path().to_path_buf()),
+                plugin_roots,
+                disabled_paths,
+            });
+        *self.skill_registry.write() = registry;
+        // A disabled or replaced skill must be loaded again before resources
+        // can be read in any existing conversation.
+        self.loaded_conversation_skills.clear();
+    }
+
     pub(in crate::workspace) fn ai_tool_number_input_row(
         &self,
         label_key: &str,

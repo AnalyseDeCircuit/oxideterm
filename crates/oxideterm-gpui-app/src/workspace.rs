@@ -203,9 +203,8 @@ use oxideterm_render_policy::{
 };
 use oxideterm_session_adapter::{
     reconnect_max_attempts_from_settings, reconnect_timing_from_settings,
-    sftp_runtime_settings_from_settings,
-    terminal_backspace_sequence_from_connection, terminal_delete_sequence_from_connection,
-    terminal_encoding_from_connection,
+    sftp_runtime_settings_from_settings, terminal_backspace_sequence_from_connection,
+    terminal_delete_sequence_from_connection, terminal_encoding_from_connection,
     terminal_encoding_from_settings as session_terminal_encoding,
 };
 use oxideterm_settings::{
@@ -755,6 +754,9 @@ pub(crate) struct WorkspaceApp {
     context_sidebar_motion_generation: u64,
     ai_entity: Entity<ai_state::AiWorkspaceEntity>,
     acp_entity: Entity<acp_workspace::AcpWorkspaceEntity>,
+    skill_registry: std::sync::Arc<parking_lot::RwLock<oxideterm_skills::SkillRegistry>>,
+    skill_workspace_root: Option<std::path::PathBuf>,
+    loaded_conversation_skills: HashMap<String, HashMap<String, String>>,
     ai_background_tasks: Entity<ai_background_tasks::AiBackgroundTaskEntity>,
     _ai_background_tasks_subscription: Subscription,
     ai_runtime_context: Entity<ai_runtime_context::AiRuntimeContextEntity>,

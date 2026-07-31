@@ -430,7 +430,7 @@ mod ai_turn_order_tests {
             ..oxideterm_ai::AiToolUsePolicy::default()
         };
 
-        let tools = ai_stream_tool_definitions(true, &policy, &registry);
+        let tools = ai_stream_tool_definitions(true, true, &policy, &registry);
         let names = tools
             .iter()
             .map(|tool| tool.name.as_str())
@@ -448,10 +448,17 @@ mod ai_turn_order_tests {
             enabled: true,
             ..oxideterm_ai::AiToolUsePolicy::default()
         };
-        let baseline_count = ai_active_tool_count(true, &baseline_policy, &registry);
+        let baseline_count = ai_active_tool_count(true, true, &baseline_policy, &registry);
 
         assert!(baseline_count > 10);
-        assert_eq!(ai_active_tool_count(false, &baseline_policy, &registry), 0);
+        assert_eq!(
+            ai_active_tool_count(false, true, &baseline_policy, &registry),
+            0
+        );
+        assert_eq!(
+            ai_active_tool_count(true, false, &baseline_policy, &registry),
+            baseline_count - 2
+        );
 
         let mut restricted_policy = baseline_policy;
         restricted_policy.disabled_tools = vec![
@@ -459,7 +466,7 @@ mod ai_turn_order_tests {
             "list_mcp_resources".to_string(),
         ];
         assert_eq!(
-            ai_active_tool_count(true, &restricted_policy, &registry),
+            ai_active_tool_count(true, true, &restricted_policy, &registry),
             baseline_count - 2
         );
     }
@@ -943,13 +950,14 @@ mod ai_turn_order_tests {
     }
 
     #[test]
-    fn user_memory_prompt_truncates_like_tauri_character_limit() {
-        let memory = "你".repeat(4_001);
+    fn user_memory_prompt_uses_the_shared_character_limit() {
+        let limit = oxideterm_ai::AI_USER_MEMORY_MAX_CHARS;
+        let memory = "你".repeat(limit + 1);
 
         let prompt = ai_user_memory_prompt(&memory, true).expect("memory prompt");
 
-        assert!(prompt.contains(&"你".repeat(4_000)));
-        assert!(!prompt.contains(&"你".repeat(4_001)));
+        assert!(prompt.contains(&"你".repeat(limit)));
+        assert!(!prompt.contains(&"你".repeat(limit + 1)));
         assert!(prompt.contains("\n...[truncated]"));
     }
 

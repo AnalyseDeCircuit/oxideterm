@@ -408,6 +408,31 @@ pub fn orchestrator_tool_definitions() -> Vec<AiToolDefinition> {
                 "additionalProperties": false,
             }),
         ),
+        tool(
+            "load_skill",
+            "Load one Agent Skill when the request matches an entry in the available skills catalog. Skill instructions never grant additional tool permissions.",
+            json!({
+                "type": "object",
+                "properties": {
+                    "id": { "type": "string", "maxLength": 64, "description": "Exact identifier from the available skills catalog." },
+                },
+                "required": ["id"],
+                "additionalProperties": false,
+            }),
+        ),
+        tool(
+            "read_skill_resource",
+            "Read one text resource referenced by a loaded Agent Skill. The relative path cannot escape the skill directory.",
+            json!({
+                "type": "object",
+                "properties": {
+                    "id": { "type": "string", "maxLength": 64, "description": "Exact loaded skill identifier." },
+                    "path": { "type": "string", "maxLength": 1024, "description": "Relative path inside the skill directory." },
+                },
+                "required": ["id", "path"],
+                "additionalProperties": false,
+            }),
+        ),
     ];
     tools.extend(crate::application_tools::extended_application_tool_definitions());
     tools
@@ -457,6 +482,15 @@ pub fn canonicalize_orchestrator_tool_arguments(
         "get_state" => validate_get_state(object)?,
         "remember_preference" => validate_remember_preference(object)?,
         "recall_preferences" => require_only_fields(object, &[])?,
+        "load_skill" => {
+            require_only_fields(object, &["id"])?;
+            required_non_empty_string(object, "id", Some(64))?;
+        }
+        "read_skill_resource" => {
+            require_only_fields(object, &["id", "path"])?;
+            required_non_empty_string(object, "id", Some(64))?;
+            required_non_empty_string(object, "path", Some(1024))?;
+        }
         _ => {
             if !crate::application_tools::validate_extended_application_tool_arguments(
                 tool_name, object,

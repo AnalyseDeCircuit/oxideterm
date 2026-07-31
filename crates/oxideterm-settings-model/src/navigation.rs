@@ -246,8 +246,8 @@ pub fn ai_settings_section_count(page: AiSettingsPage) -> usize {
         // Context controls, prompt, memory, and model windows are
         // separate cards so each virtual row owns one stable responsibility.
         AiSettingsPage::Context => 4,
-        // Tool approval and MCP servers are independent top-level cards.
-        AiSettingsPage::Tools => 2,
+        // Tool approval, Agent Skills, and MCP servers are independent cards.
+        AiSettingsPage::Tools => 3,
     };
     // The first section is the subpage picker, matching terminal settings.
     1 + page_cards
@@ -447,8 +447,8 @@ mod tests {
     }
 
     #[test]
-    fn ai_tools_page_counts_tool_policy_and_mcp_cards() {
-        assert_eq!(ai_settings_section_count(AiSettingsPage::Tools), 3);
+    fn ai_tools_page_counts_tool_policy_skills_and_mcp_cards() {
+        assert_eq!(ai_settings_section_count(AiSettingsPage::Tools), 4);
     }
 
     #[test]

@@ -89,6 +89,25 @@ impl WorkspaceApp {
             );
             return;
         };
+        let acp_agent_id = launch.launch_config.id.clone();
+        let pending_skill_catalog = self.ai_skill_catalog_prompt().and_then(|catalog| {
+            use sha2::Digest as _;
+
+            let catalog_hash = format!("{:x}", sha2::Sha256::digest(catalog.as_bytes()));
+            let already_known = self
+                .ai_entity
+                .read(cx)
+                .conversation_state()
+                .conversations
+                .iter()
+                .find(|conversation| conversation.id == conversation_id)
+                .and_then(|conversation| conversation.session_metadata.as_ref())
+                .and_then(|metadata| metadata.get("acpSkillCatalogs"))
+                .and_then(|catalogs| catalogs.get(&acp_agent_id))
+                .and_then(serde_json::Value::as_str)
+                == Some(catalog_hash.as_str());
+            (!already_known).then_some((catalog, catalog_hash))
+        });
 
         let handoff = self.ai_entity.read(cx).conversation_state()
             .conversations
@@ -127,6 +146,9 @@ impl WorkspaceApp {
             .filter(|value| !value.trim().is_empty())
         {
             append_prompt_section("OxideTerm Scoped Memory", memory);
+        }
+        if let Some((skill_catalog, _catalog_hash)) = pending_skill_catalog.as_ref() {
+            append_prompt_section("OxideTerm Agent Skills", &skill_catalog);
         }
         if let Some(context) = request_message
             .as_ref()
@@ -232,6 +254,33 @@ impl WorkspaceApp {
                 },
             })
         });
+        if started
+            && let Some((_skill_catalog, catalog_hash)) = pending_skill_catalog
+        {
+            self.ai_entity.update(cx, |ai, _cx| {
+                let Some(conversation) = ai
+                    .conversation_state_mut()
+                    .conversations
+                    .iter_mut()
+                    .find(|conversation| conversation.id == conversation_id)
+                else {
+                    return;
+                };
+                let metadata = conversation
+                    .session_metadata
+                    .get_or_insert_with(|| serde_json::json!({}));
+                let Some(metadata) = metadata.as_object_mut() else {
+                    return;
+                };
+                let catalogs = metadata
+                    .entry("acpSkillCatalogs")
+                    .or_insert_with(|| serde_json::json!({}));
+                let Some(catalogs) = catalogs.as_object_mut() else {
+                    return;
+                };
+                catalogs.insert(acp_agent_id, serde_json::Value::String(catalog_hash));
+            });
+        }
         if !started {
             self.ai_entity.update(cx, |ai, _cx| {
                 ai.enqueue_chat_stream_delivery(AiStreamDelivery {

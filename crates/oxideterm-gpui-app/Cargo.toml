@@ -61,6 +61,7 @@ oxideterm-remote-desktop = { path = "../oxideterm-remote-desktop" }
 oxideterm-render-policy = { path = "../oxideterm-render-policy" }
 oxideterm-settings = { path = "../oxideterm-settings" }
 oxideterm-settings-model = { path = "../oxideterm-settings-model" }
+oxideterm-skills = { path = "../oxideterm-skills" }
 oxideterm-session-adapter = { path = "../oxideterm-session-adapter" }
 oxideterm-sftp = { path = "../oxideterm-sftp" }
 oxideterm-ssh-launch = { path = "../oxideterm-ssh-launch" }

@@ -397,6 +397,22 @@ impl WorkspaceApp {
             .slash_command
             .as_deref()
             .and_then(resolve_ai_slash_command);
+        let explicit_skill = if slash_command.is_none()
+            && self.settings_store.settings().ai.skills.enabled
+        {
+            parsed_input.slash_command.as_deref().and_then(|skill_id| {
+                let registry = self.skill_registry.read();
+                let record = registry.enabled_record(skill_id)?;
+                let instructions = registry.load(skill_id).ok()?;
+                Some((
+                    skill_id.to_string(),
+                    record.content_hash.clone(),
+                    instructions,
+                ))
+            })
+        } else {
+            None
+        };
         if let Some(command) = slash_command.filter(|command| command.client_only) {
             match command.name {
                 "clear" => {
@@ -450,8 +466,17 @@ impl WorkspaceApp {
             suggestions: Vec::new(),
         };
         let runtime_system_prompt = self.resolve_ai_sidebar_system_prompt_segment(cx);
+        let explicit_skill_prompt = explicit_skill.as_ref().map(
+            |(skill_id, _content_hash, instructions)| {
+                format!(
+                    "## Explicit Agent Skill\nThe user explicitly selected `{skill_id}`. Follow these instructions for this request, subject to the current tool permissions and safety mode.\n\n<skill_instructions id=\"{skill_id}\">\n{}\n</skill_instructions>",
+                    oxideterm_ai::sanitize_for_ai(instructions)
+                )
+            },
+        );
         let task_system_prompt = ai_chat_message_context([
             ai_input_system_prompt(slash_command, &parsed_input.participants),
+            explicit_skill_prompt,
             runtime_system_prompt,
             ai_detected_intent_system_prompt(&detected_intent),
         ]);
@@ -462,6 +487,7 @@ impl WorkspaceApp {
         let request_text = if stream_config.execution_backend == AiExecutionBackend::Acp
             && parsed_input.slash_command.is_some()
             && slash_command.is_none()
+            && explicit_skill.is_none()
         {
             // Agent-advertised ACP commands are protocol input, not OxideTerm
             // system prompts. Preserve the slash prefix for the agent.
@@ -469,7 +495,11 @@ impl WorkspaceApp {
         } else {
             parsed_input.clean_text
         };
-        let request_content = (!request_text.is_empty()).then_some(request_text);
+        let request_content = if request_text.is_empty() && explicit_skill.is_some() {
+            Some("Apply the explicitly selected Agent Skill to the current task.".to_string())
+        } else {
+            (!request_text.is_empty()).then_some(request_text)
+        };
         let conversation_id = self.ai_entity.update(cx, |ai, _cx| {
             ai.begin_sidebar_user_turn(
                 id,
@@ -480,6 +510,9 @@ impl WorkspaceApp {
                 active_participant,
             )
         });
+        if let Some((skill_id, content_hash, _instructions)) = explicit_skill {
+            self.record_ai_loaded_skill(&conversation_id, &skill_id, &content_hash, cx);
+        }
         // Sending a new turn is an explicit request to resume following the
         // conversation tail; manual upward scrolling can pause it again.
         self.ai_entity.read(cx).chat_ui().message_list_state

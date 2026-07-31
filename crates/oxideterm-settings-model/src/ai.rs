@@ -19,9 +19,10 @@ use oxideterm_settings::{
     AI_TOOL_GET_BACKGROUND_TASK, AI_TOOL_GET_CLOUD_SYNC_STATE, AI_TOOL_GET_TRANSPORT_SESSION_STATE,
     AI_TOOL_INSPECT_HOST_TOOLS, AI_TOOL_LIST_BACKGROUND_TASKS, AI_TOOL_LIST_CREDENTIALS,
     AI_TOOL_LIST_FORWARDS, AI_TOOL_LIST_PLUGINS, AI_TOOL_LIST_REMOTE_DESKTOP_SESSIONS,
-    AI_TOOL_LIST_TRANSPORT_PROFILES, AI_TOOL_MANAGE_CLOUD_SYNC, AI_TOOL_MANAGE_CREDENTIAL,
-    AI_TOOL_MANAGE_FORWARD, AI_TOOL_MANAGE_PLUGIN, AI_TOOL_MANAGE_REMOTE_DESKTOP_SESSION,
-    AI_TOOL_MANAGE_SERIAL_SESSION, AI_TOOL_MANAGE_TELNET_SESSION, AI_TOOL_OPEN_TRANSPORT_PROFILE,
+    AI_TOOL_LIST_TRANSPORT_PROFILES, AI_TOOL_LOAD_SKILL, AI_TOOL_MANAGE_CLOUD_SYNC,
+    AI_TOOL_MANAGE_CREDENTIAL, AI_TOOL_MANAGE_FORWARD, AI_TOOL_MANAGE_PLUGIN,
+    AI_TOOL_MANAGE_REMOTE_DESKTOP_SESSION, AI_TOOL_MANAGE_SERIAL_SESSION,
+    AI_TOOL_MANAGE_TELNET_SESSION, AI_TOOL_OPEN_TRANSPORT_PROFILE, AI_TOOL_READ_SKILL_RESOURCE,
     AcpAgentAuthState, AcpAgentCapabilityPolicy, AcpAgentConfig, AcpAgentRuntimeStatus,
     PersistedSettings,
 };
@@ -266,6 +267,18 @@ pub fn ai_tool_policy_groups(settings: &PersistedSettings) -> Vec<AiToolPolicyGr
                 AiToolPolicyItem {
                     key: Some("list_memory_entries"),
                     label_key: "settings_view.ai.tool_policy_read_memory_entries",
+                    checked: true,
+                    locked: true,
+                },
+                AiToolPolicyItem {
+                    key: Some(AI_TOOL_LOAD_SKILL),
+                    label_key: "settings_view.ai.tool_policy_read_load_skill",
+                    checked: true,
+                    locked: true,
+                },
+                AiToolPolicyItem {
+                    key: Some(AI_TOOL_READ_SKILL_RESOURCE),
+                    label_key: "settings_view.ai.tool_policy_read_skill_resource",
                     checked: true,
                     locked: true,
                 },
