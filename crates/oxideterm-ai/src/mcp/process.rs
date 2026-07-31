@@ -1,6 +1,97 @@
 #[cfg(windows)]
 const MCP_STDIO_CREATE_NO_WINDOW: u32 = 0x08000000;
 
+struct McpStdioRequestGuard {
+    process: Arc<McpProcess>,
+    request_id: u64,
+    framing: McpStdioFraming,
+    notify_server: bool,
+    armed: bool,
+}
+
+struct McpPendingStdioRequest {
+    request_id: u64,
+    server_id: String,
+    receiver: oneshot::Receiver<Result<Value, McpError>>,
+    cancellation: McpStdioRequestGuard,
+}
+
+impl McpPendingStdioRequest {
+    async fn wait(mut self) -> Result<Value, McpError> {
+        let result = self.receiver.await;
+        self.cancellation.disarm();
+        result.unwrap_or_else(|_| {
+            Err(McpError::Message(format!(
+                "MCP server {} connection lost",
+                self.server_id
+            )))
+        })
+    }
+}
+
+impl McpStdioRequestGuard {
+    fn new(
+        process: Arc<McpProcess>,
+        request_id: u64,
+        framing: McpStdioFraming,
+        notify_server: bool,
+    ) -> Self {
+        Self {
+            process,
+            request_id,
+            framing,
+            notify_server,
+            armed: true,
+        }
+    }
+
+    fn disarm(&mut self) {
+        self.armed = false;
+    }
+}
+
+impl Drop for McpStdioRequestGuard {
+    fn drop(&mut self) {
+        if !self.armed {
+            return;
+        }
+        let process = self.process.clone();
+        let request_id = self.request_id;
+        let framing = self.framing;
+        let notify_server = self.notify_server;
+        if let Ok(runtime) = tokio::runtime::Handle::try_current() {
+            runtime.spawn(async move {
+                // Only notify the server if this request was still pending when
+                // its caller stopped waiting for the result.
+                if process.pending.lock().await.remove(&request_id).is_none() {
+                    return;
+                }
+                if !notify_server {
+                    return;
+                }
+                let notification = serde_json::json!({
+                    "jsonrpc": "2.0",
+                    "method": "notifications/cancelled",
+                    "params": {
+                        "requestId": request_id,
+                        "reason": "OxideTerm stopped waiting for the request"
+                    }
+                });
+                let Ok(body) = serde_json::to_string(&notification) else {
+                    return;
+                };
+                let mut stdin = process.stdin.lock().await;
+                let _ = match framing {
+                    McpStdioFraming::LineDelimited => write_line_message(&mut *stdin, &body).await,
+                    McpStdioFraming::LegacyContentLength => {
+                        write_framed_message(&mut *stdin, &body).await
+                    }
+                };
+            });
+        }
+    }
+}
+
 impl McpProcessRegistry {
     async fn stop_all(&self) {
         #[cfg(test)]
@@ -72,10 +163,17 @@ impl McpProcessRegistry {
         };
 
         let pending = Arc::new(Mutex::new(HashMap::new()));
+        let (notifications, _) = broadcast::channel(128);
         let reader_task = {
             let pending = pending.clone();
+            let notifications = notifications.clone();
             let sid = server_id.clone();
-            tokio::spawn(stdout_reader_loop(BufReader::new(stdout), pending, sid))
+            tokio::spawn(stdout_reader_loop(
+                BufReader::new(stdout),
+                pending,
+                notifications,
+                sid,
+            ))
         };
         self.processes.lock().await.insert(
             server_id.clone(),
@@ -84,18 +182,129 @@ impl McpProcessRegistry {
                 stdin: Mutex::new(stdin),
                 next_id: AtomicU64::new(1),
                 pending,
+                notifications,
                 reader_task,
                 stderr_task,
+                eof_shutdown: AtomicBool::new(false),
             }),
         );
         Ok(server_id)
     }
 
-    async fn send_request(
+    async fn subscribe_notifications(
+        &self,
+        server_id: &str,
+    ) -> Result<broadcast::Receiver<Value>, McpError> {
+        self.processes
+            .lock()
+            .await
+            .get(server_id)
+            .map(|process| process.notifications.subscribe())
+            .ok_or_else(|| McpError::Message(format!("MCP server {server_id} not found")))
+    }
+
+    async fn send_protocol_request(
+        &self,
+        server_id: &str,
+        protocol: &McpProtocol,
+        method: &str,
+        params: Value,
+    ) -> Result<Value, McpError> {
+        let framing = protocol.stdio_framing;
+        self.send_request_with_framing(server_id, method, params, MCP_REQUEST_TIMEOUT, framing)
+            .await
+    }
+
+    async fn begin_protocol_request_until_completion(
+        &self,
+        server_id: &str,
+        protocol: &McpProtocol,
+        method: &str,
+        params: Value,
+    ) -> Result<McpPendingStdioRequest, McpError> {
+        let framing = protocol.stdio_framing;
+        let process = self
+            .processes
+            .lock()
+            .await
+            .get(server_id)
+            .cloned()
+            .ok_or_else(|| McpError::Message(format!("MCP server {server_id} not found")))?;
+        let request_id = process.next_id.fetch_add(1, Ordering::Relaxed);
+        let request = serde_json::json!({ "jsonrpc": "2.0", "id": request_id, "method": method, "params": params });
+        let body = serde_json::to_string(&request)
+            .map_err(|error| McpError::Message(error.to_string()))?;
+        let (sender, receiver) = oneshot::channel();
+        process.pending.lock().await.insert(request_id, sender);
+        let write_result = {
+            let mut stdin = process.stdin.lock().await;
+            match framing {
+                McpStdioFraming::LineDelimited => write_line_message(&mut *stdin, &body).await,
+                McpStdioFraming::LegacyContentLength => {
+                    write_framed_message(&mut *stdin, &body).await
+                }
+            }
+        };
+        if let Err(error) = write_result {
+            process.pending.lock().await.remove(&request_id);
+            return Err(error);
+        }
+        Ok(McpPendingStdioRequest {
+            request_id,
+            server_id: server_id.to_string(),
+            receiver,
+            cancellation: McpStdioRequestGuard::new(process, request_id, framing, true),
+        })
+    }
+
+    async fn send_request_with_framing(
         &self,
         server_id: &str,
         method: &str,
         params: Value,
+        timeout: Duration,
+        framing: McpStdioFraming,
+    ) -> Result<Value, McpError> {
+        self.send_request_with_optional_timeout(
+            server_id,
+            method,
+            params,
+            Some(timeout),
+            framing,
+            true,
+        )
+        .await
+    }
+
+    async fn send_probe_request_with_framing(
+        &self,
+        server_id: &str,
+        method: &str,
+        params: Value,
+        timeout: Duration,
+        framing: McpStdioFraming,
+    ) -> Result<Value, McpError> {
+        // A modern probe may be sent to a legacy parser. Do not append a
+        // modern cancellation message when the probe times out.
+        self.send_request_with_optional_timeout(
+            server_id,
+            method,
+            params,
+            Some(timeout),
+            framing,
+            false,
+        )
+        .await
+    }
+
+    async fn send_request_with_optional_timeout(
+        &self,
+        server_id: &str,
+        method: &str,
+        params: Value,
+        timeout: Option<Duration>,
+        framing: McpStdioFraming,
+        notify_cancellation: bool,
     ) -> Result<Value, McpError> {
         let process = self
             .processes
@@ -122,7 +331,13 @@ impl McpProcessRegistry {
         };
         {
             let mut stdin = process.stdin.lock().await;
-            if let Err(error) = write_framed_message(&mut *stdin, &body).await {
+            let write_result = match framing {
+                McpStdioFraming::LineDelimited => write_line_message(&mut *stdin, &body).await,
+                McpStdioFraming::LegacyContentLength => {
+                    write_framed_message(&mut *stdin, &body).await
+                }
+            };
+            if let Err(error) = write_result {
                 if !is_notification {
                     process.pending.lock().await.remove(&request_id);
                 }
@@ -132,15 +347,53 @@ impl McpProcessRegistry {
         let Some(rx) = rx else {
             return Ok(Value::Null);
         };
-        match tokio::time::timeout(MCP_REQUEST_TIMEOUT, rx).await {
-            Ok(Ok(result)) => result,
-            Ok(Err(_)) => Err(McpError::Message(format!(
-                "MCP server {server_id} connection lost"
-            ))),
-            Err(_) => {
-                process.pending.lock().await.remove(&request_id);
-                Err(McpError::Timeout(server_id.to_string()))
+        let mut cancellation =
+            McpStdioRequestGuard::new(process, request_id, framing, notify_cancellation);
+        if let Some(timeout) = timeout {
+            match tokio::time::timeout(timeout, rx).await {
+                Ok(Ok(result)) => {
+                    cancellation.disarm();
+                    result
+                }
+                Ok(Err(_)) => {
+                    cancellation.disarm();
+                    Err(McpError::Message(format!(
+                        "MCP server {server_id} connection lost"
+                    )))
+                }
+                Err(_) => Err(McpError::Timeout(server_id.to_string())),
             }
+        } else {
+            let result = rx.await;
+            cancellation.disarm();
+            result.unwrap_or_else(|_| {
+                Err(McpError::Message(format!(
+                    "MCP server {server_id} connection lost"
+                )))
+            })
+        }
+    }
+
+    async fn set_eof_shutdown(&self, server_id: &str, eof_shutdown: bool) {
+        if let Some(process) = self.processes.lock().await.get(server_id) {
+            process.eof_shutdown.store(eof_shutdown, Ordering::Release);
+        }
+    }
+
+    async fn terminate_unnegotiated(&self, server_id: &str) {
+        let process = self.processes.lock().await.remove(server_id);
+        let Some(process) = process else {
+            return;
+        };
+        // No protocol was negotiated, so shutdown traffic could use the wrong
+        // framing and further confuse the subprocess.
+        let _ = process.child.lock().await.kill().await;
+        process.reader_task.abort();
+        process.stderr_task.abort();
+        for (_, sender) in process.pending.lock().await.drain() {
+            let _ = sender.send(Err(McpError::Message(
+                "MCP server was stopped during protocol negotiation".to_string(),
+            )));
         }
     }
 
@@ -149,24 +402,44 @@ impl McpProcessRegistry {
         let Some(process) = process else {
             return Ok(());
         };
-        let id = process.next_id.fetch_add(1, Ordering::Relaxed);
-        let (tx, rx) = oneshot::channel();
-        process.pending.lock().await.insert(id, tx);
-        let shutdown = format!(r#"{{"jsonrpc":"2.0","id":{id},"method":"shutdown"}}"#);
-        let write_ok = {
-            let mut stdin = process.stdin.lock().await;
-            write_framed_message(&mut *stdin, &shutdown).await.is_ok()
-        };
-        if write_ok {
-            let _ = tokio::time::timeout(MCP_SHUTDOWN_TIMEOUT, rx).await;
+        let eof_shutdown = process.eof_shutdown.load(Ordering::Acquire);
+        if !eof_shutdown {
+            let id = process.next_id.fetch_add(1, Ordering::Relaxed);
+            let (tx, rx) = oneshot::channel();
+            process.pending.lock().await.insert(id, tx);
+            let shutdown = format!(r#"{{"jsonrpc":"2.0","id":{id},"method":"shutdown"}}"#);
+            let write_ok = {
+                let mut stdin = process.stdin.lock().await;
+                write_framed_message(&mut *stdin, &shutdown).await.is_ok()
+            };
+            if write_ok {
+                let _ = tokio::time::timeout(MCP_SHUTDOWN_TIMEOUT, rx).await;
+            } else {
+                process.pending.lock().await.remove(&id);
+            }
+            {
+                let mut stdin = process.stdin.lock().await;
+                let _ =
+                    write_framed_message(&mut *stdin, r#"{"jsonrpc":"2.0","method":"exit"}"#).await;
+            }
         } else {
-            process.pending.lock().await.remove(&id);
+            // Standards-compliant MCP stdio uses EOF as its portable graceful
+            // shutdown signal in both supported protocol eras.
+            let _ = process.stdin.lock().await.shutdown().await;
+            let exited = {
+                let mut child = process.child.lock().await;
+                matches!(
+                    tokio::time::timeout(MCP_SHUTDOWN_TIMEOUT, child.wait()).await,
+                    Ok(Ok(_))
+                )
+            };
+            if !exited {
+                let _ = process.child.lock().await.kill().await;
+            }
         }
-        {
-            let mut stdin = process.stdin.lock().await;
-            let _ = write_framed_message(&mut *stdin, r#"{"jsonrpc":"2.0","method":"exit"}"#).await;
+        if !eof_shutdown {
+            let _ = process.child.lock().await.kill().await;
         }
-        let _ = process.child.lock().await.kill().await;
         process.reader_task.abort();
         process.stderr_task.abort();
         for (_, tx) in process.pending.lock().await.drain() {
@@ -201,8 +474,12 @@ impl Drop for McpProcessOwner {
     }
 }
 
-async fn stdout_reader_loop<R>(mut reader: R, pending: PendingMap, server_id: String)
-where
+async fn stdout_reader_loop<R>(
+    mut reader: R,
+    pending: PendingMap,
+    notifications: broadcast::Sender<Value>,
+    server_id: String,
+) where
     R: AsyncBufRead + Unpin,
 {
     let mut header_line = String::new();
@@ -265,16 +542,13 @@ where
                     .and_then(|value| value.as_str())
                     .unwrap_or("unknown")
             );
+            let _ = notifications.send(value);
             continue;
         };
         let tx = pending.lock().await.remove(&id);
         if let Some(tx) = tx {
             if let Some(error) = value.get("error") {
-                let message = error
-                    .get("message")
-                    .and_then(|value| value.as_str())
-                    .unwrap_or("Unknown MCP error");
-                let _ = tx.send(Err(McpError::Message(format!("MCP error: {message}"))));
+                let _ = tx.send(Err(rpc_error_from_value(error)));
             } else if let Some(result) = value.get("result") {
                 let _ = tx.send(Ok(result.clone()));
             } else {
@@ -301,6 +575,25 @@ where
     })?;
     writer
         .write_all(body.as_bytes())
+        .await
+        .map_err(|error| McpError::Message(format!("Failed to write to MCP server: {error}")))?;
+    writer
+        .flush()
+        .await
+        .map_err(|error| McpError::Message(format!("Failed to flush: {error}")))
+}
+
+async fn write_line_message<W>(writer: &mut W, body: &str) -> Result<(), McpError>
+where
+    W: AsyncWrite + Unpin,
+{
+    // Modern MCP stdio uses one compact JSON-RPC message per line.
+    writer
+        .write_all(body.as_bytes())
+        .await
+        .map_err(|error| McpError::Message(format!("Failed to write to MCP server: {error}")))?;
+    writer
+        .write_all(b"\n")
         .await
         .map_err(|error| McpError::Message(format!("Failed to write to MCP server: {error}")))?;
     writer

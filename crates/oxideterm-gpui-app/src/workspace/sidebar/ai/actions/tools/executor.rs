@@ -126,7 +126,7 @@ impl AiModelBackendServices {
         let started = std::time::Instant::now();
         let snapshot = AiOrchestratorRuntimeSnapshot::background_result_projection();
         let result = match tool_name.as_str() {
-            "list_mcp_resources" => self.list_mcp_resources(&snapshot),
+            "list_mcp_resources" => self.list_mcp_resources(&snapshot).await,
             "read_mcp_resource" => self.read_mcp_resource(&snapshot, &args).await,
             name if oxideterm_ai::is_orchestrator_tool_name(name) => snapshot.fail(
                 "Application tool requires the current runtime broker.",
@@ -152,11 +152,11 @@ impl AiModelBackendServices {
         )
     }
 
-    pub(in crate::workspace) fn list_mcp_resources(
+    pub(in crate::workspace) async fn list_mcp_resources(
         &self,
         snapshot: &AiOrchestratorRuntimeSnapshot,
     ) -> AiActionResultLite {
-        let resources = self.ai_mcp_registry.resources();
+        let resources = self.ai_mcp_registry.resources().await;
         if resources.is_empty() {
             return snapshot.ok(
                 "No MCP resources available.",

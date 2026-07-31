@@ -32,16 +32,27 @@ impl McpRegistry {
         let result = self.connect_inner(config.clone(), generation).await;
         match result {
             Ok(server) => {
+                let subscription_server = server.clone();
+                let mut start_subscription = false;
                 let mut state = self.state.write();
                 if current_generation(&state, &config.id) == generation {
                     state.retry_counters.remove(&config.id);
                     state.servers.insert(config.id.clone(), server);
                     rebuild_tool_index(&mut state);
+                    start_subscription = subscription_server
+                        .protocol
+                        .as_ref()
+                        .is_some_and(McpProtocol::is_modern)
+                        && subscription_filters(&subscription_server).is_some();
                 } else if let Some(runtime_id) = server.runtime_id {
                     let processes = self.processes.clone();
                     tokio::spawn(async move {
                         let _ = processes.close(&runtime_id).await;
                     });
+                }
+                drop(state);
+                if start_subscription {
+                    self.start_subscription(subscription_server);
                 }
             }
             Err(error) => {
@@ -77,11 +88,18 @@ impl McpRegistry {
             state.retry_counters.remove(server_id);
             let current = state.servers.get(server_id).cloned();
             if let Some(existing) = state.servers.get_mut(server_id) {
+                if let Some(abort) = existing.subscription_abort.take() {
+                    abort.abort();
+                }
                 existing.status = McpServerStatus::Disconnected;
                 existing.runtime_id = None;
                 existing.endpoint_url = None;
                 existing.session_id = None;
                 existing.resolved_transport = None;
+                existing.protocol = None;
+                existing.tools_cache = None;
+                existing.resources_cache = None;
+                existing.resource_content_cache.clear();
                 existing.tools.clear();
                 existing.resources.clear();
                 existing.error = None;
@@ -124,39 +142,113 @@ impl McpRegistry {
         config: McpServerConfig,
         generation: u64,
     ) -> Result<McpServerState, McpError> {
-        let runtime_id = self
-            .processes
-            .spawn(
-                config.command.as_deref().unwrap_or_default(),
-                &config.args,
-                &config.env,
-            )
-            .await?;
+        let modern_runtime_id = self.spawn_stdio_process(&config).await?;
+        let negotiation = self.discover_modern_stdio(&modern_runtime_id).await;
+        let (runtime_id, protocol, capabilities) = match negotiation {
+            Ok((protocol, capabilities)) => {
+                self.processes
+                    .set_eof_shutdown(&modern_runtime_id, true)
+                    .await;
+                (modern_runtime_id, protocol, capabilities)
+            }
+            Err(error) if is_recognized_modern_error(&error) => {
+                self.processes
+                    .terminate_unnegotiated(&modern_runtime_id)
+                    .await;
+                return Err(error);
+            }
+            Err(_) => {
+                // Restart before the legacy handshake because a probe can
+                // leave an older parser in an implementation-defined state.
+                self.processes
+                    .terminate_unnegotiated(&modern_runtime_id)
+                    .await;
+                let legacy_runtime_id = self.spawn_stdio_process(&config).await?;
+                let standard_protocol = McpProtocol::legacy_streamable_http();
+                match self
+                    .initialize_legacy_stdio(&legacy_runtime_id, standard_protocol)
+                    .await
+                {
+                    Ok((protocol, capabilities)) => {
+                        self.processes
+                            .set_eof_shutdown(&legacy_runtime_id, true)
+                            .await;
+                        (legacy_runtime_id, protocol, capabilities)
+                    }
+                    Err(error) if error.is_connection_failure() => {
+                        self.processes
+                            .terminate_unnegotiated(&legacy_runtime_id)
+                            .await;
+                        let compatibility_runtime_id = self.spawn_stdio_process(&config).await?;
+                        let compatibility_protocol = McpProtocol::legacy_content_length_stdio();
+                        match self
+                            .initialize_legacy_stdio(
+                                &compatibility_runtime_id,
+                                compatibility_protocol,
+                            )
+                            .await
+                        {
+                            Ok((protocol, capabilities)) => {
+                                (compatibility_runtime_id, protocol, capabilities)
+                            }
+                            Err(error) => {
+                                self.processes
+                                    .terminate_unnegotiated(&compatibility_runtime_id)
+                                    .await;
+                                return Err(error);
+                            }
+                        }
+                    }
+                    Err(error) => {
+                        self.processes
+                            .terminate_unnegotiated(&legacy_runtime_id)
+                            .await;
+                        return Err(error);
+                    }
+                }
+            }
+        };
         let connected = async {
-            let capabilities = self.initialize_stdio(&runtime_id).await?;
-            let tools = if capabilities.tools.is_some() {
-                self.stdio_list_tools(&runtime_id).await?
-            } else {
-                Vec::new()
-            };
-            let resources = if capabilities.resources.is_some() {
-                self.stdio_list_resources(&runtime_id).await?
-            } else {
-                Vec::new()
-            };
-            Ok::<_, McpError>(McpServerState {
+            let mut server = McpServerState {
                 config: config.clone(),
                 status: McpServerStatus::Connected,
                 error: None,
                 capabilities: Some(capabilities),
-                tools,
-                resources,
+                tools: Vec::new(),
+                resources: Vec::new(),
                 runtime_id: Some(runtime_id.clone()),
                 endpoint_url: None,
                 resolved_transport: Some(McpEffectiveTransport::Stdio),
                 session_id: None,
+                protocol: Some(protocol),
+                tools_cache: None,
+                resources_cache: None,
+                resource_content_cache: HashMap::new(),
+                resource_subscriptions: std::collections::HashSet::new(),
+                subscription_abort: None,
                 generation,
-            })
+            };
+            if server
+                .capabilities
+                .as_ref()
+                .and_then(|capabilities| capabilities.tools.as_ref())
+                .is_some()
+            {
+                let cache = self.list_tools(&server).await?;
+                server.tools = cache.value.clone();
+                server.tools_cache = Some(cache);
+            }
+            if server
+                .capabilities
+                .as_ref()
+                .and_then(|capabilities| capabilities.resources.as_ref())
+                .is_some()
+            {
+                let cache = self.list_resources(&server).await?;
+                server.resources = cache.value.clone();
+                server.resources_cache = Some(cache);
+            }
+            Ok::<_, McpError>(server)
         }
         .await;
         if connected.is_err() {
@@ -165,120 +257,52 @@ impl McpRegistry {
         connected
     }
 
+    async fn spawn_stdio_process(&self, config: &McpServerConfig) -> Result<String, McpError> {
+        self.processes
+            .spawn(
+                config.command.as_deref().unwrap_or_default(),
+                &config.args,
+                &config.env,
+            )
+            .await
+    }
+
     async fn connect_http(
         &self,
         config: McpServerConfig,
         generation: u64,
     ) -> Result<McpServerState, McpError> {
         let token = self.mcp_auth_token(&config);
-        let mut endpoint_url = config
+        let endpoint_url = config
             .url
             .clone()
             .ok_or_else(|| McpError::Message("MCP HTTP server requires url".to_string()))?;
-        let mut resolved_transport = config.transport.effective();
-        let mut init_request = json_rpc_request(
-            "initialize",
-            Some(serde_json::json!({
-                "protocolVersion": resolved_transport.protocol_version(),
-                "capabilities": {},
-                "clientInfo": { "name": MCP_CLIENT_NAME, "version": MCP_CLIENT_VERSION },
-            })),
-        );
-        let mut init_transport = if resolved_transport == McpEffectiveTransport::LegacySse {
-            endpoint_url = self
-                .discover_legacy_sse_endpoint(
-                    &endpoint_url,
-                    &config,
-                    token.as_ref().map(|token| token.as_str()),
-                )
-                .await?;
-            self.http_json_rpc_request(
-                &endpoint_url,
-                init_request.clone(),
-                &config,
-                token.as_ref().map(|token| token.as_str()),
-                None,
-                resolved_transport.protocol_version(),
-                true,
-            )
-            .await?
+        let auth_token = token.as_ref().map(|token| token.as_str());
+        let negotiated = if config.transport.effective() == McpEffectiveTransport::LegacySse {
+            self.initialize_http_legacy_sse(&config, &endpoint_url, auth_token)
+                .await?
         } else {
             match self
-                .http_json_rpc_request(
-                    &endpoint_url,
-                    init_request.clone(),
-                    &config,
-                    token.as_ref().map(|token| token.as_str()),
-                    None,
-                    resolved_transport.protocol_version(),
-                    true,
-                )
+                .discover_modern_http(&config, &endpoint_url, auth_token)
                 .await
             {
-                Ok(response) => response,
-                Err(McpError::HttpStatus(status, _))
-                    if matches!(
-                        status,
-                        StatusCode::BAD_REQUEST
-                            | StatusCode::NOT_FOUND
-                            | StatusCode::METHOD_NOT_ALLOWED
-                    ) =>
+                Ok(discovered) => discovered,
+                Err(error) if is_recognized_modern_http_error(&error) => return Err(error),
+                Err(error) if is_legacy_http_probe_error(&error) => match self
+                    .initialize_http_legacy_streamable(&config, &endpoint_url, auth_token)
+                    .await
                 {
-                    resolved_transport = McpEffectiveTransport::LegacySse;
-                    endpoint_url = self
-                        .discover_legacy_sse_endpoint(
-                            &endpoint_url,
-                            &config,
-                            token.as_ref().map(|token| token.as_str()),
-                        )
-                        .await?;
-                    init_request = json_rpc_request(
-                        "initialize",
-                        Some(serde_json::json!({
-                            "protocolVersion": resolved_transport.protocol_version(),
-                            "capabilities": {},
-                            "clientInfo": { "name": MCP_CLIENT_NAME, "version": MCP_CLIENT_VERSION },
-                        })),
-                    );
-                    self.http_json_rpc_request(
-                        &endpoint_url,
-                        init_request,
-                        &config,
-                        token.as_ref().map(|token| token.as_str()),
-                        None,
-                        resolved_transport.protocol_version(),
-                        true,
-                    )
-                    .await?
-                }
+                    Ok(initialized) => initialized,
+                    Err(error) if is_legacy_http_probe_error(&error) => {
+                        self.initialize_http_legacy_sse(&config, &endpoint_url, auth_token)
+                            .await?
+                    }
+                    Err(error) => return Err(error),
+                },
                 Err(error) => return Err(error),
             }
         };
-
-        endpoint_url = init_transport.endpoint_url;
-        let mut session_id = init_transport.session_id.take();
-        let initialize_result = extract_result(init_transport.response.take())?;
-        let capabilities = initialize_result
-            .get("capabilities")
-            .cloned()
-            .unwrap_or_else(|| serde_json::json!({}));
-        let capabilities = serde_json::from_value::<McpServerCapabilities>(capabilities)
-            .map_err(|error| McpError::Message(error.to_string()))?;
-
-        let notify = json_rpc_notification("notifications/initialized", None);
-        let notify_transport = self
-            .http_json_rpc_request(
-                &endpoint_url,
-                notify,
-                &config,
-                token.as_ref().map(|token| token.as_str()),
-                session_id.as_deref(),
-                resolved_transport.protocol_version(),
-                false,
-            )
-            .await?;
-        session_id = notify_transport.session_id.or(session_id);
-
+        let (protocol, resolved_transport, endpoint_url, session_id, capabilities) = negotiated;
         let mut server = McpServerState {
             config: config.clone(),
             status: McpServerStatus::Connected,
@@ -290,6 +314,12 @@ impl McpRegistry {
             endpoint_url: Some(endpoint_url),
             resolved_transport: Some(resolved_transport),
             session_id,
+            protocol: Some(protocol),
+            tools_cache: None,
+            resources_cache: None,
+            resource_content_cache: HashMap::new(),
+            resource_subscriptions: std::collections::HashSet::new(),
+            subscription_abort: None,
             generation,
         };
         if server
@@ -298,9 +328,10 @@ impl McpRegistry {
             .and_then(|cap| cap.tools.as_ref())
             .is_some()
         {
-            let response = self.http_rpc(&server, "tools/list", None, true).await?;
-            server.session_id = response.session_id.or(server.session_id);
-            server.tools = parse_tools(extract_result(response.response)?)?;
+            let cache = self.list_tools(&server).await?;
+            server.session_id = cache.session_id.clone().or(server.session_id);
+            server.tools = cache.value.clone();
+            server.tools_cache = Some(cache);
         }
         if server
             .capabilities
@@ -308,11 +339,157 @@ impl McpRegistry {
             .and_then(|cap| cap.resources.as_ref())
             .is_some()
         {
-            let response = self.http_rpc(&server, "resources/list", None, true).await?;
-            server.session_id = response.session_id.or(server.session_id);
-            server.resources = parse_resources(extract_result(response.response)?)?;
+            let cache = self.list_resources(&server).await?;
+            server.session_id = cache.session_id.clone().or(server.session_id);
+            server.resources = cache.value.clone();
+            server.resources_cache = Some(cache);
         }
         Ok(server)
+    }
+
+    async fn discover_modern_http(
+        &self,
+        config: &McpServerConfig,
+        endpoint_url: &str,
+        auth_token: Option<&str>,
+    ) -> Result<McpHttpNegotiation, McpError> {
+        let preferred = McpProtocol::modern_preferred();
+        let request = json_rpc_request_for_protocol(&preferred, "server/discover", None)?;
+        let response = self
+            .http_json_rpc_request(
+                endpoint_url,
+                request,
+                config,
+                auth_token,
+                None,
+                &preferred,
+                true,
+            )
+            .await?;
+        let result = extract_result(response.response)?;
+        let McpResultEnvelope::Complete(result) = parse_result_for_protocol(&preferred, result)?
+        else {
+            return Err(McpError::Message(
+                "MCP discovery did not return a complete result".to_string(),
+            ));
+        };
+        let discover = serde_json::from_value::<McpDiscoverResult>(result)
+            .map_err(|error| McpError::Message(error.to_string()))?;
+        let protocol =
+            select_supported_modern_version(&discover.supported_versions).ok_or_else(|| {
+                McpError::Message(format!(
+                    "MCP server does not support {MODERN_PROTOCOL_VERSION}"
+                ))
+            })?;
+        Ok((
+            protocol,
+            McpEffectiveTransport::StreamableHttp,
+            response.endpoint_url,
+            None,
+            discover.capabilities,
+        ))
+    }
+
+    async fn initialize_http_legacy_streamable(
+        &self,
+        config: &McpServerConfig,
+        endpoint_url: &str,
+        auth_token: Option<&str>,
+    ) -> Result<McpHttpNegotiation, McpError> {
+        self.initialize_http_legacy(
+            config,
+            endpoint_url,
+            auth_token,
+            McpEffectiveTransport::StreamableHttp,
+            McpProtocol::legacy_streamable_http(),
+        )
+        .await
+    }
+
+    async fn initialize_http_legacy_sse(
+        &self,
+        config: &McpServerConfig,
+        base_url: &str,
+        auth_token: Option<&str>,
+    ) -> Result<McpHttpNegotiation, McpError> {
+        let endpoint_url = self
+            .discover_legacy_sse_endpoint(base_url, config, auth_token)
+            .await?;
+        self.initialize_http_legacy(
+            config,
+            &endpoint_url,
+            auth_token,
+            McpEffectiveTransport::LegacySse,
+            McpProtocol::legacy_sse(),
+        )
+        .await
+    }
+
+    async fn initialize_http_legacy(
+        &self,
+        config: &McpServerConfig,
+        endpoint_url: &str,
+        auth_token: Option<&str>,
+        transport: McpEffectiveTransport,
+        protocol: McpProtocol,
+    ) -> Result<McpHttpNegotiation, McpError> {
+        let request = json_rpc_request(
+            "initialize",
+            Some(serde_json::json!({
+                "protocolVersion": protocol.version,
+                "capabilities": {},
+                "clientInfo": { "name": MCP_CLIENT_NAME, "version": MCP_CLIENT_VERSION },
+            })),
+        );
+        let mut initialized = self
+            .http_json_rpc_request(
+                endpoint_url,
+                request,
+                config,
+                auth_token,
+                None,
+                &protocol,
+                true,
+            )
+            .await?;
+        let initialize_result = extract_result(initialized.response.take())?;
+        let negotiated_version = initialize_result
+            .get("protocolVersion")
+            .and_then(Value::as_str)
+            .ok_or_else(|| {
+                McpError::Message(
+                    "Legacy MCP initialize response is missing protocolVersion".to_string(),
+                )
+            })?;
+        if negotiated_version != protocol.version {
+            return Err(McpError::Message(format!(
+                "Legacy MCP server selected unsupported protocol version {negotiated_version}"
+            )));
+        }
+        let capabilities = initialize_result
+            .get("capabilities")
+            .cloned()
+            .unwrap_or_else(|| serde_json::json!({}));
+        let capabilities = serde_json::from_value::<McpServerCapabilities>(capabilities)
+            .map_err(|error| McpError::Message(error.to_string()))?;
+        let notification = self
+            .http_json_rpc_request(
+                &initialized.endpoint_url,
+                json_rpc_notification("notifications/initialized", None),
+                config,
+                auth_token,
+                initialized.session_id.as_deref(),
+                &protocol,
+                false,
+            )
+            .await?;
+        Ok((
+            protocol,
+            transport,
+            initialized.endpoint_url,
+            notification.session_id.or(initialized.session_id),
+            capabilities,
+        ))
     }
 
     fn connected_server(&self, server_id: &str) -> Result<McpServerState, McpError> {
@@ -342,6 +519,12 @@ impl McpRegistry {
             server.error = Some(message);
             server.tools.clear();
             server.resources.clear();
+            server.tools_cache = None;
+            server.resources_cache = None;
+            server.resource_content_cache.clear();
+            if let Some(abort) = server.subscription_abort.take() {
+                abort.abort();
+            }
             (server.runtime_id.take(), config, generation)
         };
         if let Some(runtime_id) = runtime_id {
@@ -351,6 +534,56 @@ impl McpRegistry {
         if should_retry_mcp_server(&config) {
             self.schedule_retry(server_id.to_string(), generation);
         }
+    }
+
+    fn start_subscription(&self, server: McpServerState) {
+        let registry = self.clone();
+        let server_id = server.config.id.clone();
+        let generation = server.generation;
+        let task = tokio::spawn(async move {
+            if let Err(error) = registry.subscription_loop(server).await {
+                tracing::debug!("MCP subscription ended: {error}");
+            }
+        });
+        let mut state = self.state.write();
+        if let Some(current) = state.servers.get_mut(&server_id)
+            && current.generation == generation
+            && current.status == McpServerStatus::Connected
+        {
+            current.subscription_abort = Some(task.abort_handle());
+        } else {
+            task.abort();
+        }
+    }
+
+    fn subscribe_to_resource_updates(&self, server_id: &str, generation: u64, uri: &str) {
+        let restart = {
+            let mut state = self.state.write();
+            let Some(server) = state.servers.get_mut(server_id) else {
+                return;
+            };
+            if server.generation != generation
+                || server.status != McpServerStatus::Connected
+                || !server.protocol.as_ref().is_some_and(McpProtocol::is_modern)
+                || !server
+                    .capabilities
+                    .as_ref()
+                    .and_then(|capabilities| capabilities.resources.as_ref())
+                    .and_then(|resources| resources.get("subscribe"))
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false)
+                || !server.resource_subscriptions.insert(uri.to_string())
+            {
+                return;
+            }
+            // A listen request has immutable filters, so replace it after the
+            // first read of a resource that now needs update invalidation.
+            if let Some(abort) = server.subscription_abort.take() {
+                abort.abort();
+            }
+            server.clone()
+        };
+        self.start_subscription(restart);
     }
 
     fn schedule_retry(&self, server_id: String, generation: u64) {

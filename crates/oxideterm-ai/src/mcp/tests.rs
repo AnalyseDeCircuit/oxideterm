@@ -15,6 +15,7 @@ mod tests {
         let task = tokio::spawn(stdout_reader_loop(
             BufReader::new(client),
             pending,
+            broadcast::channel(1).0,
             "test".to_string(),
         ));
         let body = r#"{"jsonrpc":"2.0","id":7,"result":{"ok":true}}"#;
@@ -35,6 +36,7 @@ mod tests {
         let task = tokio::spawn(stdout_reader_loop(
             BufReader::new(client),
             pending,
+            broadcast::channel(1).0,
             "line-json".to_string(),
         ));
 
@@ -57,6 +59,7 @@ mod tests {
         let task = tokio::spawn(stdout_reader_loop(
             BufReader::new(client),
             pending,
+            broadcast::channel(1).0,
             "close".to_string(),
         ));
 
@@ -76,6 +79,7 @@ mod tests {
         let task = tokio::spawn(stdout_reader_loop(
             BufReader::new(client),
             pending,
+            broadcast::channel(1).0,
             "invalid-length".to_string(),
         ));
 
@@ -99,6 +103,7 @@ mod tests {
         let task = tokio::spawn(stdout_reader_loop(
             BufReader::new(client),
             pending,
+            broadcast::channel(1).0,
             "missing-result".to_string(),
         ));
 
@@ -121,6 +126,7 @@ mod tests {
         let task = tokio::spawn(stdout_reader_loop(
             BufReader::new(client),
             pending,
+            broadcast::channel(1).0,
             "header-order".to_string(),
         ));
 
@@ -203,6 +209,103 @@ mod tests {
     }
 
     #[test]
+    fn modern_rpc_errors_never_trigger_legacy_http_fallback() {
+        for code in [
+            MCP_HEADER_MISMATCH,
+            MCP_MISSING_REQUIRED_CLIENT_CAPABILITY,
+            MCP_UNSUPPORTED_PROTOCOL_VERSION,
+        ] {
+            let error = McpError::Rpc {
+                code,
+                message: "modern error".to_string(),
+                data: None,
+                status: Some(StatusCode::BAD_REQUEST),
+            };
+            assert!(is_recognized_modern_http_error(&error));
+            assert!(!is_legacy_http_probe_error(&error));
+        }
+        let method_not_found = McpError::Rpc {
+            code: JSON_RPC_METHOD_NOT_FOUND,
+            message: "method not found".to_string(),
+            data: None,
+            status: Some(StatusCode::NOT_FOUND),
+        };
+        assert!(is_recognized_modern_http_error(&method_not_found));
+    }
+
+    #[test]
+    fn subscription_notifications_are_correlated_by_request_id() {
+        let expected_id = serde_json::json!(7);
+        let matching = serde_json::json!({
+            "params": {
+                "_meta": {
+                    "io.modelcontextprotocol/subscriptionId": 7
+                }
+            }
+        });
+        let stale = serde_json::json!({
+            "params": {
+                "_meta": {
+                    "io.modelcontextprotocol/subscriptionId": 6
+                }
+            }
+        });
+        assert!(notification_matches_subscription(&matching, &expected_id));
+        assert!(!notification_matches_subscription(&stale, &expected_id));
+    }
+
+    #[test]
+    fn subscription_acknowledgment_limits_delivered_notifications() {
+        let acknowledgment = serde_json::json!({
+            "params": {
+                "notifications": {
+                    "toolsListChanged": true,
+                    "resourceSubscriptions": ["test://allowed"]
+                }
+            }
+        });
+        let filter = acknowledged_subscription_filter(&acknowledgment).unwrap();
+        assert!(subscription_filter_allows_notification(
+            &filter,
+            &serde_json::json!({ "method": "notifications/tools/list_changed" }),
+        ));
+        assert!(!subscription_filter_allows_notification(
+            &filter,
+            &serde_json::json!({ "method": "notifications/resources/list_changed" }),
+        ));
+        assert!(subscription_filter_allows_notification(
+            &filter,
+            &serde_json::json!({
+                "method": "notifications/resources/updated",
+                "params": { "uri": "test://allowed" }
+            }),
+        ));
+        assert!(!subscription_filter_allows_notification(
+            &filter,
+            &serde_json::json!({
+                "method": "notifications/resources/updated",
+                "params": { "uri": "test://other" }
+            }),
+        ));
+    }
+
+    #[test]
+    fn protocol_era_does_not_choose_nonstandard_stdio_framing() {
+        assert_eq!(
+            McpProtocol::modern_preferred().stdio_framing,
+            McpStdioFraming::LineDelimited
+        );
+        assert_eq!(
+            McpProtocol::legacy_streamable_http().stdio_framing,
+            McpStdioFraming::LineDelimited
+        );
+        assert_eq!(
+            McpProtocol::legacy_content_length_stdio().stdio_framing,
+            McpStdioFraming::LegacyContentLength
+        );
+    }
+
+    #[test]
     fn duplicate_server_names_are_disambiguated() {
         let config_a = McpServerConfig {
             id: "a".to_string(),
@@ -233,6 +336,12 @@ mod tests {
                 endpoint_url: None,
                 resolved_transport: None,
                 session_id: None,
+                protocol: None,
+                tools_cache: None,
+                resources_cache: None,
+                resource_content_cache: HashMap::new(),
+                resource_subscriptions: std::collections::HashSet::new(),
+                subscription_abort: None,
                 generation: 1,
             },
         );
@@ -251,6 +360,12 @@ mod tests {
                 endpoint_url: None,
                 resolved_transport: None,
                 session_id: None,
+                protocol: None,
+                tools_cache: None,
+                resources_cache: None,
+                resource_content_cache: HashMap::new(),
+                resource_subscriptions: std::collections::HashSet::new(),
+                subscription_abort: None,
                 generation: 1,
             },
         );
@@ -273,8 +388,8 @@ mod tests {
         assert!(names.contains(&"read_mcp_resource".to_string()));
     }
 
-    #[test]
-    fn mcp_tools_and_resources_follow_config_order() {
+    #[tokio::test]
+    async fn mcp_tools_and_resources_follow_config_order() {
         let registry = McpRegistry::new(AiProviderKeyStore::new());
         let mut state = registry.state.write();
         state.server_order = vec!["b".to_string(), "a".to_string()];
@@ -317,6 +432,7 @@ mod tests {
 
         let resource_uris = registry
             .resources()
+            .await
             .into_iter()
             .map(|(resource, _, _)| resource.uri)
             .collect::<Vec<_>>();
@@ -348,6 +464,151 @@ mod tests {
                 .iter()
                 .any(|tool| tool.name == "mcp::http::ping")
         );
+        stop_streamable_http_mcp_server(task).await;
+    }
+
+    #[tokio::test]
+    async fn modern_http_discovers_without_initialize_and_sends_routing_headers() {
+        let (url, requests, task) = spawn_modern_http_mcp_server().await;
+        let registry = McpRegistry::new(AiProviderKeyStore::new());
+        registry
+            .connect_config(http_test_config(
+                "modern",
+                McpTransport::StreamableHttp,
+                &url,
+            ))
+            .await;
+
+        let snapshot = registry
+            .snapshots()
+            .into_iter()
+            .find(|server| server.config.id == "modern")
+            .unwrap();
+        assert_eq!(snapshot.status, "connected");
+        assert_eq!(snapshot.protocol_era.as_deref(), Some("modern"));
+        assert_eq!(
+            snapshot.protocol_version.as_deref(),
+            Some(MODERN_PROTOCOL_VERSION)
+        );
+        assert!(snapshot.session_id.is_none());
+        tokio::time::timeout(Duration::from_secs(2), async {
+            loop {
+                let requests = requests.lock().await;
+                let tool_list_calls = requests
+                    .iter()
+                    .filter(|(_, request)| {
+                        request.get("method").and_then(Value::as_str) == Some("tools/list")
+                    })
+                    .count();
+                drop(requests);
+                if tool_list_calls >= 2 {
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+
+        let result = registry
+            .call_prefixed_tool("mcp::modern::ping", serde_json::json!({ "region": "华东" }))
+            .await
+            .unwrap();
+        assert_eq!(
+            result.structured_content,
+            Some(serde_json::json!({ "ok": true }))
+        );
+        let multi_round = registry
+            .call_prefixed_tool("mcp::modern::multi", serde_json::json!({}))
+            .await
+            .unwrap();
+        assert_eq!(
+            multi_round
+                .content
+                .first()
+                .and_then(|content| content.text.as_deref()),
+            Some("continued")
+        );
+        let task_result = registry
+            .call_prefixed_tool("mcp::modern::task", serde_json::json!({}))
+            .await
+            .unwrap();
+        assert_eq!(
+            task_result
+                .content
+                .first()
+                .and_then(|content| content.text.as_deref()),
+            Some("task complete")
+        );
+        let resource = registry
+            .read_resource("modern", "test://resource")
+            .await
+            .unwrap();
+        assert_eq!(
+            resource.first().and_then(|content| content.text.as_deref()),
+            Some("resource body")
+        );
+        tokio::time::timeout(Duration::from_secs(2), async {
+            loop {
+                let requests = requests.lock().await;
+                let subscribed = requests.iter().any(|(_, request)| {
+                    request
+                        .pointer("/params/notifications/resourceSubscriptions/0")
+                        .and_then(Value::as_str)
+                        == Some("test://resource")
+                });
+                drop(requests);
+                if subscribed {
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+
+        let requests = requests.lock().await;
+        assert!(requests.iter().all(
+            |(_, request)| request.get("method").and_then(Value::as_str) != Some("initialize")
+        ));
+        let (headers, tool_request) = requests
+            .iter()
+            .find(|(_, request)| {
+                request.get("method").and_then(Value::as_str) == Some("tools/call")
+            })
+            .unwrap();
+        assert!(
+            headers
+                .to_ascii_lowercase()
+                .contains("mcp-method: tools/call")
+        );
+        assert!(headers.to_ascii_lowercase().contains("mcp-name: ping"));
+        assert!(
+            headers
+                .to_ascii_lowercase()
+                .contains("mcp-param-region: =?base64?")
+        );
+        assert_eq!(
+            tool_request
+                .pointer("/params/_meta/io.modelcontextprotocol~1protocolVersion")
+                .and_then(Value::as_str),
+            Some(MODERN_PROTOCOL_VERSION)
+        );
+        let retry = requests
+            .iter()
+            .find(|(_, request)| {
+                request
+                    .pointer("/params/requestState")
+                    .and_then(Value::as_str)
+                    == Some("state-1")
+            })
+            .map(|(_, request)| request)
+            .unwrap();
+        assert!(retry.pointer("/params/inputResponses").is_none());
+        assert!(requests.iter().any(|(_, request)| {
+            request.get("method").and_then(Value::as_str) == Some("tasks/get")
+        }));
+
         stop_streamable_http_mcp_server(task).await;
     }
 
@@ -412,6 +673,12 @@ mod tests {
                 endpoint_url: Some("http://127.0.0.1".to_string()),
                 resolved_transport: Some(McpEffectiveTransport::StreamableHttp),
                 session_id: None,
+                protocol: Some(McpProtocol::legacy_streamable_http()),
+                tools_cache: None,
+                resources_cache: None,
+                resource_content_cache: HashMap::new(),
+                resource_subscriptions: std::collections::HashSet::new(),
+                subscription_abort: None,
                 generation: 1,
             },
         );
@@ -504,7 +771,7 @@ mod tests {
             &config,
             Some("token-123"),
             None,
-            STREAMABLE_HTTP_PROTOCOL_VERSION,
+            &McpProtocol::legacy_streamable_http(),
             true,
             "application/json, text/event-stream",
         )
@@ -567,6 +834,7 @@ mod tests {
     fn mcp_tool_output_keeps_error_text_out_of_truncation_meta() {
         let result = McpCallToolResult {
             is_error: true,
+            structured_content: None,
             content: vec![McpCallContent {
                 content_type: "text".to_string(),
                 text: Some("bad input".to_string()),
@@ -586,6 +854,7 @@ mod tests {
         let text = "你".repeat(MCP_TOOL_OUTPUT_MAX_CHARS + 1);
         let result = McpCallToolResult {
             is_error: false,
+            structured_content: None,
             content: vec![McpCallContent {
                 content_type: "text".to_string(),
                 text: Some(text),
@@ -631,17 +900,25 @@ mod tests {
                 tools: Some(serde_json::json!({})),
                 resources: None,
                 prompts: None,
+                extensions: None,
             }),
             tools: vec![McpToolSchema {
                 name: tool_name.to_string(),
                 description: None,
                 input_schema: serde_json::json!({ "type": "object" }),
+                output_schema: None,
             }],
             resources: Vec::new(),
             runtime_id: None,
             endpoint_url: Some("http://127.0.0.1".to_string()),
             resolved_transport: Some(McpEffectiveTransport::StreamableHttp),
             session_id: None,
+            protocol: Some(McpProtocol::legacy_streamable_http()),
+            tools_cache: None,
+            resources_cache: None,
+            resource_content_cache: HashMap::new(),
+            resource_subscriptions: std::collections::HashSet::new(),
+            subscription_abort: None,
             generation,
         }
     }
@@ -703,18 +980,27 @@ mod tests {
                         return;
                     }
                     if force_legacy && request_line.starts_with("POST / ") {
-                        let response =
-                            "HTTP/1.1 404 Not Found\r\nConnection: close\r\nContent-Length: 0\r\n\r\n";
+                        let response = "HTTP/1.1 404 Not Found\r\nConnection: close\r\nContent-Length: 0\r\n\r\n";
                         let _ = stream.write_all(response.as_bytes()).await;
                         return;
                     }
                     let request: Value = serde_json::from_slice(&body).unwrap_or_default();
+                    if request.get("method").and_then(Value::as_str) == Some("server/discover") {
+                        let body = "legacy server";
+                        let response = format!(
+                            "HTTP/1.1 400 Bad Request\r\nContent-Type: text/plain\r\nConnection: close\r\nContent-Length: {}\r\n\r\n{}",
+                            body.len(),
+                            body
+                        );
+                        let _ = stream.write_all(response.as_bytes()).await;
+                        return;
+                    }
                     let session_id = match request.get("method").and_then(Value::as_str) {
                         Some("tools/list") => "tools-session",
                         Some("resources/list") => "resources-session",
                         _ => "test-session",
                     };
-                    let response_body = mcp_http_response_body(&request);
+                    let response_body = mcp_http_response_body(&request, force_legacy);
                     let response = format!(
                         "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nConnection: close\r\nMCP-Session-Id: {}\r\nContent-Length: {}\r\n\r\n{}",
                         session_id,
@@ -733,7 +1019,7 @@ mod tests {
         let _ = task.await;
     }
 
-    fn mcp_http_response_body(request: &Value) -> String {
+    fn mcp_http_response_body(request: &Value, legacy_sse: bool) -> String {
         let id = request.get("id").cloned().unwrap_or(Value::Null);
         let result = match request
             .get("method")
@@ -741,7 +1027,11 @@ mod tests {
             .unwrap_or_default()
         {
             "initialize" => serde_json::json!({
-                "protocolVersion": STREAMABLE_HTTP_PROTOCOL_VERSION,
+                "protocolVersion": if legacy_sse {
+                    LEGACY_SSE_PROTOCOL_VERSION
+                } else {
+                    LEGACY_STREAMABLE_HTTP_PROTOCOL_VERSION
+                },
                 "capabilities": { "tools": {}, "resources": {} }
             }),
             "tools/list" => serde_json::json!({
@@ -762,6 +1052,226 @@ mod tests {
             _ => serde_json::json!({}),
         };
         serde_json::json!({ "jsonrpc": "2.0", "id": id, "result": result }).to_string()
+    }
+
+    async fn spawn_modern_http_mcp_server() -> (
+        String,
+        Arc<Mutex<Vec<(String, Value)>>>,
+        tokio::task::JoinHandle<()>,
+    ) {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let requests = Arc::new(Mutex::new(Vec::new()));
+        let captured = requests.clone();
+        let task = tokio::spawn(async move {
+            loop {
+                let Ok((mut stream, _)) = listener.accept().await else {
+                    break;
+                };
+                let captured = captured.clone();
+                tokio::spawn(async move {
+                    let mut buffer = Vec::new();
+                    let header_end = loop {
+                        let mut chunk = [0_u8; 1024];
+                        let Ok(read) = stream.read(&mut chunk).await else {
+                            return;
+                        };
+                        if read == 0 {
+                            return;
+                        }
+                        buffer.extend_from_slice(&chunk[..read]);
+                        if let Some(index) = find_header_end(&buffer) {
+                            break index;
+                        }
+                    };
+                    let headers = String::from_utf8_lossy(&buffer[..header_end]).to_string();
+                    let content_length = headers
+                        .lines()
+                        .find_map(|line| {
+                            let (name, value) = line.split_once(':')?;
+                            name.eq_ignore_ascii_case("content-length")
+                                .then(|| value.trim().parse::<usize>().ok())
+                                .flatten()
+                        })
+                        .unwrap_or_default();
+                    let mut body = buffer[(header_end + 4)..].to_vec();
+                    while body.len() < content_length {
+                        let mut chunk = vec![0_u8; content_length - body.len()];
+                        let Ok(read) = stream.read(&mut chunk).await else {
+                            return;
+                        };
+                        if read == 0 {
+                            return;
+                        }
+                        body.extend_from_slice(&chunk[..read]);
+                    }
+                    let request: Value = serde_json::from_slice(&body).unwrap();
+                    captured
+                        .lock()
+                        .await
+                        .push((headers.clone(), request.clone()));
+                    if request.get("method").and_then(Value::as_str) == Some("subscriptions/listen")
+                    {
+                        let subscription_id = request.get("id").cloned().unwrap_or(Value::Null);
+                        let acknowledged_notifications = request
+                            .pointer("/params/notifications")
+                            .cloned()
+                            .unwrap_or_else(|| serde_json::json!({}));
+                        let acknowledged = serde_json::json!({
+                            "jsonrpc": "2.0",
+                            "method": "notifications/subscriptions/acknowledged",
+                            "params": {
+                                "_meta": {
+                                    "io.modelcontextprotocol/subscriptionId": subscription_id
+                                },
+                                "notifications": acknowledged_notifications
+                            }
+                        });
+                        let changed = serde_json::json!({
+                            "jsonrpc": "2.0",
+                            "method": "notifications/tools/list_changed",
+                            "params": {
+                                "_meta": {
+                                    "io.modelcontextprotocol/subscriptionId": subscription_id
+                                }
+                            }
+                        });
+                        let complete = serde_json::json!({
+                            "jsonrpc": "2.0",
+                            "id": subscription_id,
+                            "result": { "resultType": "complete" }
+                        });
+                        let response_body = format!(
+                            "data: {acknowledged}\n\ndata: {changed}\n\ndata: {complete}\n\n"
+                        );
+                        let response = format!(
+                            "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nConnection: close\r\nContent-Length: {}\r\n\r\n{}",
+                            response_body.len(),
+                            response_body
+                        );
+                        let _ = stream.write_all(response.as_bytes()).await;
+                        return;
+                    }
+                    let result = match request
+                        .get("method")
+                        .and_then(Value::as_str)
+                        .unwrap_or_default()
+                    {
+                        "server/discover" => serde_json::json!({
+                            "resultType": "complete",
+                            "supportedVersions": [MODERN_PROTOCOL_VERSION],
+                            "capabilities": {
+                                "tools": { "listChanged": true },
+                                "resources": { "subscribe": true },
+                                "extensions": {
+                                    MCP_TASKS_EXTENSION: {}
+                                }
+                            },
+                            "ttlMs": 60_000,
+                            "cacheScope": "private"
+                        }),
+                        "tools/list" => serde_json::json!({
+                            "resultType": "complete",
+                            "tools": [{
+                                "name": "ping",
+                                "description": "Ping test tool",
+                                "inputSchema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "region": {
+                                            "type": "string",
+                                            "x-mcp-header": "Region"
+                                        }
+                                    }
+                                }
+                            }, {
+                                "name": "multi",
+                                "inputSchema": { "type": "object", "properties": {} }
+                            }, {
+                                "name": "task",
+                                "inputSchema": { "type": "object", "properties": {} }
+                            }],
+                            "ttlMs": 60_000,
+                            "cacheScope": "private"
+                        }),
+                        "resources/list" => serde_json::json!({
+                            "resultType": "complete",
+                            "resources": [{
+                                "uri": "test://resource",
+                                "name": "resource",
+                                "mimeType": "text/plain"
+                            }],
+                            "ttlMs": 60_000,
+                            "cacheScope": "private"
+                        }),
+                        "resources/read" => serde_json::json!({
+                            "resultType": "complete",
+                            "contents": [{
+                                "uri": "test://resource",
+                                "mimeType": "text/plain",
+                                "text": "resource body"
+                            }],
+                            "ttlMs": 60_000,
+                            "cacheScope": "private"
+                        }),
+                        "tools/call" => {
+                            let name = request
+                                .pointer("/params/name")
+                                .and_then(Value::as_str)
+                                .unwrap_or_default();
+                            match name {
+                                "multi" if request.pointer("/params/requestState").is_none() => {
+                                    serde_json::json!({
+                                        "resultType": "input_required",
+                                        "requestState": "state-1"
+                                    })
+                                }
+                                "multi" => serde_json::json!({
+                                    "resultType": "complete",
+                                    "content": [{ "type": "text", "text": "continued" }]
+                                }),
+                                "task" => serde_json::json!({
+                                    "resultType": "task",
+                                    "taskId": "task-1",
+                                    "status": "working",
+                                    "ttlMs": 60_000,
+                                    "pollIntervalMs": 1
+                                }),
+                                _ => serde_json::json!({
+                                    "resultType": "complete",
+                                    "content": [{ "type": "text", "text": "pong" }],
+                                    "structuredContent": { "ok": true }
+                                }),
+                            }
+                        }
+                        "tasks/get" => serde_json::json!({
+                            "resultType": "complete",
+                            "taskId": "task-1",
+                            "status": "completed",
+                            "ttlMs": 60_000,
+                            "result": {
+                                "resultType": "complete",
+                                "content": [{ "type": "text", "text": "task complete" }]
+                            }
+                        }),
+                        _ => serde_json::json!({ "resultType": "complete" }),
+                    };
+                    let response_body = serde_json::json!({
+                        "jsonrpc": "2.0",
+                        "id": request.get("id").cloned().unwrap_or(Value::Null),
+                        "result": result
+                    })
+                    .to_string();
+                    let response = format!(
+                        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nConnection: close\r\nContent-Length: {}\r\n\r\n{}",
+                        response_body.len(),
+                        response_body
+                    );
+                    let _ = stream.write_all(response.as_bytes()).await;
+                });
+            }
+        });
+        (format!("http://{addr}"), requests, task)
     }
 
     fn find_header_end(buffer: &[u8]) -> Option<usize> {

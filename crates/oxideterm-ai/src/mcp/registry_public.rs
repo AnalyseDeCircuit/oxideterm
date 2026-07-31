@@ -135,7 +135,31 @@ impl McpRegistry {
         definitions
     }
 
-    pub fn resources(&self) -> Vec<(McpResource, String, String)> {
+    pub async fn resources(&self) -> Vec<(McpResource, String, String)> {
+        let stale_server_ids = {
+            let state = self.state.read();
+            state
+                .servers
+                .iter()
+                .filter(|(_, server)| {
+                    server.status == McpServerStatus::Connected
+                        && server.protocol.as_ref().is_some_and(McpProtocol::is_modern)
+                        && server
+                            .capabilities
+                            .as_ref()
+                            .and_then(|capabilities| capabilities.resources.as_ref())
+                            .is_some()
+                        && server
+                            .resources_cache
+                            .as_ref()
+                            .is_none_or(|cache| !cache.is_fresh())
+                })
+                .map(|(server_id, _)| server_id.clone())
+                .collect::<Vec<_>>()
+        };
+        for server_id in stale_server_ids {
+            let _ = self.refresh_resources(&server_id).await;
+        }
         let state = self.state.read();
         ordered_servers(&state)
             .into_iter()
@@ -191,6 +215,30 @@ impl McpRegistry {
         prefixed_name: &str,
         args: Value,
     ) -> Result<McpCallToolResult, McpError> {
+        let stale_server_ids = {
+            let state = self.state.read();
+            state
+                .servers
+                .iter()
+                .filter(|(_, server)| {
+                    server.status == McpServerStatus::Connected
+                        && server.protocol.as_ref().is_some_and(McpProtocol::is_modern)
+                        && server
+                            .capabilities
+                            .as_ref()
+                            .and_then(|capabilities| capabilities.tools.as_ref())
+                            .is_some()
+                        && server
+                            .tools_cache
+                            .as_ref()
+                            .is_none_or(|cache| !cache.is_fresh())
+                })
+                .map(|(server_id, _)| server_id.clone())
+                .collect::<Vec<_>>()
+        };
+        for server_id in stale_server_ids {
+            self.refresh_tools(&server_id).await?;
+        }
         let (server_id, original_name) = self
             .state
             .read()
@@ -203,10 +251,31 @@ impl McpRegistry {
         let args = args.as_object().cloned().unwrap_or_default();
         let server = self.connected_server(&server_id)?;
         let generation = server.generation;
-        let result = self
-            .call_tool(&server, &original_name, Value::Object(args))
+        let mut result = self
+            .call_tool(&server, &original_name, Value::Object(args.clone()))
             .await;
-        if result.is_err() {
+        if matches!(
+            result,
+            Err(McpError::Rpc {
+                code: MCP_HEADER_MISMATCH,
+                ..
+            })
+        ) && server.protocol.as_ref().is_some_and(McpProtocol::is_modern)
+            && server.resolved_transport == Some(McpEffectiveTransport::StreamableHttp)
+        {
+            // A header mismatch may mean the tool schema changed between list and call.
+            self.invalidate_tools(&server_id, generation);
+            self.refresh_tools(&server_id).await?;
+            let refreshed = self.connected_server(&server_id)?;
+            result = self
+                .call_tool(&refreshed, &original_name, Value::Object(args))
+                .await;
+        }
+        if result
+            .as_ref()
+            .err()
+            .is_some_and(McpError::is_connection_failure)
+        {
             self.apply_runtime_error(
                 &server_id,
                 generation,
@@ -221,11 +290,15 @@ impl McpRegistry {
         &self,
         server_id: &str,
         uri: &str,
-    ) -> Result<McpResourceContent, McpError> {
+    ) -> Result<Vec<McpResourceContent>, McpError> {
         let server = self.connected_server(server_id)?;
         let generation = server.generation;
         let result = self.read_resource_inner(&server, uri).await;
-        if result.is_err() {
+        if result
+            .as_ref()
+            .err()
+            .is_some_and(McpError::is_connection_failure)
+        {
             self.apply_runtime_error(
                 server_id,
                 generation,
@@ -237,7 +310,7 @@ impl McpRegistry {
     }
 
     pub async fn refresh_tools(&self, server_id: &str) -> Result<(), McpError> {
-        let server = self.connected_server(server_id)?;
+        let mut server = self.connected_server(server_id)?;
         let generation = server.generation;
         if server
             .capabilities
@@ -247,11 +320,14 @@ impl McpRegistry {
         {
             return Ok(());
         }
+        server.tools_cache = None;
         let tools = match self.list_tools(&server).await {
             Ok(tools) => tools,
             Err(error) => {
-                self.apply_runtime_error(server_id, generation, error.to_string())
-                    .await;
+                if error.is_connection_failure() {
+                    self.apply_runtime_error(server_id, generation, error.to_string())
+                        .await;
+                }
                 return Err(error);
             }
         };
@@ -260,10 +336,36 @@ impl McpRegistry {
             && current.status == McpServerStatus::Connected
             && current.generation == generation
         {
-            current.tools = tools;
+            current.tools = tools.value.clone();
+            current.session_id = tools.session_id.clone().or(current.session_id.take());
+            current.tools_cache = Some(tools);
         }
         rebuild_tool_index(&mut state);
         Ok(())
     }
 
+    pub async fn refresh_resources(&self, server_id: &str) -> Result<(), McpError> {
+        let mut server = self.connected_server(server_id)?;
+        let generation = server.generation;
+        if server
+            .capabilities
+            .as_ref()
+            .and_then(|capabilities| capabilities.resources.as_ref())
+            .is_none()
+        {
+            return Ok(());
+        }
+        server.resources_cache = None;
+        let resources = self.list_resources(&server).await?;
+        let mut state = self.state.write();
+        if let Some(current) = state.servers.get_mut(server_id)
+            && current.status == McpServerStatus::Connected
+            && current.generation == generation
+        {
+            current.resources = resources.value.clone();
+            current.session_id = resources.session_id.clone().or(current.session_id.take());
+            current.resources_cache = Some(resources);
+        }
+        Ok(())
+    }
 }

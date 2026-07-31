@@ -46,7 +46,7 @@ fn build_http_headers(
     config: &McpServerConfig,
     auth_token: Option<&str>,
     session_id: Option<&str>,
-    protocol_version: &str,
+    protocol: &McpProtocol,
     content_type: bool,
     accept: &str,
 ) -> Result<reqwest::header::HeaderMap, McpError> {
@@ -55,6 +55,8 @@ fn build_http_headers(
         "content-type",
         "mcp-session-id",
         "mcp-protocol-version",
+        "mcp-method",
+        "mcp-name",
     ];
     let mut headers = reqwest::header::HeaderMap::new();
     let auth_header_name = config
@@ -88,11 +90,13 @@ fn build_http_headers(
         })?;
         // HeaderMap owns the bytes needed for the outgoing request, but the
         // temporary formatted auth value should still be wiped after parsing.
-        let value = Zeroizing::new(match config.auth_header_mode.unwrap_or(McpAuthHeaderMode::Bearer) {
-            McpAuthHeaderMode::Bearer => format!("Bearer {token}"),
-            McpAuthHeaderMode::Raw => token.to_string(),
-            McpAuthHeaderMode::None => String::new(),
-        });
+        let value = Zeroizing::new(
+            match config.auth_header_mode.unwrap_or(McpAuthHeaderMode::Bearer) {
+                McpAuthHeaderMode::Bearer => format!("Bearer {token}"),
+                McpAuthHeaderMode::Raw => token.to_string(),
+                McpAuthHeaderMode::None => String::new(),
+            },
+        );
         headers.insert(
             header,
             value.parse().map_err(|_| {
@@ -114,7 +118,7 @@ fn build_http_headers(
     }
     headers.insert(
         HeaderName::from_static("mcp-protocol-version"),
-        protocol_version.parse().expect("valid protocol version"),
+        protocol.version.parse().expect("valid protocol version"),
     );
     if let Some(session_id) = session_id {
         headers.insert(
@@ -125,6 +129,207 @@ fn build_http_headers(
         );
     }
     Ok(headers)
+}
+
+fn insert_modern_request_headers(
+    headers: &mut reqwest::header::HeaderMap,
+    request: &Value,
+    tool_schema: Option<&McpToolSchema>,
+) -> Result<(), McpError> {
+    let method = request
+        .get("method")
+        .and_then(Value::as_str)
+        .ok_or_else(|| McpError::Message("MCP request is missing method".to_string()))?;
+    headers.insert(
+        HeaderName::from_static("mcp-method"),
+        method
+            .parse()
+            .map_err(|_| McpError::Message("Invalid MCP method header".to_string()))?,
+    );
+    let params = request.get("params").and_then(Value::as_object);
+    let name = match method {
+        "tools/call" | "prompts/get" => params
+            .and_then(|params| params.get("name"))
+            .and_then(Value::as_str),
+        "resources/read" => params
+            .and_then(|params| params.get("uri"))
+            .and_then(Value::as_str),
+        _ => None,
+    };
+    if matches!(method, "tools/call" | "prompts/get" | "resources/read") {
+        let name = name.ok_or_else(|| {
+            McpError::Message(format!("MCP request {method} is missing its routing name"))
+        })?;
+        headers.insert(
+            HeaderName::from_static("mcp-name"),
+            encode_mcp_header_value(name)
+                .parse()
+                .map_err(|_| McpError::Message("Invalid MCP name header".to_string()))?,
+        );
+    }
+
+    if method == "tools/call"
+        && let Some(tool_schema) = tool_schema
+    {
+        let bindings = mcp_tool_header_bindings(&tool_schema.input_schema)?;
+        let arguments = params
+            .and_then(|params| params.get("arguments"))
+            .unwrap_or(&Value::Null);
+        for binding in bindings {
+            let Some(value) = value_at_path(arguments, &binding.path) else {
+                continue;
+            };
+            if value.is_null() {
+                continue;
+            }
+            let value = primitive_mcp_header_value(value).map_err(|reason| {
+                McpError::Message(format!(
+                    "MCP tool {} supplied an invalid header parameter: {reason}",
+                    tool_schema.name
+                ))
+            })?;
+            let header_name =
+                HeaderName::from_bytes(format!("mcp-param-{}", binding.header_name).as_bytes())
+                    .map_err(|_| {
+                        McpError::Message(format!(
+                            "Invalid x-mcp-header on MCP tool {}",
+                            tool_schema.name
+                        ))
+                    })?;
+            headers.insert(
+                header_name,
+                encode_mcp_header_value(&value).parse().map_err(|_| {
+                    McpError::Message(format!(
+                        "Invalid MCP parameter header on tool {}",
+                        tool_schema.name
+                    ))
+                })?,
+            );
+        }
+    }
+    Ok(())
+}
+
+fn encode_mcp_header_value(value: &str) -> String {
+    let plain_ascii = !value.is_empty()
+        && value.trim() == value
+        && value
+            .as_bytes()
+            .iter()
+            .all(|byte| matches!(*byte, b'\t' | 0x20..=0x7e))
+        && !(value.starts_with("=?base64?") && value.ends_with("?="));
+    if plain_ascii {
+        value.to_string()
+    } else {
+        format!(
+            "=?base64?{}?=",
+            base64::engine::general_purpose::STANDARD.encode(value.as_bytes())
+        )
+    }
+}
+
+fn primitive_mcp_header_value(value: &Value) -> Result<String, &'static str> {
+    const MAX_SAFE_INTEGER: u64 = (1_u64 << 53) - 1;
+    match value {
+        Value::String(value) => Ok(value.clone()),
+        Value::Bool(value) => Ok(value.to_string()),
+        Value::Number(value) => {
+            let is_safe = value
+                .as_i64()
+                .is_some_and(|value| value.unsigned_abs() <= MAX_SAFE_INTEGER)
+                || value
+                    .as_u64()
+                    .is_some_and(|value| value <= MAX_SAFE_INTEGER);
+            is_safe
+                .then(|| value.to_string())
+                .ok_or("integer is outside the JavaScript safe range")
+        }
+        _ => Err("value is not a string, integer, or boolean"),
+    }
+}
+
+#[derive(Debug)]
+struct McpHeaderBinding {
+    path: Vec<String>,
+    header_name: String,
+}
+
+fn mcp_tool_header_bindings(schema: &Value) -> Result<Vec<McpHeaderBinding>, McpError> {
+    let mut bindings = Vec::new();
+    let mut names = std::collections::HashSet::new();
+    inspect_mcp_header_schema(schema, &[], false, &mut bindings, &mut names)?;
+    Ok(bindings)
+}
+
+fn inspect_mcp_header_schema(
+    schema: &Value,
+    path: &[String],
+    annotation_allowed: bool,
+    bindings: &mut Vec<McpHeaderBinding>,
+    names: &mut std::collections::HashSet<String>,
+) -> Result<(), McpError> {
+    let Some(object) = schema.as_object() else {
+        return Ok(());
+    };
+    if let Some(annotation) = object.get("x-mcp-header") {
+        if !annotation_allowed {
+            return Err(McpError::Message(
+                "x-mcp-header is not on a statically reachable property".to_string(),
+            ));
+        }
+        let header_name = annotation
+            .as_str()
+            .filter(|value| !value.is_empty())
+            .ok_or_else(|| McpError::Message("x-mcp-header must be a string".to_string()))?;
+        HeaderName::from_bytes(header_name.as_bytes())
+            .map_err(|_| McpError::Message("x-mcp-header is not a valid token".to_string()))?;
+        if !matches!(
+            object.get("type").and_then(Value::as_str),
+            Some("string" | "integer" | "boolean")
+        ) {
+            return Err(McpError::Message(
+                "x-mcp-header requires string, integer, or boolean type".to_string(),
+            ));
+        }
+        if !names.insert(header_name.to_ascii_lowercase()) {
+            return Err(McpError::Message(
+                "x-mcp-header names must be unique".to_string(),
+            ));
+        }
+        bindings.push(McpHeaderBinding {
+            path: path.to_vec(),
+            header_name: header_name.to_string(),
+        });
+    }
+    for (key, child) in object {
+        if key == "properties" {
+            if let Some(properties) = child.as_object() {
+                for (property_name, property_schema) in properties {
+                    let mut child_path = path.to_vec();
+                    child_path.push(property_name.clone());
+                    inspect_mcp_header_schema(property_schema, &child_path, true, bindings, names)?;
+                }
+            }
+        } else if key != "x-mcp-header" {
+            match child {
+                Value::Array(values) => {
+                    for value in values {
+                        inspect_mcp_header_schema(value, path, false, bindings, names)?;
+                    }
+                }
+                Value::Object(_) => {
+                    inspect_mcp_header_schema(child, path, false, bindings, names)?;
+                }
+                _ => {}
+            }
+        }
+    }
+    Ok(())
+}
+
+fn value_at_path<'a>(value: &'a Value, path: &[String]) -> Option<&'a Value> {
+    path.iter()
+        .try_fold(value, |current, segment| current.get(segment))
 }
 
 #[derive(Default)]
@@ -157,12 +362,8 @@ async fn parse_http_response(
     request_id: Option<u64>,
     expect_json: bool,
 ) -> Result<Option<Value>, McpError> {
-    if !expect_json
-        || matches!(
-            response.status(),
-            StatusCode::ACCEPTED | StatusCode::NO_CONTENT
-        )
-    {
+    let status = response.status();
+    if !expect_json || matches!(status, StatusCode::ACCEPTED | StatusCode::NO_CONTENT) {
         return Ok(None);
     }
     let is_sse = response
@@ -182,9 +383,14 @@ async fn parse_http_response(
     if text.trim().is_empty() {
         return Ok(None);
     }
-    serde_json::from_str(&text)
-        .map(Some)
-        .map_err(|error| McpError::Message(error.to_string()))
+    match serde_json::from_str(&text) {
+        Ok(value) => Ok(Some(value)),
+        // A legacy endpoint may return an HTML or plain-text 4xx response to
+        // the modern probe. Preserve the status so era negotiation can apply
+        // the transport-defined fallback instead of surfacing a JSON error.
+        Err(_) if !status.is_success() => Ok(None),
+        Err(error) => Err(McpError::Message(error.to_string())),
+    }
 }
 
 fn extract_result(response: Option<Value>) -> Result<Value, McpError> {
@@ -192,15 +398,7 @@ fn extract_result(response: Option<Value>) -> Result<Value, McpError> {
         return Err(McpError::Message("MCP response missing result".to_string()));
     };
     if let Some(error) = response.get("error") {
-        let code = error
-            .get("code")
-            .and_then(|value| value.as_i64())
-            .unwrap_or_default();
-        let message = error
-            .get("message")
-            .and_then(|value| value.as_str())
-            .unwrap_or("Unknown MCP error");
-        return Err(McpError::Message(format!("MCP error {code}: {message}")));
+        return Err(rpc_error_from_value(error));
     }
     response
         .get("result")
@@ -490,32 +688,51 @@ pub fn is_mcp_tool_name(name: &str) -> bool {
 }
 
 pub fn mcp_tool_output(result: &McpCallToolResult) -> (bool, String, bool) {
-    let text = result
+    let mut parts = result
         .content
         .iter()
         .filter(|content| content.content_type == "text")
         .filter_map(|content| content.text.as_deref())
-        .collect::<Vec<_>>()
-        .join("\n");
+        .map(str::to_string)
+        .collect::<Vec<_>>();
+    if let Some(structured_content) = &result.structured_content {
+        parts.push(
+            serde_json::to_string_pretty(structured_content)
+                .unwrap_or_else(|_| structured_content.to_string()),
+        );
+    }
+    let text = parts.join("\n");
     let truncated = !result.is_error && text.chars().count() > MCP_TOOL_OUTPUT_MAX_CHARS;
     let output = truncate_chars(&text, MCP_TOOL_OUTPUT_MAX_CHARS);
     (!result.is_error, output, truncated)
 }
 
-pub fn mcp_resource_output(content: &McpResourceContent) -> (String, bool) {
-    let text = content.text.clone().unwrap_or_else(|| {
-        content
-            .blob
-            .as_ref()
-            .map(|blob| {
-                format!(
-                    "[base64 binary, {} chars, mime={}]",
-                    blob.len(),
-                    content.mime_type.as_deref().unwrap_or("unknown")
-                )
-            })
-            .unwrap_or_else(|| "(empty)".to_string())
-    });
+pub fn mcp_resource_output(contents: &[McpResourceContent]) -> (String, bool) {
+    let multiple = contents.len() > 1;
+    let text = contents
+        .iter()
+        .map(|content| {
+            let body = content.text.clone().unwrap_or_else(|| {
+                content
+                    .blob
+                    .as_ref()
+                    .map(|blob| {
+                        format!(
+                            "[base64 binary, {} chars, mime={}]",
+                            blob.len(),
+                            content.mime_type.as_deref().unwrap_or("unknown")
+                        )
+                    })
+                    .unwrap_or_else(|| "(empty)".to_string())
+            });
+            if multiple {
+                format!("[{}]\n{body}", content.uri)
+            } else {
+                body
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n\n");
     let truncated = text.chars().count() > MCP_TOOL_OUTPUT_MAX_CHARS;
     (truncate_chars(&text, MCP_TOOL_OUTPUT_MAX_CHARS), truncated)
 }

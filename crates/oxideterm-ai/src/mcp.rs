@@ -1,4 +1,5 @@
 include!("mcp/types.rs");
+include!("mcp/protocol.rs");
 include!("mcp/registry_public.rs");
 include!("mcp/registry_connect.rs");
 include!("mcp/registry_protocol.rs");

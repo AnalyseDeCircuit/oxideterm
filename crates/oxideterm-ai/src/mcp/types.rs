@@ -1,13 +1,14 @@
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     fmt,
     sync::{
         Arc,
-        atomic::{AtomicU64, Ordering},
+        atomic::{AtomicBool, AtomicU64, Ordering},
     },
     time::Duration,
 };
 
+use base64::Engine as _;
 use futures_util::{FutureExt as _, StreamExt as _, future::BoxFuture};
 use parking_lot::RwLock;
 use reqwest::{StatusCode, header::HeaderName};
@@ -16,23 +17,27 @@ use serde_json::Value;
 use tokio::{
     io::{AsyncBufRead, AsyncBufReadExt, AsyncWrite, AsyncWriteExt, BufReader},
     process::{Child, Command},
-    sync::{Mutex, oneshot},
+    sync::{Mutex, broadcast, oneshot},
     task::JoinHandle,
 };
 use zeroize::Zeroizing;
 
 use crate::{AiProviderKeyStore, AiToolDefinition};
 
-const STREAMABLE_HTTP_PROTOCOL_VERSION: &str = "2025-11-25";
-const LEGACY_SSE_PROTOCOL_VERSION: &str = "2024-11-05";
 const MCP_CLIENT_NAME: &str = "OxideTerm";
 const MCP_CLIENT_VERSION: &str = "1.0.0";
 const MAX_MCP_MESSAGE_BYTES: usize = 10 * 1024 * 1024;
 const MCP_REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
+const MCP_DISCOVERY_TIMEOUT: Duration = Duration::from_secs(3);
 const MCP_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(3);
 const MCP_TOOL_OUTPUT_MAX_CHARS: usize = 8_192;
 const MCP_MAX_RETRIES: u32 = 3;
 const MCP_RETRY_BASE_DELAY: Duration = Duration::from_secs(1);
+const MCP_MAX_MULTI_ROUND_TRIPS: usize = 16;
+const MCP_TASK_MAX_WAIT: Duration = Duration::from_secs(15 * 60);
+const MCP_TASK_DEFAULT_POLL_INTERVAL: Duration = Duration::from_secs(1);
+const MCP_TASK_MIN_POLL_INTERVAL: Duration = Duration::from_millis(100);
+const MCP_TASK_MAX_POLL_INTERVAL: Duration = Duration::from_secs(30);
 
 type PendingMap = Arc<Mutex<HashMap<u64, oneshot::Sender<Result<Value, McpError>>>>>;
 
@@ -101,7 +106,10 @@ impl fmt::Debug for McpServerConfig {
             .field("headers", &redacted_map_debug(&self.headers))
             .field("enabled", &self.enabled)
             .field("retry_on_disconnect", &self.retry_on_disconnect)
-            .field("auth_token", &self.auth_token.as_ref().map(|_| "[redacted token]"))
+            .field(
+                "auth_token",
+                &self.auth_token.as_ref().map(|_| "[redacted token]"),
+            )
             .finish()
     }
 }
@@ -121,6 +129,8 @@ pub struct McpServerCapabilities {
     pub resources: Option<Value>,
     #[serde(default)]
     pub prompts: Option<Value>,
+    #[serde(default)]
+    pub extensions: Option<HashMap<String, Value>>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -129,6 +139,8 @@ pub struct McpToolSchema {
     pub name: String,
     pub description: Option<String>,
     pub input_schema: Value,
+    #[serde(default)]
+    pub output_schema: Option<Value>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -165,6 +177,8 @@ pub struct McpCallToolResult {
     pub content: Vec<McpCallContent>,
     #[serde(default)]
     pub is_error: bool,
+    #[serde(default)]
+    pub structured_content: Option<Value>,
 }
 
 #[derive(Clone, Serialize)]
@@ -180,6 +194,8 @@ pub struct McpServerStateSnapshot {
     pub endpoint_url: Option<String>,
     pub resolved_transport: Option<String>,
     pub session_id: Option<String>,
+    pub protocol_era: Option<String>,
+    pub protocol_version: Option<String>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -188,10 +204,33 @@ pub enum McpError {
     Message(String),
     #[error("MCP HTTP request failed: {0} {1}")]
     HttpStatus(StatusCode, String),
+    #[error("MCP error {code}: {message}")]
+    Rpc {
+        code: i64,
+        message: String,
+        data: Option<Value>,
+        status: Option<StatusCode>,
+    },
     #[error("MCP server {0} timed out (30s)")]
     Timeout(String),
     #[error("MCP server {0} is not connected")]
     NotConnected(String),
+}
+
+impl McpError {
+    fn is_connection_failure(&self) -> bool {
+        match self {
+            Self::Timeout(_) | Self::NotConnected(_) => true,
+            Self::HttpStatus(status, _) => status.is_server_error(),
+            Self::Message(message) => {
+                message.contains("connection lost")
+                    || message.contains("closed stdout")
+                    || message.contains("MCP server closed")
+                    || message.contains("Failed to write to MCP server")
+            }
+            Self::Rpc { status, .. } => status.is_some_and(|status| status.is_server_error()),
+        }
+    }
 }
 
 struct McpProcess {
@@ -199,8 +238,10 @@ struct McpProcess {
     stdin: Mutex<tokio::process::ChildStdin>,
     next_id: AtomicU64,
     pending: PendingMap,
+    notifications: broadcast::Sender<Value>,
     reader_task: JoinHandle<()>,
     stderr_task: JoinHandle<()>,
+    eof_shutdown: AtomicBool,
 }
 
 #[derive(Default)]
@@ -236,6 +277,12 @@ struct McpServerState {
     endpoint_url: Option<String>,
     resolved_transport: Option<McpEffectiveTransport>,
     session_id: Option<String>,
+    protocol: Option<McpProtocol>,
+    tools_cache: Option<McpCachedResult<Vec<McpToolSchema>>>,
+    resources_cache: Option<McpCachedResult<Vec<McpResource>>>,
+    resource_content_cache: HashMap<String, McpCachedResult<Vec<McpResourceContent>>>,
+    resource_subscriptions: HashSet<String>,
+    subscription_abort: Option<tokio::task::AbortHandle>,
     generation: u64,
 }
 
@@ -269,13 +316,6 @@ impl McpTransport {
 }
 
 impl McpEffectiveTransport {
-    fn protocol_version(self) -> &'static str {
-        match self {
-            Self::LegacySse => LEGACY_SSE_PROTOCOL_VERSION,
-            Self::Stdio | Self::StreamableHttp => STREAMABLE_HTTP_PROTOCOL_VERSION,
-        }
-    }
-
     fn as_str(self) -> &'static str {
         match self {
             Self::Stdio => "stdio",
@@ -298,6 +338,12 @@ impl McpServerState {
             endpoint_url: None,
             resolved_transport: None,
             session_id: None,
+            protocol: None,
+            tools_cache: None,
+            resources_cache: None,
+            resource_content_cache: HashMap::new(),
+            resource_subscriptions: HashSet::new(),
+            subscription_abort: None,
             generation,
         }
     }
@@ -316,6 +362,14 @@ impl McpServerState {
                 .resolved_transport
                 .map(|transport| transport.as_str().to_string()),
             session_id: self.session_id.clone(),
+            protocol_era: self
+                .protocol
+                .as_ref()
+                .map(|protocol| protocol.era.as_str().to_string()),
+            protocol_version: self
+                .protocol
+                .as_ref()
+                .map(|protocol| protocol.version.clone()),
         }
     }
 }
