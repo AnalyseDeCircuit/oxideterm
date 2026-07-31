@@ -23,7 +23,7 @@ pub enum ModemError {
     InvalidLength,
     #[error("the escaped byte sequence is invalid")]
     InvalidEscape,
-    #[error("the YMODEM header contains an invalid filename")]
+    #[error("the modem header contains an invalid filename")]
     InvalidFileName,
 }
 
@@ -43,4 +43,6 @@ pub enum ModemTransferError {
     UnexpectedFrame,
     #[error("the file is too large for this modem protocol: {0} bytes")]
     UnsupportedFileSize(u64),
+    #[error("the modem peer exceeded the {0}-byte input buffer")]
+    InputBufferOverflow(usize),
 }

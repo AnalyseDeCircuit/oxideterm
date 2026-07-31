@@ -372,13 +372,14 @@ impl TelnetSession {
     }
 
     fn feed_transport_output(&mut self, bytes: &[u8]) {
-        let processed_output = self.process_terminal_output(bytes);
-        let bytes = processed_output.as_ref();
         let events = self.modem_consumer.process_server_output(bytes);
         self.handle_modem_consumer_events(events);
     }
 
     fn feed_plain_transport_output(&mut self, bytes: &[u8]) {
+        // Preserve protocol bytes before optional plugin display transforms.
+        let processed_output = self.process_terminal_output(bytes);
+        let bytes = processed_output.as_ref();
         for kind in self.magic_scan.scan(bytes) {
             self.pending_events.push(TerminalEvent::MagicDetected(kind));
         }
@@ -430,10 +431,19 @@ impl TelnetSession {
     }
 
     fn flush_modem_server_writes(&mut self) -> bool {
+        let Some(transfer) = self.modem_consumer.active_transfer_input() else {
+            return false;
+        };
         let mut changed = false;
-        for bytes in self.modem_consumer.take_server_writes() {
-            let _ = self.write_protocol_bytes(&bytes);
-            changed = true;
+        while let Some(bytes) = transfer.take_server_write() {
+            let byte_len = bytes.len();
+            if self.write_protocol_bytes(&bytes).is_ok() {
+                transfer.complete_server_write(byte_len);
+                changed = true;
+            } else {
+                transfer.restore_server_write(bytes);
+                break;
+            }
         }
         changed
     }
@@ -657,7 +667,8 @@ impl TerminalSessionBackend for TelnetSession {
     }
 
     fn finish_modem_transfer(&mut self) {
-        self.modem_consumer.finish_transfer();
+        let trailing_output = self.modem_consumer.finish_transfer();
+        self.feed_plain_transport_output(&trailing_output);
     }
 
     fn mode(&self) -> TermMode {

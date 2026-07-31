@@ -252,8 +252,6 @@ impl SshPtySession {
     }
 
     fn feed_transport_output(&mut self, bytes: &[u8]) {
-        let processed_output = self.process_terminal_output(bytes);
-        let bytes = processed_output.as_ref();
         if self.trzsz_consumer.is_some() {
             self.feed_trzsz_transport_output(bytes);
             return;
@@ -279,6 +277,10 @@ impl SshPtySession {
     }
 
     fn feed_plain_transport_output_to_terminal(&mut self, bytes: &[u8]) {
+        // In-band protocols own raw transport bytes. Plugin output transforms
+        // are applied only after modem/trzsz consumers release display data.
+        let processed_output = self.process_terminal_output(bytes);
+        let bytes = processed_output.as_ref();
         for kind in self.magic_scan.scan(bytes) {
             self.pending_events.push(TerminalEvent::MagicDetected(kind));
         }
@@ -391,10 +393,24 @@ impl SshPtySession {
     }
 
     fn flush_modem_server_writes(&mut self) -> bool {
+        let Some(transfer) = self.modem_consumer.active_transfer_input() else {
+            return false;
+        };
         let mut changed = false;
-        for bytes in self.modem_consumer.take_server_writes() {
-            let _ = self.send_command(SshTransportCommand::Data(bytes));
-            changed = true;
+        while let Some(bytes) = transfer.take_server_write() {
+            let byte_len = bytes.len();
+            if self
+                .send_command(SshTransportCommand::Data(bytes.clone()))
+                .is_ok()
+            {
+                transfer.complete_server_write(byte_len);
+                changed = true;
+            } else {
+                // A full bounded SSH command channel is transient; retain the
+                // frame and retry on the next terminal drain instead of dropping it.
+                transfer.restore_server_write(bytes);
+                break;
+            }
         }
         changed
     }
@@ -727,7 +743,8 @@ impl TerminalSessionBackend for SshPtySession {
     }
 
     fn finish_modem_transfer(&mut self) {
-        self.modem_consumer.finish_transfer();
+        let trailing_output = self.modem_consumer.finish_transfer();
+        self.feed_plain_transport_output_to_terminal(&trailing_output);
     }
 
     fn mode(&self) -> TermMode {

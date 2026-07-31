@@ -59,7 +59,7 @@ pub fn receive_xmodem<I: ModemIo, W: Write>(
     use_crc: bool,
 ) -> Result<u64, ModemTransferError> {
     io.write_all(&[if use_crc { WANT_CRC } else { NAK }])?;
-    receive_xymodem_blocks(io, writer, use_crc, None)
+    receive_xymodem_blocks(io, writer, use_crc, None, false)
 }
 
 pub fn send_ymodem<I: ModemIo>(
@@ -97,7 +97,15 @@ where
             true,
         )?;
         expect_byte_or_cancel(io, WANT_CRC)?;
-        total += send_xymodem_blocks(io, &mut entry.reader, XyBlockSize::Bytes1024, true)?;
+        // The block-zero metadata is authoritative, so do not send bytes past
+        // the declared size if the local file changes during the transfer.
+        let mut limited_reader = (&mut entry.reader).take(entry.file_size);
+        let entry_bytes =
+            send_xymodem_blocks(io, &mut limited_reader, XyBlockSize::Bytes1024, true)?;
+        if entry_bytes != entry.file_size {
+            return Err(ModemTransferError::UnexpectedFrame);
+        }
+        total += entry_bytes;
         finish_xymodem_send(io)?;
     }
 
@@ -131,7 +139,7 @@ where
 
         io.write_all(&[WANT_CRC])?;
         let mut writer = open_writer(&header)?;
-        let bytes = receive_xymodem_blocks(io, &mut writer, true, header.file_size)?;
+        let bytes = receive_xymodem_blocks(io, &mut writer, true, header.file_size, true)?;
         if let Some(size) = header.file_size {
             if bytes < size {
                 return Err(ModemTransferError::UnexpectedFrame);
@@ -169,6 +177,7 @@ fn receive_xymodem_blocks<I: ModemIo, W: Write>(
     writer: &mut W,
     use_crc: bool,
     expected_size: Option<u64>,
+    use_ymodem_eot_handshake: bool,
 ) -> Result<u64, ModemTransferError> {
     let mut expected = 1u8;
     let mut total = 0u64;
@@ -176,6 +185,13 @@ fn receive_xymodem_blocks<I: ModemIo, W: Write>(
     loop {
         match read_xymodem_packet(io, use_crc) {
             Ok(XymodemPacket::EndOfTransmission) => {
+                if use_ymodem_eot_handshake {
+                    // YMODEM confirms EOT with NAK/EOT/ACK, unlike XMODEM's
+                    // single EOT/ACK exchange.
+                    io.write_all(&[NAK])?;
+                    expect_byte_or_cancel(io, EOT)?;
+                }
+                writer.flush()?;
                 io.write_all(&[ACK])?;
                 return Ok(total);
             }
@@ -432,7 +448,7 @@ mod tests {
                 .unwrap()
                 .encode_crc(),
         );
-        input.push(EOT);
+        input.extend([EOT, EOT]);
         input.extend(
             XyBlock::new(0, XyBlockSize::Bytes128, &[0u8; 128])
                 .unwrap()
@@ -449,12 +465,13 @@ mod tests {
 
         assert_eq!(received.len(), 1);
         assert_eq!(&*output.borrow(), b"hello");
+        assert!(io.take_output().windows(2).any(|bytes| bytes == [NAK, ACK]));
     }
 
     #[test]
     fn ymodem_send_starts_with_block_zero() {
         let mut input = Vec::new();
-        input.extend([WANT_CRC, ACK, WANT_CRC, ACK, ACK, WANT_CRC, ACK]);
+        input.extend([WANT_CRC, ACK, WANT_CRC, ACK, NAK, ACK, WANT_CRC, ACK]);
         let mut io = MemoryModemIo::with_input(input);
         let entry = YmodemSendEntry {
             file_name: "hello.txt".to_string(),
@@ -467,5 +484,22 @@ mod tests {
         assert_eq!(output[0], crate::xymodem::SOH);
         assert_eq!(output[1], 0);
         assert!(output.windows("hello.txt".len()).any(|w| w == b"hello.txt"));
+        assert!(output.windows(2).any(|bytes| bytes == [EOT, EOT]));
+    }
+
+    #[test]
+    fn ymodem_send_rejects_a_reader_shorter_than_its_declared_size() {
+        let mut input = Vec::new();
+        input.extend([WANT_CRC, ACK, WANT_CRC, ACK]);
+        let mut io = MemoryModemIo::with_input(input);
+        let mut entries = [YmodemSendStreamEntry {
+            file_name: "short.bin".to_string(),
+            file_size: 6,
+            reader: b"short".as_slice(),
+        }];
+
+        let result = send_ymodem_stream(&mut io, &mut entries);
+
+        assert!(matches!(result, Err(ModemTransferError::UnexpectedFrame)));
     }
 }

@@ -8,14 +8,34 @@ use crate::crc::{crc16_xmodem_update, crc32_ieee_update};
 use crate::error::{ModemError, ModemTransferError};
 use crate::io::{MemoryModemIo, ModemIo};
 use crate::zmodem::{
-    XON, ZBIN, ZBIN32, ZDLE, ZDataEnd, ZFrameType, ZHeader, ZHeaderEncoding, ZPAD,
-    encode_hex_header, position_header, push_zdle_escaped,
+    XON, ZBIN, ZBIN32, ZDLE, ZDataEnd, ZFrameType, ZHeader, ZHeaderEncoding, ZPAD, ZRUB0, ZRUB1,
+    encode_bin16_header_with_escape, encode_bin32_header_with_escape, encode_hex_header,
+    position_header, push_zdle_escaped_with_control,
 };
 
 const ZMODEM_TIMEOUT: Duration = Duration::from_secs(10);
 const ZMODEM_MAX_CHUNK: usize = 8192;
 const ZMODEM_MAX_POSITION: u64 = u32::MAX as u64;
-const ZRINIT_FLAGS: [u8; 4] = [0, 0, 0, 0x23];
+const ZMODEM_CAN_FULL_DUPLEX: u8 = 0x01;
+const ZMODEM_CAN_OVERLAPPED_IO: u8 = 0x02;
+const ZMODEM_CAN_CRC32: u8 = 0x20;
+const ZMODEM_ESCAPE_CONTROL: u8 = 0x40;
+const ZMODEM_BINARY_FILE_CONVERSION: u8 = 0x01;
+const ZMODEM_ATTENTION_MAX_BYTES: usize = 32;
+const ZFILE_BINARY_FLAGS: [u8; 4] = [0, 0, 0, ZMODEM_BINARY_FILE_CONVERSION];
+const ZRINIT_FLAGS: [u8; 4] = [
+    (ZMODEM_MAX_CHUNK & 0xff) as u8,
+    (ZMODEM_MAX_CHUNK >> 8) as u8,
+    0,
+    ZMODEM_CAN_FULL_DUPLEX | ZMODEM_CAN_OVERLAPPED_IO | ZMODEM_CAN_CRC32 | ZMODEM_ESCAPE_CONTROL,
+];
+
+#[derive(Clone, Copy, Debug)]
+struct ZmodemPeerCapabilities {
+    chunk_size: usize,
+    use_crc32: bool,
+    escape_control: bool,
+}
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ZmodemFileHeader {
@@ -56,9 +76,13 @@ where
             }
             ZFrameType::ZFile => {
                 let use_crc32 = header.encoding == ZHeaderEncoding::Bin32;
-                let file_header_data = read_zmodem_data(io, use_crc32)?.payload;
+                let file_header_frame = read_zmodem_data(io, use_crc32, ZMODEM_MAX_CHUNK)?;
+                if file_header_frame.end != ZDataEnd::EndWithAck {
+                    return Err(ModemTransferError::UnexpectedFrame);
+                }
+                let file_header_data = file_header_frame.payload;
                 let Some(file_header) = parse_zfile_header(&file_header_data)? else {
-                    send_zfin(io)?;
+                    finish_zmodem_receive(io)?;
                     return Ok(received);
                 };
                 if let Some(file_size) = file_header.file_size {
@@ -76,28 +100,7 @@ where
                 loop {
                     let data_header = read_zmodem_header(io)?;
                     match data_header.frame_type {
-                        ZFrameType::ZData => loop {
-                            let frame = match read_zmodem_data(io, use_crc32) {
-                                Ok(frame) => frame,
-                                Err(ModemTransferError::Protocol(ModemError::InvalidCrc)) => {
-                                    write_zheader(
-                                        io,
-                                        ZFrameType::ZRpos,
-                                        position_header_checked(received_offset)?,
-                                    )?;
-                                    break;
-                                }
-                                Err(error) => return Err(error),
-                            };
-                            writer.write_all(&frame.payload)?;
-                            received_offset =
-                                received_offset.saturating_add(frame.payload.len() as u64);
-                            if !matches!(frame.end, ZDataEnd::Continue | ZDataEnd::ContinueWithAck)
-                            {
-                                break;
-                            }
-                        },
-                        ZFrameType::ZEof => {
+                        ZFrameType::ZData => {
                             if data_header.position_u32() as u64 != received_offset {
                                 write_zheader(
                                     io,
@@ -106,14 +109,74 @@ where
                                 )?;
                                 continue;
                             }
+                            let data_uses_crc32 = data_header.encoding == ZHeaderEncoding::Bin32;
+                            loop {
+                                let frame =
+                                    match read_zmodem_data(io, data_uses_crc32, ZMODEM_MAX_CHUNK) {
+                                        Ok(frame) => frame,
+                                        Err(ModemTransferError::Protocol(
+                                            ModemError::InvalidCrc,
+                                        )) => {
+                                            write_zheader(
+                                                io,
+                                                ZFrameType::ZRpos,
+                                                position_header_checked(received_offset)?,
+                                            )?;
+                                            break;
+                                        }
+                                        Err(error) => return Err(error),
+                                    };
+                                let next_offset = received_offset
+                                    .checked_add(frame.payload.len() as u64)
+                                    .ok_or(ModemTransferError::UnexpectedFrame)?;
+                                if file_header
+                                    .file_size
+                                    .is_some_and(|file_size| next_offset > file_size)
+                                {
+                                    return Err(ModemTransferError::UnexpectedFrame);
+                                }
+                                writer.write_all(&frame.payload)?;
+                                received_offset = next_offset;
+                                match frame.end {
+                                    ZDataEnd::Continue => {}
+                                    ZDataEnd::ContinueWithAck => write_zheader(
+                                        io,
+                                        ZFrameType::ZAck,
+                                        position_header_checked(received_offset)?,
+                                    )?,
+                                    ZDataEnd::End => break,
+                                    ZDataEnd::EndWithAck => {
+                                        write_zheader(
+                                            io,
+                                            ZFrameType::ZAck,
+                                            position_header_checked(received_offset)?,
+                                        )?;
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                        ZFrameType::ZEof => {
+                            let declared_size_matches = file_header
+                                .file_size
+                                .is_none_or(|file_size| file_size == received_offset);
+                            if data_header.position_u32() as u64 != received_offset
+                                || !declared_size_matches
+                            {
+                                write_zheader(
+                                    io,
+                                    ZFrameType::ZRpos,
+                                    position_header_checked(received_offset)?,
+                                )?;
+                                continue;
+                            }
+                            writer.flush()?;
                             send_zrinit(io)?;
                             received.push(file_header);
                             break;
                         }
                         ZFrameType::ZFin => {
-                            send_zfin(io)?;
-                            received.push(file_header);
-                            return Ok(received);
+                            return Err(ModemTransferError::UnexpectedFrame);
                         }
                         ZFrameType::ZAbort | ZFrameType::ZCan => {
                             return Err(ModemTransferError::Cancelled);
@@ -122,8 +185,16 @@ where
                     }
                 }
             }
+            ZFrameType::ZsInit => {
+                let use_crc32 = header.encoding == ZHeaderEncoding::Bin32;
+                let frame = read_zmodem_data(io, use_crc32, ZMODEM_ATTENTION_MAX_BYTES)?;
+                if frame.end != ZDataEnd::EndWithAck {
+                    return Err(ModemTransferError::UnexpectedFrame);
+                }
+                write_zheader(io, ZFrameType::ZAck, position_header(1))?;
+            }
             ZFrameType::ZFin => {
-                send_zfin(io)?;
+                finish_zmodem_receive(io)?;
                 return Ok(received);
             }
             ZFrameType::ZAbort | ZFrameType::ZCan => return Err(ModemTransferError::Cancelled),
@@ -159,21 +230,52 @@ where
         validate_zmodem_file_size(entry.file_size)?;
     }
 
-    wait_for_zrinit(io)?;
+    let peer = wait_for_zrinit(io)?;
     let mut total = 0u64;
 
     for entry in entries {
         let header_payload = build_zfile_header(&entry.file_name, entry.file_size);
-        write_zheader(io, ZFrameType::ZFile, position_header(0))?;
-        write_zdata(io, &header_payload, ZDataEnd::EndWithAck, false)?;
+        write_zbinary_header(
+            io,
+            ZFrameType::ZFile,
+            ZFILE_BINARY_FLAGS,
+            peer.use_crc32,
+            peer.escape_control,
+        )?;
+        write_zdata(
+            io,
+            &header_payload,
+            ZDataEnd::EndWithAck,
+            peer.use_crc32,
+            peer.escape_control,
+        )?;
 
         loop {
             let response = read_zmodem_header(io)?;
             match response.frame_type {
                 ZFrameType::ZRpos => {
                     let mut offset = response.position_u32() as u64;
+                    if offset > entry.file_size {
+                        return Err(ModemTransferError::UnexpectedFrame);
+                    }
                     loop {
-                        send_zfile_data_stream(io, &mut entry.reader, entry.file_size, offset)?;
+                        match send_zfile_data_stream(
+                            io,
+                            &mut entry.reader,
+                            entry.file_size,
+                            offset,
+                            peer,
+                        )? {
+                            ZmodemSendDataResult::Complete => {}
+                            ZmodemSendDataResult::ResumeAt(next_offset) => {
+                                if next_offset > entry.file_size {
+                                    return Err(ModemTransferError::UnexpectedFrame);
+                                }
+                                offset = next_offset;
+                                continue;
+                            }
+                            ZmodemSendDataResult::Skip => break,
+                        }
                         let followup = read_zmodem_header(io)?;
                         match followup.frame_type {
                             ZFrameType::ZrInit => {
@@ -181,7 +283,11 @@ where
                                 break;
                             }
                             ZFrameType::ZRpos => {
-                                offset = followup.position_u32() as u64;
+                                let next_offset = followup.position_u32() as u64;
+                                if next_offset > entry.file_size {
+                                    return Err(ModemTransferError::UnexpectedFrame);
+                                }
+                                offset = next_offset;
                                 continue;
                             }
                             ZFrameType::ZSkip => break,
@@ -222,11 +328,25 @@ struct ZDataFrame {
     end: ZDataEnd,
 }
 
-fn wait_for_zrinit<I: ModemIo>(io: &mut I) -> Result<(), ModemTransferError> {
+fn wait_for_zrinit<I: ModemIo>(io: &mut I) -> Result<ZmodemPeerCapabilities, ModemTransferError> {
     loop {
         let header = read_zmodem_header(io)?;
         match header.frame_type {
-            ZFrameType::ZrInit => return Ok(()),
+            ZFrameType::ZrInit => {
+                let advertised_chunk =
+                    u16::from_le_bytes([header.position[0], header.position[1]]) as usize;
+                let chunk_size = if advertised_chunk < 32 {
+                    1024
+                } else {
+                    advertised_chunk.min(ZMODEM_MAX_CHUNK)
+                };
+                let flags = header.position[3];
+                return Ok(ZmodemPeerCapabilities {
+                    chunk_size,
+                    use_crc32: flags & ZMODEM_CAN_CRC32 != 0,
+                    escape_control: flags & ZMODEM_ESCAPE_CONTROL != 0,
+                });
+            }
             ZFrameType::ZrqInit => write_zheader(io, ZFrameType::ZrInit, ZRINIT_FLAGS)?,
             ZFrameType::ZAbort | ZFrameType::ZCan => return Err(ModemTransferError::Cancelled),
             _ => {}
@@ -234,30 +354,90 @@ fn wait_for_zrinit<I: ModemIo>(io: &mut I) -> Result<(), ModemTransferError> {
     }
 }
 
+enum ZmodemSendDataResult {
+    Complete,
+    ResumeAt(u64),
+    Skip,
+}
+
 fn send_zfile_data_stream<I, R>(
     io: &mut I,
     reader: &mut R,
     file_size: u64,
     offset: u64,
-) -> Result<(), ModemTransferError>
+    peer: ZmodemPeerCapabilities,
+) -> Result<ZmodemSendDataResult, ModemTransferError>
 where
     I: ModemIo,
     R: Read + Seek,
 {
     let start = offset.min(file_size);
     reader.seek(SeekFrom::Start(start))?;
-    write_zheader(io, ZFrameType::ZData, position_header_checked(start)?)?;
-    let mut buffer = vec![0u8; ZMODEM_MAX_CHUNK];
-    loop {
-        let read = reader.read(&mut buffer)?;
+    write_zbinary_header(
+        io,
+        ZFrameType::ZData,
+        position_header_checked(start)?,
+        peer.use_crc32,
+        peer.escape_control,
+    )?;
+    let mut buffer = vec![0u8; peer.chunk_size];
+    let mut sent_offset = start;
+    while sent_offset < file_size {
+        let remaining = (file_size - sent_offset).min(buffer.len() as u64) as usize;
+        let read = read_padded_exact(reader, &mut buffer[..remaining])?;
+        if read == 0 {
+            return Err(ModemTransferError::UnexpectedFrame);
+        }
+        sent_offset = sent_offset.saturating_add(read as u64);
+        let frame_end = if sent_offset < file_size {
+            ZDataEnd::ContinueWithAck
+        } else {
+            ZDataEnd::End
+        };
+        write_zdata(
+            io,
+            &buffer[..read],
+            frame_end,
+            peer.use_crc32,
+            peer.escape_control,
+        )?;
+        if frame_end == ZDataEnd::ContinueWithAck {
+            let response = read_zmodem_header(io)?;
+            match response.frame_type {
+                ZFrameType::ZAck if response.position_u32() as u64 == sent_offset => {}
+                ZFrameType::ZRpos => {
+                    return Ok(ZmodemSendDataResult::ResumeAt(
+                        response.position_u32() as u64
+                    ));
+                }
+                ZFrameType::ZSkip => return Ok(ZmodemSendDataResult::Skip),
+                ZFrameType::ZAbort | ZFrameType::ZCan => {
+                    return Err(ModemTransferError::Cancelled);
+                }
+                _ => return Err(ModemTransferError::UnexpectedFrame),
+            }
+        }
+    }
+    if start == file_size {
+        write_zdata(io, &[], ZDataEnd::End, peer.use_crc32, peer.escape_control)?;
+    }
+    write_zheader(io, ZFrameType::ZEof, position_header_checked(file_size)?)?;
+    Ok(ZmodemSendDataResult::Complete)
+}
+
+fn read_padded_exact<R: Read>(
+    reader: &mut R,
+    buffer: &mut [u8],
+) -> Result<usize, ModemTransferError> {
+    let mut total = 0usize;
+    while total < buffer.len() {
+        let read = reader.read(&mut buffer[total..])?;
         if read == 0 {
             break;
         }
-        write_zdata(io, &buffer[..read], ZDataEnd::Continue, false)?;
+        total += read;
     }
-    write_zdata(io, &[], ZDataEnd::End, false)?;
-    write_zheader(io, ZFrameType::ZEof, position_header_checked(file_size)?)?;
-    Ok(())
+    Ok(total)
 }
 
 fn validate_zmodem_file_size(file_size: u64) -> Result<(), ModemTransferError> {
@@ -276,15 +456,30 @@ fn position_header_checked(position: u64) -> Result<[u8; 4], ModemTransferError>
 }
 
 fn send_zrinit<I: ModemIo>(io: &mut I) -> Result<(), ModemTransferError> {
-    for _ in 0..3 {
-        write_zheader(io, ZFrameType::ZrInit, ZRINIT_FLAGS)?;
-    }
-    Ok(())
+    // Send one response per negotiation event. Back-to-back duplicates remain
+    // queued as stale replies after lrzsz has already advanced to ZFILE/ZSINIT.
+    write_zheader(io, ZFrameType::ZrInit, ZRINIT_FLAGS)
 }
 
-fn send_zfin<I: ModemIo>(io: &mut I) -> Result<(), ModemTransferError> {
+fn finish_zmodem_receive<I: ModemIo>(io: &mut I) -> Result<(), ModemTransferError> {
     write_zheader(io, ZFrameType::ZFin, position_header(0))?;
-    io.write_all(b"OO")
+    let mut consecutive_o = 0usize;
+    let mut consecutive_cancel = 0usize;
+    loop {
+        let byte = io.read_byte(ZMODEM_TIMEOUT)?;
+        consecutive_o = if byte == b'O' { consecutive_o + 1 } else { 0 };
+        if consecutive_o == 2 {
+            return Ok(());
+        }
+        consecutive_cancel = if byte == ZDLE {
+            consecutive_cancel + 1
+        } else {
+            0
+        };
+        if consecutive_cancel == 5 {
+            return Err(ModemTransferError::Cancelled);
+        }
+    }
 }
 
 fn finish_zmodem_send<I: ModemIo>(io: &mut I) -> Result<(), ModemTransferError> {
@@ -315,35 +510,56 @@ fn write_zheader<I: ModemIo>(
     io.write_all(&encode_hex_header(frame_type, position, include_xon))
 }
 
+fn write_zbinary_header<I: ModemIo>(
+    io: &mut I,
+    frame_type: ZFrameType,
+    position: [u8; 4],
+    use_crc32: bool,
+    escape_control: bool,
+) -> Result<(), ModemTransferError> {
+    let header = if use_crc32 {
+        encode_bin32_header_with_escape(frame_type, position, escape_control)
+    } else {
+        encode_bin16_header_with_escape(frame_type, position, escape_control)
+    };
+    io.write_all(&header)
+}
+
 fn write_zdata<I: ModemIo>(
     io: &mut I,
     payload: &[u8],
     end: ZDataEnd,
     use_crc32: bool,
+    escape_control: bool,
 ) -> Result<(), ModemTransferError> {
     let mut out = Vec::with_capacity(payload.len() * 2 + 8);
     if use_crc32 {
         let mut crc = 0xffff_ffffu32;
         for byte in payload {
-            push_zdle_escaped(&mut out, *byte);
+            push_zdle_escaped_with_control(&mut out, *byte, escape_control);
             crc = crc32_ieee_update(crc, *byte);
         }
         out.extend_from_slice(&[ZDLE, end.marker()]);
         crc = crc32_ieee_update(crc, end.marker());
         crc = !crc;
         for byte in crc.to_le_bytes() {
-            push_zdle_escaped(&mut out, byte);
+            push_zdle_escaped_with_control(&mut out, byte, escape_control);
         }
     } else {
         let mut crc = 0u16;
         for byte in payload {
-            push_zdle_escaped(&mut out, *byte);
+            push_zdle_escaped_with_control(&mut out, *byte, escape_control);
             crc = crc16_xmodem_update(crc, *byte);
         }
         out.extend_from_slice(&[ZDLE, end.marker()]);
         crc = crc16_xmodem_update(crc, end.marker());
-        push_zdle_escaped(&mut out, (crc >> 8) as u8);
-        push_zdle_escaped(&mut out, crc as u8);
+        push_zdle_escaped_with_control(&mut out, (crc >> 8) as u8, escape_control);
+        push_zdle_escaped_with_control(&mut out, crc as u8, escape_control);
+    }
+    if end == ZDataEnd::EndWithAck {
+        // lrzsz emits XON after ZCRCW to release software flow control before
+        // it waits for the peer's acknowledgment.
+        out.push(XON);
     }
     io.write_all(&out)
 }
@@ -443,16 +659,18 @@ fn read_binary_zheader<I: ModemIo>(
 fn read_zmodem_data<I: ModemIo>(
     io: &mut I,
     use_crc32: bool,
+    max_payload: usize,
 ) -> Result<ZDataFrame, ModemTransferError> {
     let mut payload = Vec::new();
-    let mut frame_start = true;
     let end = loop {
         let byte = io.read_byte(ZMODEM_TIMEOUT)?;
-        if frame_start && byte == XON {
+        if matches!(byte, XON | 0x13 | 0x91 | 0x93) {
             continue;
         }
-        frame_start = false;
         if byte != ZDLE {
+            if payload.len() >= max_payload {
+                return Err(ModemTransferError::Protocol(ModemError::InvalidLength));
+            }
             payload.push(byte);
             continue;
         }
@@ -460,7 +678,10 @@ fn read_zmodem_data<I: ModemIo>(
         if let Some(end) = ZDataEnd::from_marker(escaped) {
             break end;
         }
-        payload.push(escaped ^ 0x40);
+        if payload.len() >= max_payload {
+            return Err(ModemTransferError::Protocol(ModemError::InvalidLength));
+        }
+        payload.push(decode_zescaped_followup(io, escaped)?);
     };
 
     if use_crc32 {
@@ -510,11 +731,33 @@ fn consume_hex_header_line_end<I: ModemIo>(io: &mut I) -> Result<(), ModemTransf
 }
 
 fn read_zescaped_byte<I: ModemIo>(io: &mut I) -> Result<u8, ModemTransferError> {
-    let byte = io.read_byte(ZMODEM_TIMEOUT)?;
-    if byte == ZDLE {
-        Ok(io.read_byte(ZMODEM_TIMEOUT)? ^ 0x40)
-    } else {
-        Ok(byte)
+    loop {
+        let byte = io.read_byte(ZMODEM_TIMEOUT)?;
+        if matches!(byte, XON | 0x13 | 0x91 | 0x93) {
+            continue;
+        }
+        if byte == ZDLE {
+            let escaped = io.read_byte(ZMODEM_TIMEOUT)?;
+            return decode_zescaped_followup(io, escaped);
+        }
+        return Ok(byte);
+    }
+}
+
+fn decode_zescaped_followup<I: ModemIo>(io: &mut I, escaped: u8) -> Result<u8, ModemTransferError> {
+    match escaped {
+        ZRUB0 => Ok(0x7f),
+        ZRUB1 => Ok(0xff),
+        byte if byte & 0x60 == 0x40 => Ok(byte ^ 0x40),
+        ZDLE => {
+            for _ in 0..3 {
+                if io.read_byte(ZMODEM_TIMEOUT)? != ZDLE {
+                    return Err(ModemTransferError::Protocol(ModemError::InvalidEscape));
+                }
+            }
+            Err(ModemTransferError::Cancelled)
+        }
+        _ => Err(ModemTransferError::Protocol(ModemError::InvalidEscape)),
     }
 }
 
@@ -543,7 +786,9 @@ fn parse_zfile_header(bytes: &[u8]) -> Result<Option<ZmodemFileHeader>, ModemTra
     let file_size = metadata
         .split_whitespace()
         .next()
-        .and_then(|size| size.parse().ok());
+        .map(str::parse)
+        .transpose()
+        .map_err(|_| ModemTransferError::Protocol(ModemError::InvalidLength))?;
     Ok(Some(ZmodemFileHeader {
         file_name,
         file_size,
@@ -571,6 +816,7 @@ mod tests {
             position_header(0),
             false,
         ));
+        input.extend_from_slice(b"OO");
         let mut io = MemoryModemIo::with_input(input);
         let received = receive_zmodem(&mut io, |_header| {
             Ok::<Vec<u8>, ModemTransferError>(Vec::new())
@@ -579,6 +825,7 @@ mod tests {
         let output = io.take_output();
         assert!(received.is_empty());
         assert!(output.starts_with(&encode_hex_header(ZFrameType::ZrInit, ZRINIT_FLAGS, true)));
+        assert!(!output.ends_with(b"OO"));
     }
 
     #[test]
@@ -594,11 +841,20 @@ mod tests {
         );
         assert!(matches!(result, Err(ModemTransferError::Timeout)));
         let output = io.take_output();
-        assert!(output.starts_with(&encode_hex_header(
+        assert!(output.starts_with(&encode_bin32_header_with_escape(
             ZFrameType::ZFile,
-            position_header(0),
-            true
+            ZFILE_BINARY_FLAGS,
+            true,
         )));
+    }
+
+    #[test]
+    fn zcrcw_data_releases_software_flow_control() {
+        let mut io = MemoryModemIo::default();
+
+        write_zdata(&mut io, b"header", ZDataEnd::EndWithAck, true, true).unwrap();
+
+        assert_eq!(io.take_output().last(), Some(&XON));
     }
 
     #[test]
@@ -628,7 +884,8 @@ mod tests {
         assert_eq!(sent, 6);
         assert!(output.windows(3).any(|window| window == b"def"));
         assert!(!output.windows(3).any(|window| window == b"abc"));
-        let resumed_data_header = encode_hex_header(ZFrameType::ZData, position_header(3), true);
+        let resumed_data_header =
+            encode_bin32_header_with_escape(ZFrameType::ZData, position_header(3), true);
         assert!(
             output
                 .windows(resumed_data_header.len())
@@ -659,12 +916,13 @@ mod tests {
             &build_zfile_header("hello.bin", 5),
             ZDataEnd::EndWithAck,
             false,
+            false,
         )
         .expect("file header data");
         let zfile_data = data_io.take_output();
 
         let mut payload_io = MemoryModemIo::default();
-        write_zdata(&mut payload_io, b"hello", ZDataEnd::End, false).expect("payload data");
+        write_zdata(&mut payload_io, b"hello", ZDataEnd::End, false, false).expect("payload data");
         let payload_data = payload_io.take_output();
 
         let mut input = encode_hex_header(ZFrameType::ZFile, position_header(0), true);
@@ -690,11 +948,13 @@ mod tests {
             position_header(0),
             false,
         ));
+        input.extend_from_slice(b"OO");
 
         let mut probe = MemoryModemIo::with_input(input.clone());
         let zfile_header = read_zmodem_header(&mut probe).expect("probe zfile header");
         assert_eq!(zfile_header.frame_type, ZFrameType::ZFile);
-        let zfile_frame = read_zmodem_data(&mut probe, false).expect("probe zfile data");
+        let zfile_frame =
+            read_zmodem_data(&mut probe, false, ZMODEM_MAX_CHUNK).expect("probe zfile data");
         assert!(
             parse_zfile_header(&zfile_frame.payload)
                 .expect("probe zfile parse")
@@ -702,7 +962,8 @@ mod tests {
         );
         let data_header = read_zmodem_header(&mut probe).expect("probe data header");
         assert_eq!(data_header.frame_type, ZFrameType::ZData);
-        let data_frame = read_zmodem_data(&mut probe, false).expect("probe payload data");
+        let data_frame =
+            read_zmodem_data(&mut probe, false, ZMODEM_MAX_CHUNK).expect("probe payload data");
         assert_eq!(data_frame.payload, b"hello");
 
         let output = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
@@ -725,6 +986,105 @@ mod tests {
     }
 
     #[test]
+    fn zmodem_receive_acknowledges_crcq_at_the_committed_offset() {
+        let mut header_io = MemoryModemIo::default();
+        write_zdata(
+            &mut header_io,
+            &build_zfile_header("hello.bin", 5),
+            ZDataEnd::EndWithAck,
+            false,
+            false,
+        )
+        .unwrap();
+        let mut first_data_io = MemoryModemIo::default();
+        write_zdata(
+            &mut first_data_io,
+            b"hel",
+            ZDataEnd::ContinueWithAck,
+            false,
+            false,
+        )
+        .unwrap();
+        let mut final_data_io = MemoryModemIo::default();
+        write_zdata(&mut final_data_io, b"lo", ZDataEnd::End, false, false).unwrap();
+
+        let mut input = encode_hex_header(ZFrameType::ZFile, position_header(0), true);
+        input.extend(header_io.take_output());
+        input.extend(encode_hex_header(
+            ZFrameType::ZData,
+            position_header(0),
+            true,
+        ));
+        input.extend(first_data_io.take_output());
+        input.extend(final_data_io.take_output());
+        input.extend(encode_hex_header(
+            ZFrameType::ZEof,
+            position_header(5),
+            true,
+        ));
+        input.extend(encode_hex_header(
+            ZFrameType::ZFin,
+            position_header(0),
+            false,
+        ));
+        input.extend_from_slice(b"OO");
+
+        let mut io = MemoryModemIo::with_input(input);
+        let received = receive_zmodem(&mut io, |_header| {
+            Ok::<Vec<u8>, ModemTransferError>(Vec::new())
+        })
+        .unwrap();
+        let replies = io.take_output();
+        let expected_ack = encode_hex_header(ZFrameType::ZAck, position_header(3), false);
+
+        assert_eq!(received.len(), 1);
+        assert!(
+            replies
+                .windows(expected_ack.len())
+                .any(|window| window == expected_ack.as_slice())
+        );
+    }
+
+    #[test]
+    fn zmodem_receive_rejects_zfin_before_verified_eof() {
+        let mut header_io = MemoryModemIo::default();
+        write_zdata(
+            &mut header_io,
+            &build_zfile_header("partial.bin", 5),
+            ZDataEnd::EndWithAck,
+            false,
+            false,
+        )
+        .unwrap();
+        let mut input = encode_hex_header(ZFrameType::ZFile, position_header(0), true);
+        input.extend(header_io.take_output());
+        input.extend(encode_hex_header(
+            ZFrameType::ZFin,
+            position_header(0),
+            false,
+        ));
+        let mut io = MemoryModemIo::with_input(input);
+
+        let result = receive_zmodem(&mut io, |_header| {
+            Ok::<Vec<u8>, ModemTransferError>(Vec::new())
+        });
+
+        assert!(matches!(result, Err(ModemTransferError::UnexpectedFrame)));
+    }
+
+    #[test]
+    fn zmodem_data_rejects_payloads_beyond_the_negotiated_limit() {
+        let mut io = MemoryModemIo::with_input(vec![b'x'; ZMODEM_MAX_CHUNK + 1]);
+
+        let result = read_zmodem_data(&mut io, false, ZMODEM_MAX_CHUNK);
+
+        assert!(matches!(
+            result,
+            Err(ModemTransferError::Protocol(ModemError::InvalidLength))
+        ));
+    }
+
+    #[test]
     fn zmodem_send_rejects_files_beyond_32_bit_positions() {
         let file_size = u32::MAX as u64 + 1;
         let mut entries = [ZmodemSendStreamEntry {
@@ -741,5 +1101,39 @@ mod tests {
             Err(ModemTransferError::UnsupportedFileSize(size)) if size == file_size
         ));
         assert!(io.take_output().is_empty());
+    }
+
+    #[test]
+    fn zmodem_receive_finish_ignores_a_retried_zfin_header() {
+        let mut input = encode_hex_header(ZFrameType::ZFin, position_header(0), false);
+        input.extend_from_slice(b"OO");
+        let mut io = MemoryModemIo::with_input(input);
+
+        finish_zmodem_receive(&mut io).unwrap();
+
+        assert_eq!(
+            io.take_output(),
+            encode_hex_header(ZFrameType::ZFin, position_header(0), false)
+        );
+    }
+
+    #[test]
+    fn zmodem_send_rejects_resume_positions_past_end_of_file() {
+        let mut input = encode_hex_header(ZFrameType::ZrInit, ZRINIT_FLAGS, true);
+        input.extend(encode_hex_header(
+            ZFrameType::ZRpos,
+            position_header(7),
+            true,
+        ));
+        let mut io = MemoryModemIo::with_input(input);
+        let mut entries = [ZmodemSendStreamEntry {
+            file_name: "short.bin".to_string(),
+            file_size: 5,
+            reader: std::io::Cursor::new(b"short".to_vec()),
+        }];
+
+        let result = send_zmodem_stream(&mut io, &mut entries);
+
+        assert!(matches!(result, Err(ModemTransferError::UnexpectedFrame)));
     }
 }

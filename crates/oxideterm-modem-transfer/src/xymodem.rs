@@ -213,7 +213,11 @@ impl YmodemFileHeader {
         let file_size = if size_end == 0 {
             None
         } else {
-            String::from_utf8_lossy(&metadata[..size_end]).parse().ok()
+            Some(
+                String::from_utf8_lossy(&metadata[..size_end])
+                    .parse()
+                    .map_err(|_| ModemError::InvalidLength)?,
+            )
         };
 
         Ok(Some(Self {

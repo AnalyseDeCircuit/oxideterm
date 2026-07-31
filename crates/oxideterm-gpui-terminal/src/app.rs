@@ -363,6 +363,8 @@ pub struct TerminalPane {
     modem_prompt_active: bool,
     modem_connection_lost: bool,
     modem_progress: Option<ModemProgressState>,
+    modem_transfer: Option<oxideterm_modem_transfer::ModemTransfer>,
+    modem_worker: Option<std::thread::JoinHandle<()>>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -765,6 +767,8 @@ impl TerminalPane {
             modem_prompt_active: false,
             modem_connection_lost: false,
             modem_progress: None,
+            modem_transfer: None,
+            modem_worker: None,
             _subscriptions: vec![focus_in, focus_out],
         })
     }

@@ -296,7 +296,7 @@ impl SerialSession {
         let (worker_tx, worker_rx) = crate::backpressure::byte_bounded_channel(
             crate::backpressure::TRANSPORT_OUTPUT_BACKLOG_BYTES,
         );
-        let (command_tx, command_rx) = crossbeam_channel::unbounded();
+        let (command_tx, command_rx) = crossbeam_channel::bounded(256);
         let term_config = interactive_terminal_config(scrollback_lines);
         let term = Arc::new(FairMutex::new(Term::new(term_config, &size, listener)));
 
@@ -445,13 +445,14 @@ impl SerialSession {
     }
 
     fn feed_transport_output(&mut self, bytes: &[u8]) {
-        let processed_output = apply_terminal_output_processor(&self.output_processor, bytes);
-        let bytes = processed_output.as_ref();
         let events = self.modem_consumer.process_server_output(bytes);
         self.handle_modem_consumer_events(events);
     }
 
     fn feed_plain_transport_output(&mut self, bytes: &[u8]) {
+        // Modem framing is defined on raw serial bytes, before display plugins.
+        let processed_output = apply_terminal_output_processor(&self.output_processor, bytes);
+        let bytes = processed_output.as_ref();
         let terminal_bytes = self.prepare_display_output(bytes);
         if terminal_bytes.is_empty() {
             return;
@@ -508,10 +509,19 @@ impl SerialSession {
     }
 
     fn flush_modem_server_writes(&mut self) -> bool {
+        let Some(transfer) = self.modem_consumer.active_transfer_input() else {
+            return false;
+        };
         let mut changed = false;
-        for bytes in self.modem_consumer.take_server_writes() {
-            let _ = self.write_protocol_bytes(&bytes);
-            changed = true;
+        while let Some(bytes) = transfer.take_server_write() {
+            let byte_len = bytes.len();
+            if self.write_protocol_bytes(&bytes).is_ok() {
+                transfer.complete_server_write(byte_len);
+                changed = true;
+            } else {
+                transfer.restore_server_write(bytes);
+                break;
+            }
         }
         changed
     }
@@ -782,7 +792,8 @@ impl TerminalSessionBackend for SerialSession {
     }
 
     fn finish_modem_transfer(&mut self) {
-        self.modem_consumer.finish_transfer();
+        let trailing_output = self.modem_consumer.finish_transfer();
+        self.feed_plain_transport_output(&trailing_output);
     }
 
     fn mode(&self) -> TermMode {

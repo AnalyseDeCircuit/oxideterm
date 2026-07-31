@@ -14,6 +14,8 @@ pub const ZCRCE: u8 = b'h';
 pub const ZCRCG: u8 = b'i';
 pub const ZCRCQ: u8 = b'j';
 pub const ZCRCW: u8 = b'k';
+pub const ZRUB0: u8 = b'l';
+pub const ZRUB1: u8 = b'm';
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(u8)]
@@ -178,21 +180,29 @@ pub fn parse_hex_header(bytes: &[u8]) -> Result<ZHeader, ModemError> {
 }
 
 pub fn encode_bin16_header(frame_type: ZFrameType, position: [u8; 4]) -> Vec<u8> {
+    encode_bin16_header_with_escape(frame_type, position, false)
+}
+
+pub fn encode_bin16_header_with_escape(
+    frame_type: ZFrameType,
+    position: [u8; 4],
+    escape_control: bool,
+) -> Vec<u8> {
     let mut escaped_payload = Vec::with_capacity(8);
     let mut crc_payload = [0u8; 5];
     crc_payload[0] = frame_type as u8;
     crc_payload[1..].copy_from_slice(&position);
 
     for byte in crc_payload {
-        push_zdle_escaped(&mut escaped_payload, byte);
+        push_zdle_escaped_with_control(&mut escaped_payload, byte, escape_control);
     }
 
     let mut crc = crc_payload
         .iter()
         .fold(0u16, |crc, byte| crc16_xmodem_update(crc, *byte));
     crc = crc16_xmodem_update(crc16_xmodem_update(crc, 0), 0);
-    push_zdle_escaped(&mut escaped_payload, (crc >> 8) as u8);
-    push_zdle_escaped(&mut escaped_payload, crc as u8);
+    push_zdle_escaped_with_control(&mut escaped_payload, (crc >> 8) as u8, escape_control);
+    push_zdle_escaped_with_control(&mut escaped_payload, crc as u8, escape_control);
 
     let mut out = Vec::with_capacity(3 + escaped_payload.len());
     out.extend_from_slice(&[ZPAD, ZDLE, ZBIN]);
@@ -201,13 +211,21 @@ pub fn encode_bin16_header(frame_type: ZFrameType, position: [u8; 4]) -> Vec<u8>
 }
 
 pub fn encode_bin32_header(frame_type: ZFrameType, position: [u8; 4]) -> Vec<u8> {
+    encode_bin32_header_with_escape(frame_type, position, false)
+}
+
+pub fn encode_bin32_header_with_escape(
+    frame_type: ZFrameType,
+    position: [u8; 4],
+    escape_control: bool,
+) -> Vec<u8> {
     let mut escaped_payload = Vec::with_capacity(10);
     let mut crc_payload = [0u8; 5];
     crc_payload[0] = frame_type as u8;
     crc_payload[1..].copy_from_slice(&position);
 
     for byte in crc_payload {
-        push_zdle_escaped(&mut escaped_payload, byte);
+        push_zdle_escaped_with_control(&mut escaped_payload, byte, escape_control);
     }
 
     let mut crc = crc_payload
@@ -215,7 +233,7 @@ pub fn encode_bin32_header(frame_type: ZFrameType, position: [u8; 4]) -> Vec<u8>
         .fold(0xffff_ffffu32, |crc, byte| crc32_ieee_update(crc, *byte));
     crc = !crc;
     for byte in crc.to_le_bytes() {
-        push_zdle_escaped(&mut escaped_payload, byte);
+        push_zdle_escaped_with_control(&mut escaped_payload, byte, escape_control);
     }
 
     let mut out = Vec::with_capacity(3 + escaped_payload.len());
@@ -286,7 +304,13 @@ pub fn decode_zdle_payload(bytes: &[u8], decoded_len: usize) -> Result<Vec<u8>, 
             }
             let escaped = bytes[index];
             index += 1;
-            out.push(escaped ^ 0x40);
+            let decoded = match escaped {
+                ZRUB0 => 0x7f,
+                ZRUB1 => 0xff,
+                byte if byte & 0x60 == 0x40 => byte ^ 0x40,
+                _ => return Err(ModemError::InvalidEscape),
+            };
+            out.push(decoded);
         } else {
             out.push(byte);
         }
@@ -295,7 +319,11 @@ pub fn decode_zdle_payload(bytes: &[u8], decoded_len: usize) -> Result<Vec<u8>, 
 }
 
 pub fn push_zdle_escaped(out: &mut Vec<u8>, byte: u8) {
-    if should_escape_zdle(byte) {
+    push_zdle_escaped_with_control(out, byte, false);
+}
+
+pub fn push_zdle_escaped_with_control(out: &mut Vec<u8>, byte: u8, escape_control: bool) {
+    if should_escape_zdle(byte) || (escape_control && byte & 0x60 == 0) {
         out.push(ZDLE);
         out.push(byte ^ 0x40);
     } else {

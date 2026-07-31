@@ -1,10 +1,10 @@
 // Copyright (C) 2026 OxideTerm contributors.
 // SPDX-License-Identifier: GPL-3.0-only
 
-use std::fs::{File, OpenOptions};
-use std::io::ErrorKind;
+use std::fs::File;
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use oxideterm_modem_transfer::xymodem_transfer::{
@@ -21,8 +21,8 @@ use oxideterm_terminal::TerminalModemTransferRequest;
 
 #[derive(Clone)]
 pub(crate) enum ModemPromptSelection {
-    UploadFiles(Vec<String>),
-    DownloadRoot(String),
+    UploadFiles(Vec<PathBuf>),
+    DownloadRoot(PathBuf),
     Cancelled,
 }
 
@@ -51,6 +51,11 @@ pub(crate) fn run_modem_worker_job(
     event_tx: std::sync::mpsc::Sender<ModemWorkerEvent>,
 ) {
     let result = run_modem_worker_job_inner(&mut job, &event_tx);
+    if result.is_err() {
+        // Protocol failures and user cancellation both need an on-wire abort so
+        // the peer exits instead of retrying after the UI releases the transfer.
+        job.transfer.stop();
+    }
     let event = match result {
         Ok(()) => ModemWorkerEvent::Completed,
         Err(ModemWorkerError::Cancelled) => ModemWorkerEvent::Cancelled,
@@ -76,7 +81,7 @@ fn run_modem_worker_job_inner(
             Err(ModemWorkerError::Cancelled)
         }
         (ModemTransferDirection::Download, ModemPromptSelection::DownloadRoot(root)) => {
-            run_download(job, Path::new(&root), event_tx)
+            run_download(job, &root, event_tx)
         }
         (ModemTransferDirection::Upload, ModemPromptSelection::UploadFiles(paths)) => {
             run_upload(job, &paths, event_tx)
@@ -93,17 +98,20 @@ fn run_download(
     event_tx: &std::sync::mpsc::Sender<ModemWorkerEvent>,
 ) -> Result<(), ModemWorkerError> {
     std::fs::create_dir_all(root).map_err(failed)?;
+    let downloads = DownloadBatch::default();
     match job.request.protocol {
         DetectedModemProtocol::Xmodem => {
-            let (file, file_name) =
-                create_download_file(root, "xmodem.bin").map_err(worker_error)?;
+            let (file, file_name) = downloads
+                .create_writer(root, "xmodem.bin")
+                .map_err(worker_error)?;
             let mut writer = ProgressWriter::new(file, Some(file_name), None, event_tx.clone());
             receive_xmodem(&mut job.transfer, &mut writer, true).map_err(worker_error)?;
+            drop(writer);
         }
         DetectedModemProtocol::Ymodem => {
             receive_ymodem(&mut job.transfer, |header| {
                 let total = header.file_size;
-                let (file, file_name) = create_download_file(root, &header.file_name)?;
+                let (file, file_name) = downloads.create_writer(root, &header.file_name)?;
                 Ok(ProgressWriter::new(
                     file,
                     Some(file_name),
@@ -116,7 +124,7 @@ fn run_download(
         DetectedModemProtocol::Zmodem => {
             receive_zmodem(&mut job.transfer, |header| {
                 let total = header.file_size;
-                let (file, file_name) = create_download_file(root, &header.file_name)?;
+                let (file, file_name) = downloads.create_writer(root, &header.file_name)?;
                 Ok(ProgressWriter::new(
                     file,
                     Some(file_name),
@@ -132,12 +140,13 @@ fn run_download(
             ));
         }
     }
+    downloads.commit(root).map_err(worker_error)?;
     Ok(())
 }
 
 fn run_upload(
     job: &mut ModemWorkerJob,
-    paths: &[String],
+    paths: &[PathBuf],
     event_tx: &std::sync::mpsc::Sender<ModemWorkerEvent>,
 ) -> Result<(), ModemWorkerError> {
     if paths.is_empty() {
@@ -146,10 +155,10 @@ fn run_upload(
 
     match job.request.protocol {
         DetectedModemProtocol::Xmodem => {
-            let file = File::open(&paths[0]).map_err(failed)?;
-            let path = PathBuf::from(&paths[0]);
+            let path = &paths[0];
+            let file = File::open(path).map_err(failed)?;
             let file_size = file.metadata().map_err(failed)?.len();
-            let file_name = Some(local_file_name(&path)?);
+            let file_name = Some(local_file_name(path)?);
             let mut file = ProgressReader::new(file, file_name, file_size, event_tx.clone());
             send_xmodem(&mut job.transfer, &mut file, XmodemBlockMode::Bytes1024)
                 .map_err(worker_error)?;
@@ -157,10 +166,10 @@ fn run_upload(
         DetectedModemProtocol::XymodemNegotiation if paths.len() == 1 => {
             // Bare C/NAK negotiation does not identify XMODEM vs YMODEM; a
             // single selected file is the least surprising XMODEM fallback.
-            let file = File::open(&paths[0]).map_err(failed)?;
-            let path = PathBuf::from(&paths[0]);
+            let path = &paths[0];
+            let file = File::open(path).map_err(failed)?;
             let file_size = file.metadata().map_err(failed)?.len();
-            let file_name = Some(local_file_name(&path)?);
+            let file_name = Some(local_file_name(path)?);
             let mut file = ProgressReader::new(file, file_name, file_size, event_tx.clone());
             send_xmodem(&mut job.transfer, &mut file, XmodemBlockMode::Bytes1024)
                 .map_err(worker_error)?;
@@ -178,16 +187,15 @@ fn run_upload(
 }
 
 fn open_ymodem_entries(
-    paths: &[String],
+    paths: &[PathBuf],
     event_tx: &std::sync::mpsc::Sender<ModemWorkerEvent>,
 ) -> Result<Vec<YmodemSendStreamEntry<ProgressReader<File>>>, ModemWorkerError> {
     paths
         .iter()
         .map(|path| {
-            let path = PathBuf::from(path);
-            let file = File::open(&path).map_err(failed)?;
+            let file = File::open(path).map_err(failed)?;
             let file_size = file.metadata().map_err(failed)?.len();
-            let file_name = local_file_name(&path)?;
+            let file_name = local_file_name(path)?;
             let reader =
                 ProgressReader::new(file, Some(file_name.clone()), file_size, event_tx.clone());
             Ok(YmodemSendStreamEntry {
@@ -200,16 +208,15 @@ fn open_ymodem_entries(
 }
 
 fn open_zmodem_entries(
-    paths: &[String],
+    paths: &[PathBuf],
     event_tx: &std::sync::mpsc::Sender<ModemWorkerEvent>,
 ) -> Result<Vec<ZmodemSendStreamEntry<ProgressReader<File>>>, ModemWorkerError> {
     paths
         .iter()
         .map(|path| {
-            let path = PathBuf::from(path);
-            let file = File::open(&path).map_err(failed)?;
+            let file = File::open(path).map_err(failed)?;
             let file_size = file.metadata().map_err(failed)?.len();
-            let file_name = local_file_name(&path)?;
+            let file_name = local_file_name(path)?;
             let reader =
                 ProgressReader::new(file, Some(file_name.clone()), file_size, event_tx.clone());
             Ok(ZmodemSendStreamEntry {
@@ -223,33 +230,114 @@ fn open_zmodem_entries(
 
 fn local_file_name(path: &Path) -> Result<String, ModemWorkerError> {
     path.file_name()
-        .and_then(|name| name.to_str())
         .filter(|name| !name.is_empty())
-        .map(ToString::to_string)
+        // The filesystem path remains lossless; only the protocol metadata is
+        // converted because classic modem filename fields are byte strings.
+        .map(|name| name.to_string_lossy().into_owned())
         .ok_or_else(|| ModemWorkerError::Failed("Invalid local file name".to_string()))
 }
 
-fn create_download_file(
+#[derive(Clone, Default)]
+struct DownloadBatch {
+    pending: Arc<parking_lot::Mutex<Vec<PendingDownload>>>,
+}
+
+struct PendingDownload {
+    temporary_file: tempfile::NamedTempFile,
+    requested_name: String,
+}
+
+struct TransactionalDownloadWriter {
+    temporary_file: Option<tempfile::NamedTempFile>,
+    requested_name: String,
+    pending: Arc<parking_lot::Mutex<Vec<PendingDownload>>>,
+}
+
+impl DownloadBatch {
+    fn create_writer(
+        &self,
+        root: &Path,
+        remote_name: &str,
+    ) -> Result<(TransactionalDownloadWriter, String), ModemTransferError> {
+        let requested_name = safe_download_file_name(remote_name)?;
+        let temporary_file = tempfile::Builder::new()
+            .prefix(".oxideterm-modem-")
+            .suffix(".part")
+            .tempfile_in(root)?;
+        Ok((
+            TransactionalDownloadWriter {
+                temporary_file: Some(temporary_file),
+                requested_name: requested_name.clone(),
+                pending: self.pending.clone(),
+            },
+            requested_name,
+        ))
+    }
+
+    fn commit(&self, root: &Path) -> Result<(), ModemTransferError> {
+        let pending = std::mem::take(&mut *self.pending.lock());
+        for pending_download in pending {
+            persist_download_without_overwrite(root, pending_download)?;
+        }
+        Ok(())
+    }
+}
+
+impl Write for TransactionalDownloadWriter {
+    fn write(&mut self, buffer: &[u8]) -> std::io::Result<usize> {
+        self.temporary_file
+            .as_mut()
+            .expect("transactional download file")
+            .write(buffer)
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.temporary_file
+            .as_mut()
+            .expect("transactional download file")
+            .flush()
+    }
+}
+
+impl Drop for TransactionalDownloadWriter {
+    fn drop(&mut self) {
+        let Some(temporary_file) = self.temporary_file.take() else {
+            return;
+        };
+        self.pending.lock().push(PendingDownload {
+            temporary_file,
+            requested_name: self.requested_name.clone(),
+        });
+    }
+}
+
+fn persist_download_without_overwrite(
     root: &Path,
-    remote_name: &str,
-) -> Result<(File, String), ModemTransferError> {
-    let file_name = safe_download_file_name(remote_name)?;
+    mut pending: PendingDownload,
+) -> Result<(), ModemTransferError> {
     for index in 0..10_000 {
         let candidate_name = if index == 0 {
-            file_name.clone()
+            pending.requested_name.clone()
         } else {
-            duplicate_download_name(&file_name, index)
+            duplicate_download_name(&pending.requested_name, index)
         };
-        let path = root.join(&candidate_name);
-        match OpenOptions::new().write(true).create_new(true).open(path) {
-            Ok(file) => return Ok((file, candidate_name)),
-            Err(error) if error.kind() == ErrorKind::AlreadyExists => continue,
-            Err(error) => return Err(ModemTransferError::Io(error)),
+        match pending
+            .temporary_file
+            .persist_noclobber(root.join(candidate_name))
+        {
+            Ok(file) => {
+                drop(file);
+                return Ok(());
+            }
+            Err(error) if error.error.kind() == std::io::ErrorKind::AlreadyExists => {
+                pending.temporary_file = error.file;
+            }
+            Err(error) => return Err(ModemTransferError::Io(error.error)),
         }
     }
 
     Err(ModemTransferError::Io(std::io::Error::new(
-        ErrorKind::AlreadyExists,
+        std::io::ErrorKind::AlreadyExists,
         "too many duplicate modem download names",
     )))
 }
@@ -417,5 +505,53 @@ impl<W: Write> Write for ProgressWriter<W> {
 
     fn flush(&mut self) -> std::io::Result<()> {
         self.inner.flush()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn abandoned_download_batch_removes_partial_files() {
+        let root = tempfile::tempdir().unwrap();
+        let downloads = DownloadBatch::default();
+        let (mut writer, _) = downloads.create_writer(root.path(), "partial.bin").unwrap();
+        writer.write_all(b"incomplete").unwrap();
+        drop(writer);
+        drop(downloads);
+
+        assert_eq!(std::fs::read_dir(root.path()).unwrap().count(), 0);
+    }
+
+    #[test]
+    fn committed_download_does_not_overwrite_an_existing_file() {
+        let root = tempfile::tempdir().unwrap();
+        std::fs::write(root.path().join("report.txt"), b"existing").unwrap();
+        let downloads = DownloadBatch::default();
+        let (mut writer, _) = downloads.create_writer(root.path(), "report.txt").unwrap();
+        writer.write_all(b"downloaded").unwrap();
+        drop(writer);
+
+        downloads.commit(root.path()).unwrap();
+
+        assert_eq!(
+            std::fs::read(root.path().join("report.txt")).unwrap(),
+            b"existing"
+        );
+        assert_eq!(
+            std::fs::read(root.path().join("report (1).txt")).unwrap(),
+            b"downloaded"
+        );
+    }
+
+    #[test]
+    fn remote_paths_are_reduced_to_safe_file_names() {
+        assert_eq!(
+            safe_download_file_name("../../report.txt").unwrap(),
+            "report.txt"
+        );
+        assert!(safe_download_file_name("..").is_err());
+        assert!(safe_download_file_name("/").is_err());
     }
 }

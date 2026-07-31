@@ -68,14 +68,14 @@ fn find_zmodem_start(window: &[u8], current_start: usize) -> Option<DetectedMode
         &[ZPAD, ZDLE, ZBIN],
         &[ZPAD, ZDLE, ZBIN32],
     ];
-    patterns.iter().find_map(|pattern| {
-        find_pattern_crossing_current_chunk(window, current_start, pattern).map(|offset| {
-            DetectedModemStart {
-                protocol: DetectedModemProtocol::Zmodem,
-                offset,
-            }
+    patterns
+        .iter()
+        .filter_map(|pattern| find_pattern_crossing_current_chunk(window, current_start, pattern))
+        .min()
+        .map(|offset| DetectedModemStart {
+            protocol: DetectedModemProtocol::Zmodem,
+            offset,
         })
-    })
 }
 
 fn detect_xymodem_start(window: &[u8], current_start: usize) -> Option<DetectedModemStart> {
@@ -132,6 +132,16 @@ mod tests {
             detector.scan(&[ZPAD, ZDLE, ZBIN32]),
             vec![DetectedModemProtocol::Zmodem]
         );
+    }
+
+    #[test]
+    fn reports_the_earliest_zmodem_header_across_encodings() {
+        let mut detector = ModemDetector::new();
+        let bytes = [ZPAD, ZDLE, ZBIN32, b'x', ZPAD, ZPAD, ZDLE, ZHEX];
+
+        let start = detector.scan_first(&bytes).expect("zmodem header");
+
+        assert_eq!(start.offset, 0);
     }
 
     #[test]

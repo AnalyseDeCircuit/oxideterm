@@ -8,6 +8,25 @@ use crate::zmodem_transfer::parse_zmodem_header_prefix;
 use std::fmt;
 
 const PLAIN_HISTORY_LIMIT: usize = 512;
+const XYMODEM_CANCEL_BYTES: &[u8] = &[crate::xymodem::CAN; 8];
+const ZMODEM_CANCEL_BYTES: &[u8] = &[
+    crate::zmodem::ZDLE,
+    crate::zmodem::ZDLE,
+    crate::zmodem::ZDLE,
+    crate::zmodem::ZDLE,
+    crate::zmodem::ZDLE,
+    crate::zmodem::ZDLE,
+    crate::zmodem::ZDLE,
+    crate::zmodem::ZDLE,
+    0x08,
+    0x08,
+    0x08,
+    0x08,
+    0x08,
+    0x08,
+    0x08,
+    0x08,
+];
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ModemTransferDirection {
@@ -206,13 +225,22 @@ impl ModemConsumer {
         Some(self.start_transfer(&[], request))
     }
 
-    pub fn finish_transfer(&mut self) {
+    pub fn finish_transfer(&mut self) -> Vec<u8> {
+        // A successful protocol may share its final transport packet with the
+        // next shell prompt. Return those unconsumed bytes to the terminal.
+        let trailing_output = self
+            .transfer_input
+            .as_ref()
+            .map(ModemTransfer::drain_remote_output)
+            .unwrap_or_default();
         self.transfer = None;
         self.transfer_input = None;
         self.pending = None;
         self.plain_tail.clear();
         self.detection_tail.clear();
+        self.plain_history.clear();
         self.detection_scope.reset();
+        trailing_output
     }
 
     pub fn interrupt_transfer(&mut self) {
@@ -222,14 +250,12 @@ impl ModemConsumer {
         if let Some(input) = &self.transfer_input {
             input.stop();
         }
-        self.finish_transfer();
+        // Keep the stopped transfer attached until the transport drains its
+        // protocol cancellation bytes. The completion path calls finish.
     }
 
-    pub fn take_server_writes(&mut self) -> Vec<Vec<u8>> {
-        self.transfer_input
-            .as_ref()
-            .map(ModemTransfer::take_server_writes)
-            .unwrap_or_default()
+    pub fn active_transfer_input(&self) -> Option<ModemTransfer> {
+        self.transfer_input.clone()
     }
 
     pub fn process_server_output(&mut self, bytes: &[u8]) -> Vec<ModemConsumerEvent> {
@@ -270,9 +296,14 @@ impl ModemConsumer {
             self.detection_tail
                 .extend_from_slice(&detection_bytes[split..]);
             self.remember_plain_output(&detection_bytes[..split]);
-            return vec![ModemConsumerEvent::WriteTerminal(
+            let mut events = vec![ModemConsumerEvent::WriteTerminal(
                 scan_bytes[..split].to_vec(),
             )];
+            if let Some(request) = xymodem_download_request(&self.plain_history) {
+                self.start_transfer(&[], request.clone());
+                events.push(ModemConsumerEvent::TransferStarted(request));
+            }
+            return events;
         };
 
         let mut events = Vec::new();
@@ -294,6 +325,15 @@ impl ModemConsumer {
                 protocol: start.protocol,
                 bytes: protocol_bytes.to_vec(),
             });
+        } else if let Some(control_len) = zmodem_control_prefix_len(start.protocol, protocol_bytes)
+        {
+            // A retried completion/control header belongs to the previous peer
+            // state and must not become terminal text or a new file prompt.
+            let remaining = &protocol_bytes[control_len..];
+            if !remaining.is_empty() {
+                self.remember_plain_output(remaining);
+                events.push(ModemConsumerEvent::WriteTerminal(remaining.to_vec()));
+            }
         } else {
             self.remember_plain_output(protocol_bytes);
             events.push(ModemConsumerEvent::WriteTerminal(protocol_bytes.to_vec()));
@@ -314,6 +354,15 @@ impl ModemConsumer {
         } else if should_wait_for_protocol_confirmation(pending.protocol, &pending.bytes) {
             self.pending = Some(pending);
             Vec::new()
+        } else if let Some(control_len) =
+            zmodem_control_prefix_len(pending.protocol, &pending.bytes)
+        {
+            let remaining = pending.bytes[control_len..].to_vec();
+            self.remember_plain_output(&remaining);
+            (!remaining.is_empty())
+                .then_some(ModemConsumerEvent::WriteTerminal(remaining))
+                .into_iter()
+                .collect()
         } else {
             let plain = pending.bytes;
             self.remember_plain_output(&plain);
@@ -326,10 +375,20 @@ impl ModemConsumer {
         initial_bytes: &[u8],
         request: ModemTransferRequest,
     ) -> ModemTransfer {
-        let transfer = ModemTransfer::new_with_wake(initial_bytes, self.wake_host.clone());
+        let cancellation_bytes = match request.protocol {
+            DetectedModemProtocol::Zmodem => ZMODEM_CANCEL_BYTES,
+            DetectedModemProtocol::Xmodem
+            | DetectedModemProtocol::XymodemNegotiation
+            | DetectedModemProtocol::Ymodem => XYMODEM_CANCEL_BYTES,
+        };
+        let transfer = ModemTransfer::new_with_wake_and_cancel(
+            initial_bytes,
+            self.wake_host.clone(),
+            cancellation_bytes,
+        );
         self.transfer_input = Some(transfer.clone());
         self.transfer = Some(transfer.clone());
-        let _ = request;
+        self.plain_history.clear();
         transfer
     }
 
@@ -363,7 +422,7 @@ fn request_for_protocol(
             {
                 (protocol, ModemTransferDirection::Download)
             }
-            _ => (protocol, ModemTransferDirection::Download),
+            _ => return None,
         },
         DetectedModemProtocol::XymodemNegotiation => {
             let protocol = xymodem_negotiation_protocol_hint(plain_history)?;
@@ -386,22 +445,94 @@ fn should_wait_for_protocol_confirmation(protocol: DetectedModemProtocol, bytes:
         && matches!(parse_zmodem_header_prefix(bytes), Ok(None))
 }
 
+fn zmodem_control_prefix_len(protocol: DetectedModemProtocol, bytes: &[u8]) -> Option<usize> {
+    if protocol != DetectedModemProtocol::Zmodem {
+        return None;
+    }
+    let header = parse_zmodem_header_prefix(bytes).ok().flatten()?;
+    if matches!(
+        header.frame_type,
+        ZFrameType::ZrInit | ZFrameType::ZrqInit | ZFrameType::ZFile | ZFrameType::ZData
+    ) {
+        return None;
+    }
+    for include_xon in [false, true] {
+        let encoded =
+            crate::zmodem::encode_hex_header(header.frame_type, header.position, include_xon);
+        if bytes.starts_with(&encoded) {
+            return Some(encoded.len());
+        }
+    }
+    None
+}
+
 fn xymodem_negotiation_protocol_hint(plain_history: &[u8]) -> Option<DetectedModemProtocol> {
     let text = String::from_utf8_lossy(plain_history);
-    text.lines().rev().take(4).find_map(|line| {
-        line.split_whitespace().find_map(|token| {
-            let command = token
-                .rsplit(['/', '\\'])
-                .next()
-                .unwrap_or(token)
-                .trim_matches(|ch: char| !ch.is_ascii_alphanumeric() && ch != '-' && ch != '_');
-            match command {
-                "rx" => Some(DetectedModemProtocol::Xmodem),
-                "rb" => Some(DetectedModemProtocol::Ymodem),
-                _ => None,
-            }
+    text.lines()
+        .rev()
+        .take(4)
+        .find_map(|line| match xymodem_command_hint(line) {
+            Some((protocol, ModemTransferDirection::Upload)) => Some(protocol),
+            _ => None,
         })
+}
+
+fn xymodem_download_request(plain_history: &[u8]) -> Option<ModemTransferRequest> {
+    // PTYs echo characters while the user is still typing. Wait for the
+    // command line terminator so entering "sx" cannot open a prompt early.
+    if !plain_history.ends_with(b"\r") && !plain_history.ends_with(b"\n") {
+        return None;
+    }
+    let text = String::from_utf8_lossy(plain_history);
+    let (protocol, direction) = xymodem_command_hint(text.lines().next_back()?)?;
+    (direction == ModemTransferDirection::Download).then_some(ModemTransferRequest {
+        protocol,
+        direction,
     })
+}
+
+fn xymodem_command_hint(line: &str) -> Option<(DetectedModemProtocol, ModemTransferDirection)> {
+    for token in line.split_whitespace() {
+        let command = token
+            .rsplit(['/', '\\'])
+            .next()
+            .unwrap_or(token)
+            .trim_matches(|ch: char| !ch.is_ascii_alphanumeric() && ch != '-' && ch != '_');
+        let request = match command {
+            "rx" | "lrx" => Some((
+                DetectedModemProtocol::Xmodem,
+                ModemTransferDirection::Upload,
+            )),
+            "rb" | "ry" | "lrb" | "lry" => Some((
+                DetectedModemProtocol::Ymodem,
+                ModemTransferDirection::Upload,
+            )),
+            "sx" | "lsx" => Some((
+                DetectedModemProtocol::Xmodem,
+                ModemTransferDirection::Download,
+            )),
+            "sb" | "sy" | "lsb" | "lsy" => Some((
+                DetectedModemProtocol::Ymodem,
+                ModemTransferDirection::Download,
+            )),
+            _ => None,
+        };
+        if request.is_some() {
+            return request;
+        }
+        if !is_shell_prompt_token(token) {
+            return None;
+        }
+    }
+    None
+}
+
+fn is_shell_prompt_token(token: &str) -> bool {
+    token == "PS"
+        || token
+            .chars()
+            .last()
+            .is_some_and(|last| matches!(last, '$' | '#' | '>' | '%'))
 }
 
 fn possible_modem_prefix_suffix_len(bytes: &[u8]) -> usize {
@@ -428,7 +559,9 @@ fn possible_modem_prefix_suffix_len(bytes: &[u8]) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::io::ModemIo;
     use crate::zmodem::{ZFrameType, encode_hex_header, position_header};
+    use std::time::Duration;
 
     #[test]
     fn zmodem_download_detection_swallows_protocol_bytes() {
@@ -459,6 +592,18 @@ mod tests {
         assert!(consumer.process_server_output(&[b'*', b'*']).is_empty());
         let events = consumer.process_server_output(&[0x18, b'B', b'0']);
         assert!(events.is_empty());
+    }
+
+    #[test]
+    fn standalone_zfin_is_not_treated_as_a_new_download() {
+        let mut consumer = ModemConsumer::new();
+        let mut bytes = encode_hex_header(ZFrameType::ZFin, position_header(0), false);
+        bytes.extend_from_slice(b"\r\n$ ");
+
+        let events = consumer.process_server_output(&bytes);
+
+        assert_eq!(terminal_bytes(&events), b"\r\n$ ");
+        assert!(consumer.active_transfer().is_none());
     }
 
     #[test]
@@ -543,6 +688,80 @@ mod tests {
     }
 
     #[test]
+    fn sx_command_echo_starts_xmodem_download_before_sender_data() {
+        let mut consumer = ModemConsumer::new();
+
+        let events = consumer.process_server_output(b"\r\n$ sx download.bin\r\n");
+
+        assert!(matches!(
+            events.last(),
+            Some(ModemConsumerEvent::TransferStarted(ModemTransferRequest {
+                protocol: DetectedModemProtocol::Xmodem,
+                direction: ModemTransferDirection::Download
+            }))
+        ));
+    }
+
+    #[test]
+    fn sx_is_not_detected_before_the_echoed_command_is_submitted() {
+        let mut consumer = ModemConsumer::new();
+
+        let typing_events = consumer.process_server_output(b"\r\n$ sx download.bin");
+        let submitted_events = consumer.process_server_output(b"\r\n");
+
+        assert!(
+            !typing_events
+                .iter()
+                .any(|event| matches!(event, ModemConsumerEvent::TransferStarted(_)))
+        );
+        assert!(matches!(
+            submitted_events.last(),
+            Some(ModemConsumerEvent::TransferStarted(ModemTransferRequest {
+                protocol: DetectedModemProtocol::Xmodem,
+                direction: ModemTransferDirection::Download
+            }))
+        ));
+    }
+
+    #[test]
+    fn sb_command_echo_starts_ymodem_download_before_sender_data() {
+        let mut consumer = ModemConsumer::new();
+
+        let events = consumer.process_server_output(b"\r\n$ sb download.bin\r\n");
+
+        assert!(matches!(
+            events.last(),
+            Some(ModemConsumerEvent::TransferStarted(ModemTransferRequest {
+                protocol: DetectedModemProtocol::Ymodem,
+                direction: ModemTransferDirection::Download
+            }))
+        ));
+    }
+
+    #[test]
+    fn lrzsz_prefixed_command_names_are_detected() {
+        let mut upload_consumer = ModemConsumer::new();
+        let upload_events = upload_consumer.process_server_output(b"\r\n$ lrx upload.bin\r\nC");
+        let mut download_consumer = ModemConsumer::new();
+        let download_events = download_consumer.process_server_output(b"\r\n$ lsb file.bin\r\n");
+
+        assert!(matches!(
+            upload_events.last(),
+            Some(ModemConsumerEvent::TransferStarted(ModemTransferRequest {
+                protocol: DetectedModemProtocol::Xmodem,
+                direction: ModemTransferDirection::Upload
+            }))
+        ));
+        assert!(matches!(
+            download_events.last(),
+            Some(ModemConsumerEvent::TransferStarted(ModemTransferRequest {
+                protocol: DetectedModemProtocol::Ymodem,
+                direction: ModemTransferDirection::Download
+            }))
+        ));
+    }
+
+    #[test]
     fn xymodem_like_serial_noise_is_plain_output_without_negotiation() {
         let mut consumer = ModemConsumer::new();
         let bytes = [
@@ -591,6 +810,60 @@ mod tests {
             consumer.process_server_output(b"ontinued\r\n"),
             vec![ModemConsumerEvent::WriteTerminal(b"ontinued\r\n".to_vec())]
         );
+        assert!(consumer.active_transfer().is_none());
+    }
+
+    #[test]
+    fn finish_returns_prompt_bytes_after_protocol_completion() {
+        let mut consumer = ModemConsumer::new();
+        let header = encode_hex_header(ZFrameType::ZrqInit, position_header(0), true);
+        let events = consumer.process_server_output(&header);
+        assert!(matches!(
+            events.last(),
+            Some(ModemConsumerEvent::TransferStarted(_))
+        ));
+
+        consumer.process_server_output(b"OO\r\n$ ");
+
+        let mut transfer = consumer
+            .active_transfer()
+            .cloned()
+            .expect("active transfer");
+        for expected in header {
+            assert_eq!(
+                transfer.read_byte(Duration::from_millis(1)).unwrap(),
+                expected
+            );
+        }
+        assert_eq!(transfer.read_byte(Duration::from_millis(1)).unwrap(), b'O');
+        assert_eq!(transfer.read_byte(Duration::from_millis(1)).unwrap(), b'O');
+        assert_eq!(consumer.finish_transfer(), b"\r\n$ ");
+    }
+
+    #[test]
+    fn interrupt_keeps_protocol_cancellation_available_to_the_transport() {
+        let mut consumer = ModemConsumer::new();
+        let transfer = consumer
+            .start_manual_transfer(ModemTransferRequest {
+                protocol: DetectedModemProtocol::Zmodem,
+                direction: ModemTransferDirection::Upload,
+            })
+            .expect("manual transfer");
+        let mut producer = transfer.clone();
+        producer.write_all(b"stale-frame").unwrap();
+
+        consumer.interrupt_transfer();
+
+        let transport_transfer = consumer
+            .active_transfer_input()
+            .expect("stopped transfer remains attached");
+        let cancellation = transport_transfer
+            .take_server_write()
+            .expect("protocol cancellation");
+        assert_eq!(cancellation, ZMODEM_CANCEL_BYTES);
+        transport_transfer.complete_server_write(cancellation.len());
+        assert!(transport_transfer.server_writes_drained());
+        assert!(consumer.finish_transfer().is_empty());
         assert!(consumer.active_transfer().is_none());
     }
 
