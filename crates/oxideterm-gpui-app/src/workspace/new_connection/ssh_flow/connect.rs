@@ -655,11 +655,13 @@ impl WorkspaceApp {
         };
 
         match run.intent {
-            SshConnectionIntent::Connect(terminal_options) => {
+            SshConnectionIntent::Connect(connection_options) => {
                 if let Some(node) = self.ssh_nodes.get_mut(&target_node_id) {
                     // Manual connections have no saved record, so the runtime node
-                    // retains their terminal behavior until all panes are closed.
-                    node.terminal_options = terminal_options;
+                    // retains their terminal and SSH connection behavior until all panes close.
+                    node.terminal_options = connection_options.terminal;
+                    node.dedicated_new_terminal_connection =
+                        connection_options.dedicated_new_terminal_connection;
                 }
                 self.update_connection_form_state(cx, ConnectionFormState::clear);
                 let post_connect_command = target_config.post_connect_command.clone();
@@ -676,6 +678,18 @@ impl WorkspaceApp {
                 );
             }
             SshConnectionIntent::ConnectSaved(id) => {
+                if let Some(connection_options) = self.connection_store.get(&id).map(|connection| {
+                    (
+                        connection.options.terminal,
+                        connection.options.dedicated_new_terminal_connection,
+                    )
+                }) && let Some(node) = self.ssh_nodes.get_mut(&target_node_id)
+                {
+                    // The expanded target must keep the saved host's terminal
+                    // connection policy after its proxy path is materialized.
+                    node.terminal_options = connection_options.0;
+                    node.dedicated_new_terminal_connection = connection_options.1;
+                }
                 if self.connection_form_state(cx).form.is_some() {
                     self.update_connection_form_state(cx, ConnectionFormState::clear);
                 }
@@ -912,7 +926,7 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) {
         match intent {
-            SshConnectionIntent::Connect(terminal_options) => {
+            SshConnectionIntent::Connect(connection_options) => {
                 self.update_connection_form_state(cx, ConnectionFormState::clear);
                 self.connection_flow.update(cx, |connection_flow, cx| {
                     connection_flow.clear_host_key_challenge(cx);
@@ -927,7 +941,9 @@ impl WorkspaceApp {
                     match self.expand_saved_connection_tree(&expansion_id, config, title.clone()) {
                         Ok(expansion) => {
                             if let Some(node) = self.ssh_nodes.get_mut(&expansion.target_node_id) {
-                                node.terminal_options = terminal_options;
+                                node.terminal_options = connection_options.terminal;
+                                node.dedicated_new_terminal_connection =
+                                    connection_options.dedicated_new_terminal_connection;
                             }
                             if let Some(target_config) = self
                                 .node_router
@@ -960,7 +976,9 @@ impl WorkspaceApp {
                 }
                 let node_id = self.materialize_ssh_root_node(config.clone(), title.clone(), None);
                 if let Some(node) = self.ssh_nodes.get_mut(&node_id) {
-                    node.terminal_options = terminal_options;
+                    node.terminal_options = connection_options.terminal;
+                    node.dedicated_new_terminal_connection =
+                        connection_options.dedicated_new_terminal_connection;
                 }
                 let post_connect_command = config.post_connect_command.clone();
                 let _ = self.queue_ssh_terminal_tab_for_node_with_mark_used(
@@ -1026,7 +1044,9 @@ impl WorkspaceApp {
                     Vec::new(),
                     NodeReadiness::Connecting,
                 );
-                child_node.terminal_options = terminal_options;
+                child_node.terminal_options = terminal_options.terminal;
+                child_node.dedicated_new_terminal_connection =
+                    terminal_options.dedicated_new_terminal_connection;
                 self.ssh_nodes.insert(child_id.clone(), child_node);
                 if let Some(saved_connection_id) = saved_connection_id {
                     self.saved_ssh_nodes

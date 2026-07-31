@@ -373,6 +373,7 @@ pub(in crate::workspace) fn form_from_saved_connection(
         oxideterm_ssh::ssh_agent_available(identity_agent_selector(&form.identity_agent));
     // Preserve compatibility settings when an existing connection enters edit mode.
     form.legacy_ssh_compatibility = conn.options.legacy_ssh_compatibility;
+    form.dedicated_new_terminal_connection = conn.options.dedicated_new_terminal_connection;
     form.terminal = conn.options.terminal;
     form.save_connection = true;
     form.error = error;
@@ -565,6 +566,7 @@ fn connection_draft_from_form_with_proxy_hop_prefix(
         identity_agent: identity_agent_from_form(&form.identity_agent),
         agent_forwarding_socket: form.agent_forwarding_socket.clone(),
         legacy_ssh_compatibility: form.legacy_ssh_compatibility,
+        dedicated_new_terminal_connection: form.dedicated_new_terminal_connection,
         post_connect_command: form.post_connect_command.clone(),
         terminal: form.terminal,
     }

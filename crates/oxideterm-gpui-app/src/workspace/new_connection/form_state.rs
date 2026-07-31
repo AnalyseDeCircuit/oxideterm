@@ -462,6 +462,7 @@ pub(in crate::workspace) struct NewConnectionForm {
     pub(in crate::workspace) identity_agent: String,
     pub(in crate::workspace) agent_forwarding_socket: Option<String>,
     pub(in crate::workspace) legacy_ssh_compatibility: bool,
+    pub(in crate::workspace) dedicated_new_terminal_connection: bool,
     pub(in crate::workspace) terminal: ConnectionTerminalOptions,
     pub(in crate::workspace) agent_available: Option<bool>,
     pub(in crate::workspace) save_connection: bool,
@@ -545,6 +546,10 @@ impl fmt::Debug for NewConnectionForm {
                 &self.agent_forwarding_socket.is_some(),
             )
             .field("legacy_ssh_compatibility", &self.legacy_ssh_compatibility)
+            .field(
+                "dedicated_new_terminal_connection",
+                &self.dedicated_new_terminal_connection,
+            )
             .field("terminal", &self.terminal)
             .field("agent_available", &self.agent_available)
             .field("save_connection", &self.save_connection)
@@ -614,6 +619,7 @@ impl Default for NewConnectionForm {
             identity_agent: String::new(),
             agent_forwarding_socket: None,
             legacy_ssh_compatibility: false,
+            dedicated_new_terminal_connection: false,
             terminal: ConnectionTerminalOptions::default(),
             agent_available: None,
             save_connection: false,

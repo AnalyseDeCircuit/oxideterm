@@ -780,6 +780,7 @@ impl WorkspaceApp {
                 },
                 title,
                 terminal_options: ConnectionTerminalOptions::default(),
+                dedicated_new_terminal_connection: false,
                 terminal_ids: Vec::new(),
                 readiness: snapshot.readiness,
             },
@@ -932,7 +933,7 @@ impl WorkspaceApp {
             let tab_id = location.tab_id;
             let old_pane_id = location.pane_id;
             let Ok((new_pane_id, new_session_id)) =
-                self.create_ssh_terminal_pane_for_existing_node(node_id, None, window, cx)
+                self.create_ssh_terminal_pane_for_existing_node(node_id, None, false, window, cx)
             else {
                 continue;
             };

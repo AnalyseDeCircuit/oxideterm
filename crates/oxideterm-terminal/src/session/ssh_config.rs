@@ -1,6 +1,10 @@
 pub(super) enum SshSessionConnection {
     New(SshConfig),
     Existing { connection_id: String },
+    Dedicated {
+        config: SshConfig,
+        parent_connection_id: Option<String>,
+    },
 }
 
 pub struct SshSessionConfig {
@@ -38,6 +42,34 @@ impl SshSessionConfig {
             host: host.into(),
             port,
             username: username.into(),
+            registry: None,
+            consumer: None,
+            prompt_handler: None,
+            managed_key_resolver: None,
+            trzsz_policy: None,
+            runtime_handle: None,
+            defer_pty_until_resize: false,
+            post_connect_command: None,
+        }
+    }
+
+    pub fn for_dedicated_connection(
+        config: SshConfig,
+        parent_connection_id: Option<String>,
+    ) -> Self {
+        // Keep the source node's transport untouched while this terminal owns
+        // a separately authenticated registry entry.
+        let host = config.host.clone();
+        let port = config.port;
+        let username = config.username.clone();
+        Self {
+            connection: Some(SshSessionConnection::Dedicated {
+                config,
+                parent_connection_id,
+            }),
+            host,
+            port,
+            username,
             registry: None,
             consumer: None,
             prompt_handler: None,
@@ -231,6 +263,24 @@ mod ssh_config_tests {
         assert_eq!(config.username(), "alice");
         assert!(!format!("{config:?}").contains("connection-1"));
     }
+
+    #[test]
+    fn dedicated_connection_retains_parent_route_without_using_existing_mode() {
+        let config = SshSessionConfig::for_dedicated_connection(
+            SshConfig::password("target", 22, "alice", "secret"),
+            Some("parent-connection".to_string()),
+        );
+
+        assert!(matches!(
+            config.connection.as_ref(),
+            Some(super::SshSessionConnection::Dedicated {
+                parent_connection_id: Some(parent_connection_id),
+                ..
+            }) if parent_connection_id == "parent-connection"
+        ));
+        assert_eq!(config.host(), "target");
+        assert!(!format!("{config:?}").contains("secret"));
+    }
 }
 
 impl std::fmt::Debug for SshSessionConfig {
@@ -238,6 +288,7 @@ impl std::fmt::Debug for SshSessionConfig {
         let connection_kind = match self.connection.as_ref() {
             Some(SshSessionConnection::New(_)) => "new",
             Some(SshSessionConnection::Existing { .. }) => "existing",
+            Some(SshSessionConnection::Dedicated { .. }) => "dedicated",
             None => "moved",
         };
         f.debug_struct("SshSessionConfig")

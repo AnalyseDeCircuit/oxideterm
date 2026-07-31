@@ -210,6 +210,7 @@ impl ConnectionStore {
         options.identity_agent = request.identity_agent;
         options.agent_forwarding_socket = request.agent_forwarding_socket;
         options.legacy_ssh_compatibility = request.legacy_ssh_compatibility;
+        options.dedicated_new_terminal_connection = request.dedicated_new_terminal_connection;
         options.terminal = request.terminal;
         let (auth, auth_secret) =
             self.materialize_auth_with_runtime_secret(request.auth, existing_auth.as_ref())?;

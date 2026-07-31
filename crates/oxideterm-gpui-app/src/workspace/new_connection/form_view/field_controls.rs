@@ -2611,11 +2611,11 @@ impl WorkspaceApp {
     pub(super) fn render_connection_terminal_options(&self, cx: &mut Context<Self>) -> AnyElement {
         // Saved host controls are optional overrides so application defaults
         // continue to govern legacy records and temporary local terminals.
-        let Some(terminal) = self
+        let Some((terminal, dedicated_new_terminal_connection)) = self
             .connection_form_state(cx)
             .form
             .as_ref()
-            .map(|form| form.terminal)
+            .map(|form| (form.terminal, form.dedicated_new_terminal_connection))
         else {
             return div().into_any_element();
         };
@@ -2725,6 +2725,31 @@ impl WorkspaceApp {
                                     cx,
                                 ),
                             )),
+                    ),
+            )
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap(px(self.tokens.spacing.one))
+                    .child(self.render_connection_checkbox(
+                        self.i18n.t("ssh.form.dedicated_new_terminal_connection"),
+                        dedicated_new_terminal_connection,
+                        |form| {
+                            form.dedicated_new_terminal_connection =
+                                !form.dedicated_new_terminal_connection;
+                        },
+                        cx,
+                    ))
+                    .child(
+                        div()
+                            .pl(px(self.tokens.spacing.three))
+                            .text_size(px(self.tokens.metrics.ui_text_xs))
+                            .text_color(rgb(self.tokens.ui.text_muted))
+                            .child(
+                                self.i18n
+                                    .t("ssh.form.dedicated_new_terminal_connection_hint"),
+                            ),
                     ),
             )
             .into_any_element()

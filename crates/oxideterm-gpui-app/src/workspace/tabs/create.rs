@@ -1,5 +1,7 @@
 use super::*;
+use crate::workspace::new_connection::SshTerminalConnectionOptions;
 use crate::workspace::root::init::terminal_preference_overrides;
+use oxideterm_session_adapter::managed_key_resolver_from_store;
 
 fn attach_saved_owner_to_reused_ssh_node(
     node: &mut WorkspaceSshNode,
@@ -13,6 +15,16 @@ fn attach_saved_owner_to_reused_ssh_node(
     }
     node.saved_connection_id = Some(saved_connection_id.to_string());
     true
+}
+
+fn should_use_dedicated_terminal_connection(
+    allow_dedicated_connection: bool,
+    saved_policy: Option<bool>,
+    manual_node_policy: bool,
+) -> bool {
+    // Initial tabs and reconnect remounts must consume the node connection that
+    // was just authenticated. Only explicit additional terminals may isolate.
+    allow_dedicated_connection && saved_policy.unwrap_or(manual_node_policy)
 }
 
 fn saved_node_route_matches_config(
@@ -218,6 +230,16 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Result<()> {
+        let (saved_terminal_options, saved_dedicated_new_terminal_connection) = self
+            .connection_store
+            .get(&saved_connection_id)
+            .map(|connection| {
+                (
+                    connection.options.terminal,
+                    connection.options.dedicated_new_terminal_connection,
+                )
+            })
+            .unwrap_or_default();
         let indexed_node_id = self.saved_ssh_nodes.get(&saved_connection_id).cloned();
         if let Some(node_id) = indexed_node_id.clone().filter(|node_id| {
             saved_node_route_matches_config(&self.node_router, node_id, &config)
@@ -228,6 +250,10 @@ impl WorkspaceApp {
                 })
         }) {
             self.associate_existing_node_with_saved_connection(&node_id, &saved_connection_id);
+            if let Some(node) = self.ssh_nodes.get_mut(&node_id) {
+                node.terminal_options = saved_terminal_options;
+                node.dedicated_new_terminal_connection = saved_dedicated_new_terminal_connection;
+            }
             if let Some(session_id) = self
                 .workspace_runtime
                 .read(cx)
@@ -289,6 +315,10 @@ impl WorkspaceApp {
                 .map(|snapshot| snapshot.config)
                 .ok_or_else(|| anyhow::anyhow!("target node was not materialized"))?;
             let target_node_id = expansion.target_node_id;
+            if let Some(node) = self.ssh_nodes.get_mut(&target_node_id) {
+                node.terminal_options = saved_terminal_options;
+                node.dedicated_new_terminal_connection = saved_dedicated_new_terminal_connection;
+            }
             let post_connect_command = target_config.post_connect_command.clone();
             self.queue_ssh_terminal_tab_for_node_with_mark_used(
                 target_node_id,
@@ -310,6 +340,11 @@ impl WorkspaceApp {
                     &existing_node_id,
                     &saved_connection_id,
                 );
+                if let Some(node) = self.ssh_nodes.get_mut(&existing_node_id) {
+                    node.terminal_options = saved_terminal_options;
+                    node.dedicated_new_terminal_connection =
+                        saved_dedicated_new_terminal_connection;
+                }
                 if let Some(session_id) = self
                     .workspace_runtime
                     .read(cx)
@@ -362,6 +397,10 @@ impl WorkspaceApp {
                 title.clone(),
                 Some(saved_connection_id.clone()),
             );
+            if let Some(node) = self.ssh_nodes.get_mut(&node_id) {
+                node.terminal_options = saved_terminal_options;
+                node.dedicated_new_terminal_connection = saved_dedicated_new_terminal_connection;
+            }
             let cleanup_node_id = node_id.clone();
             let post_connect_command = config.post_connect_command.clone();
             let result = self.queue_ssh_terminal_tab_for_node_with_mark_used(
@@ -691,6 +730,7 @@ impl WorkspaceApp {
                     },
                     title,
                     terminal_options: ConnectionTerminalOptions::default(),
+                    dedicated_new_terminal_connection: false,
                     terminal_ids: Vec::new(),
                     readiness: NodeReadiness::Disconnected,
                 },
@@ -708,20 +748,32 @@ impl WorkspaceApp {
         &mut self,
         node_id: &NodeId,
         post_connect_command: Option<String>,
+        allow_dedicated_connection: bool,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Result<(PaneId, TerminalSessionId)> {
-        let (host, port, username) = self
-            .ssh_nodes
-            .get(node_id)
-            .map(|node| {
-                (
-                    node.endpoint.host.clone(),
-                    node.endpoint.port,
-                    node.endpoint.username.clone(),
-                )
-            })
-            .ok_or_else(|| anyhow::anyhow!("SSH node {} not found", node_id.0))?;
+        let (host, port, username, saved_connection_id, node_dedicated_new_terminal_connection) =
+            self.ssh_nodes
+                .get(node_id)
+                .map(|node| {
+                    (
+                        node.endpoint.host.clone(),
+                        node.endpoint.port,
+                        node.endpoint.username.clone(),
+                        node.saved_connection_id.clone(),
+                        node.dedicated_new_terminal_connection,
+                    )
+                })
+                .ok_or_else(|| anyhow::anyhow!("SSH node {} not found", node_id.0))?;
+        let saved_dedicated_policy = saved_connection_id
+            .as_deref()
+            .and_then(|id| self.connection_store.get(id))
+            .map(|connection| connection.options.dedicated_new_terminal_connection);
+        let dedicated_new_terminal_connection = should_use_dedicated_terminal_connection(
+            allow_dedicated_connection,
+            saved_dedicated_policy,
+            node_dedicated_new_terminal_connection,
+        );
         let connection_id = self
             .node_router
             .connection_id_for_node(node_id)
@@ -735,30 +787,51 @@ impl WorkspaceApp {
 
         let pane_id = self.alloc_pane_id(cx);
         let session_id = self.alloc_session_id(cx);
-        self.register_existing_ssh_terminal_session(node_id, session_id, cx)?;
-
-        // Tauri remounts terminal tabs by replacing the old session id in the
-        // pane tree after reconnect. The new GPUI pane is only a consumer of
-        // the node-owned SSH connection; node liveness stays with NodeRouter.
         let preference_overrides = self.terminal_preference_overrides_for_ssh_node(node_id);
         let mut preferences =
             self.prepare_terminal_preferences_for_tab_kind(&TabKind::SshTerminal, cx);
         preference_overrides.apply_to(&mut preferences);
         let consumer = ConnectionConsumer::Terminal(session_id.0.to_string());
-        // Opening another terminal for an already-connected node mirrors
-        // Tauri's createTerminalForNode(nodeId) path: no post-connect command
-        // is replayed unless the caller explicitly supplies one.
-        let session_config =
+        let session_config = if dedicated_new_terminal_connection {
+            // This zeroizing, secret-bearing snapshot moves directly into the
+            // terminal task and is never copied into WorkspaceSshNode UI state.
+            let runtime_snapshot = self
+                .node_router
+                .node_runtime_snapshot(node_id)
+                .ok_or_else(|| anyhow::anyhow!("SSH node {} has no runtime config", node_id.0))?;
+            let parent_connection_id = runtime_snapshot
+                .parent_id
+                .map(|parent_id| {
+                    self.node_router
+                        .connection_id_for_node(&parent_id)
+                        .ok_or_else(|| {
+                            anyhow::anyhow!("SSH parent node {} is not connected", parent_id.0)
+                        })
+                })
+                .transpose()?;
+            let prompt_handler = self.workspace_runtime.read(cx).native_ssh_prompt_handler();
+            SshSessionConfig::for_dedicated_connection(
+                runtime_snapshot.config,
+                parent_connection_id,
+            )
+            .with_prompt_handler(prompt_handler)
+            .with_managed_key_resolver(managed_key_resolver_from_store(&self.connection_store))
+            .with_registry(self.ssh_registry.clone(), consumer)
+        } else {
+            // The default path adds a channel to the node-owned transport and
+            // never clones its authentication configuration.
             SshSessionConfig::for_existing_connection(connection_id, host, port, username)
-                .with_post_connect_command(post_connect_command)
                 .with_registry(self.ssh_registry.clone(), consumer)
-                // Reopened node terminals are consumers of the same backend runtime
-                // as the node-owned SSH transport.
-                // Keep remounted tabs on the same deferred PTY boundary as fresh
-                // SSH terminals so reconnects do not briefly start at fallback size.
-                .with_deferred_pty(true)
-                .with_runtime_handle(self.forwarding_runtime.handle().clone())
-                .with_trzsz_policy(preferences.trzsz_policy.clone());
+        }
+        // Opening another terminal never replays a post-connect command unless
+        // the caller explicitly supplies one.
+        .with_post_connect_command(post_connect_command)
+        // Both policies keep remounted tabs on the deferred PTY boundary
+        // so authentication cannot briefly start at a fallback size.
+        .with_deferred_pty(true)
+        .with_runtime_handle(self.forwarding_runtime.handle().clone())
+        .with_trzsz_policy(preferences.trzsz_policy.clone());
+        self.register_existing_ssh_terminal_session(node_id, session_id, cx)?;
         let shared_session = TerminalPane::ssh_shared_session(session_config, &preferences);
         self.register_terminal_endpoint_session(node_id, session_id, shared_session.clone(), cx);
         let pane = cx.new(|cx| {
@@ -780,10 +853,48 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Result<TerminalSessionId> {
+        self.create_ssh_terminal_tab_for_existing_node_with_policy(
+            node_id,
+            post_connect_command,
+            title,
+            true,
+            window,
+            cx,
+        )
+    }
+
+    fn create_initial_ssh_terminal_tab_for_existing_node(
+        &mut self,
+        node_id: &NodeId,
+        post_connect_command: Option<String>,
+        title: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Result<TerminalSessionId> {
+        self.create_ssh_terminal_tab_for_existing_node_with_policy(
+            node_id,
+            post_connect_command,
+            title,
+            false,
+            window,
+            cx,
+        )
+    }
+
+    fn create_ssh_terminal_tab_for_existing_node_with_policy(
+        &mut self,
+        node_id: &NodeId,
+        post_connect_command: Option<String>,
+        title: String,
+        allow_dedicated_connection: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Result<TerminalSessionId> {
         let tab_id = self.alloc_tab_id(cx);
         let (pane_id, session_id) = self.create_ssh_terminal_pane_for_existing_node(
             node_id,
             post_connect_command,
+            allow_dedicated_connection,
             window,
             cx,
         )?;
@@ -808,8 +919,8 @@ impl WorkspaceApp {
         self.focus_active_pane(window, cx);
         self.reveal_active_tab(window, cx);
         self.persist_session_tree_snapshot();
-        // The existing node remains the physical transport owner. This tab
-        // owns only the terminal consumer registered by the pane helper.
+        // The node remains the route owner even when the new tab has a
+        // dedicated physical connection.
         self.start_remote_shell_integration_terminal_gate(node_id.clone(), false, cx);
         cx.notify();
         Ok(session_id)
@@ -903,7 +1014,7 @@ impl WorkspaceApp {
             self.associate_existing_node_with_saved_connection(&node_id, saved_connection_id);
         }
         if self.node_is_ready_for_terminal(&node_id) {
-            self.create_ssh_terminal_tab_for_existing_node(
+            self.create_initial_ssh_terminal_tab_for_existing_node(
                 &node_id,
                 post_connect_command,
                 title,
@@ -934,7 +1045,13 @@ impl WorkspaceApp {
                         .get(&node_id)
                         .map(|node| node.terminal_options)
                         .unwrap_or_default();
-                    SshConnectionIntent::Connect(terminal_options)
+                    SshConnectionIntent::Connect(SshTerminalConnectionOptions {
+                        terminal: terminal_options,
+                        dedicated_new_terminal_connection: self
+                            .ssh_nodes
+                            .get(&node_id)
+                            .is_some_and(|node| node.dedicated_new_terminal_connection),
+                    })
                 });
             if self.start_existing_session_tree_connect(
                 node_id.clone(),
@@ -982,7 +1099,7 @@ impl WorkspaceApp {
         let mut opened = false;
         for request in requests {
             if self
-                .create_ssh_terminal_tab_for_existing_node(
+                .create_initial_ssh_terminal_tab_for_existing_node(
                     &request.node_id,
                     request.post_connect_command,
                     request.title,
@@ -1160,6 +1277,26 @@ mod create_tests {
             }
             _ => panic!("proxy hop password authentication was not preserved"),
         }
+    }
+
+    #[test]
+    fn dedicated_policy_applies_only_to_explicit_additional_terminals() {
+        assert!(!should_use_dedicated_terminal_connection(
+            false,
+            Some(true),
+            true
+        ));
+        assert!(should_use_dedicated_terminal_connection(
+            true,
+            Some(true),
+            false
+        ));
+        assert!(should_use_dedicated_terminal_connection(true, None, true));
+        assert!(!should_use_dedicated_terminal_connection(
+            true,
+            Some(false),
+            true
+        ));
     }
 
     #[test]

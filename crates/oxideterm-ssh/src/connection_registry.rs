@@ -238,11 +238,21 @@ struct ConnectionEntry {
     created_at: SystemTime,
     last_active_at: RwLock<SystemTime>,
     idle_timeout: Option<Duration>,
+    retire_when_unused: bool,
 }
 
 impl ConnectionEntry {
     fn new(config: SshConfig, pool_config: ConnectionPoolConfig) -> Self {
         let key = config.connection_key();
+        Self::new_with_key(config, key, pool_config, false)
+    }
+
+    fn new_with_key(
+        config: SshConfig,
+        key: String,
+        pool_config: ConnectionPoolConfig,
+        retire_when_unused: bool,
+    ) -> Self {
         Self {
             connection_id: Uuid::new_v4().to_string(),
             key,
@@ -267,6 +277,7 @@ impl ConnectionEntry {
             created_at: SystemTime::now(),
             last_active_at: RwLock::new(SystemTime::now()),
             idle_timeout: pool_config.idle_timeout,
+            retire_when_unused,
         }
     }
 
@@ -698,6 +709,28 @@ impl SshConnectionRegistry {
         SshConnectionHandle { entry }
     }
 
+    pub fn acquire_dedicated(
+        &self,
+        config: SshConfig,
+        consumer: ConnectionConsumer,
+    ) -> SshConnectionHandle {
+        let pool_key = format!("{}|dedicated={}", config.connection_key(), Uuid::new_v4());
+        // Dedicated terminals remain registry-owned without joining the shared
+        // node pool. Their transport is retired as soon as its terminal exits.
+        let entry = Arc::new(ConnectionEntry::new_with_key(
+            config,
+            pool_key.clone(),
+            *self.config.read(),
+            true,
+        ));
+        entry.consumers.write().push(consumer);
+        entry.ref_count.store(1, Ordering::SeqCst);
+        self.by_id
+            .insert(entry.connection_id.clone(), pool_key.clone());
+        self.by_key.insert(pool_key, entry.clone());
+        SshConnectionHandle { entry }
+    }
+
     pub fn release(&self, connection_id: &str, consumer: &ConnectionConsumer) {
         let Some(key) = self.by_id.get(connection_id).map(|key| key.value().clone()) else {
             return;
@@ -722,6 +755,10 @@ impl SshConnectionRegistry {
         }
         entry.touch();
         if entry.ref_count.load(Ordering::SeqCst) == 0 {
+            if entry.retire_when_unused {
+                let _ = self.retire_connection(connection_id);
+                return;
+            }
             if entry.is_keep_alive() {
                 entry.cancel_idle_timer();
                 *entry.state.write() = ConnectionState::Idle;
@@ -769,7 +806,7 @@ impl SshConnectionRegistry {
             // whenever the connection has been registered to a node.
             let _ = emitter.emit_state_from_connection(&info.connection_id, &info.state, reason);
         }
-        if became_active && entry.first_visible_terminal_started() {
+        if became_active && entry.first_visible_terminal_started() && !entry.retire_when_unused {
             // Match Tauri's environment detector gate: hidden exec/shell probes
             // must not be the first session on a fresh SSH login because PAM
             // MOTD/lastlog output belongs to the user's first visible terminal.
@@ -785,7 +822,9 @@ impl SshConnectionRegistry {
             .map(|key| key.value().clone())?;
         let entry = self.by_key.get(&key)?.clone();
         let first = entry.mark_first_visible_terminal_started();
-        if first {
+        if first && !entry.retire_when_unused {
+            // A one-terminal connection must not start an environment probe
+            // that opens a second channel on servers requiring isolated login.
             self.maybe_spawn_remote_env_detection(entry);
         }
         Some(first)
@@ -2102,6 +2141,71 @@ mod tests {
 
         registry.release(first.connection_id(), &consumer);
         assert_eq!(first.info().ref_count, 0);
+    }
+
+    #[test]
+    fn acquire_dedicated_isolates_a_terminal_from_the_shared_pool_entry() {
+        let registry = SshConnectionRegistry::default();
+        let config = SshConfig::password("dedicated.example", 22, "alice", "pw");
+        let node_consumer = ConnectionConsumer::NodeRouter("node-1".into());
+        let terminal_consumer = ConnectionConsumer::Terminal("term-1".into());
+
+        let shared = registry.acquire(config.clone(), node_consumer.clone());
+        let dedicated = registry.acquire_dedicated(config.clone(), terminal_consumer.clone());
+        let pooled_again = registry.acquire(config, node_consumer);
+
+        assert_ne!(shared.connection_id(), dedicated.connection_id());
+        assert_eq!(shared.connection_id(), pooled_again.connection_id());
+        assert_eq!(dedicated.info().consumers, vec![terminal_consumer]);
+        assert!(dedicated.key().contains("|dedicated="));
+    }
+
+    #[test]
+    fn dedicated_connection_retires_after_its_terminal_releases() {
+        let registry = SshConnectionRegistry::default();
+        let consumer = ConnectionConsumer::Terminal("term-1".into());
+        let dedicated = registry.acquire_dedicated(
+            SshConfig::password("dedicated.example", 22, "alice", "pw"),
+            consumer.clone(),
+        );
+        let connection_id = dedicated.connection_id().to_string();
+
+        registry.release(&connection_id, &consumer);
+
+        assert!(registry.get(&connection_id).is_none());
+    }
+
+    #[test]
+    fn dedicated_child_retirement_releases_parent_ownership() {
+        let registry = SshConnectionRegistry::default();
+        let parent_owner = ConnectionConsumer::NodeRouter("parent".into());
+        let parent = registry.acquire(
+            SshConfig::password("jump.example", 22, "alice", "pw"),
+            parent_owner.clone(),
+        );
+        let terminal_consumer = ConnectionConsumer::Terminal("term-1".into());
+        let child = registry.acquire_dedicated(
+            SshConfig::password("target.example", 22, "alice", "pw"),
+            terminal_consumer.clone(),
+        );
+        let ancestor_consumer =
+            ConnectionConsumer::NodeRouter(format!("{}:ancestor", child.connection_id()));
+        registry
+            .acquire_consumer_for_connection(parent.connection_id(), ancestor_consumer.clone())
+            .expect("parent connection");
+        registry
+            .set_parent_connection_ownership(
+                child.connection_id(),
+                parent.connection_id().to_string(),
+                ancestor_consumer,
+            )
+            .expect("dedicated child ownership");
+
+        registry.release(child.connection_id(), &terminal_consumer);
+
+        assert!(registry.get(child.connection_id()).is_none());
+        assert_eq!(parent.info().consumers, vec![parent_owner]);
+        assert_eq!(parent.info().ref_count, 1);
     }
 
     #[tokio::test]

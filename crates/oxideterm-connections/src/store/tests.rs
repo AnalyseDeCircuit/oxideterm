@@ -33,6 +33,7 @@ mod tests {
             identity_agent: None,
             agent_forwarding_socket: None,
             legacy_ssh_compatibility: false,
+            dedicated_new_terminal_connection: false,
             post_connect_command: None,
             terminal: ConnectionTerminalOptions::default(),
         }
@@ -46,8 +47,14 @@ mod tests {
     fn terminal_options_round_trip_without_changing_legacy_defaults() {
         let default_options = serde_json::to_value(ConnectionOptions::default()).unwrap();
         assert!(default_options.get("terminal").is_none());
+        assert!(
+            default_options
+                .get("dedicated_new_terminal_connection")
+                .is_none()
+        );
 
         let options = ConnectionOptions {
+            dedicated_new_terminal_connection: true,
             terminal: ConnectionTerminalOptions {
                 encoding: Some(ConnectionTerminalEncoding::Utf8),
                 backspace_sequence: Some(ConnectionTerminalBackspaceSequence::ControlH),
@@ -59,6 +66,7 @@ mod tests {
         assert_eq!(serialized["terminal"]["encoding"], "utf-8");
         assert_eq!(serialized["terminal"]["backspaceSequence"], "controlH");
         assert_eq!(serialized["terminal"]["deleteSequence"], "delete");
+        assert_eq!(serialized["dedicated_new_terminal_connection"], true);
         assert_eq!(
             serde_json::to_value(ConnectionTerminalEncoding::EucJp).unwrap(),
             "euc-jp"
@@ -70,9 +78,11 @@ mod tests {
 
         let decoded: ConnectionOptions = serde_json::from_value(serialized).unwrap();
         assert_eq!(decoded.terminal, options.terminal);
+        assert!(decoded.dedicated_new_terminal_connection);
 
         let legacy: ConnectionOptions = serde_json::from_value(serde_json::json!({})).unwrap();
         assert!(legacy.terminal.inherits_application_defaults());
+        assert!(!legacy.dedicated_new_terminal_connection);
     }
 
     #[test]
@@ -1635,6 +1645,7 @@ mod tests {
             identity_agent: None,
             agent_forwarding_socket: None,
             legacy_ssh_compatibility: true,
+            dedicated_new_terminal_connection: true,
             post_connect_command: Some("uname -a".to_string()),
             terminal: ConnectionTerminalOptions::default(),
         };
@@ -1658,6 +1669,7 @@ mod tests {
         assert_eq!(imported.options.term_type.as_deref(), Some("xterm-direct"));
         assert!(imported.options.agent_forwarding);
         assert!(imported.options.legacy_ssh_compatibility);
+        assert!(imported.options.dedicated_new_terminal_connection);
         assert_eq!(
             imported.options.post_connect_command.as_deref(),
             Some("uname -a")

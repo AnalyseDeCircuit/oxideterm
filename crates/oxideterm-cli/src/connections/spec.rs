@@ -194,6 +194,9 @@ pub(super) fn connection_request_from_spec(
                 .map(|connection| connection.options.legacy_ssh_compatibility)
                 .unwrap_or(false)
         }),
+        dedicated_new_terminal_connection: existing
+            .map(|connection| connection.options.dedicated_new_terminal_connection)
+            .unwrap_or(false),
         post_connect_command: spec.post_connect_command.unwrap_or_else(|| {
             existing.and_then(|connection| connection.post_connect_command().map(ToOwned::to_owned))
         }),

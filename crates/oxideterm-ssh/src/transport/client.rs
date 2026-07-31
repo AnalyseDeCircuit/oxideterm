@@ -7,6 +7,12 @@ enum ShellRequestConfig {
     Registry(SshConnectionHandle),
 }
 
+#[derive(Clone, Copy)]
+enum ShellRegistryAcquisition {
+    Shared,
+    Dedicated,
+}
+
 impl ShellRequestConfig {
     fn config(&self) -> &SshConfig {
         match self {
@@ -201,7 +207,51 @@ impl SshTransportClient {
         registry: SshConnectionRegistry,
         consumer: ConnectionConsumer,
     ) -> Result<SshPtyHandle, SshTransportError> {
-        let connection = registry.acquire(self.config.clone(), consumer.clone());
+        self.connect_shell_with_registry_acquisition(
+            registry,
+            consumer,
+            ShellRegistryAcquisition::Shared,
+        )
+        .await
+    }
+
+    pub async fn connect_shell_with_dedicated_registry(
+        self,
+        registry: SshConnectionRegistry,
+        consumer: ConnectionConsumer,
+        parent_connection_id: Option<String>,
+    ) -> Result<SshPtyHandle, SshTransportError> {
+        if let Some(parent_connection_id) = parent_connection_id {
+            return self
+                .connect_shell_with_dedicated_parent(
+                    registry,
+                    consumer,
+                    parent_connection_id,
+                )
+                .await;
+        }
+        self.connect_shell_with_registry_acquisition(
+            registry,
+            consumer,
+            ShellRegistryAcquisition::Dedicated,
+        )
+        .await
+    }
+
+    async fn connect_shell_with_registry_acquisition(
+        self,
+        registry: SshConnectionRegistry,
+        consumer: ConnectionConsumer,
+        acquisition: ShellRegistryAcquisition,
+    ) -> Result<SshPtyHandle, SshTransportError> {
+        let connection = match acquisition {
+            ShellRegistryAcquisition::Shared => {
+                registry.acquire(self.config.clone(), consumer.clone())
+            }
+            ShellRegistryAcquisition::Dedicated => {
+                registry.acquire_dedicated(self.config.clone(), consumer.clone())
+            }
+        };
         let connection_id = connection.connection_id().to_string();
         let mut release_guard =
             RegistryConsumerGuard::new(registry.clone(), connection_id.clone(), consumer.clone());
@@ -269,6 +319,70 @@ impl SshTransportClient {
         result
     }
 
+    async fn connect_shell_with_dedicated_parent(
+        self,
+        registry: SshConnectionRegistry,
+        consumer: ConnectionConsumer,
+        parent_connection_id: String,
+    ) -> Result<SshPtyHandle, SshTransportError> {
+        let connection = registry.acquire_dedicated(self.config.clone(), consumer.clone());
+        let connection_id = connection.connection_id().to_string();
+        // The parent consumer is tied to the dedicated child entry. Retiring
+        // that entry releases this ancestor ownership in the registry.
+        let parent_consumer =
+            ConnectionConsumer::NodeRouter(format!("{connection_id}:ancestor"));
+        let Some(parent) = registry.acquire_consumer_for_connection(
+            &parent_connection_id,
+            parent_consumer.clone(),
+        ) else {
+            registry.release(&connection_id, &consumer);
+            return Err(SshTransportError::ConnectionFailed(
+                "parent SSH connection is unavailable for dedicated terminal".to_string(),
+            ));
+        };
+
+        let connection = self
+            .connect_child_node_via_parent_with_registry(
+                registry.clone(),
+                consumer.clone(),
+                connection,
+                parent,
+                parent_consumer,
+            )
+            .await?;
+        let Some(pooled) = connection.physical::<PooledSshConnection>() else {
+            registry.release(&connection_id, &consumer);
+            return Err(SshTransportError::ConnectionFailed(
+                "dedicated terminal SSH transport is unavailable".to_string(),
+            ));
+        };
+        let mut release_guard =
+            RegistryConsumerGuard::new(registry.clone(), connection_id.clone(), consumer);
+        let result = Self::open_shell_from_pooled(
+            ShellRequestConfig::Registry(connection.clone()),
+            pooled,
+            None,
+            release_guard.release_tuple(),
+            Some(connection),
+        )
+        .await;
+        match &result {
+            Ok(_) => release_guard.disarm(),
+            Err(error) => {
+                if ssh_channel_error_is_transport_lost(&error.to_string()) {
+                    let _ = registry
+                        .mark_transport_lost_cascade(
+                            &connection_id,
+                            "dedicated terminal channel open failed",
+                        )
+                        .await;
+                }
+                release_guard.release_now();
+            }
+        }
+        result
+    }
+
     pub async fn connect_shell_on_existing_connection(
         registry: SshConnectionRegistry,
         connection_id: String,
@@ -301,9 +415,8 @@ impl SshTransportClient {
             ));
         }
 
-        // Opening a terminal on an existing node must never reacquire or copy
-        // authentication material. The registry-owned transport and config
-        // remain authoritative; this consumer only adds one shell channel.
+        // Existing terminals borrow only a new session channel. Authentication
+        // remains owned by the node's physical connection.
         let result = Self::open_shell_from_pooled(
             ShellRequestConfig::Registry(connection.clone()),
             pooled,

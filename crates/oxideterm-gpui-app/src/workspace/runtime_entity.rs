@@ -300,6 +300,12 @@ pub(in crate::workspace) struct WorkspaceRuntimeEntity {
 }
 
 impl WorkspaceRuntimeEntity {
+    pub(in crate::workspace) fn native_ssh_prompt_handler(&self) -> Arc<NativeSshPromptHandler> {
+        // Additional terminal logins use the same UI-owned prompt delivery
+        // channel as the source node's initial authentication.
+        Arc::new(NativeSshPromptHandler::new(self.ssh_worker_tx.clone()))
+    }
+
     #[cfg(test)]
     pub(in crate::workspace) fn new(
         ssh_registry: SshConnectionRegistry,

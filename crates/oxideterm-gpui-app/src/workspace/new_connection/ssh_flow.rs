@@ -61,14 +61,39 @@ struct SavedConnectionRuntimeHandoff {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub(in crate::workspace) struct SshTerminalConnectionOptions {
+    pub(in crate::workspace) terminal: ConnectionTerminalOptions,
+    pub(in crate::workspace) dedicated_new_terminal_connection: bool,
+}
+
+impl SshTerminalConnectionOptions {
+    pub(in crate::workspace) fn from_form(form: &NewConnectionForm) -> Self {
+        // Keep the SSH session ownership policy separate from terminal protocol overrides.
+        Self {
+            terminal: form.terminal,
+            dedicated_new_terminal_connection: form.dedicated_new_terminal_connection,
+        }
+    }
+}
+
+impl Default for SshTerminalConnectionOptions {
+    fn default() -> Self {
+        Self {
+            terminal: ConnectionTerminalOptions::default(),
+            dedicated_new_terminal_connection: false,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub(in crate::workspace) enum SshConnectionIntent {
     Test,
-    Connect(ConnectionTerminalOptions),
+    Connect(SshTerminalConnectionOptions),
     ConnectSaved(String),
     DrillDown {
         parent_id: NodeId,
         saved_connection_id: Option<String>,
-        terminal_options: ConnectionTerminalOptions,
+        terminal_options: SshTerminalConnectionOptions,
     },
 }
 

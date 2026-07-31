@@ -354,6 +354,7 @@ pub(super) fn test_connection_store_with_agent_connection(
             identity_agent: None,
             agent_forwarding_socket: None,
             legacy_ssh_compatibility: false,
+            dedicated_new_terminal_connection: false,
             post_connect_command: None,
             terminal: oxideterm_connections::ConnectionTerminalOptions::default(),
         })

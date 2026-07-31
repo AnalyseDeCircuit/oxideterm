@@ -115,6 +115,36 @@ impl SshPtySession {
                             )),
                         }
                     }
+                    Some(SshSessionConnection::Dedicated {
+                        mut config,
+                        parent_connection_id,
+                    }) => {
+                        config.cols = cols;
+                        config.rows = rows;
+                        let mut client = SshTransportClient::new(config);
+                        if let Some(prompt_handler) = prompt_handler {
+                            client = client.with_prompt_handler(prompt_handler);
+                        }
+                        if let Some(resolver) = managed_key_resolver {
+                            client = client.with_managed_key_resolver(resolver);
+                        }
+                        match (registry, consumer) {
+                            (Some(registry), Some(consumer)) => {
+                                // Dedicated terminals still use the registry so
+                                // their physical connection has one clear owner.
+                                client
+                                    .connect_shell_with_dedicated_registry(
+                                        registry,
+                                        consumer,
+                                        parent_connection_id,
+                                    )
+                                    .await
+                            }
+                            _ => Err(oxideterm_ssh::SshTransportError::ConnectionFailed(
+                                "dedicated SSH terminal requires a connection registry".to_string(),
+                            )),
+                        }
+                    }
                     None => Err(oxideterm_ssh::SshTransportError::ConnectionFailed(
                         "SSH terminal connection ownership was already transferred".to_string(),
                     )),

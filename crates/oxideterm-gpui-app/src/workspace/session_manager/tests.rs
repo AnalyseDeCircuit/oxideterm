@@ -660,6 +660,7 @@ pub(super) fn edit_properties_saved_keychain_password_starts_unloaded() {
 pub(super) fn edit_properties_preserves_legacy_ssh_compatibility() {
     let mut saved_connection = saved_connection_fixture(SavedAuth::Agent);
     saved_connection.options.legacy_ssh_compatibility = true;
+    saved_connection.options.dedicated_new_terminal_connection = true;
 
     // Editing and saving an existing connection must round-trip its transport policy.
     let mut form = form_from_saved_connection(&saved_connection, None);
@@ -667,6 +668,8 @@ pub(super) fn edit_properties_preserves_legacy_ssh_compatibility() {
 
     assert!(form.legacy_ssh_compatibility);
     assert!(request.legacy_ssh_compatibility);
+    assert!(form.dedicated_new_terminal_connection);
+    assert!(request.dedicated_new_terminal_connection);
 }
 
 #[test]

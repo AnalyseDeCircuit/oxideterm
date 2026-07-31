@@ -229,7 +229,7 @@ impl WorkspaceApp {
                 .connection_form_state(cx)
                 .form
                 .as_ref()
-                .map(|form| form.terminal)
+                .map(SshTerminalConnectionOptions::from_form)
                 .unwrap_or_default();
             self.start_new_connection_flow(
                 SshConnectionIntent::DrillDown {
@@ -263,7 +263,7 @@ impl WorkspaceApp {
                         .connection_form_state(cx)
                         .form
                         .as_ref()
-                        .map(|form| form.terminal)
+                        .map(SshTerminalConnectionOptions::from_form)
                         .unwrap_or_default();
                     self.start_new_connection_flow(
                         SshConnectionIntent::Connect(terminal_options),
@@ -396,7 +396,12 @@ impl WorkspaceApp {
             SshConnectionIntent::DrillDown {
                 parent_id,
                 saved_connection_id: Some(connection.id.clone()),
-                terminal_options: connection.options.terminal,
+                terminal_options: SshTerminalConnectionOptions {
+                    terminal: connection.options.terminal,
+                    dedicated_new_terminal_connection: connection
+                        .options
+                        .dedicated_new_terminal_connection,
+                },
             }
         } else {
             SshConnectionIntent::ConnectSaved(connection.id.clone())

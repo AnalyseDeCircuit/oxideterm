@@ -172,6 +172,9 @@ pub struct ConnectionOptions {
     pub agent_forwarding_socket: Option<String>,
     #[serde(default)]
     pub legacy_ssh_compatibility: bool,
+    /// Some SSH servers require a new authentication exchange for every terminal.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub dedicated_new_terminal_connection: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub post_connect_command: Option<String>,
     /// Terminal protocol behavior is host-specific; absent values inherit the
@@ -844,6 +847,7 @@ pub struct SaveConnectionRequest {
     pub identity_agent: Option<String>,
     pub agent_forwarding_socket: Option<String>,
     pub legacy_ssh_compatibility: bool,
+    pub dedicated_new_terminal_connection: bool,
     pub post_connect_command: Option<String>,
     pub terminal: ConnectionTerminalOptions,
 }
