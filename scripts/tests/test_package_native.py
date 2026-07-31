@@ -261,6 +261,73 @@ class MacosDmgDetachTests(unittest.TestCase):
             sleep.call_count, package_native.MACOS_DMG_DETACH_MAX_ATTEMPTS - 1
         )
 
+    def test_retries_busy_force_detach_before_succeeding(self) -> None:
+        device = "/dev/disk9"
+        detach_command = ["hdiutil", "detach", device]
+        force_detach_command = ["hdiutil", "detach", "-force", device]
+        busy_error = subprocess.CalledProcessError(
+            package_native.MACOS_RESOURCE_BUSY_EXIT_CODE, detach_command
+        )
+        failed_attempts = [
+            busy_error for _ in range(package_native.MACOS_DMG_DETACH_MAX_ATTEMPTS)
+        ]
+
+        with (
+            patch.object(
+                package_native,
+                "run",
+                side_effect=[*failed_attempts, busy_error, None],
+            ) as run_mock,
+            patch.object(
+                package_native, "macos_dmg_device_is_attached", return_value=True
+            ),
+            patch.object(package_native.time, "sleep") as sleep,
+        ):
+            package_native.detach_macos_dmg(device)
+
+        self.assertEqual(
+            run_mock.call_args_list,
+            [call(detach_command)] * package_native.MACOS_DMG_DETACH_MAX_ATTEMPTS
+            + [call(force_detach_command), call(force_detach_command)],
+        )
+        self.assertEqual(
+            sleep.call_count, package_native.MACOS_DMG_DETACH_MAX_ATTEMPTS
+        )
+
+    def test_reports_busy_after_force_detach_retry_limit(self) -> None:
+        device = "/dev/disk9"
+        detach_command = ["hdiutil", "detach", device]
+        force_detach_command = ["hdiutil", "detach", "-force", device]
+        busy_error = subprocess.CalledProcessError(
+            package_native.MACOS_RESOURCE_BUSY_EXIT_CODE, detach_command
+        )
+        failed_attempt_count = (
+            package_native.MACOS_DMG_DETACH_MAX_ATTEMPTS
+            + package_native.MACOS_DMG_FORCE_DETACH_MAX_ATTEMPTS
+        )
+
+        with (
+            patch.object(
+                package_native,
+                "run",
+                side_effect=[busy_error for _ in range(failed_attempt_count)],
+            ) as run_mock,
+            patch.object(
+                package_native, "macos_dmg_device_is_attached", return_value=True
+            ),
+            patch.object(package_native.time, "sleep") as sleep,
+            self.assertRaises(subprocess.CalledProcessError),
+        ):
+            package_native.detach_macos_dmg(device)
+
+        self.assertEqual(
+            run_mock.call_args_list,
+            [call(detach_command)] * package_native.MACOS_DMG_DETACH_MAX_ATTEMPTS
+            + [call(force_detach_command)]
+            * package_native.MACOS_DMG_FORCE_DETACH_MAX_ATTEMPTS,
+        )
+        self.assertEqual(sleep.call_count, failed_attempt_count - 2)
+
     def test_does_not_retry_non_busy_detach_error(self) -> None:
         device = "/dev/disk9"
         detach_command = ["hdiutil", "detach", device]
@@ -296,9 +363,7 @@ class MacosDmgDetachTests(unittest.TestCase):
 
         run_mock.assert_called_once_with(detach_command)
         device_is_attached.assert_called_once_with(device)
-        sleep.assert_called_once_with(
-            package_native.MACOS_DMG_DETACH_RETRY_DELAY_SECONDS
-        )
+        sleep.assert_not_called()
 
 
 class ReleaseDocumentTests(unittest.TestCase):

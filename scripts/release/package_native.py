@@ -33,6 +33,7 @@ MACOS_UNSIGNED_DMG_BACKGROUND = (
 MACOS_DMG_BACKGROUND_DIR_NAME = ".background"
 MACOS_DMG_BACKGROUND_NAME = "unsigned-dmg-background.png"
 MACOS_DMG_DETACH_MAX_ATTEMPTS = 5
+MACOS_DMG_FORCE_DETACH_MAX_ATTEMPTS = 15
 MACOS_DMG_DETACH_RETRY_DELAY_SECONDS = 2
 MACOS_RESOURCE_BUSY_EXIT_CODE = 16
 DIST_DIR = ROOT_DIR / "dist"
@@ -181,32 +182,39 @@ def attach_macos_dmg(image_path: Path, mount_point: Path) -> str:
 
 def detach_macos_dmg(device: str) -> None:
     """Detach a DMG after transient macOS filesystem users release it."""
-    detach_command = ["hdiutil", "detach", device]
-    for attempt in range(1, MACOS_DMG_DETACH_MAX_ATTEMPTS + 1):
-        try:
-            run(detach_command)
-            return
-        except subprocess.CalledProcessError as error:
-            if error.returncode != MACOS_RESOURCE_BUSY_EXIT_CODE:
-                raise
-            if attempt < MACOS_DMG_DETACH_MAX_ATTEMPTS:
+    detach_phases = (
+        ("detach", ["hdiutil", "detach", device], MACOS_DMG_DETACH_MAX_ATTEMPTS),
+        (
+            "force-detach",
+            ["hdiutil", "detach", "-force", device],
+            MACOS_DMG_FORCE_DETACH_MAX_ATTEMPTS,
+        ),
+    )
+    for phase_name, detach_command, maximum_attempts in detach_phases:
+        for attempt in range(1, maximum_attempts + 1):
+            try:
+                run(detach_command)
+                return
+            except subprocess.CalledProcessError as error:
+                if error.returncode != MACOS_RESOURCE_BUSY_EXIT_CODE:
+                    raise
+
+                # hdiutil can return EBUSY after an asynchronous detach has
+                # already removed the image. The root device remains the only
+                # stable identity after an APFS volume disappears.
+                if not macos_dmg_device_is_attached(device):
+                    return
+                if attempt == maximum_attempts:
+                    if phase_name == "force-detach":
+                        raise
+                    break
+
                 print(
-                    "warning: DMG is still busy; retrying detach "
-                    f"({attempt}/{MACOS_DMG_DETACH_MAX_ATTEMPTS})",
+                    f"warning: DMG is still busy; retrying {phase_name} "
+                    f"({attempt}/{maximum_attempts})",
                     file=sys.stderr,
                 )
                 time.sleep(MACOS_DMG_DETACH_RETRY_DELAY_SECONDS)
-
-            # hdiutil can report resource-busy while diskimages-helper finishes
-            # the detach asynchronously. Track the root device because an APFS
-            # volume can disappear before its backing image is released.
-            if not macos_dmg_device_is_attached(device):
-                return
-            if attempt == MACOS_DMG_DETACH_MAX_ATTEMPTS:
-                break
-
-    # A completed sync makes force-detach a safe final fallback for flaky CI runners.
-    run(["hdiutil", "detach", "-force", device])
 
 
 def host_triple() -> str:
