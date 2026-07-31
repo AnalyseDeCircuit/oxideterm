@@ -59,7 +59,8 @@ impl WorkspaceApp {
                 SelectAnchorId::AiModelSelector
                 | SelectAnchorId::AiReasoningMenu
                 | SelectAnchorId::AiSafetyMenu
-                | SelectAnchorId::AiContextPopover => {
+                | SelectAnchorId::AiContextPopover
+                | SelectAnchorId::AiAutocomplete => {
                     anchor.bounds.origin.x = anchor.bounds.origin.x + px(dx);
                     anchor.bounds.origin.y = anchor.bounds.origin.y + px(dy);
                 }
@@ -85,7 +86,12 @@ impl WorkspaceApp {
         let panel_right = f32::from(panel_anchor.bounds.right());
         let panel_width = f32::from(panel_anchor.bounds.size.width);
 
-        let (corner, anchor_x, anchor_y, popup) = if self.ai_entity.read(cx).chat_ui().conversation_list_open {
+        let (corner, anchor_x, anchor_y, popup, dismiss_from_outside) = if self
+            .ai_entity
+            .read(cx)
+            .chat_ui()
+            .conversation_list_open
+        {
             let top = self
                 .select_anchors
                 .get(&SelectAnchorId::AiConversationList)
@@ -99,6 +105,7 @@ impl WorkspaceApp {
                 panel_left + AI_TOP_FLOATING_INSET_X,
                 top,
                 self.render_ai_conversation_dropdown(dropdown_width, cx),
+                true,
             )
         } else if self.ai_entity.read(cx).chat_ui().menu_open {
             let anchor = self
@@ -117,6 +124,7 @@ impl WorkspaceApp {
                 left,
                 top,
                 self.render_ai_chat_menu(cx),
+                true,
             )
         } else if self
             .ai_entity
@@ -134,6 +142,7 @@ impl WorkspaceApp {
                 ),
                 f32::from(anchor.bounds.top()) - AI_FLOATING_GAP,
                 self.render_ai_model_selector_dropdown(&self.ai_model_selector_providers(cx), cx),
+                true,
             )
         } else if self.ai_entity.read(cx).chat_ui().reasoning_menu_open {
             let anchor = self.select_anchors.get(&SelectAnchorId::AiReasoningMenu)?;
@@ -147,6 +156,7 @@ impl WorkspaceApp {
                 ),
                 f32::from(anchor.bounds.top()) - AI_FLOATING_GAP,
                 self.render_ai_reasoning_menu(cx)?,
+                true,
             )
         } else if self.ai_entity.read(cx).chat_ui().safety_menu_open {
             let anchor = self.select_anchors.get(&SelectAnchorId::AiSafetyMenu)?;
@@ -160,6 +170,7 @@ impl WorkspaceApp {
                 ),
                 f32::from(anchor.bounds.top()) - AI_FLOATING_GAP,
                 self.render_ai_safety_menu(cx),
+                true,
             )
         } else if self.ai_entity.read(cx).chat_ui().context_popover_open {
             let anchor = self.select_anchors.get(&SelectAnchorId::AiContextPopover)?;
@@ -182,10 +193,47 @@ impl WorkspaceApp {
                 ),
                 f32::from(anchor.bounds.top()) - AI_FLOATING_GAP,
                 popover,
+                true,
+            )
+        } else if let autocomplete_items = self.ai_chat_autocomplete_items(cx)
+            && !autocomplete_items.is_empty()
+        {
+            let anchor = self
+                .select_anchors
+                .get(&SelectAnchorId::AiAutocomplete)?;
+            let popup_width = f32::from(anchor.bounds.size.width)
+                .min((panel_width - AI_TOP_FLOATING_INSET_X * 2.0).max(1.0))
+                .max(1.0);
+            (
+                Corner::BottomLeft,
+                ai_sidebar_popup_left(
+                    f32::from(anchor.bounds.left()),
+                    popup_width,
+                    panel_left,
+                    panel_right,
+                ),
+                f32::from(anchor.bounds.top()) - AI_FLOATING_GAP,
+                div()
+                    .w(px(popup_width))
+                    .child(self.render_ai_autocomplete_popup(&autocomplete_items, cx))
+                    .into_any_element(),
+                false,
             )
         } else {
             return None;
         };
+
+        let popup = deferred(
+            anchored()
+                .anchor(corner)
+                .position(gpui::point(px(anchor_x), px(anchor_y)))
+                .position_mode(AnchoredPositionMode::Window)
+                .child(overlay_content_boundary(div().child(popup))),
+        )
+        .with_priority(oxideterm_gpui_ui::modal::TAURI_POPOVER_LAYER_PRIORITY);
+        if !dismiss_from_outside {
+            return Some(popup.into_any_element());
+        }
 
         Some(
             popover_backdrop()
@@ -203,16 +251,7 @@ impl WorkspaceApp {
                         cx.stop_propagation();
                     }),
                 )
-                .child(
-                    deferred(
-                        anchored()
-                            .anchor(corner)
-                            .position(gpui::point(px(anchor_x), px(anchor_y)))
-                            .position_mode(AnchoredPositionMode::Window)
-                            .child(overlay_content_boundary(div().child(popup))),
-                    )
-                    .with_priority(oxideterm_gpui_ui::modal::TAURI_POPOVER_LAYER_PRIORITY),
-                )
+                .child(popup)
                 .into_any_element(),
         )
     }
@@ -227,6 +266,7 @@ impl WorkspaceApp {
             || self.ai_entity.read(cx).chat_ui().reasoning_menu_open
             || self.ai_entity.read(cx).chat_ui().safety_menu_open
             || self.ai_entity.read(cx).chat_ui().context_popover_open
+            || !self.ai_chat_autocomplete_items(cx).is_empty()
     }
 
     pub(in crate::workspace) fn render_ai_conversation_dropdown(

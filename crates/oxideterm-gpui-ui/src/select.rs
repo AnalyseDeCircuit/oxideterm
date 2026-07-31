@@ -107,6 +107,7 @@ pub enum SelectAnchorId {
     AiReasoningMenu,
     AiSafetyMenu,
     AiContextPopover,
+    AiAutocomplete,
     NewConnectionGroup,
     NewConnectionKeyAuthSource,
     NewConnectionManagedKey,

@@ -632,6 +632,7 @@ impl WorkspaceApp {
                     | SelectAnchorId::AiReasoningMenu
                     | SelectAnchorId::AiSafetyMenu
                     | SelectAnchorId::AiContextPopover
+                    | SelectAnchorId::AiAutocomplete
             ) && self.has_ai_sidebar_floating_overlay(cx))
             || (anchor.id == SelectAnchorId::TerminalBroadcastMenu
                 && self.terminal.read(cx).broadcast_menu_open())
@@ -1648,6 +1649,7 @@ pub(in crate::workspace) fn select_anchor_tracks_while_closed(anchor_id: SelectA
             | SelectAnchorId::AiReasoningMenu
             | SelectAnchorId::AiSafetyMenu
             | SelectAnchorId::AiContextPopover
+            | SelectAnchorId::AiAutocomplete
             | SelectAnchorId::NewConnectionGroup
             | SelectAnchorId::NewConnectionKeyAuthSource
             | SelectAnchorId::NewConnectionManagedKey
@@ -1679,4 +1681,18 @@ pub(in crate::workspace) fn select_anchor_tracks_while_closed(anchor_id: SelectA
             | SelectAnchorId::SessionManagerSort
             | SelectAnchorId::SessionManagerBatchMove
     )
+}
+
+#[cfg(test)]
+mod floating_overlay_anchor_tests {
+    use super::*;
+
+    #[test]
+    fn ai_autocomplete_keeps_a_warm_window_overlay_anchor() {
+        // The candidate list is root-mounted, so its input-frame anchor must
+        // exist before the first slash, participant, or reference completion.
+        assert!(select_anchor_tracks_while_closed(
+            SelectAnchorId::AiAutocomplete
+        ));
+    }
 }

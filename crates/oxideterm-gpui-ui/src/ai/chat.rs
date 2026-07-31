@@ -293,13 +293,14 @@ pub fn ai_stop_button(
 pub fn ai_autocomplete_popup(tokens: &ThemeTokens, id: impl Into<ElementId>) -> Stateful<Div> {
     div()
         .id(id)
-        .absolute()
-        .left_0()
-        .right_0()
-        .bottom_full()
-        .mb(px(tokens.spacing.one))
+        .w_full()
         .max_h(px(AI_AUTOCOMPLETE_MAX_HEIGHT))
         .overflow_y_scroll()
+        // The popup is mounted at the window overlay root. Keep pointer and
+        // wheel input from falling through to the virtualized chat history.
+        .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| cx.stop_propagation())
+        .on_mouse_down(gpui::MouseButton::Right, |_, _, cx| cx.stop_propagation())
+        .on_scroll_wheel(|_, _, cx| cx.stop_propagation())
         .rounded(px(tokens.radii.md))
         .border_1()
         .border_color(bg_alpha(tokens, tokens.ui.border, 0x99))

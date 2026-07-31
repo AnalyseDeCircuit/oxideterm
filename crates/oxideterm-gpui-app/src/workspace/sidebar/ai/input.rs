@@ -57,7 +57,6 @@ impl WorkspaceApp {
         };
         let target = WorkspaceImeTarget::AiChatInput;
         let focused = self.ai_entity.read(cx).chat_ui().input_focused;
-        let autocomplete_items = self.ai_chat_autocomplete_items(cx);
         let draft = self.ai_entity.read(cx).chat_ui().draft.clone();
         let marked_range = self.ime_marked_virtual_range_for_target(target, cx);
         let selected_range = self.ime_selected_range_for_target(target, cx);
@@ -197,9 +196,6 @@ window.focus(&this.focus_handle, cx);
             )
         };
         let frame = ai_chat_input_frame(&self.tokens, focused)
-            .when(!autocomplete_items.is_empty(), |frame| {
-                frame.child(self.render_ai_autocomplete_popup(&autocomplete_items, cx))
-            })
             .child(ai_chat_input_editor(&self.tokens, input));
         let footer_leading = if self.ai_entity.read(cx).chat_is_loading() {
             div()
@@ -259,6 +255,11 @@ window.focus(&this.focus_handle, cx);
             footer_leading,
             footer_trailing,
         ));
+        let frame = select_anchor_probe(
+            SelectAnchorId::AiAutocomplete,
+            frame,
+            Self::deferred_ai_select_anchor_update(cx.entity()),
+        );
         ai_chat_input_root_with_background(
             &self.tokens,
             self.context_sidebar_content_background(self.tokens.ui.bg),
