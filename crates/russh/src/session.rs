@@ -23,6 +23,7 @@ use byteorder::{BigEndian, ByteOrder};
 use log::{debug, trace};
 use ssh_encoding::Encode;
 use tokio::sync::oneshot;
+use zeroize::Zeroize;
 
 use crate::cipher::OpeningKey;
 use crate::client::GexParams;
@@ -46,9 +47,9 @@ pub(crate) struct Encrypted {
     pub session_id: CryptoVec,
     pub channels: HashMap<ChannelId, ChannelParams>,
     pub last_channel_id: Wrapping<u32>,
-    // Non-sensitive packet assembly buffer, analogous to
-    // OpenSSH sshbuf (output side).  Not mlocked because it
-    // holds only protocol framing and ciphertext.
+    // Transient plaintext packet assembly buffer. Some channel requests carry
+    // bearer credentials, so completed packets are wiped after encryption and
+    // any pending bytes are wiped when the session is dropped.
     pub write: Vec<u8>,
     pub write_cursor: usize,
     pub last_rekey: russh_util::time::Instant,
@@ -58,6 +59,12 @@ pub(crate) struct Encrypted {
     pub rekey_wanted: bool,
     pub received_extensions: Vec<String>,
     pub extension_info_awaiters: HashMap<String, Vec<oneshot::Sender<()>>>,
+}
+
+impl Drop for Encrypted {
+    fn drop(&mut self) {
+        self.write.zeroize();
+    }
 }
 
 pub(crate) struct CommonSession<Config> {
@@ -674,16 +681,33 @@ impl Encrypted {
                 let len = BigEndian::read_u32(&self.write[self.write_cursor..]) as usize;
                 #[allow(clippy::indexing_slicing)]
                 let to_write = &self.write[(self.write_cursor + 4)..(self.write_cursor + 4 + len)];
-                trace!("session_write_encrypted, buf = {to_write:?}");
+                // Packet payloads can contain passwords, cookies, commands, or
+                // environment values. Log only safe framing metadata.
+                trace!(
+                    "session_write_encrypted, msg_type = {:?}, len = {}",
+                    to_write.first(),
+                    to_write.len()
+                );
 
-                writer.packet_raw(to_write)?;
+                let write_result = writer.packet_raw(to_write);
+                #[allow(clippy::indexing_slicing)]
+                self.write[self.write_cursor..(self.write_cursor + 4 + len)].zeroize();
+                if let Err(error) = write_result {
+                    // Packet encryption/compression failures are terminal for
+                    // this queue; wipe later queued secrets before returning.
+                    self.write_cursor = 0;
+                    self.write.zeroize();
+                    return Err(error.into());
+                }
                 self.write_cursor += 4 + len
             }
         }
         if self.write_cursor >= self.write.len() {
-            // If all packets have been written, clear.
+            // `zeroize` also clears the logical length after every packet range
+            // has been wiped, keeping the allocation reusable without retaining
+            // plaintext protocol data.
             self.write_cursor = 0;
-            self.write.clear();
+            self.write.zeroize();
         }
 
         if self.kex.skip_exchange() {

@@ -51,6 +51,7 @@ pub use oxideterm_sftp::{
     SftpSession, SftpTransferManager, SftpTransferPermit, SftpTransferRuntimeSettings, SortOrder,
     TransferDirection, TransferProgress, TransferState,
 };
+pub use oxideterm_x11_forwarding::{X11ForwardPolicy, X11ForwardTrust};
 pub use reconnect::{
     MAX_RETAINED_RECONNECT_JOBS, PhaseEvent, PhaseResult, ReconnectForwardRestorePlan,
     ReconnectForwardRule, ReconnectForwardRuleSnapshot, ReconnectIdeSnapshot, ReconnectJob,

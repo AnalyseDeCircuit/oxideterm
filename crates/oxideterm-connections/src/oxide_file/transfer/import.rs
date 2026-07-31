@@ -932,6 +932,10 @@ fn merge_options(
         existing.agent_forwarding_socket = imported.agent_forwarding_socket;
     }
     existing.legacy_ssh_compatibility |= imported.legacy_ssh_compatibility;
+    if imported.x11_forwarding.enabled {
+        // An imported enabled policy is explicit; absent legacy fields remain disabled.
+        existing.x11_forwarding = imported.x11_forwarding;
+    }
     existing.post_connect_command = imported
         .post_connect_command
         .or(existing.post_connect_command);

@@ -23,6 +23,14 @@ pub enum X11ForwardingError {
     MissingAuthEntry,
     #[error("X11 authority file is unavailable: {0}")]
     AuthorityFileUnavailable(String),
+    #[error("xauth is unavailable: {0}")]
+    XauthUnavailable(String),
+    #[error("xauth command timed out")]
+    XauthTimedOut,
+    #[error("xauth command failed: {0}")]
+    XauthFailed(String),
+    #[error("xauth output exceeded {0} bytes")]
+    XauthOutputTooLarge(usize),
     #[error("no remote X11 display candidate was available")]
     RemoteDisplayUnavailable,
     #[error("X11 auth cookie did not match the forwarding cookie")]

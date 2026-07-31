@@ -4,17 +4,30 @@
 use std::fmt;
 
 use serde::{Deserialize, Serialize};
-use zeroize::Zeroize;
+use zeroize::Zeroizing;
 
 use crate::{X11AuthMaterial, X11AuthProtocol, X11Display, X11ForwardPolicy};
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct X11ForwardConfig {
     pub local_display: X11Display,
     pub remote_display: u16,
     pub single_connection: bool,
     pub policy: X11ForwardPolicy,
+}
+
+impl fmt::Debug for X11ForwardConfig {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // The device-local display is runtime context and must not enter diagnostics.
+        formatter
+            .debug_struct("X11ForwardConfig")
+            .field("local_display", &"<device-local display>")
+            .field("remote_display", &self.remote_display)
+            .field("single_connection", &self.single_connection)
+            .field("policy", &self.policy)
+            .finish()
+    }
 }
 
 impl X11ForwardConfig {
@@ -40,7 +53,7 @@ impl X11ForwardConfig {
         X11SshRequest {
             single_connection: self.single_connection,
             auth_protocol: auth.protocol,
-            auth_cookie_hex: auth.ssh_auth_cookie(),
+            auth_cookie_hex: Zeroizing::new(auth.ssh_auth_cookie()),
             screen_number: self.local_display.screen as u32,
         }
     }
@@ -50,19 +63,13 @@ impl X11ForwardConfig {
 pub struct X11SshRequest {
     pub single_connection: bool,
     pub auth_protocol: X11AuthProtocol,
-    pub auth_cookie_hex: String,
+    pub auth_cookie_hex: Zeroizing<String>,
     pub screen_number: u32,
 }
 
 impl X11SshRequest {
     pub fn auth_protocol_name(&self) -> &'static str {
         self.auth_protocol.ssh_name()
-    }
-}
-
-impl Drop for X11SshRequest {
-    fn drop(&mut self) {
-        self.auth_cookie_hex.zeroize();
     }
 }
 
@@ -97,10 +104,14 @@ mod tests {
 
         assert!(request.single_connection);
         assert_eq!(request.auth_protocol_name(), "MIT-MAGIC-COOKIE-1");
-        assert_eq!(request.auth_cookie_hex, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+        assert_eq!(
+            request.auth_cookie_hex.as_str(),
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        );
         assert_eq!(request.screen_number, 1);
         assert_eq!(config.remote_display_value(), "localhost:10.1");
         assert!(!format!("{request:?}").contains("aaaaaaaa"));
+        assert!(!format!("{config:?}").contains(":0.1"));
     }
 
     #[test]

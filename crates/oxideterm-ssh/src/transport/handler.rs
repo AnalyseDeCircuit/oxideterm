@@ -112,6 +112,9 @@ struct NativeClientHandler {
     agent_forward_tasks: JoinSet<()>,
     remote_forward_handler: RemoteForwardHandlerSlot,
     x11_forward_handler: X11ForwardHandlerSlot,
+    x11_dispatcher: X11ForwardDispatcher,
+    x11_forward_semaphore: Arc<Semaphore>,
+    x11_forward_tasks: JoinSet<()>,
     auth_banners: AuthBannerSink,
 }
 
@@ -151,6 +154,9 @@ impl NativeClientHandler {
             agent_forward_tasks: JoinSet::new(),
             remote_forward_handler,
             x11_forward_handler,
+            x11_dispatcher: X11ForwardDispatcher::new(),
+            x11_forward_semaphore: Arc::new(Semaphore::new(X11_CHANNEL_LIMIT)),
+            x11_forward_tasks: JoinSet::new(),
             auth_banners: new_auth_banner_sink(),
         })
     }
@@ -162,10 +168,25 @@ impl NativeClientHandler {
     fn agent_forwarding_acceptance(&self) -> Arc<AtomicBool> {
         self.agent_forwarding_accepted.clone()
     }
+
+    fn x11_dispatcher(&self) -> X11ForwardDispatcher {
+        self.x11_dispatcher.clone()
+    }
 }
 
 impl client::Handler for NativeClientHandler {
     type Error = SshTransportError;
+
+    fn should_accept_x11_server_channel(
+        &mut self,
+        _channel: russh::ChannelId,
+        _originator_address: &str,
+        _originator_port: u32,
+    ) -> impl Future<Output = bool> + Send {
+        let accepted = self.x11_dispatcher.has_active_routes()
+            || self.x11_forward_handler.read().is_some();
+        async move { accepted }
+    }
 
     fn kex_done(
         &mut self,
@@ -370,19 +391,35 @@ impl client::Handler for NativeClientHandler {
         originator_port: u32,
         _session: &mut client::Session,
     ) -> Result<(), Self::Error> {
+        let Ok(permit) = self.x11_forward_semaphore.clone().try_acquire_owned() else {
+            let _ = channel.eof().await;
+            return Ok(());
+        };
+        while self.x11_forward_tasks.try_join_next().is_some() {}
+        if self.x11_dispatcher.has_active_routes() {
+            let dispatcher = self.x11_dispatcher.clone();
+            self.x11_forward_tasks.spawn(async move {
+                if let Err(error) = dispatcher.bridge(Box::new(channel.into_stream())).await {
+                    tracing::debug!(error = %error, "X11 channel bridge failed");
+                }
+                drop(permit);
+            });
+            return Ok(());
+        }
+
         let Some(registration) = self.x11_forward_handler.read().clone() else {
             let _ = channel.eof().await;
             return Ok(());
         };
-
         let event = X11ForwardedChannel {
             connection_id: registration.connection_id.clone(),
             originator_address: originator_address.to_string(),
             originator_port: originator_port as u16,
             stream: Box::new(channel.into_stream()),
         };
-        tokio::spawn(async move {
+        self.x11_forward_tasks.spawn(async move {
             registration.handler.handle_x11_forward(event).await;
+            drop(permit);
         });
         Ok(())
     }

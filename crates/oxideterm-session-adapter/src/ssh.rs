@@ -2,14 +2,14 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use oxideterm_connections::{
-    ConnectionStore, SSH_CONFIG_TAG, SSH_PROXY_COMMAND_TAG, SavedAuth, SavedConnection,
-    SavedConnectionRuntimeSecrets, SavedUpstreamProxyAuth, SavedUpstreamProxyPolicy, SecretString,
-    resolve_ssh_config_alias,
+    ConnectionStore, ConnectionX11ForwardingMode, ConnectionX11ForwardingOptions, SSH_CONFIG_TAG,
+    SSH_PROXY_COMMAND_TAG, SavedAuth, SavedConnection, SavedConnectionRuntimeSecrets,
+    SavedUpstreamProxyAuth, SavedUpstreamProxyPolicy, SecretString, resolve_ssh_config_alias,
 };
 use oxideterm_settings::PersistedSettings;
 use oxideterm_ssh::{
     AuthMethod, ProxyCommandConfig, ProxyHopConfig, SshConfig, UpstreamProxyAuth,
-    UpstreamProxyConfig, UpstreamProxyProtocol,
+    UpstreamProxyConfig, UpstreamProxyProtocol, X11ForwardPolicy,
 };
 
 use crate::{auth_method_from_saved_auth, upstream_proxy_config_from_saved_policy};
@@ -51,6 +51,7 @@ pub fn ssh_config_from_saved_connection_with_auth(
         identity_agent: conn.options.identity_agent.clone(),
         agent_forwarding_socket: conn.options.agent_forwarding_socket.clone(),
         legacy_ssh_compatibility: conn.options.legacy_ssh_compatibility,
+        x11_forwarding: x11_forward_policy(conn.options.x11_forwarding),
         strict_host_key_checking: true,
         post_connect_command: conn.post_connect_command().map(ToOwned::to_owned),
         ..SshConfig::default()
@@ -118,10 +119,27 @@ pub fn ssh_config_from_saved_connection_with_runtime_secrets(
         identity_agent: conn.options.identity_agent.clone(),
         agent_forwarding_socket: conn.options.agent_forwarding_socket.clone(),
         legacy_ssh_compatibility: conn.options.legacy_ssh_compatibility,
+        x11_forwarding: x11_forward_policy(conn.options.x11_forwarding),
         strict_host_key_checking: true,
         post_connect_command: conn.post_connect_command().map(ToOwned::to_owned),
         ..SshConfig::default()
     })
+}
+
+fn x11_forward_policy(options: ConnectionX11ForwardingOptions) -> Option<X11ForwardPolicy> {
+    if !options.enabled {
+        return None;
+    }
+    match options.mode {
+        ConnectionX11ForwardingMode::Trusted => Some(X11ForwardPolicy::trusted()),
+        ConnectionX11ForwardingMode::Untrusted if options.untrusted_timeout_seconds == 0 => {
+            Some(X11ForwardPolicy::untrusted().without_timeout())
+        }
+        ConnectionX11ForwardingMode::Untrusted => Some(
+            X11ForwardPolicy::untrusted()
+                .with_timeout_millis(u64::from(options.untrusted_timeout_seconds) * 1_000),
+        ),
+    }
 }
 
 fn auth_method_from_saved_auth_with_runtime_secret(
@@ -294,4 +312,33 @@ pub fn ssh_config_for_saved_connection_hop(
     }
 
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn saved_x11_options_become_non_secret_runtime_policy() {
+        let policy = x11_forward_policy(ConnectionX11ForwardingOptions {
+            enabled: true,
+            mode: ConnectionX11ForwardingMode::Untrusted,
+            untrusted_timeout_seconds: 900,
+        })
+        .unwrap();
+
+        assert_eq!(policy.timeout_millis, Some(900_000));
+        assert!(!policy.is_trusted());
+        assert_eq!(
+            x11_forward_policy(ConnectionX11ForwardingOptions {
+                enabled: true,
+                mode: ConnectionX11ForwardingMode::Untrusted,
+                untrusted_timeout_seconds: 0,
+            })
+            .unwrap()
+            .timeout_millis,
+            None
+        );
+        assert!(x11_forward_policy(ConnectionX11ForwardingOptions::default()).is_none());
+    }
 }

@@ -754,16 +754,32 @@ impl Session {
                             originator_address,
                             originator_port,
                         } => {
-                            confirm()?;
-                            let channel = self.accept_server_initiated_channel(id, &msg);
-                            client
-                                .server_channel_open_x11(
-                                    channel,
+                            if client
+                                .should_accept_x11_server_channel(
+                                    id,
                                     originator_address,
                                     *originator_port,
-                                    self,
                                 )
-                                .await?
+                                .await
+                            {
+                                confirm()?;
+                                let channel = self.accept_server_initiated_channel(id, &msg);
+                                client
+                                    .server_channel_open_x11(
+                                        channel,
+                                        originator_address,
+                                        *originator_port,
+                                        self,
+                                    )
+                                    .await?
+                            } else {
+                                debug!("rejecting unsolicited X11 channel");
+                                msg.fail(
+                                    &mut enc.write,
+                                    msg::SSH_OPEN_ADMINISTRATIVELY_PROHIBITED,
+                                    b"X11 forwarding was not requested",
+                                )?;
+                            }
                         }
                         ChannelType::ForwardedTcpIp(d) => {
                             confirm()?;

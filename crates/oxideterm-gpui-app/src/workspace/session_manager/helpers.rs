@@ -374,6 +374,7 @@ pub(in crate::workspace) fn form_from_saved_connection(
     // Preserve compatibility settings when an existing connection enters edit mode.
     form.legacy_ssh_compatibility = conn.options.legacy_ssh_compatibility;
     form.dedicated_new_terminal_connection = conn.options.dedicated_new_terminal_connection;
+    form.x11_forwarding = conn.options.x11_forwarding;
     form.terminal = conn.options.terminal;
     form.save_connection = true;
     form.error = error;
@@ -567,6 +568,7 @@ fn connection_draft_from_form_with_proxy_hop_prefix(
         agent_forwarding_socket: form.agent_forwarding_socket.clone(),
         legacy_ssh_compatibility: form.legacy_ssh_compatibility,
         dedicated_new_terminal_connection: form.dedicated_new_terminal_connection,
+        x11_forwarding: form.x11_forwarding,
         post_connect_command: form.post_connect_command.clone(),
         terminal: form.terminal,
     }

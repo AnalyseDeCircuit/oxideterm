@@ -3,6 +3,7 @@ struct PooledSshConnection {
     _jump_handles: Vec<client::Handle<NativeClientHandler>>,
     remote_forward_handler: RemoteForwardHandlerSlot,
     x11_forward_handler: X11ForwardHandlerSlot,
+    x11_dispatcher: X11ForwardDispatcher,
     auth_banners: AuthBannerSink,
     agent_forwarding_accepted: Arc<AtomicBool>,
 }
@@ -34,6 +35,7 @@ impl PooledSshConnection {
         handle: client::Handle<NativeClientHandler>,
         remote_forward_handler: RemoteForwardHandlerSlot,
         x11_forward_handler: X11ForwardHandlerSlot,
+        x11_dispatcher: X11ForwardDispatcher,
         auth_banners: AuthBannerSink,
         agent_forwarding_accepted: Arc<AtomicBool>,
     ) -> Self {
@@ -42,6 +44,7 @@ impl PooledSshConnection {
             _jump_handles: Vec::new(),
             remote_forward_handler,
             x11_forward_handler,
+            x11_dispatcher,
             auth_banners,
             agent_forwarding_accepted,
         }
@@ -52,6 +55,7 @@ impl PooledSshConnection {
         jump_handles: Vec<client::Handle<NativeClientHandler>>,
         remote_forward_handler: RemoteForwardHandlerSlot,
         x11_forward_handler: X11ForwardHandlerSlot,
+        x11_dispatcher: X11ForwardDispatcher,
         auth_banners: AuthBannerSink,
         agent_forwarding_accepted: Arc<AtomicBool>,
     ) -> Self {
@@ -60,6 +64,7 @@ impl PooledSshConnection {
             _jump_handles: jump_handles,
             remote_forward_handler,
             x11_forward_handler,
+            x11_dispatcher,
             auth_banners,
             agent_forwarding_accepted,
         }

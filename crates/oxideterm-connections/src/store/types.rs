@@ -154,6 +154,46 @@ impl ConnectionTerminalOptions {
     }
 }
 
+pub const DEFAULT_X11_UNTRUSTED_TIMEOUT_SECONDS: u32 = 20 * 60;
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ConnectionX11ForwardingMode {
+    #[default]
+    Untrusted,
+    Trusted,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct ConnectionX11ForwardingOptions {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default)]
+    pub mode: ConnectionX11ForwardingMode,
+    #[serde(default = "default_x11_untrusted_timeout_seconds")]
+    pub untrusted_timeout_seconds: u32,
+}
+
+impl ConnectionX11ForwardingOptions {
+    pub fn is_default(&self) -> bool {
+        *self == Self::default()
+    }
+}
+
+impl Default for ConnectionX11ForwardingOptions {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            mode: ConnectionX11ForwardingMode::Untrusted,
+            untrusted_timeout_seconds: DEFAULT_X11_UNTRUSTED_TIMEOUT_SECONDS,
+        }
+    }
+}
+
+fn default_x11_untrusted_timeout_seconds() -> u32 {
+    DEFAULT_X11_UNTRUSTED_TIMEOUT_SECONDS
+}
+
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct ConnectionOptions {
     #[serde(default)]
@@ -175,6 +215,12 @@ pub struct ConnectionOptions {
     /// Some SSH servers require a new authentication exchange for every terminal.
     #[serde(default, skip_serializing_if = "is_false")]
     pub dedicated_new_terminal_connection: bool,
+    /// X11 stores only portable policy; local display and cookies are resolved per shell.
+    #[serde(
+        default,
+        skip_serializing_if = "ConnectionX11ForwardingOptions::is_default"
+    )]
+    pub x11_forwarding: ConnectionX11ForwardingOptions,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub post_connect_command: Option<String>,
     /// Terminal protocol behavior is host-specific; absent values inherit the
@@ -848,6 +894,7 @@ pub struct SaveConnectionRequest {
     pub agent_forwarding_socket: Option<String>,
     pub legacy_ssh_compatibility: bool,
     pub dedicated_new_terminal_connection: bool,
+    pub x11_forwarding: ConnectionX11ForwardingOptions,
     pub post_connect_command: Option<String>,
     pub terminal: ConnectionTerminalOptions,
 }

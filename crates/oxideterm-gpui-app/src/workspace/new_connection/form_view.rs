@@ -37,7 +37,7 @@ use crate::workspace::{
 use gpui::Div;
 use oxideterm_connections::{
     ConnectionTerminalBackspaceSequence, ConnectionTerminalDeleteSequence,
-    ConnectionTerminalEncoding, SavedUpstreamProxyProtocol,
+    ConnectionTerminalEncoding, ConnectionX11ForwardingMode, SavedUpstreamProxyProtocol,
 };
 use oxideterm_gpui_settings_view::{
     terminal_backspace_sequence_label, terminal_delete_sequence_label, terminal_encoding_label,
