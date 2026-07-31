@@ -83,6 +83,22 @@ pub fn validate_group_name(name: &str) -> Result<String> {
     Ok(name.to_string())
 }
 
+/// Returns whether `candidate` is the selected group or one of its descendants.
+fn group_path_is_within(candidate: &str, group: &str) -> bool {
+    candidate == group
+        || candidate
+            .strip_prefix(group)
+            .is_some_and(|suffix| suffix.starts_with('/'))
+}
+
+/// Rewrites a group path while preserving its relative path inside the subtree.
+fn rename_group_path(candidate: &str, old_group: &str, new_group: &str) -> Option<String> {
+    group_path_is_within(candidate, old_group).then(|| {
+        let suffix = &candidate[old_group.len()..];
+        format!("{new_group}{suffix}")
+    })
+}
+
 fn normalize_optional_group_name(group: Option<&str>) -> Result<Option<String>> {
     let Some(group) = group.map(str::trim).filter(|group| !group.is_empty()) else {
         return Ok(None);

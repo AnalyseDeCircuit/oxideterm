@@ -38,6 +38,26 @@ pub(super) fn expand_group_path(group: &str, expanded_groups: &mut HashSet<Strin
     }
 }
 
+/// Returns whether a path is the selected group or one of its descendants.
+pub(super) fn session_group_path_is_within(candidate: &str, group: &str) -> bool {
+    candidate == group
+        || candidate
+            .strip_prefix(group)
+            .is_some_and(|suffix| suffix.starts_with('/'))
+}
+
+/// Rewrites UI group state after a persisted subtree rename.
+pub(super) fn renamed_session_group_path(
+    candidate: &str,
+    old_group: &str,
+    new_group: &str,
+) -> Option<String> {
+    session_group_path_is_within(candidate, old_group).then(|| {
+        let suffix = &candidate[old_group.len()..];
+        format!("{new_group}{suffix}")
+    })
+}
+
 pub(super) fn format_last_used(last_used: Option<&str>, i18n: &I18n) -> String {
     let Some(last_used) = last_used else {
         return i18n.t("sessionManager.table.never_used");

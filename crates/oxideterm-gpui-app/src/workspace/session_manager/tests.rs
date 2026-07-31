@@ -222,6 +222,26 @@ pub(super) fn session_manager_tree_projection_only_contains_visible_rows() {
 }
 
 #[test]
+pub(super) fn session_group_ui_state_rewrites_only_the_selected_subtree() {
+    assert!(session_group_path_is_within(
+        "Production/Core/Database",
+        "Production"
+    ));
+    assert!(!session_group_path_is_within(
+        "Production-Backup",
+        "Production"
+    ));
+    assert_eq!(
+        renamed_session_group_path("Production/Core", "Production", "Live"),
+        Some("Live/Core".to_string())
+    );
+    assert_eq!(
+        renamed_session_group_path("Unrelated", "Production", "Live"),
+        None
+    );
+}
+
+#[test]
 pub(super) fn session_manager_main_views_keep_independent_empty_list_states() {
     let state = SessionManagerState::default();
 
@@ -256,6 +276,57 @@ pub(super) fn session_manager_main_views_use_virtual_lists_as_scroll_owners() {
         assert!(function_source.contains("tauri_virtual_list("));
         assert!(!function_source.contains("overflow_y_scrollbar"));
     }
+}
+
+#[test]
+pub(super) fn session_group_management_action_is_shared_by_every_view_and_empty_state() {
+    let source = include_str!("views.rs");
+    for (function_name, next_function_name) in [
+        (
+            "pub(super) fn render_session_manager_view_content",
+            "pub(super) fn render_session_manager_empty_view",
+        ),
+        (
+            "pub(super) fn render_session_manager_grid_view",
+            "pub(super) fn render_session_manager_grid_row",
+        ),
+        (
+            "pub(super) fn render_session_manager_list_view",
+            "pub(super) fn render_session_manager_tree_view",
+        ),
+        (
+            "pub(super) fn render_session_manager_tree_view",
+            "pub(super) fn render_session_manager_view_actions",
+        ),
+    ] {
+        let function_start = source.find(function_name).expect("view function");
+        let function_tail = &source[function_start + function_name.len()..];
+        let function_end = function_tail
+            .find(next_function_name)
+            .expect("next view function");
+        assert!(
+            function_tail[..function_end].contains("render_session_manager_view_actions"),
+            "{function_name} must expose the shared group-management action"
+        );
+    }
+
+    let actions_start = source
+        .find("pub(super) fn render_session_manager_view_actions")
+        .expect("shared view actions");
+    let actions_tail = &source[actions_start..];
+    let actions_end = actions_tail
+        .find("pub(super) fn render_tree_mode_action_button")
+        .expect("next view helper");
+    let actions_source = &actions_tail[..actions_end];
+    assert!(actions_source.contains("sessionManager.folder_tree.manage_groups"));
+    assert!(actions_source.contains("open_session_group_manager"));
+    assert!(!actions_source.contains("sessionManager.folder_tree.new_group"));
+    assert!(!actions_source.contains("open_session_group_creation"));
+
+    let dialogs_source = include_str!("dialogs.rs");
+    assert!(dialogs_source.contains("open_session_group_creation"));
+    assert!(dialogs_source.contains("group_editor.clone()"));
+    assert!(!dialogs_source.contains("render_group_editor_dialog"));
 }
 
 #[test]

@@ -13,7 +13,7 @@ pub(in crate::workspace) enum ActiveTabWindowModalKind {
     KeybindingReset,
     ManagedKey,
     PortablePassword,
-    SessionManagerNewGroup,
+    SessionManagerGroupManager,
     SessionManagerDelete,
     ForwardEdit,
     ForwardDelete,
@@ -716,9 +716,9 @@ impl WorkspaceApp {
                         kind: ActiveTabWindowModalKind::SessionManagerDelete,
                         phase: visible,
                     })
-                } else if session_manager.show_new_group {
+                } else if session_manager.show_group_manager {
                     Some(ActiveTabWindowModalSnapshot {
-                        kind: ActiveTabWindowModalKind::SessionManagerNewGroup,
+                        kind: ActiveTabWindowModalKind::SessionManagerGroupManager,
                         phase: visible,
                     })
                 } else {
@@ -1017,8 +1017,14 @@ impl WorkspaceApp {
                 }
                 true
             }
-            ActiveTabWindowModalKind::SessionManagerNewGroup => {
-                self.handle_session_manager_basic_dialog_footer_key(event, cx)
+            ActiveTabWindowModalKind::SessionManagerGroupManager => {
+                if self.handle_session_manager_basic_dialog_footer_key(event, cx) {
+                    return true;
+                }
+                if event.keystroke.key.as_str() == "escape" {
+                    self.close_session_group_manager(cx);
+                }
+                true
             }
             ActiveTabWindowModalKind::SessionManagerDelete => {
                 self.handle_session_manager_delete_confirm_key(event, cx)

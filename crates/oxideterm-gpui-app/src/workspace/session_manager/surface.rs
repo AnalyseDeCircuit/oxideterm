@@ -28,15 +28,15 @@ impl WorkspaceApp {
         event: &KeyDownEvent,
         cx: &mut Context<Self>,
     ) -> bool {
-        let (show_new_group, focused_input, focused_footer_action) = {
+        let (group_editor_active, focused_input, focused_footer_action) = {
             let session_manager = self.session_manager.read(cx);
             (
-                session_manager.show_new_group,
+                session_manager.show_group_manager && session_manager.group_editor.is_some(),
                 session_manager.focused_input,
                 session_manager.focused_basic_dialog_footer_action,
             )
         };
-        if !show_new_group {
+        if !group_editor_active {
             return false;
         }
         if event.keystroke.modifiers.platform || event.keystroke.modifiers.control {
@@ -47,19 +47,19 @@ impl WorkspaceApp {
             event.keystroke.key.as_str(),
             event.keystroke.modifiers.shift,
             &SESSION_MANAGER_BASIC_DIALOG_FOOTER_ACTIONS,
-            show_new_group,
-            focused_input == Some(SessionManagerInput::NewGroup),
+            group_editor_active,
+            focused_input == Some(SessionManagerInput::GroupName),
             focused_footer_action,
             SessionManagerBasicDialogFooterAction::Cancel,
             None,
         ) {
             Some(browser_behavior::ModalFooterInputKeyAction::Cancel) => {
-                self.close_session_manager_basic_dialog(cx);
+                self.cancel_session_group_editor(cx);
                 true
             }
             Some(browser_behavior::ModalFooterInputKeyAction::FocusInput) => {
                 self.session_manager.update(cx, |session_manager, cx| {
-                    session_manager.focused_input = Some(SessionManagerInput::NewGroup);
+                    session_manager.focused_input = Some(SessionManagerInput::GroupName);
                     session_manager.focused_basic_dialog_footer_action = None;
                     cx.notify();
                 });
@@ -89,37 +89,42 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) {
         match action {
-            SessionManagerBasicDialogFooterAction::Cancel => {
-                self.close_session_manager_basic_dialog(cx)
-            }
+            SessionManagerBasicDialogFooterAction::Cancel => self.cancel_session_group_editor(cx),
             SessionManagerBasicDialogFooterAction::Primary => {
-                let (show_new_group, group_name_empty) = {
+                let (group_editor_active, group_name_invalid) = {
                     let session_manager = self.session_manager.read(cx);
+                    let group_name = session_manager.group_name_draft.trim();
                     (
-                        session_manager.show_new_group,
-                        session_manager.new_group_name.trim().is_empty(),
+                        session_manager.show_group_manager
+                            && session_manager.group_editor.is_some(),
+                        group_name.is_empty()
+                            || matches!(
+                                session_manager.group_editor.as_ref(),
+                                Some(SessionManagerGroupEditor::Rename { old_name })
+                                    if old_name == group_name
+                            ),
                     )
                 };
-                if !show_new_group || group_name_empty {
-                    // Match Tauri's disabled create button: keyboard activation
-                    // cannot submit while the visible primary action is disabled.
+                if !group_editor_active || group_name_invalid {
+                    // Keyboard activation cannot submit while the visible primary
+                    // action is disabled for an empty or unchanged group name.
                     return;
                 }
                 self.session_manager.update(cx, |session_manager, cx| {
                     session_manager.focused_basic_dialog_footer_action = None;
                     cx.notify();
                 });
-                self.create_session_group(cx);
+                self.submit_session_group_editor(cx);
             }
         }
     }
 
-    pub(super) fn close_session_manager_basic_dialog(&mut self, cx: &mut Context<Self>) {
+    pub(super) fn cancel_session_group_editor(&mut self, cx: &mut Context<Self>) {
         self.session_manager.update(cx, |session_manager, cx| {
-            if session_manager.show_new_group {
-                session_manager.show_new_group = false;
-                session_manager.focused_input = None;
-            }
+            session_manager.group_editor = None;
+            session_manager.group_name_draft.clear();
+            session_manager.group_editor_error = None;
+            session_manager.focused_input = None;
             session_manager.focused_basic_dialog_footer_action = None;
             cx.notify();
         });
@@ -255,6 +260,12 @@ impl WorkspaceApp {
                 confirm_batch_delete_label(&self.i18n, targets.len()),
                 self.i18n.t("common.actions.confirm"),
             ),
+            SessionManagerDeleteConfirm::Group { name } => (
+                self.i18n
+                    .t("sessionManager.folder_tree.confirm_delete_group")
+                    .replace("{{name}}", name),
+                self.i18n.t("sessionManager.folder_tree.delete_group"),
+            ),
         };
         confirm_dialog(
             &self.tokens,
@@ -300,8 +311,8 @@ impl WorkspaceApp {
                 self.ime_marked_text = None;
                 true
             }
-            "enter" if input == SessionManagerInput::NewGroup => {
-                self.create_session_group(cx);
+            "enter" if input == SessionManagerInput::GroupName => {
+                self.submit_session_group_editor(cx);
                 true
             }
             "backspace" => {
@@ -311,8 +322,8 @@ impl WorkspaceApp {
                         SessionManagerInput::SavedSearch => {
                             session_manager.saved_search_query.pop().is_some()
                         }
-                        SessionManagerInput::NewGroup => {
-                            session_manager.new_group_name.pop().is_some()
+                        SessionManagerInput::GroupName => {
+                            session_manager.group_name_draft.pop().is_some()
                         }
                         SessionManagerInput::OxideImportPassword => session_manager
                             .oxide_import_dialog

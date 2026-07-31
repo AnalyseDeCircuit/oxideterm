@@ -503,12 +503,26 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let items = self.session_manager_display_items(cx);
+        let view_mode = self.session_manager.read(cx).view_mode;
         if items.is_empty() {
-            return self
-                .render_session_manager_empty_view(has_background, cx)
+            return div()
+                .size_full()
+                .flex()
+                .flex_col()
+                .child(self.render_session_manager_view_actions(
+                    view_mode == SessionManagerViewMode::Tree,
+                    has_background,
+                    cx,
+                ))
+                .child(
+                    div()
+                        .flex_1()
+                        .min_h(px(0.0))
+                        .child(self.render_session_manager_empty_view(has_background, cx)),
+                )
                 .into_any_element();
         }
-        match self.session_manager.read(cx).view_mode {
+        match view_mode {
             SessionManagerViewMode::Grid => {
                 self.render_session_manager_grid_view(items, window, has_background, cx)
             }
@@ -1056,20 +1070,13 @@ impl WorkspaceApp {
                     cx,
                 ));
         }
-        // Group creation is a manager-level action; only expand/collapse is
-        // tree-specific. Keep this outside the tree-controls branch.
+        // Group maintenance is a manager-level action shared by every view.
         row = row.child(self.render_tree_mode_action_button(
-            LucideIcon::Plus,
-            self.i18n.t("sessionManager.folder_tree.new_group"),
+            LucideIcon::FolderOpen,
+            self.i18n.t("sessionManager.folder_tree.manage_groups"),
             has_background,
             cx.listener(|this, _event, _window, cx| {
-                this.close_session_row_menus(cx);
-                this.session_manager.update(cx, |manager, cx| {
-                    manager.show_new_group = true;
-                    manager.new_group_name.clear();
-                    manager.focused_input = Some(SessionManagerInput::NewGroup);
-                    cx.notify();
-                });
+                this.open_session_group_manager(cx);
                 cx.stop_propagation();
             }),
             cx,
@@ -1174,6 +1181,7 @@ impl WorkspaceApp {
         let theme = self.tokens.ui;
         let group_name = group.rsplit('/').next().unwrap_or(group).to_string();
         let group_id = group.to_string();
+        let menu_group = group.to_string();
         div()
             .w_full()
             .min_w(px(0.0))
@@ -1234,6 +1242,23 @@ impl WorkspaceApp {
                     .text_color(rgb(theme.text_muted))
                     .child(self.connection_count_for_group(group).to_string()),
             )
+            .child(self.render_row_icon_button(
+                LucideIcon::MoreVertical,
+                MANAGER_ROW_ACTION_BUTTON,
+                MANAGER_ROW_ACTION_ICON_SIZE,
+                rgb(theme.text),
+                has_background,
+                move |this, event, _window, cx| {
+                    this.open_session_manager_row_action_menu(
+                        SessionManagerRowActionTarget::Group(menu_group.clone()),
+                        f32::from(event.position.x),
+                        f32::from(event.position.y),
+                        cx,
+                    );
+                    cx.stop_propagation();
+                },
+                cx,
+            ))
     }
 
     pub(super) fn render_session_manager_display_item_row(
@@ -1641,6 +1666,9 @@ impl WorkspaceApp {
             SessionManagerRowActionTarget::Serial(_) | SessionManagerRowActionTarget::Telnet(_) => {
                 MANAGER_ROW_ACTION_MENU_PROFILE_HEIGHT
             }
+            SessionManagerRowActionTarget::Group(_) => {
+                MANAGER_ROW_ACTION_MENU_EDITABLE_PROFILE_HEIGHT
+            }
         };
         let placement = browser_behavior::clamp_context_menu_position(
             menu.x - MANAGER_ROW_ACTION_MENU_WIDTH + MANAGER_ROW_ACTION_BUTTON / 2.0,
@@ -1654,6 +1682,29 @@ impl WorkspaceApp {
         let mut popup = context_menu_event_boundary(
             dropdown_menu_content(&self.tokens).w(px(MANAGER_ROW_ACTION_MENU_WIDTH)),
         );
+
+        if let SessionManagerRowActionTarget::Group(group) = &menu.target {
+            let rename_group = group.clone();
+            popup = popup
+                .child(self.render_session_manager_menu_action(
+                    dropdown_menu_item(
+                        &self.tokens,
+                        self.i18n.t("sessionManager.folder_tree.rename_group"),
+                        DropdownMenuItemKind::Plain,
+                        false,
+                        false,
+                    ),
+                    false,
+                    false,
+                    has_background,
+                    move |this, _event, _window, cx| {
+                        this.open_session_group_rename(&rename_group, cx);
+                        cx.stop_propagation();
+                    },
+                    cx,
+                ))
+                .child(dropdown_menu_separator(&self.tokens));
+        }
 
         if let SessionManagerRowActionTarget::Connection(id) = &menu.target {
             let test_id = id.clone();
@@ -1737,6 +1788,10 @@ impl WorkspaceApp {
                 id.clone(),
                 self.i18n.t("sessionManager.remote_desktop_profiles.delete"),
             ),
+            SessionManagerRowActionTarget::Group(group) => (
+                group.clone(),
+                self.i18n.t("sessionManager.folder_tree.delete_group"),
+            ),
         };
         popup = popup.child(
             self.render_session_manager_menu_action(
@@ -1764,6 +1819,9 @@ impl WorkspaceApp {
                         }
                         SessionManagerRowActionTarget::RemoteDesktop(_) => {
                             this.request_delete_remote_desktop_profile(&delete_id, cx)
+                        }
+                        SessionManagerRowActionTarget::Group(_) => {
+                            this.request_delete_session_group(&delete_id, cx)
                         }
                     }
                     cx.stop_propagation();

@@ -348,41 +348,121 @@ impl ConnectionStore {
     }
 
     pub fn delete_group(&mut self, name: &str) -> Result<()> {
-        self.data.groups.retain(|group| group != name);
+        let name = validate_group_name(name)?;
+        self.data
+            .groups
+            .retain(|group| !group_path_is_within(group, &name));
+        let now = Utc::now();
         for conn in &mut self.data.connections {
-            if conn.group.as_deref() == Some(name) {
+            if conn
+                .group
+                .as_deref()
+                .is_some_and(|group| group_path_is_within(group, &name))
+            {
                 conn.group = None;
+                conn.updated_at = Some(now);
+            }
+        }
+        for profile in &mut self.data.serial_profiles {
+            if profile
+                .group
+                .as_deref()
+                .is_some_and(|group| group_path_is_within(group, &name))
+            {
+                profile.group = None;
+                profile.updated_at = now;
+            }
+        }
+        for profile in &mut self.data.telnet_profiles {
+            if profile
+                .group
+                .as_deref()
+                .is_some_and(|group| group_path_is_within(group, &name))
+            {
+                profile.group = None;
+                profile.updated_at = now;
             }
         }
         for profile in &mut self.data.remote_desktop_profiles {
-            if profile.group.as_deref() == Some(name) {
+            if profile
+                .group
+                .as_deref()
+                .is_some_and(|group| group_path_is_within(group, &name))
+            {
                 profile.group = None;
-                profile.updated_at = Utc::now();
+                profile.updated_at = now;
             }
         }
         self.save()
     }
 
     pub fn rename_group(&mut self, old_name: &str, new_name: String) -> Result<usize> {
+        let old_name = validate_group_name(old_name)?;
         let new_name = validate_group_name(&new_name)?;
+        if old_name == new_name {
+            return Ok(0);
+        }
+        if group_path_is_within(&new_name, &old_name) {
+            bail!("a group cannot be moved into its own subtree");
+        }
+        if self
+            .data
+            .groups
+            .iter()
+            .any(|group| group_path_is_within(group, &new_name) && !group_path_is_within(group, &old_name))
+        {
+            bail!("the destination group already exists");
+        }
+
+        let now = Utc::now();
         let mut updated = 0;
         for group in &mut self.data.groups {
-            if group == old_name {
-                *group = new_name.clone();
+            if let Some(renamed) = rename_group_path(group, &old_name, &new_name) {
+                *group = renamed;
                 updated += 1;
             }
         }
         for connection in &mut self.data.connections {
-            if connection.group.as_deref() == Some(old_name) {
-                connection.group = Some(new_name.clone());
-                connection.updated_at = Some(Utc::now());
+            if let Some(renamed) = connection
+                .group
+                .as_deref()
+                .and_then(|group| rename_group_path(group, &old_name, &new_name))
+            {
+                connection.group = Some(renamed);
+                connection.updated_at = Some(now);
+                updated += 1;
+            }
+        }
+        for profile in &mut self.data.serial_profiles {
+            if let Some(renamed) = profile
+                .group
+                .as_deref()
+                .and_then(|group| rename_group_path(group, &old_name, &new_name))
+            {
+                profile.group = Some(renamed);
+                profile.updated_at = now;
+                updated += 1;
+            }
+        }
+        for profile in &mut self.data.telnet_profiles {
+            if let Some(renamed) = profile
+                .group
+                .as_deref()
+                .and_then(|group| rename_group_path(group, &old_name, &new_name))
+            {
+                profile.group = Some(renamed);
+                profile.updated_at = now;
                 updated += 1;
             }
         }
         for profile in &mut self.data.remote_desktop_profiles {
-            if profile.group.as_deref() == Some(old_name) {
-                profile.group = Some(new_name.clone());
-                profile.updated_at = Utc::now();
+            if let Some(renamed) = profile
+                .group
+                .as_deref()
+                .and_then(|group| rename_group_path(group, &old_name, &new_name))
+            {
+                profile.group = Some(renamed);
+                profile.updated_at = now;
                 updated += 1;
             }
         }

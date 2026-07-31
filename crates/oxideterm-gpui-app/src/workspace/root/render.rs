@@ -49,15 +49,15 @@ impl WorkspaceApp {
                 }
             }
             TabKind::SessionManager => {
-                let (show_new_group, show_delete_confirm) = {
+                let (show_group_manager, show_delete_confirm) = {
                     let session_manager = self.session_manager.read(cx);
                     (
-                        session_manager.show_new_group,
+                        session_manager.show_group_manager,
                         session_manager.delete_confirm.is_some(),
                     )
                 };
-                if show_new_group {
-                    modals.push(self.render_new_group_dialog(cx));
+                if show_group_manager {
+                    modals.push(self.render_group_manager_dialog(cx));
                 }
                 if show_delete_confirm {
                     modals.push(self.render_session_manager_delete_confirm(cx));

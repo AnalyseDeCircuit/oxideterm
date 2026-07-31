@@ -128,7 +128,7 @@ const OXIDE_NEW_BADGE_BG_ALPHA: u32 = 0x26; // Tauri bg-green-500/15
 pub(super) enum SessionManagerInput {
     Search,
     SavedSearch,
-    NewGroup,
+    GroupName,
     OxideImportPassword,
     OxideExportPassword,
     OxideExportConfirmPassword,
@@ -140,7 +140,7 @@ impl SessionManagerInput {
         match self {
             Self::Search => 1,
             Self::SavedSearch => 2,
-            Self::NewGroup => 3,
+            Self::GroupName => 3,
             Self::OxideImportPassword => 4,
             Self::OxideExportPassword => 5,
             Self::OxideExportConfirmPassword => 6,
@@ -243,6 +243,12 @@ pub(super) enum SessionManagerBasicDialogFooterAction {
     Primary,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(super) enum SessionManagerGroupEditor {
+    Create,
+    Rename { old_name: String },
+}
+
 const SESSION_MANAGER_BASIC_DIALOG_FOOTER_ACTIONS: [SessionManagerBasicDialogFooterAction; 2] = [
     SessionManagerBasicDialogFooterAction::Cancel,
     SessionManagerBasicDialogFooterAction::Primary,
@@ -280,6 +286,9 @@ pub(super) enum SessionManagerDeleteConfirm {
     Batch {
         targets: Vec<SessionManagerSelectionTarget>,
     },
+    Group {
+        name: String,
+    },
 }
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
@@ -294,6 +303,7 @@ pub(super) enum SessionManagerRowActionTarget {
     Serial(String),
     Telnet(String),
     RemoteDesktop(String),
+    Group(String),
 }
 
 #[derive(Clone, Debug)]
@@ -366,8 +376,12 @@ pub(super) struct SessionManagerState {
     pub(super) row_action_menu: Option<SessionManagerRowActionMenu>,
     pub(super) expanded_groups: HashSet<String>,
     pub(super) focused_input: Option<SessionManagerInput>,
-    pub(super) show_new_group: bool,
-    pub(super) new_group_name: String,
+    pub(super) group_editor: Option<SessionManagerGroupEditor>,
+    pub(super) group_name_draft: String,
+    pub(super) group_editor_error: Option<String>,
+    pub(super) group_manager_error: Option<String>,
+    pub(super) show_group_manager: bool,
+    pub(super) reopen_group_manager_after_delete: bool,
     pub(super) focused_basic_dialog_footer_action: Option<SessionManagerBasicDialogFooterAction>,
     pub(super) show_batch_move: bool,
     pub(super) delete_confirm: Option<SessionManagerDeleteConfirm>,
@@ -423,8 +437,12 @@ impl Default for SessionManagerState {
             row_action_menu: None,
             expanded_groups: HashSet::new(),
             focused_input: None,
-            show_new_group: false,
-            new_group_name: String::new(),
+            group_editor: None,
+            group_name_draft: String::new(),
+            group_editor_error: None,
+            group_manager_error: None,
+            show_group_manager: false,
+            reopen_group_manager_after_delete: false,
             focused_basic_dialog_footer_action: None,
             show_batch_move: false,
             delete_confirm: None,
@@ -574,7 +592,7 @@ impl SessionManagerState {
         match input {
             SessionManagerInput::Search => Some(&self.search_query),
             SessionManagerInput::SavedSearch => Some(&self.saved_search_query),
-            SessionManagerInput::NewGroup => Some(&self.new_group_name),
+            SessionManagerInput::GroupName => Some(&self.group_name_draft),
             SessionManagerInput::OxideImportPassword => self
                 .oxide_import_dialog
                 .as_ref()
@@ -604,7 +622,10 @@ impl SessionManagerState {
         let value = match input {
             SessionManagerInput::Search => &mut self.search_query,
             SessionManagerInput::SavedSearch => &mut self.saved_search_query,
-            SessionManagerInput::NewGroup => &mut self.new_group_name,
+            SessionManagerInput::GroupName => {
+                self.group_editor_error = None;
+                &mut self.group_name_draft
+            }
             SessionManagerInput::OxideImportPassword => {
                 let Some(dialog) = self.oxide_import_dialog.as_mut() else {
                     return false;

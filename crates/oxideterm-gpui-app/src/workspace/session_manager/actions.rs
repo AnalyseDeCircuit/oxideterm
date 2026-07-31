@@ -210,16 +210,31 @@ impl WorkspaceApp {
         });
     }
 
-    pub(super) fn create_session_group(&mut self, cx: &mut Context<Self>) {
-        let name = self
-            .session_manager
-            .read(cx)
-            .new_group_name
-            .trim()
-            .to_string();
+    pub(super) fn submit_session_group_editor(&mut self, cx: &mut Context<Self>) {
+        let (name, editor) = {
+            let session_manager = self.session_manager.read(cx);
+            (
+                session_manager.group_name_draft.trim().to_string(),
+                session_manager.group_editor.clone(),
+            )
+        };
+        let Some(editor) = editor else {
+            return;
+        };
+        if name.is_empty() {
+            return;
+        }
+        if let SessionManagerGroupEditor::Rename { old_name } = editor {
+            if old_name == name {
+                self.cancel_session_group_editor(cx);
+                return;
+            }
+            self.rename_session_group(&old_name, name, cx);
+            return;
+        }
+
         match self.connection_store.create_group(name.clone()) {
             Ok(()) => {
-                let status = self.i18n.t("sessionManager.toast.group_created");
                 self.session_manager.update(cx, |session_manager, cx| {
                     session_manager.selected_group = Some(name);
                     expand_group_path(
@@ -229,10 +244,11 @@ impl WorkspaceApp {
                             .unwrap_or_default(),
                         &mut session_manager.expanded_groups,
                     );
-                    session_manager.show_new_group = false;
+                    session_manager.group_editor = None;
+                    session_manager.group_name_draft.clear();
+                    session_manager.group_editor_error = None;
                     session_manager.focused_input = None;
                     session_manager.focused_basic_dialog_footer_action = None;
-                    session_manager.status = Some(status);
                     cx.notify();
                 });
                 self.queue_cloud_sync_dirty_refresh(cx);
@@ -243,7 +259,172 @@ impl WorkspaceApp {
                     self.i18n.t("sessionManager.toast.create_group_failed")
                 );
                 self.session_manager.update(cx, |session_manager, cx| {
-                    session_manager.set_status(Some(status), cx)
+                    session_manager.group_editor_error = Some(status);
+                    cx.notify();
+                });
+            }
+        }
+    }
+
+    pub(super) fn open_session_group_creation(&mut self, cx: &mut Context<Self>) {
+        self.session_manager.update(cx, |session_manager, cx| {
+            close_session_menu_state(session_manager);
+            session_manager.show_group_manager = true;
+            session_manager.group_editor = Some(SessionManagerGroupEditor::Create);
+            session_manager.group_name_draft.clear();
+            session_manager.group_editor_error = None;
+            session_manager.group_manager_error = None;
+            session_manager.focused_input = Some(SessionManagerInput::GroupName);
+            session_manager.focused_basic_dialog_footer_action = None;
+            cx.notify();
+        });
+        self.ime_marked_text = None;
+    }
+
+    pub(super) fn open_session_group_rename(&mut self, group: &str, cx: &mut Context<Self>) {
+        let group = group.to_string();
+        self.session_manager.update(cx, |session_manager, cx| {
+            close_session_menu_state(session_manager);
+            session_manager.show_group_manager = true;
+            session_manager.group_name_draft.clone_from(&group);
+            session_manager.group_editor =
+                Some(SessionManagerGroupEditor::Rename { old_name: group });
+            session_manager.group_editor_error = None;
+            session_manager.group_manager_error = None;
+            session_manager.focused_input = Some(SessionManagerInput::GroupName);
+            session_manager.focused_basic_dialog_footer_action = None;
+            cx.notify();
+        });
+        self.ime_marked_text = None;
+    }
+
+    fn rename_session_group(&mut self, old_name: &str, new_name: String, cx: &mut Context<Self>) {
+        match self
+            .connection_store
+            .rename_group(old_name, new_name.clone())
+        {
+            Ok(_) => {
+                self.session_manager.update(cx, |session_manager, cx| {
+                    session_manager.selected_group = session_manager
+                        .selected_group
+                        .as_deref()
+                        .and_then(|group| renamed_session_group_path(group, old_name, &new_name))
+                        .or_else(|| session_manager.selected_group.clone());
+                    session_manager.expanded_groups = session_manager
+                        .expanded_groups
+                        .iter()
+                        .map(|group| {
+                            renamed_session_group_path(group, old_name, &new_name)
+                                .unwrap_or_else(|| group.clone())
+                        })
+                        .collect();
+                    expand_group_path(&new_name, &mut session_manager.expanded_groups);
+                    session_manager.group_editor = None;
+                    session_manager.group_name_draft.clear();
+                    session_manager.group_editor_error = None;
+                    session_manager.focused_input = None;
+                    session_manager.focused_basic_dialog_footer_action = None;
+                    cx.notify();
+                });
+                // Group metadata is persisted independently from live node ownership.
+                self.queue_cloud_sync_dirty_refresh(cx);
+            }
+            Err(error) => {
+                let status = format!(
+                    "{}: {error}",
+                    self.i18n.t("sessionManager.toast.rename_group_failed")
+                );
+                self.session_manager.update(cx, |session_manager, cx| {
+                    session_manager.group_editor_error = Some(status);
+                    cx.notify();
+                });
+            }
+        }
+    }
+
+    pub(super) fn request_delete_session_group(&mut self, group: &str, cx: &mut Context<Self>) {
+        let name = group.to_string();
+        self.session_manager.update(cx, |session_manager, cx| {
+            close_session_menu_state(session_manager);
+            session_manager.reopen_group_manager_after_delete = session_manager.show_group_manager;
+            session_manager.show_group_manager = false;
+            session_manager.group_editor = None;
+            session_manager.group_editor_error = None;
+            session_manager.focused_input = None;
+            session_manager.focused_basic_dialog_footer_action = None;
+            session_manager.delete_confirm = Some(SessionManagerDeleteConfirm::Group { name });
+            cx.notify();
+        });
+    }
+
+    pub(super) fn open_session_group_manager(&mut self, cx: &mut Context<Self>) {
+        self.session_manager.update(cx, |session_manager, cx| {
+            close_session_menu_state(session_manager);
+            session_manager.show_group_manager = true;
+            session_manager.group_editor = None;
+            session_manager.group_name_draft.clear();
+            session_manager.group_editor_error = None;
+            session_manager.group_manager_error = None;
+            session_manager.focused_input = None;
+            session_manager.focused_basic_dialog_footer_action = None;
+            cx.notify();
+        });
+    }
+
+    pub(in crate::workspace) fn close_session_group_manager(&mut self, cx: &mut Context<Self>) {
+        self.session_manager.update(cx, |session_manager, cx| {
+            if session_manager.show_group_manager {
+                session_manager.show_group_manager = false;
+                session_manager.group_editor = None;
+                session_manager.group_name_draft.clear();
+                session_manager.group_editor_error = None;
+                session_manager.group_manager_error = None;
+                session_manager.focused_input = None;
+                session_manager.focused_basic_dialog_footer_action = None;
+                cx.notify();
+            }
+        });
+        self.ime_marked_text = None;
+    }
+
+    fn delete_session_group(&mut self, group: &str, cx: &mut Context<Self>) {
+        match self.connection_store.delete_group(group) {
+            Ok(()) => {
+                self.session_manager.update(cx, |session_manager, cx| {
+                    if session_manager
+                        .selected_group
+                        .as_deref()
+                        .is_some_and(|selected| session_group_path_is_within(selected, group))
+                    {
+                        session_manager.selected_group = None;
+                    }
+                    session_manager
+                        .expanded_groups
+                        .retain(|expanded| !session_group_path_is_within(expanded, group));
+                    session_manager.show_group_manager =
+                        session_manager.reopen_group_manager_after_delete;
+                    session_manager.reopen_group_manager_after_delete = false;
+                    session_manager.group_manager_error = None;
+                    cx.notify();
+                });
+                // Deleting a group only reassigns saved metadata; active nodes keep running.
+                self.queue_cloud_sync_dirty_refresh(cx);
+            }
+            Err(error) => {
+                let status = format!(
+                    "{}: {error}",
+                    self.i18n.t("sessionManager.toast.delete_group_failed")
+                );
+                self.session_manager.update(cx, |session_manager, cx| {
+                    let reopen_manager = session_manager.reopen_group_manager_after_delete;
+                    session_manager.show_group_manager = reopen_manager;
+                    session_manager.reopen_group_manager_after_delete = false;
+                    if reopen_manager {
+                        session_manager.group_manager_error = Some(status);
+                        cx.notify();
+                    } else {
+                        session_manager.set_status(Some(status), cx);
+                    }
                 });
             }
         }
@@ -375,7 +556,16 @@ impl WorkspaceApp {
 
     pub(super) fn cancel_session_manager_delete(&mut self, cx: &mut Context<Self>) {
         self.session_manager.update(cx, |session_manager, cx| {
+            let canceled_group_delete = matches!(
+                session_manager.delete_confirm,
+                Some(SessionManagerDeleteConfirm::Group { .. })
+            );
             session_manager.delete_confirm = None;
+            if canceled_group_delete {
+                session_manager.show_group_manager =
+                    session_manager.reopen_group_manager_after_delete;
+                session_manager.reopen_group_manager_after_delete = false;
+            }
             cx.notify();
         });
     }
@@ -405,6 +595,7 @@ impl WorkspaceApp {
             SessionManagerDeleteConfirm::Batch { targets } => {
                 self.delete_selected_session_items(targets, cx)
             }
+            SessionManagerDeleteConfirm::Group { name } => self.delete_session_group(&name, cx),
         }
     }
 
