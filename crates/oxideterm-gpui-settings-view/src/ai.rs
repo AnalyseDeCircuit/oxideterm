@@ -29,6 +29,13 @@ const AI_CONTEXT_SOURCE_NAME_COLOR: u32 = 0x22d3ee;
 const AI_CONTEXT_SOURCE_BADGE_BG_ALPHA: u32 = 0x1a;
 const AI_CONTEXT_SOURCE_DEFAULT_TEXT_ALPHA: u32 = 0xb3;
 const AI_CONTEXT_SOURCE_DEFAULT_BG_ALPHA: u32 = 0x33;
+const AI_TEXTAREA_PADDING_X: f32 = 12.0;
+const AI_TEXTAREA_PADDING_Y: f32 = 8.0;
+const AI_TEXTAREA_LINE_HEIGHT: f32 = 20.0;
+
+fn settings_ai_textarea_shows_placeholder(display_value: &str, marked_text: Option<&str>) -> bool {
+    display_value.is_empty() && marked_text.is_none_or(str::is_empty)
+}
 
 pub fn settings_ai_tool_number_input_row(tokens: &ThemeTokens, row: AnyElement) -> AnyElement {
     // The expanded tool-use section already owns the containing surface, so
@@ -252,6 +259,10 @@ pub fn settings_ai_textarea_surface(
     caret: Option<AnyElement>,
 ) -> gpui::Div {
     let theme = tokens.ui;
+    let mut marked_text = marked_text.filter(|text| !text.is_empty());
+    let show_placeholder =
+        settings_ai_textarea_shows_placeholder(display_value, marked_text.as_deref());
+    let mut caret = caret;
     let mut textarea = div()
         .w_full()
         .min_w(px(0.0))
@@ -264,46 +275,80 @@ pub fn settings_ai_textarea_surface(
             rgb(theme.border)
         })
         .bg(rgb(theme.bg))
-        .px(px(12.0))
-        .py(px(8.0))
+        .px(px(AI_TEXTAREA_PADDING_X))
+        .py(px(AI_TEXTAREA_PADDING_Y))
+        .relative()
         .flex()
         .flex_col()
         .items_start()
         .gap(px(2.0))
         .cursor(CursorStyle::IBeam)
         .text_size(px(tokens.metrics.ui_text_sm))
-        .line_height(px(20.0))
+        .line_height(px(AI_TEXTAREA_LINE_HEIGHT))
         .text_color(rgb(theme.text));
 
     // Textarea rendering is display-only here; app code still owns editing,
     // IME selection, and anchor updates.
-    if display_value.is_empty() {
+    if show_placeholder {
+        // Placeholder copy is visual guidance, not an editable document line.
+        // Absolute positioning keeps it out of caret and selection geometry.
+        let mut placeholder_layer = div()
+            .absolute()
+            .top(px(AI_TEXTAREA_PADDING_Y))
+            .left(px(AI_TEXTAREA_PADDING_X))
+            .right(px(AI_TEXTAREA_PADDING_X))
+            .flex()
+            .flex_col()
+            .items_start()
+            .gap(px(2.0))
+            .text_color(rgba((theme.text_muted << 8) | 0x66));
         for line in placeholder.split('\n') {
-            textarea = textarea.child(
+            placeholder_layer = placeholder_layer.child(
                 div()
-                    .min_h(px(20.0))
-                    .text_color(rgba((theme.text_muted << 8) | 0x66))
+                    .min_h(px(AI_TEXTAREA_LINE_HEIGHT))
                     .child(line.to_string()),
             );
         }
-    } else {
-        for line in display_value.split('\n') {
-            textarea = textarea.child(div().min_h(px(20.0)).child(line.to_string()));
-        }
+        textarea = textarea.child(placeholder_layer);
     }
 
-    if let Some(marked_text) = marked_text {
-        textarea = textarea.child(
-            div()
-                .underline()
-                .text_color(rgb(theme.text))
-                .child(marked_text),
-        );
-    }
-    if let Some(caret) = caret {
-        textarea = textarea.child(caret);
+    let line_count = display_value.split('\n').count();
+    for (index, line) in display_value.split('\n').enumerate() {
+        let is_last_line = index + 1 == line_count;
+        let mut line_row = div()
+            .min_h(px(AI_TEXTAREA_LINE_HEIGHT))
+            .flex()
+            .flex_row()
+            .items_start()
+            .child(line.to_string());
+        if is_last_line {
+            if let Some(marked_text) = marked_text.take() {
+                line_row = line_row.child(
+                    div()
+                        .underline()
+                        .text_color(rgb(theme.text))
+                        .child(marked_text),
+                );
+            }
+            if let Some(caret) = caret.take() {
+                line_row = line_row.child(caret);
+            }
+        }
+        textarea = textarea.child(line_row);
     }
     textarea
+}
+
+#[cfg(test)]
+mod textarea_tests {
+    use super::settings_ai_textarea_shows_placeholder;
+
+    #[test]
+    fn placeholder_is_only_a_visual_layer_for_an_empty_editor() {
+        assert!(settings_ai_textarea_shows_placeholder("", None));
+        assert!(!settings_ai_textarea_shows_placeholder("--flag", None));
+        assert!(!settings_ai_textarea_shows_placeholder("", Some("拼音")));
+    }
 }
 
 pub fn settings_ai_textarea_row(
