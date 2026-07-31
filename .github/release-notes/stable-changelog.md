@@ -3,6 +3,29 @@
 Stable releases are listed newest first. The release workflow uses each versioned
 section as the detailed changelog attached to the corresponding GitHub Release.
 
+## 2.0.15
+
+OxideTerm 2.0.15 substantially expands OxideSens with application-aware tools, background tasks, Agent Skills, and modern MCP interoperability while improving AI context accuracy, terminal efficiency, and remote-session reliability.
+
+### ✨ Highlights
+
+- Expanded OxideSens tools across interactive terminal control, prompt and command completion waits, RDP, VNC, serial and Telnet sessions, Host Tools, forwarding, plugins, Cloud Sync, credentials, and scoped memory, with the same capabilities available to ACP backends through the application bridge.
+- Added cancellable one-shot, interval, and condition-based background tasks owned by each conversation, including visible task state and bounded execution rules.
+- Added bounded Agent Skills discovery, explicit skill and resource loading, chat completion, settings visibility, and a portable `skills` directory that is preserved across application updates.
+- Added dual-era MCP negotiation that discovers modern servers first and falls back to legacy initialization, with protocol-specific tool and resource handling for compatibility across server generations.
+
+### 🛠️ Fixes
+
+- Corrected AI context accounting across system instructions, tool definitions, skills, ACP handoff, compaction, and continuation turns, and changed conversation history badges to report logical user turns instead of raw stored message rows.
+- Improved the AI input surface with correctly layered skill and mention completion, clearer context-capacity feedback, responsive status controls, stable IME composition, and multiline placeholders that no longer interfere with editing.
+- Added terminal control and navigation keys, TUI-aware output waits, and tracked command completion and exit status so AI workflows can operate interactive programs without relying on blind text submission.
+- Reduced terminal memory and high-output pressure by loading the optional CJK font only when required, coalescing redundant wakeups, and bounding layout caching.
+- Restored authentication for additional SSH terminal sessions, SFTP editor keyboard ownership, and Cloud Sync form focus, and updated the remote-desktop codec dependency for broader progressive-codec compatibility.
+
+### 🔒 Security
+
+- Added a read-only AI safety mode and category-level tool policy controls, keeping observation separate from mutating, destructive, credential, and interactive operations while preserving explicit approval boundaries.
+
 ## 2.0.14
 
 OxideTerm 2.0.14 unifies ACP and ordinary AI conversations, makes long chats and privilege prompts more reliable, and improves portable credentials, SSH Agent routing, terminal input, and remote compatibility.
