@@ -243,6 +243,10 @@ pub struct AiChatStreamConfig {
     pub reasoning_effort: Option<String>,
     pub safety_mode: AiPolicySafetyMode,
     pub profile_id: Option<String>,
+    /// Already-scoped, redacted memory selected at the application boundary.
+    pub memory_context: Option<String>,
+    /// Entry identifiers used for local usage accounting; never sent to providers.
+    pub memory_entry_ids: Vec<String>,
     pub tool_policy: AiToolUsePolicy,
     pub tools: Vec<AiToolDefinition>,
     pub tool_choice: AiToolChoice,

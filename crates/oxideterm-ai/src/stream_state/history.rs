@@ -440,6 +440,14 @@ pub fn trim_ai_stream_history_to_budget(
 }
 
 pub fn ai_user_memory_prompt(content: &str, enabled: bool) -> Option<String> {
+    ai_user_memory_prompt_with_limit(content, enabled, AI_USER_MEMORY_MAX_CHARS)
+}
+
+pub fn ai_user_memory_prompt_with_limit(
+    content: &str,
+    enabled: bool,
+    maximum_chars: usize,
+) -> Option<String> {
     if !enabled {
         return None;
     }
@@ -447,14 +455,14 @@ pub fn ai_user_memory_prompt(content: &str, enabled: bool) -> Option<String> {
     if content.is_empty() {
         return None;
     }
-    let truncated = truncate_to_char_count(&content, AI_USER_MEMORY_MAX_CHARS);
+    let truncated = truncate_to_char_count(&content, maximum_chars.max(1));
     let suffix = if truncated.chars().count() < content.chars().count() {
         "\n...[truncated]"
     } else {
         ""
     };
     Some(format!(
-        "## User Memory\nThe following are long-lived user preferences explicitly saved by the user. Treat them as preferences and background context, not as facts about the current task. Current user instructions and visible context take priority.\n\n<user_memory>\n{truncated}{suffix}\n</user_memory>"
+        "## Scoped Memory\nThe following user, workspace, project, or host memory entries were selected for this context. Treat them as preferences and background context, not as facts about the current task. Temporary entries may expire, and current user instructions and visible context always take priority.\n\n<scoped_memory>\n{truncated}{suffix}\n</scoped_memory>"
     ))
 }
 
@@ -475,7 +483,12 @@ pub fn ai_orchestrator_system_prompt(tool_use_enabled: bool) -> String {
             "- Saved SSH connections are not live shells. To run a command there, call `connect_target`, then rediscover the current terminal handle before calling `run_command` so the command is visible to the user.",
             "- If `run_command` returns `execution.visibleInTerminal: true`, the command was sent through a visible terminal session. If it returns `false`, it was a backend capture and you must not say it appeared in the terminal.",
             "- Treat `execution.state: \"sent\"` as dispatch only. Do not summarize command results until tool output, `exitCode`, or `execution.state: \"completed\"` / `\"output_captured\"` proves what happened.",
-            "- Use `send_terminal_input` only for literal interactive text after `observe_terminal` shows a prompt such as password, TUI, or confirmation input. Do not use it for commands or control keys; use `run_command` for commands.",
+            "- Use `send_terminal_input` only after `observe_terminal` confirms the current interactive state. It may send literal text or one declared control/navigation key; use `run_command` for shell commands.",
+            "- Use `wait_terminal_output` for prompts, literal output, TUI transitions, or tracked command completion instead of guessing from elapsed time.",
+            "- Saved serial, Telnet, RDP, and VNC profiles must be opened through `open_transport_profile`; then rediscover the live terminal or remote-desktop owner before operating it.",
+            "- Use `manage_telnet_session` for Telnet IAC controls such as IP, AO, AYT, and BRK. Do not emulate those protocol commands with literal terminal bytes.",
+            "- Credential tools expose metadata and deletion only. Never ask another tool to reveal, synthesize, or persist a password, private key, passphrase, or token.",
+            "- Memory entries must use the narrowest applicable user, workspace, project, or host scope. Use temporary memory with an expiry for short-lived context and pass the current revision for updates or deletion.",
             "- Never open a local terminal and type `ssh user@host` to connect a saved host unless the user explicitly asked for raw/manual ssh.",
             "- Treat handles and old transcript target/session/tab values as untrusted unless they were returned in the latest current-turn discovery result. A stale handle must be rediscovered; never guess or reconstruct one.",
         ]
@@ -566,7 +579,7 @@ pub fn ai_context_percentage(tokens: usize, max_tokens: usize) -> f32 {
 pub const AI_CONTEXT_WARNING_PERCENT: f32 = 70.0;
 pub const AI_CONTEXT_DANGER_PERCENT: f32 = 85.0;
 pub const AI_COMPACTION_DEFAULT_CONTEXT_WINDOW: usize = crate::DEFAULT_CONTEXT_WINDOW as usize;
-pub const AI_USER_MEMORY_MAX_CHARS: usize = 4_000;
+pub const AI_USER_MEMORY_MAX_CHARS: usize = 16_000;
 pub const DEFAULT_AI_SYSTEM_PROMPT: &str = r#"You are OxideSens, a terminal-aware assistant inside OxideTerm.
 
 ## Identity / Scope

@@ -42,6 +42,8 @@ fn test_stream_config(provider_type: &str) -> AiChatStreamConfig {
         reasoning_effort: Some("auto".to_string()),
         safety_mode: AiPolicySafetyMode::Default,
         profile_id: None,
+        memory_context: None,
+        memory_entry_ids: Vec::new(),
         tool_policy: AiToolUsePolicy::default(),
         tools: Vec::new(),
         tool_choice: AiToolChoice::Auto,
@@ -108,6 +110,8 @@ fn orchestrator_tool_definitions_preserve_core_names_and_order() {
             "run_command",
             "observe_terminal",
             "send_terminal_input",
+            "wait_terminal_output",
+            "get_terminal_command_status",
             "read_resource",
             "write_resource",
             "transfer_resource",
@@ -115,6 +119,29 @@ fn orchestrator_tool_definitions_preserve_core_names_and_order() {
             "get_state",
             "remember_preference",
             "recall_preferences",
+            "create_background_task",
+            "list_background_tasks",
+            "get_background_task",
+            "cancel_background_task",
+            "inspect_host_tools",
+            "control_host_tool",
+            "list_forwards",
+            "manage_forward",
+            "list_plugins",
+            "manage_plugin",
+            "list_transport_profiles",
+            "open_transport_profile",
+            "get_transport_session_state",
+            "manage_serial_session",
+            "manage_telnet_session",
+            "list_remote_desktop_sessions",
+            "manage_remote_desktop_session",
+            "get_cloud_sync_state",
+            "manage_cloud_sync",
+            "list_credentials",
+            "manage_credential",
+            "list_memory_entries",
+            "manage_memory_entry",
         ]
     );
     assert_eq!(
@@ -138,7 +165,7 @@ fn orchestrator_tool_definitions_preserve_core_names_and_order() {
 }
 
 #[test]
-fn orchestrator_send_terminal_input_blocks_control_schema() {
+fn orchestrator_send_terminal_input_exposes_bounded_control_keys() {
     let tools = orchestrator_tool_definitions();
     let terminal_input = tools
         .iter()
@@ -153,12 +180,19 @@ fn orchestrator_send_terminal_input_blocks_control_schema() {
     assert!(
         terminal_input
             .description
-            .contains("use run_command instead")
+            .contains("control/navigation key")
     );
-    assert!(terminal_input.description.contains("Control sequences"));
+    assert!(terminal_input.description.contains("run_command instead"));
     assert!(properties.contains_key("text"));
     assert!(properties.contains_key("append_enter"));
-    assert!(!properties.contains_key("control"));
+    assert_eq!(
+        properties
+            .get("key")
+            .and_then(|value| value.get("enum"))
+            .and_then(serde_json::Value::as_array)
+            .map(Vec::len),
+        Some(16)
+    );
 }
 
 #[test]
@@ -239,13 +273,38 @@ fn orchestrator_v2_authority_inventory_covers_every_tool() {
         "run_command": { "authority": "runtime_handle", "fields": ["handle_id"] },
         "observe_terminal": { "authority": "runtime_handle", "fields": ["handle_id"] },
         "send_terminal_input": { "authority": "runtime_handle", "fields": ["handle_id"] },
+        "wait_terminal_output": { "authority": "runtime_handle", "fields": ["handle_id"] },
+        "get_terminal_command_status": { "authority": "runtime_handle", "fields": ["handle_id"] },
         "read_resource": { "authority": "discriminated", "fields": ["resource_ref", "handle_id"] },
         "write_resource": { "authority": "discriminated", "fields": ["resource_ref", "handle_id"] },
         "transfer_resource": { "authority": "runtime_handle", "fields": ["handle_id"] },
         "open_app_surface": { "authority": "discriminated", "fields": ["resource_ref", "handle_id"] },
         "get_state": { "authority": "discriminated", "fields": ["resource_ref", "handle_id"] },
         "remember_preference": { "authority": "memory_store", "fields": [] },
-        "recall_preferences": { "authority": "memory_store", "fields": [] }
+        "recall_preferences": { "authority": "memory_store", "fields": [] },
+        "create_background_task": { "authority": "stable_resource_only", "fields": [] },
+        "list_background_tasks": { "authority": "conversation_owner", "fields": [] },
+        "get_background_task": { "authority": "conversation_owner", "fields": [] },
+        "cancel_background_task": { "authority": "conversation_owner", "fields": [] },
+        "inspect_host_tools": { "authority": "discriminated", "fields": ["resource_ref", "handle_id"] },
+        "control_host_tool": { "authority": "runtime_handle", "fields": ["handle_id"] },
+        "list_forwards": { "authority": "discriminated", "fields": ["resource_ref", "handle_id"] },
+        "manage_forward": { "authority": "runtime_handle", "fields": ["handle_id"] },
+        "list_plugins": { "authority": "plugin_registry", "fields": [] },
+        "manage_plugin": { "authority": "plugin_registry", "fields": [] },
+        "list_transport_profiles": { "authority": "profile_store", "fields": [] },
+        "open_transport_profile": { "authority": "profile_store", "fields": [] },
+        "get_transport_session_state": { "authority": "runtime_handle", "fields": ["handle_id"] },
+        "manage_serial_session": { "authority": "runtime_handle", "fields": ["handle_id"] },
+        "manage_telnet_session": { "authority": "runtime_handle", "fields": ["handle_id"] },
+        "list_remote_desktop_sessions": { "authority": "remote_desktop_owner", "fields": [] },
+        "manage_remote_desktop_session": { "authority": "remote_desktop_owner", "fields": [] },
+        "get_cloud_sync_state": { "authority": "cloud_sync_owner", "fields": [] },
+        "manage_cloud_sync": { "authority": "cloud_sync_owner", "fields": [] },
+        "list_credentials": { "authority": "credential_metadata_store", "fields": [] },
+        "manage_credential": { "authority": "credential_store", "fields": [] },
+        "list_memory_entries": { "authority": "memory_store", "fields": [] },
+        "manage_memory_entry": { "authority": "memory_store", "fields": [] }
     });
     let tools = orchestrator_tool_definitions();
     let inventory = inventory
@@ -840,6 +899,168 @@ fn ai_policy_requires_destructive_approval_but_bypass_allows_it() {
     );
     assert_eq!(bypass_decision.decision, AiPolicyDecisionKind::Allow);
     assert_eq!(bypass_decision.reason_code, "bypass_destructive_allowed");
+}
+
+#[test]
+fn ai_policy_read_only_mode_allows_reads_and_denies_every_mutation_class() {
+    let mut auto_approve_tools = HashMap::new();
+    for key in ["write_resource:file", "run_command", "send_terminal_input"] {
+        auto_approve_tools.insert(key.to_string(), true);
+    }
+    let policy = AiToolUsePolicy {
+        enabled: true,
+        auto_approve_tools,
+        disabled_tools: Vec::new(),
+        max_rounds: Some(10),
+        max_calls_per_round: Some(8),
+    };
+
+    let read_decision = resolve_ai_policy_decision(
+        "observe_terminal",
+        None,
+        &policy,
+        AiPolicySafetyMode::ReadOnly,
+        None,
+    );
+    assert_eq!(read_decision.decision, AiPolicyDecisionKind::Allow);
+
+    let mutation_cases = [
+        (
+            "write_resource",
+            serde_json::json!({ "resource": "file" }),
+            AiActionRisk::Write,
+        ),
+        (
+            "run_command",
+            serde_json::json!({ "command": "pwd" }),
+            AiActionRisk::Execute,
+        ),
+        (
+            "send_terminal_input",
+            serde_json::json!({ "input": "q" }),
+            AiActionRisk::Interactive,
+        ),
+        (
+            "run_command",
+            serde_json::json!({ "command": "sudo reboot" }),
+            AiActionRisk::Destructive,
+        ),
+    ];
+    for (tool_name, args, expected_risk) in mutation_cases {
+        let decision = resolve_ai_policy_decision(
+            tool_name,
+            Some(&args),
+            &policy,
+            AiPolicySafetyMode::ReadOnly,
+            None,
+        );
+        assert_eq!(decision.risk, expected_risk);
+        assert_eq!(decision.decision, AiPolicyDecisionKind::Deny);
+        assert_eq!(decision.reason_code, "read_only_mode_denied");
+    }
+
+    assert_eq!(
+        serde_json::to_value(AiPolicySafetyMode::ReadOnly).unwrap(),
+        serde_json::json!("read_only")
+    );
+}
+
+#[test]
+fn application_tool_policy_classifies_mutations_by_action() {
+    assert_eq!(
+        orchestrator_risk_for_tool(
+            "control_host_tool",
+            Some(&serde_json::json!({ "action": "kill_session" })),
+        ),
+        AiActionRisk::Destructive
+    );
+    assert_eq!(
+        orchestrator_risk_for_tool(
+            "control_host_tool",
+            Some(&serde_json::json!({ "action": "restart" })),
+        ),
+        AiActionRisk::Execute
+    );
+    assert_eq!(
+        orchestrator_risk_for_tool(
+            "manage_forward",
+            Some(&serde_json::json!({ "action": "delete" })),
+        ),
+        AiActionRisk::Destructive
+    );
+    assert_eq!(
+        orchestrator_risk_for_tool(
+            "manage_plugin",
+            Some(&serde_json::json!({ "action": "uninstall" })),
+        ),
+        AiActionRisk::Destructive
+    );
+    assert_eq!(
+        orchestrator_risk_for_tool("create_background_task", None),
+        AiActionRisk::Write
+    );
+    assert_eq!(
+        orchestrator_risk_for_tool("inspect_host_tools", None),
+        AiActionRisk::Read
+    );
+}
+
+#[test]
+fn application_tool_family_approval_covers_safe_actions_only() {
+    let mut auto_approve_tools = HashMap::new();
+    auto_approve_tools.insert("control_host_tool".to_string(), true);
+    auto_approve_tools.insert("manage_forward".to_string(), true);
+    auto_approve_tools.insert("manage_plugin".to_string(), true);
+    let policy = AiToolUsePolicy {
+        enabled: true,
+        auto_approve_tools,
+        ..AiToolUsePolicy::default()
+    };
+
+    for (tool_name, action) in [
+        ("control_host_tool", "restart"),
+        ("manage_forward", "create"),
+        ("manage_plugin", "enable"),
+    ] {
+        let decision = resolve_ai_policy_decision(
+            tool_name,
+            Some(&serde_json::json!({ "action": action })),
+            &policy,
+            AiPolicySafetyMode::Default,
+            None,
+        );
+        assert_eq!(decision.decision, AiPolicyDecisionKind::Allow);
+        assert_eq!(decision.reason_code, "auto_approved");
+    }
+
+    for (tool_name, action) in [
+        ("control_host_tool", "kill_session"),
+        ("manage_forward", "delete"),
+        ("manage_plugin", "uninstall"),
+    ] {
+        let decision = resolve_ai_policy_decision(
+            tool_name,
+            Some(&serde_json::json!({ "action": action })),
+            &policy,
+            AiPolicySafetyMode::Default,
+            None,
+        );
+        assert_eq!(decision.decision, AiPolicyDecisionKind::RequireApproval);
+        assert_eq!(decision.reason_code, "destructive_requires_approval");
+    }
+
+    let mut specific_override = policy.clone();
+    specific_override
+        .auto_approve_tools
+        .insert("control_host_tool:restart".to_string(), false);
+    let decision = resolve_ai_policy_decision(
+        "control_host_tool",
+        Some(&serde_json::json!({ "action": "restart" })),
+        &specific_override,
+        AiPolicySafetyMode::Default,
+        None,
+    );
+    assert_eq!(decision.decision, AiPolicyDecisionKind::RequireApproval);
 }
 
 #[test]

@@ -60,7 +60,7 @@ const MAX_CONTENT_HASH_CHARS: usize = 256;
 const MAX_PREFERENCE_CHARS: usize = 12_000;
 
 pub fn orchestrator_tool_definitions() -> Vec<AiToolDefinition> {
-    vec![
+    let mut tools = vec![
         tool(
             "list_targets",
             "List available OxideTerm targets by view. Default view is connections for remote host discovery. Use view=all only for debugging or last-resort fallback.",
@@ -141,16 +141,53 @@ pub fn orchestrator_tool_definitions() -> Vec<AiToolDefinition> {
         ),
         tool(
             "send_terminal_input",
-            "Send literal interactive text or Enter to a visible terminal target after observing a prompt. Do not use this to run shell commands; use run_command instead. Control sequences such as Ctrl-C are not supported here.",
+            "Send literal interactive text, Enter, or one supported control/navigation key to a visible terminal target after observing its state. Do not use this to run shell commands; use run_command instead.",
             json!({
                 "type": "object",
                 "properties": {
                     "handle_id": { "type": "string", "maxLength": 64, "description": "Current terminal handle from list_targets/select_target." },
                     "text": { "type": "string", "maxLength": MAX_TERMINAL_INPUT_CHARS, "description": "Text to send." },
                     "append_enter": { "type": "boolean", "description": "Append Enter after text. Default: false." },
+                    "key": {
+                        "type": "string",
+                        "enum": ["ctrl_c", "ctrl_d", "ctrl_z", "escape", "enter", "tab", "backspace", "up", "down", "left", "right", "home", "end", "page_up", "page_down", "delete"],
+                        "description": "A single terminal control or navigation key. It cannot be combined with text or append_enter."
+                    },
                 },
                 "required": ["handle_id"],
                 "additionalProperties": false,
+            }),
+        ),
+        tool(
+            "wait_terminal_output",
+            "Wait on a visible terminal until output changes, contains a literal string, reaches an input prompt, enters or leaves a TUI, or a tracked command completes.",
+            json!({
+                "type": "object",
+                "properties": {
+                    "handle_id": { "type": "string", "maxLength": 64, "description": "Current terminal handle from list_targets/select_target." },
+                    "condition": { "type": "string", "enum": ["changed", "contains", "prompt", "tui_entered", "tui_exited", "command_completed"] },
+                    "text": { "type": "string", "maxLength": MAX_QUERY_CHARS, "description": "Literal text required by the contains condition." },
+                    "command_id": { "type": "string", "maxLength": 128, "description": "Command identifier returned by run_command." },
+                    "case_sensitive": { "type": "boolean", "description": "Whether contains matching is case-sensitive. Default: true." },
+                    "timeout_secs": { "type": "integer", "minimum": 1, "maximum": 120, "description": "Maximum wait duration. Default: 30." },
+                    "max_chars": { "type": "integer", "minimum": 200, "maximum": 12000, "description": "Maximum returned terminal text. Default: 4000." }
+                },
+                "required": ["handle_id", "condition"],
+                "additionalProperties": false
+            }),
+        ),
+        tool(
+            "get_terminal_command_status",
+            "Read reliable command lifecycle and exit status from the terminal command ledger. A command remains running until its tracked mark closes.",
+            json!({
+                "type": "object",
+                "properties": {
+                    "handle_id": { "type": "string", "maxLength": 64, "description": "Current terminal handle from list_targets/select_target." },
+                    "command_id": { "type": "string", "maxLength": 128, "description": "Optional command identifier returned by run_command. When omitted, returns recent commands." },
+                    "limit": { "type": "integer", "minimum": 1, "maximum": 20, "description": "Maximum recent commands when command_id is omitted. Default: 5." }
+                },
+                "required": ["handle_id"],
+                "additionalProperties": false
             }),
         ),
         tool(
@@ -371,7 +408,9 @@ pub fn orchestrator_tool_definitions() -> Vec<AiToolDefinition> {
                 "additionalProperties": false,
             }),
         ),
-    ]
+    ];
+    tools.extend(crate::application_tools::extended_application_tool_definitions());
+    tools
 }
 
 fn tool(name: &str, description: &str, parameters: serde_json::Value) -> AiToolDefinition {
@@ -409,6 +448,8 @@ pub fn canonicalize_orchestrator_tool_arguments(
         "run_command" => validate_run_command(object)?,
         "observe_terminal" => validate_observe_terminal(object)?,
         "send_terminal_input" => validate_send_terminal_input(object)?,
+        "wait_terminal_output" => validate_wait_terminal_output(object)?,
+        "get_terminal_command_status" => validate_get_terminal_command_status(object)?,
         "read_resource" => validate_read_resource(object)?,
         "write_resource" => validate_write_resource(object)?,
         "transfer_resource" => validate_transfer_resource(object)?,
@@ -416,7 +457,13 @@ pub fn canonicalize_orchestrator_tool_arguments(
         "get_state" => validate_get_state(object)?,
         "remember_preference" => validate_remember_preference(object)?,
         "recall_preferences" => require_only_fields(object, &[])?,
-        _ => return Err(OrchestratorArgumentError::UnknownTool),
+        _ => {
+            if !crate::application_tools::validate_extended_application_tool_arguments(
+                tool_name, object,
+            )? {
+                return Err(OrchestratorArgumentError::UnknownTool);
+            }
+        }
     }
     Ok(arguments)
 }
@@ -467,10 +514,109 @@ fn validate_observe_terminal(object: &Map<String, Value>) -> Result<(), Orchestr
 fn validate_send_terminal_input(
     object: &Map<String, Value>,
 ) -> Result<(), OrchestratorArgumentError> {
-    require_only_fields(object, &["handle_id", "text", "append_enter"])?;
+    require_only_fields(object, &["handle_id", "text", "append_enter", "key"])?;
     required_non_empty_string(object, "handle_id", Some(64))?;
     optional_string(object, "text", Some(MAX_TERMINAL_INPUT_CHARS))?;
-    optional_bool(object, "append_enter")
+    optional_bool(object, "append_enter")?;
+    optional_enum(
+        object,
+        "key",
+        &[
+            "ctrl_c",
+            "ctrl_d",
+            "ctrl_z",
+            "escape",
+            "enter",
+            "tab",
+            "backspace",
+            "up",
+            "down",
+            "left",
+            "right",
+            "home",
+            "end",
+            "page_up",
+            "page_down",
+            "delete",
+        ],
+    )?;
+    if object.contains_key("key")
+        && (object.contains_key("text") || object.contains_key("append_enter"))
+    {
+        return Err(OrchestratorArgumentError::InvalidArguments);
+    }
+    if !object.contains_key("key")
+        && !object.contains_key("text")
+        && object.get("append_enter").and_then(Value::as_bool) != Some(true)
+    {
+        return Err(OrchestratorArgumentError::InvalidArguments);
+    }
+    Ok(())
+}
+
+fn validate_wait_terminal_output(
+    object: &Map<String, Value>,
+) -> Result<(), OrchestratorArgumentError> {
+    require_only_fields(
+        object,
+        &[
+            "handle_id",
+            "condition",
+            "text",
+            "command_id",
+            "case_sensitive",
+            "timeout_secs",
+            "max_chars",
+        ],
+    )?;
+    required_non_empty_string(object, "handle_id", Some(64))?;
+    let condition = required_enum(
+        object,
+        "condition",
+        &[
+            "changed",
+            "contains",
+            "prompt",
+            "tui_entered",
+            "tui_exited",
+            "command_completed",
+        ],
+    )?;
+    optional_bool(object, "case_sensitive")?;
+    optional_u64_in_range(object, "timeout_secs", 1, 120)?;
+    optional_u64_in_range(object, "max_chars", 200, 12_000)?;
+    match condition {
+        "contains" => {
+            required_non_empty_string(object, "text", Some(MAX_QUERY_CHARS))?;
+            if object.contains_key("command_id") {
+                return Err(OrchestratorArgumentError::InvalidArguments);
+            }
+        }
+        "command_completed" => {
+            required_non_empty_string(object, "command_id", Some(128))?;
+            if object.contains_key("text") || object.contains_key("case_sensitive") {
+                return Err(OrchestratorArgumentError::InvalidArguments);
+            }
+        }
+        _ => {
+            if object.contains_key("text")
+                || object.contains_key("command_id")
+                || object.contains_key("case_sensitive")
+            {
+                return Err(OrchestratorArgumentError::InvalidArguments);
+            }
+        }
+    }
+    Ok(())
+}
+
+fn validate_get_terminal_command_status(
+    object: &Map<String, Value>,
+) -> Result<(), OrchestratorArgumentError> {
+    require_only_fields(object, &["handle_id", "command_id", "limit"])?;
+    required_non_empty_string(object, "handle_id", Some(64))?;
+    optional_string(object, "command_id", Some(128))?;
+    optional_u64_in_range(object, "limit", 1, 20)
 }
 
 fn validate_read_resource(object: &Map<String, Value>) -> Result<(), OrchestratorArgumentError> {

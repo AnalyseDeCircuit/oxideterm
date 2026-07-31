@@ -1,8 +1,113 @@
+// Shared policy keys keep persisted settings, runtime policy, and settings UI aligned.
+pub const AI_TOOL_CREATE_BACKGROUND_TASK: &str = "create_background_task";
+pub const AI_TOOL_LIST_BACKGROUND_TASKS: &str = "list_background_tasks";
+pub const AI_TOOL_GET_BACKGROUND_TASK: &str = "get_background_task";
+pub const AI_TOOL_CANCEL_BACKGROUND_TASK: &str = "cancel_background_task";
+pub const AI_TOOL_INSPECT_HOST_TOOLS: &str = "inspect_host_tools";
+pub const AI_TOOL_CONTROL_HOST_TOOL: &str = "control_host_tool";
+pub const AI_TOOL_LIST_FORWARDS: &str = "list_forwards";
+pub const AI_TOOL_MANAGE_FORWARD: &str = "manage_forward";
+pub const AI_TOOL_LIST_PLUGINS: &str = "list_plugins";
+pub const AI_TOOL_MANAGE_PLUGIN: &str = "manage_plugin";
+pub const AI_TOOL_LIST_TRANSPORT_PROFILES: &str = "list_transport_profiles";
+pub const AI_TOOL_OPEN_TRANSPORT_PROFILE: &str = "open_transport_profile";
+pub const AI_TOOL_GET_TRANSPORT_SESSION_STATE: &str = "get_transport_session_state";
+pub const AI_TOOL_MANAGE_SERIAL_SESSION: &str = "manage_serial_session";
+pub const AI_TOOL_MANAGE_TELNET_SESSION: &str = "manage_telnet_session";
+pub const AI_TOOL_LIST_REMOTE_DESKTOP_SESSIONS: &str = "list_remote_desktop_sessions";
+pub const AI_TOOL_MANAGE_REMOTE_DESKTOP_SESSION: &str = "manage_remote_desktop_session";
+pub const AI_TOOL_GET_CLOUD_SYNC_STATE: &str = "get_cloud_sync_state";
+pub const AI_TOOL_MANAGE_CLOUD_SYNC: &str = "manage_cloud_sync";
+pub const AI_TOOL_LIST_CREDENTIALS: &str = "list_credentials";
+pub const AI_TOOL_MANAGE_CREDENTIAL: &str = "manage_credential";
+pub const AI_APPLICATION_WORKSPACE_MEMORY_SCOPE_ID: &str = "application-workspace";
+
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AiMemoryScopeKind {
+    #[default]
+    User,
+    Workspace,
+    Project,
+    Host,
+}
+
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AiMemoryKind {
+    #[default]
+    LongTerm,
+    Temporary,
+}
+
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AiMemorySource {
+    Manual,
+    #[default]
+    Assistant,
+    Migrated,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AiMemoryEntry {
+    pub id: String,
+    pub content: String,
+    #[serde(default)]
+    pub scope_kind: AiMemoryScopeKind,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scope_id: Option<String>,
+    #[serde(default)]
+    pub memory_kind: AiMemoryKind,
+    #[serde(default)]
+    pub source: AiMemorySource,
+    pub created_at_ms: i64,
+    pub updated_at_ms: i64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_used_at_ms: Option<i64>,
+    #[serde(default)]
+    pub use_count: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expires_at_ms: Option<i64>,
+    #[serde(default)]
+    pub revision: u64,
+}
+
+impl AiMemoryEntry {
+    pub fn is_expired(&self, now_ms: i64) -> bool {
+        self.expires_at_ms
+            .is_some_and(|expires_at_ms| expires_at_ms <= now_ms)
+    }
+
+    pub fn applies_to(
+        &self,
+        user_id: Option<&str>,
+        workspace_id: Option<&str>,
+        project_id: Option<&str>,
+        host_id: Option<&str>,
+    ) -> bool {
+        let expected_scope = match self.scope_kind {
+            AiMemoryScopeKind::User => user_id,
+            AiMemoryScopeKind::Workspace => workspace_id,
+            AiMemoryScopeKind::Project => project_id,
+            AiMemoryScopeKind::Host => host_id,
+        };
+        match self.scope_id.as_deref() {
+            Some(scope_id) => expected_scope == Some(scope_id),
+            None => self.scope_kind == AiMemoryScopeKind::User,
+        }
+    }
+}
+
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AiMemorySettings {
     pub enabled: bool,
+    /// Legacy free-form memory is retained for backward-compatible settings files.
     pub content: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub entries: Vec<AiMemoryEntry>,
     #[serde(flatten)]
     pub extra: ExtraFields,
 }
@@ -12,6 +117,7 @@ impl Default for AiMemorySettings {
         Self {
             enabled: true,
             content: String::new(),
+            entries: Vec::new(),
             extra: ExtraFields::new(),
         }
     }
@@ -38,9 +144,22 @@ impl Default for AiToolUseSettings {
             ("list_targets", true),
             ("select_target", true),
             ("observe_terminal", true),
+            ("wait_terminal_output", true),
+            ("get_terminal_command_status", true),
             ("read_resource", true),
             ("get_state", true),
             ("recall_preferences", true),
+            ("list_memory_entries", true),
+            (AI_TOOL_LIST_BACKGROUND_TASKS, true),
+            (AI_TOOL_GET_BACKGROUND_TASK, true),
+            (AI_TOOL_INSPECT_HOST_TOOLS, true),
+            (AI_TOOL_LIST_FORWARDS, true),
+            (AI_TOOL_LIST_PLUGINS, true),
+            (AI_TOOL_LIST_TRANSPORT_PROFILES, true),
+            (AI_TOOL_GET_TRANSPORT_SESSION_STATE, true),
+            (AI_TOOL_LIST_REMOTE_DESKTOP_SESSIONS, true),
+            (AI_TOOL_GET_CLOUD_SYNC_STATE, true),
+            (AI_TOOL_LIST_CREDENTIALS, true),
             ("connect_target", false),
             ("run_command", false),
             ("send_terminal_input", false),
@@ -50,6 +169,18 @@ impl Default for AiToolUseSettings {
             ("transfer_resource", false),
             ("open_app_surface", false),
             ("remember_preference", false),
+            ("manage_memory_entry", false),
+            (AI_TOOL_CREATE_BACKGROUND_TASK, false),
+            (AI_TOOL_CANCEL_BACKGROUND_TASK, false),
+            (AI_TOOL_CONTROL_HOST_TOOL, false),
+            (AI_TOOL_MANAGE_FORWARD, false),
+            (AI_TOOL_MANAGE_PLUGIN, false),
+            (AI_TOOL_OPEN_TRANSPORT_PROFILE, false),
+            (AI_TOOL_MANAGE_SERIAL_SESSION, false),
+            (AI_TOOL_MANAGE_TELNET_SESSION, false),
+            (AI_TOOL_MANAGE_REMOTE_DESKTOP_SESSION, false),
+            (AI_TOOL_MANAGE_CLOUD_SYNC, false),
+            (AI_TOOL_MANAGE_CREDENTIAL, false),
         ] {
             auto_approve_tools.insert(name.to_string(), json!(enabled));
         }
@@ -270,6 +401,51 @@ impl Default for AiSettings {
 #[cfg(test)]
 mod ai_model_tests {
     use super::*;
+
+    fn memory_entry(scope_kind: AiMemoryScopeKind, scope_id: Option<&str>) -> AiMemoryEntry {
+        AiMemoryEntry {
+            id: "memory-1".to_string(),
+            content: "Use fish on this host.".to_string(),
+            scope_kind,
+            scope_id: scope_id.map(str::to_string),
+            memory_kind: AiMemoryKind::LongTerm,
+            source: AiMemorySource::Manual,
+            created_at_ms: 10,
+            updated_at_ms: 10,
+            last_used_at_ms: None,
+            use_count: 0,
+            expires_at_ms: None,
+            revision: 1,
+        }
+    }
+
+    #[test]
+    fn memory_scope_matches_only_its_runtime_identity() {
+        let host_memory = memory_entry(AiMemoryScopeKind::Host, Some("host-a"));
+
+        assert!(host_memory.applies_to(
+            Some("user-a"),
+            Some("workspace-a"),
+            Some("/project-a"),
+            Some("host-a"),
+        ));
+        assert!(!host_memory.applies_to(
+            Some("user-a"),
+            Some("workspace-a"),
+            Some("/project-a"),
+            Some("host-b"),
+        ));
+    }
+
+    #[test]
+    fn temporary_memory_expires_at_its_deadline() {
+        let mut entry = memory_entry(AiMemoryScopeKind::User, None);
+        entry.memory_kind = AiMemoryKind::Temporary;
+        entry.expires_at_ms = Some(100);
+
+        assert!(!entry.is_expired(99));
+        assert!(entry.is_expired(100));
+    }
 
     #[test]
     fn acp_agent_defaults_keep_host_capabilities_closed() {

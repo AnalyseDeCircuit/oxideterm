@@ -15,6 +15,13 @@ use oxideterm_ai::{
     update_provider as ai_update_provider_values,
 };
 use oxideterm_settings::{
+    AI_TOOL_CANCEL_BACKGROUND_TASK, AI_TOOL_CONTROL_HOST_TOOL, AI_TOOL_CREATE_BACKGROUND_TASK,
+    AI_TOOL_GET_BACKGROUND_TASK, AI_TOOL_GET_CLOUD_SYNC_STATE, AI_TOOL_GET_TRANSPORT_SESSION_STATE,
+    AI_TOOL_INSPECT_HOST_TOOLS, AI_TOOL_LIST_BACKGROUND_TASKS, AI_TOOL_LIST_CREDENTIALS,
+    AI_TOOL_LIST_FORWARDS, AI_TOOL_LIST_PLUGINS, AI_TOOL_LIST_REMOTE_DESKTOP_SESSIONS,
+    AI_TOOL_LIST_TRANSPORT_PROFILES, AI_TOOL_MANAGE_CLOUD_SYNC, AI_TOOL_MANAGE_CREDENTIAL,
+    AI_TOOL_MANAGE_FORWARD, AI_TOOL_MANAGE_PLUGIN, AI_TOOL_MANAGE_REMOTE_DESKTOP_SESSION,
+    AI_TOOL_MANAGE_SERIAL_SESSION, AI_TOOL_MANAGE_TELNET_SESSION, AI_TOOL_OPEN_TRANSPORT_PROFILE,
     AcpAgentAuthState, AcpAgentCapabilityPolicy, AcpAgentConfig, AcpAgentRuntimeStatus,
     PersistedSettings,
 };
@@ -39,6 +46,69 @@ pub struct AiToolPolicyGroup {
     pub title_key: &'static str,
     pub description_key: &'static str,
     pub items: Vec<AiToolPolicyItem>,
+}
+
+/// Aggregate auto-approval state for one policy category.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum AiToolPolicyGroupState {
+    Locked,
+    NoneApproved,
+    PartiallyApproved,
+    AllApproved,
+}
+
+impl AiToolPolicyGroup {
+    /// Derives the aggregate state from mutable policy items only.
+    pub fn state(&self) -> AiToolPolicyGroupState {
+        let (mutable_count, approved_count) = self
+            .items
+            .iter()
+            .filter(|item| !item.locked && item.key.is_some())
+            .fold((0_usize, 0_usize), |(total, approved), item| {
+                (total + 1, approved + usize::from(item.checked))
+            });
+        if mutable_count == 0 {
+            return AiToolPolicyGroupState::Locked;
+        }
+
+        if approved_count == 0 {
+            AiToolPolicyGroupState::NoneApproved
+        } else if approved_count == mutable_count {
+            AiToolPolicyGroupState::AllApproved
+        } else {
+            AiToolPolicyGroupState::PartiallyApproved
+        }
+    }
+
+    /// Returns the value applied by the next category-level toggle.
+    pub fn next_bulk_value(&self) -> Option<bool> {
+        match self.state() {
+            AiToolPolicyGroupState::Locked => None,
+            AiToolPolicyGroupState::AllApproved => Some(false),
+            AiToolPolicyGroupState::NoneApproved | AiToolPolicyGroupState::PartiallyApproved => {
+                Some(true)
+            }
+        }
+    }
+}
+
+/// Applies one auto-approval value to every mutable item in a category.
+pub fn set_ai_tool_policy_group_approval(
+    settings: &mut PersistedSettings,
+    group: &AiToolPolicyGroup,
+    approved: bool,
+) {
+    // Locked discovery tools are system policy and must never be changed by a
+    // group-level convenience control.
+    for item in group.items.iter().filter(|item| !item.locked) {
+        if let Some(key) = item.key {
+            settings
+                .ai
+                .tool_use
+                .auto_approve_tools
+                .insert(key.to_string(), serde_json::json!(approved));
+        }
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -126,32 +196,122 @@ pub fn ai_tool_policy_groups(settings: &PersistedSettings) -> Vec<AiToolPolicyGr
         AiToolPolicyGroup {
             title_key: "settings_view.ai.tool_policy_read_title",
             description_key: "settings_view.ai.tool_policy_read_desc",
-            items: vec![AiToolPolicyItem {
-                key: None,
-                label_key: "settings_view.ai.tool_policy_read_auto",
-                checked: true,
-                locked: true,
-            }],
+            items: vec![
+                AiToolPolicyItem {
+                    key: None,
+                    label_key: "settings_view.ai.tool_policy_read_auto",
+                    checked: true,
+                    locked: true,
+                },
+                AiToolPolicyItem {
+                    key: Some(AI_TOOL_LIST_BACKGROUND_TASKS),
+                    label_key: "settings_view.ai.tool_policy_read_background_tasks",
+                    checked: true,
+                    locked: true,
+                },
+                AiToolPolicyItem {
+                    key: Some(AI_TOOL_GET_BACKGROUND_TASK),
+                    label_key: "settings_view.ai.tool_policy_read_background_task_details",
+                    checked: true,
+                    locked: true,
+                },
+                AiToolPolicyItem {
+                    key: Some(AI_TOOL_INSPECT_HOST_TOOLS),
+                    label_key: "settings_view.ai.tool_policy_read_host_tools",
+                    checked: true,
+                    locked: true,
+                },
+                AiToolPolicyItem {
+                    key: Some(AI_TOOL_LIST_FORWARDS),
+                    label_key: "settings_view.ai.tool_policy_read_forwards",
+                    checked: true,
+                    locked: true,
+                },
+                AiToolPolicyItem {
+                    key: Some(AI_TOOL_LIST_PLUGINS),
+                    label_key: "settings_view.ai.tool_policy_read_plugins",
+                    checked: true,
+                    locked: true,
+                },
+                AiToolPolicyItem {
+                    key: Some(AI_TOOL_LIST_TRANSPORT_PROFILES),
+                    label_key: "settings_view.ai.tool_policy_read_transport_profiles",
+                    checked: true,
+                    locked: true,
+                },
+                AiToolPolicyItem {
+                    key: Some(AI_TOOL_GET_TRANSPORT_SESSION_STATE),
+                    label_key: "settings_view.ai.tool_policy_read_transport_session_state",
+                    checked: true,
+                    locked: true,
+                },
+                AiToolPolicyItem {
+                    key: Some(AI_TOOL_LIST_REMOTE_DESKTOP_SESSIONS),
+                    label_key: "settings_view.ai.tool_policy_read_remote_desktop_sessions",
+                    checked: true,
+                    locked: true,
+                },
+                AiToolPolicyItem {
+                    key: Some(AI_TOOL_GET_CLOUD_SYNC_STATE),
+                    label_key: "settings_view.ai.tool_policy_read_cloud_sync",
+                    checked: true,
+                    locked: true,
+                },
+                AiToolPolicyItem {
+                    key: Some(AI_TOOL_LIST_CREDENTIALS),
+                    label_key: "settings_view.ai.tool_policy_read_credentials",
+                    checked: true,
+                    locked: true,
+                },
+                AiToolPolicyItem {
+                    key: Some("list_memory_entries"),
+                    label_key: "settings_view.ai.tool_policy_read_memory_entries",
+                    checked: true,
+                    locked: true,
+                },
+            ],
         },
         AiToolPolicyGroup {
             title_key: "settings_view.ai.tool_policy_execute_title",
             description_key: "settings_view.ai.tool_policy_execute_desc",
-            items: vec![AiToolPolicyItem {
-                key: Some("run_command"),
-                label_key: "settings_view.ai.tool_policy_execute_run_command",
-                checked: checked("run_command"),
-                locked: false,
-            }],
-        },
-        AiToolPolicyGroup {
-            title_key: "settings_view.ai.tool_policy_interactive_title",
-            description_key: "settings_view.ai.tool_policy_interactive_desc",
-            items: vec![AiToolPolicyItem {
-                key: Some("send_terminal_input"),
-                label_key: "settings_view.ai.tool_policy_interactive_send_input",
-                checked: checked("send_terminal_input"),
-                locked: false,
-            }],
+            items: vec![
+                AiToolPolicyItem {
+                    key: Some("run_command"),
+                    label_key: "settings_view.ai.tool_policy_execute_run_command",
+                    checked: checked("run_command"),
+                    locked: false,
+                },
+                AiToolPolicyItem {
+                    key: Some("send_terminal_input"),
+                    label_key: "settings_view.ai.tool_policy_interactive_send_input",
+                    checked: checked("send_terminal_input"),
+                    locked: false,
+                },
+                AiToolPolicyItem {
+                    key: Some("wait_terminal_output"),
+                    label_key: "settings_view.ai.tool_policy_wait_terminal_output",
+                    checked: true,
+                    locked: true,
+                },
+                AiToolPolicyItem {
+                    key: Some("get_terminal_command_status"),
+                    label_key: "settings_view.ai.tool_policy_terminal_command_status",
+                    checked: true,
+                    locked: true,
+                },
+                AiToolPolicyItem {
+                    key: Some(AI_TOOL_MANAGE_SERIAL_SESSION),
+                    label_key: "settings_view.ai.tool_policy_manage_serial_session",
+                    checked: checked(AI_TOOL_MANAGE_SERIAL_SESSION),
+                    locked: false,
+                },
+                AiToolPolicyItem {
+                    key: Some(AI_TOOL_MANAGE_TELNET_SESSION),
+                    label_key: "settings_view.ai.tool_policy_manage_telnet_session",
+                    checked: checked(AI_TOOL_MANAGE_TELNET_SESSION),
+                    locked: false,
+                },
+            ],
         },
         AiToolPolicyGroup {
             title_key: "settings_view.ai.tool_policy_navigation_title",
@@ -169,12 +329,6 @@ pub fn ai_tool_policy_groups(settings: &PersistedSettings) -> Vec<AiToolPolicyGr
                     checked: checked("open_app_surface"),
                     locked: false,
                 },
-            ],
-        },
-        AiToolPolicyGroup {
-            title_key: "settings_view.ai.tool_policy_write_title",
-            description_key: "settings_view.ai.tool_policy_write_desc",
-            items: vec![
                 AiToolPolicyItem {
                     key: Some("write_resource:settings"),
                     label_key: "settings_view.ai.tool_policy_write_settings",
@@ -197,6 +351,78 @@ pub fn ai_tool_policy_groups(settings: &PersistedSettings) -> Vec<AiToolPolicyGr
                     key: Some("remember_preference"),
                     label_key: "settings_view.ai.tool_policy_remember_preference",
                     checked: checked("remember_preference"),
+                    locked: false,
+                },
+                AiToolPolicyItem {
+                    key: Some(AI_TOOL_OPEN_TRANSPORT_PROFILE),
+                    label_key: "settings_view.ai.tool_policy_open_transport_profile",
+                    checked: checked(AI_TOOL_OPEN_TRANSPORT_PROFILE),
+                    locked: false,
+                },
+                AiToolPolicyItem {
+                    key: Some("manage_memory_entry"),
+                    label_key: "settings_view.ai.tool_policy_manage_memory_entry",
+                    checked: checked("manage_memory_entry"),
+                    locked: false,
+                },
+            ],
+        },
+        AiToolPolicyGroup {
+            title_key: "settings_view.ai.tool_policy_background_title",
+            description_key: "settings_view.ai.tool_policy_background_desc",
+            items: vec![
+                AiToolPolicyItem {
+                    key: Some(AI_TOOL_CREATE_BACKGROUND_TASK),
+                    label_key: "settings_view.ai.tool_policy_create_background_task",
+                    checked: checked(AI_TOOL_CREATE_BACKGROUND_TASK),
+                    locked: false,
+                },
+                AiToolPolicyItem {
+                    key: Some(AI_TOOL_CANCEL_BACKGROUND_TASK),
+                    label_key: "settings_view.ai.tool_policy_cancel_background_task",
+                    checked: checked(AI_TOOL_CANCEL_BACKGROUND_TASK),
+                    locked: false,
+                },
+            ],
+        },
+        AiToolPolicyGroup {
+            title_key: "settings_view.ai.tool_policy_operations_title",
+            description_key: "settings_view.ai.tool_policy_operations_desc",
+            items: vec![
+                AiToolPolicyItem {
+                    key: Some(AI_TOOL_CONTROL_HOST_TOOL),
+                    label_key: "settings_view.ai.tool_policy_control_host_tool",
+                    checked: checked(AI_TOOL_CONTROL_HOST_TOOL),
+                    locked: false,
+                },
+                AiToolPolicyItem {
+                    key: Some(AI_TOOL_MANAGE_FORWARD),
+                    label_key: "settings_view.ai.tool_policy_manage_forward",
+                    checked: checked(AI_TOOL_MANAGE_FORWARD),
+                    locked: false,
+                },
+                AiToolPolicyItem {
+                    key: Some(AI_TOOL_MANAGE_PLUGIN),
+                    label_key: "settings_view.ai.tool_policy_manage_plugin",
+                    checked: checked(AI_TOOL_MANAGE_PLUGIN),
+                    locked: false,
+                },
+                AiToolPolicyItem {
+                    key: Some(AI_TOOL_MANAGE_REMOTE_DESKTOP_SESSION),
+                    label_key: "settings_view.ai.tool_policy_manage_remote_desktop",
+                    checked: checked(AI_TOOL_MANAGE_REMOTE_DESKTOP_SESSION),
+                    locked: false,
+                },
+                AiToolPolicyItem {
+                    key: Some(AI_TOOL_MANAGE_CLOUD_SYNC),
+                    label_key: "settings_view.ai.tool_policy_manage_cloud_sync",
+                    checked: checked(AI_TOOL_MANAGE_CLOUD_SYNC),
+                    locked: false,
+                },
+                AiToolPolicyItem {
+                    key: Some(AI_TOOL_MANAGE_CREDENTIAL),
+                    label_key: "settings_view.ai.tool_policy_manage_credentials",
+                    checked: checked(AI_TOOL_MANAGE_CREDENTIAL),
                     locked: false,
                 },
             ],
@@ -608,6 +834,10 @@ mod tests {
             .insert("run_command".to_string(), serde_json::json!(true));
 
         let groups = ai_tool_policy_groups(&settings);
+        let policy_keys = groups
+            .iter()
+            .flat_map(|group| group.items.iter().filter_map(|item| item.key))
+            .collect::<HashSet<_>>();
 
         assert!(groups.iter().any(|group| {
             group
@@ -624,6 +854,74 @@ mod tests {
                 .values()
                 .filter(|value| value.as_bool() == Some(true))
                 .count()
+        );
+        assert_eq!(
+            groups
+                .iter()
+                .map(|group| group.title_key)
+                .collect::<Vec<_>>(),
+            vec![
+                "settings_view.ai.tool_policy_read_title",
+                "settings_view.ai.tool_policy_execute_title",
+                "settings_view.ai.tool_policy_navigation_title",
+                "settings_view.ai.tool_policy_background_title",
+                "settings_view.ai.tool_policy_operations_title",
+            ]
+        );
+        assert!(
+            groups[0]
+                .items
+                .iter()
+                .all(|item| item.checked && item.locked)
+        );
+        assert!(policy_keys.contains(AI_TOOL_LIST_BACKGROUND_TASKS));
+        assert!(policy_keys.contains(AI_TOOL_GET_BACKGROUND_TASK));
+        assert!(policy_keys.contains(AI_TOOL_INSPECT_HOST_TOOLS));
+        assert!(policy_keys.contains(AI_TOOL_LIST_FORWARDS));
+        assert!(policy_keys.contains(AI_TOOL_LIST_PLUGINS));
+        assert!(policy_keys.contains(AI_TOOL_CREATE_BACKGROUND_TASK));
+        assert!(policy_keys.contains(AI_TOOL_CANCEL_BACKGROUND_TASK));
+        assert!(policy_keys.contains(AI_TOOL_CONTROL_HOST_TOOL));
+        assert!(policy_keys.contains(AI_TOOL_MANAGE_FORWARD));
+        assert!(policy_keys.contains(AI_TOOL_MANAGE_PLUGIN));
+    }
+
+    #[test]
+    fn ai_tool_policy_group_bulk_toggle_preserves_locked_policy() {
+        let mut settings = PersistedSettings::default();
+        settings
+            .ai
+            .tool_use
+            .auto_approve_tools
+            .insert("run_command".to_string(), serde_json::json!(true));
+
+        let groups = ai_tool_policy_groups(&settings);
+        let locked_group = groups[0].clone();
+        let terminal_group = groups[1].clone();
+        assert_eq!(locked_group.state(), AiToolPolicyGroupState::Locked);
+        assert_eq!(locked_group.next_bulk_value(), None);
+        assert_eq!(
+            terminal_group.state(),
+            AiToolPolicyGroupState::PartiallyApproved
+        );
+        assert_eq!(terminal_group.next_bulk_value(), Some(true));
+
+        let locked_policy_before = settings.ai.tool_use.auto_approve_tools.clone();
+        set_ai_tool_policy_group_approval(&mut settings, &locked_group, false);
+        assert_eq!(
+            settings.ai.tool_use.auto_approve_tools,
+            locked_policy_before
+        );
+
+        set_ai_tool_policy_group_approval(&mut settings, &terminal_group, true);
+        let terminal_group = ai_tool_policy_groups(&settings)[1].clone();
+        assert_eq!(terminal_group.state(), AiToolPolicyGroupState::AllApproved);
+        assert_eq!(terminal_group.next_bulk_value(), Some(false));
+
+        set_ai_tool_policy_group_approval(&mut settings, &terminal_group, false);
+        assert_eq!(
+            ai_tool_policy_groups(&settings)[1].state(),
+            AiToolPolicyGroupState::NoneApproved
         );
     }
 

@@ -24,9 +24,10 @@ pub enum AiActionRisk {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
+#[serde(rename_all = "snake_case")]
 pub enum AiPolicySafetyMode {
     Default,
+    ReadOnly,
     Bypass,
 }
 
@@ -65,6 +66,8 @@ pub const ORCHESTRATOR_TOOL_NAMES: &[&str] = &[
     "run_command",
     "observe_terminal",
     "send_terminal_input",
+    "wait_terminal_output",
+    "get_terminal_command_status",
     "read_resource",
     "write_resource",
     "transfer_resource",
@@ -72,6 +75,29 @@ pub const ORCHESTRATOR_TOOL_NAMES: &[&str] = &[
     "get_state",
     "remember_preference",
     "recall_preferences",
+    "create_background_task",
+    "list_background_tasks",
+    "get_background_task",
+    "cancel_background_task",
+    "inspect_host_tools",
+    "control_host_tool",
+    "list_forwards",
+    "manage_forward",
+    "list_plugins",
+    "manage_plugin",
+    "list_transport_profiles",
+    "open_transport_profile",
+    "get_transport_session_state",
+    "manage_serial_session",
+    "manage_telnet_session",
+    "list_remote_desktop_sessions",
+    "manage_remote_desktop_session",
+    "get_cloud_sync_state",
+    "manage_cloud_sync",
+    "list_credentials",
+    "manage_credential",
+    "list_memory_entries",
+    "manage_memory_entry",
 ];
 
 pub fn resolve_ai_policy_decision(
@@ -122,6 +148,20 @@ pub fn resolve_ai_policy_decision(
         );
     }
 
+    if safety_mode == AiPolicySafetyMode::ReadOnly {
+        // Read-only mode is a hard boundary: policy auto-approval and explicit
+        // approval cannot promote a mutating action into an allowed action.
+        return policy_decision(
+            AiPolicyDecisionKind::Deny,
+            risk,
+            "read_only_mode_denied",
+            "ai.tool_use.policy_reason_read_only_mode",
+            matched_policy_key,
+            safety_mode,
+            profile_id,
+        );
+    }
+
     if risk == AiActionRisk::Credential {
         return policy_decision(
             AiPolicyDecisionKind::RequireApproval,
@@ -157,12 +197,15 @@ pub fn resolve_ai_policy_decision(
         );
     }
 
-    if tool_use
+    // Action-specific entries override their tool-family setting. This keeps
+    // the settings UI compact while preserving granular persisted policies.
+    let auto_approved = tool_use
         .auto_approve_tools
         .get(&matched_policy_key)
+        .or_else(|| tool_use.auto_approve_tools.get(tool_name))
         .copied()
-        .unwrap_or(false)
-    {
+        .unwrap_or(false);
+    if auto_approved {
         return policy_decision(
             AiPolicyDecisionKind::Allow,
             risk,
@@ -199,9 +242,65 @@ pub fn orchestrator_risk_for_tool(name: &str, args: Option<&Value>) -> AiActionR
     }
 
     match name {
-        "send_terminal_input" => AiActionRisk::Interactive,
+        "send_terminal_input" | "manage_serial_session" | "manage_telnet_session" => {
+            AiActionRisk::Interactive
+        }
         "write_resource" | "transfer_resource" => AiActionRisk::Write,
-        "connect_target" | "open_app_surface" | "remember_preference" => AiActionRisk::Write,
+        "connect_target"
+        | "open_app_surface"
+        | "open_transport_profile"
+        | "manage_remote_desktop_session"
+        | "remember_preference"
+        | "manage_memory_entry"
+        | "create_background_task"
+        | "cancel_background_task" => AiActionRisk::Write,
+        "control_host_tool" => {
+            let action = args
+                .and_then(|args| args.get("action"))
+                .and_then(Value::as_str)
+                .unwrap_or_default();
+            if matches!(
+                action,
+                "signal" | "kill_session" | "kill_window" | "kill_pane"
+            ) {
+                AiActionRisk::Destructive
+            } else {
+                AiActionRisk::Execute
+            }
+        }
+        "manage_forward" => {
+            let action = args
+                .and_then(|args| args.get("action"))
+                .and_then(Value::as_str)
+                .unwrap_or_default();
+            if action == "delete" {
+                AiActionRisk::Destructive
+            } else {
+                AiActionRisk::Write
+            }
+        }
+        "manage_plugin" => {
+            let action = args
+                .and_then(|args| args.get("action"))
+                .and_then(Value::as_str)
+                .unwrap_or_default();
+            if action == "uninstall" {
+                AiActionRisk::Destructive
+            } else {
+                AiActionRisk::Write
+            }
+        }
+        "manage_cloud_sync" | "manage_credential" => {
+            let action = args
+                .and_then(|args| args.get("action"))
+                .and_then(Value::as_str)
+                .unwrap_or_default();
+            if name == "manage_credential" && action == "delete" {
+                AiActionRisk::Destructive
+            } else {
+                AiActionRisk::Write
+            }
+        }
         _ => AiActionRisk::Read,
     }
 }
@@ -217,6 +316,22 @@ pub fn orchestrator_approval_key_for_tool(name: &str, args: Option<&Value>) -> S
             "" => "write_resource:unsupported".to_string(),
             other => format!("write_resource:{other}"),
         };
+    }
+
+    if matches!(
+        name,
+        "control_host_tool"
+            | "manage_forward"
+            | "manage_plugin"
+            | "manage_remote_desktop_session"
+            | "manage_cloud_sync"
+            | "manage_credential"
+    ) {
+        let action = args
+            .and_then(|args| args.get("action"))
+            .and_then(Value::as_str)
+            .unwrap_or("unsupported");
+        return format!("{name}:{action}");
     }
 
     name.to_string()

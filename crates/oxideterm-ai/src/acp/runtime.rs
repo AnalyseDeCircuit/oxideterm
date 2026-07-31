@@ -836,6 +836,16 @@ async fn run_connection_commands(
                             continue;
                         }
                         if !sessions.contains_key(&thread_id) {
+                            let requested_mcp_server_count = mcp_servers.len();
+                            let mcp_servers =
+                                supported_mcp_servers(runtime.agent_capabilities(), mcp_servers);
+                            if mcp_servers.len() != requested_mcp_server_count {
+                                let _ = event_tx.send(AcpManagedEvent::Diagnostic {
+                                    agent_id: agent_id.clone(),
+                                    connection_id,
+                                    message: "The ACP agent does not advertise the transport required by an OxideTerm MCP server.".to_string(),
+                                });
+                            }
                             let session = match runtime
                                 .start_or_resume_session(existing_session_id, cwd, mcp_servers)
                                 .await
@@ -1104,6 +1114,24 @@ async fn run_connection_commands(
     }
 }
 
+fn supported_mcp_servers(
+    capabilities: &agent_client_protocol::schema::v1::AgentCapabilities,
+    servers: Vec<McpServer>,
+) -> Vec<McpServer> {
+    servers
+        .into_iter()
+        .filter(|server| match server {
+            McpServer::Http(_) => capabilities.mcp_capabilities.http,
+            McpServer::Sse(_) => capabilities.mcp_capabilities.sse,
+            McpServer::Acp(_) => capabilities.mcp_capabilities.acp,
+            // ACP requires every agent to support stdio MCP servers.
+            McpServer::Stdio(_) => true,
+            // Future transports must be negotiated explicitly before use.
+            _ => false,
+        })
+        .collect()
+}
+
 async fn close_managed_thread(
     runtime: &AcpAgentRuntime,
     sessions: &mut HashMap<String, AcpManagedSession>,
@@ -1309,6 +1337,27 @@ mod tests {
     fn managed_errors_do_not_debug_print_agent_text() {
         let error = AcpConnectionError::Protocol("private-agent-output".to_string());
         assert!(!format!("{error:?}").contains("private-agent-output"));
+    }
+
+    #[test]
+    fn mcp_servers_are_filtered_by_negotiated_transport_capabilities() {
+        use agent_client_protocol::schema::v1::{McpCapabilities, McpServerHttp, McpServerStdio};
+
+        let http_server =
+            McpServer::Http(McpServerHttp::new("OxideTerm", "http://127.0.0.1:1/mcp"));
+        let stdio_server =
+            McpServer::Stdio(McpServerStdio::new("Always Supported", "/test/mcp-helper"));
+        let unsupported = supported_mcp_servers(
+            &AgentCapabilities::new(),
+            vec![http_server.clone(), stdio_server.clone()],
+        );
+        assert_eq!(unsupported, vec![stdio_server]);
+
+        let supported = supported_mcp_servers(
+            &AgentCapabilities::new().mcp_capabilities(McpCapabilities::new().http(true)),
+            vec![http_server.clone()],
+        );
+        assert_eq!(supported, vec![http_server]);
     }
 
     async fn submit_prompt(

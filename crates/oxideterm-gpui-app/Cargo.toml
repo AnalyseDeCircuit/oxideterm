@@ -14,6 +14,7 @@ path = "src/main.rs"
 
 [dependencies]
 anyhow.workspace = true
+async-trait.workspace = true
 base64.workspace = true
 chrono.workspace = true
 fs2.workspace = true
@@ -21,7 +22,9 @@ gpui.workspace = true
 image.workspace = true
 oxideterm-backend-classification = { path = "../oxideterm-backend-classification" }
 oxideterm-ai = { path = "../oxideterm-ai" }
+oxideterm-ai-tasks = { path = "../oxideterm-ai-tasks" }
 oxideterm-acp-adapter = { path = "../oxideterm-acp-adapter" }
+oxideterm-acp-host-tools = { path = "../oxideterm-acp-host-tools" }
 oxideterm-atomic-file = { path = "../oxideterm-atomic-file" }
 oxideterm-app-lock = { path = "../oxideterm-app-lock" }
 oxideterm-cloud-sync = { path = "../oxideterm-cloud-sync" }
@@ -80,7 +83,9 @@ tracing.workspace = true
 tracing-appender.workspace = true
 tracing-subscriber.workspace = true
 uuid.workspace = true
+url.workspace = true
 walkdir = "2"
+whoami.workspace = true
 zeroize.workspace = true
 
 [build-dependencies]

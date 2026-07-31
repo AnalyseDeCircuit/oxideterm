@@ -1,4 +1,5 @@
 mod acp;
+mod application_tools;
 mod chat;
 mod context_sanitizer;
 mod context_window;
