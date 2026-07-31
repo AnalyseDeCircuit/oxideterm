@@ -136,7 +136,7 @@ impl CommandFactLedger {
         }
 
         self.close_previous_open(mark.start_line);
-        self.facts.push(TerminalCommandFact {
+        let fact = TerminalCommandFact {
             fact_id: format!("native-command-fact-{}", mark.command_id),
             client_mark_id: mark.command_id.clone(),
             source: mark.detection_source,
@@ -155,7 +155,9 @@ impl CommandFactLedger {
             exit_code: None,
             created_at: now_millis(),
             closed_at: None,
-        });
+        };
+        self.record_ai_command_if_eligible(mark, &fact);
+        self.facts.push(fact);
     }
 
     pub(crate) fn close_from_mark(&mut self, mark: &TerminalCommandMark) {
@@ -228,11 +230,17 @@ impl CommandFactLedger {
         ) {
             return;
         }
-        if self
+        if let Some(record) = self
             .ai_records
-            .iter()
-            .any(|record| record.command_id == mark.command_id)
+            .iter_mut()
+            .find(|record| record.command_id == mark.command_id)
         {
+            // The opening record gives AI a stable identifier immediately;
+            // closing the same fact fills in its authoritative status/exit code.
+            record.status = fact.status;
+            record.finished_at = mark.finished_at;
+            record.exit_code = mark.exit_code;
+            record.end_line = fact.end_global_line;
             return;
         }
 

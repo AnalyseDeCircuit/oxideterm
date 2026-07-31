@@ -6,6 +6,19 @@ pub enum TerminalSessionKind {
     Serial,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+/// Telnet protocol controls that are framed as IAC commands, not terminal data.
+pub enum TelnetControlCommand {
+    NoOperation,
+    Break,
+    InterruptProcess,
+    AbortOutput,
+    AreYouThere,
+    EraseCharacter,
+    EraseLine,
+    GoAhead,
+}
+
 pub type TerminalOutputProcessor = Arc<dyn Fn(&[u8]) -> Vec<u8> + Send + Sync>;
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -143,6 +156,9 @@ pub trait TerminalSessionBackend: Send {
     }
     fn send_serial_break(&mut self) -> Result<()> {
         bail!("Serial break is only supported by serial sessions")
+    }
+    fn send_telnet_control(&mut self, _command: TelnetControlCommand) -> Result<()> {
+        bail!("Telnet controls are only supported by Telnet sessions")
     }
     fn set_trzsz_policy(&mut self, _policy: Option<TrzszTransferPolicy>) {}
     fn take_trzsz_transfer(&mut self) -> Option<TrzszTransfer> {

@@ -6,6 +6,14 @@ const TELNET_COMMAND_DO: u8 = 253;
 const TELNET_COMMAND_WONT: u8 = 252;
 const TELNET_COMMAND_WILL: u8 = 251;
 const TELNET_COMMAND_SB: u8 = 250;
+const TELNET_COMMAND_GA: u8 = 249;
+const TELNET_COMMAND_EL: u8 = 248;
+const TELNET_COMMAND_EC: u8 = 247;
+const TELNET_COMMAND_AYT: u8 = 246;
+const TELNET_COMMAND_AO: u8 = 245;
+const TELNET_COMMAND_IP: u8 = 244;
+const TELNET_COMMAND_BRK: u8 = 243;
+const TELNET_COMMAND_NOP: u8 = 241;
 const TELNET_COMMAND_SE: u8 = 240;
 const TELNET_OPTION_BINARY: u8 = 0;
 const TELNET_OPTION_ECHO: u8 = 1;
@@ -19,7 +27,7 @@ pub struct TelnetSession {
     config: TelnetSessionConfig,
     term: Arc<FairMutex<Term<LocalEventListener>>>,
     parser: Processor,
-    event_rx: Receiver<AlacEvent>,
+    event_rx: LocalEventReceiver,
     worker_rx: crate::backpressure::ByteBoundedReceiver<TelnetWorkerEvent>,
     pending_events: Vec<TerminalEvent>,
     resize: TerminalResize,
@@ -45,6 +53,7 @@ pub struct TelnetSession {
 #[derive(Debug)]
 enum TelnetCommand {
     Data(Vec<u8>),
+    Control(TelnetControlCommand),
     Resize { cols: u16, rows: u16 },
     Close,
 }
@@ -223,19 +232,13 @@ impl TelnetSession {
             cell_width: resize.cell_width,
             cell_height: resize.cell_height,
         };
-        let (event_tx, event_rx) = unbounded();
+        let (listener, event_rx) = local_event_channel();
         let (worker_tx, worker_rx) = crate::backpressure::byte_bounded_channel(
             crate::backpressure::TRANSPORT_OUTPUT_BACKLOG_BYTES,
         );
         let (command_tx, command_rx) = tokio::sync::mpsc::channel(256);
-        let listener = LocalEventListener { tx: event_tx };
-
         let term_config = interactive_terminal_config(scrollback_lines);
-        let term = Arc::new(FairMutex::new(Term::new(
-            term_config,
-            &size,
-            listener,
-        )));
+        let term = Arc::new(FairMutex::new(Term::new(term_config, &size, listener)));
 
         let runtime = Runtime::new().ok();
         if let Some(runtime) = runtime.as_ref() {
@@ -526,6 +529,19 @@ impl TelnetSession {
             .try_send(command)
             .map_err(|error| anyhow::anyhow!(error.to_string()))
     }
+
+    fn control_command_byte(command: TelnetControlCommand) -> u8 {
+        match command {
+            TelnetControlCommand::NoOperation => TELNET_COMMAND_NOP,
+            TelnetControlCommand::Break => TELNET_COMMAND_BRK,
+            TelnetControlCommand::InterruptProcess => TELNET_COMMAND_IP,
+            TelnetControlCommand::AbortOutput => TELNET_COMMAND_AO,
+            TelnetControlCommand::AreYouThere => TELNET_COMMAND_AYT,
+            TelnetControlCommand::EraseCharacter => TELNET_COMMAND_EC,
+            TelnetControlCommand::EraseLine => TELNET_COMMAND_EL,
+            TelnetControlCommand::GoAhead => TELNET_COMMAND_GA,
+        }
+    }
 }
 
 impl TerminalSessionBackend for TelnetSession {
@@ -587,6 +603,13 @@ impl TerminalSessionBackend for TelnetSession {
             self.send_command(TelnetCommand::Data(bytes.to_vec()))?;
         }
         Ok(())
+    }
+
+    fn send_telnet_control(&mut self, command: TelnetControlCommand) -> Result<()> {
+        if !self.lifecycle.is_running() {
+            bail!("Telnet session is not running")
+        }
+        self.send_command(TelnetCommand::Control(command))
     }
 
     fn write_text(&mut self, text: &str) -> Result<()> {
@@ -893,6 +916,15 @@ async fn run_telnet_worker(
                             break;
                         }
                     }
+                    Some(TelnetCommand::Control(command)) => {
+                        // Protocol controls must bypass normal data escaping so
+                        // the peer receives one IAC command rather than literal bytes.
+                        let bytes = [TELNET_COMMAND_IAC, TelnetSession::control_command_byte(command)];
+                        if writer.write_all(&bytes).await.is_err() {
+                            let _ = worker_tx.send_control(TelnetWorkerEvent::Closed);
+                            break;
+                        }
+                    }
                     Some(TelnetCommand::Resize { cols, rows }) => {
                         codec.set_window_size(cols, rows);
                         if writer.write_all(&codec.naws_message()).await.is_err() {
@@ -925,6 +957,22 @@ fn telnet_escape_iac_payload(bytes: &[u8]) -> Vec<u8> {
 #[cfg(test)]
 mod telnet_tests {
     use super::*;
+
+    #[test]
+    fn telnet_control_commands_map_to_protocol_bytes() {
+        assert_eq!(
+            TelnetSession::control_command_byte(TelnetControlCommand::InterruptProcess),
+            TELNET_COMMAND_IP
+        );
+        assert_eq!(
+            TelnetSession::control_command_byte(TelnetControlCommand::AreYouThere),
+            TELNET_COMMAND_AYT
+        );
+        assert_eq!(
+            TelnetSession::control_command_byte(TelnetControlCommand::Break),
+            TELNET_COMMAND_BRK
+        );
+    }
 
     #[test]
     fn telnet_codec_filters_negotiation_and_answers_supported_options() {

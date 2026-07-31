@@ -2,7 +2,7 @@ struct PlaybackTerminalSession {
     term: Arc<FairMutex<Term<LocalEventListener>>>,
     listener: LocalEventListener,
     parser: Processor,
-    event_rx: Receiver<AlacEvent>,
+    event_rx: LocalEventReceiver,
     pending_events: Vec<TerminalEvent>,
     size: TerminalSize,
     graphics_options: GraphicsOptions,
@@ -20,8 +20,7 @@ impl PlaybackTerminalSession {
         graphics_options: GraphicsOptions,
         scrollback_lines: usize,
     ) -> Self {
-        let (event_tx, event_rx) = unbounded();
-        let listener = LocalEventListener { tx: event_tx };
+        let (listener, event_rx) = local_event_channel();
         let size = TerminalSize {
             cols: cols.max(2),
             rows: rows.max(2),

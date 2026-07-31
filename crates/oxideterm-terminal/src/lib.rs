@@ -83,10 +83,10 @@ pub use remote_shell_integration::{
 pub use session::{
     SerialControlLine, SerialControlState, SerialDisplayMode, SerialError, SerialErrorCode,
     SerialFlowControl, SerialLineEnding, SerialParity, SerialPortInfo, SerialRuntimeOptions,
-    SerialSendMode, SerialSessionConfig, SshPtySession, SshSessionConfig, TelnetSessionConfig,
-    TerminalDrainBudget, TerminalDrainReport, TerminalMagicKind, TerminalOutputProcessor,
-    TerminalResize, TerminalSession, TerminalSessionBackend, TerminalSessionKind,
-    TerminalSessionStatus, serial_list_ports,
+    SerialSendMode, SerialSessionConfig, SshPtySession, SshSessionConfig, TelnetControlCommand,
+    TelnetSessionConfig, TerminalDrainBudget, TerminalDrainReport, TerminalMagicKind,
+    TerminalOutputProcessor, TerminalResize, TerminalSession, TerminalSessionBackend,
+    TerminalSessionKind, TerminalSessionStatus, serial_list_ports,
 };
 pub use shell_completion::{
     TerminalShellParseResult, TerminalShellToken, escape_terminal_path_for_shell,

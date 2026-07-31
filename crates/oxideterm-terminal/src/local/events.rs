@@ -1,11 +1,58 @@
 #[derive(Clone)]
 struct LocalEventListener {
     tx: Sender<AlacEvent>,
+    wakeup_pending: Arc<std::sync::atomic::AtomicBool>,
+}
+
+struct LocalEventReceiver {
+    rx: Receiver<AlacEvent>,
+    wakeup_pending: Arc<std::sync::atomic::AtomicBool>,
+}
+
+fn local_event_channel() -> (LocalEventListener, LocalEventReceiver) {
+    let (tx, rx) = unbounded();
+    let wakeup_pending = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    (
+        LocalEventListener {
+            tx,
+            wakeup_pending: wakeup_pending.clone(),
+        },
+        LocalEventReceiver { rx, wakeup_pending },
+    )
+}
+
+impl LocalEventReceiver {
+    fn try_recv(&self) -> std::result::Result<AlacEvent, crossbeam_channel::TryRecvError> {
+        let event = self.rx.try_recv()?;
+        if matches!(event, AlacEvent::Wakeup) {
+            // Clear before handling so concurrent output can enqueue the next redraw.
+            self.wakeup_pending
+                .store(false, std::sync::atomic::Ordering::Release);
+        }
+        Ok(event)
+    }
+
+    fn is_empty(&self) -> bool {
+        self.rx.is_empty()
+    }
 }
 
 impl EventListener for LocalEventListener {
     fn send_event(&self, event: AlacEvent) {
-        let _ = self.tx.send(event);
+        let is_wakeup = matches!(event, AlacEvent::Wakeup);
+        if is_wakeup
+            && self
+                .wakeup_pending
+                .swap(true, std::sync::atomic::Ordering::AcqRel)
+        {
+            return;
+        }
+
+        if self.tx.send(event).is_err() && is_wakeup {
+            // A disconnected receiver must not leave cloned listeners permanently muted.
+            self.wakeup_pending
+                .store(false, std::sync::atomic::Ordering::Release);
+        }
     }
 }
 

@@ -208,6 +208,27 @@ pub struct TerminalSerialStatus {
     pub can_reconnect: bool,
 }
 
+/// A serial operation requested by another application-owned surface.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum TerminalSerialAction {
+    RefreshPortPresence,
+    Reconnect,
+    SendBreak,
+    SetDataTerminalReady(bool),
+    SetRequestToSend(bool),
+    SetLocalEcho(bool),
+    SetLineEnding(SerialLineEnding),
+    SetDisplayMode(SerialDisplayMode),
+    SetSendMode(SerialSendMode),
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+/// Actions that must execute through the entity owning the live Telnet session.
+pub enum TerminalTelnetAction {
+    SendControl(oxideterm_terminal::TelnetControlCommand),
+    Disconnect,
+}
+
 #[derive(Clone, Copy, Debug, Default)]
 struct TerminalEventEffect {
     needs_notify: bool,
@@ -1132,6 +1153,10 @@ impl TerminalPane {
         self.terminal.lock().lifecycle()
     }
 
+    pub fn session_kind(&self) -> TerminalSessionKind {
+        self.terminal.lock().kind()
+    }
+
     pub fn is_serial_transport(&self) -> bool {
         self.serial_reconnect_config.is_some()
     }
@@ -1147,6 +1172,126 @@ impl TerminalPane {
             port_available: self.serial_port_available,
             can_reconnect: self.can_reconnect_serial(),
         })
+    }
+
+    pub fn apply_serial_action(
+        &mut self,
+        action: TerminalSerialAction,
+        cx: &mut Context<Self>,
+    ) -> Result<(), String> {
+        if !self.is_serial_transport() {
+            return Err("The selected terminal is not a serial session.".to_string());
+        }
+        match action {
+            TerminalSerialAction::RefreshPortPresence => {
+                self.refresh_serial_port_presence(cx);
+            }
+            TerminalSerialAction::Reconnect => {
+                if !self.can_reconnect_serial() {
+                    return Err("The serial session is not ready to reconnect.".to_string());
+                }
+                self.reconnect_serial(cx);
+                if !self.lifecycle().is_running() {
+                    return Err("The serial session could not be reconnected.".to_string());
+                }
+            }
+            TerminalSerialAction::SendBreak => {
+                self.terminal
+                    .lock()
+                    .send_serial_break()
+                    .map_err(|error| error.to_string())?;
+                cx.notify();
+            }
+            TerminalSerialAction::SetDataTerminalReady(asserted) => {
+                self.terminal
+                    .lock()
+                    .set_serial_control_line(SerialControlLine::DataTerminalReady, asserted)
+                    .map_err(|error| error.to_string())?;
+                cx.notify();
+            }
+            TerminalSerialAction::SetRequestToSend(asserted) => {
+                self.terminal
+                    .lock()
+                    .set_serial_control_line(SerialControlLine::RequestToSend, asserted)
+                    .map_err(|error| error.to_string())?;
+                cx.notify();
+            }
+            TerminalSerialAction::SetLocalEcho(enabled) => {
+                let mut options = self
+                    .terminal
+                    .lock()
+                    .serial_runtime_options()
+                    .ok_or_else(|| "Serial runtime options are unavailable.".to_string())?;
+                options.local_echo = enabled;
+                self.terminal
+                    .lock()
+                    .set_serial_runtime_options(options)
+                    .map_err(|error| error.to_string())?;
+                cx.notify();
+            }
+            TerminalSerialAction::SetLineEnding(line_ending) => {
+                let mut options = self
+                    .terminal
+                    .lock()
+                    .serial_runtime_options()
+                    .ok_or_else(|| "Serial runtime options are unavailable.".to_string())?;
+                options.line_ending = line_ending;
+                self.terminal
+                    .lock()
+                    .set_serial_runtime_options(options)
+                    .map_err(|error| error.to_string())?;
+                cx.notify();
+            }
+            TerminalSerialAction::SetDisplayMode(display_mode) => {
+                let mut options = self
+                    .terminal
+                    .lock()
+                    .serial_runtime_options()
+                    .ok_or_else(|| "Serial runtime options are unavailable.".to_string())?;
+                options.display_mode = display_mode;
+                self.terminal
+                    .lock()
+                    .set_serial_runtime_options(options)
+                    .map_err(|error| error.to_string())?;
+                cx.notify();
+            }
+            TerminalSerialAction::SetSendMode(send_mode) => {
+                let mut options = self
+                    .terminal
+                    .lock()
+                    .serial_runtime_options()
+                    .ok_or_else(|| "Serial runtime options are unavailable.".to_string())?;
+                options.send_mode = send_mode;
+                self.terminal
+                    .lock()
+                    .set_serial_runtime_options(options)
+                    .map_err(|error| error.to_string())?;
+                cx.notify();
+            }
+        }
+        Ok(())
+    }
+
+    pub fn apply_telnet_action(
+        &mut self,
+        action: TerminalTelnetAction,
+        cx: &mut Context<Self>,
+    ) -> Result<(), String> {
+        // Reuse the pane-owned backend so AI control cannot create a parallel socket.
+        if self.session_kind() != TerminalSessionKind::Telnet {
+            return Err("The selected terminal is not a Telnet session.".to_string());
+        }
+        match action {
+            TerminalTelnetAction::SendControl(command) => {
+                self.terminal
+                    .lock()
+                    .send_telnet_control(command)
+                    .map_err(|error| error.to_string())?;
+            }
+            TerminalTelnetAction::Disconnect => self.shutdown(),
+        }
+        cx.notify();
+        Ok(())
     }
 
     fn can_reconnect_serial(&self) -> bool {

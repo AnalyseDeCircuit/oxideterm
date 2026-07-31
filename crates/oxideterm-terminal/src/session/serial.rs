@@ -155,7 +155,7 @@ pub struct SerialSession {
     config: SerialSessionConfig,
     term: Arc<FairMutex<Term<LocalEventListener>>>,
     parser: Processor,
-    event_rx: Receiver<AlacEvent>,
+    event_rx: LocalEventReceiver,
     worker_rx: crate::backpressure::ByteBoundedReceiver<SerialWorkerEvent>,
     pending_events: Vec<TerminalEvent>,
     resize: TerminalResize,
@@ -292,13 +292,11 @@ impl SerialSession {
             cell_width: resize.cell_width,
             cell_height: resize.cell_height,
         };
-        let (event_tx, event_rx) = unbounded();
+        let (listener, event_rx) = local_event_channel();
         let (worker_tx, worker_rx) = crate::backpressure::byte_bounded_channel(
             crate::backpressure::TRANSPORT_OUTPUT_BACKLOG_BYTES,
         );
         let (command_tx, command_rx) = crossbeam_channel::unbounded();
-        let listener = LocalEventListener { tx: event_tx };
-
         let term_config = interactive_terminal_config(scrollback_lines);
         let term = Arc::new(FairMutex::new(Term::new(term_config, &size, listener)));
 
@@ -1560,12 +1558,11 @@ mod serial_tests {
             cell_width: resize.cell_width,
             cell_height: resize.cell_height,
         };
-        let (event_tx, event_rx) = unbounded();
+        let (listener, event_rx) = local_event_channel();
         let (_worker_tx, worker_rx) = crate::backpressure::byte_bounded_channel(
             crate::backpressure::TRANSPORT_OUTPUT_BACKLOG_BYTES,
         );
         let (command_tx, _command_rx) = crossbeam_channel::unbounded();
-        let listener = LocalEventListener { tx: event_tx };
         let mut term_config = Config::default();
         term_config.scrolling_history = 100;
 

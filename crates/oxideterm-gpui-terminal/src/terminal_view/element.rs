@@ -27,6 +27,10 @@ mod layout;
 mod paint;
 mod style;
 
+const TERMINAL_ROW_LAYOUT_CACHE_CAPACITY: usize = 512;
+const TERMINAL_HIGHLIGHT_CACHE_CAPACITY: usize = 128;
+const TERMINAL_LINK_CACHE_CAPACITY: usize = 512;
+
 pub(crate) use layout::*;
 use paint::*;
 #[cfg(test)]
@@ -209,11 +213,75 @@ struct TerminalRowLinkCacheKey {
     signature: u64,
 }
 
-#[derive(Default)]
+struct RecentCacheEntry<V> {
+    value: V,
+    last_used: u64,
+}
+
+struct RecentCache<K, V> {
+    entries: HashMap<K, RecentCacheEntry<V>>,
+    capacity: usize,
+    access_sequence: u64,
+}
+
+impl<K, V> RecentCache<K, V>
+where
+    K: Clone + Eq + Hash,
+    V: Clone,
+{
+    fn new(capacity: usize) -> Self {
+        Self {
+            entries: HashMap::new(),
+            capacity: capacity.max(1),
+            access_sequence: 0,
+        }
+    }
+
+    fn get_or_insert_with(&mut self, key: K, build: impl FnOnce() -> V) -> V {
+        self.access_sequence = self.access_sequence.saturating_add(1);
+        let access_sequence = self.access_sequence;
+        if let Some(entry) = self.entries.get_mut(&key) {
+            entry.last_used = access_sequence;
+            return entry.value.clone();
+        }
+
+        if self.entries.len() >= self.capacity
+            && let Some(oldest_key) = self
+                .entries
+                .iter()
+                .min_by_key(|(_, entry)| entry.last_used)
+                .map(|(key, _)| key.clone())
+        {
+            // Evict one cold entry instead of periodically dropping the entire cache.
+            self.entries.remove(&oldest_key);
+        }
+
+        let value = build();
+        self.entries.insert(
+            key,
+            RecentCacheEntry {
+                value: value.clone(),
+                last_used: access_sequence,
+            },
+        );
+        value
+    }
+}
+
 pub(crate) struct TerminalLayoutCache {
-    rows: HashMap<TerminalRowLayoutCacheKey, Arc<TerminalRowLayout>>,
-    highlights: HashMap<TerminalLogicalHighlightCacheKey, Arc<TerminalLogicalHighlightLayout>>,
-    links: HashMap<TerminalRowLinkCacheKey, Arc<TerminalRowLinkLayout>>,
+    rows: RecentCache<TerminalRowLayoutCacheKey, Arc<TerminalRowLayout>>,
+    highlights: RecentCache<TerminalLogicalHighlightCacheKey, Arc<TerminalLogicalHighlightLayout>>,
+    links: RecentCache<TerminalRowLinkCacheKey, Arc<TerminalRowLinkLayout>>,
+}
+
+impl Default for TerminalLayoutCache {
+    fn default() -> Self {
+        Self {
+            rows: RecentCache::new(TERMINAL_ROW_LAYOUT_CACHE_CAPACITY),
+            highlights: RecentCache::new(TERMINAL_HIGHLIGHT_CACHE_CAPACITY),
+            links: RecentCache::new(TERMINAL_LINK_CACHE_CAPACITY),
+        }
+    }
 }
 
 impl TerminalLayoutCache {
@@ -222,19 +290,7 @@ impl TerminalLayoutCache {
         key: TerminalRowLayoutCacheKey,
         build: impl FnOnce() -> TerminalRowLayout,
     ) -> Arc<TerminalRowLayout> {
-        if let Some(row_layout) = self.rows.get(&key) {
-            return row_layout.clone();
-        }
-
-        if self.rows.len() > 4096 {
-            // Keep the cache bounded across long scrollback sessions. This is a
-            // coarse eviction policy, but row layout is cheap to rebuild safely.
-            self.rows.clear();
-        }
-
-        let layout = Arc::new(build());
-        self.rows.insert(key, layout.clone());
-        layout
+        self.rows.get_or_insert_with(key, || Arc::new(build()))
     }
 
     fn get_or_insert_highlight_with(
@@ -242,19 +298,8 @@ impl TerminalLayoutCache {
         key: TerminalLogicalHighlightCacheKey,
         build: impl FnOnce() -> TerminalLogicalHighlightLayout,
     ) -> Arc<TerminalLogicalHighlightLayout> {
-        if let Some(layout) = self.highlights.get(&key) {
-            return layout.clone();
-        }
-
-        if self.highlights.len() > 1024 {
-            // Highlight entries are per logical line and can grow while
-            // scrolling through large output; clear coarsely to stay bounded.
-            self.highlights.clear();
-        }
-
-        let layout = Arc::new(build());
-        self.highlights.insert(key, layout.clone());
-        layout
+        self.highlights
+            .get_or_insert_with(key, || Arc::new(build()))
     }
 
     fn get_or_insert_links_with(
@@ -262,19 +307,7 @@ impl TerminalLayoutCache {
         key: TerminalRowLinkCacheKey,
         build: impl FnOnce() -> TerminalRowLinkLayout,
     ) -> Arc<TerminalRowLinkLayout> {
-        if let Some(layout) = self.links.get(&key) {
-            return layout.clone();
-        }
-
-        if self.links.len() > 4096 {
-            // Link detection is row-local, so coarse eviction is cheap and
-            // avoids unbounded cache growth across long scrollback.
-            self.links.clear();
-        }
-
-        let layout = Arc::new(build());
-        self.links.insert(key, layout.clone());
-        layout
+        self.links.get_or_insert_with(key, || Arc::new(build()))
     }
 }
 
@@ -1905,6 +1938,20 @@ mod cache_tests {
         let second = cache.get_or_insert_row_with(key, empty_row_layout);
 
         assert!(Arc::ptr_eq(&first, &second));
+    }
+
+    #[test]
+    fn recent_cache_evicts_the_least_recently_used_entry() {
+        let mut cache = RecentCache::new(2);
+
+        assert_eq!(cache.get_or_insert_with(1, || "one"), "one");
+        assert_eq!(cache.get_or_insert_with(2, || "two"), "two");
+        assert_eq!(cache.get_or_insert_with(1, || "replacement"), "one");
+        assert_eq!(cache.get_or_insert_with(3, || "three"), "three");
+
+        assert!(cache.entries.contains_key(&1));
+        assert!(!cache.entries.contains_key(&2));
+        assert!(cache.entries.contains_key(&3));
     }
 
     #[test]

@@ -2,7 +2,7 @@ pub struct SshPtySession {
     config: SshSessionConfig,
     term: Arc<FairMutex<Term<LocalEventListener>>>,
     parser: Processor,
-    event_rx: Receiver<AlacEvent>,
+    event_rx: LocalEventReceiver,
     pending_events: Vec<TerminalEvent>,
     resize: TerminalResize,
     lifecycle: TerminalLifecycle,
@@ -46,15 +46,10 @@ impl SshPtySession {
             cell_width: resize.cell_width,
             cell_height: resize.cell_height,
         };
-        let (event_tx, event_rx) = unbounded();
-        let listener = LocalEventListener { tx: event_tx };
+        let (listener, event_rx) = local_event_channel();
 
         let term_config = interactive_terminal_config(scrollback_lines);
-        let term = Arc::new(FairMutex::new(Term::new(
-            term_config,
-            &size,
-            listener,
-        )));
+        let term = Arc::new(FairMutex::new(Term::new(term_config, &size, listener)));
 
         // GPUI owns a backend runtime for SSH-adjacent work; standalone
         // terminal sessions keep this fallback runtime alive for compatibility.

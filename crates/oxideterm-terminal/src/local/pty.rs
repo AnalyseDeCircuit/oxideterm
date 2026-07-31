@@ -1,7 +1,7 @@
 pub struct LocalPtySession {
     term: Arc<FairMutex<Term<LocalEventListener>>>,
     notifier: LocalGraphicsNotifier,
-    event_rx: Receiver<AlacEvent>,
+    event_rx: LocalEventReceiver,
     graphics_rx: Receiver<TerminalGraphicsEvent>,
     magic_rx: Receiver<TerminalMagicKind>,
     terminal_event_rx: Receiver<TerminalEvent>,
@@ -92,7 +92,7 @@ impl LocalPtySession {
             prepare_local_shell_launch(&local_config, &shell, terminal_env, base_shell_args);
         let shell_args = launch.args;
 
-        let (event_tx, event_rx) = unbounded();
+        let (listener, event_rx) = local_event_channel();
         let (graphics_tx, graphics_rx) = unbounded();
         let (magic_tx, magic_rx) = unbounded();
         let (terminal_event_tx, terminal_event_rx) = unbounded();
@@ -100,9 +100,6 @@ impl LocalPtySession {
 
         let terminal_config = interactive_terminal_config(scrollback_lines);
 
-        let listener = LocalEventListener {
-            tx: event_tx,
-        };
         let term = Arc::new(FairMutex::new(Term::new(
             terminal_config,
             &size,

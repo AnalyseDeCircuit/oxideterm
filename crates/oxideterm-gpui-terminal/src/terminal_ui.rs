@@ -762,6 +762,16 @@ pub(crate) fn terminal_font_with_family_and_cjk(
     if let Some(cjk_family) = cjk_family {
         push_font_fallback(&mut fallback_families, cjk_family);
     }
+    if cjk_family.is_none_or(|family| {
+        family.trim().is_empty() || family.trim() == oxideterm_settings::MAPLE_MONO_SUBSET_FAMILY
+    }) {
+        // The large bundled CJK fallback is available only for Auto or an explicit Maple choice.
+        push_font_fallback(
+            &mut fallback_families,
+            oxideterm_settings::MAPLE_MONO_SUBSET_FAMILY,
+        );
+        push_font_fallback(&mut fallback_families, "Maple Mono NF CN");
+    }
     for fallback in [
         "JetBrainsMono Nerd Font",
         "JetBrains Mono NF (Subset)",
@@ -769,8 +779,6 @@ pub(crate) fn terminal_font_with_family_and_cjk(
         "JetBrainsMonoNL Nerd Font Mono",
         oxideterm_settings::MESLO_SUBSET_FAMILY,
         "MesloLGS Nerd Font Mono",
-        oxideterm_settings::MAPLE_MONO_SUBSET_FAMILY,
-        "Maple Mono NF CN",
         "Symbols Nerd Font Mono",
         "Symbols Nerd Font",
         "ui-monospace",

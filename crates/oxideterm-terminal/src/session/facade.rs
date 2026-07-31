@@ -243,6 +243,10 @@ impl TerminalSession {
         self.backend.send_serial_break()
     }
 
+    pub fn send_telnet_control(&mut self, command: TelnetControlCommand) -> Result<()> {
+        self.backend.send_telnet_control(command)
+    }
+
     pub fn set_trzsz_policy(&mut self, policy: Option<TrzszTransferPolicy>) {
         self.backend.set_trzsz_policy(policy);
     }
