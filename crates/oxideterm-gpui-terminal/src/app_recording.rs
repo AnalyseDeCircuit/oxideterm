@@ -67,7 +67,7 @@ impl TerminalPane {
             terminal.snapshot()
         };
         self.snapshot = self.stamp_snapshot(snapshot);
-        self.mark_terminal_content_changed();
+        self.mark_terminal_content_changed(cx);
         self.selection = None;
         self.search_query = None;
         self.search_cache = None;
@@ -83,7 +83,7 @@ impl TerminalPane {
             terminal.snapshot()
         };
         self.snapshot = self.stamp_snapshot(snapshot);
-        self.mark_terminal_content_changed();
+        self.mark_terminal_content_changed(cx);
         cx.notify();
     }
 
@@ -94,7 +94,7 @@ impl TerminalPane {
             terminal.snapshot()
         };
         self.snapshot = self.stamp_snapshot(snapshot);
-        self.mark_terminal_content_changed();
+        self.mark_terminal_content_changed(cx);
         cx.notify();
     }
 

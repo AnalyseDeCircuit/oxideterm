@@ -194,7 +194,7 @@ impl LocalPtySession {
         let started = std::time::Instant::now();
         let mut report = TerminalDrainReport::default();
         let mut changed = false;
-        while report.events_drained < budget.max_events {
+        while report.events_drained < budget.max_events && !budget.time_exhausted(started) {
             let Ok(stats) = self.stats_rx.try_recv() else {
                 break;
             };
@@ -203,7 +203,7 @@ impl LocalPtySession {
             report.budget_exhausted |= stats.budget_exhausted;
         }
 
-        while report.events_drained < budget.max_events {
+        while report.events_drained < budget.max_events && !budget.time_exhausted(started) {
             let Ok(event) = self.event_rx.try_recv() else {
                 break;
             };
@@ -213,7 +213,7 @@ impl LocalPtySession {
             }
         }
 
-        while report.events_drained < budget.max_events {
+        while report.events_drained < budget.max_events && !budget.time_exhausted(started) {
             let Ok(event) = self.graphics_rx.try_recv() else {
                 break;
             };
@@ -224,7 +224,7 @@ impl LocalPtySession {
             changed = true;
         }
 
-        while report.events_drained < budget.max_events {
+        while report.events_drained < budget.max_events && !budget.time_exhausted(started) {
             let Ok(kind) = self.magic_rx.try_recv() else {
                 break;
             };
@@ -232,7 +232,7 @@ impl LocalPtySession {
             self.pending_events.push(TerminalEvent::MagicDetected(kind));
         }
 
-        while report.events_drained < budget.max_events {
+        while report.events_drained < budget.max_events && !budget.time_exhausted(started) {
             let Ok(event) = self.terminal_event_rx.try_recv() else {
                 break;
             };
@@ -241,7 +241,8 @@ impl LocalPtySession {
         }
 
         report.changed = changed;
-        report.budget_exhausted |= report.events_drained >= budget.max_events
+        report.budget_exhausted |= (report.events_drained >= budget.max_events
+            || budget.time_exhausted(started))
             && (!self.event_rx.is_empty()
                 || !self.graphics_rx.is_empty()
                 || !self.magic_rx.is_empty()
@@ -581,47 +582,12 @@ impl LocalPtySession {
     }
 
     pub fn search_matches(&self, query: &str) -> Vec<TerminalSearchMatch> {
-        let query = query.trim();
-        if query.is_empty() {
-            return Vec::new();
-        }
-
         let term = self.term.lock();
-        let grid = term.grid();
-        let top_line = -(term.total_lines().saturating_sub(term.screen_lines()) as i32);
-        let bottom_line = term.screen_lines() as i32;
-        let mut matches = Vec::new();
-        let mut logical_text = String::new();
-        let mut logical_map = Vec::new();
+        search_matches_from_term(&term, self.size.cols, query)
+    }
 
-        for line in top_line..bottom_line {
-            let row = &grid[Line(line)];
-            append_grid_line_text(
-                row[..].iter(),
-                line,
-                self.size.cols,
-                &mut logical_text,
-                &mut logical_map,
-            );
-
-            let wrapped = row
-                .last()
-                .is_some_and(|cell| cell.flags.contains(Flags::WRAPLINE));
-            if wrapped && line + 1 < bottom_line {
-                continue;
-            }
-
-            matches.extend(search_logical_line_matches(
-                &logical_text,
-                &logical_map,
-                query,
-                self.size.cols,
-            ));
-            logical_text.clear();
-            logical_map.clear();
-        }
-
-        matches
+    pub fn search_source(&self) -> TerminalSearchSource {
+        TerminalSearchSource::new(self.term.clone(), self.size.cols)
     }
 
     pub fn clear_buffer(&mut self) {
@@ -633,6 +599,11 @@ impl LocalPtySession {
     pub fn snapshot(&self) -> TerminalSnapshot {
         let term = self.term.lock();
         snapshot_from_term(&term, self.size, &self.graphics)
+    }
+
+    pub fn snapshot_incremental(&self, previous: &TerminalSnapshot) -> TerminalSnapshot {
+        let mut term = self.term.lock();
+        incremental_snapshot_from_term(&mut term, self.size, &self.graphics, previous)
     }
 
     pub fn snapshot_with_display_offset(
@@ -672,6 +643,49 @@ pub(crate) fn snapshot_from_term<T: EventListener>(
     )
 }
 
+pub(crate) fn incremental_snapshot_from_term<T: EventListener>(
+    term: &mut Term<T>,
+    size: TerminalSize,
+    graphics: &TerminalGraphicsState,
+    previous: &TerminalSnapshot,
+) -> TerminalSnapshot {
+    let scrollback_lines = term.total_lines().saturating_sub(term.screen_lines());
+    let display_offset = term.grid().display_offset().min(scrollback_lines);
+    let compatible = previous.cols == size.cols
+        && previous.rows == size.rows
+        && previous.display_offset == display_offset
+        && previous.scrollback_lines == scrollback_lines
+        && previous.lines.len() == size.rows;
+
+    let dirty_rows = match term.damage() {
+        TermDamage::Full => None,
+        TermDamage::Partial(damage) => Some(
+            damage
+                .filter(|line| line.is_damaged() && line.line < size.rows)
+                .map(|line| line.line)
+                .collect::<Vec<_>>(),
+        ),
+    };
+    term.reset_damage();
+
+    if !compatible || dirty_rows.is_none() {
+        return snapshot_from_term_with_display_offset(
+            term,
+            size,
+            graphics,
+            display_offset,
+            size.rows,
+        );
+    }
+
+    let mut snapshot = previous.clone();
+    for row in dirty_rows.expect("partial terminal damage must contain row indexes") {
+        snapshot.lines[row] = snapshot_row_from_term(term, size, display_offset, row);
+    }
+    refresh_snapshot_metadata(&mut snapshot, term, size, graphics, display_offset);
+    snapshot
+}
+
 pub(crate) fn snapshot_from_term_with_display_offset<T: EventListener>(
     term: &Term<T>,
     size: TerminalSize,
@@ -684,82 +698,8 @@ pub(crate) fn snapshot_from_term_with_display_offset<T: EventListener>(
     let display_offset = display_offset.min(scrollback_lines);
     let requested_rows = rows.max(1);
     let mut rows = (0..requested_rows)
-        .map(|row| TerminalRow {
-            absolute_line: row as i64 - display_offset as i64,
-            wrapped: false,
-            active_input: false,
-            signature: 0,
-            cells: Arc::new(vec![
-                TerminalCell {
-                    ch: ' ',
-                    zerowidth: String::new(),
-                    wide: false,
-                    fg: OXIDETERM_DARK_THEME.foreground,
-                    bg: OXIDETERM_DARK_THEME.ansi_background,
-                    attrs: TerminalAttrs::default(),
-                    hyperlink: None,
-                    cursor: false,
-                };
-                size.cols
-            ]),
-        })
+        .map(|row| snapshot_row_from_term(term, size, display_offset, row))
         .collect::<Vec<_>>();
-
-    let first_line = -(display_offset as i32);
-    let end_line = first_line.saturating_add(requested_rows as i32);
-    // GPUI smooth scroll needs one paint-only overscan row. Iterate from the
-    // requested display offset instead of mutating the terminal's real offset.
-    let start = Point::new(
-        Line(first_line.saturating_sub(1)),
-        Column(size.cols.saturating_sub(1)),
-    );
-    for indexed in term.grid().iter_from(start) {
-        if indexed.point.line.0 >= end_line {
-            break;
-        }
-        let Some(row) = viewport_row_for_grid_line(indexed.point.line.0, display_offset)
-        else {
-            continue;
-        };
-
-        let col = indexed.point.column.0;
-        if row >= rows.len() || col >= size.cols {
-            continue;
-        }
-
-        let cell: &Cell = &indexed.cell;
-        if cell.flags.contains(Flags::WRAPLINE) {
-            rows[row].wrapped = true;
-        }
-
-        if cell
-            .flags
-            .intersects(Flags::WIDE_CHAR_SPACER | Flags::LEADING_WIDE_CHAR_SPACER)
-        {
-            continue;
-        }
-
-        let mut ch = cell.c;
-        if ch == '\0' {
-            ch = ' ';
-        }
-
-        let attrs = attrs_from_flags(cell.flags);
-        let (fg, bg) = style_colors_for_cell(cell.fg, cell.bg, ch, attrs);
-
-        rows[row].cells_mut()[col] = TerminalCell {
-            ch,
-            zerowidth: cell.zerowidth().into_iter().flatten().copied().collect(),
-            wide: cell.flags.contains(Flags::WIDE_CHAR),
-            fg,
-            bg,
-            attrs,
-            hyperlink: cell
-                .hyperlink()
-                .map(|hyperlink| hyperlink.uri().to_string()),
-            cursor: false,
-        };
-    }
 
     let cursor_row = (content.cursor.point.line.0 + display_offset as i32).max(0) as usize;
     let cursor_col = content.cursor.point.column.0;
@@ -784,6 +724,201 @@ pub(crate) fn snapshot_from_term_with_display_offset<T: EventListener>(
         scrollback_lines,
         lines: rows,
         images: graphics.visible_images(display_offset, requested_rows),
+    }
+}
+
+fn snapshot_row_from_term<T: EventListener>(
+    term: &Term<T>,
+    size: TerminalSize,
+    display_offset: usize,
+    row: usize,
+) -> TerminalRow {
+    let grid_line = row as i32 - display_offset as i32;
+    let mut snapshot_row = TerminalRow {
+        absolute_line: i64::from(grid_line),
+        wrapped: false,
+        active_input: false,
+        signature: 0,
+        cells: Arc::new(vec![
+            TerminalCell {
+                ch: ' ',
+                zerowidth: String::new(),
+                wide: false,
+                fg: OXIDETERM_DARK_THEME.foreground,
+                bg: OXIDETERM_DARK_THEME.ansi_background,
+                attrs: TerminalAttrs::default(),
+                hyperlink: None,
+                cursor: false,
+            };
+            size.cols
+        ]),
+    };
+    if grid_line < -(term.grid().history_size() as i32) || grid_line >= term.screen_lines() as i32 {
+        snapshot_row.refresh_signature();
+        return snapshot_row;
+    }
+
+    let terminal_row = &term.grid()[Line(grid_line)];
+    for (col, cell) in terminal_row[..].iter().take(size.cols).enumerate() {
+        if cell.flags.contains(Flags::WRAPLINE) {
+            snapshot_row.wrapped = true;
+        }
+        if cell
+            .flags
+            .intersects(Flags::WIDE_CHAR_SPACER | Flags::LEADING_WIDE_CHAR_SPACER)
+        {
+            continue;
+        }
+        let ch = if cell.c == '\0' { ' ' } else { cell.c };
+        let attrs = attrs_from_flags(cell.flags);
+        let (fg, bg) = style_colors_for_cell(cell.fg, cell.bg, ch, attrs);
+        snapshot_row.cells_mut()[col] = TerminalCell {
+            ch,
+            zerowidth: cell.zerowidth().into_iter().flatten().copied().collect(),
+            wide: cell.flags.contains(Flags::WIDE_CHAR),
+            fg,
+            bg,
+            attrs,
+            hyperlink: cell
+                .hyperlink()
+                .map(|hyperlink| hyperlink.uri().to_string()),
+            cursor: false,
+        };
+    }
+    snapshot_row.refresh_signature();
+    snapshot_row
+}
+
+fn refresh_snapshot_metadata<T: EventListener>(
+    snapshot: &mut TerminalSnapshot,
+    term: &Term<T>,
+    size: TerminalSize,
+    graphics: &TerminalGraphicsState,
+    display_offset: usize,
+) {
+    let content = term.renderable_content();
+    let cursor_row = (content.cursor.point.line.0 + display_offset as i32).max(0) as usize;
+    let cursor_col = content.cursor.point.column.0;
+    if snapshot.cursor_row < snapshot.lines.len() && snapshot.cursor_col < size.cols {
+        snapshot.lines[snapshot.cursor_row].cells_mut()[snapshot.cursor_col].cursor = false;
+    }
+    for row in &mut snapshot.lines {
+        row.active_input = false;
+    }
+    if cursor_row < snapshot.lines.len() && cursor_col < size.cols {
+        snapshot.lines[cursor_row].cells_mut()[cursor_col].cursor = true;
+        mark_active_input_rows(&mut snapshot.lines, cursor_row);
+    }
+    snapshot.cursor_col = cursor_col;
+    snapshot.cursor_row = cursor_row;
+    snapshot.cursor_shape = content.cursor.shape.into();
+    snapshot.images = graphics.visible_images(display_offset, snapshot.lines.len());
+    for row in &mut snapshot.lines {
+        row.refresh_signature();
+    }
+}
+
+#[cfg(test)]
+mod incremental_snapshot_tests {
+    use alacritty_terminal::vte::ansi::{Processor, StdSyncHandler};
+
+    use super::*;
+
+    fn assert_snapshot_content_eq(actual: &TerminalSnapshot, expected: &TerminalSnapshot) {
+        assert_eq!(actual.cols, expected.cols);
+        assert_eq!(actual.rows, expected.rows);
+        assert_eq!(actual.cursor_col, expected.cursor_col);
+        assert_eq!(actual.cursor_row, expected.cursor_row);
+        assert_eq!(actual.cursor_shape, expected.cursor_shape);
+        assert_eq!(actual.display_offset, expected.display_offset);
+        assert_eq!(actual.scrollback_lines, expected.scrollback_lines);
+        assert_eq!(actual.lines.len(), expected.lines.len());
+        for (actual, expected) in actual.lines.iter().zip(&expected.lines) {
+            assert_eq!(actual.absolute_line, expected.absolute_line);
+            assert_eq!(actual.cells, expected.cells);
+            assert_eq!(actual.wrapped, expected.wrapped);
+            assert_eq!(actual.active_input, expected.active_input);
+            assert_eq!(actual.signature, expected.signature);
+        }
+        assert_eq!(actual.images, expected.images);
+    }
+
+    #[test]
+    fn incremental_snapshot_reuses_undamaged_rows() {
+        let size = TerminalSize {
+            cols: 8,
+            rows: 3,
+            cell_width: 0,
+            cell_height: 0,
+        };
+        let (listener, _events) = local_event_channel();
+        let mut term = Term::new(Config::default(), &size, listener);
+        let graphics = TerminalGraphicsState::default();
+        let previous = snapshot_from_term(&term, size, &graphics);
+        term.reset_damage();
+
+        let mut parser = Processor::<StdSyncHandler>::new();
+        parser.advance(&mut term, b"changed");
+        let next = incremental_snapshot_from_term(&mut term, size, &graphics, &previous);
+        let full = snapshot_from_term(&term, size, &graphics);
+
+        assert!(!Arc::ptr_eq(
+            &previous.lines[0].cells,
+            &next.lines[0].cells
+        ));
+        assert!(Arc::ptr_eq(
+            &previous.lines[2].cells,
+            &next.lines[2].cells
+        ));
+        assert_snapshot_content_eq(&next, &full);
+    }
+
+    #[test]
+    fn incremental_snapshot_clears_the_previous_cursor_cell() {
+        let size = TerminalSize {
+            cols: 8,
+            rows: 3,
+            cell_width: 0,
+            cell_height: 0,
+        };
+        let (listener, _events) = local_event_channel();
+        let mut term = Term::new(Config::default(), &size, listener);
+        let graphics = TerminalGraphicsState::default();
+        let previous = snapshot_from_term(&term, size, &graphics);
+        term.reset_damage();
+
+        let mut parser = Processor::<StdSyncHandler>::new();
+        parser.advance(&mut term, b"\r\n");
+        let next = incremental_snapshot_from_term(&mut term, size, &graphics, &previous);
+
+        assert!(!next.lines[0].cells[0].cursor);
+        assert!(next.lines[1].cells[0].cursor);
+        assert_snapshot_content_eq(&next, &snapshot_from_term(&term, size, &graphics));
+    }
+
+    #[test]
+    fn search_source_honors_cancellation_and_finds_completed_work() {
+        let size = TerminalSize {
+            cols: 16,
+            rows: 3,
+            cell_width: 0,
+            cell_height: 0,
+        };
+        let (listener, _events) = local_event_channel();
+        let term = Arc::new(FairMutex::new(Term::new(
+            Config::default(),
+            &size,
+            listener,
+        )));
+        let mut parser = Processor::<StdSyncHandler>::new();
+        {
+            let mut term = term.lock();
+            parser.advance(&mut *term, b"prefix needle suffix");
+        }
+        let source = TerminalSearchSource::new(term, size.cols);
+
+        assert!(source.search_matches("needle", &|| true).is_empty());
+        assert_eq!(source.search_matches("needle", &|| false).len(), 1);
     }
 }
 

@@ -33,7 +33,7 @@ pub(super) struct SearchBarState {
 }
 
 impl SearchBarState {
-    fn sync_from_terminal(&mut self, status: TerminalSearchStatus) {
+    pub(super) fn sync_from_terminal(&mut self, status: TerminalSearchStatus) {
         self.active_match = status.active_match;
         self.match_count = status.match_count;
     }

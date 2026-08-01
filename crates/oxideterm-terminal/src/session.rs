@@ -37,12 +37,12 @@ pub use crate::backpressure::{TerminalDrainBudget, TerminalDrainReport, Terminal
 
 use crate::{
     LocalEventListener, LocalEventReceiver, LocalPtyConfig, LocalPtySession, TermMode,
-    TerminalCommandMark, TerminalCwdIntegrationLaunchState, TerminalEvent, TerminalGraphicsState,
-    TerminalLifecycle, TerminalModemTransferRequest, TerminalProcessInfo, TerminalProcessProbe,
-    TerminalSearchMatch, TerminalSize, TerminalSnapshot, append_grid_line_text,
-    backpressure::MagicScanWindow, focus_report_sequence, graphics_cursor_from_term,
-    interactive_terminal_config, local_event_channel,
-    privilege_prompt::TerminalPrivilegePromptStream, search_logical_line_matches,
+    TerminalActivityReceiver, TerminalCommandMark, TerminalCwdIntegrationLaunchState,
+    TerminalEvent, TerminalGraphicsState, TerminalLifecycle, TerminalModemTransferRequest,
+    TerminalProcessInfo, TerminalProcessProbe, TerminalSearchMatch, TerminalSize, TerminalSnapshot,
+    append_grid_line_text, backpressure::MagicScanWindow, focus_report_sequence,
+    graphics_cursor_from_term, incremental_snapshot_from_term, interactive_terminal_config,
+    local_event_channel, privilege_prompt::TerminalPrivilegePromptStream, search_matches_from_term,
     shell_integration::TerminalShellIntegration, snapshot_from_term,
     snapshot_from_term_with_display_offset,
 };

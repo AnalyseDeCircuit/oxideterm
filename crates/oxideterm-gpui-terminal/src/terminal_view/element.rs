@@ -53,7 +53,7 @@ pub(crate) struct TerminalElement {
     search_matches: Arc<[TerminalSearchMatch]>,
     search_matches_precomputed: bool,
     selected_search_match: Option<usize>,
-    command_marks: Vec<TerminalCommandMark>,
+    command_marks: Arc<[TerminalCommandMark]>,
     selected_command_mark_id: Option<String>,
     hovered_command_mark_id: Option<String>,
     highlight_rules: Arc<[TerminalHighlightRule]>,
@@ -401,7 +401,7 @@ impl TerminalElement {
             search_matches: search_matches.into(),
             search_matches_precomputed: false,
             selected_search_match,
-            command_marks: Vec::new(),
+            command_marks: Arc::from([]),
             selected_command_mark_id: None,
             hovered_command_mark_id: None,
             highlight_rules: Arc::from(Vec::<TerminalHighlightRule>::new()),
@@ -435,11 +435,11 @@ impl TerminalElement {
 
     pub(crate) fn command_marks(
         mut self,
-        marks: Vec<TerminalCommandMark>,
+        marks: impl Into<Arc<[TerminalCommandMark]>>,
         selected_command_mark_id: Option<String>,
         hovered_command_mark_id: Option<String>,
     ) -> Self {
-        self.command_marks = marks;
+        self.command_marks = marks.into();
         self.selected_command_mark_id = selected_command_mark_id;
         self.hovered_command_mark_id = hovered_command_mark_id;
         self

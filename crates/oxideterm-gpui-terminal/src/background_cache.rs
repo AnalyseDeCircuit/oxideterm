@@ -8,6 +8,7 @@ use std::{
 use gpui::RenderImage;
 use image::{Frame, RgbaImage};
 
+use crate::image_budget::{release_image_bytes, try_reserve_image_bytes};
 use crate::terminal_ui::TerminalBackgroundPreferences;
 
 const DEFAULT_BACKGROUND_IMAGE_CACHE_BYTES: usize = 64 * 1024 * 1024;
@@ -133,7 +134,14 @@ impl BackgroundImageRenderCache {
                     self.pending.remove(&key);
                     if let Some(existing) = self.entries.remove(&key) {
                         self.bytes = self.bytes.saturating_sub(existing.bytes);
+                        release_image_bytes(existing.bytes);
                         self.retired_images.push(existing.image);
+                    }
+                    self.evict_for_admission(bytes);
+                    if !try_reserve_image_bytes(bytes) {
+                        self.retired_images.push(image);
+                        changed = true;
+                        continue;
                     }
                     self.entries.insert(
                         key.clone(),
@@ -174,9 +182,30 @@ impl BackgroundImageRenderCache {
             };
             if let Some(entry) = self.entries.remove(&key) {
                 self.bytes = self.bytes.saturating_sub(entry.bytes);
+                release_image_bytes(entry.bytes);
                 self.retired_images.push(entry.image);
             }
         }
+    }
+
+    fn evict_for_admission(&mut self, bytes: usize) {
+        while self.bytes.saturating_add(bytes) > self.byte_limit {
+            let Some(key) = self.order.pop_front() else {
+                break;
+            };
+            if let Some(entry) = self.entries.remove(&key) {
+                self.bytes = self.bytes.saturating_sub(entry.bytes);
+                release_image_bytes(entry.bytes);
+                self.retired_images.push(entry.image);
+            }
+        }
+    }
+}
+
+impl Drop for BackgroundImageRenderCache {
+    fn drop(&mut self) {
+        release_image_bytes(self.bytes);
+        self.bytes = 0;
     }
 }
 

@@ -212,6 +212,13 @@ pub(crate) struct TerminalRenderStats {
     pub tier: TerminalRenderTier,
     pub writes_per_sec: u32,
     pub pending_bytes: usize,
+    pub drain_micros: u64,
+    pub snapshot_micros: u64,
+    pub search_micros: u64,
+    pub image_prepare_micros: u64,
+    pub input_latency_p50_micros: u64,
+    pub input_latency_p95_micros: u64,
+    pub input_latency_p99_micros: u64,
 }
 
 impl Default for TerminalRenderStats {
@@ -220,6 +227,13 @@ impl Default for TerminalRenderStats {
             tier: TerminalRenderTier::Normal,
             writes_per_sec: 0,
             pending_bytes: 0,
+            drain_micros: 0,
+            snapshot_micros: 0,
+            search_micros: 0,
+            image_prepare_micros: 0,
+            input_latency_p50_micros: 0,
+            input_latency_p95_micros: 0,
+            input_latency_p99_micros: 0,
         }
     }
 }

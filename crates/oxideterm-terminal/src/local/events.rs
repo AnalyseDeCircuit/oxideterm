@@ -2,23 +2,37 @@
 struct LocalEventListener {
     tx: Sender<AlacEvent>,
     wakeup_pending: Arc<std::sync::atomic::AtomicBool>,
+    activity: crate::activity::TerminalActivitySender,
 }
 
 struct LocalEventReceiver {
     rx: Receiver<AlacEvent>,
     wakeup_pending: Arc<std::sync::atomic::AtomicBool>,
+    activity: TerminalActivityReceiver,
 }
 
 fn local_event_channel() -> (LocalEventListener, LocalEventReceiver) {
     let (tx, rx) = unbounded();
     let wakeup_pending = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let (activity_tx, activity_rx) = crate::activity::terminal_activity_channel();
     (
         LocalEventListener {
             tx,
             wakeup_pending: wakeup_pending.clone(),
+            activity: activity_tx,
         },
-        LocalEventReceiver { rx, wakeup_pending },
+        LocalEventReceiver {
+            rx,
+            wakeup_pending,
+            activity: activity_rx,
+        },
     )
+}
+
+impl LocalEventListener {
+    fn activity_sender(&self) -> crate::activity::TerminalActivitySender {
+        self.activity.clone()
+    }
 }
 
 impl LocalEventReceiver {
@@ -34,6 +48,10 @@ impl LocalEventReceiver {
 
     fn is_empty(&self) -> bool {
         self.rx.is_empty()
+    }
+
+    fn activity_receiver(&self) -> TerminalActivityReceiver {
+        self.activity.clone()
     }
 }
 
@@ -52,6 +70,9 @@ impl EventListener for LocalEventListener {
             // A disconnected receiver must not leave cloned listeners permanently muted.
             self.wakeup_pending
                 .store(false, std::sync::atomic::Ordering::Release);
+        } else {
+            // Terminal protocol events are consumed by the pane owner, so wake it after publish.
+            self.activity.notify();
         }
     }
 }

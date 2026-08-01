@@ -293,8 +293,9 @@ impl SerialSession {
             cell_height: resize.cell_height,
         };
         let (listener, event_rx) = local_event_channel();
-        let (worker_tx, worker_rx) = crate::backpressure::byte_bounded_channel(
+        let (worker_tx, worker_rx) = crate::backpressure::byte_bounded_channel_with_activity(
             crate::backpressure::TRANSPORT_OUTPUT_BACKLOG_BYTES,
+            listener.activity_sender(),
         );
         let (command_tx, command_rx) = crossbeam_channel::bounded(256);
         let term_config = interactive_terminal_config(scrollback_lines);
@@ -362,7 +363,9 @@ impl SerialSession {
         let started = Instant::now();
         let mut report = TerminalDrainReport::default();
         loop {
-            if report.drained_bytes >= budget.max_bytes || report.events_drained >= budget.max_events
+            if budget.time_exhausted(started)
+                || report.drained_bytes >= budget.max_bytes
+                || report.events_drained >= budget.max_events
             {
                 report.budget_exhausted =
                     !self.output_queue.is_empty() || !self.worker_rx.is_empty();
@@ -660,7 +663,7 @@ impl TerminalSessionBackend for SerialSession {
         if self.flush_modem_server_writes() {
             report.mark_changed();
         }
-        while report.events_drained < budget.max_events {
+        while report.events_drained < budget.max_events && !budget.time_exhausted(started) {
             let Ok(event) = self.event_rx.try_recv() else {
                 break;
             };
@@ -669,11 +672,17 @@ impl TerminalSessionBackend for SerialSession {
                 report.mark_changed();
             }
         }
-        if report.events_drained >= budget.max_events && !self.event_rx.is_empty() {
+        if (report.events_drained >= budget.max_events || budget.time_exhausted(started))
+            && !self.event_rx.is_empty()
+        {
             report.budget_exhausted = true;
         }
         report.drain_duration = started.elapsed();
         report
+    }
+
+    fn activity_receiver(&self) -> TerminalActivityReceiver {
+        self.event_rx.activity_receiver()
     }
 
     fn take_events(&mut self) -> Vec<TerminalEvent> {
@@ -864,47 +873,15 @@ impl TerminalSessionBackend for SerialSession {
     }
 
     fn search_matches(&self, query: &str) -> Vec<TerminalSearchMatch> {
-        let query = query.trim();
-        if query.is_empty() {
-            return Vec::new();
-        }
-
         let term = self.term.lock();
-        let grid = term.grid();
-        let top_line = -(term.total_lines().saturating_sub(term.screen_lines()) as i32);
-        let bottom_line = term.screen_lines() as i32;
-        let mut matches = Vec::new();
-        let mut logical_text = String::new();
-        let mut logical_map = Vec::new();
+        search_matches_from_term(&term, self.resize.cols, query)
+    }
 
-        for line in top_line..bottom_line {
-            let row = &grid[Line(line)];
-            append_grid_line_text(
-                row[..].iter(),
-                line,
-                self.resize.cols,
-                &mut logical_text,
-                &mut logical_map,
-            );
-
-            let wrapped = row.last().is_some_and(|cell| {
-                cell.flags
-                    .contains(alacritty_terminal::term::cell::Flags::WRAPLINE)
-            });
-            if wrapped && line + 1 < bottom_line {
-                continue;
-            }
-
-            matches.extend(search_logical_line_matches(
-                &logical_text,
-                &logical_map,
-                query,
-                self.resize.cols,
-            ));
-            logical_text.clear();
-            logical_map.clear();
-        }
-        matches
+    fn search_source(&self) -> Option<crate::TerminalSearchSource> {
+        Some(crate::TerminalSearchSource::new(
+            self.term.clone(),
+            self.resize.cols,
+        ))
     }
 
     fn clear_buffer(&mut self) {
@@ -934,6 +911,21 @@ impl TerminalSessionBackend for SerialSession {
                 cell_height: self.resize.cell_height,
             },
             &self.graphics,
+        )
+    }
+
+    fn snapshot_incremental(&self, previous: &TerminalSnapshot) -> TerminalSnapshot {
+        let mut term = self.term.lock();
+        incremental_snapshot_from_term(
+            &mut term,
+            TerminalSize {
+                cols: self.resize.cols,
+                rows: self.resize.rows,
+                cell_width: self.resize.cell_width,
+                cell_height: self.resize.cell_height,
+            },
+            &self.graphics,
+            previous,
         )
     }
 

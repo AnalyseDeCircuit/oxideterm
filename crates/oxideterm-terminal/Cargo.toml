@@ -7,6 +7,7 @@ version.workspace = true
 [dependencies]
 alacritty_terminal.workspace = true
 anyhow.workspace = true
+async-channel.workspace = true
 crossbeam-channel.workspace = true
 libc.workspace = true
 oxideterm-ssh = { path = "../oxideterm-ssh" }
@@ -25,3 +26,10 @@ zeroize.workspace = true
 
 [target.'cfg(windows)'.dependencies]
 windows = { workspace = true, features = ["Win32_Foundation", "Win32_System_JobObjects", "Win32_System_Threading"] }
+
+[dev-dependencies]
+criterion.workspace = true
+
+[[bench]]
+name = "terminal_pipeline"
+harness = false

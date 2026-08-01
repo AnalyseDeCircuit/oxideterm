@@ -28,6 +28,7 @@ const DEFAULT_MAX_EVENTS_PER_DRAIN: usize = 512;
 pub struct TerminalDrainBudget {
     pub max_bytes: usize,
     pub max_events: usize,
+    pub max_duration: Duration,
 }
 
 impl TerminalDrainBudget {
@@ -35,7 +36,17 @@ impl TerminalDrainBudget {
         Self {
             max_bytes,
             max_events,
+            max_duration: Duration::MAX,
         }
+    }
+
+    pub const fn with_max_duration(mut self, max_duration: Duration) -> Self {
+        self.max_duration = max_duration;
+        self
+    }
+
+    pub fn time_exhausted(self, started: std::time::Instant) -> bool {
+        started.elapsed() >= self.max_duration
     }
 
     pub const fn interactive() -> Self {
@@ -52,6 +63,18 @@ impl TerminalDrainBudget {
 
     pub const fn unlimited() -> Self {
         Self::new(usize::MAX, usize::MAX)
+    }
+}
+
+#[cfg(test)]
+mod drain_budget_tests {
+    use super::*;
+
+    #[test]
+    fn zero_duration_budget_is_immediately_exhausted() {
+        let budget = TerminalDrainBudget::interactive().with_max_duration(Duration::ZERO);
+
+        assert!(budget.time_exhausted(std::time::Instant::now()));
     }
 }
 
@@ -97,6 +120,7 @@ struct ByteBoundedInner<T> {
     blocking_space: Condvar,
     async_space: Notify,
     max_bytes: usize,
+    activity: Option<crate::activity::TerminalActivitySender>,
 }
 
 /// Sends worker events while charging data events against an exact byte limit.
@@ -116,8 +140,23 @@ pub(crate) struct ByteBoundedItem<T> {
     inner: Arc<ByteBoundedInner<T>>,
 }
 
+#[cfg(test)]
 pub(crate) fn byte_bounded_channel<T>(
     max_bytes: usize,
+) -> (ByteBoundedSender<T>, ByteBoundedReceiver<T>) {
+    byte_bounded_channel_inner(max_bytes, None)
+}
+
+pub(crate) fn byte_bounded_channel_with_activity<T>(
+    max_bytes: usize,
+    activity: crate::activity::TerminalActivitySender,
+) -> (ByteBoundedSender<T>, ByteBoundedReceiver<T>) {
+    byte_bounded_channel_inner(max_bytes, Some(activity))
+}
+
+fn byte_bounded_channel_inner<T>(
+    max_bytes: usize,
+    activity: Option<crate::activity::TerminalActivitySender>,
 ) -> (ByteBoundedSender<T>, ByteBoundedReceiver<T>) {
     assert!(max_bytes > 0, "byte-bounded channels need a positive limit");
     let inner = Arc::new(ByteBoundedInner {
@@ -130,6 +169,7 @@ pub(crate) fn byte_bounded_channel<T>(
         blocking_space: Condvar::new(),
         async_space: Notify::new(),
         max_bytes,
+        activity,
     });
     (
         ByteBoundedSender {
@@ -158,6 +198,10 @@ impl<T> ByteBoundedSender<T> {
                     value.take().expect("queued value must be present"),
                     byte_len,
                 );
+                drop(state);
+                if let Some(activity) = &self.inner.activity {
+                    activity.notify();
+                }
                 return Ok(());
             }
             state = self
@@ -190,6 +234,10 @@ impl<T> ByteBoundedSender<T> {
                         value.take().expect("queued value must be present"),
                         byte_len,
                     );
+                    drop(state);
+                    if let Some(activity) = &self.inner.activity {
+                        activity.notify();
+                    }
                     return Ok(());
                 }
             }
@@ -204,6 +252,10 @@ impl<T> ByteBoundedSender<T> {
             return Err(value);
         }
         enqueue(&mut state, value, 0);
+        drop(state);
+        if let Some(activity) = &self.inner.activity {
+            activity.notify();
+        }
         Ok(())
     }
 }
@@ -212,6 +264,12 @@ impl<T> Drop for ByteBoundedSender<T> {
     fn drop(&mut self) {
         let mut state = lock_state(&self.inner);
         state.sender_open = false;
+        drop(state);
+        // A worker can exit without publishing a final control event; wake the owner so it can
+        // observe the disconnected queue instead of sleeping until an unrelated deadline.
+        if let Some(activity) = &self.inner.activity {
+            activity.notify();
+        }
     }
 }
 
@@ -596,5 +654,19 @@ mod tests {
             TestEvent::Output(vec![2; LIMIT_BYTES])
         );
         assert_eq!(receiver.pending_bytes(), 0);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn sender_drop_wakes_an_activity_driven_consumer() {
+        let (activity_sender, activity_receiver) = crate::activity::terminal_activity_channel();
+        let (sender, _receiver) = byte_bounded_channel_with_activity::<Vec<u8>>(8, activity_sender);
+
+        drop(sender);
+
+        assert!(
+            tokio::time::timeout(Duration::from_secs(1), activity_receiver.notified())
+                .await
+                .is_ok()
+        );
     }
 }

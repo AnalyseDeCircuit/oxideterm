@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{sync::Arc, time::Instant};
 
 use gpui::{
     Anchor, AnchoredPositionMode, AnyElement, App, ClipboardItem, Context, FocusHandle, Focusable,
@@ -22,7 +22,8 @@ use oxideterm_terminal::{
 };
 
 use super::{
-    ModemProgressState, TerminalCommandNavigationDirection, TerminalContextAction,
+    BACKGROUND_IMAGE_COMPLETION_POLL_INTERVAL, ImageRenderCache, ModemProgressState,
+    SmoothScrollSnapshotCache, TerminalCommandNavigationDirection, TerminalContextAction,
     TerminalContextMenu, TerminalPane, TerminalPaneEvent, command_mark_ui_available,
 };
 use crate::terminal_ui::*;
@@ -124,12 +125,17 @@ impl Render for TerminalPane {
         if self.snapshot_dirty {
             // Hidden panes keep their emulator state current without copying the full grid. The
             // first visible render after activation materializes exactly one latest snapshot.
-            let snapshot = self.terminal.lock().snapshot();
+            let snapshot_started = Instant::now();
+            let snapshot = self.terminal.lock().snapshot_incremental(&self.snapshot);
             if snapshot.display_offset == 0 {
                 self.clear_smooth_scroll_remainder();
             }
             self.snapshot = self.stamp_snapshot(snapshot);
             self.snapshot_dirty = false;
+            self.render_stats.snapshot_micros = snapshot_started
+                .elapsed()
+                .as_micros()
+                .min(u128::from(u64::MAX)) as u64;
         }
         self.metrics = TerminalMetrics::measure_with_preferences(window, &self.preferences);
         let scrollbar_display_offset = self.smooth_scroll_display_offset();
@@ -138,18 +144,44 @@ impl Render for TerminalPane {
         snapshot.cursor_shape =
             terminal_cursor_shape_for_render(snapshot.cursor_shape, self.preferences.cursor_shape);
         let terminal_mode = self.terminal.lock().mode();
-        let rendered_images = self.image_cache.render_images(
-            &snapshot.images,
-            self.preferences
-                .render_policy
-                .terminal_graphics
-                .decode_images,
-        );
+        let decode_images = self
+            .preferences
+            .render_policy
+            .terminal_graphics
+            .decode_images;
+        let image_requests = self
+            .image_cache
+            .take_preparation_requests(&snapshot.images, decode_images);
+        if !image_requests.is_empty() {
+            let worker_requests = image_requests.clone();
+            let preparation_task = cx.background_executor().spawn(async move {
+                let started = Instant::now();
+                let prepared = worker_requests
+                    .into_iter()
+                    .filter_map(ImageRenderCache::prepare_snapshot)
+                    .collect();
+                (prepared, started.elapsed())
+            });
+            cx.spawn(async move |weak, cx| {
+                let (prepared, elapsed) = preparation_task.await;
+                let _ = weak.update(cx, |this, cx| {
+                    this.image_cache
+                        .finish_preparations(&image_requests, prepared);
+                    this.render_stats.image_prepare_micros =
+                        elapsed.as_micros().min(u128::from(u64::MAX)) as u64;
+                    cx.notify();
+                });
+            })
+            .detach();
+        }
+        let rendered_images = self
+            .image_cache
+            .cached_images(&snapshot.images, decode_images);
         self.drop_retired_images(window, cx);
         let row_timestamps = self
             .terminal_timestamps_enabled
             .then(|| self.row_timestamps.clone());
-        let search_matches = self.refresh_search_cache();
+        let search_matches = self.current_search_matches();
 
         let background = self.preferences.background.clone().filter(|_background| {
             // Keep terminal repaint frames off the filesystem hot path; image
@@ -162,6 +194,7 @@ impl Render for TerminalPane {
                 self.background_image_cache.render_blurred_image(background),
             )
         });
+        self.ensure_background_image_completion_poll(cx);
         let transparent_pane_base =
             terminal_pane_base_is_transparent(self.preferences.transparent_background);
         let bell_flash_layer = self.bell_flash.then(|| {
@@ -180,6 +213,10 @@ impl Render for TerminalPane {
         self.drop_retired_images(window, cx);
         let command_mark_ui_visible =
             command_mark_ui_available(self.settings.command_marks_enabled, terminal_mode);
+        if self.command_marks_render_cache_dirty {
+            self.command_marks_render_cache = Arc::from(self.command_marks.clone());
+            self.command_marks_render_cache_dirty = false;
+        }
         let selected_command_mark_id = if command_mark_ui_visible {
             self.selected_command_mark_id.clone()
         } else {
@@ -212,9 +249,9 @@ impl Render for TerminalPane {
         .precomputed_search_matches()
         .command_marks(
             if command_mark_ui_visible {
-                self.command_marks.clone()
+                self.command_marks_render_cache.clone()
             } else {
-                Vec::new()
+                Arc::from([])
             },
             selected_command_mark_id,
             hovered_command_mark_id,
@@ -753,7 +790,38 @@ fn serial_color_alpha(rgb_color: u32, alpha: u8) -> u32 {
 }
 
 impl TerminalPane {
-    fn render_snapshot_for_smooth_scroll(&self) -> (TerminalSnapshot, gpui::Pixels, usize) {
+    fn ensure_background_image_completion_poll(&mut self, cx: &mut Context<Self>) {
+        if self.background_image_poll_active || !self.background_image_cache.has_pending() {
+            return;
+        }
+        self.background_image_poll_active = true;
+        cx.spawn(async move |weak, cx| {
+            loop {
+                cx.background_executor()
+                    .timer(BACKGROUND_IMAGE_COMPLETION_POLL_INTERVAL)
+                    .await;
+                let Ok(pending) = weak.update(cx, |this, cx| {
+                    let changed = this.background_image_cache.drain_completed();
+                    let pending = this.background_image_cache.has_pending();
+                    if changed {
+                        cx.notify();
+                    }
+                    if !pending {
+                        this.background_image_poll_active = false;
+                    }
+                    pending
+                }) else {
+                    break;
+                };
+                if !pending {
+                    break;
+                }
+            }
+        })
+        .detach();
+    }
+
+    fn render_snapshot_for_smooth_scroll(&mut self) -> (TerminalSnapshot, gpui::Pixels, usize) {
         let snapshot = self.snapshot.clone();
         let viewport_rows = snapshot.rows;
         if !self.settings.smooth_scroll {
@@ -768,10 +836,7 @@ impl TerminalPane {
         let overscan_rows = viewport_rows.saturating_add(1);
         if remainder > 0.0 && snapshot.display_offset < snapshot.scrollback_lines {
             let display_offset = snapshot.display_offset.saturating_add(1);
-            let overscan = self
-                .terminal
-                .lock()
-                .snapshot_with_display_offset(display_offset, overscan_rows);
+            let overscan = self.smooth_scroll_overscan_snapshot(display_offset, overscan_rows);
             return (
                 overscan,
                 self.scroll_remainder_px - self.metrics.line_height,
@@ -780,14 +845,37 @@ impl TerminalPane {
         }
 
         if remainder < 0.0 && snapshot.display_offset > 0 {
-            let overscan = self
-                .terminal
-                .lock()
-                .snapshot_with_display_offset(snapshot.display_offset, overscan_rows);
+            let overscan =
+                self.smooth_scroll_overscan_snapshot(snapshot.display_offset, overscan_rows);
             return (overscan, self.scroll_remainder_px, viewport_rows);
         }
 
         (snapshot, px(0.0), viewport_rows)
+    }
+
+    fn smooth_scroll_overscan_snapshot(
+        &mut self,
+        display_offset: usize,
+        rows: usize,
+    ) -> TerminalSnapshot {
+        if let Some(cached) = &self.smooth_scroll_snapshot_cache
+            && cached.source_generation == self.snapshot.generation
+            && cached.display_offset == display_offset
+            && cached.rows == rows
+        {
+            return cached.snapshot.clone();
+        }
+        let snapshot = self
+            .terminal
+            .lock()
+            .snapshot_with_display_offset(display_offset, rows);
+        self.smooth_scroll_snapshot_cache = Some(SmoothScrollSnapshotCache {
+            source_generation: self.snapshot.generation,
+            display_offset,
+            rows,
+            snapshot: snapshot.clone(),
+        });
+        snapshot
     }
 
     fn render_terminal_context_menu(
@@ -1480,6 +1568,15 @@ impl TerminalPane {
                     .text_color(rgba(0xe6e8eb99))
                     .child(format!("{}b", stats.pending_bytes)),
             )
+            .child(div().text_color(rgba(0xe6e8eb99)).child("·"))
+            .child(div().text_color(rgba(0xe6e8eb99)).child(format!(
+                "d{} s{} q{} i{} l95{}us",
+                stats.drain_micros,
+                stats.snapshot_micros,
+                stats.search_micros,
+                stats.image_prepare_micros,
+                stats.input_latency_p95_micros,
+            )))
             .into_any_element()
     }
 

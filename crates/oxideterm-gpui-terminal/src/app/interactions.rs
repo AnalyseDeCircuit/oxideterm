@@ -1,4 +1,4 @@
-use std::{env, sync::Arc, time::Duration};
+use std::{env, time::Duration};
 
 use gpui::{
     ClipboardItem, Context, KeyDownEvent, KeyUpEvent, Modifiers, MouseButton, MouseDownEvent,
@@ -965,10 +965,6 @@ impl TerminalPane {
         self.clear_smooth_scroll_remainder();
         self.snapshot = self.stamp_snapshot(snapshot);
         cx.notify();
-    }
-
-    fn current_search_matches(&mut self) -> Arc<[TerminalSearchMatch]> {
-        self.refresh_search_cache()
     }
 
     pub(super) fn select_next_search_match(&mut self, forward: bool, cx: &mut Context<Self>) {

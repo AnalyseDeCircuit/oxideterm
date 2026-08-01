@@ -152,7 +152,7 @@ impl TerminalPane {
                     terminal.snapshot()
                 };
                 self.snapshot = self.stamp_snapshot(snapshot);
-                self.mark_terminal_content_changed();
+                self.mark_terminal_content_changed(cx);
                 cx.notify();
             }
             TrzszWorkerEvent::Completed => {

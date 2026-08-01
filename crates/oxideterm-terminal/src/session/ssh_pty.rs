@@ -3,6 +3,7 @@ pub struct SshPtySession {
     term: Arc<FairMutex<Term<LocalEventListener>>>,
     parser: Processor,
     event_rx: LocalEventReceiver,
+    activity: crate::activity::TerminalActivitySender,
     pending_events: Vec<TerminalEvent>,
     resize: TerminalResize,
     lifecycle: TerminalLifecycle,
@@ -47,6 +48,7 @@ impl SshPtySession {
             cell_height: resize.cell_height,
         };
         let (listener, event_rx) = local_event_channel();
+        let activity = listener.activity_sender();
 
         let term_config = interactive_terminal_config(scrollback_lines);
         let term = Arc::new(FairMutex::new(Term::new(term_config, &size, listener)));
@@ -74,6 +76,7 @@ impl SshPtySession {
             } else {
                 (resize.cols as u32, resize.rows as u32)
             };
+            let connect_activity = activity.clone();
             runtime_handle.spawn(async move {
                 let result = match connection {
                     Some(SshSessionConnection::New(mut ssh_config)) => {
@@ -146,9 +149,11 @@ impl SshPtySession {
                 }
                 .map_err(|error| error.to_string());
                 let _ = connect_tx.send(result);
+                connect_activity.notify();
             });
         } else {
             let _ = connect_tx.send(Err("failed to initialize SSH runtime".to_string()));
+            activity.notify();
         }
 
         let trzsz_consumer = config.trzsz_policy().map(TrzszConsumer::new);
@@ -157,6 +162,7 @@ impl SshPtySession {
             term,
             parser: Processor::new(),
             event_rx,
+            activity,
             pending_events: Vec::new(),
             resize,
             lifecycle: TerminalLifecycle::Running,
@@ -195,7 +201,11 @@ impl SshPtySession {
         };
 
         match result {
-            Ok(handle) => {
+            Ok(mut handle) => {
+                let activity = self.activity.clone();
+                handle
+                    .output_rx
+                    .set_activity_callback(Arc::new(move || activity.notify()));
                 let auth_banner_prelude = handle.take_auth_banner_prelude();
                 self.handle = Some(handle);
                 if !self.waiting_for_deferred_pty_resize() {
@@ -456,10 +466,15 @@ impl SshPtySession {
         let started = Instant::now();
         let mut report = TerminalDrainReport::default();
         loop {
-            if report.drained_bytes >= budget.max_bytes
+            if budget.time_exhausted(started)
+                || report.drained_bytes >= budget.max_bytes
                 || report.events_drained >= budget.max_events
             {
-                report.budget_exhausted = !self.output_queue.is_empty();
+                report.budget_exhausted = !self.output_queue.is_empty()
+                    || self
+                        .handle
+                        .as_ref()
+                        .is_some_and(|handle| !handle.output_rx.is_empty());
                 break;
             }
 
@@ -624,7 +639,7 @@ impl TerminalSessionBackend for SshPtySession {
             report.mark_changed();
         }
 
-        while report.events_drained < budget.max_events {
+        while report.events_drained < budget.max_events && !budget.time_exhausted(started) {
             let Ok(event) = self.event_rx.try_recv() else {
                 break;
             };
@@ -634,11 +649,17 @@ impl TerminalSessionBackend for SshPtySession {
             }
         }
 
-        if report.events_drained >= budget.max_events && !self.event_rx.is_empty() {
+        if (report.events_drained >= budget.max_events || budget.time_exhausted(started))
+            && !self.event_rx.is_empty()
+        {
             report.budget_exhausted = true;
         }
         report.drain_duration = started.elapsed();
         report
+    }
+
+    fn activity_receiver(&self) -> TerminalActivityReceiver {
+        self.event_rx.activity_receiver()
     }
 
     fn take_events(&mut self) -> Vec<TerminalEvent> {
@@ -825,48 +846,15 @@ impl TerminalSessionBackend for SshPtySession {
     }
 
     fn search_matches(&self, query: &str) -> Vec<TerminalSearchMatch> {
-        let query = query.trim();
-        if query.is_empty() {
-            return Vec::new();
-        }
-
         let term = self.term.lock();
-        let grid = term.grid();
-        let top_line = -(term.total_lines().saturating_sub(term.screen_lines()) as i32);
-        let bottom_line = term.screen_lines() as i32;
-        let mut matches = Vec::new();
-        let mut logical_text = String::new();
-        let mut logical_map = Vec::new();
+        search_matches_from_term(&term, self.resize.cols, query)
+    }
 
-        for line in top_line..bottom_line {
-            let row = &grid[alacritty_terminal::index::Line(line)];
-            append_grid_line_text(
-                row[..].iter(),
-                line,
-                self.resize.cols,
-                &mut logical_text,
-                &mut logical_map,
-            );
-
-            let wrapped = row.last().is_some_and(|cell| {
-                cell.flags
-                    .contains(alacritty_terminal::term::cell::Flags::WRAPLINE)
-            });
-            if wrapped && line + 1 < bottom_line {
-                continue;
-            }
-
-            matches.extend(search_logical_line_matches(
-                &logical_text,
-                &logical_map,
-                query,
-                self.resize.cols,
-            ));
-            logical_text.clear();
-            logical_map.clear();
-        }
-
-        matches
+    fn search_source(&self) -> Option<crate::TerminalSearchSource> {
+        Some(crate::TerminalSearchSource::new(
+            self.term.clone(),
+            self.resize.cols,
+        ))
     }
 
     fn clear_buffer(&mut self) {
@@ -896,6 +884,21 @@ impl TerminalSessionBackend for SshPtySession {
                 cell_height: self.resize.cell_height,
             },
             &self.graphics,
+        )
+    }
+
+    fn snapshot_incremental(&self, previous: &TerminalSnapshot) -> TerminalSnapshot {
+        let mut term = self.term.lock();
+        incremental_snapshot_from_term(
+            &mut term,
+            TerminalSize {
+                cols: self.resize.cols,
+                rows: self.resize.rows,
+                cell_width: self.resize.cell_width,
+                cell_height: self.resize.cell_height,
+            },
+            &self.graphics,
+            previous,
         )
     }
 

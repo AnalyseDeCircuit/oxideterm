@@ -1,5 +1,5 @@
 use std::{
-    collections::{HashMap, hash_map::DefaultHasher},
+    collections::{HashMap, VecDeque, hash_map::DefaultHasher},
     env,
     hash::{Hash, Hasher},
     ops::Range,
@@ -12,6 +12,7 @@ use std::{
 
 use anyhow::Result;
 use chrono::Timelike;
+use futures::future::{Either, select};
 use gpui::{
     App, Bounds, ClipboardItem, Context, EventEmitter, FocusHandle, PathPromptOptions, Pixels,
     Point, SharedString, Subscription, Timer, Window, px,
@@ -72,15 +73,17 @@ pub type SharedTerminalSession = Arc<Mutex<TerminalSession>>;
 pub type TerminalInputInterceptor =
     Arc<dyn Fn(&[u8]) -> TerminalInputInterceptorResult + Send + Sync>;
 const PRIVILEGE_PROMPT_DEBUG_ENV: &str = "OXIDETERM_PRIVILEGE_DEBUG";
-const ACTIVE_TERMINAL_POLL_INTERVAL: Duration = Duration::from_millis(16);
-const BACKGROUND_TERMINAL_POLL_INTERVAL: Duration = Duration::from_millis(64);
-const IDLE_TERMINAL_POLL_INTERVAL: Duration = Duration::from_millis(250);
+const TERMINAL_ANIMATION_INTERVAL: Duration = Duration::from_millis(16);
+const TERMINAL_IDLE_MAINTENANCE_INTERVAL: Duration = Duration::from_secs(60 * 60);
 const DRAIN_BOOST_POLL_INTERVAL: Duration = Duration::from_millis(8);
+const MAX_UI_TERMINAL_DRAIN_DURATION: Duration = Duration::from_millis(2);
 const RECENT_TERMINAL_ACTIVITY_WINDOW: Duration = Duration::from_millis(600);
 const RECENT_TERMINAL_INPUT_WINDOW: Duration = Duration::from_millis(220);
 const ACTIVE_PROCESS_INFO_REFRESH_INTERVAL: Duration = Duration::from_secs(1);
 const EDITOR_INTEGRATION_HEARTBEAT_TIMEOUT: Duration = Duration::from_millis(2500);
 const EDITOR_CLIPBOARD_REQUEST_TIMEOUT: Duration = Duration::from_secs(2);
+const TERMINAL_SEARCH_DEBOUNCE: Duration = Duration::from_millis(24);
+const BACKGROUND_IMAGE_COMPLETION_POLL_INTERVAL: Duration = Duration::from_millis(32);
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum TerminalPaneEvent {
@@ -95,6 +98,8 @@ pub enum TerminalPaneEvent {
     PrivilegePromptSubmitRequested,
     // The requested action remains pane-owned until the active Workspace consumes it.
     ContextActionRequested,
+    // Search completion is asynchronous; Workspace reads the latest pane-owned status.
+    SearchStatusChanged,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -244,24 +249,30 @@ impl TerminalEventEffect {
     }
 }
 
-fn terminal_poll_interval(
-    focused: bool,
+fn terminal_maintenance_interval(
     drain_budget_exhausted: bool,
-    time_since_input: Duration,
-    time_since_activity: Duration,
+    smooth_scroll_active: bool,
+    cursor_blink_remaining: Option<Duration>,
+    process_refresh_remaining: Option<Duration>,
+    pending_cwd_remaining: Option<Duration>,
+    editor_expiry_remaining: Option<Duration>,
 ) -> Duration {
     if drain_budget_exhausted {
         return DRAIN_BOOST_POLL_INTERVAL;
     }
-    if focused {
-        return ACTIVE_TERMINAL_POLL_INTERVAL;
+    if smooth_scroll_active {
+        return TERMINAL_ANIMATION_INTERVAL;
     }
-    if time_since_input <= RECENT_TERMINAL_INPUT_WINDOW
-        || time_since_activity <= RECENT_TERMINAL_ACTIVITY_WINDOW
-    {
-        return BACKGROUND_TERMINAL_POLL_INTERVAL;
-    }
-    IDLE_TERMINAL_POLL_INTERVAL
+    [
+        cursor_blink_remaining,
+        process_refresh_remaining,
+        pending_cwd_remaining,
+        editor_expiry_remaining,
+    ]
+    .into_iter()
+    .flatten()
+    .min()
+    .unwrap_or(TERMINAL_IDLE_MAINTENANCE_INTERVAL)
 }
 
 fn viewport_needs_live_output_restore(
@@ -272,6 +283,19 @@ fn viewport_needs_live_output_restore(
     display_offset > 0
         || f32::from(scroll_remainder_px).abs() > f32::EPSILON
         || smooth_scroll_animation_active
+}
+
+fn terminal_latency_percentiles(samples: &VecDeque<u64>) -> (u64, u64, u64) {
+    if samples.is_empty() {
+        return (0, 0, 0);
+    }
+    let mut sorted = samples.iter().copied().collect::<Vec<_>>();
+    sorted.sort_unstable();
+    let percentile = |numerator: usize| {
+        let rank = (sorted.len() * numerator).div_ceil(100).max(1);
+        sorted[rank.saturating_sub(1).min(sorted.len() - 1)]
+    };
+    (percentile(50), percentile(95), percentile(99))
 }
 
 pub struct TerminalPane {
@@ -305,6 +329,8 @@ pub struct TerminalPane {
     search_query: Option<String>,
     terminal_content_revision: u64,
     search_cache: Option<TerminalSearchCache>,
+    search_generation: Arc<AtomicU64>,
+    search_task: Option<gpui::Task<()>>,
     selected_search_match: Option<usize>,
     hovered_link: Option<TerminalLinkRange>,
     hovered_command_mark_id: Option<String>,
@@ -321,6 +347,8 @@ pub struct TerminalPane {
     editor_integration: Option<ActiveTerminalEditorIntegration>,
     pending_editor_clipboard: Option<PendingTerminalEditorClipboard>,
     command_marks: Vec<TerminalCommandMark>,
+    command_marks_render_cache: Arc<[TerminalCommandMark]>,
+    command_marks_render_cache_dirty: bool,
     selected_command_mark_id: Option<String>,
     command_mark_id_aliases: HashMap<String, String>,
     input_tracker: TerminalInputTracker,
@@ -333,6 +361,7 @@ pub struct TerminalPane {
     terminal_exited: bool,
     scroll_remainder_px: Pixels,
     smooth_scroll_animation_active: bool,
+    smooth_scroll_snapshot_cache: Option<SmoothScrollSnapshotCache>,
     scrollbar_drag: Option<ScrollbarDrag>,
     selection_autoscroll_position: Option<Point<Pixels>>,
     selection_autoscroll_scheduled: bool,
@@ -349,9 +378,12 @@ pub struct TerminalPane {
     render_stats: TerminalRenderStats,
     render_stats_window_start: Instant,
     render_stats_window_writes: usize,
+    input_latency_samples_micros: VecDeque<u64>,
+    last_latency_sampled_input: Option<Instant>,
     image_cache: ImageRenderCache,
     layout_cache: Arc<Mutex<TerminalLayoutCache>>,
     background_image_cache: BackgroundImageRenderCache,
+    background_image_poll_active: bool,
     bounds: Option<Bounds<Pixels>>,
     last_pty_resize: Option<(usize, usize, u16, u16)>,
     pending_pty_resize: Option<(usize, usize, u16, u16)>,
@@ -437,6 +469,13 @@ struct TerminalSearchCache {
     query: String,
     content_revision: u64,
     matches: Arc<[oxideterm_terminal::TerminalSearchMatch]>,
+}
+
+struct SmoothScrollSnapshotCache {
+    source_generation: u64,
+    display_offset: usize,
+    rows: usize,
+    snapshot: TerminalSnapshot,
 }
 
 impl TerminalSearchCache {
@@ -650,17 +689,22 @@ impl TerminalPane {
             this.handle_focus_change(false, cx);
         });
 
+        let terminal_activity = terminal.lock().activity_receiver();
         cx.spawn(async move |weak, cx| {
-            let mut poll_interval = ACTIVE_TERMINAL_POLL_INTERVAL;
+            let mut maintenance_interval = TERMINAL_ANIMATION_INTERVAL;
             loop {
-                cx.background_executor().timer(poll_interval).await;
-                let Ok(next_poll_interval) = weak.update(cx, |this, cx| {
+                let activity = Box::pin(terminal_activity.notified());
+                let timer = Box::pin(cx.background_executor().timer(maintenance_interval));
+                if matches!(select(activity, timer).await, Either::Left((false, _))) {
+                    break;
+                }
+                let Ok(next_maintenance_interval) = weak.update(cx, |this, cx| {
                     this.tick(cx);
-                    this.next_poll_interval()
+                    this.next_maintenance_interval()
                 }) else {
                     break;
                 };
-                poll_interval = next_poll_interval;
+                maintenance_interval = next_maintenance_interval;
             }
         })
         .detach();
@@ -694,6 +738,8 @@ impl TerminalPane {
             search_query: None,
             terminal_content_revision: 1,
             search_cache: None,
+            search_generation: Arc::new(AtomicU64::new(0)),
+            search_task: None,
             selected_search_match: None,
             hovered_link: None,
             hovered_command_mark_id: None,
@@ -715,6 +761,8 @@ impl TerminalPane {
             editor_integration: None,
             pending_editor_clipboard: None,
             command_marks: Vec::new(),
+            command_marks_render_cache: Arc::from([]),
+            command_marks_render_cache_dirty: false,
             selected_command_mark_id: None,
             command_mark_id_aliases: HashMap::new(),
             input_tracker: TerminalInputTracker::default(),
@@ -727,6 +775,7 @@ impl TerminalPane {
             terminal_exited: false,
             scroll_remainder_px: px(0.0),
             smooth_scroll_animation_active: false,
+            smooth_scroll_snapshot_cache: None,
             scrollbar_drag: None,
             selection_autoscroll_position: None,
             selection_autoscroll_scheduled: false,
@@ -745,6 +794,8 @@ impl TerminalPane {
             render_stats: TerminalRenderStats::default(),
             render_stats_window_start: Instant::now(),
             render_stats_window_writes: 0,
+            input_latency_samples_micros: VecDeque::with_capacity(256),
+            last_latency_sampled_input: None,
             image_cache: {
                 let mut cache = ImageRenderCache::default();
                 cache.set_byte_limit(preferences.render_policy.image_cache_bytes);
@@ -756,6 +807,7 @@ impl TerminalPane {
                 cache.set_byte_limit(preferences.render_policy.image_cache_bytes);
                 cache
             },
+            background_image_poll_active: false,
             bounds: None,
             last_pty_resize: None,
             pending_pty_resize: None,
@@ -1097,6 +1149,7 @@ impl TerminalPane {
         let next_settings = TerminalUiSettings::from_preferences(&preferences);
         if !next_settings.command_marks_enabled {
             self.command_marks.clear();
+            self.command_marks_render_cache_dirty = true;
             self.selected_command_mark_id = None;
             self.hovered_command_mark_id = None;
             self.command_mark_id_aliases.clear();
@@ -1350,7 +1403,7 @@ impl TerminalPane {
         self.serial_reconnect_config = Some(config);
         self.serial_port_available = Some(true);
         self.snapshot = self.stamp_snapshot(snapshot);
-        self.mark_terminal_content_changed();
+        self.mark_terminal_content_changed(cx);
         self.terminal_exited = false;
         self.input_locked = false;
         self.title = SharedString::from("OxideTerm");
@@ -1369,6 +1422,7 @@ impl TerminalPane {
         self.selecting = false;
         self.last_mouse_report_point = None;
         self.command_marks.clear();
+        self.command_marks_render_cache_dirty = true;
         self.selected_command_mark_id = None;
         self.command_mark_id_aliases.clear();
         self.input_tracker.reset();
@@ -1493,7 +1547,7 @@ impl TerminalPane {
     ) -> TerminalSearchStatus {
         self.search_query = query;
         self.search_cache = None;
-        self.refresh_search_cache();
+        self.schedule_search_refresh(cx);
         let match_count = self.search_match_count();
         self.selected_search_match = if match_count == 0 {
             None
@@ -1541,32 +1595,90 @@ impl TerminalPane {
             .unwrap_or_default()
     }
 
-    fn mark_terminal_content_changed(&mut self) {
+    fn mark_terminal_content_changed(&mut self, cx: &mut Context<Self>) {
         self.terminal_content_revision = self.terminal_content_revision.wrapping_add(1).max(1);
         self.search_cache = None;
+        self.schedule_search_refresh(cx);
     }
 
-    fn refresh_search_cache(&mut self) -> Arc<[TerminalSearchMatch]> {
+    fn schedule_search_refresh(&mut self, cx: &mut Context<Self>) {
+        let generation = self
+            .search_generation
+            .fetch_add(1, Ordering::AcqRel)
+            .wrapping_add(1);
+        self.search_task = None;
         let Some(query) = self
             .search_query
             .as_deref()
             .filter(|query| !query.is_empty())
+            .map(str::to_owned)
         else {
             self.search_cache = None;
-            return Arc::from([]);
+            self.selected_search_match = None;
+            return;
         };
-        if let Some(cache) = &self.search_cache
-            && cache.is_current(query, self.terminal_content_revision)
-        {
-            return cache.matches.clone();
-        }
-        let matches: Arc<[TerminalSearchMatch]> = self.terminal.lock().search_matches(query).into();
-        self.search_cache = Some(TerminalSearchCache {
-            query: query.to_string(),
-            content_revision: self.terminal_content_revision,
-            matches: matches.clone(),
-        });
-        matches
+        let Some(search_source) = self.terminal.lock().search_source() else {
+            return;
+        };
+        let cancellation = self.search_generation.clone();
+        let content_revision = self.terminal_content_revision;
+        self.search_task = Some(cx.spawn(async move |weak, cx| {
+            cx.background_executor()
+                .timer(TERMINAL_SEARCH_DEBOUNCE)
+                .await;
+            if cancellation.load(Ordering::Acquire) != generation {
+                return;
+            }
+            let worker_cancellation = cancellation.clone();
+            let worker_query = query.clone();
+            let search_task = cx.background_executor().spawn(async move {
+                let started = Instant::now();
+                let is_cancelled = || worker_cancellation.load(Ordering::Acquire) != generation;
+                let matches = search_source.search_matches(&worker_query, &is_cancelled);
+                (matches, started.elapsed())
+            });
+            let (matches, elapsed) = search_task.await;
+            let _ = weak.update(cx, |this, cx| {
+                if this.search_generation.load(Ordering::Acquire) != generation
+                    || this.terminal_content_revision != content_revision
+                    || this.search_query.as_deref() != Some(query.as_str())
+                {
+                    return;
+                }
+                let matches: Arc<[TerminalSearchMatch]> = matches.into();
+                this.search_cache = Some(TerminalSearchCache {
+                    query,
+                    content_revision,
+                    matches: matches.clone(),
+                });
+                this.render_stats.search_micros =
+                    elapsed.as_micros().min(u128::from(u64::MAX)) as u64;
+                this.selected_search_match = if matches.is_empty() {
+                    None
+                } else {
+                    this.selected_search_match
+                        .or(Some(0))
+                        .filter(|index| *index < matches.len())
+                };
+                if this.selected_search_match.is_some() {
+                    this.scroll_to_selected_search_match(cx);
+                }
+                cx.emit(TerminalPaneEvent::SearchStatusChanged);
+                cx.notify();
+            });
+        }));
+    }
+
+    fn current_search_matches(&self) -> Arc<[TerminalSearchMatch]> {
+        self.search_cache
+            .as_ref()
+            .filter(|cache| {
+                self.search_query
+                    .as_deref()
+                    .is_some_and(|query| cache.is_current(query, self.terminal_content_revision))
+            })
+            .map(|cache| cache.matches.clone())
+            .unwrap_or_else(|| Arc::from([]))
     }
 
     pub fn copy_to_clipboard(&mut self, cx: &mut Context<Self>) {
@@ -1788,7 +1900,7 @@ impl TerminalPane {
         };
         self.clear_smooth_scroll_remainder();
         self.snapshot = self.stamp_snapshot(snapshot);
-        self.mark_terminal_content_changed();
+        self.mark_terminal_content_changed(cx);
         self.selection = None;
         self.search_query = None;
         self.selected_search_match = None;
@@ -1856,7 +1968,7 @@ impl TerminalPane {
             // Parsing stays current for every terminal, but the expensive immutable snapshot is
             // built only when GPUI actually renders this pane.
             self.snapshot_dirty = true;
-            self.mark_terminal_content_changed();
+            self.mark_terminal_content_changed(cx);
         }
         let render_stats_changed = self.update_render_stats(&report, now);
 
@@ -1899,12 +2011,36 @@ impl TerminalPane {
         }
     }
 
-    fn next_poll_interval(&self) -> Duration {
-        terminal_poll_interval(
-            self.focused,
+    fn next_maintenance_interval(&self) -> Duration {
+        let now = Instant::now();
+        let cursor_blink_remaining = self.should_blink_cursor().then(|| {
+            CURSOR_BLINK_INTERVAL
+                .saturating_sub(now.saturating_duration_since(self.last_cursor_blink))
+        });
+        let mode = self.terminal.lock().mode();
+        let needs_process_refresh = (self.settings.free_type_mode
+            && mode.contains(TermMode::ALT_SCREEN))
+            || (self.settings.current_directory_awareness_enabled
+                && self.cwd_shell_integration_status != TerminalCwdShellIntegrationStatus::Active);
+        let process_refresh_remaining = (self.focused && needs_process_refresh).then(|| {
+            ACTIVE_PROCESS_INFO_REFRESH_INTERVAL.saturating_sub(
+                now.saturating_duration_since(self.last_process_info_refresh_requested),
+            )
+        });
+        let pending_cwd_remaining = self.pending_cwd.as_ref().map(|pending| {
+            PENDING_CWD_TIMEOUT.saturating_sub(now.saturating_duration_since(pending.created_at))
+        });
+        let editor_expiry_remaining = self.editor_integration.map(|integration| {
+            EDITOR_INTEGRATION_HEARTBEAT_TIMEOUT
+                .saturating_sub(now.saturating_duration_since(integration.last_seen))
+        });
+        terminal_maintenance_interval(
             self.last_drain_budget_exhausted,
-            self.last_terminal_input.elapsed(),
-            self.last_terminal_activity.elapsed(),
+            self.smooth_scroll_animation_active,
+            cursor_blink_remaining,
+            process_refresh_remaining,
+            pending_cwd_remaining,
+            editor_expiry_remaining,
         )
     }
 
@@ -2045,6 +2181,7 @@ impl TerminalPane {
         } else {
             TerminalDrainBudget::new(drain.normal_bytes, drain.max_events)
         }
+        .with_max_duration(MAX_UI_TERMINAL_DRAIN_DURATION)
     }
 
     fn current_render_tier(&self) -> TerminalRenderTier {
@@ -2075,10 +2212,28 @@ impl TerminalPane {
         } else {
             None
         };
+        if report.changed
+            && now.saturating_duration_since(self.last_terminal_input)
+                <= RECENT_TERMINAL_ACTIVITY_WINDOW
+            && self.last_latency_sampled_input != Some(self.last_terminal_input)
+        {
+            if self.input_latency_samples_micros.len() == 256 {
+                self.input_latency_samples_micros.pop_front();
+            }
+            self.input_latency_samples_micros.push_back(
+                now.saturating_duration_since(self.last_terminal_input)
+                    .as_micros()
+                    .min(u128::from(u64::MAX)) as u64,
+            );
+            self.last_latency_sampled_input = Some(self.last_terminal_input);
+        }
+        let latency_percentiles = terminal_latency_percentiles(&self.input_latency_samples_micros);
         Self::apply_render_stats_sample(
             &mut self.render_stats,
             tier,
             report.pending_bytes,
+            report.drain_duration.as_micros().min(u128::from(u64::MAX)) as u64,
+            latency_percentiles,
             published_writes_per_sec,
         )
     }
@@ -2087,11 +2242,17 @@ impl TerminalPane {
         stats: &mut TerminalRenderStats,
         tier: TerminalRenderTier,
         pending_bytes: usize,
+        drain_micros: u64,
+        latency_percentiles: (u64, u64, u64),
         published_writes_per_sec: Option<u32>,
     ) -> bool {
         let previous_stats = *stats;
         stats.tier = tier;
         stats.pending_bytes = pending_bytes;
+        stats.drain_micros = drain_micros;
+        stats.input_latency_p50_micros = latency_percentiles.0;
+        stats.input_latency_p95_micros = latency_percentiles.1;
+        stats.input_latency_p99_micros = latency_percentiles.2;
         if let Some(writes_per_sec) = published_writes_per_sec {
             stats.writes_per_sec = writes_per_sec;
         }
@@ -2336,6 +2497,7 @@ impl TerminalPane {
                         self.hovered_command_mark_id = None;
                     }
                 }
+                self.command_marks_render_cache_dirty = true;
                 TerminalEventEffect::notify()
             }
             TerminalEvent::CwdChanged { cwd, host } => {
@@ -2372,6 +2534,8 @@ impl TerminalPane {
         self.focused = focused;
         let _ = self.terminal.lock().set_focused(focused);
         self.reset_cursor_blink();
+        // Focus changes must consume already queued output instead of waiting for an old deadline.
+        self.tick(cx);
         cx.notify();
     }
 
@@ -2681,7 +2845,7 @@ impl TerminalPane {
             }
             self.clear_smooth_scroll_remainder();
             self.snapshot = self.stamp_snapshot(snapshot);
-            self.mark_terminal_content_changed();
+            self.mark_terminal_content_changed(cx);
             if grid_changed {
                 // The backend also resets its shell-integration state. Clear
                 // immediately so stale hit regions cannot survive one UI frame.
@@ -2910,50 +3074,55 @@ mod tests {
     }
 
     #[test]
-    fn terminal_polling_keeps_focused_panes_responsive() {
+    fn terminal_maintenance_prioritizes_animation_deadlines() {
         assert_eq!(
-            terminal_poll_interval(
-                true,
+            terminal_maintenance_interval(
                 false,
-                Duration::from_secs(10),
-                Duration::from_secs(10),
+                true,
+                Some(Duration::from_millis(200)),
+                None,
+                None,
+                None,
             ),
-            ACTIVE_TERMINAL_POLL_INTERVAL
+            TERMINAL_ANIMATION_INTERVAL
         );
     }
 
     #[test]
-    fn terminal_polling_reduces_background_and_idle_work() {
+    fn terminal_maintenance_sleeps_without_a_real_deadline() {
         assert_eq!(
-            terminal_poll_interval(
-                false,
-                false,
-                Duration::from_secs(10),
-                Duration::from_millis(20),
-            ),
-            BACKGROUND_TERMINAL_POLL_INTERVAL
-        );
-        assert_eq!(
-            terminal_poll_interval(
-                false,
-                false,
-                Duration::from_secs(10),
-                Duration::from_secs(10),
-            ),
-            IDLE_TERMINAL_POLL_INTERVAL
+            terminal_maintenance_interval(false, false, None, None, None, None),
+            TERMINAL_IDLE_MAINTENANCE_INTERVAL
         );
     }
 
     #[test]
-    fn terminal_polling_drains_backpressure_before_other_tiers() {
+    fn terminal_maintenance_drains_backpressure_before_other_deadlines() {
         assert_eq!(
-            terminal_poll_interval(
-                false,
+            terminal_maintenance_interval(
                 true,
-                Duration::from_secs(10),
-                Duration::from_secs(10),
+                false,
+                Some(Duration::from_millis(2)),
+                None,
+                None,
+                None,
             ),
             DRAIN_BOOST_POLL_INTERVAL
+        );
+    }
+
+    #[test]
+    fn terminal_maintenance_uses_the_earliest_real_deadline() {
+        assert_eq!(
+            terminal_maintenance_interval(
+                false,
+                false,
+                Some(Duration::from_millis(300)),
+                Some(Duration::from_millis(700)),
+                Some(Duration::from_millis(120)),
+                None,
+            ),
+            Duration::from_millis(120)
         );
     }
 
@@ -3088,20 +3257,32 @@ mod tests {
             &mut stats,
             TerminalRenderTier::Normal,
             0,
+            0,
+            (0, 0, 0),
             None,
         ));
         assert!(TerminalPane::apply_render_stats_sample(
             &mut stats,
             TerminalRenderTier::Idle,
             0,
+            0,
+            (0, 0, 0),
             Some(7),
         ));
         assert!(!TerminalPane::apply_render_stats_sample(
             &mut stats,
             TerminalRenderTier::Idle,
             0,
+            0,
+            (0, 0, 0),
             None,
         ));
+    }
+
+    #[test]
+    fn latency_window_reports_stable_percentiles() {
+        let samples = (1..=100).collect::<VecDeque<_>>();
+        assert_eq!(terminal_latency_percentiles(&samples), (50, 95, 99));
     }
 
     #[test]

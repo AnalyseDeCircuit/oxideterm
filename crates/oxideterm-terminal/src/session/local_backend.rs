@@ -43,6 +43,10 @@ impl TerminalSessionBackend for LocalPtySession {
         LocalPtySession::drain_output_with_budget(self, budget)
     }
 
+    fn activity_receiver(&self) -> TerminalActivityReceiver {
+        self.event_rx.activity_receiver()
+    }
+
     fn take_events(&mut self) -> Vec<TerminalEvent> {
         LocalPtySession::take_events(self)
     }
@@ -130,6 +134,10 @@ impl TerminalSessionBackend for LocalPtySession {
         LocalPtySession::search_matches(self, query)
     }
 
+    fn search_source(&self) -> Option<crate::TerminalSearchSource> {
+        Some(LocalPtySession::search_source(self))
+    }
+
     fn clear_buffer(&mut self) {
         LocalPtySession::clear_buffer(self);
     }
@@ -146,6 +154,10 @@ impl TerminalSessionBackend for LocalPtySession {
 
     fn snapshot(&self) -> TerminalSnapshot {
         LocalPtySession::snapshot(self)
+    }
+
+    fn snapshot_incremental(&self, previous: &TerminalSnapshot) -> TerminalSnapshot {
+        LocalPtySession::snapshot_incremental(self, previous)
     }
 
     fn snapshot_with_display_offset(

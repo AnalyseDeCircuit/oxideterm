@@ -10,12 +10,9 @@ use std::{
 use alacritty_terminal::{
     event::{Event as AlacEvent, EventListener, Notify, OnResize, WindowSize},
     grid::{Dimensions, Scroll},
-    index::{Column, Line, Point},
+    index::Line,
     sync::FairMutex,
-    term::{
-        Config, Osc52, Term,
-        cell::{Cell, Flags},
-    },
+    term::{Config, Osc52, Term, TermDamage, cell::Flags},
     tty::{self, Shell},
 };
 use anyhow::{Context, Result};
@@ -26,6 +23,7 @@ use oxideterm_terminal_graphics::{
     DEFAULT_STORAGE_LIMIT_MB, GraphicsCursor, TerminalGraphicsEvent, TerminalImagePlacement,
 };
 
+mod activity;
 mod backpressure;
 mod color;
 mod command_sender;
@@ -43,6 +41,7 @@ mod session;
 mod shell_completion;
 mod shell_integration;
 
+pub use activity::TerminalActivityReceiver;
 pub use alacritty_terminal::term::TermMode;
 pub use command_sender::{
     TerminalSenderFrame, TerminalSenderInputMode, TerminalSenderPacing, TerminalSenderPlan,
@@ -80,6 +79,7 @@ pub use remote_shell_integration::{
     inspect_remote_shell_integration, install_remote_shell_integration,
     remove_remote_shell_integration,
 };
+pub use search::TerminalSearchSource;
 pub use session::{
     SerialControlLine, SerialControlState, SerialDisplayMode, SerialError, SerialErrorCode,
     SerialFlowControl, SerialLineEnding, SerialParity, SerialPortInfo, SerialRuntimeOptions,
@@ -115,7 +115,10 @@ use process::{ProcessState, TerminalSignal, signal_process_group};
 use process_lifecycle::WindowsTerminalJob;
 #[cfg(not(windows))]
 use process_lifecycle::cleanup_local_pty_process_tree;
-use search::{append_grid_line_text, search_logical_line_matches, viewport_row_for_grid_line};
+#[cfg(test)]
+use search::search_logical_line_matches;
+pub(crate) use search::search_matches_from_term;
+use search::{append_grid_line_text, viewport_row_for_grid_line};
 
 fn interactive_terminal_config(scrollback_lines: usize) -> Config {
     let mut config = Config::default();

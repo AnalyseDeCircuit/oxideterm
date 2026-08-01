@@ -1,10 +1,17 @@
-use std::{collections::HashMap, sync::Arc, time::Instant};
+use std::{
+    collections::{HashMap, HashSet},
+    sync::Arc,
+    time::Instant,
+};
 
 use gpui::RenderImage;
 use image::{Delay, Frame, RgbaImage};
 use oxideterm_terminal::{TerminalImageId, TerminalImageSnapshot};
 
+use crate::image_budget::{release_image_bytes, try_reserve_image_bytes};
+
 const DEFAULT_RENDER_IMAGE_CACHE_BYTES: usize = 64 * 1024 * 1024;
+const IMAGE_PREPARATION_RETRY_DELAY: std::time::Duration = std::time::Duration::from_secs(1);
 
 #[derive(Clone)]
 pub(crate) struct TerminalRenderedImage {
@@ -15,6 +22,8 @@ pub(crate) struct TerminalRenderedImage {
 
 pub(crate) struct ImageRenderCache {
     entries: HashMap<ImageCacheKey, CachedRenderImage>,
+    pending: HashSet<ImageCacheKey>,
+    retry_after: HashMap<ImageCacheKey, Instant>,
     retired_images: Vec<Arc<RenderImage>>,
     bytes: usize,
     byte_limit: usize,
@@ -38,10 +47,18 @@ struct CachedRenderImage {
     last_used: u64,
 }
 
+pub(crate) struct PreparedRenderImage {
+    key: ImageCacheKey,
+    frames: Vec<Frame>,
+    bytes: usize,
+}
+
 impl Default for ImageRenderCache {
     fn default() -> Self {
         Self {
             entries: HashMap::new(),
+            pending: HashSet::new(),
+            retry_after: HashMap::new(),
             retired_images: Vec::new(),
             bytes: 0,
             byte_limit: DEFAULT_RENDER_IMAGE_CACHE_BYTES,
@@ -60,7 +77,7 @@ impl ImageRenderCache {
         std::mem::take(&mut self.retired_images)
     }
 
-    pub(crate) fn render_images(
+    pub(crate) fn cached_images(
         &mut self,
         images: &[TerminalImageSnapshot],
         decode_images: bool,
@@ -70,11 +87,7 @@ impl ImageRenderCache {
             .cloned()
             .map(|snapshot| {
                 let (render_image, animation_started_at) = if decode_images {
-                    match snapshot
-                        .data
-                        .as_ref()
-                        .and_then(|_| self.image_for_snapshot(&snapshot))
-                    {
+                    match self.cached_image_for_snapshot(&snapshot) {
                         Some((image, animation_started_at)) => (Some(image), animation_started_at),
                         None => (None, None),
                     }
@@ -90,18 +103,91 @@ impl ImageRenderCache {
             .collect()
     }
 
-    fn image_for_snapshot(
+    pub(crate) fn take_preparation_requests(
+        &mut self,
+        images: &[TerminalImageSnapshot],
+        decode_images: bool,
+    ) -> Vec<TerminalImageSnapshot> {
+        if !decode_images {
+            return Vec::new();
+        }
+        let mut requests = Vec::new();
+        for snapshot in images.iter().filter(|snapshot| snapshot.data.is_some()) {
+            let key = ImageCacheKey::from_snapshot(snapshot);
+            if self.entries.contains_key(&key) || self.pending.contains(&key) {
+                continue;
+            }
+            if self
+                .retry_after
+                .get(&key)
+                .is_some_and(|retry_after| Instant::now() < *retry_after)
+            {
+                continue;
+            }
+            self.retry_after.remove(&key);
+            self.pending.insert(key);
+            requests.push(snapshot.clone());
+        }
+        requests
+    }
+
+    pub(crate) fn prepare_snapshot(snapshot: TerminalImageSnapshot) -> Option<PreparedRenderImage> {
+        let key = ImageCacheKey::from_snapshot(&snapshot);
+        let data = snapshot.data.as_deref()?;
+        let (frames, bytes) = render_frames_for_snapshot(data, &snapshot)?;
+        Some(PreparedRenderImage { key, frames, bytes })
+    }
+
+    pub(crate) fn finish_preparations(
+        &mut self,
+        requested: &[TerminalImageSnapshot],
+        prepared: Vec<PreparedRenderImage>,
+    ) {
+        let prepared_keys = prepared
+            .iter()
+            .map(|prepared| prepared.key)
+            .collect::<HashSet<_>>();
+        for snapshot in requested {
+            let key = ImageCacheKey::from_snapshot(snapshot);
+            self.pending.remove(&key);
+            if !prepared_keys.contains(&key) {
+                self.retry_after
+                    .insert(key, Instant::now() + IMAGE_PREPARATION_RETRY_DELAY);
+            }
+        }
+        for prepared in prepared {
+            if self.entries.contains_key(&prepared.key) {
+                continue;
+            }
+            self.evict_for_admission(prepared.bytes);
+            if !try_reserve_image_bytes(prepared.bytes) {
+                self.retry_after
+                    .insert(prepared.key, Instant::now() + IMAGE_PREPARATION_RETRY_DELAY);
+                continue;
+            }
+            self.retry_after.remove(&prepared.key);
+            self.usage_clock = self.usage_clock.wrapping_add(1);
+            let render_image = Arc::new(RenderImage::new(prepared.frames));
+            let animation_started_at = (render_image.frame_count() > 1).then(Instant::now);
+            self.entries.insert(
+                prepared.key,
+                CachedRenderImage {
+                    image: render_image,
+                    bytes: prepared.bytes,
+                    animation_started_at,
+                    last_used: self.usage_clock,
+                },
+            );
+            self.bytes += prepared.bytes;
+            self.evict_over_budget(Some(prepared.key));
+        }
+    }
+
+    fn cached_image_for_snapshot(
         &mut self,
         snapshot: &TerminalImageSnapshot,
     ) -> Option<(Arc<RenderImage>, Option<Instant>)> {
-        let key = ImageCacheKey {
-            id: snapshot.id,
-            version: snapshot.version,
-            source_x: snapshot.source_x,
-            source_y: snapshot.source_y,
-            source_width: snapshot.source_width,
-            source_height: snapshot.source_height,
-        };
+        let key = ImageCacheKey::from_snapshot(snapshot);
         self.usage_clock = self.usage_clock.wrapping_add(1);
         if let Some(cached) = self.entries.get_mut(&key) {
             // Cache hits remain O(1); eviction scans only when admitting new pixel data.
@@ -109,42 +195,80 @@ impl ImageRenderCache {
             return Some((cached.image.clone(), cached.animation_started_at));
         }
 
-        let data = snapshot.data.as_deref()?;
-        let (frames, byte_len) = render_frames_for_snapshot(data, snapshot)?;
-        let render_image = Arc::new(RenderImage::new(frames));
-        let animation_started_at = (render_image.frame_count() > 1).then(Instant::now);
-        self.entries.insert(
-            key,
-            CachedRenderImage {
-                image: render_image.clone(),
-                bytes: byte_len,
-                animation_started_at,
-                last_used: self.usage_clock,
-            },
-        );
-        self.bytes += byte_len;
-        self.evict_over_budget(Some(key));
-        Some((render_image, animation_started_at))
+        None
+    }
+
+    fn evict_for_admission(&mut self, bytes: usize) {
+        while self.bytes.saturating_add(bytes) > self.byte_limit && !self.entries.is_empty() {
+            if !self.evict_oldest(None) {
+                break;
+            }
+        }
     }
 
     fn evict_over_budget(&mut self, protected: Option<ImageCacheKey>) {
         // Keep one oversized image resident. Re-decoding it every frame is more expensive than
         // temporarily exceeding the configured budget, while all competing entries are evicted.
         while self.bytes > self.byte_limit && self.entries.len() > 1 {
-            let Some(key) = self
-                .entries
-                .iter()
-                .filter(|(key, _)| Some(**key) != protected)
-                .min_by_key(|(_, entry)| entry.last_used)
-                .map(|(key, _)| *key)
-            else {
+            if !self.evict_oldest(protected) {
                 break;
-            };
-            if let Some(entry) = self.entries.remove(&key) {
-                self.bytes = self.bytes.saturating_sub(entry.bytes);
-                self.retired_images.push(entry.image);
             }
         }
+    }
+
+    fn evict_oldest(&mut self, protected: Option<ImageCacheKey>) -> bool {
+        let Some(key) = self
+            .entries
+            .iter()
+            .filter(|(key, _)| Some(**key) != protected)
+            .min_by_key(|(_, entry)| entry.last_used)
+            .map(|(key, _)| *key)
+        else {
+            return false;
+        };
+        let Some(entry) = self.entries.remove(&key) else {
+            return false;
+        };
+        self.bytes = self.bytes.saturating_sub(entry.bytes);
+        release_image_bytes(entry.bytes);
+        self.retired_images.push(entry.image);
+        true
+    }
+
+    #[cfg(test)]
+    fn render_images(
+        &mut self,
+        images: &[TerminalImageSnapshot],
+        decode_images: bool,
+    ) -> Vec<TerminalRenderedImage> {
+        let requested = self.take_preparation_requests(images, decode_images);
+        let prepared = requested
+            .iter()
+            .cloned()
+            .filter_map(Self::prepare_snapshot)
+            .collect();
+        self.finish_preparations(&requested, prepared);
+        self.cached_images(images, decode_images)
+    }
+}
+
+impl ImageCacheKey {
+    fn from_snapshot(snapshot: &TerminalImageSnapshot) -> Self {
+        Self {
+            id: snapshot.id,
+            version: snapshot.version,
+            source_x: snapshot.source_x,
+            source_y: snapshot.source_y,
+            source_width: snapshot.source_width,
+            source_height: snapshot.source_height,
+        }
+    }
+}
+
+impl Drop for ImageRenderCache {
+    fn drop(&mut self) {
+        release_image_bytes(self.bytes);
+        self.bytes = 0;
     }
 }
 
@@ -228,7 +352,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn render_cache_reuses_same_image_version() {
+    fn render_cache_prepares_once_then_reuses_same_image_version() {
         let mut cache = ImageRenderCache::default();
         let snapshot = TerminalImageSnapshot {
             id: TerminalImageId(7),
@@ -259,8 +383,22 @@ mod tests {
             })),
         };
 
-        let first = cache.render_images(std::slice::from_ref(&snapshot), true);
-        let second = cache.render_images(std::slice::from_ref(&snapshot), true);
+        let requests = cache.take_preparation_requests(std::slice::from_ref(&snapshot), true);
+        assert_eq!(requests.len(), 1);
+        assert!(
+            cache.cached_images(std::slice::from_ref(&snapshot), true)[0]
+                .render_image
+                .is_none()
+        );
+        let prepared = requests
+            .iter()
+            .cloned()
+            .filter_map(ImageRenderCache::prepare_snapshot)
+            .collect();
+        cache.finish_preparations(&requests, prepared);
+
+        let first = cache.cached_images(std::slice::from_ref(&snapshot), true);
+        let second = cache.cached_images(std::slice::from_ref(&snapshot), true);
 
         let first = first[0].render_image.as_ref().unwrap();
         let second = second[0].render_image.as_ref().unwrap();
