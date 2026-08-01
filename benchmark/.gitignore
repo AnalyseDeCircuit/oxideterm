@@ -1,0 +1,3 @@
+# Generated benchmark fixtures are intentionally local and can be large.
+.data/
+results/
