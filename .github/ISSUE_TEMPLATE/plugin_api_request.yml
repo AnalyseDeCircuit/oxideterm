@@ -1,5 +1,6 @@
 name: Plugin API Request
 description: Request a new plugin host API / 插件接口请求
+title: "[Plugin API] "
 labels: ["plugin-api", "enhancement"]
 body:
   - type: markdown

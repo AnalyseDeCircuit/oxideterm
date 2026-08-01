@@ -1,5 +1,6 @@
 name: Feature Request
 description: Suggest an improvement or new capability / 功能建议或改进
+title: "[Feature] "
 labels: ["enhancement"]
 body:
   - type: markdown
@@ -67,6 +68,18 @@ body:
         - Settings / themes / i18n
         - Windows / WSL / graphics
         - Other
+    validations:
+      required: true
+
+  - type: dropdown
+    id: priority
+    attributes:
+      label: Priority / 优先级
+      description: How important is this to you? / 这个功能对你有多重要？
+      options:
+        - Nice to have / 锦上添花
+        - Would improve my daily workflow / 能改善我的日常工作流
+        - Blocking / critical for my use case / 阻塞我的使用场景
     validations:
       required: true
 

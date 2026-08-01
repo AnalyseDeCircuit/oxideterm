@@ -9,6 +9,11 @@ contact_links:
     url: https://github.com/AnalyseDeCircuit/OxideTerm/security/advisories/new
     about: >
       Report privately via GitHub — do not open a public issue for undisclosed vulnerabilities.
+  - name: Latest release
+    url: https://github.com/AnalyseDeCircuit/OxideTerm/releases/latest
+    about: >
+      Check your version before reporting — update to the latest release first.
+      报告问题前请先检查版本，并更新到最新正式版。
   - name: Contributing & PR policy
     url: https://github.com/AnalyseDeCircuit/OxideTerm/blob/main/docs/CONTRIBUTING.md
     about: >

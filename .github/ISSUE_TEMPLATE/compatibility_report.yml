@@ -1,5 +1,6 @@
 name: SSH Compatibility Report
 description: Cannot connect or authenticate with a specific SSH server / 无法连接或认证特定 SSH 服务端
+title: "[Compatibility] "
 labels: ["compatibility"]
 body:
   - type: markdown
@@ -29,6 +30,20 @@ body:
         - Windows
         - Linux
         - Other
+    validations:
+      required: true
+
+  - type: dropdown
+    id: install_source
+    attributes:
+      label: Installation source / 安装来源
+      description: How did you install OxideTerm? Some bugs are packaging-specific.
+        你是如何安装 OxideTerm 的？部分问题与安装包类型相关。
+      options:
+        - GitHub Release (.dmg / .exe / .AppImage / .deb / .rpm)
+        - Homebrew
+        - Built from source / 源码构建
+        - Other / 其他
     validations:
       required: true
 

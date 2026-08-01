@@ -1,5 +1,6 @@
 name: Bug Report
 description: Something is broken or behaves incorrectly / 功能异常或行为不符合预期
+title: "[Bug] "
 labels: ["bug"]
 body:
   - type: markdown
@@ -36,6 +37,20 @@ body:
       required: true
 
   - type: dropdown
+    id: install_source
+    attributes:
+      label: Installation source / 安装来源
+      description: How did you install OxideTerm? Some bugs are packaging-specific.
+        你是如何安装 OxideTerm 的？部分问题与安装包类型相关。
+      options:
+        - GitHub Release (.dmg / .exe / .AppImage / .deb / .rpm)
+        - Homebrew
+        - Built from source / 源码构建
+        - Other / 其他
+    validations:
+      required: true
+
+  - type: dropdown
     id: area
     attributes:
       label: Area / 问题领域
@@ -60,6 +75,18 @@ body:
       label: Summary / 简述
       description: What went wrong in one or two sentences?
       placeholder: When I …, I expected … but …
+    validations:
+      required: true
+
+  - type: dropdown
+    id: reproducibility
+    attributes:
+      label: Reproducibility / 可复现性
+      options:
+        - Always (100%) / 必现
+        - Often (>50%) / 经常
+        - Sometimes / 偶尔
+        - Once / not sure / 仅一次或不确定
     validations:
       required: true
 
@@ -123,4 +150,8 @@ body:
         - label: |
             I provided the OxideTerm version, platform, and steps to reproduce; I understand vague, incomplete, or inactive issues may be closed.
             我已提供 OxideTerm 版本、平台及复现步骤；我理解描述模糊、信息不足或长期无回复的 Issue 可能会被关闭。
+          required: true
+        - label: |
+            I removed passwords, private keys, and other secrets from this report.
+            我已从本报告中删除密码、私钥及其他敏感信息。
           required: true
