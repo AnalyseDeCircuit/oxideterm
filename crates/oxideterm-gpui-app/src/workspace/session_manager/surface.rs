@@ -94,14 +94,28 @@ impl WorkspaceApp {
                 let (group_editor_active, group_name_invalid) = {
                     let session_manager = self.session_manager.read(cx);
                     let group_name = session_manager.group_name_draft.trim();
+                    let candidate_path = session_manager.group_editor.as_ref().and_then(|editor| {
+                        let parent_path = match editor {
+                            SessionManagerGroupEditor::Create { parent_path }
+                            | SessionManagerGroupEditor::Rename { parent_path, .. } => {
+                                parent_path.as_deref()
+                            }
+                        };
+                        session_group_path_from_leaf(parent_path, group_name)
+                    });
                     (
                         session_manager.show_group_manager
                             && session_manager.group_editor.is_some(),
-                        group_name.is_empty()
+                        candidate_path.is_none()
                             || matches!(
-                                session_manager.group_editor.as_ref(),
-                                Some(SessionManagerGroupEditor::Rename { old_name })
-                                    if old_name == group_name
+                                (
+                                    session_manager.group_editor.as_ref(),
+                                    candidate_path.as_deref()
+                                ),
+                                (
+                                    Some(SessionManagerGroupEditor::Rename { old_path, .. }),
+                                    Some(candidate)
+                                ) if old_path == candidate
                             ),
                     )
                 };
@@ -200,10 +214,16 @@ impl WorkspaceApp {
                 )
             })
             .when_some(row_action_menu, |surface, menu| {
-                surface.child(self.workspace_context_menu_backdrop(
-                    self.render_session_manager_row_action_menu(menu, window, has_background, cx),
-                    cx,
-                ))
+                let menu =
+                    self.render_session_manager_row_action_menu(menu, window, has_background, cx);
+                let backdrop = self
+                    .workspace_context_menu_backdrop(menu, cx)
+                    .on_scroll_wheel(cx.listener(|this, _event, _window, cx| {
+                        // Pointer-positioned menus are stale as soon as their list scrolls.
+                        this.close_session_row_menus(cx);
+                        cx.stop_propagation();
+                    }));
+                surface.child(backdrop)
             })
             .when(view_mode_menu_open, |surface| {
                 surface.child(self.workspace_context_menu_backdrop(

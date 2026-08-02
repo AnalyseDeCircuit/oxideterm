@@ -124,11 +124,49 @@ impl WorkspaceApp {
         y: f32,
         cx: &mut Context<Self>,
     ) {
+        self.open_session_manager_menu_at(
+            target,
+            SessionManagerRowActionMenuOrigin::ActionButton,
+            x,
+            y,
+            cx,
+        );
+    }
+
+    pub(super) fn open_session_manager_context_menu(
+        &mut self,
+        target: SessionManagerRowActionTarget,
+        x: f32,
+        y: f32,
+        cx: &mut Context<Self>,
+    ) {
+        self.open_session_manager_menu_at(
+            target,
+            SessionManagerRowActionMenuOrigin::Pointer,
+            x,
+            y,
+            cx,
+        );
+    }
+
+    fn open_session_manager_menu_at(
+        &mut self,
+        target: SessionManagerRowActionTarget,
+        origin: SessionManagerRowActionMenuOrigin,
+        x: f32,
+        y: f32,
+        cx: &mut Context<Self>,
+    ) {
         // One shared floating-menu owner prevents row actions from overlapping
         // the sort, view-mode, or batch-move popovers.
         self.session_manager.update(cx, |session_manager, cx| {
             close_session_menu_state(session_manager);
-            session_manager.row_action_menu = Some(SessionManagerRowActionMenu { target, x, y });
+            session_manager.row_action_menu = Some(SessionManagerRowActionMenu {
+                target,
+                origin,
+                x,
+                y,
+            });
             cx.notify();
         });
     }
@@ -211,7 +249,7 @@ impl WorkspaceApp {
     }
 
     pub(super) fn submit_session_group_editor(&mut self, cx: &mut Context<Self>) {
-        let (name, editor) = {
+        let (leaf_name, editor) = {
             let session_manager = self.session_manager.read(cx);
             (
                 session_manager.group_name_draft.trim().to_string(),
@@ -221,15 +259,24 @@ impl WorkspaceApp {
         let Some(editor) = editor else {
             return;
         };
-        if name.is_empty() {
+        let parent_path = match &editor {
+            SessionManagerGroupEditor::Create { parent_path }
+            | SessionManagerGroupEditor::Rename { parent_path, .. } => parent_path.as_deref(),
+        };
+        let Some(name) = session_group_path_from_leaf(parent_path, &leaf_name) else {
+            let status = self.i18n.t("sessionManager.folder_tree.group_name_invalid");
+            self.session_manager.update(cx, |session_manager, cx| {
+                session_manager.group_editor_error = Some(status);
+                cx.notify();
+            });
             return;
-        }
-        if let SessionManagerGroupEditor::Rename { old_name } = editor {
-            if old_name == name {
+        };
+        if let SessionManagerGroupEditor::Rename { old_path, .. } = editor {
+            if old_path == name {
                 self.cancel_session_group_editor(cx);
                 return;
             }
-            self.rename_session_group(&old_name, name, cx);
+            self.rename_session_group(&old_path, name, cx);
             return;
         }
 
@@ -267,10 +314,27 @@ impl WorkspaceApp {
     }
 
     pub(super) fn open_session_group_creation(&mut self, cx: &mut Context<Self>) {
+        self.open_session_group_creation_at(None, cx);
+    }
+
+    pub(super) fn open_session_subgroup_creation(
+        &mut self,
+        parent_path: &str,
+        cx: &mut Context<Self>,
+    ) {
+        self.open_session_group_creation_at(Some(parent_path.to_string()), cx);
+    }
+
+    fn open_session_group_creation_at(
+        &mut self,
+        parent_path: Option<String>,
+        cx: &mut Context<Self>,
+    ) {
         self.session_manager.update(cx, |session_manager, cx| {
             close_session_menu_state(session_manager);
             session_manager.show_group_manager = true;
-            session_manager.group_editor = Some(SessionManagerGroupEditor::Create);
+            // The editor keeps the parent immutable so users only enter one segment.
+            session_manager.group_editor = Some(SessionManagerGroupEditor::Create { parent_path });
             session_manager.group_name_draft.clear();
             session_manager.group_editor_error = None;
             session_manager.group_manager_error = None;
@@ -282,13 +346,18 @@ impl WorkspaceApp {
     }
 
     pub(super) fn open_session_group_rename(&mut self, group: &str, cx: &mut Context<Self>) {
-        let group = group.to_string();
+        let (parent_path, leaf_name) = split_session_group_path(group);
+        let old_path = group.to_string();
+        let parent_path = parent_path.map(ToOwned::to_owned);
+        let leaf_name = leaf_name.to_string();
         self.session_manager.update(cx, |session_manager, cx| {
             close_session_menu_state(session_manager);
             session_manager.show_group_manager = true;
-            session_manager.group_name_draft.clone_from(&group);
-            session_manager.group_editor =
-                Some(SessionManagerGroupEditor::Rename { old_name: group });
+            session_manager.group_name_draft = leaf_name;
+            session_manager.group_editor = Some(SessionManagerGroupEditor::Rename {
+                old_path,
+                parent_path,
+            });
             session_manager.group_editor_error = None;
             session_manager.group_manager_error = None;
             session_manager.focused_input = Some(SessionManagerInput::GroupName);

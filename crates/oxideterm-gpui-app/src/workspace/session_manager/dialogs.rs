@@ -80,12 +80,46 @@ impl WorkspaceApp {
             )
         };
         let is_rename = matches!(editor, Some(SessionManagerGroupEditor::Rename { .. }));
-        let unchanged_name = matches!(
-            editor.as_ref(),
-            Some(SessionManagerGroupEditor::Rename { old_name })
-                if old_name == group_name.trim()
+        let is_subgroup = matches!(
+            editor,
+            Some(SessionManagerGroupEditor::Create {
+                parent_path: Some(_)
+            })
         );
-        let can_save_group = !group_name.trim().is_empty() && !unchanged_name;
+        let parent_path = match editor.as_ref() {
+            Some(SessionManagerGroupEditor::Create { parent_path })
+            | Some(SessionManagerGroupEditor::Rename { parent_path, .. }) => parent_path.clone(),
+            None => None,
+        };
+        let candidate_path = session_group_path_from_leaf(parent_path.as_deref(), &group_name);
+        let unchanged_name = matches!(
+            (editor.as_ref(), candidate_path.as_deref()),
+            (
+                Some(SessionManagerGroupEditor::Rename { old_path, .. }),
+                Some(candidate)
+            ) if old_path == candidate
+        );
+        let invalid_leaf_name = !group_name.trim().is_empty() && candidate_path.is_none();
+        let editor_has_error = editor_error.is_some() || invalid_leaf_name;
+        let editor_message = editor_error.unwrap_or_else(|| {
+            self.i18n.t(if invalid_leaf_name {
+                "sessionManager.folder_tree.group_name_invalid"
+            } else if is_rename {
+                "sessionManager.folder_tree.rename_group_description"
+            } else if is_subgroup {
+                "sessionManager.folder_tree.new_subgroup_description"
+            } else {
+                "sessionManager.folder_tree.new_group_description"
+            })
+        });
+        let editor_action_key = if is_rename {
+            "sessionManager.folder_tree.rename_group"
+        } else if is_subgroup {
+            "sessionManager.folder_tree.new_subgroup"
+        } else {
+            "sessionManager.folder_tree.new_group"
+        };
+        let can_save_group = editor.is_some() && candidate_path.is_some() && !unchanged_name;
         let group_actions_disabled = editor.is_some();
         let workspace = cx.entity();
 
@@ -260,17 +294,35 @@ impl WorkspaceApp {
                                 div()
                                     .text_size(px(self.tokens.metrics.ui_text_sm))
                                     .font_weight(gpui::FontWeight::SEMIBOLD)
-                                    .child(self.i18n.t(if is_rename {
-                                        "sessionManager.folder_tree.rename_group"
-                                    } else {
-                                        "sessionManager.folder_tree.new_group"
-                                    })),
+                                    .child(self.i18n.t(editor_action_key)),
                             )
+                            .when_some(parent_path.clone(), |editor, parent_path| {
+                                editor.child(
+                                    div()
+                                        .min_w(px(0.0))
+                                        .flex()
+                                        .items_center()
+                                        .gap(px(self.tokens.spacing.two))
+                                        .text_size(px(self.tokens.metrics.ui_text_xs))
+                                        .text_color(rgb(theme.text_muted))
+                                        .child(
+                                            self.i18n.t("sessionManager.folder_tree.parent_group"),
+                                        )
+                                        .child(
+                                            div()
+                                                .min_w(px(0.0))
+                                                .flex_1()
+                                                .truncate()
+                                                .text_color(rgb(theme.text))
+                                                .child(parent_path),
+                                        ),
+                                )
+                            })
                             .child(
                                 div()
                                     .text_size(px(self.tokens.metrics.ui_text_xs))
                                     .text_color(rgb(theme.text_muted))
-                                    .child(self.i18n.t("sessionManager.folder_tree.group_path")),
+                                    .child(self.i18n.t("sessionManager.folder_tree.group_name")),
                             )
                             .child(
                                 self.render_session_text_input(
@@ -285,18 +337,12 @@ impl WorkspaceApp {
                                 div()
                                     .min_h(px(18.0))
                                     .text_size(px(self.tokens.metrics.ui_text_xs))
-                                    .text_color(rgb(if editor_error.is_some() {
+                                    .text_color(rgb(if editor_has_error {
                                         theme.error
                                     } else {
                                         theme.text_muted
                                     }))
-                                    .child(editor_error.unwrap_or_else(|| {
-                                        self.i18n.t(if is_rename {
-                                            "sessionManager.folder_tree.rename_group_description"
-                                        } else {
-                                            "sessionManager.folder_tree.new_group_description"
-                                        })
-                                    })),
+                                    .child(editor_message),
                             )
                             .child(
                                 div()
@@ -314,11 +360,7 @@ impl WorkspaceApp {
                                         cx,
                                     ))
                                     .child(self.session_manager_basic_footer_action(
-                                        self.i18n.t(if is_rename {
-                                            "sessionManager.folder_tree.rename_group"
-                                        } else {
-                                            "sessionManager.folder_tree.new_group"
-                                        }),
+                                        self.i18n.t(editor_action_key),
                                         ButtonVariant::Default,
                                         SessionManagerBasicDialogFooterAction::Primary,
                                         !can_save_group,

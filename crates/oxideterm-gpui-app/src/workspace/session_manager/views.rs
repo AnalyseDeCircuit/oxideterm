@@ -111,6 +111,25 @@ impl SessionManagerDisplayItem {
         }
     }
 
+    pub(super) fn row_action_target(&self) -> Option<SessionManagerRowActionTarget> {
+        // SSH config discoveries are not persisted rows and therefore have no delete menu.
+        match self {
+            Self::Connection(connection) => Some(SessionManagerRowActionTarget::Connection(
+                connection.id.clone(),
+            )),
+            Self::Serial(profile) => {
+                Some(SessionManagerRowActionTarget::Serial(profile.id.clone()))
+            }
+            Self::Telnet(profile) => {
+                Some(SessionManagerRowActionTarget::Telnet(profile.id.clone()))
+            }
+            Self::RemoteDesktop(profile) => Some(SessionManagerRowActionTarget::RemoteDesktop(
+                profile.id.clone(),
+            )),
+            Self::SshConfig(_) => None,
+        }
+    }
+
     pub(super) fn open_target(&self) -> SessionManagerOpenTarget {
         match self {
             Self::Connection(connection) => {
@@ -504,7 +523,7 @@ impl WorkspaceApp {
     ) -> AnyElement {
         let items = self.session_manager_display_items(cx);
         let view_mode = self.session_manager.read(cx).view_mode;
-        if items.is_empty() {
+        if items.is_empty() && view_mode != SessionManagerViewMode::Tree {
             return div()
                 .size_full()
                 .flex()
@@ -986,6 +1005,7 @@ impl WorkspaceApp {
             &children,
             &expanded_groups,
         ));
+        let has_rows = !rows.is_empty();
         self.sync_session_manager_tree_list_state(&rows, &items, cx);
         let state = self.session_manager.read(cx).main_tree_list_state.clone();
         let workspace = cx.entity();
@@ -1015,7 +1035,34 @@ impl WorkspaceApp {
                 rgb(theme.bg)
             })
             .child(self.render_session_manager_view_actions(true, has_background, cx))
-            .child(div().flex_1().min_h(px(0.0)).child(list))
+            .child(
+                div()
+                    .flex_1()
+                    .min_h(px(0.0))
+                    .on_mouse_down(
+                        MouseButton::Right,
+                        cx.listener(|this, event: &MouseDownEvent, _window, cx| {
+                            // Empty tree space represents the root group level.
+                            this.open_session_manager_context_menu(
+                                SessionManagerRowActionTarget::GroupRoot,
+                                f32::from(event.position.x),
+                                f32::from(event.position.y),
+                                cx,
+                            );
+                            cx.stop_propagation();
+                        }),
+                    )
+                    .on_scroll_wheel(cx.listener(|this, _event, _window, cx| {
+                        // Close pointer-positioned menus before the virtual rows move.
+                        this.close_session_row_menus(cx);
+                    }))
+                    .child(if has_rows {
+                        list.into_any_element()
+                    } else {
+                        self.render_session_manager_empty_view(has_background, cx)
+                            .into_any_element()
+                    }),
+            )
             .into_any_element()
     }
 
@@ -1161,7 +1208,22 @@ impl WorkspaceApp {
             Some(SessionManagerTreeRow::Item { item_index, depth }) => items
                 .get(*item_index)
                 .map(|item| {
+                    let context_target = item.row_action_target();
                     self.render_session_manager_display_item_row(item, *depth, has_background, cx)
+                        .on_mouse_down(
+                            MouseButton::Right,
+                            cx.listener(move |this, event: &MouseDownEvent, _window, cx| {
+                                if let Some(target) = context_target.clone() {
+                                    this.open_session_manager_context_menu(
+                                        target,
+                                        f32::from(event.position.x),
+                                        f32::from(event.position.y),
+                                        cx,
+                                    );
+                                }
+                                cx.stop_propagation();
+                            }),
+                        )
                         .into_any_element()
                 })
                 .unwrap_or_else(|| div().into_any_element()),
@@ -1181,6 +1243,7 @@ impl WorkspaceApp {
         let theme = self.tokens.ui;
         let group_name = group.rsplit('/').next().unwrap_or(group).to_string();
         let group_id = group.to_string();
+        let context_group = group.to_string();
         let menu_group = group.to_string();
         div()
             .w_full()
@@ -1201,6 +1264,18 @@ impl WorkspaceApp {
                         this.toggle_session_group_expanded(&group_id, cx);
                         cx.notify();
                     }
+                    cx.stop_propagation();
+                }),
+            )
+            .on_mouse_down(
+                MouseButton::Right,
+                cx.listener(move |this, event: &MouseDownEvent, _window, cx| {
+                    this.open_session_manager_context_menu(
+                        SessionManagerRowActionTarget::Group(context_group.clone()),
+                        f32::from(event.position.x),
+                        f32::from(event.position.y),
+                        cx,
+                    );
                     cx.stop_propagation();
                 }),
             )
@@ -1666,13 +1741,19 @@ impl WorkspaceApp {
             SessionManagerRowActionTarget::Serial(_) | SessionManagerRowActionTarget::Telnet(_) => {
                 MANAGER_ROW_ACTION_MENU_PROFILE_HEIGHT
             }
-            SessionManagerRowActionTarget::Group(_) => {
-                MANAGER_ROW_ACTION_MENU_EDITABLE_PROFILE_HEIGHT
-            }
+            SessionManagerRowActionTarget::GroupRoot => MANAGER_ROW_ACTION_MENU_PROFILE_HEIGHT,
+            SessionManagerRowActionTarget::Group(_) => MANAGER_ROW_ACTION_MENU_GROUP_HEIGHT,
+        };
+        let (requested_x, requested_y) = match menu.origin {
+            SessionManagerRowActionMenuOrigin::ActionButton => (
+                menu.x - MANAGER_ROW_ACTION_MENU_WIDTH + MANAGER_ROW_ACTION_BUTTON / 2.0,
+                menu.y + MANAGER_ROW_ACTION_BUTTON / 2.0,
+            ),
+            SessionManagerRowActionMenuOrigin::Pointer => (menu.x, menu.y),
         };
         let placement = browser_behavior::clamp_context_menu_position(
-            menu.x - MANAGER_ROW_ACTION_MENU_WIDTH + MANAGER_ROW_ACTION_BUTTON / 2.0,
-            menu.y + MANAGER_ROW_ACTION_BUTTON / 2.0,
+            requested_x,
+            requested_y,
             f32::from(viewport.width),
             f32::from(viewport.height),
             MANAGER_ROW_ACTION_MENU_WIDTH,
@@ -1683,9 +1764,47 @@ impl WorkspaceApp {
             dropdown_menu_content(&self.tokens).w(px(MANAGER_ROW_ACTION_MENU_WIDTH)),
         );
 
+        if matches!(&menu.target, SessionManagerRowActionTarget::GroupRoot) {
+            popup = popup.child(self.render_session_manager_menu_action(
+                dropdown_menu_item(
+                    &self.tokens,
+                    self.i18n.t("sessionManager.folder_tree.new_group"),
+                    DropdownMenuItemKind::Plain,
+                    false,
+                    false,
+                ),
+                false,
+                false,
+                has_background,
+                move |this, _event, _window, cx| {
+                    this.open_session_group_creation(cx);
+                    cx.stop_propagation();
+                },
+                cx,
+            ));
+        }
+
         if let SessionManagerRowActionTarget::Group(group) = &menu.target {
+            let subgroup_parent = group.clone();
             let rename_group = group.clone();
             popup = popup
+                .child(self.render_session_manager_menu_action(
+                    dropdown_menu_item(
+                        &self.tokens,
+                        self.i18n.t("sessionManager.folder_tree.new_subgroup"),
+                        DropdownMenuItemKind::Plain,
+                        false,
+                        false,
+                    ),
+                    false,
+                    false,
+                    has_background,
+                    move |this, _event, _window, cx| {
+                        this.open_session_subgroup_creation(&subgroup_parent, cx);
+                        cx.stop_propagation();
+                    },
+                    cx,
+                ))
                 .child(self.render_session_manager_menu_action(
                     dropdown_menu_item(
                         &self.tokens,
@@ -1771,67 +1890,71 @@ impl WorkspaceApp {
                 .child(dropdown_menu_separator(&self.tokens));
         }
 
-        let delete_target = menu.target.clone();
-        let (delete_id, delete_label) = match &menu.target {
+        let delete_action = match &menu.target {
             SessionManagerRowActionTarget::Connection(id) => {
-                (id.clone(), self.i18n.t("sessionManager.actions.delete"))
+                Some((id.clone(), self.i18n.t("sessionManager.actions.delete")))
             }
-            SessionManagerRowActionTarget::Serial(id) => (
+            SessionManagerRowActionTarget::Serial(id) => Some((
                 id.clone(),
                 self.i18n.t("sessionManager.serial_profiles.delete"),
-            ),
-            SessionManagerRowActionTarget::Telnet(id) => (
+            )),
+            SessionManagerRowActionTarget::Telnet(id) => Some((
                 id.clone(),
                 self.i18n.t("sessionManager.telnet_profiles.delete"),
-            ),
-            SessionManagerRowActionTarget::RemoteDesktop(id) => (
+            )),
+            SessionManagerRowActionTarget::RemoteDesktop(id) => Some((
                 id.clone(),
                 self.i18n.t("sessionManager.remote_desktop_profiles.delete"),
-            ),
-            SessionManagerRowActionTarget::Group(group) => (
+            )),
+            SessionManagerRowActionTarget::Group(group) => Some((
                 group.clone(),
                 self.i18n.t("sessionManager.folder_tree.delete_group"),
-            ),
+            )),
+            SessionManagerRowActionTarget::GroupRoot => None,
         };
-        popup = popup.child(
-            self.render_session_manager_menu_action(
-                dropdown_menu_item(
-                    &self.tokens,
-                    delete_label,
-                    DropdownMenuItemKind::Plain,
+        if let Some((delete_id, delete_label)) = delete_action {
+            let delete_target = menu.target.clone();
+            popup = popup.child(
+                self.render_session_manager_menu_action(
+                    dropdown_menu_item(
+                        &self.tokens,
+                        delete_label,
+                        DropdownMenuItemKind::Plain,
+                        false,
+                        false,
+                    )
+                    .text_color(rgb(self.tokens.ui.error)),
                     false,
                     false,
-                )
-                .text_color(rgb(self.tokens.ui.error)),
-                false,
-                false,
-                has_background,
-                move |this, _event, _window, cx| {
-                    match &delete_target {
-                        SessionManagerRowActionTarget::Connection(_) => {
-                            this.request_delete_connection(&delete_id, cx)
+                    has_background,
+                    move |this, _event, _window, cx| {
+                        match &delete_target {
+                            SessionManagerRowActionTarget::Connection(_) => {
+                                this.request_delete_connection(&delete_id, cx)
+                            }
+                            SessionManagerRowActionTarget::Serial(_) => {
+                                this.request_delete_serial_profile(&delete_id, cx)
+                            }
+                            SessionManagerRowActionTarget::Telnet(_) => {
+                                this.request_delete_telnet_profile(&delete_id, cx)
+                            }
+                            SessionManagerRowActionTarget::RemoteDesktop(_) => {
+                                this.request_delete_remote_desktop_profile(&delete_id, cx)
+                            }
+                            SessionManagerRowActionTarget::Group(_) => {
+                                this.request_delete_session_group(&delete_id, cx)
+                            }
+                            SessionManagerRowActionTarget::GroupRoot => {}
                         }
-                        SessionManagerRowActionTarget::Serial(_) => {
-                            this.request_delete_serial_profile(&delete_id, cx)
-                        }
-                        SessionManagerRowActionTarget::Telnet(_) => {
-                            this.request_delete_telnet_profile(&delete_id, cx)
-                        }
-                        SessionManagerRowActionTarget::RemoteDesktop(_) => {
-                            this.request_delete_remote_desktop_profile(&delete_id, cx)
-                        }
-                        SessionManagerRowActionTarget::Group(_) => {
-                            this.request_delete_session_group(&delete_id, cx)
-                        }
-                    }
-                    cx.stop_propagation();
-                },
-                cx,
-            ),
-        );
+                        cx.stop_propagation();
+                    },
+                    cx,
+                ),
+            );
+        }
 
-        // The menu uses pointer coordinates because the same action renderer
-        // is shared by cards, list rows, and nested tree rows.
+        // Pointer menus use the click position while ellipsis menus preserve
+        // their established button alignment; both mount at the window root.
         deferred(
             anchored()
                 .anchor(Corner::TopLeft)

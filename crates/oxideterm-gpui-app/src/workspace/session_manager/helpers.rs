@@ -38,6 +38,28 @@ pub(super) fn expand_group_path(group: &str, expanded_groups: &mut HashSet<Strin
     }
 }
 
+/// Splits a canonical group path into its parent path and editable leaf name.
+pub(super) fn split_session_group_path(group: &str) -> (Option<&str>, &str) {
+    group
+        .rsplit_once('/')
+        .map_or((None, group), |(parent, leaf)| (Some(parent), leaf))
+}
+
+/// Builds a canonical path while keeping contextual editors leaf-name only.
+pub(super) fn session_group_path_from_leaf(
+    parent_path: Option<&str>,
+    leaf_name: &str,
+) -> Option<String> {
+    let leaf_name = leaf_name.trim();
+    if leaf_name.is_empty() || leaf_name.contains('/') {
+        return None;
+    }
+    Some(match parent_path.filter(|parent| !parent.is_empty()) {
+        Some(parent) => format!("{parent}/{leaf_name}"),
+        None => leaf_name.to_string(),
+    })
+}
+
 /// Returns whether a path is the selected group or one of its descendants.
 pub(super) fn session_group_path_is_within(candidate: &str, group: &str) -> bool {
     candidate == group

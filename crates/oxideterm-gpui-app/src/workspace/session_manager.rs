@@ -92,6 +92,7 @@ const MANAGER_ROW_ACTION_MENU_WIDTH: f32 = 176.0;
 const MANAGER_ROW_ACTION_MENU_CONNECTION_HEIGHT: f32 = 120.0;
 const MANAGER_ROW_ACTION_MENU_PROFILE_HEIGHT: f32 = 44.0;
 const MANAGER_ROW_ACTION_MENU_EDITABLE_PROFILE_HEIGHT: f32 = 80.0;
+const MANAGER_ROW_ACTION_MENU_GROUP_HEIGHT: f32 = 120.0;
 const MANAGER_VIEW_MODE_MENU_WIDTH: f32 = 168.0; // Tauri DropdownMenuContent min-w-[160px] plus native menu padding.
 const MANAGER_VIEW_MODE_MENU_HEIGHT: f32 = 104.0; // Three compact radio rows plus menu padding.
 const MANAGER_SORT_MENU_WIDTH: f32 = 184.0; // Sort fields reuse the compact toolbar dropdown rhythm.
@@ -245,8 +246,13 @@ pub(super) enum SessionManagerBasicDialogFooterAction {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(super) enum SessionManagerGroupEditor {
-    Create,
-    Rename { old_name: String },
+    Create {
+        parent_path: Option<String>,
+    },
+    Rename {
+        old_path: String,
+        parent_path: Option<String>,
+    },
 }
 
 const SESSION_MANAGER_BASIC_DIALOG_FOOTER_ACTIONS: [SessionManagerBasicDialogFooterAction; 2] = [
@@ -303,13 +309,21 @@ pub(super) enum SessionManagerRowActionTarget {
     Serial(String),
     Telnet(String),
     RemoteDesktop(String),
+    GroupRoot,
     Group(String),
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum SessionManagerRowActionMenuOrigin {
+    ActionButton,
+    Pointer,
 }
 
 #[derive(Clone, Debug)]
 pub(super) struct SessionManagerRowActionMenu {
     // Stable ids keep the floating menu independent from temporary row futures.
     pub(super) target: SessionManagerRowActionTarget,
+    pub(super) origin: SessionManagerRowActionMenuOrigin,
     pub(super) x: f32,
     pub(super) y: f32,
 }
@@ -426,7 +440,8 @@ impl Default for SessionManagerState {
     fn default() -> Self {
         Self {
             selected_group: None,
-            view_mode: SessionManagerViewMode::Grid,
+            // Group management is contextual in the tree, so make that capability discoverable.
+            view_mode: SessionManagerViewMode::Tree,
             sort_field: SessionSortField::LastUsed,
             sort_direction: SortDirection::Desc,
             search_query: String::new(),

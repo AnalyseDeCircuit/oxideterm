@@ -242,6 +242,42 @@ pub(super) fn session_group_ui_state_rewrites_only_the_selected_subtree() {
 }
 
 #[test]
+pub(super) fn contextual_group_editors_compose_only_one_path_segment() {
+    assert_eq!(
+        split_session_group_path("Production/Core/Database"),
+        (Some("Production/Core"), "Database")
+    );
+    assert_eq!(
+        session_group_path_from_leaf(Some("Production/Core"), " Database "),
+        Some("Production/Core/Database".to_string())
+    );
+    assert_eq!(
+        session_group_path_from_leaf(Some("Production/Core"), "Cache"),
+        Some("Production/Core/Cache".to_string())
+    );
+    assert_eq!(
+        session_group_path_from_leaf(None, "Production"),
+        Some("Production".to_string())
+    );
+    assert_eq!(
+        session_group_path_from_leaf(Some("Production"), "Core/Database"),
+        None
+    );
+    assert_eq!(session_group_path_from_leaf(None, "   "), None);
+}
+
+#[test]
+pub(super) fn session_group_tree_exposes_contextual_root_and_group_actions() {
+    let source = include_str!("views.rs");
+    // Tree-level and row-level right clicks must use pointer-positioned menus.
+    assert!(source.contains("SessionManagerRowActionTarget::GroupRoot"));
+    assert!(source.contains("open_session_manager_context_menu"));
+    assert!(source.contains("sessionManager.folder_tree.new_subgroup"));
+    assert!(source.contains("MouseButton::Right"));
+    assert!(source.contains("close_session_row_menus(cx)"));
+}
+
+#[test]
 pub(super) fn session_manager_main_views_keep_independent_empty_list_states() {
     let state = SessionManagerState::default();
 
@@ -417,6 +453,7 @@ pub(super) fn session_menu_dismissal_closes_all_manager_popovers() {
         show_batch_move: true,
         row_action_menu: Some(SessionManagerRowActionMenu {
             target: SessionManagerRowActionTarget::Connection("connection-1".to_string()),
+            origin: SessionManagerRowActionMenuOrigin::Pointer,
             x: 120.0,
             y: 80.0,
         }),
