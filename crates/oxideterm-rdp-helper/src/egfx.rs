@@ -7,6 +7,9 @@ use std::{
     sync::{Arc, Mutex},
 };
 
+use ironrdp::pdu::codecs::rfx::progressive::{
+    ProgressiveBlock, ProgressiveContextPdu, decode_progressive_stream, encode_progressive_stream,
+};
 use ironrdp::pdu::geometry::{ExclusiveRectangle, Rectangle as _};
 use ironrdp_egfx::{
     client::{BitmapUpdate, GraphicsPipelineClient, GraphicsPipelineHandler, Surface},
@@ -17,7 +20,10 @@ use ironrdp_egfx::{
         SurfaceToSurfacePdu, WireToSurface2Pdu,
     },
 };
-use ironrdp_graphics::{clearcodec::ClearCodecDecoder, progressive::ProgressiveDecoder};
+use ironrdp_graphics::{
+    clearcodec::ClearCodecDecoder,
+    progressive::{ProgressiveDecodeError, ProgressiveDecoder},
+};
 use oxideterm_remote_desktop::{
     RemoteDesktopFrame, RemoteDesktopFrameFormat, RemoteDesktopFrameUpdate,
     RemoteDesktopHelperEvent, RemoteDesktopRect, RemoteDesktopSize,
@@ -317,7 +323,8 @@ impl EgfxRenderer {
         self.allocated_surface_bytes = 0;
         self.cache.clear();
         self.allocated_cache_bytes = 0;
-        self.progressive_decoder.reset();
+        // RESET_GRAPHICS discards surfaces, but progressive codec contexts
+        // remain valid until DELETE_ENCODING_CONTEXT explicitly removes them.
         self.clearcodec_decoder = ClearCodecDecoder::new();
     }
 
@@ -413,15 +420,30 @@ impl EgfxRenderer {
 
     fn apply_progressive_update(&mut self, pdu: &WireToSurface2Pdu) -> Result<(), String> {
         let (surface_width, surface_height) = self.surface_dimensions(pdu.surface_id)?;
-        let tiles = self
-            .progressive_decoder
-            .decode_bitmap(
-                pdu.codec_context_id,
-                surface_width,
-                surface_height,
-                &pdu.bitmap_data,
-            )
-            .map_err(|error| format!("RDP Progressive decode failed: {error}"))?;
+        let decode = self.progressive_decoder.decode_bitmap(
+            pdu.codec_context_id,
+            surface_width,
+            surface_height,
+            &pdu.bitmap_data,
+        );
+        let tiles = match decode {
+            Ok(tiles) => tiles,
+            Err(ProgressiveDecodeError::MissingBlock("CONTEXT")) => {
+                // MS-RDPEGFX makes RFX_PROGRESSIVE_CONTEXT optional. Retry
+                // first-use streams with the protocol default context instead
+                // of terminating the remote desktop session.
+                let bitmap_data = progressive_bitmap_with_default_context(&pdu.bitmap_data)?;
+                self.progressive_decoder
+                    .decode_bitmap(
+                        pdu.codec_context_id,
+                        surface_width,
+                        surface_height,
+                        &bitmap_data,
+                    )
+                    .map_err(|error| format!("RDP Progressive decode failed: {error}"))?
+            }
+            Err(error) => return Err(format!("RDP Progressive decode failed: {error}")),
+        };
 
         for tile in tiles {
             let x = tile.x_idx.saturating_mul(EGFX_PROGRESSIVE_TILE_EDGE);
@@ -741,6 +763,25 @@ impl EgfxRenderer {
             .output_tx
             .send_control(ClientRdpOutput::ProtocolFailure(message));
     }
+}
+
+fn progressive_bitmap_with_default_context(bitmap_data: &[u8]) -> Result<Vec<u8>, String> {
+    let mut blocks = decode_progressive_stream(bitmap_data)
+        .map_err(|error| format!("RDP Progressive stream decode failed: {error}"))?;
+    let insert_index = blocks
+        .iter()
+        .position(|block| matches!(block, ProgressiveBlock::FrameBegin(_)))
+        .unwrap_or(blocks.len());
+    blocks.insert(
+        insert_index,
+        ProgressiveBlock::Context(ProgressiveContextPdu {
+            context_id: 0,
+            tile_size: EGFX_PROGRESSIVE_TILE_EDGE,
+            flags: 0,
+        }),
+    );
+    encode_progressive_stream(&blocks)
+        .map_err(|error| format!("RDP Progressive stream encode failed: {error}"))
 }
 
 struct EgfxSurface {
