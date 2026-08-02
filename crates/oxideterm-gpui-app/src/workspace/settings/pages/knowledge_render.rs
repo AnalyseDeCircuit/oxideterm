@@ -49,6 +49,7 @@ impl WorkspaceApp {
                     collection,
                     selected_documents,
                     selected_stats,
+                    true,
                     cx,
                 );
             }
@@ -135,11 +136,13 @@ impl WorkspaceApp {
         collection: &oxideterm_ai::RagCollectionResponse,
         documents: Option<oxideterm_ai::RagPaginatedDocuments>,
         stats: Option<oxideterm_ai::RagStatsResponse>,
+        include_document_rows: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let reindex_collection_id = collection.id.clone();
         let import_collection_id = collection.id.clone();
         let embedding_collection_id = collection.id.clone();
+        let create_document_collection_id = collection.id.clone();
         let documents = documents.map(|page| page.documents).unwrap_or_default();
         let import_progress = self.ai_entity.read(cx).knowledge_import_progress();
         let embedding_progress = self.ai_entity.read(cx).knowledge_embedding_progress();
@@ -221,8 +224,13 @@ impl WorkspaceApp {
                             LucideIcon::FilePlus,
                             self.i18n.t("settings_view.knowledge.new_document"),
                             false,
-                            cx.listener(|this, _event, _window, cx| {
-                                this.open_knowledge_document_dialog(cx);
+                            cx.listener(move |this, _event, window, cx| {
+                                this.open_knowledge_document_dialog(
+                                    create_document_collection_id.clone(),
+                                    false,
+                                    window,
+                                    cx,
+                                );
                                 this.reset_standard_confirm_focus();
                                 cx.stop_propagation();
                             }),
@@ -274,16 +282,18 @@ impl WorkspaceApp {
         if let Some(stats) = stats {
             rows.push(self.knowledge_stats_row(stats, cx));
         }
-        rows.push(self.card_separator());
-        if documents.is_empty() {
-            rows.push(self.knowledge_empty_row(
-                LucideIcon::FileText,
-                self.i18n.t("settings_view.knowledge.no_documents"),
-                cx,
-            ));
-        } else {
-            for document in documents {
-                rows.push(self.knowledge_document_row(document, cx));
+        if include_document_rows {
+            rows.push(self.card_separator());
+            if documents.is_empty() {
+                rows.push(self.knowledge_empty_row(
+                    LucideIcon::FileText,
+                    self.i18n.t("settings_view.knowledge.no_documents"),
+                    cx,
+                ));
+            } else {
+                for document in documents {
+                    rows.push(self.knowledge_document_row(document, false, cx));
+                }
             }
         }
         self.settings_card(
@@ -331,6 +341,7 @@ impl WorkspaceApp {
                         entity.select_knowledge_collection(collection_id.clone());
                         cx.notify();
                     });
+                    this.refresh_knowledge_navigator(true, cx);
                     cx.stop_propagation();
                     cx.notify();
                 }),
@@ -460,115 +471,141 @@ impl WorkspaceApp {
     pub(in crate::workspace) fn knowledge_document_row(
         &self,
         document: oxideterm_ai::RagDocumentResponse,
+        open_in_workspace: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let delete_id = document.id.clone();
         let delete_name = document.title.clone();
         let edit_id = document.id.clone();
-        let editing_this = self
-            .ai_entity
-            .read(cx)
-            .knowledge_external_edit()
-            .is_some_and(|edit| edit.doc_id == document.id);
-        div()
-            .flex()
-            .items_center()
-            .justify_between()
-            .gap(px(12.0))
-            .rounded(px(self.tokens.radii.md))
-            .px(px(12.0))
-            .py(px(8.0))
-            .hover(|style| style.bg(rgb(self.tokens.ui.bg_hover)))
-            .child(
-                div()
-                    .min_w(px(0.0))
-                    .flex_1()
-                    .flex()
-                    .items_center()
-                    .gap(px(12.0))
-                    .child(div().flex_none().child(Self::render_lucide_icon(
-                        LucideIcon::FileText,
-                        KNOWLEDGE_ROW_ICON_SIZE,
-                        rgb(self.tokens.ui.text_muted),
-                    )))
-                    .child(
-                        div()
-                            .min_w(px(0.0))
-                            .flex_1()
-                            .flex()
-                            .flex_col()
-                            .gap(px(2.0))
-                            .child(
-                                div()
-                                    .text_size(px(self.tokens.metrics.ui_text_sm))
-                                    .text_color(rgb(self.tokens.ui.text))
-                                    .truncate()
-                                    .child(document.title),
-                            )
-                            .child(
-                                div()
-                                    .text_size(px(self.tokens.metrics.ui_text_xs))
-                                    .text_color(rgb(self.tokens.ui.text_muted))
-                                    .truncate()
-                                    .child(format!(
-                                        "{} · {} {} · {}",
-                                        document.format,
-                                        document.chunk_count,
-                                        self.i18n.t("settings_view.knowledge.chunks"),
-                                        self.knowledge_format_date(document.indexed_at)
-                                    )),
-                            ),
-                    ),
-            )
-            .child(
-                div()
-                    .flex_none()
-                    .flex()
-                    .items_center()
-                    .gap(px(6.0))
-                    .child(if editing_this {
-                        self.knowledge_icon_button(
-                            LucideIcon::RefreshCw,
-                            rgb(self.tokens.ui.accent),
-                            Some(rgb(self.tokens.ui.accent)),
-                            |this, _event, _window, cx| {
-                                this.knowledge_sync_external_edit(true, cx);
-                                cx.stop_propagation();
-                            },
-                            cx,
-                        )
-                    } else {
-                        self.knowledge_icon_button(
-                            LucideIcon::Pencil,
-                            rgb(self.tokens.ui.text_muted),
-                            Some(rgb(self.tokens.ui.text)),
-                            move |this, _event, _window, cx| {
-                                this.knowledge_open_external(edit_id.clone(), cx);
-                                cx.stop_propagation();
-                            },
-                            cx,
-                        )
-                    })
-                    .child(self.knowledge_icon_button(
-                        LucideIcon::Trash2,
-                        rgb(self.tokens.ui.text_muted),
-                        Some(rgb(self.tokens.ui.error)),
-                        move |this, _event, _window, cx| {
-                            this.ai_entity.update(cx, |entity, cx| {
-                                entity.request_delete_knowledge_document(
-                                    delete_id.clone(),
-                                    delete_name.clone(),
-                                );
-                                cx.notify();
-                            });
-                            this.reset_standard_confirm_focus();
+        let open_id = document.id.clone();
+        let selected = open_in_workspace && self.is_knowledge_document_selected(&document.id, cx);
+        let metadata = format!(
+            "{} · {} {} · {}",
+            document.format,
+            document.chunk_count,
+            self.i18n.t("settings_view.knowledge.chunks"),
+            self.knowledge_format_date(document.indexed_at)
+        );
+        let editing_this = !open_in_workspace
+            && self
+                .ai_entity
+                .read(cx)
+                .knowledge_external_edit()
+                .is_some_and(|edit| edit.doc_id == document.id);
+        let mut options = oxideterm_gpui_ui::EntityListRowOptions::new()
+            .active(selected)
+            .has_background_image(self.background_surface_active("knowledge"));
+        if open_in_workspace {
+            options = options.compact();
+        }
+        let mut trailing = Vec::with_capacity(2);
+        if !open_in_workspace {
+            trailing.push(
+                if editing_this {
+                    self.knowledge_icon_button(
+                        LucideIcon::RefreshCw,
+                        rgb(self.tokens.ui.accent),
+                        Some(rgb(self.tokens.ui.accent)),
+                        |this, _event, _window, cx| {
+                            this.knowledge_sync_external_edit(true, cx);
                             cx.stop_propagation();
-                            cx.notify();
                         },
                         cx,
-                    )),
+                    )
+                } else {
+                    self.knowledge_icon_button(
+                        LucideIcon::Pencil,
+                        rgb(self.tokens.ui.text_muted),
+                        Some(rgb(self.tokens.ui.text)),
+                        move |this, _event, _window, cx| {
+                            this.knowledge_open_external(edit_id.clone(), cx);
+                            cx.stop_propagation();
+                        },
+                        cx,
+                    )
+                }
+                .into_any_element(),
+            );
+        }
+        trailing.push(
+            self.knowledge_icon_button(
+                LucideIcon::Trash2,
+                rgb(self.tokens.ui.text_muted),
+                Some(rgb(self.tokens.ui.error)),
+                move |this, _event, _window, cx| {
+                    this.ai_entity.update(cx, |entity, cx| {
+                        entity.request_delete_knowledge_document(
+                            delete_id.clone(),
+                            delete_name.clone(),
+                        );
+                        cx.notify();
+                    });
+                    this.reset_standard_confirm_focus();
+                    cx.stop_propagation();
+                    cx.notify();
+                },
+                cx,
             )
-            .into_any_element()
+            .into_any_element(),
+        );
+        let row = oxideterm_gpui_ui::entity_list_row(
+            &self.tokens,
+            options,
+            Some(
+                div()
+                    .flex_none()
+                    .child(Self::render_lucide_icon(
+                        LucideIcon::FileText,
+                        KNOWLEDGE_ROW_ICON_SIZE,
+                        rgb(if selected {
+                            self.tokens.ui.accent
+                        } else {
+                            self.tokens.ui.text_muted
+                        }),
+                    ))
+                    .into_any_element(),
+            ),
+            div()
+                .min_w(px(0.0))
+                .truncate()
+                .text_size(px(self.tokens.metrics.ui_text_sm))
+                .text_color(rgb(self.tokens.ui.text))
+                .child(document.title)
+                .into_any_element(),
+            (!open_in_workspace).then(|| {
+                div()
+                    .min_w(px(0.0))
+                    .truncate()
+                    .text_size(px(self.tokens.metrics.ui_text_xs))
+                    .text_color(rgb(self.tokens.ui.text_muted))
+                    .child(metadata)
+                    .into_any_element()
+            }),
+            Vec::new(),
+            trailing,
+        )
+        .id(format!("knowledge-document-row-{}", document.id))
+        .when(open_in_workspace, |row| {
+            row.h(px(40.0)).cursor_pointer().on_mouse_down(
+                MouseButton::Left,
+                cx.listener(move |this, _event, window, cx| {
+                    this.open_knowledge_workspace_tab(window, cx);
+                    this.select_knowledge_document(open_id.clone(), cx);
+                    cx.stop_propagation();
+                }),
+            )
+        });
+        if open_in_workspace {
+            div()
+                .w_full()
+                .h(px(44.0))
+                .flex_none()
+                .px(px(4.0))
+                .child(row)
+                .into_any_element()
+        } else {
+            row.into_any_element()
+        }
     }
 
     pub(in crate::workspace) fn knowledge_embedding_config_section(
@@ -925,30 +962,31 @@ impl WorkspaceApp {
         &self,
         icon: LucideIcon,
         label: String,
-        cx: &mut Context<Self>,
+        _cx: &mut Context<Self>,
     ) -> AnyElement {
         div()
+            .w_full()
             .flex()
             .flex_col()
             .items_center()
             .justify_center()
             .gap(px(8.0))
+            .px(px(16.0))
             .py(px(32.0))
+            .text_center()
             .text_color(rgb(self.tokens.ui.text_muted))
             .child(Self::render_lucide_icon(
                 icon,
                 32.0,
                 rgba((self.tokens.ui.text_muted << 8) | 0x66),
             ))
-            .child(div().text_size(px(self.tokens.metrics.ui_text_sm)).child(
-                self.render_selectable_display_text(
-                    "knowledge-empty-row",
-                    &label,
-                    label.clone(),
-                    self.tokens.ui.text_muted,
-                    cx,
-                ),
-            ))
+            .child(
+                div()
+                    .w_full()
+                    .text_center()
+                    .text_size(px(self.tokens.metrics.ui_text_sm))
+                    .child(label),
+            )
             .into_any_element()
     }
 
@@ -969,8 +1007,8 @@ impl WorkspaceApp {
         cx: &Context<Self>,
     ) -> String {
         match self.ai_entity.read(cx).knowledge_new_document_format() {
-            "plaintext" => "Plain Text".to_string(),
-            _ => "Markdown".to_string(),
+            "plaintext" => self.i18n.t("settings_view.knowledge.format_plain_text"),
+            _ => self.i18n.t("settings_view.knowledge.format_markdown"),
         }
     }
 }

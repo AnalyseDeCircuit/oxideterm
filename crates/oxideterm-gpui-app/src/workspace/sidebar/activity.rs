@@ -18,6 +18,7 @@ impl WorkspaceApp {
         ];
         let top_items_after_plugins = [
             (SidebarSection::CloudSync, LucideIcon::Cloud),
+            (SidebarSection::Knowledge, LucideIcon::BookOpen),
             (SidebarSection::Assistant, LucideIcon::Sparkles),
             (SidebarSection::HostTools, LucideIcon::Wrench),
         ];
@@ -232,6 +233,9 @@ impl WorkspaceApp {
             SidebarSection::CloudSync => self
                 .active_tab(cx)
                 .is_some_and(|tab| tab.kind == TabKind::CloudSync),
+            SidebarSection::Knowledge => self
+                .active_tab(cx)
+                .is_some_and(|tab| tab.kind == TabKind::Knowledge),
             SidebarSection::Settings => self
                 .active_tab(cx)
                 .is_some_and(|tab| tab.kind == TabKind::Settings),
@@ -398,6 +402,8 @@ impl WorkspaceApp {
                         this.open_notification_center_tab(window, cx);
                     } else if section == SidebarSection::Assistant {
                         let _ = this.toggle_ai_sidebar(cx);
+                    } else if section == SidebarSection::Knowledge {
+                        this.open_knowledge_workspace_tab(window, cx);
                     } else if section == SidebarSection::HostTools {
                         let _ =
                             this.toggle_context_sidebar_panel(ContextSidebarPanel::HostTools, cx);
@@ -426,6 +432,7 @@ impl WorkspaceApp {
             SidebarSection::Network => self.i18n.t("sidebar.panels.connection_matrix"),
             SidebarSection::Extensions => self.i18n.t("sidebar.panels.plugins"),
             SidebarSection::CloudSync => self.i18n.t("plugin.cloud_sync.panel_title"),
+            SidebarSection::Knowledge => self.i18n.t("sidebar.panels.knowledge"),
             SidebarSection::Assistant => self.i18n.t("sidebar.panels.ai"),
             SidebarSection::HostTools => self.i18n.t("sidebar.panels.host_tools"),
             SidebarSection::Automation => self.i18n.t("sidebar.panels.activity"),

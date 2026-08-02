@@ -31,6 +31,7 @@
       "export_tooltip": "Exporter vers un fichier .oxide",
       "system_health": "Santé du système",
       "host_tools": "Outils d’hôte",
+      "knowledge": "Base de connaissances",
       "host_monitor": "Surveillance",
       "gpu": "GPU / NPU",
       "processes": "Processus",

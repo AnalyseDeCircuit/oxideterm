@@ -7,8 +7,12 @@ use crate::rag::types::*;
 use redb::{Database, ReadableTable, TableDefinition};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+#[cfg(test)]
+use std::sync::atomic::AtomicBool;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, OnceLock};
+#[cfg(test)]
+use std::time::Duration;
 use std::time::Instant;
 use tracing::{debug, info, warn};
 
@@ -23,6 +27,8 @@ const DOC_CHUNKS_TABLE: TableDefinition<&str, &[u8]> = TableDefinition::new("doc
 const DOC_CHUNK_INDEX_TABLE: TableDefinition<&str, &[u8]> = TableDefinition::new("doc_chunk_index");
 const BM25_POSTINGS_TABLE: TableDefinition<&str, &[u8]> = TableDefinition::new("bm25_postings");
 const BM25_META_TABLE: TableDefinition<&str, &[u8]> = TableDefinition::new("bm25_meta");
+const BM25_CONTENT_REVISION_KEY: &str = "content_revision";
+const BM25_INDEXED_REVISION_KEY: &str = "indexed_revision";
 const EMBEDDINGS_TABLE: TableDefinition<&str, &[u8]> = TableDefinition::new("embeddings");
 const DOC_RAW_CONTENT_TABLE: TableDefinition<&str, &[u8]> = TableDefinition::new("doc_raw_content");
 
@@ -70,6 +76,44 @@ pub enum HnswIndexStatus {
     Failed(String),
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Bm25IndexStatus {
+    Ready,
+    Pending,
+    Rebuilding,
+    Failed(String),
+}
+
+struct Bm25RuntimeState {
+    status: Bm25IndexStatus,
+    worker_running: bool,
+}
+
+struct Bm25Runtime {
+    state: Mutex<Bm25RuntimeState>,
+    changed: Condvar,
+    operation: Mutex<()>,
+    requested_generation: AtomicU64,
+    #[cfg(test)]
+    fail_next_rebuild: AtomicBool,
+}
+
+impl Bm25Runtime {
+    fn new() -> Self {
+        Self {
+            state: Mutex::new(Bm25RuntimeState {
+                status: Bm25IndexStatus::Ready,
+                worker_running: false,
+            }),
+            changed: Condvar::new(),
+            operation: Mutex::new(()),
+            requested_generation: AtomicU64::new(0),
+            #[cfg(test)]
+            fail_next_rebuild: AtomicBool::new(false),
+        }
+    }
+}
+
 enum HnswRuntimeState {
     Unloaded,
     Loading,
@@ -101,6 +145,7 @@ pub struct RagStore {
     db: Arc<Database>,
     data_dir: PathBuf,
     hnsw_index: Arc<HnswRuntime>,
+    bm25_index: Arc<Bm25Runtime>,
 }
 
 impl Clone for RagStore {
@@ -109,11 +154,28 @@ impl Clone for RagStore {
             db: self.db.clone(),
             data_dir: self.data_dir.clone(),
             hnsw_index: self.hnsw_index.clone(),
+            bm25_index: self.bm25_index.clone(),
         }
     }
 }
 
 impl RagStore {
+    fn bump_bm25_content_revision(txn: &redb::WriteTransaction) -> Result<u64, RagError> {
+        let mut bm25_meta = txn.open_table(BM25_META_TABLE)?;
+        let revision = bm25_meta
+            .get(BM25_CONTENT_REVISION_KEY)?
+            .map(|value| value.value().to_vec())
+            .map(|bytes| rmp_serde::from_slice::<u64>(&bytes))
+            .transpose()?
+            .unwrap_or_default()
+            .wrapping_add(1);
+        bm25_meta.insert(
+            BM25_CONTENT_REVISION_KEY,
+            rmp_serde::to_vec(&revision)?.as_slice(),
+        )?;
+        Ok(revision)
+    }
+
     fn hnsw_operation_lock(&self) -> Result<std::sync::MutexGuard<'_, ()>, RagError> {
         lock_with_diagnostics(&self.hnsw_index.operation, "hnsw.operation")
     }
@@ -174,11 +236,18 @@ impl RagStore {
         }
         txn.commit()?;
 
-        Ok(Self {
+        let store = Self {
             db: Arc::new(db),
             data_dir: data_dir.to_path_buf(),
             hnsw_index: Arc::new(HnswRuntime::new()),
-        })
+            bm25_index: Arc::new(Bm25Runtime::new()),
+        };
+        if store.bm25_rebuild_required()?
+            && let Err(error) = store.queue_bm25_rebuild()
+        {
+            warn!("Failed to resume pending BM25 rebuild: {}", error);
+        }
+        Ok(store)
     }
 
     pub fn ensure_hnsw_loaded(&self) -> Result<Option<Arc<PersistedHnswIndex>>, RagError> {
@@ -355,6 +424,9 @@ impl RagStore {
             col_t.remove(collection_id)?;
             let mut cd_t = txn.open_table(COLLECTION_DOCS_TABLE)?;
             cd_t.remove(collection_id)?;
+            if !doc_ids.is_empty() {
+                Self::bump_bm25_content_revision(&txn)?;
+            }
         }
         txn.commit()?;
 
@@ -472,6 +544,15 @@ impl RagStore {
 
         let txn = self.db.begin_write()?;
         {
+            // Validate the parent inside the same write transaction that inserts the document.
+            // A preflight read would still allow a concurrent collection deletion to create an
+            // unreachable document and a dangling collection-docs entry.
+            let mut collections_t = txn.open_table(COLLECTIONS_TABLE)?;
+            let collection_bytes = collections_t
+                .get(metadata.collection_id.as_str())?
+                .map(|guard| guard.value().to_vec())
+                .ok_or_else(|| RagError::CollectionNotFound(metadata.collection_id.clone()))?;
+
             // Store metadata
             let mut meta_t = txn.open_table(DOC_METADATA_TABLE)?;
             meta_t.insert(metadata.id.as_str(), meta_bytes.as_slice())?;
@@ -523,17 +604,14 @@ impl RagStore {
             )?;
 
             // Update collection timestamp
-            let mut col_t = txn.open_table(COLLECTIONS_TABLE)?;
-            let col_data = col_t
-                .get(metadata.collection_id.as_str())?
-                .map(|g| g.value().to_vec());
-            if let Some(bytes) = col_data {
-                let mut col: DocCollection = rmp_serde::from_slice(&bytes)?;
-                col.updated_at = metadata.indexed_at;
-                col_t.insert(
-                    metadata.collection_id.as_str(),
-                    rmp_serde::to_vec(&col)?.as_slice(),
-                )?;
+            let mut collection: DocCollection = rmp_serde::from_slice(&collection_bytes)?;
+            collection.updated_at = metadata.indexed_at;
+            collections_t.insert(
+                metadata.collection_id.as_str(),
+                rmp_serde::to_vec(&collection)?.as_slice(),
+            )?;
+            if !chunks.is_empty() {
+                Self::bump_bm25_content_revision(&txn)?;
             }
         }
         txn.commit()?;
@@ -583,6 +661,9 @@ impl RagStore {
                     meta.collection_id.as_str(),
                     rmp_serde::to_vec(&ids)?.as_slice(),
                 )?;
+            }
+            if !chunk_ids.is_empty() {
+                Self::bump_bm25_content_revision(&txn)?;
             }
         }
         txn.commit()?;
@@ -878,6 +959,162 @@ impl RagStore {
     // BM25 Index Storage
     // ═══════════════════════════════════════════════════════════════════════
 
+    /// Returns the observable state of the coalesced keyword-index worker.
+    pub fn bm25_index_status(&self) -> Result<Bm25IndexStatus, RagError> {
+        let state = lock_with_diagnostics(&self.bm25_index.state, "bm25.status")?;
+        Ok(state.status.clone())
+    }
+
+    pub(crate) fn bm25_operation_lock(&self) -> Result<MutexGuard<'_, ()>, RagError> {
+        lock_with_diagnostics(&self.bm25_index.operation, "bm25.operation")
+    }
+
+    pub(crate) fn bm25_content_revision(&self) -> Result<u64, RagError> {
+        let txn = self.db.begin_read()?;
+        let table = txn.open_table(BM25_META_TABLE)?;
+        table
+            .get(BM25_CONTENT_REVISION_KEY)?
+            .map(|value| rmp_serde::from_slice(value.value()).map_err(RagError::from))
+            .transpose()
+            .map(|revision| revision.unwrap_or_default())
+    }
+
+    fn bm25_rebuild_required(&self) -> Result<bool, RagError> {
+        let txn = self.db.begin_read()?;
+        let table = txn.open_table(BM25_META_TABLE)?;
+        let content_revision = table
+            .get(BM25_CONTENT_REVISION_KEY)?
+            .map(|value| rmp_serde::from_slice::<u64>(value.value()))
+            .transpose()?
+            .unwrap_or_default();
+        let indexed_revision = table
+            .get(BM25_INDEXED_REVISION_KEY)?
+            .map(|value| rmp_serde::from_slice::<u64>(value.value()))
+            .transpose()?
+            .unwrap_or_default();
+        Ok(content_revision != indexed_revision)
+    }
+
+    pub(crate) fn record_manual_bm25_rebuild(&self, result: &Result<usize, RagError>) {
+        if matches!(result, Err(RagError::Cancelled)) {
+            return;
+        }
+        if let Ok(mut state) = self.bm25_index.state.lock()
+            && !state.worker_running
+        {
+            state.status = match result {
+                Ok(_) => Bm25IndexStatus::Ready,
+                Err(error) => Bm25IndexStatus::Failed(error.to_string()),
+            };
+            self.bm25_index.changed.notify_all();
+        }
+    }
+
+    /// Queues one global rebuild and coalesces further requests while it is running.
+    pub fn queue_bm25_rebuild(&self) -> Result<(), RagError> {
+        self.bm25_index
+            .requested_generation
+            .fetch_add(1, Ordering::SeqCst);
+        let mut state = lock_with_diagnostics(&self.bm25_index.state, "bm25.queue")?;
+        state.status = Bm25IndexStatus::Pending;
+        self.bm25_index.changed.notify_all();
+        if state.worker_running {
+            return Ok(());
+        }
+        state.worker_running = true;
+        drop(state);
+
+        let store = self.clone();
+        let runtime = self.bm25_index.clone();
+        std::thread::Builder::new()
+            .name("oxideterm-bm25-rebuild".to_string())
+            .spawn(move || store.run_bm25_rebuild_worker())
+            .map_err(|error| {
+                if let Ok(mut state) = runtime.state.lock() {
+                    state.worker_running = false;
+                    state.status = Bm25IndexStatus::Failed(error.to_string());
+                    runtime.changed.notify_all();
+                }
+                RagError::Io(error)
+            })?;
+        Ok(())
+    }
+
+    fn run_bm25_rebuild_worker(&self) {
+        loop {
+            let rebuild_generation = self.bm25_index.requested_generation.load(Ordering::SeqCst);
+            if let Ok(mut state) = self.bm25_index.state.lock() {
+                state.status = Bm25IndexStatus::Rebuilding;
+                self.bm25_index.changed.notify_all();
+            } else {
+                return;
+            }
+
+            #[cfg(test)]
+            let force_failure = self
+                .bm25_index
+                .fail_next_rebuild
+                .swap(false, Ordering::SeqCst);
+            #[cfg(not(test))]
+            let force_failure = false;
+            let result = if force_failure {
+                Err(RagError::InvalidInput(
+                    "forced BM25 rebuild failure".to_string(),
+                ))
+            } else {
+                crate::rag::bm25::reindex_all(self, None, None)
+            };
+            let requested_generation = self.bm25_index.requested_generation.load(Ordering::SeqCst);
+            let Ok(mut state) = self.bm25_index.state.lock() else {
+                return;
+            };
+            if requested_generation != rebuild_generation {
+                // A save landed while the snapshot was rebuilding. The stale result may have
+                // committed briefly, so immediately replace it with the newest database state.
+                state.status = Bm25IndexStatus::Pending;
+                self.bm25_index.changed.notify_all();
+                drop(state);
+                continue;
+            }
+            state.status = match result {
+                Ok(_) => Bm25IndexStatus::Ready,
+                Err(error) => Bm25IndexStatus::Failed(error.to_string()),
+            };
+            state.worker_running = false;
+            self.bm25_index.changed.notify_all();
+            return;
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn wait_for_bm25_rebuild(&self, timeout: Duration) -> Bm25IndexStatus {
+        let deadline = Instant::now() + timeout;
+        let mut state = self.bm25_index.state.lock().unwrap();
+        while state.worker_running {
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            if remaining.is_zero() {
+                break;
+            }
+            let (next, wait_result) = self
+                .bm25_index
+                .changed
+                .wait_timeout(state, remaining)
+                .unwrap();
+            state = next;
+            if wait_result.timed_out() {
+                break;
+            }
+        }
+        state.status.clone()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn fail_next_bm25_rebuild(&self) {
+        self.bm25_index
+            .fail_next_rebuild
+            .store(true, Ordering::SeqCst);
+    }
+
     pub fn get_bm25_postings(&self, term: &str) -> Result<Vec<PostingEntry>, RagError> {
         let txn = self.db.begin_read()?;
         let t = txn.open_table(BM25_POSTINGS_TABLE)?;
@@ -902,6 +1139,7 @@ impl RagStore {
         &self,
         postings: &std::collections::HashMap<String, Vec<PostingEntry>>,
         stats: &Bm25Stats,
+        source_revision: u64,
     ) -> Result<(), RagError> {
         let txn = self.db.begin_write()?;
         {
@@ -928,6 +1166,10 @@ impl RagStore {
 
             let mut meta_t = txn.open_table(BM25_META_TABLE)?;
             meta_t.insert("stats", rmp_serde::to_vec(stats)?.as_slice())?;
+            meta_t.insert(
+                BM25_INDEXED_REVISION_KEY,
+                rmp_serde::to_vec(&source_revision)?.as_slice(),
+            )?;
         }
         txn.commit()?;
         debug!(
@@ -935,49 +1177,6 @@ impl RagStore {
             postings.len(),
             stats.doc_count
         );
-        Ok(())
-    }
-
-    /// Incrementally add a single chunk to the BM25 index.
-    pub fn add_to_bm25_index(
-        &self,
-        terms_tf: &std::collections::HashMap<String, f32>,
-        chunk_id: &str,
-        doc_length: usize,
-    ) -> Result<(), RagError> {
-        let txn = self.db.begin_write()?;
-        {
-            let mut t = txn.open_table(BM25_POSTINGS_TABLE)?;
-            for (term, tf) in terms_tf {
-                let existing = t.get(term.as_str())?.map(|g| g.value().to_vec());
-                let mut entries: Vec<PostingEntry> = match existing {
-                    Some(data) => rmp_serde::from_slice(&data)?,
-                    None => Vec::new(),
-                };
-                entries.push(PostingEntry {
-                    chunk_id: chunk_id.to_string(),
-                    tf: *tf,
-                    doc_length,
-                });
-                t.insert(term.as_str(), rmp_serde::to_vec(&entries)?.as_slice())?;
-            }
-
-            // Update stats
-            let mut meta_t = txn.open_table(BM25_META_TABLE)?;
-            let stats_data = meta_t.get("stats")?.map(|g| g.value().to_vec());
-            let mut stats: Bm25Stats = match stats_data {
-                Some(data) => rmp_serde::from_slice(&data)?,
-                None => Bm25Stats {
-                    doc_count: 0,
-                    avg_dl: 0.0,
-                },
-            };
-            let old_total = stats.avg_dl * stats.doc_count as f64;
-            stats.doc_count += 1;
-            stats.avg_dl = (old_total + doc_length as f64) / stats.doc_count as f64;
-            meta_t.insert("stats", rmp_serde::to_vec(&stats)?.as_slice())?;
-        }
-        txn.commit()?;
         Ok(())
     }
 
@@ -1013,6 +1212,60 @@ impl RagStore {
             Some(guard) => Ok(rmp_serde::from_slice(guard.value())?),
             None => Ok(Vec::new()),
         }
+    }
+
+    /// Loads editable content, metadata, and embedding freshness from one read snapshot.
+    pub fn get_document_for_editing(
+        &self,
+        doc_id: &str,
+    ) -> Result<(DocMetadata, String, usize), RagError> {
+        let txn = self.db.begin_read()?;
+        let metadata = txn
+            .open_table(DOC_METADATA_TABLE)?
+            .get(doc_id)?
+            .map(|guard| rmp_serde::from_slice::<DocMetadata>(guard.value()))
+            .transpose()?
+            .ok_or_else(|| RagError::DocumentNotFound(doc_id.to_string()))?;
+        let content = txn
+            .open_table(DOC_RAW_CONTENT_TABLE)?
+            .get(doc_id)?
+            .map(|guard| Self::decompress_bytes(guard.value()))
+            .transpose()?
+            .ok_or_else(|| RagError::DocumentNotFound(doc_id.to_string()))?;
+        let content = String::from_utf8(content)
+            .map_err(|error| RagError::Serialization(error.to_string()))?;
+        let chunk_ids = txn
+            .open_table(DOC_CHUNK_INDEX_TABLE)?
+            .get(doc_id)?
+            .map(|guard| rmp_serde::from_slice::<Vec<String>>(guard.value()))
+            .transpose()?
+            .unwrap_or_default();
+        let embeddings = txn.open_table(EMBEDDINGS_TABLE)?;
+        let mut pending = 0usize;
+        for chunk_id in chunk_ids {
+            if embeddings.get(chunk_id.as_str())?.is_none() {
+                pending += 1;
+            }
+        }
+        Ok((metadata, content, pending))
+    }
+
+    pub fn get_pending_embedding_count_for_doc(&self, doc_id: &str) -> Result<usize, RagError> {
+        let txn = self.db.begin_read()?;
+        let chunk_index = txn.open_table(DOC_CHUNK_INDEX_TABLE)?;
+        let embeddings = txn.open_table(EMBEDDINGS_TABLE)?;
+        let chunk_ids = chunk_index
+            .get(doc_id)?
+            .map(|value| rmp_serde::from_slice::<Vec<String>>(value.value()))
+            .transpose()?
+            .ok_or_else(|| RagError::DocumentNotFound(doc_id.to_string()))?;
+        let mut pending = 0usize;
+        for chunk_id in chunk_ids {
+            if embeddings.get(chunk_id.as_str())?.is_none() {
+                pending += 1;
+            }
+        }
+        Ok(pending)
     }
 
     /// Decode a chunk from stored bytes (handles compression prefix).
@@ -1086,35 +1339,53 @@ impl RagStore {
         now: i64,
         expected_version: Option<u64>,
     ) -> Result<DocMetadata, RagError> {
-        let meta = self
-            .get_doc_metadata(doc_id)?
-            .ok_or_else(|| RagError::DocumentNotFound(doc_id.to_string()))?;
+        let new_chunk_ids: Vec<String> = new_chunks.iter().map(|c| c.id.clone()).collect();
+        let chunk_idx_bytes = rmp_serde::to_vec(&new_chunk_ids)?;
+        let stored_content = Self::compress_bytes(new_content.as_bytes());
+        let stored_chunks = new_chunks
+            .iter()
+            .map(|chunk| {
+                let raw = rmp_serde::to_vec(chunk)?;
+                Ok((chunk.id.clone(), Self::compress_bytes(&raw)))
+            })
+            .collect::<Result<Vec<_>, RagError>>()?;
 
-        // Optimistic locking check
-        if let Some(expected) = expected_version {
-            if meta.version != expected {
+        let txn = self.db.begin_write()?;
+        let (updated_meta, old_chunk_count) = {
+            // The version comparison belongs to the same serialized write transaction as the
+            // replacement. Reading it before begin_write would let two same-version writers pass
+            // the check and overwrite each other.
+            let mut meta_t = txn.open_table(DOC_METADATA_TABLE)?;
+            let meta_bytes = meta_t.get(doc_id)?.map(|guard| guard.value().to_vec());
+            let meta: DocMetadata = meta_bytes
+                .as_deref()
+                .ok_or_else(|| RagError::DocumentNotFound(doc_id.to_string()))
+                .and_then(|bytes| rmp_serde::from_slice(bytes).map_err(RagError::from))?;
+            if let Some(expected) = expected_version
+                && meta.version != expected
+            {
                 return Err(RagError::VersionConflict {
                     expected,
                     actual: meta.version,
                 });
             }
-        }
 
-        let old_chunk_ids = self.get_chunk_ids_for_doc(doc_id)?;
-        let new_chunk_ids: Vec<String> = new_chunks.iter().map(|c| c.id.clone()).collect();
+            let mut idx_t = txn.open_table(DOC_CHUNK_INDEX_TABLE)?;
+            let old_chunk_ids = idx_t
+                .get(doc_id)?
+                .map(|guard| guard.value().to_vec())
+                .map(|bytes| rmp_serde::from_slice::<Vec<String>>(&bytes))
+                .transpose()?
+                .unwrap_or_default();
 
-        let updated_meta = DocMetadata {
-            content_hash: content_hash.to_string(),
-            indexed_at: now,
-            chunk_count: new_chunks.len(),
-            version: meta.version + 1,
-            ..meta
-        };
-        let meta_bytes = rmp_serde::to_vec(&updated_meta)?;
-        let chunk_idx_bytes = rmp_serde::to_vec(&new_chunk_ids)?;
+            let updated_meta = DocMetadata {
+                content_hash: content_hash.to_string(),
+                indexed_at: now,
+                chunk_count: new_chunks.len(),
+                version: meta.version + 1,
+                ..meta
+            };
 
-        let txn = self.db.begin_write()?;
-        {
             // Remove old chunks + embeddings
             let mut chunks_t = txn.open_table(DOC_CHUNKS_TABLE)?;
             let mut emb_t = txn.open_table(EMBEDDINGS_TABLE)?;
@@ -1124,24 +1395,24 @@ impl RagStore {
             }
 
             // Store new chunks
-            for chunk in new_chunks {
-                let raw = rmp_serde::to_vec(chunk)?;
-                let stored = Self::compress_bytes(&raw);
-                chunks_t.insert(chunk.id.as_str(), stored.as_slice())?;
+            for (chunk_id, stored) in &stored_chunks {
+                chunks_t.insert(chunk_id.as_str(), stored.as_slice())?;
             }
 
             // Update chunk index
-            let mut idx_t = txn.open_table(DOC_CHUNK_INDEX_TABLE)?;
             idx_t.insert(doc_id, chunk_idx_bytes.as_slice())?;
 
             // Update metadata
-            let mut meta_t = txn.open_table(DOC_METADATA_TABLE)?;
-            meta_t.insert(doc_id, meta_bytes.as_slice())?;
+            let updated_meta_bytes = rmp_serde::to_vec(&updated_meta)?;
+            meta_t.insert(doc_id, updated_meta_bytes.as_slice())?;
 
             // Update raw content
             let mut raw_t = txn.open_table(DOC_RAW_CONTENT_TABLE)?;
-            let stored = Self::compress_bytes(new_content.as_bytes());
-            raw_t.insert(doc_id, stored.as_slice())?;
+            raw_t.insert(doc_id, stored_content.as_slice())?;
+
+            // Persist the content revision in the same transaction as the document so a crash
+            // before the background rebuild is detected and resumed on the next application run.
+            Self::bump_bm25_content_revision(&txn)?;
 
             // Update collection timestamp
             let mut col_t = txn.open_table(COLLECTIONS_TABLE)?;
@@ -1156,12 +1427,13 @@ impl RagStore {
                     rmp_serde::to_vec(&col)?.as_slice(),
                 )?;
             }
-        }
+            (updated_meta, old_chunk_ids.len())
+        };
         txn.commit()?;
         debug!(
             "Updated document {} ({} → {} chunks)",
             doc_id,
-            old_chunk_ids.len(),
+            old_chunk_count,
             new_chunks.len()
         );
 
@@ -1180,6 +1452,7 @@ impl RagStore {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::{Arc, Barrier};
 
     fn temp_store(test_name: &str) -> RagStore {
         let dir = std::env::temp_dir().join(format!(
@@ -1238,5 +1511,77 @@ mod tests {
                 .check_content_hash_exists_excluding_doc("col-1", "hash-b", "doc-1")
                 .unwrap()
         );
+    }
+
+    #[test]
+    fn stale_document_version_leaves_committed_content_unchanged() {
+        let store = temp_store("stale_document_version");
+        store.create_collection(&make_collection("col-1")).unwrap();
+        store
+            .add_document(&make_doc("doc-1", "col-1", "hash-0"), &[], Some("initial"))
+            .unwrap();
+
+        let updated = store
+            .update_document("doc-1", "first", &[], "hash-1", 10, Some(0))
+            .unwrap();
+        let error = store
+            .update_document("doc-1", "stale", &[], "hash-stale", 11, Some(0))
+            .unwrap_err();
+
+        assert!(matches!(
+            error,
+            RagError::VersionConflict {
+                expected: 0,
+                actual: 1
+            }
+        ));
+        assert_eq!(updated.version, 1);
+        assert_eq!(
+            store.get_raw_content("doc-1").unwrap().as_deref(),
+            Some("first")
+        );
+        let metadata = store.get_doc_metadata("doc-1").unwrap().unwrap();
+        assert_eq!(metadata.version, 1);
+        assert_eq!(metadata.content_hash, "hash-1");
+    }
+
+    #[test]
+    fn concurrent_same_version_document_updates_allow_only_one_commit() {
+        let store = temp_store("concurrent_document_version");
+        store.create_collection(&make_collection("col-1")).unwrap();
+        store
+            .add_document(&make_doc("doc-1", "col-1", "hash-0"), &[], Some("initial"))
+            .unwrap();
+        let barrier = Arc::new(Barrier::new(3));
+        let handles = [("alpha", "hash-alpha"), ("beta", "hash-beta")]
+            .into_iter()
+            .map(|(content, hash)| {
+                let store = store.clone();
+                let barrier = barrier.clone();
+                std::thread::spawn(move || {
+                    barrier.wait();
+                    store.update_document("doc-1", content, &[], hash, 10, Some(0))
+                })
+            })
+            .collect::<Vec<_>>();
+
+        barrier.wait();
+        let results = handles
+            .into_iter()
+            .map(|handle| handle.join().unwrap())
+            .collect::<Vec<_>>();
+
+        assert_eq!(results.iter().filter(|result| result.is_ok()).count(), 1);
+        assert_eq!(
+            results
+                .iter()
+                .filter(|result| matches!(result, Err(RagError::VersionConflict { .. })))
+                .count(),
+            1
+        );
+        let metadata = store.get_doc_metadata("doc-1").unwrap().unwrap();
+        let content = store.get_raw_content("doc-1").unwrap().unwrap();
+        assert_eq!(metadata.version, 1);
+        assert!(matches!(content.as_str(), "alpha" | "beta"));
     }
 }

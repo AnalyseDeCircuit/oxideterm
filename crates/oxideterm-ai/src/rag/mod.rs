@@ -15,7 +15,8 @@ use std::sync::{LazyLock, Mutex, atomic::AtomicBool};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-pub use store::RagStore;
+pub use error::RagError;
+pub use store::{Bm25IndexStatus, RagStore};
 pub use types::{DocCollection, DocFormat, DocMetadata, DocScope, EmbeddingRecord, SearchSource};
 
 const MAX_NAME_LENGTH: usize = 1000;
@@ -163,6 +164,38 @@ pub struct DocumentResponse {
 
 #[derive(Debug, Serialize, Clone, PartialEq)]
 #[serde(rename_all = "camelCase")]
+pub struct DocumentContentResponse {
+    pub document: DocumentResponse,
+    pub content: String,
+    pub semantic_index: SemanticIndexState,
+}
+
+#[derive(Debug, Serialize, Clone, PartialEq)]
+#[serde(rename_all = "camelCase", tag = "state")]
+pub enum KeywordIndexState {
+    Ready,
+    Pending,
+    Rebuilding,
+    Failed { message: String },
+}
+
+#[derive(Debug, Serialize, Clone, PartialEq)]
+#[serde(rename_all = "camelCase", tag = "state")]
+pub enum SemanticIndexState {
+    Ready,
+    Pending { chunk_count: usize },
+}
+
+#[derive(Debug, Serialize, Clone, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct DocumentSaveOutcome {
+    pub document: DocumentResponse,
+    pub keyword_index: KeywordIndexState,
+    pub semantic_index: SemanticIndexState,
+}
+
+#[derive(Debug, Serialize, Clone, PartialEq)]
+#[serde(rename_all = "camelCase")]
 pub struct StatsResponse {
     pub doc_count: usize,
     pub chunk_count: usize,
@@ -306,7 +339,9 @@ pub fn rag_delete_collection(store: &RagStore, collection_id: &str) -> Result<()
     store
         .delete_collection(collection_id)
         .map_err(|e| e.to_string())?;
-    bm25::reindex_all(store, None, None).map_err(|e| e.to_string())?;
+    let rebuild = bm25::reindex_all(store, None, None);
+    store.record_manual_bm25_rebuild(&rebuild);
+    rebuild.map_err(|e| e.to_string())?;
     Ok(())
 }
 
@@ -369,26 +404,32 @@ pub fn rag_add_document(
     store
         .add_document(&metadata, &chunks, Some(&request.content))
         .map_err(|e| e.to_string())?;
-    for chunk in &chunks {
-        bm25::index_chunk(
-            store,
-            &chunk.id,
-            &chunk.content,
-            chunk.context_prefix.as_deref(),
-        )
-        .map_err(|e| e.to_string())?;
+    if !chunks.is_empty()
+        && let Err(error) = store.queue_bm25_rebuild()
+    {
+        // Persistence has already committed. Preserve the document result and expose the
+        // indexing failure through the observable keyword-index state instead of lying that the
+        // import itself failed.
+        tracing::warn!(
+            "Document imported but BM25 rebuild could not start: {}",
+            error
+        );
     }
     Ok(document_response(metadata))
 }
 
 pub fn rag_remove_document(store: &RagStore, doc_id: &str) -> Result<(), String> {
     store.remove_document(doc_id).map_err(|e| e.to_string())?;
-    bm25::reindex_all(store, None, None).map_err(|e| e.to_string())?;
+    let rebuild = bm25::reindex_all(store, None, None);
+    store.record_manual_bm25_rebuild(&rebuild);
+    rebuild.map_err(|e| e.to_string())?;
     Ok(())
 }
 
 pub fn rag_reindex_collection(store: &RagStore, _collection_id: &str) -> Result<usize, String> {
-    bm25::reindex_all(store, None, None).map_err(|e| e.to_string())
+    let rebuild = bm25::reindex_all(store, None, None);
+    store.record_manual_bm25_rebuild(&rebuild);
+    rebuild.map_err(|e| e.to_string())
 }
 
 pub fn rag_reindex_collection_with_progress(
@@ -397,7 +438,9 @@ pub fn rag_reindex_collection_with_progress(
     cancel: Option<&AtomicBool>,
     on_progress: Option<&mut dyn FnMut(usize, usize)>,
 ) -> Result<usize, String> {
-    bm25::reindex_all(store, cancel, on_progress).map_err(|e| e.to_string())
+    let rebuild = bm25::reindex_all(store, cancel, on_progress);
+    store.record_manual_bm25_rebuild(&rebuild);
+    rebuild.map_err(|e| e.to_string())
 }
 
 pub fn rag_list_documents(
@@ -520,44 +563,110 @@ pub fn rag_get_document_content(store: &RagStore, doc_id: &str) -> Result<String
         .ok_or_else(|| format!("No raw content stored for document {doc_id}"))
 }
 
+pub fn rag_get_document(
+    store: &RagStore,
+    doc_id: &str,
+) -> Result<DocumentContentResponse, RagError> {
+    let (metadata, content, pending_embeddings) = store.get_document_for_editing(doc_id)?;
+    Ok(DocumentContentResponse {
+        document: document_response(metadata),
+        content,
+        semantic_index: if pending_embeddings == 0 {
+            SemanticIndexState::Ready
+        } else {
+            SemanticIndexState::Pending {
+                chunk_count: pending_embeddings,
+            }
+        },
+    })
+}
+
+pub fn rag_save_document(
+    store: &RagStore,
+    doc_id: &str,
+    content: String,
+    expected_version: Option<u64>,
+) -> Result<DocumentSaveOutcome, RagError> {
+    if content.len() > MAX_CONTENT_SIZE {
+        return Err(RagError::InvalidInput(
+            "Document content too large".to_string(),
+        ));
+    }
+    let metadata = store
+        .get_doc_metadata(doc_id)?
+        .ok_or_else(|| RagError::DocumentNotFound(doc_id.to_string()))?;
+    let now = chrono::Utc::now().timestamp_millis();
+    let mut chunks = chunker::chunk_document(doc_id, &content, &metadata.format);
+    let hash = content_hash(&content);
+    if hash != metadata.content_hash
+        && store.check_content_hash_exists_excluding_doc(&metadata.collection_id, &hash, doc_id)?
+    {
+        return Err(RagError::DuplicateDocument(hash));
+    }
+    for chunk in &mut chunks {
+        chunk.context_prefix = Some(build_context_prefix(
+            &metadata.title,
+            chunk.section_path.as_deref(),
+        ));
+    }
+    let updated = store.update_document(doc_id, &content, &chunks, &hash, now, expected_version)?;
+    // Document persistence has already committed at this point. The global keyword index is
+    // rebuilt by one coalescing owner so autosave bursts do not repeat the same full scan.
+    let keyword_index = match store.queue_bm25_rebuild() {
+        Ok(()) => KeywordIndexState::Pending,
+        Err(error) => KeywordIndexState::Failed {
+            message: error.to_string(),
+        },
+    };
+    let semantic_index = if chunks.is_empty() {
+        SemanticIndexState::Ready
+    } else {
+        SemanticIndexState::Pending {
+            chunk_count: chunks.len(),
+        }
+    };
+    Ok(DocumentSaveOutcome {
+        document: document_response(updated),
+        keyword_index,
+        semantic_index,
+    })
+}
+
+pub fn rag_keyword_index_state(store: &RagStore) -> KeywordIndexState {
+    match store.bm25_index_status() {
+        Ok(Bm25IndexStatus::Ready) => KeywordIndexState::Ready,
+        Ok(Bm25IndexStatus::Pending) => KeywordIndexState::Pending,
+        Ok(Bm25IndexStatus::Rebuilding) => KeywordIndexState::Rebuilding,
+        Ok(Bm25IndexStatus::Failed(message)) => KeywordIndexState::Failed { message },
+        Err(error) => KeywordIndexState::Failed {
+            message: error.to_string(),
+        },
+    }
+}
+
+pub fn rag_document_semantic_index_state(
+    store: &RagStore,
+    doc_id: &str,
+) -> Result<SemanticIndexState, RagError> {
+    let pending = store.get_pending_embedding_count_for_doc(doc_id)?;
+    Ok(if pending == 0 {
+        SemanticIndexState::Ready
+    } else {
+        SemanticIndexState::Pending {
+            chunk_count: pending,
+        }
+    })
+}
+
 pub fn rag_update_document(
     store: &RagStore,
     doc_id: &str,
     content: String,
     expected_version: Option<u64>,
 ) -> Result<DocumentResponse, String> {
-    if content.len() > MAX_CONTENT_SIZE {
-        return Err("Document content too large".to_string());
-    }
-    let meta = store
-        .get_doc_metadata(doc_id)
-        .map_err(|e| e.to_string())?
-        .ok_or_else(|| format!("Document not found: {doc_id}"))?;
-    let now = chrono::Utc::now().timestamp_millis();
-    let mut chunks = chunker::chunk_document(doc_id, &content, &meta.format);
-    let hash = content_hash(&content);
-    if hash != meta.content_hash
-        && store
-            .check_content_hash_exists_excluding_doc(&meta.collection_id, &hash, doc_id)
-            .map_err(|e| e.to_string())?
-    {
-        return Err(format!(
-            "Duplicate document: identical content already exists in this collection (hash: {})",
-            &hash[..8]
-        ));
-    }
-    for chunk in &mut chunks {
-        chunk.context_prefix = Some(build_context_prefix(
-            &meta.title,
-            chunk.section_path.as_deref(),
-        ));
-    }
-    let mut updated = store
-        .update_document(doc_id, &content, &chunks, &hash, now, expected_version)
-        .map_err(|e| e.to_string())?;
-    bm25::reindex_all(store, None, None).map_err(|e| e.to_string())?;
-    updated.chunk_count = chunks.len();
-    Ok(document_response(updated))
+    rag_save_document(store, doc_id, content, expected_version)
+        .map(|outcome| outcome.document)
+        .map_err(|error| error.to_string())
 }
 
 pub fn rag_create_blank_document(
@@ -589,7 +698,18 @@ pub fn rag_create_blank_document(
 
 #[cfg(test)]
 mod tests {
-    use super::HnswRebuildCoordinator;
+    use super::*;
+
+    fn temp_store(test_name: &str) -> RagStore {
+        let directory = std::env::temp_dir().join(format!(
+            "oxideterm_rag_facade_{}_{}_{}",
+            test_name,
+            std::process::id(),
+            chrono::Utc::now().timestamp_nanos_opt().unwrap_or_default()
+        ));
+        std::fs::create_dir_all(&directory).unwrap();
+        RagStore::new(&directory).unwrap()
+    }
 
     #[test]
     fn hnsw_rebuild_coordinator_queues_one_follow_up_pass() {
@@ -600,5 +720,266 @@ mod tests {
         assert!(coordinator.finish_cycle());
         assert!(!coordinator.finish_cycle());
         assert!(coordinator.request_or_queue());
+    }
+
+    #[test]
+    fn typed_document_save_reports_persistence_and_index_states() {
+        let store = temp_store("typed_save_outcome");
+        let collection = rag_create_collection(
+            &store,
+            CreateCollectionRequest {
+                name: "docs".to_string(),
+                scope: DocScopeRequest::Global,
+            },
+        )
+        .unwrap();
+        let document = rag_create_blank_document(
+            &store,
+            CreateBlankDocumentRequest {
+                collection_id: collection.id.clone(),
+                title: "guide".to_string(),
+                format: "markdown".to_string(),
+            },
+        )
+        .unwrap();
+        let listed = rag_list_documents(&store, &collection.id, None, None).unwrap();
+        assert_eq!(listed.documents, vec![document.clone()]);
+        assert_eq!(rag_get_document(&store, &document.id).unwrap().content, "");
+
+        let outcome = rag_save_document(
+            &store,
+            &document.id,
+            "# Updated guide\n\nSearchable content.".to_string(),
+            Some(document.version),
+        )
+        .unwrap();
+
+        assert_eq!(outcome.document.version, 1);
+        assert_eq!(outcome.keyword_index, KeywordIndexState::Pending);
+        assert_eq!(
+            store.wait_for_bm25_rebuild(std::time::Duration::from_secs(5)),
+            Bm25IndexStatus::Ready
+        );
+        assert_eq!(rag_keyword_index_state(&store), KeywordIndexState::Ready);
+        assert!(matches!(
+            outcome.semantic_index,
+            SemanticIndexState::Pending { chunk_count } if chunk_count > 0
+        ));
+        assert_eq!(
+            rag_document_semantic_index_state(&store, &document.id).unwrap(),
+            outcome.semantic_index
+        );
+        let loaded = rag_get_document(&store, &document.id).unwrap();
+        assert_eq!(loaded.document.version, 1);
+        assert_eq!(loaded.content, "# Updated guide\n\nSearchable content.");
+        assert_eq!(loaded.semantic_index, outcome.semantic_index);
+
+        let pending =
+            rag_get_pending_embeddings(&store, &loaded.document.collection_id, None).unwrap();
+        let embeddings = pending
+            .into_iter()
+            .map(|chunk| EmbeddingRecord {
+                chunk_id: chunk.chunk_id,
+                vector: vec![1.0, 0.0],
+                model_name: "test-model".to_string(),
+                dimensions: 2,
+            })
+            .collect::<Vec<_>>();
+        store.store_embeddings_batch(&embeddings).unwrap();
+        assert_eq!(
+            rag_get_document(&store, &document.id)
+                .unwrap()
+                .semantic_index,
+            SemanticIndexState::Ready
+        );
+        assert_eq!(
+            rag_document_semantic_index_state(&store, &document.id).unwrap(),
+            SemanticIndexState::Ready
+        );
+    }
+
+    #[test]
+    fn blank_document_creation_rejects_a_deleted_parent_collection() {
+        let store = temp_store("blank_document_deleted_parent");
+        let collection = rag_create_collection(
+            &store,
+            CreateCollectionRequest {
+                name: "docs".to_string(),
+                scope: DocScopeRequest::Global,
+            },
+        )
+        .unwrap();
+        rag_delete_collection(&store, &collection.id).unwrap();
+
+        let result = rag_create_blank_document(
+            &store,
+            CreateBlankDocumentRequest {
+                collection_id: collection.id.clone(),
+                title: "guide".to_string(),
+                format: "markdown".to_string(),
+            },
+        );
+
+        assert!(result.is_err());
+        assert!(
+            store
+                .get_collection_doc_ids(&collection.id)
+                .unwrap()
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn imported_document_enters_the_coalesced_keyword_index() {
+        let store = temp_store("imported_document_keyword_index");
+        let collection = rag_create_collection(
+            &store,
+            CreateCollectionRequest {
+                name: "docs".to_string(),
+                scope: DocScopeRequest::Global,
+            },
+        )
+        .unwrap();
+
+        let document = rag_add_document(
+            &store,
+            AddDocumentRequest {
+                collection_id: collection.id.clone(),
+                title: "Imported guide".to_string(),
+                content: "importeduniqueterm".to_string(),
+                format: "markdown".to_string(),
+                source_path: Some("/docs/imported.md".to_string()),
+            },
+        )
+        .unwrap();
+
+        assert_eq!(document.version, 0);
+        assert_eq!(
+            store.wait_for_bm25_rebuild(std::time::Duration::from_secs(5)),
+            Bm25IndexStatus::Ready
+        );
+        assert!(
+            !bm25::search_bm25(&store, "importeduniqueterm", &[collection.id], 10)
+                .unwrap()
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn cancelled_manual_rebuild_keeps_the_observable_index_state() {
+        let store = temp_store("cancelled_manual_rebuild_status");
+
+        store.record_manual_bm25_rebuild(&Err(RagError::Cancelled));
+
+        assert!(matches!(
+            store.bm25_index_status().unwrap(),
+            Bm25IndexStatus::Ready
+        ));
+    }
+
+    #[test]
+    fn queued_keyword_rebuild_publishes_the_latest_saved_version() {
+        let store = temp_store("coalesced_keyword_rebuild");
+        let collection = rag_create_collection(
+            &store,
+            CreateCollectionRequest {
+                name: "docs".to_string(),
+                scope: DocScopeRequest::Global,
+            },
+        )
+        .unwrap();
+        let document = rag_create_blank_document(
+            &store,
+            CreateBlankDocumentRequest {
+                collection_id: collection.id.clone(),
+                title: "guide".to_string(),
+                format: "markdown".to_string(),
+            },
+        )
+        .unwrap();
+
+        let first = rag_save_document(
+            &store,
+            &document.id,
+            "firstuniqueterm".to_string(),
+            Some(document.version),
+        )
+        .unwrap();
+        let second = rag_save_document(
+            &store,
+            &document.id,
+            "seconduniqueterm".to_string(),
+            Some(first.document.version),
+        )
+        .unwrap();
+
+        assert_eq!(second.keyword_index, KeywordIndexState::Pending);
+        assert_eq!(
+            store.wait_for_bm25_rebuild(std::time::Duration::from_secs(5)),
+            Bm25IndexStatus::Ready
+        );
+        let collection_ids = vec![collection.id];
+        assert!(
+            bm25::search_bm25(&store, "firstuniqueterm", &collection_ids, 10)
+                .unwrap()
+                .is_empty()
+        );
+        assert!(
+            !bm25::search_bm25(&store, "seconduniqueterm", &collection_ids, 10)
+                .unwrap()
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn later_keyword_failure_does_not_undo_a_committed_document() {
+        let store = temp_store("committed_document_index_failure");
+        let collection = rag_create_collection(
+            &store,
+            CreateCollectionRequest {
+                name: "docs".to_string(),
+                scope: DocScopeRequest::Global,
+            },
+        )
+        .unwrap();
+        let document = rag_create_blank_document(
+            &store,
+            CreateBlankDocumentRequest {
+                collection_id: collection.id,
+                title: "guide".to_string(),
+                format: "markdown".to_string(),
+            },
+        )
+        .unwrap();
+        store.fail_next_bm25_rebuild();
+
+        let outcome = rag_save_document(
+            &store,
+            &document.id,
+            "durable content".to_string(),
+            Some(document.version),
+        )
+        .unwrap();
+
+        assert_eq!(outcome.document.version, 1);
+        assert!(matches!(
+            store.wait_for_bm25_rebuild(std::time::Duration::from_secs(5)),
+            Bm25IndexStatus::Failed(_)
+        ));
+        let loaded = rag_get_document(&store, &document.id).unwrap();
+        assert_eq!(loaded.document.version, 1);
+        assert_eq!(loaded.content, "durable content");
+        let data_dir = store.data_dir().to_path_buf();
+        drop(store);
+
+        let reopened = RagStore::new(&data_dir).unwrap();
+        assert_eq!(
+            reopened.wait_for_bm25_rebuild(std::time::Duration::from_secs(5)),
+            Bm25IndexStatus::Ready
+        );
+        assert_eq!(
+            rag_get_document(&reopened, &document.id).unwrap().content,
+            "durable content"
+        );
     }
 }

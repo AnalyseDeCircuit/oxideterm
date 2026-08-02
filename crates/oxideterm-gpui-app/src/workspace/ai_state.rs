@@ -4607,6 +4607,154 @@ mod entity_tests {
     }
 
     #[gpui::test]
+    fn knowledge_dialog_input_keeps_focus_and_visible_value_in_ai_entity(cx: &mut TestAppContext) {
+        let entity = cx.new(|cx| {
+            AiWorkspaceEntity::new(test_runtime(), oxideterm_ai::AiProviderKeyStore::new(), cx)
+        });
+        let input = SettingsInput::KnowledgeCollectionName;
+
+        entity.update(cx, |entity, cx| {
+            // Knowledge dialogs use the AI entity as the single draft owner.
+            assert!(entity.focus_settings_input(input, cx));
+            assert!(entity.replace_settings_input(input, None, "部署运维手册", cx));
+            assert_eq!(entity.focused_settings_input(), Some(input));
+            assert_eq!(entity.settings_input_value(input), Some("部署运维手册"));
+        });
+    }
+
+    #[gpui::test]
+    fn knowledge_document_dialog_keeps_its_collection_and_destination(cx: &mut TestAppContext) {
+        let entity = cx.new(|cx| {
+            AiWorkspaceEntity::new(test_runtime(), oxideterm_ai::AiProviderKeyStore::new(), cx)
+        });
+        entity.update(cx, |entity, cx| {
+            let store = entity.rag_store();
+            let first = oxideterm_ai::rag_create_collection(
+                &store,
+                oxideterm_ai::RagCreateCollectionRequest {
+                    name: "first".to_string(),
+                    scope: oxideterm_ai::RagDocScopeRequest::Global,
+                },
+            )
+            .unwrap();
+            let second = oxideterm_ai::rag_create_collection(
+                &store,
+                oxideterm_ai::RagCreateCollectionRequest {
+                    name: "second".to_string(),
+                    scope: oxideterm_ai::RagDocScopeRequest::Global,
+                },
+            )
+            .unwrap();
+            let owner_window_id: gpui::WindowId = 41_u64.into();
+            entity.open_knowledge_document_dialog(first.id.clone(), owner_window_id, true);
+            entity.select_knowledge_collection(second.id.clone());
+            assert!(entity.focus_settings_input(SettingsInput::KnowledgeDocumentTitle, cx));
+            assert!(entity.replace_settings_input(
+                SettingsInput::KnowledgeDocumentTitle,
+                None,
+                "Runbook",
+                cx,
+            ));
+
+            let (document, open_in_workspace) = entity
+                .create_blank_knowledge_document("failed".to_string())
+                .unwrap();
+
+            assert_eq!(document.collection_id, first.id);
+            assert!(open_in_workspace);
+            assert!(entity.knowledge_document_dialog_owned_by(owner_window_id));
+            assert_eq!(
+                oxideterm_ai::rag_list_documents(&store, &second.id, None, None)
+                    .unwrap()
+                    .total,
+                0
+            );
+        });
+    }
+
+    #[gpui::test]
+    fn failed_document_creation_keeps_dialog_title_and_local_error(cx: &mut TestAppContext) {
+        let entity = cx.new(|cx| {
+            AiWorkspaceEntity::new(test_runtime(), oxideterm_ai::AiProviderKeyStore::new(), cx)
+        });
+        entity.update(cx, |entity, cx| {
+            let store = entity.rag_store();
+            let collection = oxideterm_ai::rag_create_collection(
+                &store,
+                oxideterm_ai::RagCreateCollectionRequest {
+                    name: "temporary".to_string(),
+                    scope: oxideterm_ai::RagDocScopeRequest::Global,
+                },
+            )
+            .unwrap();
+            oxideterm_ai::rag_delete_collection(&store, &collection.id).unwrap();
+            entity.open_knowledge_document_dialog(collection.id, 42_u64.into(), true);
+            assert!(entity.focus_settings_input(SettingsInput::KnowledgeDocumentTitle, cx));
+            assert!(entity.replace_settings_input(
+                SettingsInput::KnowledgeDocumentTitle,
+                None,
+                "Runbook",
+                cx,
+            ));
+
+            assert!(
+                entity
+                    .create_blank_knowledge_document("failed".to_string())
+                    .is_none()
+            );
+            assert!(entity.knowledge_document_dialog_open());
+            assert_eq!(entity.knowledge_new_document_title(), "Runbook");
+            assert_eq!(entity.knowledge_new_document_error(), Some("failed"));
+            assert_eq!(entity.knowledge_error(), None);
+        });
+    }
+
+    #[gpui::test]
+    fn knowledge_document_dialog_stays_with_its_owner_until_transfer_or_release(
+        cx: &mut TestAppContext,
+    ) {
+        let entity = cx.new(|cx| {
+            AiWorkspaceEntity::new(test_runtime(), oxideterm_ai::AiProviderKeyStore::new(), cx)
+        });
+        entity.update(cx, |entity, cx| {
+            let first_window_id: gpui::WindowId = 43_u64.into();
+            let second_window_id: gpui::WindowId = 44_u64.into();
+            entity.open_knowledge_document_dialog(
+                "collection-first".to_string(),
+                first_window_id,
+                true,
+            );
+            assert!(entity.focus_settings_input(SettingsInput::KnowledgeDocumentTitle, cx));
+            assert!(entity.replace_settings_input(
+                SettingsInput::KnowledgeDocumentTitle,
+                None,
+                "Draft title",
+                cx,
+            ));
+
+            entity.open_knowledge_document_dialog(
+                "collection-second".to_string(),
+                second_window_id,
+                false,
+            );
+            assert!(entity.knowledge_document_dialog_owned_by(first_window_id));
+            assert!(!entity.knowledge_document_dialog_owned_by(second_window_id));
+            assert_eq!(entity.knowledge_new_document_title(), "Draft title");
+
+            assert!(entity.transfer_knowledge_document_dialog_owner(
+                first_window_id,
+                second_window_id,
+                cx,
+            ));
+            assert!(entity.knowledge_document_dialog_owned_by(second_window_id));
+            assert!(entity.dismiss_knowledge_document_dialog_for_window(second_window_id, cx));
+            assert!(!entity.knowledge_document_dialog_open());
+            assert_eq!(entity.knowledge_new_document_title(), "");
+            assert_eq!(entity.focused_settings_input(), None);
+        });
+    }
+
+    #[gpui::test]
     fn provider_operation_failure_exposes_only_typed_category(cx: &mut TestAppContext) {
         let entity = cx.new(|cx| {
             AiWorkspaceEntity::new(test_runtime(), oxideterm_ai::AiProviderKeyStore::new(), cx)

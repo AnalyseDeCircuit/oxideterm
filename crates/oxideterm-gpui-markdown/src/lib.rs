@@ -49,12 +49,17 @@ pub mod model;
 pub mod options;
 pub mod parser;
 pub mod render;
+pub mod source;
 pub mod style;
 
 pub use layout::{MarkdownBlockLayout, MarkdownLayoutItem};
 pub use model::MarkdownDocument;
 pub use options::MarkdownOptions;
+pub use parser::MarkdownDocumentContext;
 pub use render::{MarkdownCodeBlockActions, MarkdownMermaidZoomHandler};
+pub use source::{
+    MarkdownSourceBlock, MarkdownSourceBlockKind, MarkdownSourceDocument, parse_source_blocks,
+};
 
 use gpui::{AnyElement, ElementId, ScrollHandle};
 use oxideterm_theme::ThemeTokens;
@@ -76,7 +81,22 @@ pub fn markdown_with_options(
     source: &str,
     opts: &MarkdownOptions,
 ) -> AnyElement {
-    let document = parser::parse(source);
+    let document = parser::parse_with_smart_punctuation(source, opts.enable_smart_punctuation);
+    render::render_document(&document, tokens, opts)
+}
+
+/// Renders one source block with document-level reference definitions.
+pub fn markdown_block_with_document_context(
+    tokens: &ThemeTokens,
+    source: &str,
+    document_context: &MarkdownDocumentContext,
+    opts: &MarkdownOptions,
+) -> AnyElement {
+    let document = parser::parse_with_document_context(
+        source,
+        document_context,
+        opts.enable_smart_punctuation,
+    );
     render::render_document(&document, tokens, opts)
 }
 
@@ -88,7 +108,7 @@ pub fn markdown_virtual_with_options(
     opts: &MarkdownOptions,
     scroll_handle: &MarkdownVirtualListScrollHandle,
 ) -> AnyElement {
-    let document = parser::parse(source);
+    let document = parser::parse_with_smart_punctuation(source, opts.enable_smart_punctuation);
     render::render_document_virtual(id, &document, tokens, opts, scroll_handle)
 }
 
@@ -101,7 +121,7 @@ pub fn markdown_virtual_with_code_actions(
     scroll_handle: &MarkdownVirtualListScrollHandle,
     code_actions: &render::MarkdownCodeBlockActions,
 ) -> AnyElement {
-    let document = parser::parse(source);
+    let document = parser::parse_with_smart_punctuation(source, opts.enable_smart_punctuation);
     render::render_document_virtual_with_code_actions(
         id,
         &document,

@@ -1,20 +1,37 @@
 use super::*;
 
 pub(in crate::workspace) const SETTINGS_ROW_LABEL_MIN_WIDTH: f32 = 180.0; // Keep localized labels readable before controls wrap.
+const KNOWLEDGE_SCOPE_SELECT_MAX_HEIGHT: f32 = 320.0;
 
 impl WorkspaceApp {
     pub(in crate::workspace) fn render_settings_select_overlay(
         &self,
+        window: &Window,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
         // Select content follows the logical open state directly. Dropdowns
         // never retain a second render-only state for exit animation.
         let open_select = self.open_settings_select?;
-        let anchor = self.select_anchors.get(&open_select.anchor_id()).copied()?;
+        let window_id = window.window_handle().window_id();
+        if self.open_settings_select_owner_window_id != Some(window_id) {
+            return None;
+        }
+        let anchor = self
+            .settings_select_anchors
+            .get(&(window_id, open_select.anchor_id()))
+            .copied()?;
         let width =
             f32::from(anchor.bounds.size.width).max(self.tokens.metrics.ui_select_min_width);
         let settings = self.settings_store.settings();
-        let active_tab = self.settings_workspace.read(cx).route_snapshot().active_tab;
+        let knowledge_dialog_visible = self
+            .ai_entity
+            .read(cx)
+            .knowledge_document_dialog_owned_by(window_id);
+        let active_tab = if knowledge_dialog_visible {
+            SettingsTab::Knowledge
+        } else {
+            self.settings_workspace.read(cx).route_snapshot().active_tab
+        };
 
         let popup = match (active_tab, open_select) {
             (SettingsTab::General, SettingsSelect::Language) => {
@@ -1115,27 +1132,68 @@ impl WorkspaceApp {
                 Some(popup)
             }
             (SettingsTab::Knowledge, SettingsSelect::KnowledgeCollectionScope) => {
-                let popup = select_overlay_popup(&self.tokens, width.max(220.0)).child(
-                    select_option_action(
-                        select_option(
-                            &self.tokens,
-                            self.i18n.t("settings_view.knowledge.scope_global"),
-                            true,
-                        ),
+                let selected_connection_id = self
+                    .ai_entity
+                    .read(cx)
+                    .knowledge_new_collection_connection_id()
+                    .map(str::to_string);
+                let connection_options = self
+                    .connection_store
+                    .connections()
+                    .iter()
+                    .map(|connection| (connection.id.clone(), connection.name.clone()))
+                    .collect::<Vec<_>>();
+                let mut popup = select_panel_overlay_popup_with_max_height(
+                    &self.tokens,
+                    width.max(220.0),
+                    KNOWLEDGE_SCOPE_SELECT_MAX_HEIGHT,
+                )
+                .child(select_option_action(
+                    select_option(
+                        &self.tokens,
+                        self.i18n.t("settings_view.knowledge.scope_global"),
+                        selected_connection_id.is_none(),
+                    ),
+                    false,
+                    false,
+                    cx.listener(|this, _event, _window, cx| {
+                        this.close_settings_select();
+                        this.ai_entity.update(cx, |entity, cx| {
+                            entity.set_knowledge_collection_connection_id(None);
+                            cx.notify();
+                        });
+                        cx.stop_propagation();
+                        cx.notify();
+                    }),
+                ));
+                for (connection_id, connection_name) in connection_options {
+                    let selected = selected_connection_id.as_deref() == Some(&connection_id);
+                    popup = popup.child(select_option_action(
+                        select_option(&self.tokens, connection_name, selected),
                         false,
                         false,
-                        cx.listener(|this, _event, _window, cx| {
+                        cx.listener(move |this, _event, _window, cx| {
                             this.close_settings_select();
+                            this.ai_entity.update(cx, |entity, cx| {
+                                entity.set_knowledge_collection_connection_id(Some(
+                                    connection_id.clone(),
+                                ));
+                                cx.notify();
+                            });
                             cx.stop_propagation();
                             cx.notify();
                         }),
-                    ),
-                );
+                    ));
+                }
                 Some(popup)
             }
             (SettingsTab::Knowledge, SettingsSelect::KnowledgeDocumentFormat) => {
                 let mut popup = select_overlay_popup(&self.tokens, width.max(220.0));
-                for (format, label) in [("markdown", "Markdown"), ("plaintext", "Plain Text")] {
+                for format in ["markdown", "plaintext"] {
+                    let label = match format {
+                        "plaintext" => self.i18n.t("settings_view.knowledge.format_plain_text"),
+                        _ => self.i18n.t("settings_view.knowledge.format_markdown"),
+                    };
                     let selected =
                         self.ai_entity.read(cx).knowledge_new_document_format() == format;
                     popup = popup.child(select_option_action(
@@ -1363,17 +1421,24 @@ impl WorkspaceApp {
     pub(in crate::workspace) fn open_settings_select_from_pointer(
         &mut self,
         select_id: SettingsSelect,
-        _cx: &mut Context<Self>,
+        owner_window_id: gpui::WindowId,
+        cx: &mut Context<Self>,
     ) {
         // Browser select triggers opened by pointer do not show a focus-visible
         // ring. Keep the origin and open/toggle rule in one place so settings,
         // AI provider, and knowledge selects do not drift apart.
         self.focused_settings_input = None;
-        if self.open_settings_select == Some(select_id) {
+        self.ai_entity.update(cx, |entity, cx| {
+            entity.blur_settings_input(cx);
+        });
+        if self.open_settings_select == Some(select_id)
+            && self.open_settings_select_owner_window_id == Some(owner_window_id)
+        {
             self.close_settings_select();
             return;
         }
         self.open_settings_select = Some(select_id);
+        self.open_settings_select_owner_window_id = Some(owner_window_id);
         self.settings_select_focus_origin = Some(browser_behavior::BrowserFocusOrigin::Pointer);
     }
 

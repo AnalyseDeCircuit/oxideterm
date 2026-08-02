@@ -7,6 +7,7 @@ use super::super::*;
 pub(in crate::workspace) enum ActiveTabWindowModalKind {
     SettingsNavigationEditor,
     AiMcpServer,
+    KnowledgeLeaveConfirmation,
     KnowledgeCollectionCreate,
     KnowledgeDocumentCreate,
     KnowledgeDelete,
@@ -662,6 +663,40 @@ impl WorkspaceApp {
         let visible = oxideterm_gpui_ui::motion::ExitPhase::Visible;
         let active_tab = self.active_tab(cx)?;
         match active_tab.kind {
+            TabKind::Knowledge => {
+                if self.knowledge_leave_confirmation_open(cx) {
+                    return Some(ActiveTabWindowModalSnapshot {
+                        kind: ActiveTabWindowModalKind::KnowledgeLeaveConfirmation,
+                        phase: visible,
+                    });
+                }
+                let ai = self.ai_entity.read(cx);
+                if ai.knowledge_delete_confirm().is_some() {
+                    return Some(ActiveTabWindowModalSnapshot {
+                        kind: ActiveTabWindowModalKind::KnowledgeDelete,
+                        phase: visible,
+                    });
+                }
+                let main_window_id = self
+                    .window_registry
+                    .handle_for_role(window_registry::WindowRole::Main)
+                    .map(|handle| handle.window_id());
+                if main_window_id
+                    .is_some_and(|window_id| ai.knowledge_document_dialog_owned_by(window_id))
+                {
+                    return Some(ActiveTabWindowModalSnapshot {
+                        kind: ActiveTabWindowModalKind::KnowledgeDocumentCreate,
+                        phase: ai.knowledge_document_dialog_phase(),
+                    });
+                }
+                if ai.knowledge_create_dialog_open() {
+                    return Some(ActiveTabWindowModalSnapshot {
+                        kind: ActiveTabWindowModalKind::KnowledgeCollectionCreate,
+                        phase: ai.knowledge_create_dialog_phase(),
+                    });
+                }
+                None
+            }
             TabKind::Settings => {
                 let settings = self.settings_workspace.read(cx);
                 let ai = self.ai_entity.read(cx);
@@ -685,7 +720,11 @@ impl WorkspaceApp {
                         kind: ActiveTabWindowModalKind::KnowledgeDelete,
                         phase: visible,
                     })
-                } else if ai.knowledge_document_dialog_open() {
+                } else if self
+                    .window_registry
+                    .handle_for_role(window_registry::WindowRole::Main)
+                    .is_some_and(|handle| ai.knowledge_document_dialog_owned_by(handle.window_id()))
+                {
                     Some(ActiveTabWindowModalSnapshot {
                         kind: ActiveTabWindowModalKind::KnowledgeDocumentCreate,
                         phase: ai.knowledge_document_dialog_phase(),
@@ -986,6 +1025,9 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> bool {
         match kind {
+            ActiveTabWindowModalKind::KnowledgeLeaveConfirmation => {
+                self.handle_knowledge_leave_confirmation_key(event, window, cx)
+            }
             ActiveTabWindowModalKind::PortablePassword => {
                 if event.keystroke.key.as_str() == "escape" {
                     self.close_portable_password_change_dialog(cx);

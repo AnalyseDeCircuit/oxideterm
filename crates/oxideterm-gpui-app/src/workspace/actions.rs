@@ -1049,10 +1049,11 @@ impl WorkspaceApp {
                     self.reset_standard_confirm_focus();
                     cx.notify();
                 } else {
-                    self.knowledge_create_blank_document(cx);
-                    self.ai_entity.update(cx, |entity, cx| {
-                        entity.close_knowledge_document_dialog(Duration::ZERO, cx);
-                    });
+                    if self.knowledge_create_blank_document(cx) {
+                        self.ai_entity.update(cx, |entity, cx| {
+                            entity.close_knowledge_document_dialog(Duration::ZERO, cx);
+                        });
+                    }
                 }
                 true
             }

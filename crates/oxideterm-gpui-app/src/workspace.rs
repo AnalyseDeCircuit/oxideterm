@@ -18,6 +18,7 @@ mod graphics;
 mod graphics_vnc;
 mod ide;
 mod ime;
+mod knowledge;
 mod launcher;
 mod local_shell_launcher;
 mod local_terminal_background;
@@ -85,6 +86,7 @@ use std::{
 use self::{
     ai_lazy::LazyAiRagStore,
     breadcrumb_scroll::scroll_breadcrumb_by_wheel,
+    knowledge::KnowledgeWorkspaceLayout,
     path_completion::{
         PathCompletionCandidate, PathCompletionOwner, PathCompletionState,
         local_path_completion_request, remote_path_completion_request,
@@ -263,6 +265,10 @@ use self::ime::{
     WorkspaceImeElement, WorkspaceImeSelection, WorkspaceImeTarget,
     active_ime_should_defer_input_key, workspace_ime_target_for_plain_host_tools_input,
 };
+use self::knowledge::{
+    KNOWLEDGE_WORKSPACE_SECTION_COUNT, KNOWLEDGE_WORKSPACE_SECTION_ESTIMATED_HEIGHT,
+    KNOWLEDGE_WORKSPACE_SECTION_OVERSCAN,
+};
 use self::launcher::{LauncherWorkspaceEntity, LauncherWorkspaceEvent};
 use self::new_connection::{
     ConnectionFlowEntity, ConnectionFlowEvent, NativeSshPromptHandler, NewConnectionField,
@@ -295,7 +301,7 @@ use crate::{
     GoToTab5, GoToTab6, GoToTab7, GoToTab8, GoToTab9, NewConnection, NewTerminal, NextTab,
     OpenSettings, PaletteAiSidebar, PaletteBroadcast, PaletteCancelReconnect, PaletteCleanupDead,
     PaletteDetachTerminal, PaletteDisconnectAll, PaletteEventLog, PaletteHealthCheck,
-    PaletteReconnectAll, PaletteResetPanes, Paste, PrevTab, ShellLauncher, ShowShortcuts,
+    PaletteReconnectAll, PaletteResetPanes, Paste, PrevTab, Quit, ShellLauncher, ShowShortcuts,
     SplitHorizontal, SplitNavLeft, SplitNavRight, SplitVertical, SwitchLocaleChinese,
     SwitchLocaleEnglish, SwitchLocaleFrench, SwitchLocaleGerman, SwitchLocaleItalian,
     SwitchLocaleJapanese, SwitchLocaleKorean, SwitchLocalePortugueseBrazil, SwitchLocaleSpanish,
@@ -778,12 +784,18 @@ pub(crate) struct WorkspaceApp {
     active_session_sidebar_focused_node_id: Option<NodeId>,
     active_session_sidebar_list_state: ListState,
     active_session_sidebar_list_cache: RefCell<VirtualListSignatureCache>,
+    knowledge_workspace_collection_list_state: ListState,
+    knowledge_workspace_list_state: ListState,
     open_settings_select: Option<SettingsSelect>,
+    // A root-mounted select portal must only use the trigger geometry from the
+    // native window that opened it.
+    open_settings_select_owner_window_id: Option<gpui::WindowId>,
     settings_select_focus_origin: Option<browser_behavior::BrowserFocusOrigin>,
     settings_section_list_state: ListState,
     settings_section_list_cache: RefCell<VirtualListSignatureCache>,
     standard_confirm_focused_action: Option<ConfirmDialogAction>,
     select_anchors: HashMap<SelectAnchorId, OverlayAnchor>,
+    settings_select_anchors: HashMap<(gpui::WindowId, SelectAnchorId), OverlayAnchor>,
     text_input_anchors: TextInputAnchorStore,
     selectable_text_values: HashMap<u64, String>,
     selectable_text_layouts: HashMap<u64, TextLayout>,
@@ -846,6 +858,7 @@ pub(crate) struct WorkspaceApp {
     sftp_tab_nodes: HashMap<TabId, NodeId>,
     ide_workspace: Entity<ide::IdeWorkspaceEntity>,
     _ide_workspace_subscription: Subscription,
+    knowledge_workspace: Entity<knowledge::KnowledgeWorkspaceEntity>,
     sftp_view: Entity<sftp::SftpWorkspaceEntity>,
     _sftp_observation: Subscription,
     _sftp_subscription: Subscription,

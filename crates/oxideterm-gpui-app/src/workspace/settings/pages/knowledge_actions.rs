@@ -10,21 +10,39 @@ impl WorkspaceApp {
             cx.notify();
         });
         self.settings_input_draft.clear();
+        self.refresh_knowledge_navigator(true, cx);
         cx.notify();
     }
 
-    pub(in crate::workspace) fn knowledge_create_blank_document(&mut self, cx: &mut Context<Self>) {
+    pub(in crate::workspace) fn knowledge_create_blank_document(
+        &mut self,
+        cx: &mut Context<Self>,
+    ) -> bool {
         let error_message = self.i18n.t("settings_view.knowledge.error_create_document");
-        let document_id = self.ai_entity.update(cx, |entity, cx| {
-            let document_id = entity.create_blank_knowledge_document(error_message);
+        let creation = self.ai_entity.update(cx, |entity, cx| {
+            let creation = entity.create_blank_knowledge_document(error_message);
             cx.notify();
-            document_id
+            creation
         });
+        let Some((document, open_in_workspace)) = creation else {
+            cx.notify();
+            return false;
+        };
+        let document_id = document.id.clone();
         self.settings_input_draft.clear();
-        if let Some(document_id) = document_id {
-            self.knowledge_open_external(document_id, cx);
+        self.knowledge_workspace.update(cx, |workspace, _cx| {
+            workspace.insert_created_document(document);
+        });
+        self.refresh_knowledge_navigator(true, cx);
+        {
+            if open_in_workspace {
+                self.select_knowledge_document(document_id, cx);
+            } else {
+                self.knowledge_open_external(document_id, cx);
+            }
         }
         cx.notify();
+        true
     }
 
     pub(in crate::workspace) fn knowledge_delete_collection(
@@ -33,10 +51,17 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) {
         let error_message = self.i18n.t("settings_view.knowledge.error_delete");
-        self.ai_entity.update(cx, |entity, cx| {
-            entity.delete_knowledge_collection(&collection_id, error_message);
+        let deleted = self.ai_entity.update(cx, |entity, cx| {
+            let deleted = entity.delete_knowledge_collection(&collection_id, error_message);
             cx.notify();
+            deleted
         });
+        if deleted {
+            self.knowledge_workspace.update(cx, |workspace, entity_cx| {
+                workspace.remove_collection(&collection_id, entity_cx);
+            });
+            self.refresh_knowledge_navigator(true, cx);
+        }
         cx.notify();
     }
 
@@ -46,10 +71,17 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) {
         let error_message = self.i18n.t("settings_view.knowledge.error_delete");
-        self.ai_entity.update(cx, |entity, cx| {
-            entity.delete_knowledge_document(&document_id, error_message);
+        let deleted = self.ai_entity.update(cx, |entity, cx| {
+            let deleted = entity.delete_knowledge_document(&document_id, error_message);
             cx.notify();
+            deleted
         });
+        if deleted {
+            self.knowledge_workspace.update(cx, |workspace, _cx| {
+                workspace.remove_document(&document_id);
+            });
+            self.refresh_knowledge_navigator(true, cx);
+        }
         cx.notify();
     }
 

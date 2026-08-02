@@ -20,6 +20,7 @@ pub(in crate::workspace) fn tab_background_key(kind: &TabKind) -> &'static str {
         TabKind::PluginManager => "plugin_manager",
         TabKind::Plugin { .. } => "plugin",
         TabKind::CloudSync => "cloud_sync",
+        TabKind::Knowledge => "knowledge",
         TabKind::RemoteDesktop => "remote_desktop",
         TabKind::Settings => "settings",
     }

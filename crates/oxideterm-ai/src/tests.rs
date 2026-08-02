@@ -1389,6 +1389,10 @@ fn rag_store_indexes_and_searches_like_tauri_keyword_path() {
     let stats = rag_get_collection_stats(&store, &collection.id).unwrap();
     assert_eq!(stats.doc_count, 1);
     assert_eq!(stats.chunk_count, 2);
+    assert_eq!(
+        store.wait_for_bm25_rebuild(std::time::Duration::from_secs(5)),
+        crate::rag::Bm25IndexStatus::Ready
+    );
 
     let results = rag_search(
         &store,

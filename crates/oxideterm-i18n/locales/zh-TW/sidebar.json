@@ -31,6 +31,7 @@
       "export_tooltip": "匯出為 .oxide 檔案",
       "system_health": "系統健康",
       "host_tools": "主機工具",
+      "knowledge": "知識庫",
       "host_monitor": "監控",
       "gpu": "GPU / NPU",
       "processes": "程序",

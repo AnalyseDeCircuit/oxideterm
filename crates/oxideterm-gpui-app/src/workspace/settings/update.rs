@@ -963,9 +963,11 @@ impl WorkspaceApp {
         // Tauri's updater exits after platform installers that need the current
         // process out of the way. Delay one frame so the final toast/state can
         // render before GPUI begins app shutdown.
-        cx.spawn(async move |_weak, cx| {
+        cx.spawn(async move |weak, cx| {
             Timer::after(std::time::Duration::from_millis(750)).await;
-            cx.update(|cx| cx.quit());
+            let _ = weak.update(cx, |workspace, cx| {
+                workspace.request_application_quit(cx);
+            });
         })
         .detach();
     }

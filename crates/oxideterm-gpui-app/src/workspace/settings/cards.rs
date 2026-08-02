@@ -59,8 +59,12 @@ impl WorkspaceApp {
         .when(!disabled, |trigger| {
             trigger.cursor_pointer().on_mouse_down(
                 MouseButton::Left,
-                cx.listener(move |this, _event, _window, cx| {
-                    this.open_settings_select_from_pointer(select_id, cx);
+                cx.listener(move |this, _event, window, cx| {
+                    this.open_settings_select_from_pointer(
+                        select_id,
+                        window.window_handle().window_id(),
+                        cx,
+                    );
                     cx.stop_propagation();
                     cx.notify();
                 }),
@@ -77,9 +81,10 @@ impl WorkspaceApp {
             .child(select_anchor_probe(
                 anchor_id,
                 trigger,
-                move |anchor, _window, cx| {
+                move |anchor, window, cx| {
+                    let window_id = window.window_handle().window_id();
                     let _ = workspace.update(cx, |this, cx| {
-                        this.update_select_anchor(anchor, cx);
+                        this.update_settings_select_anchor(window_id, anchor, cx);
                     });
                 },
             ))
@@ -593,6 +598,27 @@ impl WorkspaceApp {
             items,
         )
         .into_any_element()
+    }
+
+    pub(in crate::workspace) fn update_settings_select_anchor(
+        &mut self,
+        window_id: gpui::WindowId,
+        anchor: OverlayAnchor,
+        cx: &mut Context<Self>,
+    ) {
+        let is_open_select_in_other_window = self
+            .open_settings_select
+            .is_some_and(|select| select.anchor_id() == anchor.id)
+            && self.open_settings_select_owner_window_id != Some(window_id);
+        self.settings_select_anchors
+            .insert((window_id, anchor.id), anchor);
+        if is_open_select_in_other_window {
+            // The popup is mounted in the owning native window. Ignore a
+            // coincidental repaint from another window instead of replacing
+            // its coordinate space with foreign bounds.
+            return;
+        }
+        self.update_select_anchor(anchor, cx);
     }
 
     pub(in crate::workspace) fn update_select_anchor(
@@ -1196,6 +1222,20 @@ impl WorkspaceApp {
             &mut self.open_settings_select,
             &mut self.settings_select_focus_origin,
         );
+        self.open_settings_select_owner_window_id = None;
+    }
+
+    pub(in crate::workspace) fn release_settings_select_window(
+        &mut self,
+        window_id: gpui::WindowId,
+    ) -> bool {
+        self.settings_select_anchors
+            .retain(|(anchor_window_id, _), _| *anchor_window_id != window_id);
+        if self.open_settings_select_owner_window_id == Some(window_id) {
+            self.close_settings_select();
+            return true;
+        }
+        false
     }
 
     pub(in crate::workspace) fn clear_settings_input_draft(&mut self, input: SettingsInput) {

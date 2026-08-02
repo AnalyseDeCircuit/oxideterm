@@ -16,6 +16,11 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> Vec<AnyElement> {
         let mut modals = Vec::new();
+        let window_id = window.window_handle().window_id();
+        let document_dialog_owned_by_window = self
+            .ai_entity
+            .read(cx)
+            .knowledge_document_dialog_owned_by(window_id);
         match tab_kind {
             TabKind::Settings => {
                 if let Some(modal) = self.render_settings_navigation_editor(cx) {
@@ -27,7 +32,9 @@ impl WorkspaceApp {
                 if let Some(modal) = self.render_knowledge_create_collection_dialog(cx) {
                     modals.push(modal);
                 }
-                if let Some(modal) = self.render_knowledge_new_document_dialog(cx) {
+                if document_dialog_owned_by_window
+                    && let Some(modal) = self.render_knowledge_new_document_dialog(cx)
+                {
                     modals.push(modal);
                 }
                 if let Some(modal) = self.render_knowledge_delete_confirm_dialog(cx) {
@@ -45,6 +52,19 @@ impl WorkspaceApp {
                     modals.push(modal);
                 }
                 if let Some(modal) = self.render_portable_password_change_dialog(cx) {
+                    modals.push(modal);
+                }
+            }
+            TabKind::Knowledge => {
+                if let Some(modal) = self.render_knowledge_create_collection_dialog(cx) {
+                    modals.push(modal);
+                }
+                if document_dialog_owned_by_window
+                    && let Some(modal) = self.render_knowledge_new_document_dialog(cx)
+                {
+                    modals.push(modal);
+                }
+                if let Some(modal) = self.render_knowledge_delete_confirm_dialog(cx) {
                     modals.push(modal);
                 }
             }
@@ -110,7 +130,8 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let active_ime_target = self.active_ime_target(cx);
+        let window_id = window.window_handle().window_id();
+        let active_ime_target = self.active_ime_target_for_window(window_id, cx);
         self.workspace_input.update(cx, |input, cx| {
             input.sync_active_target(active_ime_target, cx);
         });
@@ -160,6 +181,7 @@ impl WorkspaceApp {
                         | TabKind::PluginManager
                         | TabKind::Plugin { .. }
                         | TabKind::CloudSync
+                        | TabKind::Knowledge
                         | TabKind::RemoteDesktop
                 )
             })
@@ -203,6 +225,11 @@ impl WorkspaceApp {
                     self.render_native_plugin_tab_surface(&plugin_id, &tab_id, cx)
                 }
                 (TabKind::CloudSync, _) => self.render_cloud_sync_surface(cx),
+                (TabKind::Knowledge, _) => self.render_knowledge_workspace_surface(
+                    KnowledgeWorkspaceLayout::MainWindow,
+                    window,
+                    cx,
+                ),
                 (TabKind::RemoteDesktop, _) => {
                     self.render_remote_desktop_surface(*tab_id, window, cx)
                 }
@@ -225,6 +252,9 @@ impl WorkspaceApp {
             .as_ref()
             .map(|(tab_id, kind, _)| self.render_tab_window_modals(*tab_id, kind, window, cx))
             .unwrap_or_default();
+        // Settings and Knowledge share one root-mounted select portal. Keeping it
+        // above tab-owned modals lets both surfaces use the same anchored control.
+        let settings_select_overlay = self.render_settings_select_overlay(window, cx);
         let window_background_layer =
             self.render_workspace_window_background(window_background, window, cx);
         let has_window_background = window_background_layer.is_some();
@@ -286,6 +316,17 @@ impl WorkspaceApp {
                     cx.stop_propagation();
                 }),
             )
+            .on_action(cx.listener(|this, _: &Quit, _window, cx| {
+                if this.guard_dirty_knowledge_app_quit(cx) {
+                    // The global listener terminates the process, so retain this action until the
+                    // user has explicitly saved or discarded the Knowledge draft.
+                    cx.stop_propagation();
+                } else {
+                    // GPUI actions stop during the bubble phase by default. A clean workspace must
+                    // explicitly continue to the application-level quit handler.
+                    cx.propagate();
+                }
+            }))
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(|this, _event: &MouseDownEvent, _window, cx| {
@@ -303,8 +344,10 @@ impl WorkspaceApp {
                     cx.stop_propagation();
                     return;
                 }
-                let active_ime_should_receive_key =
-                    this.defer_active_ime_key(&event.keystroke, window, cx);
+                let active_ime_target =
+                    this.active_ime_target_for_window(window.window_handle().window_id(), cx);
+                let active_ime_should_receive_key = active_ime_target.is_some()
+                    && this.defer_active_ime_key(&event.keystroke, window, cx);
                 if active_ime_should_receive_key {
                     // Tauri DOM inputs let printable keydown bubble while the
                     // browser performs the actual text mutation through the
@@ -313,22 +356,32 @@ impl WorkspaceApp {
                     // may not receive the character or IME candidate control.
                     return;
                 }
-                if this.handle_active_text_input_edit_shortcut(&event.keystroke, cx) {
+                if active_ime_target.is_some()
+                    && this.handle_active_text_input_edit_shortcut(&event.keystroke, cx)
+                {
                     window.prevent_default();
                     cx.stop_propagation();
-                } else if this.handle_active_text_input_delete_selection(&event.keystroke, cx) {
+                } else if active_ime_target.is_some()
+                    && this.handle_active_text_input_delete_selection(&event.keystroke, cx)
+                {
                     window.prevent_default();
                     cx.stop_propagation();
-                } else if this.handle_active_text_input_newline(&event.keystroke, cx) {
+                } else if active_ime_target.is_some()
+                    && this.handle_active_text_input_newline(&event.keystroke, cx)
+                {
                     window.prevent_default();
                     cx.stop_propagation();
-                } else if this.handle_active_text_input_transpose(&event.keystroke, cx) {
+                } else if active_ime_target.is_some()
+                    && this.handle_active_text_input_transpose(&event.keystroke, cx)
+                {
                     window.prevent_default();
                     cx.stop_propagation();
                 } else if this.handle_terminal_git_branch_picker_key(event, cx) {
                     window.prevent_default();
                     cx.stop_propagation();
-                } else if this.handle_active_text_input_navigation(&event.keystroke, cx) {
+                } else if active_ime_target.is_some()
+                    && this.handle_active_text_input_navigation(&event.keystroke, cx)
+                {
                     window.prevent_default();
                     cx.stop_propagation();
                 } else if this.handle_host_process_search_key(event, cx) {
@@ -416,6 +469,12 @@ impl WorkspaceApp {
                 } else if this.terminal_command_sender_editor_focused(window, cx) {
                     // The editor owns its complete key model, including Tab and
                     // navigation keys that otherwise fall through to the pane.
+                } else if this.handle_knowledge_workspace_key(event, window, cx) {
+                    window.prevent_default();
+                    cx.stop_propagation();
+                } else if this.knowledge_text_editor_focused(window, cx) {
+                    // Knowledge source, instant-block, and navigator search editors own their
+                    // complete key models instead of falling through to terminal shortcuts.
                 } else if this.forward_remote_desktop_key_from_capture(event, cx) {
                     window.prevent_default();
                     cx.stop_propagation();
@@ -1017,6 +1076,7 @@ impl WorkspaceApp {
             )
             // Tab-owned dialogs are portaled here so their backdrops cover all window chrome.
             .children(active_tab_window_modals)
+            .when_some(settings_select_overlay, |root, overlay| root.child(overlay))
             .when_some(
                 self.render_ai_sidebar_floating_overlay(window, cx),
                 |root, overlay| root.child(overlay),
@@ -1125,6 +1185,7 @@ impl WorkspaceApp {
             .child(WorkspaceImeElement::new(
                 cx.entity(),
                 self.focus_handle.clone(),
+                window.window_handle().window_id(),
             ))
             .into_any_element()
     }

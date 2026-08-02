@@ -1,7 +1,7 @@
 # OxideTerm Native Architecture
 
 > **Version**: Native desktop architecture
-> **Last updated**: 2026-07-31
+> **Last updated**: 2026-08-01
 > **Workspace version**: Cargo workspace `2.0.15`
 > **Reference style**: based on the Tauri architecture documents and retained for migration context; the Rust/GPUI native app is the implementation source of truth.
 
@@ -337,6 +337,7 @@ crates/oxideterm-gpui-app/src/workspace/tabs/
 crates/oxideterm-gpui-app/src/workspace/pane_tree.rs
 crates/oxideterm-gpui-app/src/workspace/sidebar/
 crates/oxideterm-gpui-app/src/workspace/settings/
+crates/oxideterm-gpui-app/src/workspace/knowledge.rs
 ```
 
 ### Layer Dependency Shape
@@ -542,12 +543,21 @@ Tabs are visible surfaces. A tab can represent:
 - Plugin manager.
 - Connection monitor.
 - Cloud sync.
+- Knowledge workspace.
 
 Tabs are closeable views. They are not the durable source of truth for saved connections or secrets.
 
 ### Activity Bar
 
 The activity bar is the navigation entrypoint. It should take users to app surfaces, not expose low-level runtime handles.
+
+### Knowledge Workspace
+
+Knowledge is a first-class central tab with its own internal split layout. Its left navigator owns collection and document browsing; its right pane owns Markdown editing. It is not a global companion-sidebar panel and it is not implemented as a stack of Settings cards.
+
+The workspace keeps one canonical Markdown draft for Source, Instant, and Preview modes. Instant is a block-level hybrid view, not a WYSIWYG editor: inactive blocks are rendered while the active block exposes its Markdown source. `TextEditorView` owns source editing and undo history, `oxideterm-gpui-markdown` owns source-block projection and native rendering, and the RAG store remains the durable owner of collections, document revisions, chunks, and search indexes. The app entity coordinates selection, asynchronous loads, autosave, conflict detection, dirty-document leave guards, and background index refresh without moving persistence into the GPUI render tree.
+
+Knowledge settings remain a configuration surface for embedding and retrieval behavior. They do not own the primary document browser or editor.
 
 ### Notifications
 
@@ -855,7 +865,7 @@ Settings are durable application state. The desktop Settings surface is the prim
 - SFTP behavior.
 - IDE behavior.
 - AI providers and model settings.
-- AI memory, tool use, and knowledge settings.
+- AI memory, tool use, and Knowledge embedding or retrieval settings.
 - Plugins.
 - Cloud sync.
 - Portable runtime.
@@ -1208,7 +1218,7 @@ flowchart TB
 | `policy.rs` | Decide which tool actions need approval or rejection | Dangerous or state-changing actions are not executed solely because a model requested them |
 | `persistence.rs` | Store conversations and AI durable state | Long-running chat history survives app restarts where configured |
 | `profiles.rs` and `settings.rs` | Manage AI profiles and settings | Model/provider choices are user configuration, not hardcoded defaults |
-| `rag/*` | Chunk, embed, store, and search knowledge sources | Retrieval is a domain service, not sidebar rendering logic |
+| `rag/*` | Persist, chunk, embed, index, and search knowledge documents | Retrieval and durable document state are domain services, not workspace rendering logic |
 | `mcp/*` | Manage MCP registry, process startup, and protocol types | External tool servers are isolated from core app state |
 | `references.rs`, `slash.rs`, `suggestions.rs` | Provide references, slash commands, and suggestions | Assistant input helpers remain separate from provider transport |
 
@@ -1857,6 +1867,7 @@ Staleness means "the app cannot prove this state is current." It does not automa
 | Forwarding | `oxideterm-forwarding`, app forwarding surface |
 | Graphics and remote desktop sessions | `oxideterm-wsl-graphics`, `oxideterm-remote-desktop`, `oxideterm-gpui-remote-desktop`, `oxideterm-rdp-helper`, `oxideterm-vnc-helper`, app graphics/remote-desktop surfaces |
 | IDE and editor | `oxideterm-gpui-ide`, `oxideterm-gpui-editor`, `oxideterm-ide-core`, `oxideterm-ide-fs`, `oxideterm-editor-*` |
+| Knowledge workspace and Markdown | `oxideterm-ai` RAG domain, `oxideterm-gpui-markdown`, `oxideterm-gpui-editor`, `workspace/knowledge.rs` |
 | Settings and privilege credentials | `oxideterm-settings`, `oxideterm-settings-model`, `oxideterm-gpui-settings-view`, secret-aware app boundary |
 | AI, RAG, MCP, reasoning, and tool policy | `oxideterm-ai`, `oxideterm-ai-tasks`, `oxideterm-skills`, app AI sidebar |
 | ACP agent sessions and host tools | `oxideterm-acp-adapter`, `oxideterm-acp-host-tools`, `workspace/acp_workspace.rs` |

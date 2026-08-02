@@ -507,11 +507,20 @@ impl WorkspaceImeTarget {
 pub(super) struct WorkspaceImeElement {
     view: Entity<WorkspaceApp>,
     focus_handle: FocusHandle,
+    window_id: gpui::WindowId,
 }
 
 impl WorkspaceImeElement {
-    pub(super) fn new(view: Entity<WorkspaceApp>, focus_handle: FocusHandle) -> Self {
-        Self { view, focus_handle }
+    pub(super) fn new(
+        view: Entity<WorkspaceApp>,
+        focus_handle: FocusHandle,
+        window_id: gpui::WindowId,
+    ) -> Self {
+        Self {
+            view,
+            focus_handle,
+            window_id,
+        }
     }
 }
 
@@ -569,12 +578,18 @@ impl Element for WorkspaceImeElement {
         window: &mut Window,
         cx: &mut App,
     ) {
-        if self.view.read(cx).active_ime_target(cx).is_some() {
+        if self
+            .view
+            .read(cx)
+            .active_ime_target_for_window(self.window_id, cx)
+            .is_some()
+        {
             window.handle_input(
                 &self.focus_handle,
                 WorkspaceInputHandler {
                     view: self.view.clone(),
                     fallback_bounds: bounds,
+                    window_id: self.window_id,
                 },
                 cx,
             );
@@ -585,6 +600,15 @@ impl Element for WorkspaceImeElement {
 pub(super) struct WorkspaceInputHandler {
     view: Entity<WorkspaceApp>,
     fallback_bounds: Bounds<Pixels>,
+    window_id: gpui::WindowId,
+}
+
+impl WorkspaceInputHandler {
+    fn active_ime_target(&self, cx: &App) -> Option<WorkspaceImeTarget> {
+        self.view
+            .read(cx)
+            .active_ime_target_for_window(self.window_id, cx)
+    }
 }
 
 #[cfg(test)]
@@ -641,8 +665,8 @@ impl InputHandler for WorkspaceInputHandler {
         _window: &mut Window,
         cx: &mut App,
     ) -> Option<UTF16Selection> {
+        let target = self.active_ime_target(cx)?;
         self.view.update(cx, |view, cx| {
-            let target = view.active_ime_target(cx)?;
             view.text_for_ime_target(target, cx).map(|text| {
                 let text_len = text.encode_utf16().count();
                 let (range, reversed) =
@@ -669,8 +693,8 @@ impl InputHandler for WorkspaceInputHandler {
     }
 
     fn marked_text_range(&mut self, _window: &mut Window, cx: &mut App) -> Option<Range<usize>> {
+        let target = self.active_ime_target(cx)?;
         self.view.update(cx, |view, cx| {
-            let target = view.active_ime_target(cx)?;
             let marked = view.marked_text_state_for_target(target, cx)?;
             (!marked.text.is_empty()).then(|| marked.virtual_range())
         })
@@ -683,8 +707,9 @@ impl InputHandler for WorkspaceInputHandler {
         _window: &mut Window,
         cx: &mut App,
     ) -> Option<String> {
+        let target = self.active_ime_target(cx)?;
         self.view.update(cx, |view, cx| {
-            let text = view.active_ime_text_with_marked_text(cx)?;
+            let text = view.ime_text_with_marked_text_for_target(target, cx)?;
             let end = text.encode_utf16().count();
             let clamped = range_utf16.start.min(end)..range_utf16.end.min(end);
             *adjusted_range = Some(clamped.clone());
@@ -699,8 +724,11 @@ impl InputHandler for WorkspaceInputHandler {
         _window: &mut Window,
         cx: &mut App,
     ) {
+        let Some(target) = self.active_ime_target(cx) else {
+            return;
+        };
         let _ = self.view.update(cx, |view, cx| {
-            view.replace_active_ime_text(replacement_range, text, cx);
+            view.replace_platform_ime_text(target, replacement_range, text, cx);
         });
     }
 
@@ -712,10 +740,10 @@ impl InputHandler for WorkspaceInputHandler {
         _window: &mut Window,
         cx: &mut App,
     ) {
+        let Some(target) = self.active_ime_target(cx) else {
+            return;
+        };
         let _ = self.view.update(cx, |view, cx| {
-            let Some(target) = view.active_ime_target(cx) else {
-                return;
-            };
             if new_text.is_empty() {
                 if view.ime_marked_text.take().is_some() {
                     cx.notify();
@@ -762,8 +790,8 @@ impl InputHandler for WorkspaceInputHandler {
         _window: &mut Window,
         cx: &mut App,
     ) -> Option<Bounds<Pixels>> {
-        self.view.update(cx, |view, cx| {
-            let target = view.active_ime_target(cx)?;
+        let target = self.active_ime_target(cx)?;
+        self.view.update(cx, |view, _cx| {
             let bounds = view
                 .text_input_anchors
                 .bounds(target.anchor_id())
@@ -781,8 +809,8 @@ impl InputHandler for WorkspaceInputHandler {
         window: &mut Window,
         cx: &mut App,
     ) -> Option<usize> {
+        let target = self.active_ime_target(cx)?;
         self.view.update(cx, |view, cx| {
-            let target = view.active_ime_target(cx)?;
             view.ime_index_for_position(target, point, window, cx)
         })
     }
@@ -799,7 +827,9 @@ impl WorkspaceApp {
         window: &Window,
         cx: &mut Context<Self>,
     ) -> bool {
-        let Some(target) = self.active_ime_target(cx) else {
+        let Some(target) =
+            self.active_ime_target_for_window(window.window_handle().window_id(), cx)
+        else {
             return false;
         };
         if self.marked_text_state_for_target(target, cx).is_some()
@@ -908,21 +938,26 @@ impl WorkspaceApp {
         let settings_tab_visible = self
             .active_tab(cx)
             .is_some_and(|tab| tab.kind == oxideterm_workspace::TabKind::Settings);
-        if settings_tab_visible {
-            if let Some(input) = self
+        // Knowledge dialogs may be owned by a detached Knowledge or Settings window. The focused
+        // window's WorkspaceImeElement decides which native window receives the shared draft.
+        let knowledge_dialog_visible = self.ai_entity.read(cx).knowledge_create_dialog_open()
+            || self.ai_entity.read(cx).knowledge_document_dialog_open();
+        if settings_tab_visible
+            && let Some(input) = self
                 .settings_workspace
                 .read(cx)
                 .settings_entity_focused_input()
-            {
-                return Some(WorkspaceImeTarget::Settings(input));
-            }
-
+        {
+            return Some(WorkspaceImeTarget::Settings(input));
+        }
+        if settings_tab_visible || knowledge_dialog_visible {
             if let Some(input) = self.ai_entity.read(cx).focused_settings_input() {
                 return Some(WorkspaceImeTarget::Settings(input));
             }
         }
 
         let legacy_settings_input_visible = settings_tab_visible
+            || knowledge_dialog_visible
             || self
                 .active_tab(cx)
                 .is_some_and(|tab| tab.kind == oxideterm_workspace::TabKind::CloudSync);
@@ -1095,6 +1130,25 @@ impl WorkspaceApp {
         }
 
         self.search.visible.then_some(WorkspaceImeTarget::Search)
+    }
+
+    pub(super) fn active_ime_target_for_window(
+        &self,
+        window_id: gpui::WindowId,
+        cx: &App,
+    ) -> Option<WorkspaceImeTarget> {
+        let target = self.active_ime_target(cx)?;
+        if matches!(
+            target,
+            WorkspaceImeTarget::Settings(SettingsInput::KnowledgeDocumentTitle)
+        ) && !self
+            .ai_entity
+            .read(cx)
+            .knowledge_document_dialog_owned_by(window_id)
+        {
+            return None;
+        }
+        Some(target)
     }
 
     pub(super) fn marked_text_for_target(
@@ -1549,11 +1603,6 @@ impl WorkspaceApp {
         position_x - centered_text_left
     }
 
-    fn active_ime_text_with_marked_text(&self, cx: &App) -> Option<String> {
-        let target = self.active_ime_target(cx)?;
-        self.ime_text_with_marked_text_for_target(target, cx)
-    }
-
     /// Builds the virtual text buffer seen by the platform while an IME
     /// composition temporarily replaces the target's selected range.
     pub(super) fn ime_text_with_marked_text_for_target(
@@ -1937,15 +1986,13 @@ impl WorkspaceApp {
         }
     }
 
-    fn replace_active_ime_text(
+    fn replace_platform_ime_text(
         &mut self,
+        target: WorkspaceImeTarget,
         replacement_range: Option<Range<usize>>,
         text: &str,
         cx: &mut Context<Self>,
     ) {
-        let Some(target) = self.active_ime_target(cx) else {
-            return;
-        };
         if platform_text_commit_is_duplicate(&mut self.pending_platform_text_commit, target, text) {
             self.ime_marked_text = None;
             return;

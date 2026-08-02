@@ -31,6 +31,7 @@
       "export_tooltip": ".oxide 파일로 내보내기",
       "system_health": "시스템 상태",
       "host_tools": "호스트 도구",
+      "knowledge": "지식 베이스",
       "host_monitor": "모니터링",
       "gpu": "GPU / NPU",
       "processes": "프로세스",

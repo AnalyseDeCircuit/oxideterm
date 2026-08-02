@@ -236,31 +236,6 @@ fn flush_ascii(buf: &mut String, tokens: &mut Vec<String>) {
 // BM25 Index Building
 // ═══════════════════════════════════════════════════════════════════════════
 
-/// Index a single chunk's content into BM25 postings.
-/// When `context_prefix` is provided, it is prepended to the content before
-/// tokenization to improve keyword retrieval (Contextual Retrieval).
-pub fn index_chunk(
-    store: &RagStore,
-    chunk_id: &str,
-    content: &str,
-    context_prefix: Option<&str>,
-) -> Result<(), RagError> {
-    let owned;
-    let full_text = match context_prefix {
-        Some(prefix) if !prefix.is_empty() => {
-            owned = format!("{} {}", prefix, content);
-            owned.as_str()
-        }
-        _ => content,
-    };
-    let tokens = tokenize(full_text);
-    let doc_length = estimate_tokens(full_text);
-    let tf_map = term_frequencies(&tokens);
-
-    store.add_to_bm25_index(&tf_map, chunk_id, doc_length)?;
-    Ok(())
-}
-
 /// Rebuild the global BM25 index from all collections.
 ///
 /// `cancel` — if provided, checked periodically; if set to `true`, the
@@ -271,6 +246,10 @@ pub fn reindex_all(
     cancel: Option<&AtomicBool>,
     mut on_progress: Option<&mut dyn FnMut(usize, usize)>,
 ) -> Result<usize, RagError> {
+    // All global rebuilds share one owner so an import, removal, manual rebuild, and autosave
+    // cannot race and let an older snapshot overwrite a newer index.
+    let _operation_guard = store.bm25_operation_lock()?;
+    let source_revision = store.bm25_content_revision()?;
     let all_col_ids = store.get_all_collection_ids()?;
     let chunk_ids = store.get_chunk_ids_in_collections(&all_col_ids)?;
     let total = chunk_ids.len();
@@ -328,7 +307,7 @@ pub fn reindex_all(
         avg_dl,
     };
 
-    store.write_bm25_index(&postings, &stats)?;
+    store.write_bm25_index(&postings, &stats, source_revision)?;
     Ok(count)
 }
 

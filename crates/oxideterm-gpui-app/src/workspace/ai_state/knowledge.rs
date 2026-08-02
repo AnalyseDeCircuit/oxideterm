@@ -17,8 +17,13 @@ pub(in crate::workspace) struct KnowledgePageState {
     pub(super) new_document_dialog_open: bool,
     pub(super) embedding_config_expanded: bool,
     pub(super) new_collection_name: String,
+    pub(super) new_collection_connection_id: Option<String>,
+    pub(super) new_document_collection_id: Option<String>,
+    pub(super) new_document_owner_window_id: Option<gpui::WindowId>,
+    pub(super) new_document_open_in_workspace: bool,
     pub(super) new_document_title: String,
     pub(super) new_document_format: String,
+    pub(super) new_document_error: Option<String>,
     pub(super) import_progress: Option<(usize, usize)>,
     pub(super) embedding_progress: Option<(usize, usize)>,
     pub(super) delete_confirm: Option<oxideterm_settings_model::KnowledgeDeleteConfirm>,
@@ -38,8 +43,13 @@ impl Default for KnowledgePageState {
             new_document_dialog_open: false,
             embedding_config_expanded: false,
             new_collection_name: String::new(),
+            new_collection_connection_id: None,
+            new_document_collection_id: None,
+            new_document_owner_window_id: None,
+            new_document_open_in_workspace: false,
             new_document_title: String::new(),
             new_document_format: "markdown".to_string(),
+            new_document_error: None,
             import_progress: None,
             embedding_progress: None,
             delete_confirm: None,
@@ -101,12 +111,55 @@ impl AiWorkspaceEntity {
         &self.knowledge_page.new_collection_name
     }
 
+    pub(in crate::workspace) fn knowledge_new_collection_connection_id(&self) -> Option<&str> {
+        self.knowledge_page.new_collection_connection_id.as_deref()
+    }
+
     pub(in crate::workspace) fn knowledge_new_document_title(&self) -> &str {
         &self.knowledge_page.new_document_title
     }
 
     pub(in crate::workspace) fn knowledge_new_document_format(&self) -> &str {
         &self.knowledge_page.new_document_format
+    }
+
+    pub(in crate::workspace) fn knowledge_new_document_error(&self) -> Option<&str> {
+        self.knowledge_page.new_document_error.as_deref()
+    }
+
+    pub(in crate::workspace) fn knowledge_document_dialog_owned_by(
+        &self,
+        window_id: gpui::WindowId,
+    ) -> bool {
+        self.knowledge_page.new_document_dialog_open
+            && self.knowledge_page.new_document_owner_window_id == Some(window_id)
+    }
+
+    pub(in crate::workspace) fn transfer_knowledge_document_dialog_owner(
+        &mut self,
+        source_window_id: gpui::WindowId,
+        destination_window_id: gpui::WindowId,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if !self.knowledge_document_dialog_owned_by(source_window_id) {
+            return false;
+        }
+        self.knowledge_page.new_document_owner_window_id = Some(destination_window_id);
+        self.emit_knowledge_page_changed(cx);
+        true
+    }
+
+    pub(in crate::workspace) fn dismiss_knowledge_document_dialog_for_window(
+        &mut self,
+        window_id: gpui::WindowId,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if !self.knowledge_document_dialog_owned_by(window_id) {
+            return false;
+        }
+        self.clear_knowledge_document_dialog();
+        self.emit_knowledge_page_changed(cx);
+        true
     }
 
     pub(in crate::workspace) fn knowledge_import_progress(&self) -> Option<(usize, usize)> {
@@ -151,6 +204,13 @@ impl AiWorkspaceEntity {
 
     pub(in crate::workspace) fn set_knowledge_document_format(&mut self, format: String) {
         self.knowledge_page.new_document_format = format;
+    }
+
+    pub(in crate::workspace) fn set_knowledge_collection_connection_id(
+        &mut self,
+        connection_id: Option<String>,
+    ) {
+        self.knowledge_page.new_collection_connection_id = connection_id;
     }
 
     pub(in crate::workspace) fn toggle_knowledge_embedding_config(&mut self) {
@@ -241,14 +301,32 @@ impl AiWorkspaceEntity {
         if self.knowledge_page.create_presence.finish_exit(generation) {
             self.knowledge_page.create_dialog_open = false;
             self.knowledge_page.new_collection_name.clear();
+            self.knowledge_page.new_collection_connection_id = None;
             self.knowledge_page.create_presence.reopen();
             self.knowledge_page.create_exit_task = None;
         }
     }
 
-    pub(in crate::workspace) fn open_knowledge_document_dialog(&mut self) {
+    pub(in crate::workspace) fn open_knowledge_document_dialog(
+        &mut self,
+        collection_id: String,
+        owner_window_id: gpui::WindowId,
+        open_in_workspace: bool,
+    ) {
+        if self.knowledge_page.new_document_dialog_open {
+            // One shared draft cannot safely be moved to another window while
+            // it is visible. Keep the existing owner and draft intact.
+            return;
+        }
         self.knowledge_page.document_exit_task = None;
         self.knowledge_page.document_presence.reopen();
+        // Bind creation to the section that opened the dialog so a concurrent navigator refresh
+        // cannot redirect the new document into a different collection.
+        self.knowledge_page.selected_collection_id = Some(collection_id.clone());
+        self.knowledge_page.new_document_collection_id = Some(collection_id);
+        self.knowledge_page.new_document_owner_window_id = Some(owner_window_id);
+        self.knowledge_page.new_document_open_in_workspace = open_in_workspace;
+        self.knowledge_page.new_document_error = None;
         self.knowledge_page.new_document_dialog_open = true;
     }
 
@@ -282,10 +360,21 @@ impl AiWorkspaceEntity {
             .document_presence
             .finish_exit(generation)
         {
-            self.knowledge_page.new_document_dialog_open = false;
-            self.knowledge_page.new_document_title.clear();
-            self.knowledge_page.document_presence.reopen();
-            self.knowledge_page.document_exit_task = None;
+            self.clear_knowledge_document_dialog();
+        }
+    }
+
+    fn clear_knowledge_document_dialog(&mut self) {
+        self.knowledge_page.new_document_dialog_open = false;
+        self.knowledge_page.new_document_collection_id = None;
+        self.knowledge_page.new_document_owner_window_id = None;
+        self.knowledge_page.new_document_open_in_workspace = false;
+        self.knowledge_page.new_document_title.clear();
+        self.knowledge_page.new_document_error = None;
+        self.knowledge_page.document_presence.reopen();
+        self.knowledge_page.document_exit_task = None;
+        if self.focused_settings_input == Some(SettingsInput::KnowledgeDocumentTitle) {
+            self.clear_focused_settings_input();
         }
     }
 
@@ -298,16 +387,18 @@ impl AiWorkspaceEntity {
             return false;
         }
         let store = self.rag_store();
+        let scope = match self.knowledge_page.new_collection_connection_id.clone() {
+            Some(connection_id) => oxideterm_ai::RagDocScopeRequest::Connection { connection_id },
+            None => oxideterm_ai::RagDocScopeRequest::Global,
+        };
         match oxideterm_ai::rag_create_collection(
             &store,
-            oxideterm_ai::RagCreateCollectionRequest {
-                name,
-                scope: oxideterm_ai::RagDocScopeRequest::Global,
-            },
+            oxideterm_ai::RagCreateCollectionRequest { name, scope },
         ) {
             Ok(collection) => {
                 self.knowledge_page.selected_collection_id = Some(collection.id);
                 self.knowledge_page.new_collection_name.clear();
+                self.knowledge_page.new_collection_connection_id = None;
                 self.knowledge_page.error = None;
                 true
             }
@@ -321,19 +412,12 @@ impl AiWorkspaceEntity {
     pub(in crate::workspace) fn create_blank_knowledge_document(
         &mut self,
         error_message: String,
-    ) -> Option<String> {
+    ) -> Option<(oxideterm_ai::RagDocumentResponse, bool)> {
         let store = self.rag_store();
-        let collection_id = self
-            .knowledge_page
-            .selected_collection_id
-            .clone()
-            .or_else(|| {
-                oxideterm_ai::rag_list_collections(&store, None)
-                    .ok()
-                    .and_then(|collections| {
-                        collections.first().map(|collection| collection.id.clone())
-                    })
-            })?;
+        let Some(collection_id) = self.knowledge_page.new_document_collection_id.clone() else {
+            self.knowledge_page.new_document_error = Some(error_message);
+            return None;
+        };
         let title = self.knowledge_page.new_document_title.trim().to_string();
         if title.is_empty() {
             return None;
@@ -348,11 +432,11 @@ impl AiWorkspaceEntity {
         ) {
             Ok(document) => {
                 self.knowledge_page.new_document_title.clear();
-                self.knowledge_page.error = None;
-                Some(document.id)
+                self.knowledge_page.new_document_error = None;
+                Some((document, self.knowledge_page.new_document_open_in_workspace))
             }
             Err(_) => {
-                self.knowledge_page.error = Some(error_message);
+                self.knowledge_page.new_document_error = Some(error_message);
                 None
             }
         }

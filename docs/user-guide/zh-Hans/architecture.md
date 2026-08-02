@@ -1,7 +1,7 @@
 # OxideTerm Native 架构设计
 
 > **版本**: Native 桌面架构
-> **上次更新**: 2026-07-31
+> **上次更新**: 2026-08-01
 > **工作区版本**: Cargo workspace `2.0.15`
 > **参考写法**: 参考 Tauri 架构文档的组织方式并保留其迁移语境；Rust/GPUI Native 应用源码是实现的事实来源。
 
@@ -335,6 +335,7 @@ crates/oxideterm-gpui-app/src/workspace/tabs/
 crates/oxideterm-gpui-app/src/workspace/pane_tree.rs
 crates/oxideterm-gpui-app/src/workspace/sidebar/
 crates/oxideterm-gpui-app/src/workspace/settings/
+crates/oxideterm-gpui-app/src/workspace/knowledge.rs
 ```
 
 ### 分层依赖形状
@@ -536,12 +537,21 @@ flowchart TB
 - 插件管理器。
 - 连接监控。
 - 云同步。
+- 知识库工作区。
 
 标签页是可关闭视图，不是保存连接或凭据的长期真源。
 
 ### 活动栏
 
 活动栏是导航入口。它应把用户带到应用页面，而不是暴露低层运行时句柄。
+
+### 知识库工作区
+
+知识库是一级中央标签页，并拥有自己的内部左右分栏。左侧导航负责集合与文档浏览，右侧负责 Markdown 编辑；它不是全局伴随侧边栏面板，也不是设置卡片的堆叠。
+
+源码、即时渲染和预览模式共享同一份 Markdown 草稿。即时渲染是块级混合视图，而不是所见即所得编辑器：非活动块显示渲染结果，活动块显示 Markdown 源码。`TextEditorView` 负责源码编辑与撤销历史，`oxideterm-gpui-markdown` 负责源码块投影和原生渲染，RAG 存储仍是集合、文档版本、分块和搜索索引的持久所有者。应用实体只协调选择、异步加载、自动保存、冲突检测、未保存离开保护和后台索引刷新，不把持久化职责放入 GPUI 渲染树。
+
+知识库设置页面继续负责嵌入和检索行为配置，但不再承担主要文档浏览器或编辑器职责。
 
 ### 通知
 
@@ -848,7 +858,7 @@ AI 和插件能力句柄不是直接重连阶段。它们通过运行时边界�
 - SFTP 行为。
 - IDE 行为。
 - AI 供应商和模型设置。
-- AI 记忆、工具调用和知识设置。
+- AI 记忆、工具调用，以及知识库嵌入与检索设置。
 - 插件。
 - 云同步。
 - 便携运行时。
@@ -1193,7 +1203,7 @@ flowchart TB
 | `policy.rs` | 决定哪些工具动作需要批准或拒绝 | 危险或会改变状态的动作不能只因模型要求就执行 |
 | `persistence.rs` | 存储对话和 AI 持久状态 | 在启用时，长对话可跨应用重启保留 |
 | `profiles.rs` 与 `settings.rs` | 管理 AI 配置档和设置 | 模型/供应商选择是用户配置，不是硬编码默认值 |
-| `rag/*` | 切分、嵌入、存储和搜索知识来源 | 检索是领域服务，不是侧边栏渲染逻辑 |
+| `rag/*` | 持久化、切分、嵌入、索引和搜索知识文档 | 检索和持久文档状态属于领域服务，不属于工作区渲染逻辑 |
 | `mcp/*` | 管理 MCP 注册表、进程启动和协议类型 | 外部工具服务器与核心应用状态隔离 |
 | `references.rs`, `slash.rs`, `suggestions.rs` | 提供引用、斜杠命令和建议 | 助手输入辅助与供应商传输分离 |
 
@@ -1840,6 +1850,7 @@ flowchart LR
 | 转发 | `oxideterm-forwarding`, 应用转发页面 |
 | 图形和远程桌面会话 | `oxideterm-wsl-graphics`, `oxideterm-remote-desktop`, `oxideterm-gpui-remote-desktop`, `oxideterm-rdp-helper`, `oxideterm-vnc-helper`, 应用图形/远程桌面页面 |
 | IDE 和编辑器 | `oxideterm-gpui-ide`, `oxideterm-gpui-editor`, `oxideterm-ide-core`, `oxideterm-ide-fs`, `oxideterm-editor-*` |
+| 知识库工作区与 Markdown | `oxideterm-ai` RAG 领域、`oxideterm-gpui-markdown`、`oxideterm-gpui-editor`、`workspace/knowledge.rs` |
 | 设置和提权凭据 | `oxideterm-settings`, `oxideterm-settings-model`, `oxideterm-gpui-settings-view`, 应用凭据感知边界 |
 | AI、RAG、MCP、推理和工具策略 | `oxideterm-ai`, `oxideterm-ai-tasks`, `oxideterm-skills`, 应用 AI 侧边栏 |
 | ACP agent session 和主机工具 | `oxideterm-acp-adapter`, `oxideterm-acp-host-tools`, `workspace/acp_workspace.rs` |

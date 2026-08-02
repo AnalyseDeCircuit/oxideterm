@@ -1014,6 +1014,7 @@ impl WorkspaceApp {
                     TabKind::PluginManager => self.i18n.t("plugin.manager_title"),
                     TabKind::Plugin { .. } => self.i18n.t("sidebar.panels.plugins"),
                     TabKind::CloudSync => self.i18n.t("plugin.cloud_sync.panel_title"),
+                    TabKind::Knowledge => self.i18n.t("sidebar.panels.knowledge"),
                     TabKind::RemoteDesktop => {
                         self.i18n.t("settings_view.terminal.bg_tab_remote_desktop")
                     }
@@ -2167,6 +2168,7 @@ fn tab_kind_icon(kind: &TabKind) -> LucideIcon {
         TabKind::PluginManager => LucideIcon::Puzzle,
         TabKind::Plugin { .. } => LucideIcon::Puzzle,
         TabKind::CloudSync => LucideIcon::Cloud,
+        TabKind::Knowledge => LucideIcon::BookOpen,
         TabKind::RemoteDesktop => LucideIcon::Monitor,
         TabKind::Settings => LucideIcon::Settings,
         TabKind::SessionManager => LucideIcon::LayoutList,

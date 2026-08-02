@@ -90,6 +90,7 @@ enum DetachedTabSurfaceRoute {
     Ide(TabId),
     Sftp(TabId),
     Forwards(TabId),
+    Knowledge(TabId),
     Other,
 }
 
@@ -101,6 +102,7 @@ fn detached_tab_surface_route(tab_id: TabId, kind: &TabKind) -> DetachedTabSurfa
         TabKind::Ide => DetachedTabSurfaceRoute::Ide(tab_id),
         TabKind::Sftp => DetachedTabSurfaceRoute::Sftp(tab_id),
         TabKind::Forwards => DetachedTabSurfaceRoute::Forwards(tab_id),
+        TabKind::Knowledge => DetachedTabSurfaceRoute::Knowledge(tab_id),
         _ => DetachedTabSurfaceRoute::Other,
     }
 }
@@ -319,6 +321,21 @@ impl WorkspaceApp {
         current_window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        let source_window_id = current_window.window_handle().window_id();
+        let main_window_id = self
+            .window_registry
+            .handle_for_role(window_registry::WindowRole::Main)
+            .map(|handle| handle.window_id());
+        if let Some(main_window_id) = main_window_id {
+            let transferred = self.ai_entity.update(cx, |ai, cx| {
+                ai.transfer_knowledge_document_dialog_owner(source_window_id, main_window_id, cx)
+            });
+            if transferred {
+                // A native composition cannot move between windows safely.
+                self.ime_marked_text = None;
+                self.clear_ime_selection();
+            }
+        }
         let transition = self.tab_host.update(cx, |tab_host, _cx| {
             tab_host.return_to_main_and_select(tab_id, tabs::TabMountCloseReason::ReturnToMain)
         });
@@ -344,6 +361,14 @@ impl WorkspaceApp {
         window_id: gpui::WindowId,
         cx: &mut Context<Self>,
     ) {
+        self.release_settings_select_window(window_id);
+        let dismissed_document_dialog = self.ai_entity.update(cx, |ai, cx| {
+            ai.dismiss_knowledge_document_dialog_for_window(window_id, cx)
+        });
+        if dismissed_document_dialog {
+            self.ime_marked_text = None;
+            self.clear_ime_selection();
+        }
         self.release_workspace_window(window_registration, window_id, cx);
         let transition = self.tab_host.update(cx, |tab_host, _cx| {
             tab_host.release_detached_window_and_select(tab_id, mount_id, window_id)
@@ -1009,6 +1034,11 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        let active_ime_target =
+            self.active_ime_target_for_window(window.window_handle().window_id(), cx);
+        self.workspace_input.update(cx, |input, cx| {
+            input.sync_active_target(active_ime_target, cx);
+        });
         if self.app_lock.locked {
             window.set_window_title(&SharedString::from(
                 self.i18n.t("settings_view.general.app_lock_window_title"),
@@ -1041,6 +1071,7 @@ impl WorkspaceApp {
             window,
             cx,
         );
+        let has_background_image = self.background_surface_active(tab_background_key(&tab_kind));
         let titlebar_visible = self.window_titlebar_visible(window);
 
         let window_content = div()
@@ -1048,9 +1079,19 @@ impl WorkspaceApp {
             .relative()
             .flex()
             .flex_col()
-            .bg(rgb(self.tokens.ui.bg))
+            .bg(oxideterm_gpui_ui::color_for_background(
+                self.tokens.ui.bg,
+                has_background_image,
+                0xd9,
+            ))
             .when(titlebar_visible, |root| {
-                root.child(self.render_detached_tab_title_bar(tab_id, title.clone(), window, cx))
+                root.child(self.render_detached_tab_title_bar(
+                    tab_id,
+                    title.clone(),
+                    has_background_image,
+                    window,
+                    cx,
+                ))
             })
             .child(div().flex_1().min_h(px(0.0)).child(content))
             .when_some(
@@ -1089,16 +1130,28 @@ impl WorkspaceApp {
             )
         });
         let tab_window_modals = self.render_tab_window_modals(tab_id, &tab_kind, window, cx);
+        let settings_select_overlay = self.render_settings_select_overlay(window, cx);
 
         // Keep the native window base opaque while its workspace content fades in.
         div()
             .size_full()
             .relative()
-            .bg(rgb(self.tokens.ui.bg))
+            .track_focus(&self.focus_handle)
+            .bg(oxideterm_gpui_ui::color_for_background(
+                self.tokens.ui.bg,
+                has_background_image,
+                0xd9,
+            ))
             .child(window_content)
             .when_some(entry_handoff, |root, handoff| root.child(handoff))
             // Detached tabs use their own native window root as the modal portal.
             .children(tab_window_modals)
+            .when_some(settings_select_overlay, |root, overlay| root.child(overlay))
+            .child(WorkspaceImeElement::new(
+                cx.entity(),
+                self.focus_handle.clone(),
+                window.window_handle().window_id(),
+            ))
             .into_any_element()
     }
 
@@ -1120,6 +1173,13 @@ impl WorkspaceApp {
             }
             DetachedTabSurfaceRoute::Forwards(tab_id) => {
                 return self.render_forwards_surface_for_tab(tab_id, window, cx);
+            }
+            DetachedTabSurfaceRoute::Knowledge(_tab_id) => {
+                return self.render_knowledge_workspace_surface(
+                    KnowledgeWorkspaceLayout::DetachedWindow,
+                    window,
+                    cx,
+                );
             }
             DetachedTabSurfaceRoute::Other => {}
         }
@@ -1155,6 +1215,7 @@ impl WorkspaceApp {
         &self,
         tab_id: TabId,
         title: String,
+        has_background_image: bool,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
@@ -1166,7 +1227,11 @@ impl WorkspaceApp {
             .items_center()
             .border_b_1()
             .border_color(rgb(theme.border))
-            .bg(rgb(theme.bg))
+            .bg(oxideterm_gpui_ui::color_for_background(
+                theme.bg,
+                has_background_image,
+                0xd9,
+            ))
             .pl(px(72.0))
             .text_size(px(self.tokens.metrics.titlebar_label_font_size))
             .text_color(rgb(theme.text))

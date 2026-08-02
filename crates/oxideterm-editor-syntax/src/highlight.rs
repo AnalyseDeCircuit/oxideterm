@@ -34,7 +34,12 @@ pub(crate) fn highlight_spans(
         let Some(scope) = scope_for_capture(capture_name, capture.node.kind()) else {
             continue;
         };
-        let range = capture.node.byte_range();
+        let range = if language_id == LanguageId::Markdown {
+            markdown_delimited_content_range(capture_name, capture.node)
+                .unwrap_or_else(|| capture.node.byte_range())
+        } else {
+            capture.node.byte_range()
+        };
         if range.start < range.end && range.end <= source.len() {
             spans.push(HighlightSpan {
                 range: TextRange::new(BufferOffset(range.start), BufferOffset(range.end)),
@@ -56,6 +61,16 @@ pub(crate) fn highlight_spans(
 fn scope_for_capture(capture: &str, node_kind: &str) -> Option<SyntaxScope> {
     if matches!(node_kind, "integer_literal" | "float_literal") {
         return Some(SyntaxScope::Number);
+    }
+    if capture == "punctuation.delimiter"
+        && matches!(
+            node_kind,
+            "code_span_delimiter" | "fenced_code_block_delimiter"
+        )
+    {
+        // Markdown code markers belong to the literal token visually. Keeping
+        // them in the muted punctuation palette makes valid code look open.
+        return Some(SyntaxScope::String);
     }
     match capture {
         // Tauri loads `@codemirror/lang-markdown`, whose Lezer tags include
@@ -149,7 +164,8 @@ fn collect_markdown_inline_node_highlights(
         let Some(scope) = scope_for_capture(capture_name, capture.node.kind()) else {
             continue;
         };
-        let capture_range = capture.node.byte_range();
+        let capture_range = markdown_delimited_content_range(capture_name, capture.node)
+            .unwrap_or_else(|| capture.node.byte_range());
         let start = range.start + capture_range.start;
         let end = range.start + capture_range.end;
         if start < end && end <= source.len() {
@@ -160,6 +176,37 @@ fn collect_markdown_inline_node_highlights(
             });
         }
     }
+}
+
+fn markdown_delimited_content_range(
+    capture_name: &str,
+    node: Node<'_>,
+) -> Option<std::ops::Range<usize>> {
+    // Markdown captures the complete construct and each delimiter token. Trim
+    // the parent capture so the renderer never resolves their styles by order.
+    let delimiter_kind = match (capture_name, node.kind()) {
+        ("text.literal", "code_span") => "code_span_delimiter",
+        ("text.literal", "fenced_code_block") => "fenced_code_block_delimiter",
+        ("text.emphasis", "emphasis") | ("text.strong", "strong_emphasis") => "emphasis_delimiter",
+        _ => return None,
+    };
+    let mut content_start = node.start_byte();
+    let mut closing_delimiter_start = None;
+    let mut cursor = node.walk();
+
+    for child in node.children(&mut cursor) {
+        if child.kind() != delimiter_kind {
+            continue;
+        }
+        if closing_delimiter_start.is_none() && child.start_byte() == content_start {
+            content_start = child.end_byte();
+        } else {
+            closing_delimiter_start.get_or_insert(child.start_byte());
+        }
+    }
+
+    let content_end = closing_delimiter_start?;
+    (content_start <= content_end).then_some(content_start..content_end)
 }
 
 fn normalize_highlight_spans(mut spans: Vec<HighlightSpan>) -> Vec<HighlightSpan> {

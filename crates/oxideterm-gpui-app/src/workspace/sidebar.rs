@@ -54,6 +54,7 @@ pub(super) enum SidebarSection {
     Network,
     Extensions,
     CloudSync,
+    Knowledge,
     Assistant,
     HostTools,
     Automation,
@@ -119,6 +120,7 @@ impl SidebarSection {
             "network" | "topology" => Self::Network,
             "extensions" => Self::Extensions,
             "cloud_sync" => Self::CloudSync,
+            "knowledge" => Self::Knowledge,
             "ai" | "assistant" => Self::Assistant,
             "host_tools" => Self::HostTools,
             "automation" => Self::Automation,
@@ -144,6 +146,7 @@ impl SidebarSection {
             Self::Network => "topology",
             Self::Extensions => "extensions",
             Self::CloudSync => "cloud_sync",
+            Self::Knowledge => "knowledge",
             Self::Assistant => "ai",
             Self::HostTools => "host_tools",
             Self::Automation => "automation",
@@ -171,6 +174,7 @@ impl WorkspaceApp {
             | SidebarSection::Runtime
             | SidebarSection::Activity
             | SidebarSection::Network
+            | SidebarSection::Knowledge
             | SidebarSection::Assistant
             | SidebarSection::HostTools
             | SidebarSection::Automation
@@ -221,6 +225,7 @@ mod sidebar_persistence_tests {
             SidebarSection::Network,
             SidebarSection::Extensions,
             SidebarSection::CloudSync,
+            SidebarSection::Knowledge,
             SidebarSection::Assistant,
             SidebarSection::HostTools,
             SidebarSection::Automation,

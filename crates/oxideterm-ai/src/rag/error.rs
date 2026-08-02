@@ -5,6 +5,9 @@ use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum RagError {
+    #[error("Invalid RAG request: {0}")]
+    InvalidInput(String),
+
     #[error("Database error: {0}")]
     Database(#[from] redb::DatabaseError),
 

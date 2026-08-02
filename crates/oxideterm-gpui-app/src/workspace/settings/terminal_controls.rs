@@ -301,9 +301,16 @@ impl WorkspaceApp {
     ) -> AnyElement {
         let settings_workspace = self.settings_workspace.read(cx);
         let entity_value = settings_workspace.settings_entity_input_value(input);
-        let entity_owned = entity_value.is_some();
-        let focused = if entity_owned {
+        let settings_entity_owned = entity_value.is_some();
+        let ai_entity_owned = ai_state::AiWorkspaceEntity::owns_settings_input(input);
+        let ai_entity = self.ai_entity.read(cx);
+        let ai_entity_value = ai_entity_owned
+            .then(|| ai_entity.settings_input_value(input))
+            .flatten();
+        let focused = if settings_entity_owned {
             settings_workspace.settings_entity_focused_input() == Some(input)
+        } else if ai_entity_owned {
+            ai_entity.focused_settings_input() == Some(input)
         } else {
             self.focused_settings_input == Some(input)
         };
@@ -311,6 +318,10 @@ impl WorkspaceApp {
             // Borrow Entity-owned drafts for this frame instead of cloning them
             // into root rendering snapshots, especially for secret inputs.
             entity_value
+        } else if let Some(ai_entity_value) = ai_entity_value {
+            // Knowledge and AI dialogs keep their drafts in AiWorkspaceEntity.
+            // Render from that same owner so IME replacements are visible immediately.
+            ai_entity_value
         } else if focused {
             self.settings_input_draft.as_str()
         } else {

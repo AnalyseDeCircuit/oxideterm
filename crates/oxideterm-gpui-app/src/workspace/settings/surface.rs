@@ -74,6 +74,22 @@ impl WorkspaceApp {
         self.open_settings(window, cx);
     }
 
+    pub(in crate::workspace) fn open_knowledge_settings(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.settings_workspace.update(cx, |settings, cx| {
+            settings.set_active_tab(SettingsTab::Knowledge, cx);
+        });
+        self.close_settings_select();
+        self.focused_settings_input = None;
+        self.settings_slider_drag = None;
+        self.clear_ime_selection();
+        self.sync_settings_section_list_state(cx);
+        self.open_settings(window, cx);
+    }
+
     pub(in crate::workspace) fn close_settings(
         &mut self,
         window: &mut Window,
@@ -121,10 +137,6 @@ impl WorkspaceApp {
                     .min_h(px(0.0))
                     .relative()
                     .child(self.render_settings_section_list_scroll(cx)),
-            )
-            .when_some(
-                self.render_settings_select_overlay(cx),
-                |surface, overlay| surface.child(overlay),
             )
             .into_any_element()
     }

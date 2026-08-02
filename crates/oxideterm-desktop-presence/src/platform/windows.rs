@@ -91,6 +91,26 @@ pub(crate) fn set_keep_running_on_close(enabled: bool) {
     KEEP_RUNNING_ON_CLOSE.store(enabled, Ordering::SeqCst);
 }
 
+pub(crate) fn install_main_window_close_guard(
+    window: &mut Window,
+    cx: &App,
+    guard: impl Fn(&mut Window, &mut App) -> bool + 'static,
+) {
+    let hwnd = main_window_hwnd(window).ok();
+    window.on_window_should_close(cx, move |window, cx| {
+        if QUIT_REQUESTED.load(Ordering::SeqCst) {
+            return true;
+        }
+        if KEEP_RUNNING_ON_CLOSE.load(Ordering::SeqCst) {
+            if let Some(hwnd) = hwnd {
+                hide_hwnd(hwnd);
+            }
+            return false;
+        }
+        guard(window, cx)
+    });
+}
+
 pub(crate) fn show_main_window() {
     let hwnd = HWND(MAIN_HWND.load(Ordering::SeqCst) as _);
     if hwnd.is_invalid() {

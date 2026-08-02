@@ -5,6 +5,27 @@ use oxideterm_editor_core::{BufferOffset, TextRange};
 
 use crate::*;
 
+fn syntax_scope_covers_range(
+    spans: &[HighlightSpan],
+    scope: SyntaxScope,
+    range: std::ops::Range<usize>,
+) -> bool {
+    // Adjacent grammar tokens may represent one visual delimiter, such as `**`.
+    let mut covered_until = range.start;
+    for span in spans.iter().filter(|span| span.scope == scope) {
+        if span.range.start.0 > covered_until {
+            break;
+        }
+        if span.range.end.0 > covered_until {
+            covered_until = span.range.end.0;
+        }
+        if covered_until >= range.end {
+            return true;
+        }
+    }
+    false
+}
+
 #[test]
 fn exposes_at_least_twenty_supported_languages() {
     assert!(SUPPORTED_LANGUAGES.len() >= 20);
@@ -280,6 +301,145 @@ fn parses_and_highlights_common_remote_files() {
             .iter()
             .any(|span| span.scope == SyntaxScope::String)
     );
+}
+
+#[test]
+fn markdown_inline_code_highlights_paired_delimiters_symmetrically() {
+    let source = "Run `cargo check` before saving.";
+    let session = SyntaxSession::parse(LanguageId::Markdown, source).unwrap();
+    let spans = session.highlight_spans(source);
+    let opening_delimiter = source.find('`').unwrap();
+    let closing_delimiter = source.rfind('`').unwrap();
+
+    assert!(spans.iter().any(|span| {
+        span.scope == SyntaxScope::String
+            && span.range.start.0 == opening_delimiter
+            && span.range.end.0 == opening_delimiter + 1
+    }));
+    assert!(spans.iter().any(|span| {
+        span.scope == SyntaxScope::String
+            && span.range.start.0 == closing_delimiter
+            && span.range.end.0 == closing_delimiter + 1
+    }));
+    assert!(spans.iter().any(|span| {
+        span.scope == SyntaxScope::String
+            && span.range.start.0 == opening_delimiter + 1
+            && span.range.end.0 == closing_delimiter
+    }));
+    assert!(!spans.iter().any(|span| {
+        span.scope == SyntaxScope::Punctuation
+            && (span.range.start.0 == opening_delimiter || span.range.start.0 == closing_delimiter)
+    }));
+}
+
+#[test]
+fn markdown_inline_code_preserves_multi_backtick_delimiter_widths() {
+    let source = "Run ``cargo `check`` before saving.";
+    let session = SyntaxSession::parse(LanguageId::Markdown, source).unwrap();
+    let spans = session.highlight_spans(source);
+    let opening_delimiter = source.find("``").unwrap();
+    let closing_delimiter = source.rfind("``").unwrap();
+
+    assert!(spans.iter().any(|span| {
+        span.scope == SyntaxScope::String
+            && span.range.start.0 == opening_delimiter
+            && span.range.end.0 == opening_delimiter + 2
+    }));
+    assert!(spans.iter().any(|span| {
+        span.scope == SyntaxScope::String
+            && span.range.start.0 == closing_delimiter
+            && span.range.end.0 == closing_delimiter + 2
+    }));
+    assert!(spans.iter().any(|span| {
+        span.scope == SyntaxScope::String
+            && span.range.start.0 == opening_delimiter + 2
+            && span.range.end.0 == closing_delimiter
+    }));
+}
+
+#[test]
+fn markdown_inline_code_keeps_literal_color_after_incremental_toolbar_wrap() {
+    let before = "```\necho hello\n```\n\ncdlalalala\n";
+    let selected_start = before.find("cdlalalala").unwrap();
+    let selected_end = selected_start + "cdlalalala".len();
+    let edit_range = TextRange::new(BufferOffset(selected_start), BufferOffset(selected_end));
+    let replacement = "`cdlalalala`";
+    let edit = SyntaxEdit::replace(before, edit_range, replacement);
+    let after = before.replacen("cdlalalala", replacement, 1);
+    let mut session = SyntaxSession::parse(LanguageId::Markdown, before).unwrap();
+
+    session.apply_edit(&after, edit).unwrap();
+    let spans = session.highlight_spans(&after);
+
+    assert!(syntax_scope_covers_range(
+        &spans,
+        SyntaxScope::String,
+        selected_start..selected_start + replacement.len(),
+    ));
+    assert!(!spans.iter().any(|span| {
+        span.scope == SyntaxScope::Punctuation
+            && span.range.start.0 >= selected_start
+            && span.range.end.0 <= selected_start + replacement.len()
+    }));
+}
+
+#[test]
+fn markdown_fenced_code_highlights_both_fences_as_literal_tokens() {
+    let source = "```\necho hello\n```\n";
+    let session = SyntaxSession::parse(LanguageId::Markdown, source).unwrap();
+    let spans = session.highlight_spans(source);
+    let closing_fence = source.rfind("```").unwrap();
+
+    assert!(syntax_scope_covers_range(
+        &spans,
+        SyntaxScope::String,
+        0..closing_fence + 3,
+    ));
+    assert!(spans.iter().any(|span| {
+        span.capture == "text.literal"
+            && span.range.start.0 == 3
+            && span.range.end.0 == closing_fence
+    }));
+    assert!(!spans.iter().any(|span| {
+        span.scope == SyntaxScope::Punctuation
+            && (span.range.start.0 == 0 || span.range.start.0 == closing_fence)
+    }));
+}
+
+#[test]
+fn markdown_emphasis_highlights_paired_delimiters_symmetrically() {
+    for (source, delimiter_width) in [("Use *care* here.", 1), ("Use **care** here.", 2)] {
+        let session = SyntaxSession::parse(LanguageId::Markdown, source).unwrap();
+        let spans = session.highlight_spans(source);
+        let delimiter = "*".repeat(delimiter_width);
+        let opening_delimiter = source.find(&delimiter).unwrap();
+        let closing_delimiter = source.rfind(&delimiter).unwrap();
+
+        assert!(
+            syntax_scope_covers_range(
+                &spans,
+                SyntaxScope::Punctuation,
+                opening_delimiter..opening_delimiter + delimiter_width,
+            ),
+            "missing opening delimiter for {source}: {spans:?}"
+        );
+        assert!(
+            syntax_scope_covers_range(
+                &spans,
+                SyntaxScope::Punctuation,
+                closing_delimiter..closing_delimiter + delimiter_width,
+            ),
+            "missing closing delimiter for {source}: {spans:?}"
+        );
+        assert!(
+            spans.iter().any(|span| {
+                span.scope == SyntaxScope::Variable
+                    && span.range.start.0 == opening_delimiter + delimiter_width
+                    && span.range.end.0 == closing_delimiter
+            }),
+            "missing emphasized content for {source}: {spans:?}"
+        );
+    }
 }
 
 #[test]

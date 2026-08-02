@@ -5,27 +5,144 @@
 
 use std::collections::HashMap;
 
-use pulldown_cmark::{BlockQuoteKind, Event, HeadingLevel, Options, Parser, Tag, TagEnd};
+use pulldown_cmark::{
+    BlockQuoteKind, BrokenLink, CowStr, Event, HeadingLevel, Options, Parser, Tag, TagEnd,
+};
 
 use crate::html::{self, InlineHtmlEvent, InlineHtmlKind};
 use crate::model::{
     Block, CalloutKind, FootnoteDefinition, Inline, ListItem, MarkdownDocument, TableAlignment,
 };
 
-/// Parse a markdown string into an OxideTerm-owned [`MarkdownDocument`].
-pub fn parse(source: &str) -> MarkdownDocument {
-    let options = Options::ENABLE_STRIKETHROUGH
+/// Document-level Markdown context shared by Instant-mode source blocks.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct MarkdownDocumentContext {
+    definitions: HashMap<String, (String, String)>,
+    footnote_indices: HashMap<String, usize>,
+    footnote_source: String,
+}
+
+impl MarkdownDocumentContext {
+    /// Collects cross-block definitions and reference order once for contextual rendering.
+    pub fn from_source(source: &str) -> Self {
+        let parser = Parser::new_ext(source, markdown_options(true));
+        let definitions = parser
+            .reference_definitions()
+            .iter()
+            .map(|(label, definition)| {
+                (
+                    normalize_reference_label(label),
+                    (
+                        definition.dest.to_string(),
+                        definition
+                            .title
+                            .as_ref()
+                            .map(ToString::to_string)
+                            .unwrap_or_default(),
+                    ),
+                )
+            })
+            .collect();
+        let document = parse_events(parser);
+        let footnote_indices = document
+            .footnotes
+            .iter()
+            .enumerate()
+            .map(|(index, footnote)| (normalize_reference_label(&footnote.label), index + 1))
+            .collect();
+        let footnote_source = crate::source::parse_source_blocks(source)
+            .blocks
+            .into_iter()
+            .filter(|block| {
+                block.kind == crate::source::MarkdownSourceBlockKind::FootnoteDefinition
+            })
+            .filter_map(|block| source.get(block.range))
+            .collect::<Vec<_>>()
+            .join("\n\n");
+        Self {
+            definitions,
+            footnote_indices,
+            footnote_source,
+        }
+    }
+
+    fn resolve(&self, reference: &str) -> Option<(CowStr<'static>, CowStr<'static>)> {
+        self.definitions
+            .get(&normalize_reference_label(reference))
+            .map(|(destination, title)| {
+                (
+                    CowStr::from(destination.clone()),
+                    CowStr::from(title.clone()),
+                )
+            })
+    }
+}
+
+fn normalize_reference_label(label: &str) -> String {
+    // Markdown reference labels are case-insensitive and collapse internal whitespace.
+    label
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .to_lowercase()
+}
+
+fn markdown_options(enable_smart_punctuation: bool) -> Options {
+    let mut options = Options::ENABLE_STRIKETHROUGH
         | Options::ENABLE_TABLES
         | Options::ENABLE_TASKLISTS
         | Options::ENABLE_FOOTNOTES
         | Options::ENABLE_MATH
-        | Options::ENABLE_SMART_PUNCTUATION
         | Options::ENABLE_GFM
         | Options::ENABLE_HEADING_ATTRIBUTES
         | Options::ENABLE_YAML_STYLE_METADATA_BLOCKS
         | Options::ENABLE_PLUSES_DELIMITED_METADATA_BLOCKS;
-    let parser = Parser::new_ext(source, options);
+    if enable_smart_punctuation {
+        options.insert(Options::ENABLE_SMART_PUNCTUATION);
+    }
+    options
+}
 
+/// Parse a markdown string into an OxideTerm-owned [`MarkdownDocument`].
+pub fn parse(source: &str) -> MarkdownDocument {
+    parse_with_smart_punctuation(source, true)
+}
+
+/// Parses Markdown while honoring the renderer's smart-punctuation option.
+pub fn parse_with_smart_punctuation(
+    source: &str,
+    enable_smart_punctuation: bool,
+) -> MarkdownDocument {
+    parse_events(Parser::new_ext(
+        source,
+        markdown_options(enable_smart_punctuation),
+    ))
+}
+
+/// Parses one source block while resolving reference links from its complete document.
+pub fn parse_with_document_context(
+    source: &str,
+    document_context: &MarkdownDocumentContext,
+    enable_smart_punctuation: bool,
+) -> MarkdownDocument {
+    let callback = |broken: BrokenLink<'_>| document_context.resolve(&broken.reference);
+    let contextual_source = (!document_context.footnote_source.is_empty()).then(|| {
+        // Exact footnote definition source gives pulldown-cmark the same recognition context as
+        // Preview. Definitions are removed from this block's render model below.
+        format!("{source}\n\n{}", document_context.footnote_source)
+    });
+    let parser_source = contextual_source.as_deref().unwrap_or(source);
+    let mut document = parse_events(Parser::new_with_broken_link_callback(
+        parser_source,
+        markdown_options(enable_smart_punctuation),
+        Some(callback),
+    ));
+    apply_document_context_to_blocks(&mut document.blocks, document_context);
+    document.footnotes.clear();
+    document
+}
+
+fn parse_events<'input>(parser: impl Iterator<Item = Event<'input>>) -> MarkdownDocument {
     let mut ctx = ParseContext::default();
 
     for event in parser {
@@ -318,6 +435,69 @@ pub fn parse(source: &str) -> MarkdownDocument {
     MarkdownDocument {
         blocks: ctx.blocks,
         footnotes,
+    }
+}
+
+fn apply_document_context_to_blocks(
+    blocks: &mut [Block],
+    document_context: &MarkdownDocumentContext,
+) {
+    for block in blocks {
+        match block {
+            Block::Heading { inlines, .. } | Block::Paragraph { inlines } => {
+                apply_document_context_to_inlines(inlines, document_context);
+            }
+            Block::HtmlContainer { blocks, .. } | Block::Blockquote { blocks, .. } => {
+                apply_document_context_to_blocks(blocks, document_context);
+            }
+            Block::UnorderedList { items } | Block::OrderedList { items, .. } => {
+                for item in items {
+                    apply_document_context_to_inlines(&mut item.inlines, document_context);
+                    apply_document_context_to_blocks(&mut item.children, document_context);
+                }
+            }
+            Block::Table { headers, rows, .. } => {
+                for cell in headers.iter_mut().chain(rows.iter_mut().flatten()) {
+                    apply_document_context_to_inlines(cell, document_context);
+                }
+            }
+            Block::Html(_) | Block::CodeBlock { .. } | Block::HorizontalRule => {}
+        }
+    }
+}
+
+fn apply_document_context_to_inlines(
+    inlines: &mut [Inline],
+    document_context: &MarkdownDocumentContext,
+) {
+    for inline in inlines {
+        match inline {
+            Inline::FootnoteReference { label, index } => {
+                if let Some(document_index) = document_context
+                    .footnote_indices
+                    .get(&normalize_reference_label(label))
+                {
+                    *index = *document_index;
+                }
+            }
+            Inline::Bold(children)
+            | Inline::Italic(children)
+            | Inline::Link { text: children, .. }
+            | Inline::Kbd(children)
+            | Inline::Subscript(children)
+            | Inline::Superscript(children)
+            | Inline::Underline(children)
+            | Inline::Highlight(children)
+            | Inline::Strikethrough(children) => {
+                apply_document_context_to_inlines(children, document_context);
+            }
+            Inline::Text(_)
+            | Inline::Code(_)
+            | Inline::Html(_)
+            | Inline::Image { .. }
+            | Inline::Math { .. }
+            | Inline::LineBreak => {}
+        }
     }
 }
 
@@ -838,6 +1018,52 @@ mod tests {
             }
             other => panic!("expected Paragraph, got {:?}", other),
         }
+    }
+
+    #[test]
+    fn source_block_resolves_reference_definition_from_complete_document() {
+        let source = "Read the [guide][operations].\n\n[operations]: https://example.com/runbook\n";
+        let block_source = "Read the [guide][operations].";
+        let context = MarkdownDocumentContext::from_source(source);
+        let doc = parse_with_document_context(block_source, &context, true);
+
+        match &doc.blocks[0] {
+            Block::Paragraph { inlines } => {
+                assert!(inlines.iter().any(|inline| matches!(
+                    inline,
+                    Inline::Link { url, .. } if url == "https://example.com/runbook"
+                )));
+            }
+            other => panic!("expected contextual Paragraph, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn source_block_keeps_complete_document_footnote_number() {
+        let source = "First[^b].\n\nSecond[^a].\n\n[^a]: Alpha\n\n[^b]: Beta\n";
+        let context = MarkdownDocumentContext::from_source(source);
+        let doc = parse_with_document_context("Second[^a].", &context, true);
+
+        assert!(matches!(
+            &doc.blocks[0],
+            Block::Paragraph { inlines }
+                if inlines.iter().any(|inline| matches!(
+                    inline,
+                    Inline::FootnoteReference { label, index }
+                        if label == "a" && *index == 2
+                ))
+        ));
+    }
+
+    #[test]
+    fn smart_punctuation_can_be_disabled_by_render_options() {
+        let doc = parse_with_smart_punctuation("'quoted'", false);
+
+        assert!(matches!(
+            &doc.blocks[0],
+            Block::Paragraph { inlines }
+                if inlines == &vec![Inline::Text("'quoted'".to_string())]
+        ));
     }
 
     #[test]

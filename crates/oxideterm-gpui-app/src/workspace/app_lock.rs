@@ -1004,6 +1004,7 @@ impl WorkspaceApp {
             .child(WorkspaceImeElement::new(
                 cx.entity(),
                 self.focus_handle.clone(),
+                window.window_handle().window_id(),
             ))
             .into_any_element()
     }

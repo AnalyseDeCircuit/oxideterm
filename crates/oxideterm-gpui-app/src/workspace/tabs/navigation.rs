@@ -576,6 +576,11 @@ impl WorkspaceApp {
             );
             return;
         }
+        if self.tabs(cx)[index].kind == TabKind::Knowledge
+            && self.guard_dirty_knowledge_tab_close(tab_id, window, cx)
+        {
+            return;
+        }
         self.close_tab_at_index(index, window, cx);
     }
 
@@ -832,6 +837,12 @@ impl WorkspaceApp {
     }
 
     fn close_tab_at_index(&mut self, index: usize, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(tab) = self.tabs(cx).get(index)
+            && tab.kind == TabKind::Knowledge
+            && self.guard_dirty_knowledge_tab_close(tab.id, window, cx)
+        {
+            return;
+        }
         let exiting_visual = self.tab_exit_visual(index, cx);
         let Some(TabRemovalTransition {
             tab,
@@ -881,6 +892,8 @@ impl WorkspaceApp {
             // surface's node consumer; shared node users remain registered.
             workspace.close_surface(tab.id, ide::IdeSurfaceCloseReason::UserProjectClose, cx);
         });
+        self.knowledge_workspace
+            .update(cx, |workspace, _cx| workspace.close_tab(tab.id));
         self.forwarding
             .update(cx, |forwarding, _cx| forwarding.unmap_tab(tab.id));
         let mut pane_ids = Vec::new();
