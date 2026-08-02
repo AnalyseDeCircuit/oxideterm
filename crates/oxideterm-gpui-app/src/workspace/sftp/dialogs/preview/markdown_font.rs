@@ -288,84 +288,49 @@ impl WorkspaceApp {
         &self,
         source: &str,
         language: Option<&str>,
-        cx: &App,
+        cx: &mut Context<Self>,
     ) -> AnyElement {
-        let theme = self.tokens.ui;
-        let opts = MarkdownOptions::from_theme(&self.tokens);
-        let language = language
-            .filter(|language| !language.trim().is_empty())
-            .unwrap_or("text")
-            .to_ascii_lowercase();
-        let lines = std::sync::Arc::new(sftp_preview_visual_lines(source));
-        let row_count = lines.len();
-        let list_lines = lines;
-        let font_family = settings_mono_font_family(self.settings_store.settings());
-        let scroll = self.sftp_view.read(cx).preview_code_scroll.clone();
-        div()
-            .size_full()
-            .bg(rgb(theme.bg_sunken))
-            .child(
-                tauri_virtual_uniform_list(
-                    "sftp-preview-code-virtual",
-                    row_count,
-                    scroll,
-                    TauriVirtualListSpec::new(
-                        px(SFTP_PREVIEW_CODE_LINE_HEIGHT),
-                        SFTP_PREVIEW_CODE_OVERSCAN,
-                    ),
-                    move |range, _window, _cx| {
-                        let opts = opts.clone();
-                        let language = language.clone();
-                        let font_family = font_family.clone();
-                        range
-                            .map(|index| {
-                                let line = &list_lines[index];
-                                let content: AnyElement = if language != "text"
-                                    && let Some(runs) =
-                                        highlight::highlight_code(&language, &line.content, &opts)
-                                {
-                                    let (text, text_runs) =
-                                        highlight::highlighted_runs_to_text_runs(&runs);
-                                    StyledText::new(text)
-                                        .with_runs(text_runs)
-                                        .into_any_element()
-                                } else {
-                                    SharedString::from(line.content.clone()).into_any_element()
-                                };
-                                div()
-                                    .h(px(SFTP_PREVIEW_CODE_LINE_HEIGHT))
-                                    .w_full()
-                                    .flex()
-                                    .flex_row()
-                                    .items_center()
-                                    .font_family(font_family.clone())
-                                    .text_size(px(SFTP_TEXT_XS))
-                                    .line_height(px(SFTP_PREVIEW_CODE_LINE_HEIGHT))
-                                    .text_color(rgb(theme.text))
-                                    .child(
-                                        div()
-                                            .w(px(SFTP_DIFF_LINE_NUMBER_COL))
-                                            .flex_none()
-                                            .pr(px(12.0))
-                                            .text_align(gpui::TextAlign::Right)
-                                            .text_color(rgba(
-                                                (theme.text_muted << 8)
-                                                    | SFTP_PREVIEW_CODE_GUTTER_ALPHA,
-                                            ))
-                                            .child(
-                                                line.line_number
-                                                    .map(|line_number| line_number.to_string())
-                                                    .unwrap_or_default(),
-                                            ),
-                                    )
-                                    .child(div().flex_1().min_w(px(0.0)).child(content))
-                                    .into_any_element()
-                            })
-                            .collect::<Vec<_>>()
-                    },
-                )
-                .on_scroll_wheel(|_, _, cx| cx.stop_propagation()),
-            )
-            .into_any_element()
+        let existing_editor = self.sftp_view.read(cx).preview_editor.clone();
+        let editor = existing_editor.unwrap_or_else(|| {
+            let tokens = self.tokens;
+            let runtime_settings = self.ide_runtime_settings();
+            let preview_path = self.sftp_view.read(cx).preview_path.clone();
+            let name = preview_path
+                .as_deref()
+                .and_then(|path| std::path::Path::new(path).file_name())
+                .and_then(|name| name.to_str())
+                .unwrap_or_default();
+            let syntax_language =
+                sftp_editor_language_id(language, preview_path.as_deref(), name, source);
+            let context_menu_labels = EditorContextMenuLabels {
+                copy: self.i18n.t("menu.copy"),
+                cut: self.i18n.t("fileManager.cut"),
+                paste: self.i18n.t("menu.paste"),
+                select_all: self.i18n.t("fileManager.selectAll"),
+            };
+            let (editor_text, _) = normalize_text_line_endings(source);
+            let editor = cx.new(|cx| {
+                let mut editor = TextEditorView::new(editor_text, &tokens, cx);
+                editor.set_read_only(true);
+                editor.set_context_menu_labels(context_menu_labels);
+                editor.apply_ide_runtime_settings(
+                    &tokens,
+                    runtime_settings.editor_font_size,
+                    runtime_settings.editor_line_height,
+                    runtime_settings.word_wrap,
+                    runtime_settings.background_active,
+                    cx,
+                );
+                editor.set_language(syntax_language, cx);
+                editor
+            });
+            self.sftp_view.update(cx, |sftp, cx| {
+                // The same editor entity becomes editable when the user chooses Edit.
+                sftp.preview_editor = Some(editor.clone());
+                cx.notify();
+            });
+            editor
+        });
+        div().size_full().child(editor).into_any_element()
     }
 }

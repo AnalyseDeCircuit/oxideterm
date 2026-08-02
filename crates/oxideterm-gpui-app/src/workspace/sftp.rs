@@ -2,13 +2,13 @@ use super::ime::WorkspaceImeTarget;
 use super::*;
 use gpui::{
     AnchoredPositionMode, Corner, Entity, EventEmitter, Focusable, ObjectFit, PathPromptOptions,
-    Pixels, Point, SharedString, StyledText, Subscription, Task, UniformListScrollHandle, anchored,
-    deferred, prelude::*,
+    Pixels, Point, SharedString, Subscription, Task, UniformListScrollHandle, anchored, deferred,
+    prelude::*,
 };
 use oxideterm_editor_syntax::LanguageId;
 use oxideterm_gpui_editor::{EditorContextMenuLabels, TextEditorView};
 use oxideterm_gpui_markdown::{
-    MarkdownOptions, MarkdownVirtualListScrollHandle, highlight, markdown_virtual_with_code_actions,
+    MarkdownVirtualListScrollHandle, markdown_virtual_with_code_actions,
 };
 use oxideterm_gpui_ui::{
     button::{
@@ -88,9 +88,6 @@ const SFTP_VIRTUAL_OVERSCAN: usize = 15; // Keep SFTP file panes aligned with Fi
 const SFTP_DIFF_ROW_HEIGHT: f32 = 21.0; // Tauri FileDiffDialog text-xs py-0.5 border row
 const SFTP_DIFF_VIRTUAL_OVERSCAN: usize = 15; // Diff dialog keeps the same file-list overdraw budget.
 const SFTP_DIFF_LINE_NUMBER_COL: f32 = 48.0; // Tauri w-12
-const SFTP_PREVIEW_CODE_LINE_HEIGHT: f32 = 20.0; // Tauri CodeHighlight text-xs leading-normal
-const SFTP_PREVIEW_CODE_OVERSCAN: usize = 20; // Match Tauri VirtualTextPreview OVERSCAN_LINES.
-const SFTP_PREVIEW_CODE_WRAP_COLUMNS: usize = 96; // GPUI virtual rows need soft-wrapped chunks instead of hidden overflow.
 const SFTP_DIFF_WRAP_COLUMNS: usize = 64; // max-w-5xl split diff leaves roughly this many mono chars per side.
 const SFTP_PREVIEW_FONT_DEFAULT_SIZE: f32 = 32.0; // Tauri FontPreview initial fontSize
 const SFTP_SIZE_COL: f32 = 80.0; // Tauri w-20
@@ -138,7 +135,6 @@ const SFTP_EDITOR_RETRY_HOVER_ALPHA: u32 = 0x1a; // Tauri hover:bg-orange-500/10
 const SFTP_CONFLICT_NEWER_BG_ALPHA: u32 = 0x4d; // Tauri bg-green-950/30
 const SFTP_DIFF_HEADER_BG_ALPHA: u32 = 0x33; // Tauri bg-red/green-950/20
 const SFTP_DIFF_LINE_BG_ALPHA: u32 = 0x4d; // Tauri bg-red/green-950/30
-const SFTP_PREVIEW_CODE_GUTTER_ALPHA: u32 = 0x4d; // Tauri CodeHighlight line-number opacity 30%
 const SFTP_READONLY_BADGE_BG_ALPHA: u32 = 0x26; // Tauri warning badge translucent fill
 const SFTP_DIALOG_WIDTH_XS: f32 = 320.0; // Tauri max-w-xs
 const SFTP_DIALOG_WIDTH_SM: f32 = 384.0; // Tauri max-w-sm
@@ -773,7 +769,6 @@ pub(super) struct SftpWorkspaceEntity {
     queue_height: f32,
     queue_resize_drag: Option<SftpQueueResizeDrag>,
     diff_scroll: UniformListScrollHandle,
-    preview_code_scroll: UniformListScrollHandle,
     preview_markdown_scroll: MarkdownVirtualListScrollHandle,
     pub(in crate::workspace) diff_document_scroll: ScrollHandle,
     pub(in crate::workspace) preview_document_scroll: ScrollHandle,
@@ -893,7 +888,6 @@ impl Default for SftpWorkspaceEntity {
             queue_height: SFTP_QUEUE_DEFAULT_HEIGHT,
             queue_resize_drag: None,
             diff_scroll: UniformListScrollHandle::new(),
-            preview_code_scroll: UniformListScrollHandle::new(),
             preview_markdown_scroll: MarkdownVirtualListScrollHandle::new(),
             diff_document_scroll: ScrollHandle::new(),
             preview_document_scroll: ScrollHandle::new(),
@@ -1554,7 +1548,7 @@ use helpers::{
     save_remote_sftp_preview, sftp_bg, sftp_border, sftp_card_surface,
     sftp_conflict_resolution_from_settings, sftp_diff_visual_lines, sftp_editor_language,
     sftp_editor_language_id, sftp_file_name, sftp_hover_bg, sftp_panel_bg, sftp_path_segments,
-    sftp_preview_editor_is_network_error, sftp_preview_is_markdown, sftp_preview_visual_lines,
+    sftp_preview_editor_is_network_error, sftp_preview_is_markdown,
     sftp_source_not_newer_than_target, sftp_transfer_conflicts,
     sftp_transfer_state_from_background, sorted_sftp_files, unique_sftp_conflict_name,
 };

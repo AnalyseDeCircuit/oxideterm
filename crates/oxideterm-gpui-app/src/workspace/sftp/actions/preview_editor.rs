@@ -25,7 +25,6 @@ impl WorkspaceApp {
                 sftp.preview_path = Some(file.path.clone());
                 sftp.preview_content = None;
                 sftp.preview_asset_owner = None;
-                sftp.preview_code_scroll = UniformListScrollHandle::new();
                 sftp.preview_markdown_scroll = MarkdownVirtualListScrollHandle::new();
                 sftp.preview_document_scroll = ScrollHandle::new();
                 sftp.font_preview_scroll = ScrollHandle::new();
@@ -129,27 +128,40 @@ impl WorkspaceApp {
         let sftp_entity = self.sftp_view.clone();
         let (editor_text, line_ending) = normalize_text_line_endings(&data);
         let initial_editor_text: Arc<str> = Arc::from(editor_text.as_str());
-        let editor = cx.new(|cx| {
-            let mut editor = TextEditorView::new(editor_text, &tokens, cx);
-            editor.set_context_menu_labels(context_menu_labels);
-            editor.apply_ide_runtime_settings(
-                &tokens,
-                runtime_settings.editor_font_size,
-                runtime_settings.editor_line_height,
-                runtime_settings.word_wrap,
-                runtime_settings.background_active,
-                cx,
-            );
-            editor.set_language(syntax_language, cx);
-            editor.set_on_save(Box::new(move |text, _window, cx| {
-                let text = text.to_string();
-                let _ = sftp_entity.update(cx, |sftp, cx| {
-                    sftp.save_preview_editor_content(text, cx);
-                });
-                Ok(())
-            }));
+        let existing_editor = self.sftp_view.read(cx).preview_editor.clone();
+        let configure_editor =
+            move |editor: &mut TextEditorView, cx: &mut Context<TextEditorView>| {
+                editor.set_read_only(false);
+                editor.set_context_menu_labels(context_menu_labels);
+                editor.apply_ide_runtime_settings(
+                    &tokens,
+                    runtime_settings.editor_font_size,
+                    runtime_settings.editor_line_height,
+                    runtime_settings.word_wrap,
+                    runtime_settings.background_active,
+                    cx,
+                );
+                editor.set_language(syntax_language, cx);
+                editor.set_on_save(Box::new(move |text, _window, cx| {
+                    let text = text.to_string();
+                    let _ = sftp_entity.update(cx, |sftp, cx| {
+                        sftp.save_preview_editor_content(text, cx);
+                    });
+                    Ok(())
+                }));
+            };
+        let editor = if let Some(editor) = existing_editor {
+            // Reusing the painted read-only preview preserves the Windows IME
+            // input handler across the transition into editable mode.
+            editor.update(cx, configure_editor);
             editor
-        });
+        } else {
+            cx.new(|cx| {
+                let mut editor = TextEditorView::new(editor_text, &tokens, cx);
+                configure_editor(&mut editor, cx);
+                editor
+            })
+        };
         let observer = self.sftp_view.update(cx, |_sftp, cx| {
             cx.observe(&editor, |sftp, editor, cx| {
                 sftp.sync_preview_editor_state(&editor, cx);

@@ -745,36 +745,12 @@ pub(in crate::workspace::sftp) fn format_conflict_modified(modified: Option<i64>
 }
 
 #[derive(Clone, Debug)]
-pub(in crate::workspace::sftp) struct SftpPreviewVisualLine {
-    pub(super) line_number: Option<usize>,
-    pub(super) content: String,
-}
-
-#[derive(Clone, Debug)]
 pub(in crate::workspace::sftp) struct SftpDiffVisualLine {
     pub(super) kind: SftpDiffLineKind,
     pub(super) left_line_num: String,
     pub(super) right_line_num: String,
     pub(super) left_content: String,
     pub(super) right_content: String,
-}
-
-pub(in crate::workspace::sftp) fn sftp_preview_visual_lines(
-    source: &str,
-) -> Vec<SftpPreviewVisualLine> {
-    source
-        .split('\n')
-        .enumerate()
-        .flat_map(|(index, line)| {
-            wrap_sftp_virtual_text_line(line, SFTP_PREVIEW_CODE_WRAP_COLUMNS)
-                .into_iter()
-                .enumerate()
-                .map(move |(chunk_index, content)| SftpPreviewVisualLine {
-                    line_number: (chunk_index == 0).then_some(index + 1),
-                    content,
-                })
-        })
-        .collect()
 }
 
 pub(in crate::workspace::sftp) fn sftp_diff_visual_lines(
