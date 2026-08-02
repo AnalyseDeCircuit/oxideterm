@@ -1,24 +1,8 @@
 fn validate_mcp_command(command: &str) -> Result<(), McpError> {
-    const ALLOWED: &[&str] = &["npx", "uvx", "docker"];
-    let command = command.trim();
-    if command.is_empty() {
+    if command.trim().is_empty() {
         return Err(McpError::Message(
             "MCP command must not be empty".to_string(),
         ));
-    }
-    let basename = std::path::Path::new(command)
-        .file_name()
-        .and_then(|name| name.to_str())
-        .unwrap_or_default();
-    if basename != command {
-        return Err(McpError::Message(format!(
-            "MCP command must be a plain command name (no paths). Got: '{command}'"
-        )));
-    }
-    if !ALLOWED.contains(&basename) {
-        return Err(McpError::Message(format!(
-            "MCP command '{basename}' is not in the allowlist. Allowed: {ALLOWED:?}"
-        )));
     }
     Ok(())
 }

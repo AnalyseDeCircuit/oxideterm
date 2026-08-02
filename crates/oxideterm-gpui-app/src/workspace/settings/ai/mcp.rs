@@ -707,14 +707,14 @@ impl WorkspaceApp {
                 self.ai_mcp_labeled_input(
                     "settings_view.mcp.command",
                     SettingsInput::AiMcpCommand,
-                    "npx -y @modelcontextprotocol/server-example".to_string(),
+                    "npx".to_string(),
                     cx,
                 ),
                 self.ai_textarea_row(
                     SettingsInput::AiMcpArgs,
                     self.i18n.t("settings_view.mcp.args"),
                     String::new(),
-                    "--flag value".to_string(),
+                    "-y @modelcontextprotocol/server-example".to_string(),
                     String::new(),
                     AI_MCP_ARGS_TEXTAREA_MIN_H,
                     cx,

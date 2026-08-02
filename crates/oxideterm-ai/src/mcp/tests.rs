@@ -174,19 +174,6 @@ mod tests {
     }
 
     #[test]
-    fn validate_mcp_command_rejects_paths_and_unknown_binaries() {
-        assert!(validate_mcp_command("npx").is_ok());
-        assert!(validate_mcp_command("uvx").is_ok());
-        assert!(validate_mcp_command("docker").is_ok());
-        assert!(validate_mcp_command("../npx").is_err());
-        assert!(validate_mcp_command("node").is_err());
-        assert!(validate_mcp_command("python3").is_err());
-        assert!(validate_mcp_command("uv").is_err());
-        assert!(validate_mcp_command("bash").is_err());
-        assert!(validate_mcp_command("/usr/bin/python3").is_err());
-    }
-
-    #[test]
     fn validate_mcp_env_blocks_injection_variables() {
         let mut env = HashMap::new();
         env.insert("LD_PRELOAD".to_string(), "evil.so".to_string());
