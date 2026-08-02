@@ -209,13 +209,6 @@ fn prepare_zsh(
     };
     write_private_file(&directory.join(".zshenv"), &zshenv)?;
     write_private_file(
-        &directory.join(".zprofile"),
-        &config
-            .load_profile
-            .then(|| zsh_source_user_file(".zprofile", directory, false))
-            .unwrap_or_default(),
-    )?;
-    write_private_file(
         &directory.join(".zshrc"),
         &format!(
             "{}\n{}",
@@ -227,11 +220,9 @@ fn prepare_zsh(
         ),
     )?;
     env.insert("ZDOTDIR".to_string(), directory.display().to_string());
-    Ok(if config.load_profile {
-        vec!["--login".to_string()]
-    } else {
-        Vec::new()
-    })
+    // The PTY provides interactive mode; the temporary ZDOTDIR controls whether
+    // user startup files are loaded without turning the session into a login shell.
+    Ok(Vec::new())
 }
 
 fn prepare_fish(config: &LocalPtyConfig, directory: &Path) -> Result<Vec<String>> {
@@ -305,7 +296,6 @@ fn zsh_source_user_file(name: &str, integration_directory: &Path, final_user_fil
     );
     if final_user_file {
         // Restore the user's effective ZDOTDIR for the interactive session.
-        // Zsh will then load the user's .zlogin and .zlogout through its normal path.
         format!(
             "{source}\nexport ZDOTDIR=\"$__oxideterm_user_zdotdir\"\nunset __oxideterm_user_zdotdir __oxideterm_integration_zdotdir"
         )
@@ -464,10 +454,11 @@ mod tests {
             );
             assert!(launch.integration.is_some(), "{shell_id}");
             assert!(
-                launch.args.iter().any(|arg| {
-                    arg.contains("oxideterm-shell-")
-                        || matches!(shell_id, "zsh") && arg == "--login"
-                }) || matches!(shell_id, "zsh"),
+                launch
+                    .args
+                    .iter()
+                    .any(|arg| arg.contains("oxideterm-shell-"))
+                    || matches!(shell_id, "zsh"),
                 "{shell_id}"
             );
         }
@@ -594,10 +585,12 @@ mod tests {
             "ZDOTDIR".to_string(),
             user_config.path().display().to_string(),
         )]);
-        prepare_zsh(&config, integration.path(), &mut launch_env).expect("prepare Zsh integration");
+        let args = prepare_zsh(&config, integration.path(), &mut launch_env)
+            .expect("prepare Zsh integration");
 
         let output = std::process::Command::new("zsh")
-            .args(["--login", "-i", "-c", "fc -l -1"])
+            .args(args)
+            .args(["-i", "-c", "fc -l -1"])
             .env("ZDOTDIR", integration.path())
             .output()
             .expect("run integrated Zsh");

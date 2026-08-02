@@ -125,7 +125,9 @@ pub fn shell_args_for_profile(shell: &ShellInfo, load_profile: bool) -> Vec<Stri
     match shell.id.as_str() {
         "zsh" => {
             if load_profile {
-                vec!["--login".to_string()]
+                // A PTY already starts Zsh interactively, so it loads .zshrc without
+                // forcing login-only files such as .zprofile and .zlogin.
+                Vec::new()
             } else {
                 vec!["--no-rcs".to_string()]
             }
@@ -179,8 +181,8 @@ pub fn shell_args_for_profile(shell: &ShellInfo, load_profile: bool) -> Vec<Stri
 
 fn default_args_for_shell(shell_id: &str) -> Vec<String> {
     match shell_id {
-        "zsh" | "bash" | "git-bash" | "fish" | "sh" | "dash" => vec!["--login".to_string()],
-        "nu" | "nu.exe" => Vec::new(),
+        "zsh" | "nu" | "nu.exe" => Vec::new(),
+        "bash" | "git-bash" | "fish" | "sh" | "dash" => vec!["--login".to_string()],
         "pwsh" | "powershell" => vec![
             "-NoLogo".to_string(),
             "-NoExit".to_string(),
