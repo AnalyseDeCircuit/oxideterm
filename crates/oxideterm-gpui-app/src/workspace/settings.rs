@@ -67,6 +67,7 @@ use oxideterm_gpui_ui::{
         ToolbarButtonOptions, split_footer_button,
     },
     checkbox::{CheckboxOptions, CheckboxState, checkbox, checkbox_with_state},
+    entity_row::{EntityListRowOptions, entity_list_row},
     form_field,
     modal::{
         dialog_content, dialog_description, dialog_footer, dialog_header, dialog_title,
@@ -190,6 +191,7 @@ mod pages;
 mod portable_runtime;
 mod privilege_credentials_page;
 mod remote_shell_integration;
+mod search;
 mod sftp_page;
 mod surface;
 mod terminal_controls;

@@ -708,6 +708,14 @@ impl WorkspaceApp {
             let key = event.keystroke.key.as_str();
             let modifiers = event.keystroke.modifiers;
             match key {
+                "escape" if input == SettingsInput::SettingsSearch => {
+                    self.close_settings_search(cx);
+                    return true;
+                }
+                "enter" if input == SettingsInput::SettingsSearch => {
+                    self.activate_first_settings_search_result(cx);
+                    return true;
+                }
                 "escape" | "enter" => {
                     self.settings_workspace.update(cx, |settings, cx| {
                         settings.blur_settings_entity_input(cx);

@@ -1,6 +1,13 @@
 {
   "settings_view": {
     "title": "Settings",
+    "search": {
+      "open": "Search settings",
+      "placeholder": "Search settings",
+      "hint": "Type to find settings",
+      "no_results": "No matching settings",
+      "clear": "Clear search"
+    },
     "navigation_editor": {
       "open": "Arrange settings navigation",
       "title": "Arrange settings navigation",

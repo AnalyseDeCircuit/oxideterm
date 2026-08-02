@@ -53,8 +53,11 @@ impl WorkspaceApp {
     pub(in crate::workspace) fn open_settings_navigation_editor(&mut self, cx: &mut Context<Self>) {
         let persisted_groups = &self.settings_store.settings().settings_navigation.groups;
         self.settings_workspace.update(cx, |settings, cx| {
+            settings.close_settings_search(true, cx);
             settings.open_navigation_editor(persisted_groups, cx);
         });
+        self.clear_ime_selection();
+        self.ime_marked_text = None;
     }
 
     pub(in crate::workspace) fn close_settings_navigation_editor(

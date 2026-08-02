@@ -1,6 +1,13 @@
 {
   "settings_view": {
     "title": "Configurações",
+    "search": {
+      "open": "Pesquisar configurações",
+      "placeholder": "Pesquisar configurações",
+      "hint": "Digite para encontrar configurações",
+      "no_results": "Nenhuma configuração correspondente",
+      "clear": "Limpar pesquisa"
+    },
     "navigation_editor": {
       "open": "Organizar a navegação das configurações",
       "title": "Organizar a navegação das configurações",

@@ -1,6 +1,13 @@
 {
   "settings_view": {
     "title": "設定",
+    "search": {
+      "open": "搜尋設定",
+      "placeholder": "搜尋設定",
+      "hint": "輸入關鍵字尋找設定",
+      "no_results": "找不到相符的設定",
+      "clear": "清除搜尋"
+    },
     "navigation_editor": {
       "open": "整理設定導覽",
       "title": "調整設定導覽",

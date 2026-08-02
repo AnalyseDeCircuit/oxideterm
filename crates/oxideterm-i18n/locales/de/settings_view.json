@@ -1,6 +1,13 @@
 {
   "settings_view": {
     "title": "Einstellungen",
+    "search": {
+      "open": "Einstellungen durchsuchen",
+      "placeholder": "Einstellungen durchsuchen",
+      "hint": "Tippen, um Einstellungen zu finden",
+      "no_results": "Keine passenden Einstellungen",
+      "clear": "Suche löschen"
+    },
     "navigation_editor": {
       "open": "Einstellungsnavigation anordnen",
       "title": "Einstellungsnavigation anordnen",

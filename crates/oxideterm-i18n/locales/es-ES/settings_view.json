@@ -1,6 +1,13 @@
 {
   "settings_view": {
     "title": "Configuración",
+    "search": {
+      "open": "Buscar ajustes",
+      "placeholder": "Buscar ajustes",
+      "hint": "Escribe para buscar ajustes",
+      "no_results": "No hay ajustes coincidentes",
+      "clear": "Borrar búsqueda"
+    },
     "navigation_editor": {
       "open": "Organizar la navegación de ajustes",
       "title": "Organizar la navegación de ajustes",

@@ -451,6 +451,8 @@ pub(in crate::workspace) struct SettingsWorkspaceEntity {
     theme_editor_exit_action: Option<ThemeEditorExitAction>,
     theme_editor_exit_task: Option<Task<()>>,
     theme_editor_results: VecDeque<ThemeEditorOperationResult>,
+    settings_search_open: bool,
+    settings_search_query: String,
     keybinding_scope_filter: SettingsKeybindingScopeFilter,
     previous_keybinding_scope_filter: SettingsKeybindingScopeFilter,
     keybinding_search_query: String,
@@ -598,6 +600,8 @@ impl SettingsWorkspaceEntity {
             theme_editor_exit_action: None,
             theme_editor_exit_task: None,
             theme_editor_results: VecDeque::new(),
+            settings_search_open: false,
+            settings_search_query: String::new(),
             keybinding_scope_filter: SettingsKeybindingScopeFilter::All,
             previous_keybinding_scope_filter: SettingsKeybindingScopeFilter::All,
             keybinding_search_query: String::new(),
@@ -2031,11 +2035,57 @@ impl SettingsWorkspaceEntity {
         self.settings_focused_input
     }
 
+    pub(in crate::workspace) fn settings_search_open(&self) -> bool {
+        self.settings_search_open
+    }
+
+    pub(in crate::workspace) fn settings_search_query(&self) -> &str {
+        &self.settings_search_query
+    }
+
+    pub(in crate::workspace) fn open_settings_search(&mut self, cx: &mut Context<Self>) {
+        self.settings_search_open = true;
+        cx.notify();
+    }
+
+    pub(in crate::workspace) fn close_settings_search(
+        &mut self,
+        clear_query: bool,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let mut changed = std::mem::take(&mut self.settings_search_open);
+        if self.settings_focused_input == Some(SettingsInput::SettingsSearch) {
+            self.settings_focused_input = None;
+            changed = true;
+        }
+        if clear_query && !self.settings_search_query.is_empty() {
+            self.settings_search_query.clear();
+            changed = true;
+        }
+        if changed {
+            cx.notify();
+        }
+        changed
+    }
+
+    pub(in crate::workspace) fn clear_settings_search_query(
+        &mut self,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if self.settings_search_query.is_empty() {
+            return false;
+        }
+        self.settings_search_query.clear();
+        cx.notify();
+        true
+    }
+
     pub(in crate::workspace) fn settings_entity_input_value(
         &self,
         input: SettingsInput,
     ) -> Option<&str> {
         match input {
+            SettingsInput::SettingsSearch => Some(&self.settings_search_query),
             SettingsInput::CustomThemeName => self
                 .theme_editor
                 .as_deref()
@@ -2084,6 +2134,7 @@ impl SettingsWorkspaceEntity {
     ) -> bool {
         let portable_open = self.portable_dialog == Some(PortableSettingsDialog::ChangePassword);
         let can_focus = match input {
+            SettingsInput::SettingsSearch => self.settings_search_open,
             SettingsInput::CustomThemeName
             | SettingsInput::CustomThemeTerminalColor(_)
             | SettingsInput::CustomThemeUiColor(_) => self.theme_editor.is_some(),
@@ -2211,6 +2262,7 @@ impl SettingsWorkspaceEntity {
 
     fn settings_entity_input_mut(&mut self, input: SettingsInput) -> Option<&mut String> {
         match input {
+            SettingsInput::SettingsSearch => Some(&mut self.settings_search_query),
             SettingsInput::CustomThemeName => self
                 .theme_editor
                 .as_mut()

@@ -1,6 +1,13 @@
 {
   "settings_view": {
     "title": "설정",
+    "search": {
+      "open": "설정 검색",
+      "placeholder": "설정 검색",
+      "hint": "입력하여 설정 찾기",
+      "no_results": "일치하는 설정 없음",
+      "clear": "검색 지우기"
+    },
     "navigation_editor": {
       "open": "설정 탐색 정리",
       "title": "설정 탐색 정리",

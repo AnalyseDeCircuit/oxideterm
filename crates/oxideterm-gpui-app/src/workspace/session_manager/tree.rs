@@ -278,9 +278,9 @@ impl WorkspaceApp {
             8.0,
         );
         let modes = [
+            SessionManagerViewMode::Tree,
             SessionManagerViewMode::Grid,
             SessionManagerViewMode::List,
-            SessionManagerViewMode::Tree,
         ];
         let mut menu = context_menu_event_boundary(
             dropdown_menu_content(&self.tokens).w(px(MANAGER_VIEW_MODE_MENU_WIDTH)),

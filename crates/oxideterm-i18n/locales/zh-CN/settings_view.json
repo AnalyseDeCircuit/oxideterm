@@ -1,6 +1,13 @@
 {
   "settings_view": {
     "title": "设置",
+    "search": {
+      "open": "搜索设置",
+      "placeholder": "搜索设置",
+      "hint": "输入关键词查找设置",
+      "no_results": "未找到匹配的设置",
+      "clear": "清除搜索"
+    },
     "navigation_editor": {
       "open": "整理设置导航",
       "title": "调整设置导航",

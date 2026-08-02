@@ -1,6 +1,13 @@
 {
   "settings_view": {
     "title": "設定",
+    "search": {
+      "open": "設定を検索",
+      "placeholder": "設定を検索",
+      "hint": "入力して設定を検索",
+      "no_results": "一致する設定はありません",
+      "clear": "検索をクリア"
+    },
     "navigation_editor": {
       "open": "設定ナビゲーションを整理",
       "title": "設定ナビゲーションを整理",

@@ -1,6 +1,13 @@
 {
   "settings_view": {
     "title": "Impostazioni",
+    "search": {
+      "open": "Cerca nelle impostazioni",
+      "placeholder": "Cerca nelle impostazioni",
+      "hint": "Digita per trovare le impostazioni",
+      "no_results": "Nessuna impostazione corrispondente",
+      "clear": "Cancella ricerca"
+    },
     "navigation_editor": {
       "open": "Organizza la navigazione delle impostazioni",
       "title": "Organizza la navigazione delle impostazioni",

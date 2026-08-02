@@ -1,6 +1,13 @@
 {
   "settings_view": {
     "title": "Paramètres",
+    "search": {
+      "open": "Rechercher dans les paramètres",
+      "placeholder": "Rechercher dans les paramètres",
+      "hint": "Saisissez du texte pour trouver des paramètres",
+      "no_results": "Aucun paramètre correspondant",
+      "clear": "Effacer la recherche"
+    },
     "navigation_editor": {
       "open": "Organiser la navigation des paramètres",
       "title": "Organiser la navigation des paramètres",

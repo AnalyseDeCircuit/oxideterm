@@ -1,6 +1,13 @@
 {
   "settings_view": {
     "title": "Cài đặt",
+    "search": {
+      "open": "Tìm kiếm cài đặt",
+      "placeholder": "Tìm kiếm cài đặt",
+      "hint": "Nhập để tìm cài đặt",
+      "no_results": "Không có cài đặt phù hợp",
+      "clear": "Xóa tìm kiếm"
+    },
     "navigation_editor": {
       "open": "Sắp xếp điều hướng cài đặt",
       "title": "Sắp xếp điều hướng cài đặt",

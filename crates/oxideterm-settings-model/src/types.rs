@@ -9,6 +9,7 @@
 
 const PLUGIN_MANAGER_INPUT_ANCHOR_BASE: u64 = 28_000;
 const PLUGIN_SETTING_INPUT_ANCHOR_BASE: u64 = 29_000;
+const SETTINGS_SEARCH_INPUT_ANCHOR_KEY: u64 = 34_000;
 const DEFAULT_SETTINGS_TEXTAREA_LINE_HEIGHT: f32 = 20.0;
 
 /// Describes the installed CLI companion relative to the bundled executable.
@@ -121,6 +122,7 @@ pub enum SettingsSelect {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub enum SettingsInput {
+    SettingsSearch,
     TerminalCustomFontFamily,
     TerminalFontSize,
     TerminalScrollback,
@@ -472,6 +474,7 @@ impl SettingsInput {
 
     pub fn anchor_key(self) -> u64 {
         match self {
+            Self::SettingsSearch => SETTINGS_SEARCH_INPUT_ANCHOR_KEY,
             Self::TerminalCustomFontFamily => 19,
             Self::TerminalFontSize => 1,
             Self::TerminalScrollback => 33_000,

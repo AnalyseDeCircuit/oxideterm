@@ -84,8 +84,10 @@ impl WorkspaceApp {
             .is_some_and(|tab| tab.kind == TabKind::Settings);
         self.active_surface = ActiveSurface::Terminal;
         self.close_settings_select();
-        self.settings_workspace
-            .update(cx, SettingsWorkspaceEntity::close_navigation_editor);
+        self.settings_workspace.update(cx, |settings, cx| {
+            settings.close_navigation_editor(cx);
+            settings.close_settings_search(true, cx);
+        });
         self.focused_settings_input = None;
         self.settings_slider_drag = None;
         if close_active_settings_tab {
@@ -718,6 +720,7 @@ impl WorkspaceApp {
 
     pub(in crate::workspace) fn render_settings_nav(&self, cx: &mut Context<Self>) -> AnyElement {
         let theme = self.tokens.ui;
+        let settings_search_open = self.settings_workspace.read(cx).settings_search_open();
         let settings_nav_scroll = self.selectable_text_scroll_handle("settings-nav-scroll");
         let settings_nav_width = self.tokens.metrics.settings_nav_width;
         let navigation_layout = SettingsNavigationLayout::from_persisted_groups(
@@ -755,24 +758,61 @@ impl WorkspaceApp {
                 .font_weight(gpui::FontWeight::SEMIBOLD)
                 .text_color(rgb(theme.text_heading))
                 .child(self.i18n.t("settings_view.title"))
-                .child(self.workspace_tooltip_icon_button(
-                    LucideIcon::ListTree,
-                    15.0,
-                    rgb(theme.text_muted),
-                    IconButtonOptions {
-                        hover_background: Some(rgb(theme.bg_hover)),
-                        ..IconButtonOptions::opaque_toolbar(28.0, ButtonRadius::Sm)
-                    },
-                    self.i18n.t("settings_view.navigation_editor.open"),
-                    "settings-navigation-editor",
-                    true,
-                    cx.listener(|this, _event, _window, cx| {
-                        this.open_settings_navigation_editor(cx);
-                        cx.stop_propagation();
-                    }),
-                    cx.entity(),
-                )),
+                .child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap_1()
+                        .child(
+                            self.workspace_tooltip_icon_button(
+                                LucideIcon::Search,
+                                15.0,
+                                rgb(if settings_search_open {
+                                    theme.accent
+                                } else {
+                                    theme.text_muted
+                                }),
+                                IconButtonOptions {
+                                    background: settings_search_open
+                                        .then(|| self.settings_panel_background(theme.bg_active)),
+                                    hover_background: Some(rgb(theme.bg_hover)),
+                                    ..IconButtonOptions::opaque_toolbar(28.0, ButtonRadius::Sm)
+                                },
+                                self.i18n.t("settings_view.search.open"),
+                                "settings-search",
+                                true,
+                                cx.listener(|this, _event, window, cx| {
+                                    this.toggle_settings_search(window, cx);
+                                    cx.stop_propagation();
+                                }),
+                                cx.entity(),
+                            ),
+                        )
+                        .child(self.workspace_tooltip_icon_button(
+                            LucideIcon::ListTree,
+                            15.0,
+                            rgb(theme.text_muted),
+                            IconButtonOptions {
+                                hover_background: Some(rgb(theme.bg_hover)),
+                                ..IconButtonOptions::opaque_toolbar(28.0, ButtonRadius::Sm)
+                            },
+                            self.i18n.t("settings_view.navigation_editor.open"),
+                            "settings-navigation-editor",
+                            true,
+                            cx.listener(|this, _event, _window, cx| {
+                                this.open_settings_navigation_editor(cx);
+                                cx.stop_propagation();
+                            }),
+                            cx.entity(),
+                        )),
+                ),
         );
+
+        if settings_search_open {
+            return nav
+                .child(self.render_settings_search_panel(cx))
+                .into_any_element();
+        }
 
         let mut list = div()
             .id("settings-nav-scroll")
