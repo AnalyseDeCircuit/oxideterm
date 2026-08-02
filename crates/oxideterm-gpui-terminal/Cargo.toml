@@ -6,7 +6,6 @@ version.workspace = true
 
 [dependencies]
 anyhow.workspace = true
-futures.workspace = true
 chrono.workspace = true
 gpui.workspace = true
 image.workspace = true

@@ -3,6 +3,25 @@
 Stable releases are listed newest first. The release workflow uses each versioned
 section as the detailed changelog attached to the corresponding GitHub Release.
 
+## 2.0.16
+
+OxideTerm 2.0.16 adds searchable settings, contextual nested session groups, and secure SSH X11 forwarding while improving terminal startup, remote previews, remote-desktop compatibility, and modem transfers.
+
+### ✨ Highlights
+
+- Added localized settings search with ranked results and direct navigation to matching sections and controls.
+- Expanded Session Manager group management with contextual creation, child-group creation without typing full paths, rename and delete actions, and made the tree layout the default and first view option.
+- Added persistent trusted and untrusted X11 forwarding for SSH connections, including OpenSSH configuration import and synchronization, local display and xauth preparation, spoofed-cookie handling, forwarding timeouts, and connection-owned channel routing.
+- Allowed user-configured MCP server commands without a built-in executable allowlist while retaining structural validation and explicit settings ownership.
+
+### 🛠️ Fixes
+
+- Restored output-independent terminal polling so first and subsequent SSH terminal panes no longer wait for remote output or the deferred PTY timeout before applying their real viewport size.
+- Kept terminal processing bounded under heavy output with incremental snapshots, asynchronous search and image preparation, render caches, and byte-aware backpressure while preserving responsive startup scheduling.
+- Reused the full text editor for SFTP text and Markdown previews, restoring consistent keyboard, selection, scrolling, and rendering behavior.
+- Accepted RDP progressive graphics updates that legitimately omit an optional context and launched local Zsh sessions as non-login shells to avoid duplicate login initialization.
+- Strengthened X/Y/ZMODEM transfers with transactional downloads, collision-safe file persistence, stricter frame validation, peer cancellation, resume handling, and safer filename processing.
+
 ## 2.0.15
 
 OxideTerm 2.0.15 substantially expands OxideSens with application-aware tools, background tasks, Agent Skills, and modern MCP interoperability while improving AI context accuracy, terminal efficiency, and remote-session reliability.

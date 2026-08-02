@@ -12,7 +12,6 @@ use std::{
 
 use anyhow::Result;
 use chrono::Timelike;
-use futures::future::{Either, select};
 use gpui::{
     App, Bounds, ClipboardItem, Context, EventEmitter, FocusHandle, PathPromptOptions, Pixels,
     Point, SharedString, Subscription, Timer, Window, px,
@@ -73,8 +72,9 @@ pub type SharedTerminalSession = Arc<Mutex<TerminalSession>>;
 pub type TerminalInputInterceptor =
     Arc<dyn Fn(&[u8]) -> TerminalInputInterceptorResult + Send + Sync>;
 const PRIVILEGE_PROMPT_DEBUG_ENV: &str = "OXIDETERM_PRIVILEGE_DEBUG";
-const TERMINAL_ANIMATION_INTERVAL: Duration = Duration::from_millis(16);
-const TERMINAL_IDLE_MAINTENANCE_INTERVAL: Duration = Duration::from_secs(60 * 60);
+const ACTIVE_TERMINAL_POLL_INTERVAL: Duration = Duration::from_millis(16);
+const BACKGROUND_TERMINAL_POLL_INTERVAL: Duration = Duration::from_millis(64);
+const IDLE_TERMINAL_POLL_INTERVAL: Duration = Duration::from_millis(250);
 const DRAIN_BOOST_POLL_INTERVAL: Duration = Duration::from_millis(8);
 const MAX_UI_TERMINAL_DRAIN_DURATION: Duration = Duration::from_millis(2);
 const RECENT_TERMINAL_ACTIVITY_WINDOW: Duration = Duration::from_millis(600);
@@ -249,30 +249,24 @@ impl TerminalEventEffect {
     }
 }
 
-fn terminal_maintenance_interval(
+fn terminal_poll_interval(
+    focused: bool,
     drain_budget_exhausted: bool,
-    smooth_scroll_active: bool,
-    cursor_blink_remaining: Option<Duration>,
-    process_refresh_remaining: Option<Duration>,
-    pending_cwd_remaining: Option<Duration>,
-    editor_expiry_remaining: Option<Duration>,
+    time_since_input: Duration,
+    time_since_activity: Duration,
 ) -> Duration {
     if drain_budget_exhausted {
         return DRAIN_BOOST_POLL_INTERVAL;
     }
-    if smooth_scroll_active {
-        return TERMINAL_ANIMATION_INTERVAL;
+    if focused {
+        return ACTIVE_TERMINAL_POLL_INTERVAL;
     }
-    [
-        cursor_blink_remaining,
-        process_refresh_remaining,
-        pending_cwd_remaining,
-        editor_expiry_remaining,
-    ]
-    .into_iter()
-    .flatten()
-    .min()
-    .unwrap_or(TERMINAL_IDLE_MAINTENANCE_INTERVAL)
+    if time_since_input <= RECENT_TERMINAL_INPUT_WINDOW
+        || time_since_activity <= RECENT_TERMINAL_ACTIVITY_WINDOW
+    {
+        return BACKGROUND_TERMINAL_POLL_INTERVAL;
+    }
+    IDLE_TERMINAL_POLL_INTERVAL
 }
 
 fn viewport_needs_live_output_restore(
@@ -689,22 +683,19 @@ impl TerminalPane {
             this.handle_focus_change(false, cx);
         });
 
-        let terminal_activity = terminal.lock().activity_receiver();
+        // Poll independently of backend output so GPUI layout and debounce tasks can advance
+        // before a deferred SSH PTY starts producing terminal activity.
         cx.spawn(async move |weak, cx| {
-            let mut maintenance_interval = TERMINAL_ANIMATION_INTERVAL;
+            let mut poll_interval = ACTIVE_TERMINAL_POLL_INTERVAL;
             loop {
-                let activity = Box::pin(terminal_activity.notified());
-                let timer = Box::pin(cx.background_executor().timer(maintenance_interval));
-                if matches!(select(activity, timer).await, Either::Left((false, _))) {
-                    break;
-                }
-                let Ok(next_maintenance_interval) = weak.update(cx, |this, cx| {
+                cx.background_executor().timer(poll_interval).await;
+                let Ok(next_poll_interval) = weak.update(cx, |this, cx| {
                     this.tick(cx);
-                    this.next_maintenance_interval()
+                    this.next_poll_interval()
                 }) else {
                     break;
                 };
-                maintenance_interval = next_maintenance_interval;
+                poll_interval = next_poll_interval;
             }
         })
         .detach();
@@ -2011,36 +2002,12 @@ impl TerminalPane {
         }
     }
 
-    fn next_maintenance_interval(&self) -> Duration {
-        let now = Instant::now();
-        let cursor_blink_remaining = self.should_blink_cursor().then(|| {
-            CURSOR_BLINK_INTERVAL
-                .saturating_sub(now.saturating_duration_since(self.last_cursor_blink))
-        });
-        let mode = self.terminal.lock().mode();
-        let needs_process_refresh = (self.settings.free_type_mode
-            && mode.contains(TermMode::ALT_SCREEN))
-            || (self.settings.current_directory_awareness_enabled
-                && self.cwd_shell_integration_status != TerminalCwdShellIntegrationStatus::Active);
-        let process_refresh_remaining = (self.focused && needs_process_refresh).then(|| {
-            ACTIVE_PROCESS_INFO_REFRESH_INTERVAL.saturating_sub(
-                now.saturating_duration_since(self.last_process_info_refresh_requested),
-            )
-        });
-        let pending_cwd_remaining = self.pending_cwd.as_ref().map(|pending| {
-            PENDING_CWD_TIMEOUT.saturating_sub(now.saturating_duration_since(pending.created_at))
-        });
-        let editor_expiry_remaining = self.editor_integration.map(|integration| {
-            EDITOR_INTEGRATION_HEARTBEAT_TIMEOUT
-                .saturating_sub(now.saturating_duration_since(integration.last_seen))
-        });
-        terminal_maintenance_interval(
+    fn next_poll_interval(&self) -> Duration {
+        terminal_poll_interval(
+            self.focused,
             self.last_drain_budget_exhausted,
-            self.smooth_scroll_animation_active,
-            cursor_blink_remaining,
-            process_refresh_remaining,
-            pending_cwd_remaining,
-            editor_expiry_remaining,
+            self.last_terminal_input.elapsed(),
+            self.last_terminal_activity.elapsed(),
         )
     }
 
@@ -3074,55 +3041,50 @@ mod tests {
     }
 
     #[test]
-    fn terminal_maintenance_prioritizes_animation_deadlines() {
+    fn terminal_polling_keeps_focused_panes_responsive() {
         assert_eq!(
-            terminal_maintenance_interval(
-                false,
+            terminal_poll_interval(
                 true,
-                Some(Duration::from_millis(200)),
-                None,
-                None,
-                None,
+                false,
+                Duration::from_secs(10),
+                Duration::from_secs(10),
             ),
-            TERMINAL_ANIMATION_INTERVAL
+            ACTIVE_TERMINAL_POLL_INTERVAL
         );
     }
 
     #[test]
-    fn terminal_maintenance_sleeps_without_a_real_deadline() {
+    fn terminal_polling_reduces_background_and_idle_work() {
         assert_eq!(
-            terminal_maintenance_interval(false, false, None, None, None, None),
-            TERMINAL_IDLE_MAINTENANCE_INTERVAL
-        );
-    }
-
-    #[test]
-    fn terminal_maintenance_drains_backpressure_before_other_deadlines() {
-        assert_eq!(
-            terminal_maintenance_interval(
-                true,
+            terminal_poll_interval(
                 false,
-                Some(Duration::from_millis(2)),
-                None,
-                None,
-                None,
+                false,
+                Duration::from_secs(10),
+                Duration::from_millis(20),
+            ),
+            BACKGROUND_TERMINAL_POLL_INTERVAL
+        );
+        assert_eq!(
+            terminal_poll_interval(
+                false,
+                false,
+                Duration::from_secs(10),
+                Duration::from_secs(10),
+            ),
+            IDLE_TERMINAL_POLL_INTERVAL
+        );
+    }
+
+    #[test]
+    fn terminal_polling_drains_backpressure_before_other_tiers() {
+        assert_eq!(
+            terminal_poll_interval(
+                false,
+                true,
+                Duration::from_secs(10),
+                Duration::from_secs(10),
             ),
             DRAIN_BOOST_POLL_INTERVAL
-        );
-    }
-
-    #[test]
-    fn terminal_maintenance_uses_the_earliest_real_deadline() {
-        assert_eq!(
-            terminal_maintenance_interval(
-                false,
-                false,
-                Some(Duration::from_millis(300)),
-                Some(Duration::from_millis(700)),
-                Some(Duration::from_millis(120)),
-                None,
-            ),
-            Duration::from_millis(120)
         );
     }
 
