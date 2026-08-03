@@ -14,7 +14,18 @@ use oxideterm_gpui_remote_desktop::{
     SharedRemoteDesktopGeometry, remote_desktop_surface_with_geometry,
 };
 use oxideterm_gpui_ui::button::{
-    ButtonOptions, ButtonRadius, ButtonSize, ButtonVariant, ToolbarButtonOptions,
+    ButtonOptions, ButtonRadius, ButtonSize, ButtonVariant, IconButtonOptions, ToolbarButtonOptions,
+};
+use oxideterm_gpui_ui::{
+    context_menu::{
+        context_menu_event_boundary, context_menu_item_height_estimate,
+        context_menu_separator_height_estimate,
+    },
+    dropdown_menu::{
+        DropdownMenuItemKind, dropdown_menu_content, dropdown_menu_item, dropdown_menu_label,
+        dropdown_menu_separator,
+    },
+    modal::overlay_content_boundary,
 };
 use oxideterm_remote_desktop::{
     NegotiatedCapabilities, NegotiatedCapabilityStatus, RemoteDesktopClipboardData,
@@ -52,6 +63,31 @@ const REMOTE_DESKTOP_INITIAL_LAYOUT_PROBE_INTERVAL: Duration = Duration::from_mi
 const REMOTE_DESKTOP_INITIAL_LAYOUT_PROBE_TICKS: usize = 120;
 const REMOTE_DESKTOP_RESIZE_DEBOUNCE: Duration = Duration::from_millis(120);
 const REMOTE_DESKTOP_RESIZE_DELTA_THRESHOLD: u32 = 16;
+const REMOTE_DESKTOP_RESIZE_MENU_WIDTH: f32 = 240.0;
+const REMOTE_DESKTOP_RESIZE_MENU_GAP: f32 = 4.0;
+const REMOTE_DESKTOP_RESIZE_MENU_VIEWPORT_PADDING: f32 = 8.0;
+const REMOTE_DESKTOP_COMMON_RESOLUTIONS: [RemoteDesktopSize; 5] = [
+    RemoteDesktopSize {
+        width: 1280,
+        height: 720,
+    },
+    RemoteDesktopSize {
+        width: 1366,
+        height: 768,
+    },
+    RemoteDesktopSize {
+        width: 1920,
+        height: 1080,
+    },
+    RemoteDesktopSize {
+        width: 2560,
+        height: 1440,
+    },
+    RemoteDesktopSize {
+        width: 3840,
+        height: 2160,
+    },
+];
 const REMOTE_DESKTOP_DEFAULT_SCALE_FACTOR_PERCENT: u32 = 100;
 const REMOTE_DESKTOP_MIN_SCALE_FACTOR_PERCENT: u32 = 100;
 const REMOTE_DESKTOP_MAX_SCALE_FACTOR_PERCENT: u32 = 500;
@@ -65,6 +101,10 @@ const REMOTE_DESKTOP_DIAGNOSTICS_ENV: &str = "OXIDETERM_REMOTE_DESKTOP_DIAGNOSTI
 
 fn remote_desktop_tab_visible(main_tab_visible: bool, detached_tab_visible: bool) -> bool {
     main_tab_visible || detached_tab_visible
+}
+
+fn remote_desktop_resolution_label(size: RemoteDesktopSize) -> String {
+    format!("{} × {}", size.width, size.height)
 }
 
 #[derive(Debug)]
@@ -360,6 +400,7 @@ pub(in crate::workspace) struct RemoteDesktopSessionEntity {
     last_viewport_scale_factor: Option<u32>,
     last_monitor_layout: RemoteDesktopMonitorLayout,
     resize_generation: Arc<AtomicU64>,
+    follow_window_size: bool,
     last_input_modifiers: RemoteDesktopModifierState,
     last_lock_keys: Option<RemoteDesktopLockKeys>,
     pressed_mouse_buttons: HashSet<RemoteDesktopMouseButton>,
@@ -423,6 +464,7 @@ impl RemoteDesktopSessionEntity {
             last_viewport_scale_factor: None,
             last_monitor_layout: RemoteDesktopMonitorLayout::default(),
             resize_generation: Arc::new(AtomicU64::new(0)),
+            follow_window_size: true,
             last_input_modifiers: RemoteDesktopModifierState::default(),
             last_lock_keys: None,
             pressed_mouse_buttons: HashSet::new(),
@@ -1308,7 +1350,7 @@ mod tests {
     }
 
     #[test]
-    fn resize_request_is_blocked_when_provider_does_not_support_resize() {
+    fn resize_request_is_blocked_without_negotiated_resize_support() {
         let current = RemoteDesktopSize {
             width: 1280,
             height: 720,

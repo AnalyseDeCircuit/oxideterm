@@ -806,6 +806,7 @@ impl WorkspaceApp {
             _session_manager_observation: session_manager_observation,
             _session_manager_subscription: session_manager_subscription,
             remote_desktop,
+            remote_desktop_resize_menu_tab_id: None,
             local_shells,
             local_shell_launcher_open: false,
             local_shell_launcher_selected_id: None,

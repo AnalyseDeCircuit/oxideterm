@@ -375,6 +375,9 @@ pub enum RemoteDesktopHelperEvent {
     FrameUpdate {
         update: RemoteDesktopFrameUpdate,
     },
+    FrameStreamReset {
+        graphics_epoch: u64,
+    },
     Cursor {
         x: u32,
         y: u32,
@@ -446,6 +449,7 @@ impl fmt::Debug for RemoteDesktopHelperEvent {
                 .debug_struct("Frame")
                 .field("size", &frame.size)
                 .field("format", &frame.format)
+                .field("graphics_epoch", &frame.graphics_epoch)
                 .field("trace_id", &frame.trace_id)
                 .field("bytes", &format_args!("<{} bytes>", frame.bytes.len()))
                 .finish(),
@@ -454,9 +458,14 @@ impl fmt::Debug for RemoteDesktopHelperEvent {
                 .field("size", &update.size)
                 .field("rect", &update.rect)
                 .field("format", &update.format)
+                .field("graphics_epoch", &update.graphics_epoch)
                 .field("trace_id", &update.trace_id)
                 .field("compression", &update.compression)
                 .field("bytes", &format_args!("<{} bytes>", update.bytes.len()))
+                .finish(),
+            Self::FrameStreamReset { graphics_epoch } => formatter
+                .debug_struct("FrameStreamReset")
+                .field("graphics_epoch", graphics_epoch)
                 .finish(),
             Self::Cursor {
                 x,

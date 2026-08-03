@@ -58,6 +58,7 @@ pub(super) fn build_client_rdp_config(config: &RdpWorkerConfig) -> Result<Client
     Ok(ClientRdpConfig {
         destination: ClientRdpDestination::from_parts(&config.endpoint.host, config.endpoint.port),
         connector,
+        graphics_epoch: config.graphics_epoch,
         session_options: config.session_options,
         monitor_layout: config.monitor_layout.clone(),
     })
@@ -160,7 +161,11 @@ pub(super) fn connector_error_category(
         | ConnectorErrorKind::Decode(_)
         | ConnectorErrorKind::Reason(_) => RemoteDesktopErrorCategory::Protocol,
         ConnectorErrorKind::Custom => RemoteDesktopErrorCategory::Unknown,
-        ConnectorErrorKind::General => RemoteDesktopErrorCategory::Unknown,
+        ConnectorErrorKind::General => {
+            // IronRDP uses General for certificate-bound credential validation,
+            // so recover the user-facing category from its retained context.
+            remote_desktop_error_category_from_message(&error.to_string())
+        }
         _ => RemoteDesktopErrorCategory::Unknown,
     }
 }
@@ -180,7 +185,14 @@ pub(super) fn format_connector_error(stage: &str, error: &connector::ConnectorEr
             format!("{stage}: failed to decode an RDP protocol message.")
         }
         ConnectorErrorKind::AccessDenied => format!("{stage}: access denied by the RDP server."),
-        ConnectorErrorKind::General => format!("{stage}: general RDP connector error."),
+        ConnectorErrorKind::General => {
+            let summary = sanitize_connector_error_text(&error.to_string());
+            if summary.is_empty() {
+                format!("{stage}: general RDP connector error.")
+            } else {
+                format!("{stage}: {summary}")
+            }
+        }
         ConnectorErrorKind::Custom => connector_error_source_summary(error)
             .map(|summary| format!("{stage}: {summary}"))
             .unwrap_or_else(|| format!("{stage}: RDP connector error.")),

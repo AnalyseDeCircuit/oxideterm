@@ -24,6 +24,7 @@ pub enum RemoteDesktopFrameQueuePush {
     Queued,
     RecoveryRequired,
     AwaitingRecovery,
+    Discarded,
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -35,6 +36,7 @@ pub struct RemoteDesktopFrameDeliveryDecision {
 pub struct RemoteDesktopFrameQueue {
     frames: VecDeque<RemoteDesktopHelperEvent>,
     queued_dirty_bytes: usize,
+    active_graphics_epoch: Option<u64>,
     awaiting_base_frame: bool,
     max_events: usize,
     max_dirty_bytes: usize,
@@ -51,6 +53,7 @@ impl RemoteDesktopFrameQueue {
         Self {
             frames: VecDeque::new(),
             queued_dirty_bytes: 0,
+            active_graphics_epoch: None,
             awaiting_base_frame: false,
             max_events,
             max_dirty_bytes,
@@ -58,7 +61,32 @@ impl RemoteDesktopFrameQueue {
     }
 
     pub fn push(&mut self, event: RemoteDesktopHelperEvent) -> RemoteDesktopFrameQueuePush {
-        if matches!(event, RemoteDesktopHelperEvent::Frame { .. }) {
+        if let RemoteDesktopHelperEvent::FrameStreamReset { graphics_epoch } = &event {
+            let graphics_epoch = *graphics_epoch;
+            if self
+                .active_graphics_epoch
+                .is_some_and(|active_epoch| graphics_epoch <= active_epoch)
+            {
+                return RemoteDesktopFrameQueuePush::Discarded;
+            }
+            // A reset starts a new graphics lineage while the currently
+            // presented frame remains available until its replacement arrives.
+            self.frames.clear();
+            self.queued_dirty_bytes = 0;
+            self.active_graphics_epoch = Some(graphics_epoch);
+            self.awaiting_base_frame = true;
+            self.frames
+                .push_back(RemoteDesktopHelperEvent::FrameStreamReset { graphics_epoch });
+            return RemoteDesktopFrameQueuePush::Queued;
+        }
+
+        if let RemoteDesktopHelperEvent::Frame { frame } = &event {
+            if self
+                .active_graphics_epoch
+                .is_some_and(|active_epoch| frame.graphics_epoch < active_epoch)
+            {
+                return RemoteDesktopFrameQueuePush::Discarded;
+            }
             let event_bytes = frame_event_bytes(&event);
             self.frames.clear();
             self.queued_dirty_bytes = 0;
@@ -66,9 +94,27 @@ impl RemoteDesktopFrameQueue {
                 self.awaiting_base_frame = true;
                 return RemoteDesktopFrameQueuePush::RecoveryRequired;
             }
+            self.active_graphics_epoch = Some(frame.graphics_epoch);
             self.frames.push_back(event);
             self.awaiting_base_frame = false;
             return RemoteDesktopFrameQueuePush::Queued;
+        }
+
+        if let RemoteDesktopHelperEvent::FrameUpdate { update } = &event {
+            match self.active_graphics_epoch {
+                Some(active_epoch) if update.graphics_epoch < active_epoch => {
+                    return RemoteDesktopFrameQueuePush::Discarded;
+                }
+                Some(active_epoch) if update.graphics_epoch > active_epoch => {
+                    self.frames.clear();
+                    self.queued_dirty_bytes = 0;
+                    self.active_graphics_epoch = Some(update.graphics_epoch);
+                    self.awaiting_base_frame = true;
+                    return RemoteDesktopFrameQueuePush::RecoveryRequired;
+                }
+                None => self.active_graphics_epoch = Some(update.graphics_epoch),
+                _ => {}
+            }
         }
 
         if self.awaiting_base_frame {
@@ -196,6 +242,9 @@ impl RemoteDesktopFrameDeliverySlot {
                 recovery_required,
             };
         }
+        if queue_push == RemoteDesktopFrameQueuePush::Discarded {
+            return RemoteDesktopFrameDeliveryDecision::default();
+        }
 
         RemoteDesktopFrameDeliveryDecision {
             frame_ready: self.mark_frame_ready_queued(),
@@ -266,7 +315,9 @@ impl RemoteDesktopFrameDeliverySlot {
 pub fn is_remote_desktop_frame_event(event: &RemoteDesktopHelperEvent) -> bool {
     matches!(
         event,
-        RemoteDesktopHelperEvent::Frame { .. } | RemoteDesktopHelperEvent::FrameUpdate { .. }
+        RemoteDesktopHelperEvent::Frame { .. }
+            | RemoteDesktopHelperEvent::FrameUpdate { .. }
+            | RemoteDesktopHelperEvent::FrameStreamReset { .. }
     )
 }
 
@@ -274,6 +325,7 @@ fn frame_event_bytes(event: &RemoteDesktopHelperEvent) -> usize {
     match event {
         RemoteDesktopHelperEvent::Frame { frame } => frame.bytes.len(),
         RemoteDesktopHelperEvent::FrameUpdate { update } => update.bytes.len(),
+        RemoteDesktopHelperEvent::FrameStreamReset { .. } => 0,
         _ => 0,
     }
 }

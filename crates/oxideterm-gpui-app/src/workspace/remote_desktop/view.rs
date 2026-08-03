@@ -157,6 +157,19 @@ impl WorkspaceApp {
         let geometry = session.geometry.clone();
         let certificate_challenge = session.certificate_challenge.clone();
         let worker_generation = session.worker_generation;
+        let resize_menu_open = self.remote_desktop_resize_menu_tab_id == Some(tab_id);
+        let resize_session = session_entity.clone();
+        window.on_next_frame(move |window, cx| {
+            let scale_factor = Some(remote_desktop_scale_factor_percent(window.scale_factor()));
+            let _ = resize_session.update(cx, |session, cx| {
+                // Canvas geometry is final only after layout. Replaying it on
+                // the next frame makes local window/sidebar/tab changes drive
+                // resize independently from incoming remote desktop frames.
+                if session.schedule_viewport_resize(scale_factor, cx) {
+                    cx.notify();
+                }
+            });
+        });
         let desktop_surface = div()
             .min_h(px(0.0))
             .flex_1()
@@ -405,6 +418,12 @@ impl WorkspaceApp {
             .flex_col()
             .child(desktop_surface)
             .child(self.render_remote_desktop_footer(tab_id, cx))
+            .when(resize_menu_open, |surface| {
+                surface.child(self.workspace_context_menu_backdrop(
+                    self.render_remote_desktop_resize_menu(tab_id, window, cx),
+                    cx,
+                ))
+            })
             .when_some(certificate_challenge, |surface, challenge| {
                 surface.child(self.render_remote_desktop_certificate_dialog(
                     tab_id,

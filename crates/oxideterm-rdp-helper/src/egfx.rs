@@ -52,6 +52,9 @@ impl EgfxSessionBridge {
             .renderer
             .lock()
             .map_err(|_| io::Error::other("EGFX renderer lock is poisoned"))?;
+        if renderer.awaiting_reactivation {
+            return Ok(true);
+        }
         if !renderer.has_desktop() {
             return Ok(false);
         }
@@ -61,12 +64,26 @@ impl EgfxSessionBridge {
         Ok(true)
     }
 
-    pub(super) fn prepare_for_reactivation(&self) -> Result<(), io::Error> {
+    pub(super) fn begin_frame_transition(&self, graphics_epoch: u64) -> Result<(), io::Error> {
+        let mut renderer = self
+            .renderer
+            .lock()
+            .map_err(|_| io::Error::other("EGFX renderer lock is poisoned"))?;
+        renderer.graphics_epoch = graphics_epoch;
+        renderer.awaiting_reactivation = true;
+        renderer.pending_desktop_dirty = None;
+        renderer.needs_base_frame = true;
+        Ok(())
+    }
+
+    pub(super) fn prepare_for_reactivation(&self, graphics_epoch: u64) -> Result<(), io::Error> {
         let mut renderer = self
             .renderer
             .lock()
             .map_err(|_| io::Error::other("EGFX renderer lock is poisoned"))?;
         renderer.discard_graphics_state();
+        renderer.graphics_epoch = graphics_epoch;
+        renderer.awaiting_reactivation = false;
         Ok(())
     }
 }
@@ -74,6 +91,7 @@ impl EgfxSessionBridge {
 /// Builds a handler and its session-side bridge around one renderer state.
 pub(super) fn new_egfx_channel(
     output_tx: ClientRdpOutputSender,
+    graphics_epoch: u64,
 ) -> (GraphicsPipelineClient, EgfxSessionBridge) {
     let h264_decoder = std::env::var_os(OPENH264_LIBRARY_PATH_ENV).and_then(|path| {
         OpenH264Decoder::from_library_path(std::path::Path::new(&path))
@@ -86,7 +104,9 @@ pub(super) fn new_egfx_channel(
             .ok()
     });
     let h264_available = h264_decoder.is_some();
-    let renderer = Arc::new(Mutex::new(EgfxRenderer::new(output_tx.clone())));
+    let mut renderer = EgfxRenderer::new(output_tx.clone());
+    renderer.graphics_epoch = graphics_epoch;
+    let renderer = Arc::new(Mutex::new(renderer));
     let bridge = EgfxSessionBridge {
         renderer: renderer.clone(),
     };
@@ -244,6 +264,8 @@ struct EgfxRenderer {
     clearcodec_decoder: ClearCodecDecoder,
     pending_desktop_dirty: Option<RemoteDesktopRect>,
     needs_base_frame: bool,
+    graphics_epoch: u64,
+    awaiting_reactivation: bool,
     published_first_frame: bool,
     next_trace_id: u64,
     failed: bool,
@@ -263,6 +285,8 @@ impl EgfxRenderer {
             clearcodec_decoder: ClearCodecDecoder::new(),
             pending_desktop_dirty: None,
             needs_base_frame: true,
+            graphics_epoch: 0,
+            awaiting_reactivation: false,
             published_first_frame: false,
             next_trace_id: 0,
             failed: false,
@@ -672,6 +696,10 @@ impl EgfxRenderer {
     }
 
     fn publish_completed_frame(&mut self) -> Result<(), String> {
+        if self.awaiting_reactivation {
+            self.pending_desktop_dirty = None;
+            return Ok(());
+        }
         let Some(dirty) = self.pending_desktop_dirty.take() else {
             return Ok(());
         };
@@ -697,6 +725,7 @@ impl EgfxRenderer {
                 RemoteDesktopFrameFormat::Rgba8,
                 copy_rgba_region_u32(&self.desktop_pixels, desktop_width, dirty)?,
             )
+            .with_graphics_epoch(self.graphics_epoch)
             .with_trace_id(self.next_trace_id),
         };
         match self
@@ -716,6 +745,10 @@ impl EgfxRenderer {
     }
 
     fn publish_base_frame(&mut self, publish_ready: bool) -> Result<(), String> {
+        if self.awaiting_reactivation {
+            self.needs_base_frame = true;
+            return Ok(());
+        }
         let size = self
             .desktop_size
             .ok_or_else(|| "RDP Graphics Pipeline has no desktop surface.".to_string())?;
@@ -726,6 +759,7 @@ impl EgfxRenderer {
                 RemoteDesktopFrameFormat::Rgba8,
                 self.desktop_pixels.clone(),
             )
+            .with_graphics_epoch(self.graphics_epoch)
             .with_trace_id(self.next_trace_id),
         };
         match self

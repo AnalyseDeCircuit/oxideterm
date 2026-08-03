@@ -7,6 +7,8 @@ use super::*;
 pub(super) struct ClientRdpFrameState {
     pub(super) graphics_sync: RdpGraphicsSyncState,
     pub(super) graphics_accumulator: RdpGraphicsFrameAccumulator,
+    pub(super) graphics_epoch: u64,
+    pub(super) awaiting_reactivation: bool,
     pub(super) pending_base_frame: bool,
     pub(super) pending_base_frame_can_publish_ready: bool,
     pub(super) published_first_desktop_frame: bool,
@@ -19,6 +21,8 @@ impl Default for ClientRdpFrameState {
         Self {
             graphics_sync: RdpGraphicsSyncState::default(),
             graphics_accumulator: RdpGraphicsFrameAccumulator::default(),
+            graphics_epoch: 0,
+            awaiting_reactivation: false,
             pending_base_frame: false,
             pending_base_frame_can_publish_ready: false,
             published_first_desktop_frame: false,
@@ -29,6 +33,24 @@ impl Default for ClientRdpFrameState {
 }
 
 impl ClientRdpFrameState {
+    fn begin_reactivation(&mut self) -> Option<u64> {
+        if self.awaiting_reactivation {
+            return None;
+        }
+        self.graphics_epoch = self.graphics_epoch.saturating_add(1).max(1);
+        self.awaiting_reactivation = true;
+        self.graphics_sync.mark_needs_base();
+        self.graphics_accumulator.clear();
+        self.pending_base_frame = false;
+        self.pending_base_frame_can_publish_ready = false;
+        Some(self.graphics_epoch)
+    }
+
+    fn finish_reactivation(&mut self) {
+        self.awaiting_reactivation = false;
+        reset_graphics_base_after_reactivation(self);
+    }
+
     fn next_graphics_trace_id(&mut self) -> u64 {
         self.next_graphics_trace_id = self.next_graphics_trace_id.saturating_add(1).max(1);
         self.next_graphics_trace_id
@@ -169,6 +191,7 @@ pub(super) async fn connect_native_rdp(
         &mut connector,
         input_tx.clone(),
         output_tx.clone(),
+        config.graphics_epoch,
         config.session_options,
         config.monitor_layout.clone(),
     );
@@ -357,10 +380,11 @@ pub(super) fn attach_client_virtual_channels(
     connector: &mut connector::ClientConnector,
     input_tx: tokio_mpsc::UnboundedSender<RdpInputEvent>,
     output_tx: ClientRdpOutputSender,
+    graphics_epoch: u64,
     session_options: RemoteDesktopSessionOptions,
     monitor_layout: RemoteDesktopMonitorLayout,
 ) -> EgfxSessionBridge {
-    let (graphics_pipeline, egfx_bridge) = new_egfx_channel(output_tx.clone());
+    let (graphics_pipeline, egfx_bridge) = new_egfx_channel(output_tx.clone(), graphics_epoch);
     let initial_layout = if session_options.display.use_all_monitors {
         build_display_control_layout(&monitor_layout).ok()
     } else {
@@ -534,6 +558,65 @@ fn encode_display_control_layout(
     )
 }
 
+fn display_control_resize_available(active_stage: &mut ActiveStage) -> bool {
+    let Some(display_control_channel) = active_stage.get_dvc::<DisplayControlClient>() else {
+        return false;
+    };
+    if display_control_channel.channel_id().is_none() {
+        return false;
+    }
+    display_control_channel
+        .channel_processor_downcast_ref::<DisplayControlClient>()
+        .is_some_and(DisplayControlClient::ready)
+}
+
+fn publish_rdp_resize_capability(
+    active_stage: &mut ActiveStage,
+    output_tx: &ClientRdpOutputSender,
+    last_reported: &mut Option<NegotiatedCapabilityStatus>,
+) -> SessionResult<()> {
+    let resize = if display_control_resize_available(active_stage) {
+        NegotiatedCapabilityStatus::Supported
+    } else {
+        NegotiatedCapabilityStatus::Unsupported
+    };
+    if *last_reported == Some(resize) {
+        return Ok(());
+    }
+
+    // Report only negotiated DisplayControl evidence. The provider manifest
+    // describes helper potential, not what this server actually exposed.
+    send_client_rdp_event(
+        output_tx,
+        RemoteDesktopHelperEvent::CapabilitiesNegotiated {
+            capabilities: NegotiatedCapabilities {
+                resize,
+                ..NegotiatedCapabilities::default()
+            },
+        },
+    )?;
+    *last_reported = Some(resize);
+    Ok(())
+}
+
+fn begin_rdp_frame_transition(
+    output_tx: &ClientRdpOutputSender,
+    frame_state: &mut ClientRdpFrameState,
+    egfx_bridge: &EgfxSessionBridge,
+) -> SessionResult<u64> {
+    let Some(graphics_epoch) = frame_state.begin_reactivation() else {
+        return Ok(frame_state.graphics_epoch);
+    };
+    egfx_bridge
+        .begin_frame_transition(graphics_epoch)
+        .map_err(|error| session::custom_err!("begin EGFX frame transition", error))?;
+    send_client_rdp_event(
+        output_tx,
+        RemoteDesktopHelperEvent::FrameStreamReset { graphics_epoch },
+    )?;
+    Ok(graphics_epoch)
+}
+
 fn encode_pending_microphone_packets(
     active_stage: &mut ActiveStage,
 ) -> Option<SessionResult<Vec<u8>>> {
@@ -557,6 +640,7 @@ fn encode_pending_microphone_packets(
 pub(super) async fn run_native_rdp_active_session(
     framed: UpgradedRdpFramed,
     connection_result: ConnectionResult,
+    graphics_epoch: u64,
     input_rx: &mut tokio_mpsc::UnboundedReceiver<RdpInputEvent>,
     output_tx: &ClientRdpOutputSender,
     egfx_bridge: &EgfxSessionBridge,
@@ -569,11 +653,22 @@ pub(super) async fn run_native_rdp_active_session(
     );
     let mut active_stage = ActiveStage::new(connection_result);
     let mut clipboard_cleanup = tokio::time::interval(RDP_CLIPBOARD_TIMEOUT_POLL_INTERVAL);
-    let mut frame_state = ClientRdpFrameState::default();
+    let mut frame_state = ClientRdpFrameState {
+        graphics_epoch,
+        ..ClientRdpFrameState::default()
+    };
+    let mut last_reported_resize_capability = None;
 
     let disconnect_reason = 'session: loop {
         flush_pending_rdp_base_frame(output_tx, &image, &mut frame_state)?;
         flush_pending_rdp_graphics_updates(output_tx, &image, &mut frame_state)?;
+        if frame_state.published_first_desktop_frame {
+            publish_rdp_resize_capability(
+                &mut active_stage,
+                output_tx,
+                &mut last_reported_resize_capability,
+            )?;
+        }
         let graphics_flush_delay = frame_state.graphics_accumulator.next_flush_delay();
 
         let outputs = tokio::select! {
@@ -614,7 +709,9 @@ pub(super) async fn run_native_rdp_active_session(
                                 physical_size,
                             )
                         {
-                            vec![ActiveStageOutput::ResponseFrame(response_frame?)]
+                            let response_frame = response_frame?;
+                            begin_rdp_frame_transition(output_tx, &mut frame_state, egfx_bridge)?;
+                            vec![ActiveStageOutput::ResponseFrame(response_frame)]
                         } else {
                             // Some servers, notably xrdp/GNOME setups, do not
                             // expose DisplayControl after activation. Keep the
@@ -654,7 +751,9 @@ pub(super) async fn run_native_rdp_active_session(
                         if let Some(response_frame) =
                             encode_display_control_layout(&mut active_stage, &layout)
                         {
-                            vec![ActiveStageOutput::ResponseFrame(response_frame?)]
+                            let response_frame = response_frame?;
+                            begin_rdp_frame_transition(output_tx, &mut frame_state, egfx_bridge)?;
+                            vec![ActiveStageOutput::ResponseFrame(response_frame)]
                         } else {
                             Vec::new()
                         }
@@ -740,6 +839,8 @@ pub(super) async fn run_native_rdp_active_session(
                     )?;
                 }
                 ActiveStageOutput::DeactivateAll(connection_activation) => {
+                    let graphics_epoch =
+                        begin_rdp_frame_transition(output_tx, &mut frame_state, egfx_bridge)?;
                     handle_deactivate_all(
                         &mut reader,
                         &mut writer,
@@ -748,14 +849,23 @@ pub(super) async fn run_native_rdp_active_session(
                         connection_activation,
                     )
                     .await?;
-                    reset_graphics_base_after_reactivation(&mut frame_state);
-                    egfx_bridge.prepare_for_reactivation().map_err(|error| {
-                        session::custom_err!("reset EGFX state after reactivation", error)
-                    })?;
+                    frame_state.finish_reactivation();
+                    egfx_bridge
+                        .prepare_for_reactivation(graphics_epoch)
+                        .map_err(|error| {
+                            session::custom_err!("reset EGFX state after reactivation", error)
+                        })?;
                 }
                 ActiveStageOutput::Terminate(reason) => break 'session reason,
                 ActiveStageOutput::MultitransportRequest(_) | ActiveStageOutput::AutoDetect(_) => {}
             }
+        }
+        if frame_state.published_first_desktop_frame {
+            publish_rdp_resize_capability(
+                &mut active_stage,
+                output_tx,
+                &mut last_reported_resize_capability,
+            )?;
         }
     };
 
@@ -776,7 +886,7 @@ pub(super) fn flush_pending_rdp_base_frame(
     image: &DecodedImage,
     frame_state: &mut ClientRdpFrameState,
 ) -> SessionResult<()> {
-    if !frame_state.pending_base_frame {
+    if frame_state.awaiting_reactivation || !frame_state.pending_base_frame {
         return Ok(());
     }
 
@@ -814,6 +924,9 @@ pub(super) fn flush_rdp_graphics_updates(
     frame_state: &mut ClientRdpFrameState,
     force: bool,
 ) -> SessionResult<()> {
+    if frame_state.awaiting_reactivation {
+        return Ok(());
+    }
     let rect = if force {
         frame_state.graphics_accumulator.take_rect()
     } else {
@@ -830,7 +943,11 @@ pub(super) fn flush_rdp_graphics_updates(
     }
 
     let trace_id = frame_state.next_graphics_trace_id();
-    let event = attach_graphics_trace_id(accumulated_graphics_event(image, rect), trace_id);
+    let event = attach_graphics_metadata(
+        accumulated_graphics_event(image, rect),
+        frame_state.graphics_epoch,
+        trace_id,
+    );
     if let RemoteDesktopHelperEvent::FrameUpdate { update } = &event {
         frame_state.graphics_diagnostics.record_dirty_update(
             trace_id,
@@ -848,9 +965,17 @@ pub(super) fn send_client_rdp_base_frame(
     frame_state: &mut ClientRdpFrameState,
     publish_ready: bool,
 ) -> SessionResult<()> {
+    if frame_state.awaiting_reactivation {
+        frame_state.graphics_sync.mark_needs_base();
+        return Ok(());
+    }
     let trace_id = frame_state.next_graphics_trace_id();
     frame_state.graphics_accumulator.clear();
-    let event = attach_graphics_trace_id(base_frame_event(image), trace_id);
+    let event = attach_graphics_metadata(
+        base_frame_event(image),
+        frame_state.graphics_epoch,
+        trace_id,
+    );
     if let RemoteDesktopHelperEvent::Frame { frame } = &event {
         frame_state
             .graphics_diagnostics
@@ -892,6 +1017,10 @@ pub(super) fn send_client_rdp_graphics_update(
     frame_state: &mut ClientRdpFrameState,
 ) -> SessionResult<()> {
     frame_state.graphics_diagnostics.record_graphics_update();
+    if frame_state.awaiting_reactivation {
+        frame_state.graphics_diagnostics.record_skipped_update();
+        return Ok(());
+    }
     let Some(rect) =
         graphics_update_rect_for_accumulator(image, region, frame_state.graphics_sync)?
     else {
@@ -928,6 +1057,10 @@ pub(super) fn send_client_rdp_graphics_event(
     event: RemoteDesktopHelperEvent,
     frame_state: &mut ClientRdpFrameState,
 ) -> SessionResult<()> {
+    if frame_state.awaiting_reactivation {
+        frame_state.graphics_sync.mark_needs_base();
+        return Ok(());
+    }
     if matches!(event, RemoteDesktopHelperEvent::Frame { .. }) {
         match output_tx.try_send_graphics(ClientRdpOutput::Event(event)) {
             Ok(()) => {
@@ -967,16 +1100,21 @@ pub(super) fn send_client_rdp_graphics_event(
     }
 }
 
-pub(super) fn attach_graphics_trace_id(
+pub(super) fn attach_graphics_metadata(
     event: RemoteDesktopHelperEvent,
+    graphics_epoch: u64,
     trace_id: u64,
 ) -> RemoteDesktopHelperEvent {
     match event {
         RemoteDesktopHelperEvent::Frame { frame } => RemoteDesktopHelperEvent::Frame {
-            frame: frame.with_trace_id(trace_id),
+            frame: frame
+                .with_graphics_epoch(graphics_epoch)
+                .with_trace_id(trace_id),
         },
         RemoteDesktopHelperEvent::FrameUpdate { update } => RemoteDesktopHelperEvent::FrameUpdate {
-            update: update.with_trace_id(trace_id),
+            update: update
+                .with_graphics_epoch(graphics_epoch)
+                .with_trace_id(trace_id),
         },
         event => event,
     }

@@ -138,6 +138,7 @@ pub enum SelectAnchorId {
     TerminalGitBranchMenu,
     TerminalProjectMenu,
     TerminalCastSeekbar,
+    RemoteDesktopResizeMenu(u64),
     SessionManagerViewMode,
     SessionManagerSort,
     SessionManagerBatchMove,

@@ -63,6 +63,8 @@ pub struct RemoteDesktopViewState {
     message: Option<String>,
     error_category: Option<RemoteDesktopErrorCategory>,
     frame_image: Option<CachedRemoteDesktopFrameImage>,
+    active_graphics_epoch: Option<u64>,
+    awaiting_graphics_epoch: Option<u64>,
     texture_generation: u64,
     corrupted_frame: Option<CorruptedRemoteDesktopFrame>,
     cursor: RemoteDesktopCursorState,
@@ -85,6 +87,8 @@ impl PartialEq for RemoteDesktopViewState {
             && self.texture_generation == other.texture_generation
             && self.frame_image.as_ref().map(|frame| frame.size)
                 == other.frame_image.as_ref().map(|frame| frame.size)
+            && self.active_graphics_epoch == other.active_graphics_epoch
+            && self.awaiting_graphics_epoch == other.awaiting_graphics_epoch
             && self.corrupted_frame == other.corrupted_frame
             && self.cursor == other.cursor
             && self.cursor_image.as_ref().map(|image| image.id)
@@ -358,6 +362,8 @@ impl RemoteDesktopViewState {
             message: None,
             error_category: None,
             frame_image: None,
+            active_graphics_epoch: None,
+            awaiting_graphics_epoch: None,
             texture_generation: 0,
             corrupted_frame: None,
             cursor: RemoteDesktopCursorState::default(),
@@ -386,6 +392,12 @@ impl RemoteDesktopViewState {
                     // A new transport negotiation must not display the previous server report.
                     self.negotiated_capabilities = None;
                 }
+                if status == RemoteDesktopSessionStatus::Connecting {
+                    // Initial connection has no prior frame lineage. A
+                    // reconnect keeps the reset barrier until its new base.
+                    self.active_graphics_epoch = None;
+                    self.awaiting_graphics_epoch = None;
+                }
                 self.status = status;
                 self.message = message;
                 self.error_category = None;
@@ -401,7 +413,26 @@ impl RemoteDesktopViewState {
                 // Negotiated support is session-specific and may change after reconnect.
                 self.negotiated_capabilities = Some(capabilities);
             }
+            RemoteDesktopHelperEvent::FrameStreamReset { graphics_epoch } => {
+                if self
+                    .active_graphics_epoch
+                    .is_some_and(|active_epoch| graphics_epoch <= active_epoch)
+                    || self
+                        .awaiting_graphics_epoch
+                        .is_some_and(|awaiting_epoch| graphics_epoch <= awaiting_epoch)
+                {
+                    return;
+                }
+                // Preserve the last complete image until the replacement base
+                // frame arrives from the new desktop activation.
+                self.awaiting_graphics_epoch = Some(graphics_epoch);
+            }
             RemoteDesktopHelperEvent::Frame { frame } => {
+                if self.frame_epoch_is_stale(frame.graphics_epoch) {
+                    return;
+                }
+                self.active_graphics_epoch = Some(frame.graphics_epoch);
+                self.awaiting_graphics_epoch = None;
                 self.status = RemoteDesktopSessionStatus::Connected;
                 self.size = Some(frame.size);
                 self.retire_frame_image();
@@ -420,7 +451,8 @@ impl RemoteDesktopViewState {
                 self.pending_resize = None;
             }
             RemoteDesktopHelperEvent::FrameUpdate { update } => {
-                if let Some(frame_image) = self.frame_image.as_mut()
+                if self.can_apply_frame_update(update.graphics_epoch)
+                    && let Some(frame_image) = self.frame_image.as_mut()
                     && frame_image.apply_update(&update)
                 {
                     self.status = RemoteDesktopSessionStatus::Connected;
@@ -429,7 +461,9 @@ impl RemoteDesktopViewState {
                     self.error_category = None;
                     self.corrupted_frame = None;
                     self.pending_resize = None;
-                } else if let Some(frame) = frame_from_full_update(&update) {
+                } else if self.can_accept_full_update(update.graphics_epoch)
+                    && let Some(frame) = frame_from_full_update(&update)
+                {
                     // Full-frame updates carry a complete backing buffer. Use
                     // them to recover if the previous base frame was missing or
                     // belonged to an earlier desktop activation.
@@ -443,6 +477,8 @@ impl RemoteDesktopViewState {
                 self.retire_frame_image();
                 self.retire_cursor_image();
                 self.corrupted_frame = None;
+                self.active_graphics_epoch = None;
+                self.awaiting_graphics_epoch = None;
             }
             RemoteDesktopHelperEvent::Disconnected { reason } => {
                 self.status = RemoteDesktopSessionStatus::Disconnected;
@@ -451,6 +487,8 @@ impl RemoteDesktopViewState {
                 self.retire_frame_image();
                 self.retire_cursor_image();
                 self.corrupted_frame = None;
+                self.active_graphics_epoch = None;
+                self.awaiting_graphics_epoch = None;
             }
             RemoteDesktopHelperEvent::Terminated { exit_code } => {
                 if matches!(
@@ -466,6 +504,8 @@ impl RemoteDesktopViewState {
                 self.retire_frame_image();
                 self.retire_cursor_image();
                 self.corrupted_frame = None;
+                self.active_graphics_epoch = None;
+                self.awaiting_graphics_epoch = None;
             }
             RemoteDesktopHelperEvent::Cursor { x, y, .. } => {
                 self.cursor.x = x;
@@ -508,7 +548,11 @@ impl RemoteDesktopViewState {
             match event {
                 RemoteDesktopHelperEvent::Frame { frame } => {
                     record_frame_trace(&mut stats, frame.trace_id);
+                    let texture_generation = self.texture_generation;
                     self.apply_event(RemoteDesktopHelperEvent::Frame { frame });
+                    if self.texture_generation == texture_generation {
+                        continue;
+                    }
                     stats.full_frames += 1;
                     if self.frame_image.is_some() {
                         stats.frame_tiles_created += 1;
@@ -527,7 +571,8 @@ impl RemoteDesktopViewState {
                 RemoteDesktopHelperEvent::FrameUpdate { update } => {
                     stats.frame_updates += 1;
                     record_frame_trace(&mut stats, update.trace_id);
-                    if let Some(frame_image) = self.frame_image.as_mut()
+                    if self.can_apply_frame_update(update.graphics_epoch)
+                        && let Some(frame_image) = self.frame_image.as_mut()
                         && let Some(texture_stats) = frame_image.apply_update_with_stats(&update)
                     {
                         stats.dirty_updates_applied += 1;
@@ -543,7 +588,9 @@ impl RemoteDesktopViewState {
                         self.error_category = None;
                         self.corrupted_frame = None;
                         self.pending_resize = None;
-                    } else if let Some(frame) = frame_from_full_update(&update) {
+                    } else if self.can_accept_full_update(update.graphics_epoch)
+                        && let Some(frame) = frame_from_full_update(&update)
+                    {
                         stats.full_update_recoveries += 1;
                         record_frame_trace(&mut stats, frame.trace_id);
                         self.apply_event(RemoteDesktopHelperEvent::Frame { frame });
@@ -575,6 +622,26 @@ impl RemoteDesktopViewState {
 
     pub fn mark_resize_requested(&mut self, size: RemoteDesktopSize) {
         self.pending_resize = Some(RemoteDesktopSize::clamped(size.width, size.height));
+    }
+
+    fn frame_epoch_is_stale(&self, graphics_epoch: u64) -> bool {
+        self.active_graphics_epoch
+            .is_some_and(|active_epoch| graphics_epoch < active_epoch)
+            || self
+                .awaiting_graphics_epoch
+                .is_some_and(|awaiting_epoch| graphics_epoch < awaiting_epoch)
+    }
+
+    fn can_apply_frame_update(&self, graphics_epoch: u64) -> bool {
+        self.awaiting_graphics_epoch.is_none() && self.active_graphics_epoch == Some(graphics_epoch)
+    }
+
+    fn can_accept_full_update(&self, graphics_epoch: u64) -> bool {
+        if self.frame_epoch_is_stale(graphics_epoch) {
+            return false;
+        }
+        self.awaiting_graphics_epoch
+            .map_or(true, |awaiting_epoch| awaiting_epoch == graphics_epoch)
     }
 
     pub fn snapshot(&self) -> RemoteDesktopViewSnapshot {
@@ -683,7 +750,8 @@ fn frame_from_full_update(update: &RemoteDesktopFrameUpdate) -> Option<RemoteDes
         return None;
     }
 
-    let frame = RemoteDesktopFrame::new(update.size, update.format, update.bytes.clone());
+    let frame = RemoteDesktopFrame::new(update.size, update.format, update.bytes.clone())
+        .with_graphics_epoch(update.graphics_epoch);
     Some(match update.trace_id {
         Some(trace_id) => frame.with_trace_id(trace_id),
         None => frame,
@@ -1216,6 +1284,70 @@ mod tests {
             frame_bgra_bytes(&state),
             [1, 1, 1, 1, 9, 9, 9, 9].as_slice()
         );
+    }
+
+    #[test]
+    fn resize_transition_keeps_old_frame_until_new_epoch_base_arrives() {
+        let mut state = RemoteDesktopViewState::new("Server", RemoteDesktopProtocol::Rdp);
+        let size = RemoteDesktopSize {
+            width: 2,
+            height: 1,
+        };
+        state.apply_event(RemoteDesktopHelperEvent::Frame {
+            frame: RemoteDesktopFrame::new(
+                size,
+                RemoteDesktopFrameFormat::Rgba8,
+                vec![1, 1, 1, 0xff, 1, 1, 1, 0xff],
+            ),
+        });
+
+        state.apply_event(RemoteDesktopHelperEvent::FrameStreamReset { graphics_epoch: 1 });
+        state.apply_event(RemoteDesktopHelperEvent::Status {
+            status: RemoteDesktopSessionStatus::Reconnecting,
+            message: None,
+        });
+        state.apply_event(RemoteDesktopHelperEvent::FrameUpdate {
+            update: RemoteDesktopFrameUpdate::new(
+                size,
+                RemoteDesktopRect::new(0, 0, 1, 1),
+                RemoteDesktopFrameFormat::Rgba8,
+                vec![9, 9, 9, 0xff],
+            ),
+        });
+        state.apply_event(RemoteDesktopHelperEvent::FrameUpdate {
+            update: RemoteDesktopFrameUpdate::new(
+                size,
+                RemoteDesktopRect::new(1, 0, 1, 1),
+                RemoteDesktopFrameFormat::Rgba8,
+                vec![8, 8, 8, 0xff],
+            )
+            .with_graphics_epoch(1),
+        });
+
+        // Neither stale pixels nor a new-epoch delta may cross the base-frame barrier.
+        assert_eq!(state.texture_generation(), 1);
+        assert_eq!(frame_bgra_bytes(&state), [1, 1, 1, 0xff].repeat(2));
+
+        state.apply_event(RemoteDesktopHelperEvent::Frame {
+            frame: RemoteDesktopFrame::new(
+                size,
+                RemoteDesktopFrameFormat::Rgba8,
+                vec![2, 2, 2, 0xff, 2, 2, 2, 0xff],
+            )
+            .with_graphics_epoch(1),
+        });
+        state.apply_event(RemoteDesktopHelperEvent::FrameUpdate {
+            update: RemoteDesktopFrameUpdate::new(
+                size,
+                RemoteDesktopRect::new(1, 0, 1, 1),
+                RemoteDesktopFrameFormat::Rgba8,
+                vec![3, 3, 3, 0xff],
+            )
+            .with_graphics_epoch(1),
+        });
+
+        assert_eq!(state.texture_generation(), 2);
+        assert_eq!(frame_bgra_bytes(&state), vec![2, 2, 2, 0xff, 3, 3, 3, 0xff]);
     }
 
     #[test]

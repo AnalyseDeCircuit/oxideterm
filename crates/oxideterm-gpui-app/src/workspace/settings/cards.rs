@@ -650,6 +650,8 @@ impl WorkspaceApp {
                 && self.session_manager.read(cx).sort_menu_open)
             || (anchor.id == SelectAnchorId::SessionManagerBatchMove
                 && self.session_manager.read(cx).show_batch_move)
+            || (matches!(anchor.id, SelectAnchorId::RemoteDesktopResizeMenu(_))
+                && self.remote_desktop_resize_menu_tab_id.is_some())
             || self
                 .settings_slider_drag
                 .is_some_and(|slider| settings_slider_anchor_id(slider) == anchor.id);
@@ -1683,6 +1685,7 @@ pub(in crate::workspace) fn select_anchor_tracks_while_closed(anchor_id: SelectA
             | SelectAnchorId::TerminalGitBranchMenu
             | SelectAnchorId::TerminalProjectMenu
             | SelectAnchorId::TerminalCastSeekbar
+            | SelectAnchorId::RemoteDesktopResizeMenu(_)
             // Session Manager toolbar menus use window-anchored overlays, so
             // their trigger bounds must be cached before pointer-down.
             | SelectAnchorId::SessionManagerViewMode

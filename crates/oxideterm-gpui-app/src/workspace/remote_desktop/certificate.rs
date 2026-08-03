@@ -447,9 +447,12 @@ fn remote_desktop_authenticate_request(
         drop(session.password.take());
         None
     } else {
-        // Authentication is the single ownership handoff. Reconnect must load
-        // a new credential or ask the user instead of cloning this secret.
-        session.password.take()
+        // The session retains one zeroizing owner so a reconnect can answer a
+        // new certificate challenge without persisting plaintext credentials.
+        session
+            .password
+            .as_ref()
+            .map(RemoteDesktopSecret::duplicate_for_reauthentication)
     };
     RemoteDesktopHelperRequest::Authenticate {
         challenge_id: certificate.challenge_id.clone(),

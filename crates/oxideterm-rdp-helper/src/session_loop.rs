@@ -23,17 +23,27 @@ pub(super) fn run_client_rdp_loop(
     let mut keyboard_mapper = RdpKeyboardInputMapper::default();
     loop {
         let mut handled_requests = false;
+        let mut reconnect_requested = false;
         let mut coalesced_requests = Vec::new();
         let mut request_coalescer = ClientRdpRequestCoalescer::default();
         // Bound request draining so display output still advances during input bursts.
         for _ in 0..RDP_CLIENT_REQUEST_DRAIN_LIMIT {
             match request_rx.try_recv() {
                 Ok(RemoteDesktopHelperRequest::Close) => return Ok(ClientRdpSessionExit::Closed),
-                Ok(RemoteDesktopHelperRequest::Reconnect) => {
-                    return Ok(ClientRdpSessionExit::ReconnectRequested);
-                }
+                Ok(RemoteDesktopHelperRequest::Reconnect) => reconnect_requested = true,
                 Ok(request) => {
                     handled_requests = true;
+                    if matches!(
+                        request,
+                        RemoteDesktopHelperRequest::Resize { .. }
+                            | RemoteDesktopHelperRequest::UpdateDisplayLayout { .. }
+                    ) {
+                        // The pinned IronRDP session cannot safely preserve all
+                        // decoder state across DisplayControl reactivation.
+                        remember_rdp_reconnect_state(&request, config);
+                        reconnect_requested = true;
+                        continue;
+                    }
                     request_coalescer.push(request, &mut coalesced_requests);
                 }
                 Err(mpsc::TryRecvError::Empty) => break,
@@ -41,6 +51,12 @@ pub(super) fn run_client_rdp_loop(
             }
         }
         request_coalescer.flush(&mut coalesced_requests);
+        if reconnect_requested {
+            // Coalesce every queued display request into one replacement
+            // connection so a fit action cannot cause consecutive reconnects.
+            begin_rdp_reconnect(writer, config)?;
+            return Ok(ClientRdpSessionExit::ReconnectRequested);
+        }
         for request in coalesced_requests {
             remember_rdp_reconnect_state(&request, config);
             forward_client_rdp_request(
@@ -151,7 +167,26 @@ pub(super) fn remember_rdp_reconnect_state(
         // active client thread.
         config.size = normalized_rdp_desktop_size(*size);
         config.scale_factor = rdp_connector_scale_factor(*scale_factor);
+    } else if let RemoteDesktopHelperRequest::UpdateDisplayLayout { layout } = request {
+        // Multi-monitor topology is part of initial activation, so a controlled
+        // reconnect must rebuild the connector with the latest local layout.
+        config.monitor_layout = layout.clone();
     }
+}
+
+fn begin_rdp_reconnect(
+    writer: &SharedEventWriter,
+    config: &mut RdpWorkerConfig,
+) -> Result<(), String> {
+    config.graphics_epoch = config.graphics_epoch.saturating_add(1).max(1);
+    // The barrier reaches the UI before the replacement client can publish a
+    // base frame, so queued pixels from the retired connection are discarded.
+    send_event(
+        writer,
+        RemoteDesktopHelperEvent::FrameStreamReset {
+            graphics_epoch: config.graphics_epoch,
+        },
+    )
 }
 
 pub(super) fn normalized_rdp_desktop_size(size: RemoteDesktopSize) -> RemoteDesktopSize {

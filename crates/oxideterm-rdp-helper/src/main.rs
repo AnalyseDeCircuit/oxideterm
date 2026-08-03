@@ -63,12 +63,13 @@ use ironrdp_core::{IntoOwned as _, WriteBuf, impl_as_any};
 use ironrdp_displaycontrol::pdu::MonitorLayoutEntry;
 use ironrdp_tokio::{FramedWrite, single_sequence_step_read, split_tokio_framed};
 use oxideterm_remote_desktop::{
-    RemoteDesktopClipboardData, RemoteDesktopClipboardFormat, RemoteDesktopCursorShape,
-    RemoteDesktopEndpoint, RemoteDesktopErrorCategory, RemoteDesktopFakeBackend,
-    RemoteDesktopFrameFormat, RemoteDesktopHelperEvent, RemoteDesktopHelperRequest,
-    RemoteDesktopLockKeys, RemoteDesktopMonitorLayout, RemoteDesktopMouseButtonState,
-    RemoteDesktopProtocol, RemoteDesktopSecret, RemoteDesktopSessionOptions,
-    RemoteDesktopSessionStatus, RemoteDesktopSize, read_request_line, run_fake_backend_stdio,
+    NegotiatedCapabilities, NegotiatedCapabilityStatus, RemoteDesktopClipboardData,
+    RemoteDesktopClipboardFormat, RemoteDesktopCursorShape, RemoteDesktopEndpoint,
+    RemoteDesktopErrorCategory, RemoteDesktopFakeBackend, RemoteDesktopFrameFormat,
+    RemoteDesktopHelperEvent, RemoteDesktopHelperRequest, RemoteDesktopLockKeys,
+    RemoteDesktopMonitorLayout, RemoteDesktopMouseButtonState, RemoteDesktopProtocol,
+    RemoteDesktopSecret, RemoteDesktopSessionOptions, RemoteDesktopSessionStatus,
+    RemoteDesktopSize, read_request_line, run_fake_backend_stdio,
 };
 use sha2::{Digest as _, Sha256};
 use smallvec::SmallVec;
@@ -222,6 +223,7 @@ fn run_real_rdp_stdio(reader: &mut impl BufRead) -> Result<(), String> {
             endpoint,
             size,
             scale_factor: rdp_connector_scale_factor(scale_factor),
+            graphics_epoch: 0,
             read_only,
             session_options,
             monitor_layout,
@@ -249,6 +251,7 @@ struct RdpWorkerConfig {
     endpoint: RemoteDesktopEndpoint,
     size: RemoteDesktopSize,
     scale_factor: u32,
+    graphics_epoch: u64,
     read_only: bool,
     session_options: RemoteDesktopSessionOptions,
     monitor_layout: RemoteDesktopMonitorLayout,
@@ -462,6 +465,7 @@ type UpgradedRdpFramed = ironrdp_tokio::TokioFramed<Box<dyn AsyncReadWrite + Unp
 struct ClientRdpConfig {
     destination: ClientRdpDestination,
     connector: connector::Config,
+    graphics_epoch: u64,
     session_options: RemoteDesktopSessionOptions,
     monitor_layout: RemoteDesktopMonitorLayout,
 }

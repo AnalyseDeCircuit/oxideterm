@@ -1036,6 +1036,9 @@ impl WorkspaceApp {
         if self.dismiss_terminal_broadcast_menu(cx) {
             changed = true;
         }
+        if self.remote_desktop_resize_menu_tab_id.take().is_some() {
+            changed = true;
+        }
         if self.close_terminal_git_branch_picker(cx) {
             changed = true;
         }

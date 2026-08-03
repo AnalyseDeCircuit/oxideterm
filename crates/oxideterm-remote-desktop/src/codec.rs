@@ -37,6 +37,8 @@ enum RemoteDesktopBinaryEventHeader {
         size: RemoteDesktopSize,
         format: RemoteDesktopFrameFormat,
         #[serde(default)]
+        graphics_epoch: u64,
+        #[serde(default)]
         compression: RemoteDesktopFrameCompression,
         payload_len: usize,
     },
@@ -44,6 +46,8 @@ enum RemoteDesktopBinaryEventHeader {
         size: RemoteDesktopSize,
         rect: RemoteDesktopRect,
         format: RemoteDesktopFrameFormat,
+        #[serde(default)]
+        graphics_epoch: u64,
         #[serde(default)]
         compression: RemoteDesktopFrameCompression,
         payload_len: usize,
@@ -133,6 +137,7 @@ pub fn write_event_line(
             RemoteDesktopBinaryEventHeader::FrameBinary {
                 size: frame.size,
                 format: frame.format,
+                graphics_epoch: frame.graphics_epoch,
                 compression: RemoteDesktopFrameCompression::None,
                 payload_len: frame.bytes.len(),
             },
@@ -144,6 +149,7 @@ pub fn write_event_line(
                 size: update.size,
                 rect: update.rect,
                 format: update.format,
+                graphics_epoch: update.graphics_epoch,
                 compression: update.compression,
                 payload_len: update.bytes.len(),
             },
@@ -252,19 +258,23 @@ fn read_binary_event(
         RemoteDesktopBinaryEventHeader::FrameBinary {
             size,
             format,
+            graphics_epoch,
             compression: RemoteDesktopFrameCompression::None,
             ..
         } => RemoteDesktopHelperEvent::Frame {
-            frame: RemoteDesktopFrame::new(size, format, payload),
+            frame: RemoteDesktopFrame::new(size, format, payload)
+                .with_graphics_epoch(graphics_epoch),
         },
         RemoteDesktopBinaryEventHeader::FrameUpdateBinary {
             size,
             rect,
             format,
+            graphics_epoch,
             compression: RemoteDesktopFrameCompression::None,
             ..
         } => RemoteDesktopHelperEvent::FrameUpdate {
-            update: RemoteDesktopFrameUpdate::new(size, rect, format, payload),
+            update: RemoteDesktopFrameUpdate::new(size, rect, format, payload)
+                .with_graphics_epoch(graphics_epoch),
         },
         RemoteDesktopBinaryEventHeader::ClipboardDataBinary { format, .. } => {
             RemoteDesktopHelperEvent::ClipboardData {

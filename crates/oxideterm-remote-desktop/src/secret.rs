@@ -22,6 +22,12 @@ impl RemoteDesktopSecret {
     pub fn is_empty(&self) -> bool {
         self.0.is_empty()
     }
+
+    pub fn duplicate_for_reauthentication(&self) -> Self {
+        // Both copies remain zeroizing and the session retains the original
+        // only so a reconnect can cross a fresh certificate boundary.
+        Self(Zeroizing::new(self.0.to_string()))
+    }
 }
 
 impl From<String> for RemoteDesktopSecret {

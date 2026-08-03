@@ -869,6 +869,7 @@ pub(crate) struct WorkspaceApp {
     _session_manager_observation: Subscription,
     _session_manager_subscription: Subscription,
     remote_desktop: Entity<remote_desktop::RemoteDesktopWorkspaceEntity>,
+    remote_desktop_resize_menu_tab_id: Option<TabId>,
     local_shells: Vec<ShellInfo>,
     local_shell_launcher_open: bool,
     local_shell_launcher_selected_id: Option<String>,

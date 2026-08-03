@@ -602,6 +602,8 @@ impl Default for RemoteDesktopFrameCompression {
 pub struct RemoteDesktopFrame {
     pub size: RemoteDesktopSize,
     pub format: RemoteDesktopFrameFormat,
+    #[serde(default)]
+    pub graphics_epoch: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub trace_id: Option<u64>,
     #[serde(with = "base64_frame_bytes")]
@@ -613,9 +615,15 @@ impl RemoteDesktopFrame {
         Self {
             size,
             format,
+            graphics_epoch: 0,
             trace_id: None,
             bytes,
         }
+    }
+
+    pub fn with_graphics_epoch(mut self, graphics_epoch: u64) -> Self {
+        self.graphics_epoch = graphics_epoch;
+        self
     }
 
     pub fn with_trace_id(mut self, trace_id: u64) -> Self {
@@ -635,7 +643,8 @@ impl RemoteDesktopFrame {
     }
 
     pub fn apply_update(&mut self, update: &RemoteDesktopFrameUpdate) -> bool {
-        if self.size != update.size
+        if self.graphics_epoch != update.graphics_epoch
+            || self.size != update.size
             || self.format != update.format
             || update.compression != RemoteDesktopFrameCompression::None
             || !self.is_complete()
@@ -662,6 +671,8 @@ pub struct RemoteDesktopFrameUpdate {
     pub size: RemoteDesktopSize,
     pub rect: RemoteDesktopRect,
     pub format: RemoteDesktopFrameFormat,
+    #[serde(default)]
+    pub graphics_epoch: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub trace_id: Option<u64>,
     #[serde(default)]
@@ -681,10 +692,16 @@ impl RemoteDesktopFrameUpdate {
             size,
             rect,
             format,
+            graphics_epoch: 0,
             trace_id: None,
             compression: RemoteDesktopFrameCompression::None,
             bytes,
         }
+    }
+
+    pub fn with_graphics_epoch(mut self, graphics_epoch: u64) -> Self {
+        self.graphics_epoch = graphics_epoch;
+        self
     }
 
     pub fn with_trace_id(mut self, trace_id: u64) -> Self {
@@ -703,7 +720,8 @@ impl RemoteDesktopFrameUpdate {
     }
 
     pub fn merge(&mut self, incoming: &Self) -> bool {
-        if self.size != incoming.size
+        if self.graphics_epoch != incoming.graphics_epoch
+            || self.size != incoming.size
             || self.format != incoming.format
             || self.compression != RemoteDesktopFrameCompression::None
             || incoming.compression != RemoteDesktopFrameCompression::None

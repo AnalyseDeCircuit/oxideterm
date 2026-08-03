@@ -155,6 +155,7 @@ pub(super) fn run_client_rdp_thread(
             match run_native_rdp_active_session(
                 framed,
                 connection_result,
+                config.graphics_epoch,
                 &mut input_rx,
                 &client_output_tx,
                 &egfx_bridge,

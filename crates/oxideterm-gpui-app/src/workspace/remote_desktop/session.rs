@@ -470,7 +470,90 @@ impl RemoteDesktopSessionEntity {
         self.last_monitor_layout = layout;
     }
 
-    fn schedule_viewport_resize(
+    fn resize_capability(&self) -> NegotiatedCapabilityStatus {
+        self.state
+            .snapshot()
+            .negotiated_capabilities
+            .as_ref()
+            .map(|capabilities| capabilities.resize)
+            .unwrap_or(NegotiatedCapabilityStatus::Unknown)
+    }
+
+    fn send_resize_immediately(
+        &mut self,
+        size: RemoteDesktopSize,
+        scale_factor: Option<u32>,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if self.state.snapshot().status != RemoteDesktopSessionStatus::Connected
+            || !self.resize_capability().is_supported()
+        {
+            return false;
+        }
+        let Some(worker) = self.worker.as_ref() else {
+            return false;
+        };
+        let size = RemoteDesktopSize::clamped(size.width, size.height);
+        let resize_request = RemoteDesktopResizeRequestState { size, scale_factor };
+
+        // Explicit actions cancel any pending layout debounce and cross the
+        // existing session-owned helper channel without changing its lifetime.
+        self.resize_generation.fetch_add(1, Ordering::Relaxed);
+        self.last_sent_resize = Some(resize_request);
+        self.state.mark_resize_requested(size);
+        worker.send(RemoteDesktopHelperRequest::Resize { size, scale_factor });
+        cx.notify();
+        true
+    }
+
+    fn fit_current_viewport_immediately(
+        &mut self,
+        scale_factor: u32,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        self.last_viewport_scale_factor = Some(scale_factor);
+        let Some(viewport_size) = self.geometry.viewport_size() else {
+            return false;
+        };
+        let viewport_size = RemoteDesktopSize::clamped(viewport_size.width, viewport_size.height);
+        self.last_viewport_size = Some(viewport_size);
+        let request_size = remote_desktop_requested_size_for_viewport(
+            viewport_size,
+            self.last_viewport_scale_factor,
+        );
+        self.send_resize_immediately(request_size, self.last_viewport_scale_factor, cx)
+    }
+
+    fn set_follow_window_size(
+        &mut self,
+        enabled: bool,
+        scale_factor: u32,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if self.follow_window_size == enabled {
+            return false;
+        }
+        self.follow_window_size = enabled;
+        if enabled {
+            self.fit_current_viewport_immediately(scale_factor, cx);
+        }
+        true
+    }
+
+    fn request_preset_size(
+        &mut self,
+        size: RemoteDesktopSize,
+        scale_factor: u32,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        // A fixed preset and automatic viewport following are mutually
+        // exclusive; otherwise the next local layout pass would overwrite it.
+        self.follow_window_size = false;
+        self.last_viewport_scale_factor = Some(scale_factor);
+        self.send_resize_immediately(size, Some(scale_factor), cx)
+    }
+
+    pub(super) fn schedule_viewport_resize(
         &mut self,
         scale_factor: Option<u32>,
         cx: &mut Context<Self>,
@@ -515,8 +598,11 @@ impl RemoteDesktopSessionEntity {
         if snapshot.status != RemoteDesktopSessionStatus::Connected {
             return false;
         }
+        if !self.follow_window_size {
+            return false;
+        }
         let should_send_resize = remote_desktop_resize_request_needed_for_capability(
-            self.provider.capabilities.resize,
+            self.resize_capability().is_supported(),
             snapshot.size,
             snapshot.pending_resize,
             self.last_viewport_size,
@@ -620,10 +706,7 @@ impl RemoteDesktopSessionEntity {
                     }
                     match event {
                         RemoteDesktopSessionEvent::DeliveryReady { .. } => {
-                            let scale_factor =
-                                Some(remote_desktop_scale_factor_percent(window.scale_factor()));
-                            let mut outcome = session.poll_deliveries(window, cx);
-                            outcome.changed |= session.schedule_viewport_resize(scale_factor, cx);
+                            let outcome = session.poll_deliveries(window, cx);
                             session.sync_monitor_layout(cx);
                             if outcome.changed {
                                 cx.notify();
@@ -785,6 +868,9 @@ impl WorkspaceApp {
         if let Some(session) = self.remote_desktop_session_entity(tab_id, cx) {
             session.update(cx, |session, cx| session.shutdown(window, cx));
         }
+        if self.remote_desktop_resize_menu_tab_id == Some(tab_id) {
+            self.remote_desktop_resize_menu_tab_id = None;
+        }
         self.remote_desktop
             .update(cx, |remote_desktop, _cx| remote_desktop.remove(tab_id));
     }
@@ -837,6 +923,243 @@ impl WorkspaceApp {
         }
     }
 
+    fn fit_remote_desktop_to_current_viewport(
+        &mut self,
+        tab_id: TabId,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(session) = self.remote_desktop_session_entity(tab_id, cx) else {
+            return;
+        };
+        let scale_factor = remote_desktop_scale_factor_percent(window.scale_factor());
+        session.update(cx, |session, cx| {
+            session.fit_current_viewport_immediately(scale_factor, cx);
+        });
+    }
+
+    fn toggle_remote_desktop_resize_menu(&mut self, tab_id: TabId) {
+        self.remote_desktop_resize_menu_tab_id =
+            (self.remote_desktop_resize_menu_tab_id != Some(tab_id)).then_some(tab_id);
+    }
+
+    fn set_remote_desktop_follow_window_size(
+        &mut self,
+        tab_id: TabId,
+        enabled: bool,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(session) = self.remote_desktop_session_entity(tab_id, cx) else {
+            return;
+        };
+        let scale_factor = remote_desktop_scale_factor_percent(window.scale_factor());
+        session.update(cx, |session, cx| {
+            if session.set_follow_window_size(enabled, scale_factor, cx) {
+                cx.notify();
+            }
+        });
+    }
+
+    fn set_remote_desktop_preset_size(
+        &mut self,
+        tab_id: TabId,
+        size: RemoteDesktopSize,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(session) = self.remote_desktop_session_entity(tab_id, cx) else {
+            return;
+        };
+        let scale_factor = remote_desktop_scale_factor_percent(window.scale_factor());
+        session.update(cx, |session, cx| {
+            session.request_preset_size(size, scale_factor, cx);
+        });
+    }
+
+    fn render_remote_desktop_resize_control(
+        &self,
+        tab_id: TabId,
+        menu_open: bool,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let theme = self.tokens.ui;
+        let workspace = cx.entity();
+        let fit_button = self.workspace_toolbar_action_button(
+            self.i18n.t("remote_desktop.fit_current_window"),
+            Some(Self::render_lucide_icon(
+                LucideIcon::Monitor,
+                12.0,
+                rgb(theme.text_muted),
+            )),
+            ToolbarButtonOptions {
+                button: ButtonOptions {
+                    variant: ButtonVariant::Secondary,
+                    size: ButtonSize::Sm,
+                    radius: ButtonRadius::Md,
+                    disabled: false,
+                },
+                height: Some(24.0),
+                padding_x: Some(8.0),
+                font_size: Some(self.tokens.metrics.ui_text_xs),
+                ..ToolbarButtonOptions::default()
+            },
+            cx.listener(move |this, _event, window, cx| {
+                this.fit_remote_desktop_to_current_viewport(tab_id, window, cx);
+                cx.stop_propagation();
+            }),
+        );
+        let menu_button = self.workspace_icon_action_button(
+            LucideIcon::ChevronDown,
+            12.0,
+            rgb(theme.text_muted),
+            IconButtonOptions {
+                radius: ButtonRadius::Md,
+                has_background: menu_open,
+                ..IconButtonOptions::compact(24.0)
+            },
+            move |this, _event, _window, cx| {
+                this.toggle_remote_desktop_resize_menu(tab_id);
+                cx.stop_propagation();
+                cx.notify();
+            },
+            cx,
+        );
+        let trigger = div()
+            .flex_none()
+            .flex()
+            .items_center()
+            .gap(px(self.tokens.spacing.one))
+            .child(fit_button)
+            .child(menu_button);
+
+        // Keep the split-button bounds warm so the first menu open can be
+        // placed above the footer without relying on pointer coordinates.
+        select_anchor_probe(
+            SelectAnchorId::RemoteDesktopResizeMenu(tab_id.0),
+            trigger,
+            move |anchor, _window, cx| {
+                let _ = workspace.update(cx, |this, cx| {
+                    this.update_select_anchor(anchor, cx);
+                });
+            },
+        )
+        .into_any_element()
+    }
+
+    pub(super) fn render_remote_desktop_resize_menu(
+        &self,
+        tab_id: TabId,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let Some(anchor) = self
+            .select_anchors
+            .get(&SelectAnchorId::RemoteDesktopResizeMenu(tab_id.0))
+            .copied()
+        else {
+            return div().into_any_element();
+        };
+        let Some(session_entity) = self.remote_desktop_session_entity(tab_id, cx) else {
+            return div().into_any_element();
+        };
+        let session = session_entity.read(cx);
+        let snapshot = session.state.snapshot();
+        let follow_window_size = session.follow_window_size;
+        let current_size = snapshot.size;
+        let viewport = window.viewport_size();
+        let actionable_or_value_count = 2 + REMOTE_DESKTOP_COMMON_RESOLUTIONS.len();
+        let menu_label_count = 2;
+        let menu_separator_count = 2.0;
+        let menu_height = context_menu_item_height_estimate(&self.tokens)
+            * (actionable_or_value_count + menu_label_count) as f32
+            + context_menu_separator_height_estimate(&self.tokens) * menu_separator_count
+            + self.tokens.metrics.ui_menu_padding * 2.0;
+        let placement = browser_behavior::clamp_context_menu_position(
+            f32::from(anchor.bounds.right()) - REMOTE_DESKTOP_RESIZE_MENU_WIDTH,
+            f32::from(anchor.bounds.top()) - menu_height - REMOTE_DESKTOP_RESIZE_MENU_GAP,
+            f32::from(viewport.width),
+            f32::from(viewport.height),
+            REMOTE_DESKTOP_RESIZE_MENU_WIDTH,
+            menu_height,
+            REMOTE_DESKTOP_RESIZE_MENU_VIEWPORT_PADDING,
+        );
+        let follow_item = dropdown_menu_item(
+            &self.tokens,
+            self.i18n.t("remote_desktop.follow_window_size"),
+            DropdownMenuItemKind::Checkbox(follow_window_size),
+            false,
+            false,
+        );
+        let mut menu = context_menu_event_boundary(
+            dropdown_menu_content(&self.tokens).w(px(REMOTE_DESKTOP_RESIZE_MENU_WIDTH)),
+        )
+        .child(self.workspace_context_menu_persistent_styled_action(
+            follow_item,
+            false,
+            false,
+            oxideterm_gpui_ui::context_menu::ContextMenuActionableStyle::default(),
+            move |this, _event, window, cx| {
+                this.set_remote_desktop_follow_window_size(tab_id, !follow_window_size, window, cx);
+            },
+            cx,
+        ))
+        .child(dropdown_menu_separator(&self.tokens))
+        .child(dropdown_menu_label(
+            &self.tokens,
+            self.i18n.t("remote_desktop.current_remote_size"),
+            false,
+        ));
+        let current_size_label = current_size
+            .map(remote_desktop_resolution_label)
+            .unwrap_or_else(|| self.i18n.t("remote_desktop.size_unavailable"));
+        menu = menu
+            .child(dropdown_menu_item(
+                &self.tokens,
+                current_size_label,
+                DropdownMenuItemKind::Plain,
+                false,
+                true,
+            ))
+            .child(dropdown_menu_separator(&self.tokens))
+            .child(dropdown_menu_label(
+                &self.tokens,
+                self.i18n.t("remote_desktop.common_resolutions"),
+                false,
+            ));
+        for size in REMOTE_DESKTOP_COMMON_RESOLUTIONS {
+            let selected = !follow_window_size && current_size == Some(size);
+            let item = dropdown_menu_item(
+                &self.tokens,
+                remote_desktop_resolution_label(size),
+                DropdownMenuItemKind::Radio(selected),
+                false,
+                false,
+            );
+            menu = menu.child(self.workspace_context_menu_styled_action(
+                item,
+                false,
+                false,
+                oxideterm_gpui_ui::context_menu::ContextMenuActionableStyle::default(),
+                |this| this.remote_desktop_resize_menu_tab_id = None,
+                move |this, _event, window, cx| {
+                    this.set_remote_desktop_preset_size(tab_id, size, window, cx);
+                },
+                cx,
+            ));
+        }
+
+        deferred(
+            anchored()
+                .anchor(Corner::TopLeft)
+                .position(gpui::point(px(placement.x), px(placement.y)))
+                .position_mode(AnchoredPositionMode::Window)
+                .child(overlay_content_boundary(menu)),
+        )
+        .with_priority(oxideterm_gpui_ui::modal::TAURI_POPOVER_LAYER_PRIORITY)
+        .into_any_element()
+    }
+
     pub(in crate::workspace) fn render_remote_desktop_footer(
         &self,
         tab_id: TabId,
@@ -851,28 +1174,25 @@ impl WorkspaceApp {
         let status = snapshot.status;
         let status_color = remote_desktop_status_color(&self.tokens, status);
         let reconnect_disabled = remote_desktop_reconnect_mode(status).is_none();
-        let resize_capability_label = match snapshot
+        let resize_capability = snapshot
             .negotiated_capabilities
             .as_ref()
             .map(|capabilities| capabilities.resize)
-        {
-            Some(NegotiatedCapabilityStatus::Supported) => {
-                self.i18n.t("remote_desktop.resize_dynamic")
+            .unwrap_or_else(|| {
+                if session.provider.capabilities.resize {
+                    NegotiatedCapabilityStatus::Unknown
+                } else {
+                    NegotiatedCapabilityStatus::Unsupported
+                }
+            });
+        let resize_capability_label = match resize_capability {
+            NegotiatedCapabilityStatus::Supported => {
+                self.i18n.t("remote_desktop.fit_current_window")
             }
-            Some(NegotiatedCapabilityStatus::Unsupported) => {
-                self.i18n.t("remote_desktop.resize_fixed")
-            }
-            Some(NegotiatedCapabilityStatus::Unknown) => {
-                self.i18n.t("remote_desktop.resize_unknown")
-            }
-            None if snapshot.protocol == RemoteDesktopProtocol::Vnc => {
-                self.i18n.t("remote_desktop.resize_unknown")
-            }
-            None if session.provider.capabilities.resize => {
-                self.i18n.t("remote_desktop.resize_dynamic")
-            }
-            None => self.i18n.t("remote_desktop.resize_fixed"),
+            NegotiatedCapabilityStatus::Unsupported => self.i18n.t("remote_desktop.resize_fixed"),
+            NegotiatedCapabilityStatus::Unknown => self.i18n.t("remote_desktop.resize_unknown"),
         };
+        let resize_menu_open = self.remote_desktop_resize_menu_tab_id == Some(tab_id);
         let vnc_capability_presentation =
             (snapshot.protocol == RemoteDesktopProtocol::Vnc).then(|| {
                 self.remote_desktop_vnc_capability_presentation(
@@ -914,10 +1234,19 @@ impl WorkspaceApp {
                     .text_color(rgb(theme.text_muted))
                     .child(label),
             )
-            .child(remote_desktop_capability_chip(
-                &self.tokens,
-                resize_capability_label,
-            ))
+            .when(resize_capability.is_supported(), |footer| {
+                footer.child(self.render_remote_desktop_resize_control(
+                    tab_id,
+                    resize_menu_open,
+                    cx,
+                ))
+            })
+            .when(!resize_capability.is_supported(), |footer| {
+                footer.child(remote_desktop_capability_chip(
+                    &self.tokens,
+                    resize_capability_label,
+                ))
+            })
             .when_some(
                 vnc_capability_presentation,
                 |footer, (capability_label, capability_tooltip)| {
