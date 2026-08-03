@@ -1,6 +1,6 @@
 ---
 name: oxideterm-release
-description: Prepare, publish, or recover canceled OxideTerm stable, beta, or GPUI preview releases by deriving changelog content from the previous tag, running the repository version-bump script, validating channel-specific release notes, committing, pushing, and creating the correct annotated tag. Use when the user asks to upgrade the OxideTerm version, prepare a release, write a release changelog, commit and push a release, create a release tag, or republish the same version after its tag-triggered workflow was canceled.
+description: Prepare, publish, or recover canceled OxideTerm stable, beta, or GPUI preview releases by deriving changelog content from the previous tag, running the repository version-bump script, validating channel-specific release notes, committing, pushing, and creating the correct annotated tag. Use when the user asks to upgrade the OxideTerm version, prepare a release, write a release changelog, commit and push a release, create a release tag, republish the same version after its tag-triggered workflow was canceled, or repair release assets from a completed Native Package run.
 ---
 
 # OxideTerm Release
@@ -205,6 +205,36 @@ gh run list --repo <owner/repo> --branch <tag> --limit 10
 ```
 
 Report the new run URL and status. Do not keep monitoring it unless the user explicitly asks.
+
+## Repair release assets from a completed build
+
+Use this procedure when packaging failed on one or more platforms **after** a prior `Native Package` run already built the successful platforms, or when release assets uploaded incompletely and the GitHub Release exists. It reuses the finished run's artifacts without rebuilding anything.
+
+Prerequisites:
+
+- The target release exists (`gh release view <tag>` succeeds).
+- A `Native Package` workflow run produced `OxideTerm-*` artifacts for at least the platforms you want to repair. Runs from any ref work, but tag-triggered runs are typical.
+
+1. Find the completed run id for the artifacts to republish:
+
+```bash
+gh run list --repo <owner/repo> --workflow native-package.yml --limit 10
+```
+
+2. Open **Actions → Repair Release Assets → Run workflow** and enter:
+
+- `tag`: the release tag to repair, for example `v2.0.15`.
+- `run_id`: the run id from step 1.
+
+3. The workflow validates the tag format, confirms the release exists, downloads `OxideTerm-*` artifacts from that run, re-signs every asset with the minisign key, regenerates `sha256sums.txt`, and uploads with `update_release: true` (overwrite in place).
+
+4. Verify the repaired assets on the release page or with:
+
+```bash
+gh release view <tag> --repo <owner/repo>
+```
+
+If the release does not exist yet, do not use this workflow — run the normal tag-triggered packaging instead. If a platform failed during the build itself (no artifact was produced), the repair workflow cannot conjure it: re-run only the failed matrix job from the `Native Package` run, or rerun the workflow for that platform. The `native-package.yml` release job is idempotent (`update_release: true`) and caches survive failures (`cache-on-failure: true`), so a single-platform retry resumes incrementally.
 
 ## Failure handling
 

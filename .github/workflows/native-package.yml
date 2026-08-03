@@ -78,7 +78,9 @@ jobs:
         uses: swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
           key: native-package-${{ matrix.target }}
-          cache-on-failure: false
+          # Keep the compiled cache even when a build fails so a single-platform
+          # retry resumes incrementally instead of rebuilding from scratch.
+          cache-on-failure: true
 
       - name: Install Linux system dependencies
         if: runner.os == 'Linux'
@@ -456,6 +458,10 @@ jobs:
           make_latest: ${{ steps.release_meta.outputs.prerelease == 'false' }}
           body_path: ${{ steps.release_notes.outputs.body_path }}
           generate_release_notes: ${{ steps.release_notes.outputs.generate_release_notes }}
+          # Re-running a release for the same tag (for example after a partial
+          # upload failure) must overwrite in place instead of failing on an
+          # existing release.
+          update_release: true
 
   publish-updater:
     name: Generate updater manifest

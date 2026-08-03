@@ -1,0 +1,180 @@
+name: Repair Release Assets
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag to repair, for example v2.0.15'
+        required: true
+        type: string
+      run_id:
+        description: 'Native Package workflow run id that produced the build artifacts'
+        required: true
+        type: string
+
+permissions:
+  actions: read
+  contents: write
+
+jobs:
+  repair:
+    name: Re-sign and republish release assets
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Validate release tag format
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          if [[ ! "${RELEASE_TAG}" =~ ^v[0-9]+(\.[0-9]+)*([.-][0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::Invalid release tag: ${RELEASE_TAG}" >&2
+            exit 1
+          fi
+          echo "tag=${RELEASE_TAG}" >> "${GITHUB_OUTPUT}"
+
+      - name: Confirm release exists
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
+        with:
+          script: |
+            try {
+              const { data: release } = await github.rest.repos.getReleaseByTag({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                tag: process.env.RELEASE_TAG,
+              });
+              core.info(`Release ${process.env.RELEASE_TAG} found (id ${release.id}).`);
+            } catch (error) {
+              if (error.status === 404) {
+                core.setFailed(`Release ${process.env.RELEASE_TAG} does not exist; run the Native Package workflow first.`);
+              } else {
+                throw error;
+              }
+            }
+
+      - name: Download build artifacts from source run
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          run-id: ${{ inputs.run_id }}
+          github-token: ${{ github.token }}
+          pattern: OxideTerm-*
+          path: dist-release
+          merge-multiple: true
+
+      - name: Verify artifacts were recovered
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ ! -d dist-release ]]; then
+            echo "::error::No OxideTerm-* artifacts found in run ${{ inputs.run_id }}" >&2
+            exit 1
+          fi
+          mapfile -t assets < <(find dist-release -maxdepth 1 -type f \( \
+            -name '*.app.zip' -o \
+            -name '*.dmg' -o \
+            -name '*.tar.gz' -o \
+            -name '*.zip' -o \
+            -name '*.exe' -o \
+            -name '*.AppImage' -o \
+            -name '*.deb' -o \
+            -name '*.rpm' \
+          \) | sort -u)
+          if [[ "${#assets[@]}" -eq 0 ]]; then
+            echo "::error::No installable artifacts recovered from run ${{ inputs.run_id }}" >&2
+            exit 1
+          fi
+          echo "Recovered ${#assets[@]} artifact(s) from run ${{ inputs.run_id }}:"
+          printf '  %s\n' "${assets[@]}"
+          echo "asset_count=${#assets[@]}" >> "${GITHUB_OUTPUT}"
+
+      - name: Re-sign recovered assets
+        shell: bash
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          RELEASE_VERSION: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y minisign
+
+          key_path="$(mktemp)"
+          trap 'rm -f "${key_path}"' EXIT
+          printf '%s' "${TAURI_SIGNING_PRIVATE_KEY}" | base64 --decode > "${key_path}"
+          chmod 600 "${key_path}"
+
+          version="${RELEASE_VERSION#v}"
+          mapfile -t assets < <(find dist-release -maxdepth 1 -type f \( \
+            -name '*.app.zip' -o \
+            -name '*.dmg' -o \
+            -name '*.tar.gz' -o \
+            -name '*.zip' -o \
+            -name '*.exe' -o \
+            -name '*.AppImage' -o \
+            -name '*.deb' -o \
+            -name '*.rpm' \
+          \) | sort -u)
+
+          if [[ "${#assets[@]}" -eq 0 ]]; then
+            echo "No recovered assets to sign." >&2
+            exit 1
+          fi
+
+          for asset in "${assets[@]}"; do
+            sig="${asset}.sig"
+            trusted_comment="OxideTerm ${version} $(basename "${asset}")"
+            if [[ -n "${TAURI_SIGNING_PRIVATE_KEY_PASSWORD:-}" ]]; then
+              printf '%s\n' "${TAURI_SIGNING_PRIVATE_KEY_PASSWORD}" \
+                | minisign -S -s "${key_path}" -m "${asset}" -x "${sig}" -t "${trusted_comment}"
+            else
+              minisign -S -W -s "${key_path}" -m "${asset}" -x "${sig}" -t "${trusted_comment}"
+            fi
+          done
+
+      - name: Regenerate release checksums
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t checksum_assets < <(find dist-release -maxdepth 1 -type f \( \
+            -name '*.app.zip' -o \
+            -name '*.dmg' -o \
+            -name '*.tar.gz' -o \
+            -name '*.zip' -o \
+            -name '*.exe' -o \
+            -name '*.AppImage' -o \
+            -name '*.deb' -o \
+            -name '*.rpm' \
+          \) | sort -u)
+
+          if [[ "${#checksum_assets[@]}" -eq 0 ]]; then
+            echo "No recovered assets for checksum generation." >&2
+            exit 1
+          fi
+
+          (cd dist-release && sha256sum "${checksum_assets[@]/#dist-release\//}" > sha256sums.txt)
+          cat dist-release/sha256sums.txt
+
+      - name: Upload repaired assets to release
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
+        with:
+          files: |
+            dist-release/*.app.zip
+            dist-release/*.dmg
+            dist-release/*.tar.gz
+            dist-release/*.zip
+            dist-release/*.exe
+            dist-release/*.AppImage
+            dist-release/*.deb
+            dist-release/*.rpm
+            dist-release/*.sig
+            dist-release/sha256sums.txt
+          tag_name: ${{ inputs.tag }}
+          # Repair targets an existing release; overwrite assets in place
+          # instead of failing on duplicates.
+          update_release: true
+          fail_on_unmatched_files: true
