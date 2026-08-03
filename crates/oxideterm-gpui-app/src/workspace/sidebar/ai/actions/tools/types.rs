@@ -1,6 +1,5 @@
 use std::collections::BTreeMap;
 
-pub(in crate::workspace) const AI_MAX_REQUIRED_TOOL_RETRIES: usize = 1;
 pub(in crate::workspace) const AI_MAX_HARD_DENY_RETRIES: usize = 1;
 pub(in crate::workspace) const AI_PSEUDO_TOOL_RETRY_TOOL_NAME: &str = "tool_use_disabled";
 pub(in crate::workspace) const AI_RUNTIME_STABLE_RESOURCE_LIMIT: usize = 128;

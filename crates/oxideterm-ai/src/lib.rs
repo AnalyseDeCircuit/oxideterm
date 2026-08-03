@@ -152,13 +152,7 @@ pub use target_projection::{
     AiIdeTargetInput, AiSftpTargetInput, AiTargetProjection, connect_result_terminal_projection,
     ide_workspace_target_projection, opened_local_terminal_projection, sftp_target_projection,
 };
-pub use tool_protocol::{
-    AiOrchestratorObligation, AiOrchestratorObligationMode, ai_classify_orchestrator_obligation,
-    ai_orchestrator_obligation_prompt, ai_required_tool_retry_prompt,
-    ai_should_retry_required_tool_round, ai_should_retry_required_tool_round_for_turn,
-    ai_should_trigger_hard_deny, ai_text_contains_tauri_action_claim,
-    ai_user_explicitly_requested_json,
-};
+pub use tool_protocol::{ai_should_trigger_hard_deny, ai_user_explicitly_requested_json};
 pub use tool_result_protocol::{
     AI_TOOL_CONDENSE_KEEP_RECENT, AI_TOOL_CONDENSE_SUMMARY_MAX_CHARS,
     AI_TOOL_MODEL_ERROR_MESSAGE_MAX_CHARS, AI_TOOL_MODEL_ERROR_OUTPUT_MAX_CHARS,

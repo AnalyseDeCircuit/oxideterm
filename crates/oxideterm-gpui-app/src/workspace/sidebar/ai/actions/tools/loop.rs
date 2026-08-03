@@ -48,15 +48,8 @@ pub(in crate::workspace) async fn run_ai_chat_tool_loop(
         .find(|message| message.role == AiChatRole::User)
         .map(|message| message.content.clone())
         .unwrap_or_default();
-    let tool_obligation = if config.tool_policy.enabled {
-        ai_classify_orchestrator_obligation(&request_text)
-    } else {
-        AiOrchestratorObligation::auto()
-    };
     let user_requested_json = ai_user_explicitly_requested_json(&request_text);
-    let mut required_tool_retry_count = 0usize;
     let mut hard_deny_retry_count = 0usize;
-    let mut has_required_tool_result_this_turn = false;
 
     let mut awaiting_summary_round_id: Option<String> = None;
 
@@ -74,12 +67,7 @@ pub(in crate::workspace) async fn run_ai_chat_tool_loop(
         };
         replace_ai_runtime_context_message(&mut history, runtime_context);
         let (stream_tx, mut stream_rx) = tokio::sync::mpsc::unbounded_channel();
-        let mut provider_config = config.clone();
-        if tool_obligation.mode == AiOrchestratorObligationMode::Required
-            && !provider_config.tools.is_empty()
-        {
-            provider_config.tool_choice = oxideterm_ai::AiToolChoice::Required;
-        }
+        let provider_config = config.clone();
         let _ = send_ai_diagnostic(
             &ui_tx,
             generation,
@@ -94,10 +82,6 @@ pub(in crate::workspace) async fn run_ai_chat_tool_loop(
                 "messageCount": history.len(),
                 "toolDefinitionCount": provider_config.tools.len(),
                 "hardDenyRetryCount": hard_deny_retry_count,
-                "requiredToolRetryCount": required_tool_retry_count,
-                "toolObligationMode": ai_orchestrator_obligation_mode_label(tool_obligation.mode),
-                "toolObligationReason": tool_obligation.reason.clone(),
-                "candidateToolNames": tool_obligation.candidate_tools.clone(),
                 "toolChoice": ai_tool_choice_label(&provider_config.tool_choice),
             }),
         );
@@ -134,10 +118,6 @@ pub(in crate::workspace) async fn run_ai_chat_tool_loop(
         let mut stream_error = None;
         let mut round_content = String::new();
         let mut round_thinking = String::new();
-        let mut buffered_required_content = String::new();
-        let mut buffered_required_thinking = String::new();
-        let mut buffering_required_tool =
-            tool_obligation.mode == AiOrchestratorObligationMode::Required;
         let mut pending_calls = BTreeMap::<String, AiToolCall>::new();
         let mut completed_calls = Vec::<AiToolCall>::new();
         let mut round_provider_parts = Vec::<serde_json::Value>::new();
@@ -156,21 +136,17 @@ pub(in crate::workspace) async fn run_ai_chat_tool_loop(
                         );
                     }
                     round_content.push_str(&chunk);
-                    if buffering_required_tool {
-                        buffered_required_content.push_str(&chunk);
-                    } else {
-                        assistant_content.push_str(&chunk);
-                        if send_ai_stream_delivery(
-                            &ui_tx,
-                            generation,
-                            &conversation_id,
-                            &assistant_id,
-                            AiStreamDeliveryEvent::Stream(AiStreamEvent::Content(chunk)),
-                        )
-                        .is_err()
-                        {
-                            return;
-                        }
+                    assistant_content.push_str(&chunk);
+                    if send_ai_stream_delivery(
+                        &ui_tx,
+                        generation,
+                        &conversation_id,
+                        &assistant_id,
+                        AiStreamDeliveryEvent::Stream(AiStreamEvent::Content(chunk)),
+                    )
+                    .is_err()
+                    {
+                        return;
                     }
                 }
                 AiStreamEvent::Thinking(chunk) => {
@@ -185,21 +161,17 @@ pub(in crate::workspace) async fn run_ai_chat_tool_loop(
                         );
                     }
                     round_thinking.push_str(&chunk);
-                    if buffering_required_tool {
-                        buffered_required_thinking.push_str(&chunk);
-                    } else {
-                        assistant_thinking.push_str(&chunk);
-                        if send_ai_stream_delivery(
-                            &ui_tx,
-                            generation,
-                            &conversation_id,
-                            &assistant_id,
-                            AiStreamDeliveryEvent::Stream(AiStreamEvent::Thinking(chunk)),
-                        )
-                        .is_err()
-                        {
-                            return;
-                        }
+                    assistant_thinking.push_str(&chunk);
+                    if send_ai_stream_delivery(
+                        &ui_tx,
+                        generation,
+                        &conversation_id,
+                        &assistant_id,
+                        AiStreamDeliveryEvent::Stream(AiStreamEvent::Thinking(chunk)),
+                    )
+                    .is_err()
+                    {
+                        return;
                     }
                 }
                 AiStreamEvent::ProviderResponsePart {
@@ -235,23 +207,6 @@ pub(in crate::workspace) async fn run_ai_chat_tool_loop(
                             arguments: arguments.clone(),
                         },
                     );
-                    if buffering_required_tool {
-                        buffering_required_tool = false;
-                        if flush_ai_required_tool_buffer(
-                            &ui_tx,
-                            generation,
-                            &conversation_id,
-                            &assistant_id,
-                            &mut assistant_content,
-                            &mut assistant_thinking,
-                            &mut buffered_required_content,
-                            &mut buffered_required_thinking,
-                        )
-                        .is_err()
-                        {
-                            return;
-                        }
-                    }
                     if send_ai_stream_delivery(
                         &ui_tx,
                         generation,
@@ -290,23 +245,6 @@ pub(in crate::workspace) async fn run_ai_chat_tool_loop(
                     };
                     pending_calls.insert(id.clone(), call.clone());
                     record_completed_ai_tool_call(&mut completed_calls, call);
-                    if buffering_required_tool {
-                        buffering_required_tool = false;
-                        if flush_ai_required_tool_buffer(
-                            &ui_tx,
-                            generation,
-                            &conversation_id,
-                            &assistant_id,
-                            &mut assistant_content,
-                            &mut assistant_thinking,
-                            &mut buffered_required_content,
-                            &mut buffered_required_thinking,
-                        )
-                        .is_err()
-                        {
-                            return;
-                        }
-                    }
                     if send_ai_stream_delivery(
                         &ui_tx,
                         generation,
@@ -495,112 +433,6 @@ pub(in crate::workspace) async fn run_ai_chat_tool_loop(
                 hard_deny_retry_count = retry_attempt;
                 continue;
             }
-            if required_tool_retry_count < AI_MAX_REQUIRED_TOOL_RETRIES
-                && oxideterm_ai::ai_should_retry_required_tool_round_for_turn(
-                    &tool_obligation,
-                    &round_content,
-                    has_required_tool_result_this_turn,
-                )
-            {
-                let retry_attempt = required_tool_retry_count.saturating_add(1);
-                let _ = send_ai_guardrail(
-                    &ui_tx,
-                    generation,
-                    &conversation_id,
-                    &assistant_id,
-                    "tool-required-no-call",
-                    "This request requires a real tool result before the assistant can answer. Retrying with a stricter tool-use instruction.",
-                    (!round_content.trim().is_empty()).then_some(round_content.clone()),
-                );
-                let _ = send_ai_diagnostic(
-                    &ui_tx,
-                    generation,
-                    &conversation_id,
-                    &assistant_id,
-                    "guardrail",
-                    None,
-                    serde_json::json!({
-                        "code": "tool-required-no-call",
-                        "retryAttempt": retry_attempt,
-                        "candidateToolNames": tool_obligation.candidate_tools.clone(),
-                    }),
-                );
-                let _ = send_ai_assistant_round(
-                    &ui_tx,
-                    generation,
-                    &conversation_id,
-                    &assistant_id,
-                    format!("{assistant_id}-required-retry-{retry_attempt}"),
-                    retry_attempt as i64,
-                    round_content.len(),
-                    Vec::new(),
-                    true,
-                    Some(retry_attempt),
-                    false,
-                );
-                let mut retry_message = AiChatMessage {
-                    id: format!("required-retry-assistant-{retry_attempt}"),
-                    role: AiChatRole::Assistant,
-                    content: if round_content.trim().is_empty() {
-                        "(No tool call was made.)".to_string()
-                    } else {
-                        round_content
-                    },
-                    timestamp_ms: ai_now_ms(),
-                    model: Some(config.model.clone()),
-                    context: None,
-                    is_streaming: false,
-                    thinking_content: (!round_thinking.is_empty()).then_some(round_thinking),
-                    metadata: None,
-                    tool_call_id: None,
-                    tool_calls: Vec::new(),
-                    turn: None,
-                    transcript_ref: None,
-                    summary_ref: None,
-                    branches: None,
-                    suggestions: Vec::new(),
-                };
-                set_ai_provider_parts(
-                    &mut retry_message,
-                    &config.provider_type,
-                    round_provider_parts,
-                );
-                history.push(retry_message);
-                history.push(AiChatMessage {
-                    id: format!("required-retry-user-{retry_attempt}"),
-                    role: AiChatRole::User,
-                    content: ai_required_tool_retry_prompt(&tool_obligation),
-                    timestamp_ms: ai_now_ms(),
-                    model: None,
-                    context: None,
-                    is_streaming: false,
-                    thinking_content: None,
-                    metadata: None,
-                    tool_call_id: None,
-                    tool_calls: Vec::new(),
-                    turn: None,
-                    transcript_ref: None,
-                    summary_ref: None,
-                    branches: None,
-                    suggestions: Vec::new(),
-                });
-                required_tool_retry_count = retry_attempt;
-                continue;
-            }
-            if flush_ai_required_tool_buffer(
-                &ui_tx,
-                generation,
-                &conversation_id,
-                &assistant_id,
-                &mut assistant_content,
-                &mut assistant_thinking,
-                &mut buffered_required_content,
-                &mut buffered_required_thinking,
-            )
-            .is_err()
-            {
-                return;
-            }
             let _ = send_ai_stream_delivery(
                 &ui_tx,
                 generation,
@@ -722,7 +554,6 @@ pub(in crate::workspace) async fn run_ai_chat_tool_loop(
                     summary: executed_summary(&executed),
                 });
                 history.push(ai_tool_result_message(executed));
-                has_required_tool_result_this_turn = true;
                 continue;
             }
             let Some(parsed_args) = parse_ai_tool_args(&call.name, &call.arguments) else {
@@ -750,7 +581,6 @@ pub(in crate::workspace) async fn run_ai_chat_tool_loop(
                     summary: executed_summary(&executed),
                 });
                 history.push(ai_tool_result_message(executed));
-                has_required_tool_result_this_turn = true;
                 continue;
             };
             if let Some(executed) = preflight_ai_tool(
@@ -783,7 +613,6 @@ pub(in crate::workspace) async fn run_ai_chat_tool_loop(
                     summary: executed_summary(&executed),
                 });
                 history.push(ai_tool_result_message(executed));
-                has_required_tool_result_this_turn = true;
                 continue;
             }
             let approval_args = parsed_args.clone();
@@ -998,7 +827,6 @@ pub(in crate::workspace) async fn run_ai_chat_tool_loop(
                 summary: executed_summary(&executed),
             });
             history.push(ai_tool_result_message(executed));
-            has_required_tool_result_this_turn = true;
         }
 
         if round_index >= 1 {
@@ -1308,41 +1136,4 @@ pub(in crate::workspace) fn acp_session_cwd_from_agent(
             .map(std::path::PathBuf::from)
             .unwrap_or_else(|| std::path::PathBuf::from("."))
     })
-}
-
-pub(in crate::workspace) fn flush_ai_required_tool_buffer(
-    ui_tx: &AiStreamDeliverySender,
-    generation: u64,
-    conversation_id: &str,
-    assistant_id: &str,
-    assistant_content: &mut String,
-    assistant_thinking: &mut String,
-    buffered_content: &mut String,
-    buffered_thinking: &mut String,
-) -> Result<(), ()> {
-    if !buffered_thinking.is_empty() {
-        let chunk = std::mem::take(buffered_thinking);
-        assistant_thinking.push_str(&chunk);
-        send_ai_stream_delivery(
-            ui_tx,
-            generation,
-            conversation_id,
-            assistant_id,
-            AiStreamDeliveryEvent::Stream(AiStreamEvent::Thinking(chunk)),
-        )
-        .map_err(|_| ())?;
-    }
-    if !buffered_content.is_empty() {
-        let chunk = std::mem::take(buffered_content);
-        assistant_content.push_str(&chunk);
-        send_ai_stream_delivery(
-            ui_tx,
-            generation,
-            conversation_id,
-            assistant_id,
-            AiStreamDeliveryEvent::Stream(AiStreamEvent::Content(chunk)),
-        )
-        .map_err(|_| ())?;
-    }
-    Ok(())
 }

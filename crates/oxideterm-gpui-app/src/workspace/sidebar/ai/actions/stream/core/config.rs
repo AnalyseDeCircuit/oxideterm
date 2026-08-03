@@ -499,15 +499,11 @@ impl WorkspaceApp {
     ) -> Vec<AiChatMessage> {
         apply_chat_request_overrides(&mut history, request_content, None);
         normalize_ai_stream_history_for_provider(&mut history);
-        let mut base_system_prompt = self.build_ai_base_system_prompt(
+        let base_system_prompt = self.build_ai_base_system_prompt(
             config,
             rag_system_prompt,
             task_system_prompt,
         );
-        if let Some(prompt) = ai_orchestrator_obligation_prompt_for_history(config, &history) {
-            base_system_prompt.push_str("\n\n");
-            base_system_prompt.push_str(&prompt);
-        }
         history.insert(
             0,
             AiChatMessage {
@@ -865,29 +861,6 @@ pub(in crate::workspace) fn ai_chat_request_max_response_tokens(
             ))
             .ok()
         })
-}
-
-pub(in crate::workspace) fn ai_orchestrator_obligation_prompt_for_history(
-    config: &AiChatStreamConfig,
-    history: &[AiChatMessage],
-) -> Option<String> {
-    history
-        .iter()
-        .rev()
-        .find(|message| message.role == AiChatRole::User)
-        .and_then(|message| ai_orchestrator_obligation_prompt_for_text(config, &message.content))
-}
-
-pub(in crate::workspace) fn ai_orchestrator_obligation_prompt_for_text(
-    config: &AiChatStreamConfig,
-    request_text: &str,
-) -> Option<String> {
-    config
-        .tool_policy
-        .enabled
-        .then(|| ai_classify_orchestrator_obligation(request_text))
-        .as_ref()
-        .and_then(ai_orchestrator_obligation_prompt)
 }
 
 #[cfg(test)]

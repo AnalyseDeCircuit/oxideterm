@@ -188,15 +188,6 @@ pub(in crate::workspace) fn send_ai_diagnostic(
     )
 }
 
-pub(in crate::workspace) fn ai_orchestrator_obligation_mode_label(
-    mode: AiOrchestratorObligationMode,
-) -> &'static str {
-    match mode {
-        AiOrchestratorObligationMode::Auto => "auto",
-        AiOrchestratorObligationMode::Required => "required",
-    }
-}
-
 pub(in crate::workspace) fn ai_tool_choice_label(
     choice: &oxideterm_ai::AiToolChoice,
 ) -> serde_json::Value {

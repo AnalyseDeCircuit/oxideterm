@@ -1694,69 +1694,6 @@ mod ai_turn_order_tests {
     }
 
     #[test]
-    fn required_tool_obligation_retries_action_claims() {
-        let obligation = ai_classify_orchestrator_obligation("打开本地终端");
-
-        assert_eq!(obligation.mode, AiOrchestratorObligationMode::Required);
-        assert!(
-            obligation
-                .candidate_tools
-                .iter()
-                .any(|tool| tool == "open_app_surface")
-        );
-        assert!(
-            ai_orchestrator_obligation_prompt(&obligation)
-                .expect("prompt")
-                .contains("Required Tool Call")
-        );
-        assert!(oxideterm_ai::ai_should_retry_required_tool_round(
-            &obligation,
-            "我已经打开了本地终端。"
-        ));
-        assert!(!oxideterm_ai::ai_should_retry_required_tool_round(
-            &obligation,
-            "需要你确认打开哪一个终端？"
-        ));
-        assert!(!oxideterm_ai::ai_should_retry_required_tool_round_for_turn(
-            &obligation,
-            "好的，已经通过工具确认当前状态。",
-            true,
-        ));
-    }
-
-    #[test]
-    fn required_tool_prompt_is_available_before_history_budgeting() {
-        let mut tool_policy = AiToolUsePolicy::default();
-        tool_policy.enabled = true;
-        let config = AiChatStreamConfig {
-            execution_backend: AiExecutionBackend::Provider,
-            provider_id: Some("provider-1".to_string()),
-            acp_agent_id: None,
-            acp_session_id: None,
-            acp_config_selection: None,
-            provider_type: "openai".to_string(),
-            base_url: "https://api.example.test".to_string(),
-            model: "model".to_string(),
-            api_key: None,
-            max_response_tokens: None,
-            reasoning_effort: Some("auto".to_string()),
-            safety_mode: AiPolicySafetyMode::Default,
-            profile_id: None,
-            memory_context: None,
-            memory_entry_ids: Vec::new(),
-            tool_policy,
-            tools: Vec::new(),
-            tool_choice: oxideterm_ai::AiToolChoice::Auto,
-        };
-
-        let prompt = ai_orchestrator_obligation_prompt_for_text(&config, "打开本地终端")
-            .expect("required tool prompt");
-
-        assert!(prompt.contains("## Required Tool Call"));
-        assert!(prompt.contains("open_app_surface"));
-    }
-
-    #[test]
     fn rag_prompt_inserts_before_suggestions_and_runtime_rules() {
         let mut system_prompt = [
             "base",
@@ -1774,43 +1711,6 @@ mod ai_turn_order_tests {
         let runtime_index = system_prompt.find("## OxideSens Runtime Rules").unwrap();
         assert!(rag_index < suggestions_index);
         assert!(rag_index < runtime_index);
-    }
-
-    #[test]
-    fn required_tool_buffer_flushes_only_after_tool_call() {
-        let (tx, rx) = crate::workspace::delivery::ActiveDeliverySender::channel();
-        let mut assistant_content = String::new();
-        let mut assistant_thinking = String::new();
-        let mut buffered_content = "我已经打开了终端。".to_string();
-        let mut buffered_thinking = "需要调用工具。".to_string();
-
-        flush_ai_required_tool_buffer(
-            &tx,
-            1,
-            "conversation-1",
-            "assistant-1",
-            &mut assistant_content,
-            &mut assistant_thinking,
-            &mut buffered_content,
-            &mut buffered_thinking,
-        )
-        .expect("flush");
-
-        assert!(buffered_content.is_empty());
-        assert!(buffered_thinking.is_empty());
-        assert_eq!(assistant_content, "我已经打开了终端。");
-        assert_eq!(assistant_thinking, "需要调用工具。");
-
-        let first = rx.recv().expect("thinking delivery");
-        assert!(matches!(
-            first.event,
-            AiStreamDeliveryEvent::Stream(AiStreamEvent::Thinking(_))
-        ));
-        let second = rx.recv().expect("content delivery");
-        assert!(matches!(
-            second.event,
-            AiStreamDeliveryEvent::Stream(AiStreamEvent::Content(_))
-        ));
     }
 
     #[test]
