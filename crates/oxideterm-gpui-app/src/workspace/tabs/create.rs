@@ -784,6 +784,10 @@ impl WorkspaceApp {
                 node_id.0
             ));
         }
+        let node_x11_forwarding = self
+            .node_router
+            .node_x11_forwarding(node_id)
+            .map_err(|error| anyhow::anyhow!(error.to_string()))?;
 
         let pane_id = self.alloc_pane_id(cx);
         let session_id = self.alloc_session_id(cx);
@@ -821,6 +825,7 @@ impl WorkspaceApp {
             // The default path adds a channel to the node-owned transport and
             // never clones its authentication configuration.
             SshSessionConfig::for_existing_connection(connection_id, host, port, username)
+                .with_x11_forwarding_override(node_x11_forwarding)
                 .with_registry(self.ssh_registry.clone(), consumer)
         }
         // Opening another terminal never replays a post-connect command unless

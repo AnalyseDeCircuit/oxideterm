@@ -9,6 +9,7 @@ pub(super) fn detect_ssh_agent_available(identity_agent: &str) -> Option<bool> {
 
 pub(super) fn proxy_chain_from_form(
     form: &mut NewConnectionForm,
+    secret_handoff: RuntimeSecretHandoff,
 ) -> Result<Option<Vec<ProxyHopConfig>>, String> {
     if form.proxy_hops.is_empty() {
         return Ok(None);
@@ -22,7 +23,7 @@ pub(super) fn proxy_chain_from_form(
             host: hop.host.trim().to_string(),
             port: hop.port.trim().parse::<u16>().unwrap_or(22),
             username: hop.username.trim().to_string(),
-            auth: auth_method_from_proxy_hop(hop),
+            auth: auth_method_from_proxy_hop(hop, secret_handoff),
             agent_forwarding: hop.agent_forwarding,
             identity_agent: identity_agent_from_form(&hop.identity_agent),
             agent_forwarding_socket: hop.agent_forwarding_socket.clone(),
@@ -110,26 +111,29 @@ pub(super) fn resolve_default_key_for_tree_auth(auth: &mut AuthMethod) -> Result
     }
 }
 
-pub(super) fn auth_method_from_proxy_hop(hop: &mut NewConnectionProxyHop) -> AuthMethod {
+pub(super) fn auth_method_from_proxy_hop(
+    hop: &mut NewConnectionProxyHop,
+    secret_handoff: RuntimeSecretHandoff,
+) -> AuthMethod {
     match hop.auth_tab {
         SshAuthTab::Password => {
-            AuthMethod::password_secret(take_zeroizing_secret(&mut hop.password))
+            AuthMethod::password_secret(secret_handoff.zeroizing(&mut hop.password))
         }
         SshAuthTab::DefaultKey => {
-            AuthMethod::key_secret("", take_zeroizing_non_empty_secret(&mut hop.passphrase))
+            AuthMethod::key_secret("", secret_handoff.zeroizing_non_empty(&mut hop.passphrase))
         }
         SshAuthTab::SshKey => AuthMethod::key_secret(
             hop.key_path.trim().to_string(),
-            take_zeroizing_non_empty_secret(&mut hop.passphrase),
+            secret_handoff.zeroizing_non_empty(&mut hop.passphrase),
         ),
         SshAuthTab::ManagedKey => AuthMethod::managed_key_secret(
             hop.managed_key_id.trim().to_string(),
-            take_zeroizing_non_empty_secret(&mut hop.passphrase),
+            secret_handoff.zeroizing_non_empty(&mut hop.passphrase),
         ),
         SshAuthTab::Certificate => AuthMethod::certificate_secret(
             hop.key_path.trim().to_string(),
             hop.cert_path.trim().to_string(),
-            take_zeroizing_non_empty_secret(&mut hop.passphrase),
+            secret_handoff.zeroizing_non_empty(&mut hop.passphrase),
         ),
         SshAuthTab::Agent => AuthMethod::Agent,
         SshAuthTab::TwoFactor => AuthMethod::KeyboardInteractive,
@@ -325,6 +329,43 @@ fn runtime_auth_form_fields(auth: AuthMethod) -> RuntimeAuthFormFields {
 mod runtime_save_tests {
     use super::*;
     use zeroize::Zeroizing;
+
+    #[test]
+    fn test_secret_handoff_keeps_the_form_reusable() {
+        let mut form_secret = "target-secret".to_string();
+
+        let runtime_secret = RuntimeSecretHandoff::CopyForTest.zeroizing(&mut form_secret);
+
+        assert_eq!(runtime_secret.as_str(), "target-secret");
+        assert_eq!(form_secret, "target-secret");
+    }
+
+    #[test]
+    fn connection_secret_handoff_moves_the_form_allocation() {
+        let mut form_secret = "target-secret".to_string();
+        let form_secret_pointer = form_secret.as_ptr();
+
+        let runtime_secret = RuntimeSecretHandoff::Move.zeroizing(&mut form_secret);
+
+        assert_eq!(runtime_secret.as_str(), "target-secret");
+        assert_eq!(runtime_secret.as_ptr(), form_secret_pointer);
+        assert!(form_secret.is_empty());
+    }
+
+    #[test]
+    fn proxy_test_secret_handoff_keeps_the_hop_reusable() {
+        let mut hop = NewConnectionProxyHop::new();
+        hop.auth_tab = SshAuthTab::Password;
+        hop.password = "jump-secret".to_string();
+
+        let auth = auth_method_from_proxy_hop(&mut hop, RuntimeSecretHandoff::CopyForTest);
+
+        assert!(matches!(
+            auth,
+            AuthMethod::Password { ref password } if password.as_str() == "jump-secret"
+        ));
+        assert_eq!(hop.password, "jump-secret");
+    }
 
     #[test]
     fn runtime_proxy_hop_form_preserves_password_for_save_as() {
@@ -594,10 +635,4 @@ pub(super) fn serial_profile_flow_from_terminal(
 pub(super) fn take_zeroizing_secret(value: &mut String) -> zeroize::Zeroizing<String> {
     // Preserve the UI allocation while transferring it to the runtime secret owner.
     zeroize::Zeroizing::new(std::mem::take(value))
-}
-
-pub(super) fn take_zeroizing_non_empty_secret(
-    value: &mut String,
-) -> Option<zeroize::Zeroizing<String>> {
-    (!value.is_empty()).then(|| take_zeroizing_secret(value))
 }

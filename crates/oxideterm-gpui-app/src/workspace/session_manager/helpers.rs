@@ -666,6 +666,30 @@ pub(super) fn take_secret_from_ui_draft(value: &mut String) -> SecretString {
     SecretString::from(std::mem::take(value))
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(in crate::workspace) enum RuntimeSecretHandoff {
+    Move,
+    CopyForTest,
+}
+
+impl RuntimeSecretHandoff {
+    pub(in crate::workspace) fn zeroizing(self, value: &mut String) -> zeroize::Zeroizing<String> {
+        match self {
+            Self::Move => zeroize::Zeroizing::new(std::mem::take(value)),
+            // A connection test must leave the form reusable. The bounded test
+            // copy remains zeroizing and is erased when the test config drops.
+            Self::CopyForTest => zeroize::Zeroizing::new(value.clone()),
+        }
+    }
+
+    pub(in crate::workspace) fn zeroizing_non_empty(
+        self,
+        value: &mut String,
+    ) -> Option<zeroize::Zeroizing<String>> {
+        (!value.is_empty()).then(|| self.zeroizing(value))
+    }
+}
+
 pub(in crate::workspace) fn saved_upstream_proxy_policy_from_form(
     form: &mut NewConnectionForm,
 ) -> anyhow::Result<SavedUpstreamProxyPolicy> {
@@ -716,6 +740,7 @@ pub(in crate::workspace) fn upstream_proxy_config_from_form(
     store: &ConnectionStore,
     settings: &PersistedSettings,
     form: &mut NewConnectionForm,
+    secret_handoff: RuntimeSecretHandoff,
 ) -> anyhow::Result<Option<UpstreamProxyConfig>> {
     match form.upstream_proxy_policy {
         NewConnectionUpstreamProxyPolicy::UseGlobal => upstream_proxy_config_from_saved_policy(
@@ -725,15 +750,16 @@ pub(in crate::workspace) fn upstream_proxy_config_from_form(
         )
         .map_err(anyhow::Error::msg),
         NewConnectionUpstreamProxyPolicy::Direct => Ok(None),
-        NewConnectionUpstreamProxyPolicy::Custom => {
-            Ok(Some(runtime_upstream_proxy_config_from_form(store, form)?))
-        }
+        NewConnectionUpstreamProxyPolicy::Custom => Ok(Some(
+            runtime_upstream_proxy_config_from_form(store, form, secret_handoff)?,
+        )),
     }
 }
 
 pub(super) fn runtime_upstream_proxy_config_from_form(
     store: &ConnectionStore,
     form: &mut NewConnectionForm,
+    secret_handoff: RuntimeSecretHandoff,
 ) -> anyhow::Result<UpstreamProxyConfig> {
     // Parse the non-secret port before taking ownership of a visible password draft.
     if form.upstream_proxy_host.trim().is_empty() {
@@ -757,7 +783,7 @@ pub(super) fn runtime_upstream_proxy_config_from_form(
                     .get_saved_upstream_proxy_password(&saved_auth)?
                     .into_zeroizing()
             } else {
-                zeroize::Zeroizing::new(std::mem::take(&mut form.upstream_proxy_password))
+                secret_handoff.zeroizing(&mut form.upstream_proxy_password)
             };
             UpstreamProxyAuth::Password { username, password }
         }

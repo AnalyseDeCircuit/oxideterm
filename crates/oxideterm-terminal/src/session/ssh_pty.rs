@@ -96,18 +96,32 @@ impl SshPtySession {
                             _ => client.connect_shell().await,
                         }
                     }
-                    Some(SshSessionConnection::Existing { connection_id }) => {
+                    Some(SshSessionConnection::Existing {
+                        connection_id,
+                        x11_forwarding_override,
+                    }) => {
                         match (registry, consumer) {
-                            (Some(registry), Some(consumer)) => {
-                                SshTransportClient::connect_shell_on_existing_connection(
+                            (Some(registry), Some(consumer)) => match x11_forwarding_override {
+                                Some(x11_forwarding) => {
+                                    SshTransportClient::connect_shell_on_existing_connection_with_x11_forwarding(
+                                        registry,
+                                        connection_id,
+                                        consumer,
+                                        cols,
+                                        rows,
+                                        x11_forwarding,
+                                    )
+                                    .await
+                                }
+                                None => SshTransportClient::connect_shell_on_existing_connection(
                                     registry,
                                     connection_id,
                                     consumer,
                                     cols,
                                     rows,
                                 )
-                                .await
-                            }
+                                .await,
+                            },
                             _ => Err(oxideterm_ssh::SshTransportError::ConnectionFailed(
                                 "existing SSH terminal requires a connection registry".to_string(),
                             )),

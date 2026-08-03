@@ -20,6 +20,7 @@ use oxideterm_modem_transfer::{ModemConsumer, ModemConsumerEvent, ModemTransfer}
 use oxideterm_ssh::{
     ConnectionConsumer, ManagedKeyResolver, SshConfig, SshConnectionHandle, SshConnectionRegistry,
     SshOutputChunk, SshPromptHandler, SshPtyHandle, SshTransportClient, SshTransportCommand,
+    X11ForwardPolicy,
 };
 use oxideterm_terminal_encoding::{
     EncodingMismatchDetector, TerminalEncoding, TerminalInputEncoder, TerminalOutputDecoder,

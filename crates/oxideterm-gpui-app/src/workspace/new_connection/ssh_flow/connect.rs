@@ -26,6 +26,7 @@ impl WorkspaceApp {
 
     pub(super) fn build_new_connection_config(
         &mut self,
+        secret_handoff: RuntimeSecretHandoff,
         cx: &mut Context<Self>,
     ) -> Option<(SshConfig, String)> {
         self.with_connection_form_mut(cx, |this, form, cx| {
@@ -75,6 +76,7 @@ impl WorkspaceApp {
                 &this.connection_store,
                 this.settings_store.settings(),
                 form,
+                secret_handoff,
             ) {
                 Ok(upstream_proxy) => upstream_proxy,
                 Err(error) => {
@@ -85,32 +87,32 @@ impl WorkspaceApp {
             };
             let auth = match form.auth_tab {
                 SshAuthTab::Password => {
-                    AuthMethod::password_secret(take_zeroizing_secret(&mut form.password))
+                    AuthMethod::password_secret(secret_handoff.zeroizing(&mut form.password))
                 }
                 SshAuthTab::Agent => AuthMethod::Agent,
                 SshAuthTab::DefaultKey => AuthMethod::key_secret(
                     "",
-                    take_zeroizing_non_empty_secret(&mut form.passphrase),
+                    secret_handoff.zeroizing_non_empty(&mut form.passphrase),
                 ),
                 SshAuthTab::SshKey => AuthMethod::key_secret(
                     form.key_path.trim().to_string(),
-                    take_zeroizing_non_empty_secret(&mut form.passphrase),
+                    secret_handoff.zeroizing_non_empty(&mut form.passphrase),
                 ),
                 SshAuthTab::ManagedKey => {
-                    // Runtime auth carries only the managed-key reference and moved passphrase.
+                    // Runtime auth carries only the managed-key reference and runtime-owned passphrase.
                     AuthMethod::managed_key_secret(
                         form.managed_key_id.trim().to_string(),
-                        take_zeroizing_non_empty_secret(&mut form.passphrase),
+                        secret_handoff.zeroizing_non_empty(&mut form.passphrase),
                     )
                 }
                 SshAuthTab::Certificate => AuthMethod::certificate_secret(
                     form.key_path.trim().to_string(),
                     form.cert_path.trim().to_string(),
-                    take_zeroizing_non_empty_secret(&mut form.passphrase),
+                    secret_handoff.zeroizing_non_empty(&mut form.passphrase),
                 ),
                 SshAuthTab::TwoFactor => AuthMethod::KeyboardInteractive,
             };
-            let proxy_chain = proxy_chain_from_form(form)
+            let proxy_chain = proxy_chain_from_form(form, secret_handoff)
                 .expect("proxy-chain validation completed before secret handoff");
             let config = SshConfig {
                 host: host.clone(),

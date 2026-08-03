@@ -936,7 +936,12 @@ impl WorkspaceApp {
             cx.notify();
             return;
         }
-        let Some((config, title)) = self.build_new_connection_config(cx) else {
+        let secret_handoff = if intent == SshConnectionIntent::Test {
+            RuntimeSecretHandoff::CopyForTest
+        } else {
+            RuntimeSecretHandoff::Move
+        };
+        let Some((config, title)) = self.build_new_connection_config(secret_handoff, cx) else {
             return;
         };
         self.start_new_connection_config_flow(config, title, intent, window, cx);
@@ -1151,7 +1156,11 @@ impl WorkspaceApp {
         else {
             return;
         };
-        let Some((mut config, title)) = self.build_new_connection_config(cx) else {
+        let secret_handoff = match action {
+            SavedConnectionPromptAction::Test => RuntimeSecretHandoff::CopyForTest,
+            SavedConnectionPromptAction::Connect => RuntimeSecretHandoff::Move,
+        };
+        let Some((mut config, title)) = self.build_new_connection_config(secret_handoff, cx) else {
             return;
         };
         if config.proxy_chain.is_none()
@@ -1191,6 +1200,22 @@ impl WorkspaceApp {
         sync_saved_connection_node_title_for_nodes(&mut self.ssh_nodes, saved_connection_id, &title)
     }
 
+    pub(super) fn sync_saved_connection_x11_forwarding(&self, saved_connection_id: &str) -> bool {
+        let Some(options) = self
+            .connection_store
+            .get(saved_connection_id)
+            .map(|connection| connection.options.x11_forwarding)
+        else {
+            return false;
+        };
+        // Only the non-secret policy is updated in place. Existing shells and
+        // the registry-owned physical connection retain their current owners.
+        self.node_router.update_saved_connection_x11_forwarding(
+            saved_connection_id,
+            x11_forward_policy(options),
+        ) > 0
+    }
+
     pub(super) fn save_editing_connection(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(id) = self
             .connection_form_state(cx)
@@ -1228,6 +1253,7 @@ impl WorkspaceApp {
                 match self.connection_store.upsert(request) {
                     Ok(_) => {
                         self.sync_saved_connection_node_title(&id);
+                        self.sync_saved_connection_x11_forwarding(&id);
                         self.apply_saved_connection_terminal_preferences(&id, cx);
                         let connect_after_save_node_id =
                             self.update_connection_form_state(cx, |state| {

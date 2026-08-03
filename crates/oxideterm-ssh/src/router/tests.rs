@@ -510,6 +510,102 @@ mod tests {
     }
 
     #[test]
+    fn saved_connection_x11_policy_updates_only_materialized_targets() {
+        let store = NodeRuntimeStore::default();
+        let restored_target = NodeId::new("restored-target");
+        store.upsert_node_with_origin(
+            restored_target.clone(),
+            SshConfig::password("direct", 22, "me", "pw"),
+            NodeOrigin::Restored {
+                saved_connection_id: "saved-a".to_string(),
+            },
+        );
+        let proxy_expansion = store
+            .expand_manual_preset(
+                "saved-a",
+                vec![SshConfig::password("jump", 22, "me", "pw")],
+                SshConfig::password("proxied-target", 22, "me", "pw"),
+            )
+            .unwrap();
+        let parent = NodeId::new("unrelated-parent");
+        store.upsert_node(parent.clone(), SshConfig::password("parent", 22, "me", "pw"));
+        store
+            .apply_node_readiness(&parent, NodeReadiness::Ready, "")
+            .unwrap();
+        let nested_expansion = store
+            .expand_manual_preset_under_parent(
+                parent,
+                "saved-a",
+                vec![SshConfig::password("nested-jump", 22, "me", "pw")],
+                SshConfig::password("nested-target", 22, "me", "pw"),
+            )
+            .unwrap();
+        let target_generation = store
+            .snapshot(&proxy_expansion.target_node_id)
+            .unwrap()
+            .generation;
+        let x11_forwarding = Some(X11ForwardPolicy::trusted());
+
+        assert_eq!(
+            store.update_saved_connection_x11_forwarding("saved-a", x11_forwarding),
+            3
+        );
+        assert_eq!(store.x11_forwarding(&restored_target).unwrap(), x11_forwarding);
+        assert_eq!(
+            store
+                .x11_forwarding(&proxy_expansion.target_node_id)
+                .unwrap(),
+            x11_forwarding
+        );
+        assert_eq!(
+            store
+                .x11_forwarding(&nested_expansion.target_node_id)
+                .unwrap(),
+            x11_forwarding
+        );
+        assert_eq!(
+            store
+                .x11_forwarding(&proxy_expansion.path_node_ids[0])
+                .unwrap(),
+            None
+        );
+        assert_eq!(
+            store
+                .x11_forwarding(&nested_expansion.path_node_ids[0])
+                .unwrap(),
+            None
+        );
+        assert_eq!(
+            store
+                .snapshot(&proxy_expansion.target_node_id)
+                .unwrap()
+                .generation,
+            target_generation + 1
+        );
+        assert_eq!(
+            store.update_saved_connection_x11_forwarding("saved-a", x11_forwarding),
+            0
+        );
+        assert_eq!(
+            store.update_saved_connection_x11_forwarding("saved-a", None),
+            3
+        );
+        assert_eq!(store.x11_forwarding(&restored_target).unwrap(), None);
+        assert_eq!(
+            store
+                .x11_forwarding(&proxy_expansion.target_node_id)
+                .unwrap(),
+            None
+        );
+        assert_eq!(
+            store
+                .x11_forwarding(&proxy_expansion.path_node_ids[0])
+                .unwrap(),
+            None
+        );
+    }
+
+    #[test]
     fn expand_manual_preset_under_parent_requires_ready_parent() {
         let store = NodeRuntimeStore::default();
         let parent = NodeId::new("root");

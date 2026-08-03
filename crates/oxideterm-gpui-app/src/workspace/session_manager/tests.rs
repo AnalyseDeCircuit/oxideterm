@@ -992,6 +992,32 @@ pub(super) fn save_request_moves_all_visible_password_allocations_and_redacts_de
 }
 
 #[test]
+pub(super) fn upstream_proxy_test_handoff_preserves_visible_password() {
+    let store = ConnectionStore::load_read_only(std::path::PathBuf::new()).unwrap();
+    let mut form = base_form();
+    form.upstream_proxy_policy = NewConnectionUpstreamProxyPolicy::Custom;
+    form.upstream_proxy_host = "proxy.example.com".to_string();
+    form.upstream_proxy_port = "1080".to_string();
+    form.upstream_proxy_auth = NewConnectionUpstreamProxyAuth::Password;
+    form.upstream_proxy_username = "proxy-user".to_string();
+    form.upstream_proxy_password = "upstream-secret-marker".to_string();
+
+    let config = runtime_upstream_proxy_config_from_form(
+        &store,
+        &mut form,
+        RuntimeSecretHandoff::CopyForTest,
+    )
+    .unwrap();
+
+    assert_eq!(form.upstream_proxy_password, "upstream-secret-marker");
+    assert!(matches!(
+        config.auth,
+        UpstreamProxyAuth::Password { ref password, .. }
+            if password.as_str() == "upstream-secret-marker"
+    ));
+}
+
+#[test]
 pub(super) fn save_request_moves_key_passphrase_allocation() {
     let mut form = base_form();
     form.auth_tab = SshAuthTab::SshKey;

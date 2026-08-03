@@ -77,6 +77,22 @@ impl NodeRouter {
         self.runtime.contains_node(node_id)
     }
 
+    pub fn node_x11_forwarding(
+        &self,
+        node_id: &NodeId,
+    ) -> Result<Option<X11ForwardPolicy>, RouteError> {
+        self.runtime.x11_forwarding(node_id)
+    }
+
+    pub fn update_saved_connection_x11_forwarding(
+        &self,
+        saved_connection_id: &str,
+        x11_forwarding: Option<X11ForwardPolicy>,
+    ) -> usize {
+        self.runtime
+            .update_saved_connection_x11_forwarding(saved_connection_id, x11_forwarding)
+    }
+
     pub fn update_node_origin(
         &self,
         node_id: &NodeId,

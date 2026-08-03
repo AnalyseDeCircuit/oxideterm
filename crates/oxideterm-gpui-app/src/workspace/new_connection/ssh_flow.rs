@@ -37,7 +37,7 @@ use crate::workspace::{
     WorkspaceApp, WorkspaceSshNode,
     delivery::ActiveDeliverySender,
     session_manager::{
-        duplicate_connection_template_name, form_from_saved_connection,
+        RuntimeSecretHandoff, duplicate_connection_template_name, form_from_saved_connection,
         save_request_from_form_with_existing_auth, save_request_from_form_with_proxy_hop_prefix,
         upstream_proxy_config_from_form,
     },

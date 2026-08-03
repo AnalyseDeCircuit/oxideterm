@@ -1,6 +1,10 @@
 pub(super) enum SshSessionConnection {
     New(SshConfig),
-    Existing { connection_id: String },
+    Existing {
+        connection_id: String,
+        // The outer option distinguishes registry inheritance from explicit disablement.
+        x11_forwarding_override: Option<Option<X11ForwardPolicy>>,
+    },
     Dedicated {
         config: SshConfig,
         parent_connection_id: Option<String>,
@@ -38,6 +42,7 @@ impl SshSessionConfig {
         Self {
             connection: Some(SshSessionConnection::Existing {
                 connection_id: connection_id.into(),
+                x11_forwarding_override: None,
             }),
             host: host.into(),
             port,
@@ -100,6 +105,21 @@ impl SshSessionConfig {
     ) -> Self {
         self.registry = Some(registry);
         self.consumer = Some(consumer);
+        self
+    }
+
+    pub fn with_x11_forwarding_override(
+        mut self,
+        x11_forwarding: Option<X11ForwardPolicy>,
+    ) -> Self {
+        if let Some(SshSessionConnection::Existing {
+            x11_forwarding_override,
+            ..
+        }) = self.connection.as_mut()
+        {
+            // The outer option marks an explicit per-node choice, including disabled.
+            *x11_forwarding_override = Some(x11_forwarding);
+        }
         self
     }
 
@@ -199,7 +219,7 @@ fn normalize_post_connect_command(command: Option<&str>) -> Result<Option<Vec<u8
 #[cfg(test)]
 mod ssh_config_tests {
     use super::{SshSessionConfig, normalize_post_connect_command};
-    use oxideterm_ssh::SshConfig;
+    use oxideterm_ssh::{SshConfig, X11ForwardPolicy};
 
     #[test]
     fn post_connect_command_trims_and_adds_enter_like_tauri() {
@@ -251,12 +271,20 @@ mod ssh_config_tests {
 
     #[test]
     fn existing_connection_config_retains_only_safe_terminal_metadata() {
-        let config =
-            SshSessionConfig::for_existing_connection("connection-1", "host", 22, "alice");
+        let config = SshSessionConfig::for_existing_connection(
+            "connection-1",
+            "host",
+            22,
+            "alice",
+        )
+        .with_x11_forwarding_override(Some(X11ForwardPolicy::trusted()));
 
         assert!(matches!(
             config.connection.as_ref(),
-            Some(super::SshSessionConnection::Existing { .. })
+            Some(super::SshSessionConnection::Existing {
+                x11_forwarding_override: Some(Some(policy)),
+                ..
+            }) if *policy == X11ForwardPolicy::trusted()
         ));
         assert_eq!(config.host(), "host");
         assert_eq!(config.port(), 22);

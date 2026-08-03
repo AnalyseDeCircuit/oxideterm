@@ -5,7 +5,11 @@ const CHILD_CONNECTION_RETIRED_DURING_CONNECT: &str =
 
 enum ShellRequestConfig {
     Owned(SshConfig),
-    Registry(SshConnectionHandle),
+    Registry {
+        connection: SshConnectionHandle,
+        // None inherits the shared entry; Some(None) explicitly disables X11.
+        x11_forwarding_override: Option<Option<X11ForwardPolicy>>,
+    },
 }
 
 #[derive(Clone, Copy)]
@@ -15,10 +19,30 @@ enum ShellRegistryAcquisition {
 }
 
 impl ShellRequestConfig {
+    fn registry(
+        connection: SshConnectionHandle,
+        x11_forwarding_override: Option<Option<X11ForwardPolicy>>,
+    ) -> Self {
+        Self::Registry {
+            connection,
+            x11_forwarding_override,
+        }
+    }
+
     fn config(&self) -> &SshConfig {
         match self {
             Self::Owned(config) => config,
-            Self::Registry(connection) => connection.config(),
+            Self::Registry { connection, .. } => connection.config(),
+        }
+    }
+
+    fn x11_forwarding(&self) -> Option<X11ForwardPolicy> {
+        match self {
+            Self::Registry {
+                x11_forwarding_override: Some(x11_forwarding),
+                ..
+            } => *x11_forwarding,
+            Self::Owned(_) | Self::Registry { .. } => self.config().x11_forwarding,
         }
     }
 }
@@ -118,6 +142,29 @@ mod x11_request_response_tests {
         assert!(validate_x11_forwarding_response(Some(ChannelMsg::Failure)).is_err());
         assert!(validate_x11_forwarding_response(None).is_err());
     }
+
+    #[test]
+    fn per_shell_x11_override_does_not_mutate_the_shared_connection() {
+        let registry = SshConnectionRegistry::default();
+        let mut config = SshConfig::password("host", 22, "me", "pw");
+        let shared_policy = Some(X11ForwardPolicy::untrusted());
+        config.x11_forwarding = shared_policy;
+        let connection = registry.acquire(
+            config,
+            ConnectionConsumer::NodeRouter("node".to_string()),
+        );
+
+        let inherited = ShellRequestConfig::registry(connection.clone(), None);
+        let disabled = ShellRequestConfig::registry(connection.clone(), Some(None));
+        let overridden_policy = Some(X11ForwardPolicy::trusted());
+        let overridden =
+            ShellRequestConfig::registry(connection.clone(), Some(overridden_policy));
+
+        assert_eq!(inherited.x11_forwarding(), shared_policy);
+        assert_eq!(disabled.x11_forwarding(), None);
+        assert_eq!(overridden.x11_forwarding(), overridden_policy);
+        assert_eq!(connection.config().x11_forwarding, shared_policy);
+    }
 }
 
 async fn request_x11_forwarding_for_shell(
@@ -144,31 +191,13 @@ async fn request_x11_forwarding_for_shell(
     validate_x11_forwarding_response(response)
 }
 
-async fn open_interactive_shell_channel(
+async fn open_pty_channel(
     pooled: &Arc<PooledSshConnection>,
     cols: u32,
     rows: u32,
     pty_modes: &[(Pty, u32)],
-    agent_forwarding: bool,
-    x11_forwarding: Option<X11ForwardPolicy>,
-    x11_route_id: &str,
-    x11_connection_owner: Option<X11ConnectionOwner>,
-) -> Result<
-    (russh::Channel<client::Msg>, Option<X11ForwardRouteGuard>),
-    (&'static str, SshTransportError),
-> {
-    // Resolve device-local X11 state before allocating a remote session. A
-    // missing DISPLAY or xauth must not leave a PTY channel or Agent forwarding
-    // authorization behind on a reusable physical connection.
-    let prepared_x11 = match x11_forwarding {
-        Some(policy) => Some(
-            prepare_x11_material(policy)
-                .await
-                .map_err(|error| ("prepare-x11", error))?,
-        ),
-        None => None,
-    };
-    let mut channel = pooled
+) -> Result<russh::Channel<client::Msg>, (&'static str, SshTransportError)> {
+    let channel = pooled
         .target
         .channel_open_session()
         .await
@@ -190,6 +219,39 @@ async fn open_interactive_shell_channel(
         )
         .await
         .map_err(|error| ("request-pty", SshTransportError::Channel(error.to_string())))?;
+    Ok(channel)
+}
+
+async fn open_interactive_shell_channel(
+    pooled: &Arc<PooledSshConnection>,
+    cols: u32,
+    rows: u32,
+    pty_modes: &[(Pty, u32)],
+    agent_forwarding: bool,
+    x11_forwarding: Option<X11ForwardPolicy>,
+    x11_route_id: &str,
+    x11_connection_owner: Option<X11ConnectionOwner>,
+) -> Result<
+    (russh::Channel<client::Msg>, Option<X11ForwardRouteGuard>),
+    (&'static str, SshTransportError),
+> {
+    // Resolve device-local X11 state before allocating a remote session. X11 is
+    // optional, so local preparation failures must not block the regular shell.
+    let prepared_x11 = match x11_forwarding {
+        Some(policy) => match prepare_x11_material(policy).await {
+            Ok(prepared) => Some(prepared),
+            Err(_error) => {
+                // Keep this log fixed because preparation errors can contain
+                // device-local display or xauth details.
+                tracing::warn!(
+                    "X11 forwarding is unavailable; continuing with a regular SSH shell"
+                );
+                None
+            }
+        },
+        None => None,
+    };
+    let mut channel = open_pty_channel(pooled, cols, rows, pty_modes).await?;
     let mut x11_route_guard = None;
     if let Some(prepared) = prepared_x11 {
         let (request, guard) = register_x11_route(
@@ -198,11 +260,23 @@ async fn open_interactive_shell_channel(
             prepared,
             x11_connection_owner,
         );
-        if let Err(error) = request_x11_forwarding_for_shell(&mut channel, &request).await {
+        if request_x11_forwarding_for_shell(&mut channel, &request)
+            .await
+            .is_err()
+        {
+            // Remove the route and its bearer cookie before awaiting channel
+            // cleanup. A fresh PTY also isolates any delayed X11 reply from
+            // later Agent forwarding requests.
+            drop(request);
+            drop(guard);
+            tracing::warn!(
+                "X11 forwarding is unavailable; continuing with a regular SSH shell"
+            );
             let _ = channel.close().await;
-            return Err(("request-x11", error));
+            channel = open_pty_channel(pooled, cols, rows, pty_modes).await?;
+        } else {
+            x11_route_guard = Some(guard);
         }
-        x11_route_guard = Some(guard);
     }
     if agent_forwarding {
         if let Err(error) = request_agent_forwarding_for_shell(&mut channel).await {
@@ -362,7 +436,7 @@ impl SshTransportClient {
         };
 
         let result = Self::open_shell_from_pooled(
-            ShellRequestConfig::Registry(connection.clone()),
+            ShellRequestConfig::registry(connection.clone(), None),
             pooled,
             None,
             release_guard.release_tuple(),
@@ -431,7 +505,7 @@ impl SshTransportClient {
         let mut release_guard =
             RegistryConsumerGuard::new(registry.clone(), connection_id.clone(), consumer);
         let result = Self::open_shell_from_pooled(
-            ShellRequestConfig::Registry(connection.clone()),
+            ShellRequestConfig::registry(connection.clone(), None),
             pooled,
             None,
             release_guard.release_tuple(),
@@ -462,6 +536,45 @@ impl SshTransportClient {
         cols: u32,
         rows: u32,
     ) -> Result<SshPtyHandle, SshTransportError> {
+        Self::connect_shell_on_existing_connection_with_x11_override(
+            registry,
+            connection_id,
+            consumer,
+            cols,
+            rows,
+            None,
+        )
+        .await
+    }
+
+    /// Opens a new channel with the node's current non-secret X11 policy.
+    pub async fn connect_shell_on_existing_connection_with_x11_forwarding(
+        registry: SshConnectionRegistry,
+        connection_id: String,
+        consumer: ConnectionConsumer,
+        cols: u32,
+        rows: u32,
+        x11_forwarding: Option<X11ForwardPolicy>,
+    ) -> Result<SshPtyHandle, SshTransportError> {
+        Self::connect_shell_on_existing_connection_with_x11_override(
+            registry,
+            connection_id,
+            consumer,
+            cols,
+            rows,
+            Some(x11_forwarding),
+        )
+        .await
+    }
+
+    async fn connect_shell_on_existing_connection_with_x11_override(
+        registry: SshConnectionRegistry,
+        connection_id: String,
+        consumer: ConnectionConsumer,
+        cols: u32,
+        rows: u32,
+        x11_forwarding_override: Option<Option<X11ForwardPolicy>>,
+    ) -> Result<SshPtyHandle, SshTransportError> {
         let Some(connection) =
             registry.acquire_consumer_for_connection(&connection_id, consumer.clone())
         else {
@@ -490,7 +603,7 @@ impl SshTransportClient {
         // Existing terminals borrow only a new session channel. Authentication
         // remains owned by the node's physical connection.
         let result = Self::open_shell_from_pooled(
-            ShellRequestConfig::Registry(connection.clone()),
+            ShellRequestConfig::registry(connection.clone(), x11_forwarding_override),
             pooled,
             Some((cols, rows)),
             release_guard.release_tuple(),
@@ -1107,6 +1220,7 @@ impl SshTransportClient {
         // so a slow or hidden pane cannot accumulate tens of MiB per session.
         let (output_tx, output_rx) = ssh_output_channel();
         let task_session_id = session_id.clone();
+        let x11_forwarding = request_config.x11_forwarding();
         let shell_config = request_config.config();
         let (cols, rows) = dimensions.unwrap_or((shell_config.cols, shell_config.rows));
         let deferred_pty = cols == 0 || rows == 0;
@@ -1129,7 +1243,7 @@ impl SshTransportClient {
         // connection. Keep one explicit owner for the terminal task, while the
         // route holds only a weak reference to avoid a dispatcher cycle.
         let standalone_x11_owner = (registry_release.is_none()
-            && shell_config.x11_forwarding.is_some())
+            && x11_forwarding.is_some())
         .then(|| {
             let owner: Arc<dyn Send + Sync> = pooled.clone();
             owner
@@ -1159,7 +1273,7 @@ impl SshTransportClient {
                     initial_cols,
                     initial_rows,
                     shell_config.agent_forwarding,
-                    shell_config.x11_forwarding,
+                    x11_forwarding,
                     &session_id,
                     x11_connection_owner.clone(),
                 )
@@ -1232,7 +1346,7 @@ impl SshTransportClient {
                         pty_cols,
                         pty_rows,
                         shell_config.agent_forwarding,
-                        shell_config.x11_forwarding,
+                        x11_forwarding,
                         &task_session_id,
                         x11_connection_owner,
                     )

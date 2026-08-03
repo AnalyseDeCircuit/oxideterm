@@ -433,6 +433,84 @@ impl NodeRuntimeStore {
         self.nodes.contains_key(node_id)
     }
 
+    /// Reads only the non-secret X11 policy needed when opening a new shell.
+    pub fn x11_forwarding(
+        &self,
+        node_id: &NodeId,
+    ) -> Result<Option<X11ForwardPolicy>, RouteError> {
+        self.nodes
+            .get(node_id)
+            .map(|route| route.config.x11_forwarding)
+            .ok_or_else(|| RouteError::NodeNotFound(node_id.0.clone()))
+    }
+
+    /// Updates materialized targets without replacing their secret-bearing configs.
+    pub fn update_saved_connection_x11_forwarding(
+        &self,
+        saved_connection_id: &str,
+        x11_forwarding: Option<X11ForwardPolicy>,
+    ) -> usize {
+        let materialized_nodes = self
+            .nodes
+            .iter()
+            .filter_map(|entry| {
+                let route = entry.value();
+                match &route.origin {
+                    NodeOrigin::Restored {
+                        saved_connection_id: route_saved_connection_id,
+                    } if route_saved_connection_id == saved_connection_id => {
+                        Some((entry.key().clone(), None, route.children_ids.clone()))
+                    }
+                    NodeOrigin::ManualPreset {
+                        saved_connection_id: route_saved_connection_id,
+                        hop_index,
+                    } if route_saved_connection_id == saved_connection_id => Some((
+                        entry.key().clone(),
+                        Some(*hop_index),
+                        route.children_ids.clone(),
+                    )),
+                    NodeOrigin::Restored { .. }
+                    | NodeOrigin::ManualPreset { .. }
+                    | NodeOrigin::AutoRoute { .. }
+                    | NodeOrigin::DrillDown { .. }
+                    | NodeOrigin::Direct => None,
+                }
+            })
+            .collect::<Vec<_>>();
+        let manual_hop_indexes = materialized_nodes
+            .iter()
+            .filter_map(|(node_id, hop_index, _)| hop_index.map(|index| (node_id.clone(), index)))
+            .collect::<HashMap<_, _>>();
+        let target_node_ids = materialized_nodes
+            .into_iter()
+            .filter_map(|(node_id, hop_index, children_ids)| {
+                let is_target = hop_index.is_none_or(|index| {
+                    let next_hop_index = index.saturating_add(1);
+                    // Every hop and target share the same origin id. Only a
+                    // route without the next indexed child is a target.
+                    !children_ids.iter().any(|child_id| {
+                        manual_hop_indexes.get(child_id) == Some(&next_hop_index)
+                    })
+                });
+                is_target.then_some(node_id)
+            })
+            .collect::<Vec<_>>();
+
+        let mut updated = 0;
+        for node_id in target_node_ids {
+            let Some(mut route) = self.nodes.get_mut(&node_id) else {
+                continue;
+            };
+            if route.config.x11_forwarding == x11_forwarding {
+                continue;
+            }
+            route.config.x11_forwarding = x11_forwarding;
+            route.generation = route.generation.saturating_add(1);
+            updated += 1;
+        }
+        updated
+    }
+
     /// Returns the non-secret projection used by UI and plugin readers.
     pub fn metadata_snapshot(&self, node_id: &NodeId) -> Option<NodeMetadataSnapshot> {
         let route = self.nodes.get(node_id)?;

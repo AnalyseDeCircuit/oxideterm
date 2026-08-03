@@ -291,8 +291,10 @@ mod x11_dispatcher_tests {
     #[test]
     fn route_guard_controls_channel_admission() {
         let dispatcher = X11ForwardDispatcher::new();
+        let fake_cookie =
+            X11AuthCookie::from_hex("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa").unwrap();
         let auth = X11AuthMaterial::with_fake_cookie(
-            X11AuthCookie::from_hex("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa").unwrap(),
+            fake_cookie.clone(),
             X11AuthCookie::from_hex("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb").unwrap(),
         );
 
@@ -307,6 +309,14 @@ mod x11_dispatcher_tests {
         assert!(dispatcher.has_active_routes());
         drop(guard);
         assert!(!dispatcher.has_active_routes());
+        assert!(
+            dispatcher
+                .state
+                .lock()
+                .auth_registry
+                .resolve(X11AuthProtocol::MitMagicCookie1, &fake_cookie)
+                .is_none()
+        );
     }
 
     #[test]
