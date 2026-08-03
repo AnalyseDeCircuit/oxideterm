@@ -835,6 +835,8 @@
       "embedding_model": "嵌入模型",
       "remove_provider_confirm": "移除提供商 \"{{name}}\"？",
       "available_models": "可用模型",
+      "model_name_placeholder": "输入模型名称",
+      "add_model": "添加模型",
       "refresh_models": "刷新模型列表",
       "refresh_failed": "刷新模型失败：{{error}}",
       "show_all_models": "显示全部 {{count}} 个",

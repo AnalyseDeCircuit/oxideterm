@@ -835,6 +835,8 @@
       "embedding_model": "Mô hình nhúng",
       "remove_provider_confirm": "Xóa nhà cung cấp \"{{name}}\"?",
       "available_models": "Mô hình có sẵn",
+      "model_name_placeholder": "Nhập tên mô hình",
+      "add_model": "Thêm mô hình",
       "refresh_models": "Làm mới danh sách mô hình",
       "refresh_failed": "Làm mới mô hình thất bại: {{error}}",
       "show_all_models": "Hiện tất cả {{count}}",

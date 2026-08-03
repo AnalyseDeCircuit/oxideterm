@@ -136,6 +136,34 @@ pub fn select_provider_model(
     *active_model = Some(model);
 }
 
+pub fn add_provider_model(
+    providers: &mut [Value],
+    index: usize,
+    provider_id_value: &str,
+    model: &str,
+) -> bool {
+    let model = model.trim();
+    if model.is_empty()
+        || providers.get(index).and_then(provider_id).as_deref() != Some(provider_id_value)
+    {
+        return false;
+    }
+    let Some(models) = providers[index]
+        .get_mut("models")
+        .and_then(Value::as_array_mut)
+    else {
+        return false;
+    };
+    if models
+        .iter()
+        .any(|existing| existing.as_str() == Some(model))
+    {
+        return false;
+    }
+    models.push(Value::String(model.to_string()));
+    true
+}
+
 pub fn apply_provider_model_refresh(
     providers: &mut [Value],
     model_context_windows: &mut Map<String, Value>,

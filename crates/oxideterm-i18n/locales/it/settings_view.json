@@ -835,6 +835,8 @@
       "embedding_model": "Modello di embedding",
       "remove_provider_confirm": "Rimuovere il provider \"{{name}}\"?",
       "available_models": "Modelli disponibili",
+      "model_name_placeholder": "Inserisci il nome del modello",
+      "add_model": "Aggiungi modello",
       "refresh_models": "Aggiorna lista modelli",
       "refresh_failed": "Aggiornamento modelli non riuscito: {{error}}",
       "show_all_models": "Mostra tutti {{count}}",

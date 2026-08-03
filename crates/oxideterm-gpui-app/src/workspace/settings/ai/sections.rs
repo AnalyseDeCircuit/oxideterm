@@ -680,6 +680,7 @@ impl WorkspaceApp {
             + 112.0
             + 34.0
             + chip_rows as f32 * AI_PROVIDER_MODEL_CHIP_ROW_ESTIMATED_HEIGHT
+            + 48.0
             + key_input_height
             + 16.0
     }

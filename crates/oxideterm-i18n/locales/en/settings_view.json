@@ -835,6 +835,8 @@
       "embedding_model": "Embedding Model",
       "remove_provider_confirm": "Remove provider \"{{name}}\"?",
       "available_models": "Available Models",
+      "model_name_placeholder": "Enter a model name",
+      "add_model": "Add Model",
       "refresh_models": "Refresh Models",
       "refresh_failed": "Failed to refresh models: {{error}}",
       "show_all_models": "Show all {{count}}",

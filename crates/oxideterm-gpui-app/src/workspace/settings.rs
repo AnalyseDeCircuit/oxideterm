@@ -43,6 +43,7 @@ use super::{ai_state::AiSettingsViewSection, ime::WorkspaceImeTarget};
 use oxideterm_ai::{
     AI_PROVIDER_TEMPLATES, AiProviderKeyDisplayState, AiProviderView,
     add_provider_from_template as ai_add_provider_from_template,
+    add_provider_model as ai_add_provider_model,
     apply_provider_model_refresh as ai_apply_provider_model_refresh, generated_provider_id,
     provider_id as ai_provider_id, provider_key_display_state as ai_provider_key_display_state,
     provider_string as ai_provider_string,

@@ -835,6 +835,8 @@
       "embedding_model": "임베딩 모델",
       "remove_provider_confirm": "공급자 \"{{name}}\"을(를) 제거하시겠습니까?",
       "available_models": "사용 가능한 모델",
+      "model_name_placeholder": "모델 이름 입력",
+      "add_model": "모델 추가",
       "refresh_models": "모델 목록 새로고침",
       "refresh_failed": "모델 새로고침 실패: {{error}}",
       "show_all_models": "전체 {{count}}개 표시",

@@ -128,10 +128,10 @@ pub use runtime_context::{
 };
 pub use settings::{
     AiProviderKeyDisplayState, AiProviderRefreshKeyPolicy, add_provider_from_template,
-    apply_provider_model_refresh, model_max_response_tokens, provider_chat_requires_key,
-    provider_key_display_state, provider_refresh_key_policy, remove_provider_at,
-    remove_provider_at_with_scoped_settings, select_provider_model, set_active_provider_selection,
-    take_provider_key_secret,
+    add_provider_model, apply_provider_model_refresh, model_max_response_tokens,
+    provider_chat_requires_key, provider_key_display_state, provider_refresh_key_policy,
+    remove_provider_at, remove_provider_at_with_scoped_settings, select_provider_model,
+    set_active_provider_selection, take_provider_key_secret,
 };
 pub use slash::{
     AI_PARTICIPANTS, AI_REFERENCES, AI_SLASH_COMMANDS, AiAutocompleteCandidate, AiAutocompleteKind,

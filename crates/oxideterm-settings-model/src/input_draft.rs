@@ -160,6 +160,7 @@ pub fn persisted_settings_input_value(
             .get(index)
             .and_then(|provider| ai_provider_string(provider, "baseUrl"))
             .unwrap_or_default(),
+        SettingsInput::AiProviderNewModel(_) => String::new(),
         SettingsInput::AiProviderApiKey(_) => String::new(),
         SettingsInput::AiAcpAgentDisplayName(index) => settings
             .ai

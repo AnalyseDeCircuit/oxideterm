@@ -835,6 +835,8 @@
       "embedding_model": "エンベディングモデル",
       "remove_provider_confirm": "プロバイダー \"{{name}}\" を削除しますか？",
       "available_models": "利用可能なモデル",
+      "model_name_placeholder": "モデル名を入力",
+      "add_model": "モデルを追加",
       "refresh_models": "モデルリストを更新",
       "refresh_failed": "モデルの更新に失敗しました：{{error}}",
       "show_all_models": "全 {{count}} 件を表示",
