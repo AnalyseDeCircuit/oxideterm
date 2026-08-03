@@ -99,7 +99,7 @@ test('reads the product version only from the dedicated template section', () =>
   );
 });
 
-test('flags an unknown product version for review without blocking the issue', () => {
+test('blocks an issue that reports a version that was never released', () => {
   const report = gate.evaluateIssue({
     title: '停止录制后文件没有保存',
     body: bugBody({ version: '99.0.0' }),
@@ -107,12 +107,38 @@ test('flags an unknown product version for review without blocking the issue', (
     releasedVersions: ['2.0.5'],
   });
 
+  assert.deepEqual(report.reviewFindings, []);
+  assert.deepEqual(
+    report.blockingFindings.map((item) => item.code),
+    ['release_version_unverified']
+  );
+});
+
+test('accepts a real released version without blocking the issue', () => {
+  const report = gate.evaluateIssue({
+    title: '停止录制后文件没有保存',
+    body: bugBody({ version: '2.0.5' }),
+    labels: ['bug'],
+    releasedVersions: ['2.0.5', '2.0.4', '2.0.3'],
+  });
+
   assert.deepEqual(report.blockingFindings, []);
+  assert.deepEqual(report.reviewFindings, []);
+});
+
+test('keeps a fabricated future version out of the review labels', () => {
+  const report = gate.evaluateIssue({
+    title: '停止录制后文件没有保存',
+    body: bugBody({ version: '2.1.17' }),
+    labels: ['bug'],
+    releasedVersions: ['2.0.5'],
+  });
+
   assert.equal(
-    report.reviewFindings.some((item) => item.code === 'release_version_unverified'),
+    report.blockingFindings.some((item) => item.code === 'release_version_unverified'),
     true
   );
-  assert.deepEqual(gate.labelsForReviewFindings(report.reviewFindings), ['needs investigation']);
+  assert.deepEqual(gate.labelsForReviewFindings(report.reviewFindings), []);
 });
 
 test('keeps thin reproduction evidence as a non-blocking review finding', () => {

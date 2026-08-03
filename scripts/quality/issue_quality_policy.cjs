@@ -186,7 +186,10 @@ function evaluateIssue({ title, body, labels, releasedVersions = [] }) {
     && releasedVersions.length > 0
     && !releasedVersions.includes(submittedVersion)
   ) {
-    reviewFindings.push({ code: 'release_version_unverified', version: submittedVersion });
+    blockingFindings.push({
+      code: 'release_version_unverified',
+      version: submittedVersion,
+    });
   }
 
   if (containsHostileLanguage(title, body)) {
@@ -206,6 +209,8 @@ function blockingFindingText(finding) {
       return `- Complete the required section: **${finding.heading}**. / 请完整填写必填部分：**${finding.heading}**。`;
     case 'repeated_section_content':
       return '- Different template sections need distinct answers. / 模板中的不同部分需要分别填写。';
+    case 'release_version_unverified':
+      return `- The reported version **${finding.version}** does not match any released version. Please fill in the exact version from Settings → Help & About. / 所填版本 **${finding.version}** 不存在于任何已发布版本中，请填写 设置 → 帮助与关于 中的准确版本号。`;
     default:
       return '- Additional report details are required. / 需要补充报告信息。';
   }
@@ -259,8 +264,6 @@ function labelsForReviewFindings(findings) {
   for (const finding of findings) {
     if (finding.code === 'reproduction_evidence_thin') {
       labels.add('needs-reproduction-steps');
-    } else if (finding.code === 'release_version_unverified') {
-      labels.add('needs investigation');
     } else if (finding.code === 'communication_needs_review') {
       labels.add('toxic-communication');
     }
