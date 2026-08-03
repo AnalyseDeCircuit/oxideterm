@@ -3303,11 +3303,11 @@ impl WorkspaceApp {
                     .with_optional_target(target)
             }
             "connection_monitor" => {
-                self.open_connection_monitor_tab(window, cx);
+                self.open_context_sidebar_panel(ContextSidebarPanel::HostTools, cx);
                 snapshot
                     .ok(
-                        "Opened connection_monitor.",
-                        "Opened connection_monitor.",
+                        "Opened Host Tools.",
+                        "Opened Host Tools.",
                         serde_json::Value::Null,
                         "write",
                     )

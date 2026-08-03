@@ -127,7 +127,6 @@ pub(super) const HOST_PACKAGE_SNAPSHOT_TIMEOUT: Duration = Duration::from_secs(1
 pub(super) const HOST_PACKAGE_SNAPSHOT_MAX_OUTPUT_SIZE: usize = 512 * 1024;
 
 pub(super) const MONITOR_POOL_REFRESH_INTERVAL: Duration = Duration::from_millis(2000);
-pub(super) const MONITOR_SPARKLINE_POINTS: usize = 12;
 // The compact sidebar must stay on GPUI List scrolling; ordinary Div overflow
 // repaints too much of the Host Tools panel during trackpad scrolling.
 pub(super) const COMPACT_MONITOR_LIST_ESTIMATED_ROW_HEIGHT: f32 = 34.0;
@@ -144,13 +143,7 @@ pub(super) const COMPACT_MONITOR_STACKED_LAYOUT_MAX_WIDTH: f32 = 360.0;
 pub(super) const COMPACT_MONITOR_VALUE_MAX_WIDTH_RATIO: f32 = 0.58;
 pub(super) const COMPACT_MONITOR_DETAIL_VALUE_MAX_WIDTH_RATIO: f32 = 0.55;
 pub(super) const COMPACT_MONITOR_DETAIL_INDENT: f32 = 22.0;
-pub(super) const MONITOR_PAGE_PADDING: f32 = 32.0;
-pub(super) const MONITOR_SECTION_GAP: f32 = 32.0;
-pub(super) const MONITOR_SPARKLINE_HEIGHT: f32 = 28.0;
-pub(super) const MONITOR_SPARKLINE_STROKE_WIDTH: f32 = 1.5;
-pub(super) const MONITOR_SPARKLINE_STROKE_ALPHA: u32 = 0x99;
 pub(super) const MONITOR_BORDER_ALPHA: u32 = 0x80;
-pub(super) const MONITOR_SOURCE_ALPHA: u32 = 0x80;
 pub(super) const MONITOR_TINT_ALPHA: u32 = 0x1a;
 pub(super) const MONITOR_EMERALD: u32 = 0x34d399;
 pub(super) const MONITOR_EMERALD_DARK: u32 = 0x10b981;
@@ -840,7 +833,6 @@ impl HostTmuxState {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(in crate::workspace) enum ConnectionRuntimeSection {
     Overview,
-    Health,
     Topology,
 }
 

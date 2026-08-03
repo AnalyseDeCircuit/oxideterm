@@ -3,7 +3,7 @@ use super::*;
 fn is_host_tools_tab_kind(tab_kind: &TabKind) -> bool {
     matches!(
         tab_kind,
-        TabKind::ConnectionPool | TabKind::ConnectionMonitor | TabKind::Topology | TabKind::Runtime
+        TabKind::ConnectionPool | TabKind::Topology | TabKind::Runtime
     )
 }
 
@@ -80,9 +80,9 @@ impl HostToolsEntity {
         if force_pool_refresh || stale {
             self.refresh_pool_snapshot(cx);
         }
-        if !visibility.is_visible() {
-            // Hidden Host Tools stop page samplers only. The registry keeps
-            // shared nodes, SFTP sessions, and forwarding tasks alive.
+        if !visibility.sidebar_is_visible() {
+            // Runtime tabs only need pool and topology snapshots. Resource
+            // samplers belong to the mounted Host Tools sidebar.
             self.stop_profiler_sampling();
             self.pause_service_refreshes();
             return;
@@ -134,7 +134,7 @@ impl HostToolsEntity {
         let Some(connection_id) = self.ensure_selected_connection(&live_connection_ids, cx) else {
             return;
         };
-        if !self.visibility.is_visible() || sampling_config.is_empty() {
+        if !self.visibility.sidebar_is_visible() || sampling_config.is_empty() {
             self.stop_profiler_sampling();
             return;
         }
@@ -155,7 +155,7 @@ impl HostToolsEntity {
         self.monitoring = monitoring;
         self.sampling_config = sampling_config;
         self.lifecycle_runtime = Some(runtime.clone());
-        if sampling_config.is_empty() || !visibility.is_visible() {
+        if sampling_config.is_empty() || !visibility.sidebar_is_visible() {
             self.stop_profiler_sampling();
         } else {
             for connection_id in self.profiler_connection_ids() {
@@ -235,14 +235,6 @@ impl WorkspaceApp {
         };
         self.set_active_tab(tab_id, window, cx);
         self.sync_host_tools_lifecycle(true, cx);
-    }
-
-    pub(in crate::workspace) fn open_connection_monitor_tab(
-        &mut self,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        self.open_connection_runtime_tab(ConnectionRuntimeSection::Health, window, cx);
     }
 
     pub(in crate::workspace) fn open_connection_pool_tab(

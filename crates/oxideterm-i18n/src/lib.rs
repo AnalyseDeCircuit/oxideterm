@@ -768,7 +768,6 @@ mod tests {
             "sidebar.panels.no_connected_sessions",
             "sidebar.panels.import_tooltip",
             "sidebar.panels.export_tooltip",
-            "sidebar.panels.system_health",
             "sidebar.panels.gpu",
             "sidebar.panels.session_manager",
             "sidebar.panels.open_session_manager",

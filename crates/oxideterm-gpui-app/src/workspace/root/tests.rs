@@ -37,7 +37,6 @@ mod tests {
             TabKind::Graphics,
             TabKind::Runtime,
             TabKind::ConnectionPool,
-            TabKind::ConnectionMonitor,
             TabKind::Topology,
             TabKind::NotificationCenter,
             TabKind::Sftp,

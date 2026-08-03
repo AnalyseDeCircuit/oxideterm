@@ -1,6 +1,5 @@
 use super::*;
 
-use gpui::{PathBuilder, canvas, point};
 use oxideterm_topology::TopologyViewStatus;
 
 use crate::workspace::selectable_text::{SelectableTextRenderState, selectable_document_group_id};
@@ -166,10 +165,6 @@ pub(super) fn threshold_color(value: Option<f64>) -> u32 {
     monitor_value_level_color(percent_level(value), 0x94a3b8)
 }
 
-pub(super) fn rtt_color(value: Option<u64>) -> u32 {
-    monitor_value_level_color(rtt_level(value), 0x94a3b8)
-}
-
 pub(super) fn monitor_value_level_color(level: MonitorValueLevel, muted_color: u32) -> u32 {
     match level {
         MonitorValueLevel::Muted => muted_color,
@@ -177,70 +172,4 @@ pub(super) fn monitor_value_level_color(level: MonitorValueLevel, muted_color: u
         MonitorValueLevel::Warning => MONITOR_AMBER,
         MonitorValueLevel::Critical => MONITOR_RED,
     }
-}
-
-pub(super) fn render_sparkline(values: Vec<Option<f64>>, color: u32) -> AnyElement {
-    if values.iter().filter_map(|value| *value).count() < 2 {
-        return div().into_any_element();
-    }
-
-    div()
-        .h(px(MONITOR_SPARKLINE_HEIGHT))
-        .w_full()
-        .child(
-            canvas(
-                |_, _, _| {},
-                move |bounds, _, window, _| {
-                    let points = sparkline_polyline_points(
-                        &values,
-                        f32::from(bounds.size.width),
-                        f32::from(bounds.size.height),
-                    );
-                    if points.len() < 2 {
-                        return;
-                    }
-
-                    let mut builder = PathBuilder::stroke(px(MONITOR_SPARKLINE_STROKE_WIDTH));
-                    for (index, (x, y)) in points.into_iter().enumerate() {
-                        let point = point(bounds.origin.x + px(x), bounds.origin.y + px(y));
-                        if index == 0 {
-                            builder.move_to(point);
-                        } else {
-                            builder.line_to(point);
-                        }
-                    }
-                    if let Ok(path) = builder.build() {
-                        window
-                            .paint_path(path, rgba((color << 8) | MONITOR_SPARKLINE_STROKE_ALPHA));
-                    }
-                },
-            )
-            .size_full(),
-        )
-        .into_any_element()
-}
-
-pub(super) fn sparkline_polyline_points(
-    values: &[Option<f64>],
-    width: f32,
-    height: f32,
-) -> Vec<(f32, f32)> {
-    let valid = values.iter().filter_map(|value| *value).collect::<Vec<_>>();
-    if valid.len() < 2 {
-        return Vec::new();
-    }
-
-    let width = width.max(1.0);
-    let height = height.max(1.0);
-    let max = valid.iter().copied().fold(1.0_f64, f64::max);
-    let step = width / (valid.len().saturating_sub(1) as f32);
-    valid
-        .into_iter()
-        .enumerate()
-        .map(|(index, value)| {
-            let x = index as f32 * step;
-            let y = height - ((value / max) as f32 * height * 0.85) - height * 0.05;
-            (x, y)
-        })
-        .collect()
 }

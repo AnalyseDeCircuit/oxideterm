@@ -33,7 +33,6 @@ pub enum TabKind {
     Graphics,
     Runtime,
     ConnectionPool,
-    ConnectionMonitor,
     Topology,
     NotificationCenter,
     Sftp,

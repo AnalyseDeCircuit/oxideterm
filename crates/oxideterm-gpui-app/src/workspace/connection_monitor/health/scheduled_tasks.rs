@@ -1938,7 +1938,7 @@ impl HostToolsEntity {
         cx: &mut Context<Self>,
     ) {
         if !self.monitoring.schedules_enabled
-            || !self.visibility.is_visible()
+            || !self.visibility.sidebar_is_visible()
             || self.active_tool() != ContextSidebarTool::Schedules
         {
             return;

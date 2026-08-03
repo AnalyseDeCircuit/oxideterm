@@ -1694,7 +1694,7 @@ impl HostToolsEntity {
         cx: &mut Context<Self>,
     ) {
         if !self.monitoring.services_enabled
-            || !self.visibility.is_visible()
+            || !self.visibility.sidebar_is_visible()
             || self.active_tool() != ContextSidebarTool::Services
         {
             return;

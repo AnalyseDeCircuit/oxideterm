@@ -10,7 +10,6 @@ pub(in crate::workspace) fn tab_background_key(kind: &TabKind) -> &'static str {
         TabKind::Graphics => "graphics",
         TabKind::Runtime => "runtime",
         TabKind::ConnectionPool => "runtime",
-        TabKind::ConnectionMonitor => "connection_monitor",
         TabKind::Topology => "topology",
         TabKind::NotificationCenter => "notification_center",
         TabKind::Sftp => "sftp",

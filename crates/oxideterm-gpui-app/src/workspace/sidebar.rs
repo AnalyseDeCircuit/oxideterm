@@ -50,7 +50,6 @@ pub(super) enum SidebarSection {
     Forwards,
     Runtime,
     Terminal,
-    Activity,
     Network,
     Extensions,
     CloudSync,
@@ -114,8 +113,8 @@ impl SidebarSection {
             "forwards" => Self::Forwards,
             "runtime" => Self::Runtime,
             "connection_pool" | "terminal" => Self::Terminal,
-            "connection_monitor" => Self::Activity,
-            "activity" => Self::Activity,
+            // Retired health-page keys now restore the Host Tools replacement.
+            "connection_monitor" | "activity" => Self::HostTools,
             "network" | "topology" => Self::Network,
             "extensions" => Self::Extensions,
             "cloud_sync" => Self::CloudSync,
@@ -140,7 +139,6 @@ impl SidebarSection {
             Self::Forwards => "forwards",
             Self::Runtime => "runtime",
             Self::Terminal => "connection_pool",
-            Self::Activity => "activity",
             Self::Network => "topology",
             Self::Extensions => "extensions",
             Self::CloudSync => "cloud_sync",
@@ -169,7 +167,6 @@ impl WorkspaceApp {
             // Keep tab-only entries from replacing the Sessions sidebar body.
             SidebarSection::Terminal
             | SidebarSection::Runtime
-            | SidebarSection::Activity
             | SidebarSection::Network
             | SidebarSection::Assistant
             | SidebarSection::HostTools
@@ -217,7 +214,6 @@ mod sidebar_persistence_tests {
             SidebarSection::Forwards,
             SidebarSection::Runtime,
             SidebarSection::Terminal,
-            SidebarSection::Activity,
             SidebarSection::Network,
             SidebarSection::Extensions,
             SidebarSection::CloudSync,

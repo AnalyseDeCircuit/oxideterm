@@ -6,7 +6,6 @@ mod events;
 mod health;
 mod helpers;
 mod lifecycle;
-mod pool;
 mod runtime;
 #[cfg(test)]
 mod tests;

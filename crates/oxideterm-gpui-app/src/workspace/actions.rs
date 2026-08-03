@@ -594,25 +594,22 @@ impl WorkspaceApp {
             return;
         }
 
-        let connection_monitor_keys_visible = self
-            .active_tab(cx)
-            .is_some_and(|tab| tab.kind == TabKind::ConnectionMonitor)
-            || (self.context_sidebar_visible()
-                && self.active_context_sidebar_panel == ContextSidebarPanel::HostTools
-                && matches!(
-                    self.host_tools.read(cx).active_tool(),
-                    ContextSidebarTool::Monitor
-                        | ContextSidebarTool::Gpu
-                        | ContextSidebarTool::Processes
-                        | ContextSidebarTool::Services
-                        | ContextSidebarTool::Logs
-                        | ContextSidebarTool::Tmux
-                        | ContextSidebarTool::Docker
-                        | ContextSidebarTool::Ports
-                        | ContextSidebarTool::Schedules
-                        | ContextSidebarTool::Filesystems
-                        | ContextSidebarTool::Packages
-                ));
+        let connection_monitor_keys_visible = self.context_sidebar_visible()
+            && self.active_context_sidebar_panel == ContextSidebarPanel::HostTools
+            && matches!(
+                self.host_tools.read(cx).active_tool(),
+                ContextSidebarTool::Monitor
+                    | ContextSidebarTool::Gpu
+                    | ContextSidebarTool::Processes
+                    | ContextSidebarTool::Services
+                    | ContextSidebarTool::Logs
+                    | ContextSidebarTool::Tmux
+                    | ContextSidebarTool::Docker
+                    | ContextSidebarTool::Ports
+                    | ContextSidebarTool::Schedules
+                    | ContextSidebarTool::Filesystems
+                    | ContextSidebarTool::Packages
+            );
         if connection_monitor_keys_visible && self.handle_connection_monitor_select_key(event, cx) {
             return;
         }

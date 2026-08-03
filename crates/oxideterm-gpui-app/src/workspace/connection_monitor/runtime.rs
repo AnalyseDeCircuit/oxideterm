@@ -1,13 +1,12 @@
 use super::*;
 
 const RUNTIME_CONTENT_PADDING: f32 = 24.0;
-const RUNTIME_TAB_BAR_WIDTH: f32 = 480.0; // Three equal header tabs keep localized runtime labels readable.
+const RUNTIME_TAB_BAR_WIDTH: f32 = 320.0; // Two equal header tabs keep localized runtime labels readable.
 
 fn connection_runtime_section_index(section: ConnectionRuntimeSection) -> usize {
     match section {
         ConnectionRuntimeSection::Overview => 0,
-        ConnectionRuntimeSection::Health => 1,
-        ConnectionRuntimeSection::Topology => 2,
+        ConnectionRuntimeSection::Topology => 1,
     }
 }
 
@@ -21,7 +20,6 @@ impl WorkspaceApp {
         let active_section = self.host_tools.read(cx).active_runtime_section;
         let content = match active_section {
             ConnectionRuntimeSection::Overview => self.render_connection_runtime_overview(cx),
-            ConnectionRuntimeSection::Health => self.render_connection_runtime_health(cx),
             ConnectionRuntimeSection::Topology => self.render_connection_runtime_topology(cx),
         };
         let content = oxideterm_gpui_ui::motion::fade_in(
@@ -128,12 +126,6 @@ impl WorkspaceApp {
                 cx,
             ),
             self.render_connection_runtime_section_tab(
-                ConnectionRuntimeSection::Health,
-                "sidebar.panels.system_health",
-                LucideIcon::Activity,
-                cx,
-            ),
-            self.render_connection_runtime_section_tab(
                 ConnectionRuntimeSection::Topology,
                 "sidebar.panels.connection_matrix",
                 LucideIcon::Network,
@@ -148,7 +140,7 @@ impl WorkspaceApp {
             oxideterm_gpui_ui::SegmentedControlOptions::new(
                 active_index,
                 connection_runtime_section_index(host_tools.previous_runtime_section),
-                3,
+                2,
             )
             .user_transition_active(self.segmented_control_user_transition_active(
                 selection_motion::CONNECTION_RUNTIME_SWITCHER_ID,
@@ -392,21 +384,6 @@ impl WorkspaceApp {
                         theme.text_muted,
                         cx,
                     )),
-            )
-            .into_any_element()
-    }
-
-    fn render_connection_runtime_health(&mut self, cx: &mut Context<Self>) -> AnyElement {
-        div()
-            .id("connection-runtime-health")
-            .flex_1()
-            .min_h_0()
-            .overflow_y_scroll()
-            .child(
-                div()
-                    .w_full()
-                    .p(px(RUNTIME_CONTENT_PADDING))
-                    .child(self.render_system_health_panel(false, cx)),
             )
             .into_any_element()
     }

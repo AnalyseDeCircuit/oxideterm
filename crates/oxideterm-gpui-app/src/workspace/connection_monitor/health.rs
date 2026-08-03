@@ -9,10 +9,10 @@ use oxideterm_gpui_ui::text_input::{TextInputView, text_input, text_input_anchor
 use crate::workspace::selectable_text::{SelectableTextRenderState, selectable_document_group_id};
 
 const HOST_TOOLS_CONNECTION_ROW_HEIGHT: f32 = 32.0;
-const SYSTEM_HEALTH_SELECTOR_OPTION_HEIGHT: f32 = 36.0;
-const SYSTEM_HEALTH_SELECTOR_MENU_PADDING_Y: f32 = 8.0;
-const SYSTEM_HEALTH_SELECTOR_VISIBLE_OPTIONS: usize = 4;
-const SYSTEM_HEALTH_SELECTOR_GAP: f32 = 8.0;
+const HOST_TOOLS_SELECTOR_OPTION_HEIGHT: f32 = 36.0;
+const HOST_TOOLS_SELECTOR_MENU_PADDING_Y: f32 = 8.0;
+const HOST_TOOLS_SELECTOR_VISIBLE_OPTIONS: usize = 4;
+const HOST_TOOLS_SELECTOR_GAP: f32 = 8.0;
 const HOST_TOOLS_TAB_STRIP_HEIGHT: f32 = 48.0;
 const HOST_TOOLS_TAB_SCROLLBAR_HEIGHT: f32 = 3.0;
 const HOST_TOOLS_TAB_SCROLLBAR_BOTTOM_INSET: f32 = 5.0;
@@ -133,11 +133,10 @@ impl HostToolsEntity {
             let visible_options = connections
                 .len()
                 .max(1)
-                .min(SYSTEM_HEALTH_SELECTOR_VISIBLE_OPTIONS)
-                as f32;
-            SYSTEM_HEALTH_SELECTOR_MENU_PADDING_Y
-                + (visible_options * SYSTEM_HEALTH_SELECTOR_OPTION_HEIGHT)
-                + (SYSTEM_HEALTH_SELECTOR_GAP * 2.0)
+                .min(HOST_TOOLS_SELECTOR_VISIBLE_OPTIONS) as f32;
+            HOST_TOOLS_SELECTOR_MENU_PADDING_Y
+                + (visible_options * HOST_TOOLS_SELECTOR_OPTION_HEIGHT)
+                + (HOST_TOOLS_SELECTOR_GAP * 2.0)
         } else {
             0.0
         };
@@ -214,14 +213,14 @@ impl HostToolsEntity {
                 div()
                     .absolute()
                     .top(px(
-                        HOST_TOOLS_CONNECTION_ROW_HEIGHT + SYSTEM_HEALTH_SELECTOR_GAP
+                        HOST_TOOLS_CONNECTION_ROW_HEIGHT + HOST_TOOLS_SELECTOR_GAP
                     ))
                     .left_0()
                     .right_0()
                     .overflow_hidden()
-                    .max_h(px(SYSTEM_HEALTH_SELECTOR_MENU_PADDING_Y
-                        + (SYSTEM_HEALTH_SELECTOR_VISIBLE_OPTIONS as f32
-                            * SYSTEM_HEALTH_SELECTOR_OPTION_HEIGHT)))
+                    .max_h(px(HOST_TOOLS_SELECTOR_MENU_PADDING_Y
+                        + (HOST_TOOLS_SELECTOR_VISIBLE_OPTIONS as f32
+                            * HOST_TOOLS_SELECTOR_OPTION_HEIGHT)))
                     .rounded(px(tokens.radii.md))
                     .border_1()
                     .border_color(rgb(tokens.ui.border))
@@ -322,7 +321,6 @@ mod gpu;
 mod logs;
 #[path = "health/monitor.rs"]
 mod monitor;
-pub(in crate::workspace::connection_monitor) use monitor::MonitorRenderContext;
 #[path = "health/packages.rs"]
 mod packages;
 #[path = "health/ports.rs"]
@@ -462,7 +460,7 @@ impl WorkspaceApp {
 
     fn render_host_tools_monitor_panel(&mut self, cx: &mut Context<Self>) -> AnyElement {
         div()
-            .id("system-health-context-panel")
+            .id("host-tools-monitor-context-panel")
             .w_full()
             .min_w_0()
             .flex_1()
@@ -479,8 +477,8 @@ impl WorkspaceApp {
                     .px_3()
                     .py_3()
                     // Host Tools owns the secondary navigation; monitoring
-                    // keeps the existing health panel behavior inside it.
-                    .child(self.render_system_health_panel(true, cx)),
+                    // keeps monitor navigation and sampling inside it.
+                    .child(self.render_host_monitor_panel(cx)),
             )
             .into_any_element()
     }

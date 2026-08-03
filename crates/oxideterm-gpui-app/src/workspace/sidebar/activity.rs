@@ -208,9 +208,6 @@ impl WorkspaceApp {
             SidebarSection::Runtime => self
                 .active_tab(cx)
                 .is_some_and(|tab| tab.kind == TabKind::Runtime),
-            SidebarSection::Activity => self
-                .active_tab(cx)
-                .is_some_and(|tab| tab.kind == TabKind::ConnectionMonitor),
             SidebarSection::Network => {
                 self.active_tab(cx)
                     .is_some_and(|tab| tab.kind == TabKind::Runtime)
@@ -377,8 +374,6 @@ impl WorkspaceApp {
                             window,
                             cx,
                         );
-                    } else if section == SidebarSection::Activity {
-                        this.open_connection_monitor_tab(window, cx);
                     } else if section == SidebarSection::Network {
                         this.open_topology_tab(window, cx);
                     } else if section == SidebarSection::Workspace {
@@ -422,7 +417,6 @@ impl WorkspaceApp {
             SidebarSection::Forwards => self.i18n.t("forwards.table.title"),
             SidebarSection::Terminal => self.i18n.t("sidebar.panels.runtime_overview"),
             SidebarSection::Runtime => self.i18n.t("sidebar.panels.runtime"),
-            SidebarSection::Activity => self.i18n.t("sidebar.panels.connection_monitor"),
             SidebarSection::Network => self.i18n.t("sidebar.panels.connection_matrix"),
             SidebarSection::Extensions => self.i18n.t("sidebar.panels.plugins"),
             SidebarSection::CloudSync => self.i18n.t("plugin.cloud_sync.panel_title"),

@@ -2017,7 +2017,7 @@ impl HostToolsEntity {
         cx: &mut Context<Self>,
     ) {
         if !self.monitoring.tmux_enabled
-            || !self.visibility.is_visible()
+            || !self.visibility.sidebar_is_visible()
             || self.active_tool() != ContextSidebarTool::Tmux
         {
             return;

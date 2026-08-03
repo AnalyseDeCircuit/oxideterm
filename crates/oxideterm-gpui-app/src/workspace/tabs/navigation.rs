@@ -209,9 +209,6 @@ impl WorkspaceApp {
             Some(TabKind::ConnectionPool) => {
                 self.active_surface = ActiveSurface::Terminal;
             }
-            Some(TabKind::ConnectionMonitor) => {
-                self.active_surface = ActiveSurface::Terminal;
-            }
             Some(TabKind::Topology) => {
                 self.active_surface = ActiveSurface::Terminal;
             }

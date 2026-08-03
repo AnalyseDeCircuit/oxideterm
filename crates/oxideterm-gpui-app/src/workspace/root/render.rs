@@ -154,7 +154,6 @@ impl WorkspaceApp {
                         | TabKind::Graphics
                         | TabKind::Runtime
                         | TabKind::ConnectionPool
-                        | TabKind::ConnectionMonitor
                         | TabKind::Topology
                         | TabKind::NotificationCenter
                         | TabKind::PluginManager
@@ -189,7 +188,6 @@ impl WorkspaceApp {
                     });
                     self.render_connection_runtime_surface(cx)
                 }
-                (TabKind::ConnectionMonitor, _) => self.render_connection_monitor_surface(cx),
                 (TabKind::Topology, _) => self.render_topology_surface(cx),
                 (TabKind::NotificationCenter, _) => self.render_notification_center_surface(cx),
                 (TabKind::Sftp, _) => self.render_sftp_surface(window, cx),

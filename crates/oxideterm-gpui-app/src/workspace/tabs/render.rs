@@ -14,7 +14,6 @@ fn tab_kind_icon(
         TabKind::FileManager => LucideIcon::FolderOpen,
         TabKind::Launcher | TabKind::Graphics | TabKind::RemoteDesktop => LucideIcon::Monitor,
         TabKind::Runtime | TabKind::ConnectionPool => LucideIcon::Gauge,
-        TabKind::ConnectionMonitor => LucideIcon::Activity,
         TabKind::Topology => LucideIcon::Network,
         TabKind::NotificationCenter => LucideIcon::Bell,
         TabKind::Sftp => LucideIcon::FolderInput,

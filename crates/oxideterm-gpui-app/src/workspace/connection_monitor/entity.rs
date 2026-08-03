@@ -67,7 +67,6 @@ pub(in crate::workspace) struct HostToolsEntity {
     pool_stats: Option<ConnectionPoolMonitorStats>,
     pool_summaries: Vec<ConnectionPoolEntrySummary>,
     topology_snapshot: Option<ConnectionTopologySnapshot>,
-    pool_error: Option<String>,
     last_pool_refresh: Option<Instant>,
     // Topology interactions belong to the shared Host Tools surface, not to
     // the workspace window that happens to render the graph.
@@ -76,8 +75,6 @@ pub(in crate::workspace) struct HostToolsEntity {
     pub(super) topology_menu: Option<TopologyNodeMenuState>,
     compact_monitor_list_state: ListState,
     compact_monitor_list_cache: RefCell<VirtualListSignatureCache>,
-    pub(in crate::workspace) section_list_state: ListState,
-    pub(in crate::workspace) section_list_cache: RefCell<VirtualListSignatureCache>,
 }
 
 impl HostToolsEntity {
@@ -375,8 +372,8 @@ impl HostToolsEntity {
         };
         match resource {
             "overview" | "processes" | "docker" => {
-                if !self.visibility.is_visible() {
-                    // The profiler is page-scoped and must not become a hidden sampler.
+                if !self.visibility.sidebar_is_visible() {
+                    // Resource snapshots are scoped to the mounted Host Tools sidebar.
                     return false;
                 }
                 self.start_profiler(connection_id, self.sampling_config, runtime, cx);
@@ -565,7 +562,6 @@ impl HostToolsEntity {
             pool_stats: None,
             pool_summaries: Vec::new(),
             topology_snapshot: None,
-            pool_error: None,
             last_pool_refresh: None,
             topology_transform: TopologyTransform::default(),
             topology_drag: None,
@@ -579,19 +575,6 @@ impl HostToolsEntity {
                 ),
             ),
             compact_monitor_list_cache: RefCell::new(VirtualListSignatureCache::default()),
-            // Monitor pages have variable-height browser sections and retain one
-            // ListState owner across the main tab and detached-window surfaces.
-            section_list_state: ListState::new(
-                CONNECTION_MONITOR_SECTION_LIST_ITEM_COUNT,
-                ListAlignment::Top,
-                TauriVirtualListSpec::new(
-                    px(CONNECTION_MONITOR_SECTION_LIST_ESTIMATED_HEIGHT),
-                    CONNECTION_MONITOR_SECTION_LIST_OVERSCAN,
-                )
-                .overdraw(),
-            )
-            .measure_all(),
-            section_list_cache: RefCell::new(VirtualListSignatureCache::default()),
         };
         entity.schedule_sampler_delivery(
             super::delivery::HostToolsDeliveryBridges {
@@ -644,7 +627,6 @@ impl HostToolsEntity {
         self.pool_stats = Some(self.ssh_registry.monitor_stats());
         self.pool_summaries = self.ssh_registry.list_connection_summaries();
         self.topology_snapshot = Some(self.ssh_registry.connection_topology_snapshot());
-        self.pool_error = None;
         self.last_pool_refresh = Some(Instant::now());
         cx.notify();
     }
@@ -658,10 +640,7 @@ impl HostToolsEntity {
         self.pool_stats.clone()
     }
 
-    pub(super) fn pool_error(&self) -> Option<&str> {
-        self.pool_error.as_deref()
-    }
-
+    #[cfg(test)]
     pub(super) fn pool_summary_count(&self) -> usize {
         self.pool_summaries.len()
     }
@@ -1140,7 +1119,7 @@ impl HostToolsEntity {
         connection_id: String,
         cx: &mut Context<Self>,
     ) {
-        if !self.visibility.is_visible() || self.sampling_config.is_empty() {
+        if !self.visibility.sidebar_is_visible() || self.sampling_config.is_empty() {
             return;
         }
         let Some(runtime) = self.lifecycle_runtime.clone() else {
