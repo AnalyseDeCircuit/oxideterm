@@ -1,5 +1,13 @@
 use super::*;
 
+// Keep the chip viewport at its full row height before adding spacing below it.
+const AI_PROVIDER_MODEL_CHIP_LIST_BOTTOM_PADDING: f32 = 16.0;
+
+fn ai_provider_model_chip_list_height(row_count: usize) -> f32 {
+    row_count as f32 * AI_PROVIDER_MODEL_CHIP_ROW_ESTIMATED_HEIGHT
+        + AI_PROVIDER_MODEL_CHIP_LIST_BOTTOM_PADDING
+}
+
 impl WorkspaceApp {
     pub(in crate::workspace) fn ai_provider_models(
         &self,
@@ -101,13 +109,13 @@ impl WorkspaceApp {
             let provider_index = index;
             let row_count = chip_rows.len();
             let hidden_count_for_rows = hidden_count;
-            let list_height = row_count as f32 * AI_PROVIDER_MODEL_CHIP_ROW_ESTIMATED_HEIGHT;
+            let list_height = ai_provider_model_chip_list_height(row_count);
             body = body.child(
                 div()
                     .w_full()
                     .min_w(px(0.0))
                     .px(px(16.0))
-                    .pb(px(16.0))
+                    .pb(px(AI_PROVIDER_MODEL_CHIP_LIST_BOTTOM_PADDING))
                     .h(px(list_height))
                     .child(tauri_virtual_list(
                         state,
@@ -351,5 +359,21 @@ impl WorkspaceApp {
 
     pub(in crate::workspace) fn ai_provider_has_key(&self, provider_id: &str, cx: &App) -> bool {
         self.ai_provider_has_key_cached(provider_id, cx)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn model_chip_list_height_keeps_bottom_padding_outside_the_viewport() {
+        let row_count = 2;
+        let container_height = ai_provider_model_chip_list_height(row_count);
+
+        assert_eq!(
+            container_height - AI_PROVIDER_MODEL_CHIP_LIST_BOTTOM_PADDING,
+            row_count as f32 * AI_PROVIDER_MODEL_CHIP_ROW_ESTIMATED_HEIGHT
+        );
     }
 }
