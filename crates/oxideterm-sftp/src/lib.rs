@@ -62,6 +62,6 @@ pub use transfer_manager::{
     SftpTransferShutdownReport, SftpTransferStats,
 };
 pub use types::{
-    AssetFileKind, FileInfo, FileType, ListFilter, PreviewContent, SortOrder, TransferDirection,
-    TransferProgress, TransferState, encode_to_encoding,
+    AssetFileKind, FileInfo, FileType, ListFilter, LocalDownloadDisposition, PreviewContent,
+    SortOrder, TransferDirection, TransferProgress, TransferState, encode_to_encoding,
 };

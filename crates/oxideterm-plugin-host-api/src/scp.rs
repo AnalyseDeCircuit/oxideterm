@@ -6,9 +6,9 @@ use std::{path::Path, sync::Arc, sync::mpsc};
 use oxideterm_plugin_protocol as plugin_runtime;
 use oxideterm_sftp::{
     BackgroundTransferDirection, BackgroundTransferKind, BackgroundTransferSnapshot,
-    BackgroundTransferState, SftpTransferGuard, SftpTransferManager, TransferProgress,
-    TransferProtocol, TransferStrategy, scp_download_directory, scp_download_file,
-    scp_upload_directory, scp_upload_file,
+    BackgroundTransferState, LocalDownloadDisposition, SftpTransferGuard, SftpTransferManager,
+    TransferProgress, TransferProtocol, TransferStrategy, scp_download_directory,
+    scp_download_file, scp_upload_directory, scp_upload_file,
 };
 use oxideterm_ssh::{NodeId, NodeRouter};
 use serde_json::{Value, json};
@@ -196,6 +196,7 @@ async fn native_plugin_scp_result(
                 &resolved.handle,
                 &remote_path,
                 &local_path,
+                LocalDownloadDisposition::CreateNew,
                 &transfer_id,
                 Some(progress_tx),
                 Some(manager.clone()),

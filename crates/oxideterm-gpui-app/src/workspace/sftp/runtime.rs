@@ -126,7 +126,7 @@ impl SftpWorkspaceEntity {
             .local_path_by_node
             .get(&node_id)
             .cloned()
-            .unwrap_or_else(home_path);
+            .unwrap_or_else(default_download_path);
         self.apply_local_path(local_path);
 
         let remembered_remote = self

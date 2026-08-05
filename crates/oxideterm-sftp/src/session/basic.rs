@@ -83,6 +83,9 @@ impl SftpSession {
             if name == "." || name == ".." {
                 continue;
             }
+            // SFTP names are single components; rejecting separators keeps recursive
+            // downloads contained beneath their selected local destination.
+            validate_remote_entry_name(&name)?;
             if filter.as_ref().is_some_and(|f| !f.show_hidden) && name.starts_with('.') {
                 continue;
             }

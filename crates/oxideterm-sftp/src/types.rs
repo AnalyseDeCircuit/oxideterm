@@ -87,6 +87,17 @@ pub enum TransferDirection {
     Download,
 }
 
+/// Controls whether a local download target may replace an existing filesystem entry.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LocalDownloadDisposition {
+    /// Create a new file and fail if the target already exists.
+    CreateNew,
+    /// Replace a target only after the caller received an explicit overwrite decision.
+    ReplaceExisting,
+    /// Resume a partial file only after its persisted transfer record is verified.
+    ResumeVerified,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum TransferState {

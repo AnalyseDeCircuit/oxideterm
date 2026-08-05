@@ -195,14 +195,21 @@ impl WorkspaceApp {
         listener: impl Fn(&MouseDownEvent, &mut Window, &mut App) + 'static,
     ) -> AnyElement {
         let theme = self.tokens.ui;
-        // Mirrors the Tauri Button variants used by SFTP dialogs:
-        // default = bg-theme-text, secondary = bg-theme-bg-panel, ghost = no border.
+        // Mirrors the Tauri Button variants used by SFTP dialogs and keeps
+        // irreversible conflict actions visually distinct from the safe default.
         let (bg, border, text, hover_bg, hover_opacity) = match variant {
             SftpButtonVariant::Default => (
                 rgb(theme.text),
                 rgba((theme.text << 8) | SFTP_BUTTON_TRANSPARENT_ALPHA),
                 rgb(theme.bg),
                 rgb(theme.text),
+                Some(0.9),
+            ),
+            SftpButtonVariant::Destructive => (
+                rgba((theme.error << 8) | SFTP_DESTRUCTIVE_BG_ALPHA),
+                rgba((theme.error << 8) | SFTP_DESTRUCTIVE_BORDER_ALPHA),
+                rgb(SFTP_DESTRUCTIVE_TEXT),
+                rgb(theme.error),
                 Some(0.9),
             ),
             SftpButtonVariant::Secondary => (

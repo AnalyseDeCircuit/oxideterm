@@ -9,6 +9,7 @@ struct SftpTransferLaunch {
     is_directory: bool,
     local_path: String,
     remote_path: String,
+    download_disposition: LocalDownloadDisposition,
     protocol_override: Option<RemoteTransferProtocol>,
 }
 
@@ -215,6 +216,12 @@ impl SftpWorkspaceEntity {
                 SftpTransferDirection::Download => transfer.source.path,
             };
             let protocol = transfer.protocol_override.unwrap_or(configured_protocol);
+            let resolution = resolved_actions.get(&transfer.name).copied();
+            let download_disposition = if resolution == Some(SftpConflictResolution::Overwrite) {
+                LocalDownloadDisposition::ReplaceExisting
+            } else {
+                LocalDownloadDisposition::CreateNew
+            };
             self.transfers.push(SftpTransferItem {
                 id,
                 transfer_id: transfer_id.clone(),
@@ -243,6 +250,7 @@ impl SftpWorkspaceEntity {
                 is_directory,
                 local_path,
                 remote_path,
+                download_disposition,
                 protocol_override: transfer.protocol_override,
             });
         }
@@ -586,6 +594,7 @@ impl WorkspaceApp {
                 launch.local_path,
                 launch.remote_path,
                 None,
+                launch.download_disposition,
                 launch.protocol_override,
                 cx,
             );

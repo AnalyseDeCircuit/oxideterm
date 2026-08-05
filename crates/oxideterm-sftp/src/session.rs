@@ -25,16 +25,20 @@ use tracing::{debug, info, warn};
 
 use super::{
     error::SftpError,
-    path_utils::{is_absolute_remote_path, join_local_path, join_remote_path},
+    path_utils::{
+        is_absolute_remote_path, join_local_path, join_remote_path, validate_remote_entry_name,
+    },
     types::{
-        AdaptiveChunkSizer, AssetFileKind, FileInfo, FileType, ListFilter, PreviewContent,
-        SortOrder, TransferDirection, TransferProgress, TransferState, constants,
-        detect_and_decode, extension_to_language, font_mime_type, generate_hex_dump,
-        is_font_extension, is_likely_text_content, is_office_extension, is_text_extension,
+        AdaptiveChunkSizer, AssetFileKind, FileInfo, FileType, ListFilter,
+        LocalDownloadDisposition, PreviewContent, SortOrder, TransferDirection, TransferProgress,
+        TransferState, constants, detect_and_decode, extension_to_language, font_mime_type,
+        generate_hex_dump, is_font_extension, is_likely_text_content, is_office_extension,
+        is_text_extension,
     },
 };
 use crate::{
-    ProgressStore, SftpTransferGuard, SftpTransferManager, StoredTransferProgress, TransferType,
+    ProgressStore, SftpTransferGuard, SftpTransferManager, StoredTransferProgress,
+    TransferProtocol, TransferStrategy, TransferType,
 };
 
 const SFTP_DOWNLOAD_MAX_REQUESTS: usize = 64;

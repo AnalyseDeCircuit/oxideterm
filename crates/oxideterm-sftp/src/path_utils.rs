@@ -3,6 +3,8 @@
 
 use std::{collections::HashSet, path::PathBuf};
 
+use crate::SftpError;
+
 pub fn is_absolute_remote_path(path: &str) -> bool {
     if path.starts_with('/') {
         return true;
@@ -20,6 +22,19 @@ pub fn join_local_path(base: &str, component: &str) -> String {
     let mut path = PathBuf::from(base);
     path.push(component);
     path.to_string_lossy().to_string()
+}
+
+pub(crate) fn validate_remote_entry_name(name: &str) -> Result<(), SftpError> {
+    if name.is_empty()
+        || name == "."
+        || name == ".."
+        || name.contains(['/', '\\', '\n', '\r', '\0'])
+    {
+        return Err(SftpError::ProtocolError(
+            "SFTP directory entry is not a safe path component".to_string(),
+        ));
+    }
+    Ok(())
 }
 
 pub fn join_remote_path(base: &str, component: &str) -> String {
@@ -120,6 +135,15 @@ mod tests {
         assert_eq!(join_remote_path("/home", "file.txt"), "/home/file.txt");
         assert_eq!(join_remote_path("/home/", "file.txt"), "/home/file.txt");
         assert_eq!(join_remote_path("/", "home"), "/home");
+    }
+
+    #[test]
+    fn rejects_remote_entry_names_that_can_escape_a_local_download_root() {
+        assert!(validate_remote_entry_name("notes.txt").is_ok());
+        assert!(validate_remote_entry_name("../notes.txt").is_err());
+        assert!(validate_remote_entry_name("folder/notes.txt").is_err());
+        assert!(validate_remote_entry_name(r"folder\notes.txt").is_err());
+        assert!(validate_remote_entry_name("..").is_err());
     }
 
     #[test]

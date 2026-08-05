@@ -356,7 +356,7 @@ impl WorkspaceApp {
                 self.clear_sftp_selection(pane, cx);
             }
             SftpDialog::Conflict => {
-                self.resolve_sftp_transfer_conflict(SftpConflictResolution::Overwrite, cx);
+                self.resolve_sftp_transfer_conflict(SftpConflictResolution::Rename, cx);
                 return;
             }
             _ => {}

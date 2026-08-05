@@ -28,8 +28,9 @@ pub use operations::{
     copy_recursively, copy_recursively_with_progress, local_operation_unit_count,
 };
 pub use paths::{
-    home_path, join_local_path, local_parent_path, local_path_segments, local_sidebar_locations,
-    normalize_local_path, unique_copy_path, validate_local_name, would_move_directory_into_itself,
+    default_download_path, home_path, join_local_path, local_parent_path, local_path_segments,
+    local_sidebar_locations, normalize_local_path, unique_copy_path, validate_local_name,
+    would_move_directory_into_itself,
 };
 pub use preview::{
     MAX_PREVIEW_SIZE, STREAM_PREVIEW_THRESHOLD, local_file_extension, local_preview_metadata,

@@ -31,9 +31,9 @@ use oxideterm_sftp::TransferConflict as SftpConflictInfo;
 use oxideterm_sftp::{
     AssetFileKind, BackgroundTransferDirection, BackgroundTransferKind, BackgroundTransferSnapshot,
     BackgroundTransferState, FileInfo as RemoteFileInfo, FileType as RemoteFileType,
-    ListFilter as RemoteListFilter, PreviewContent, SftpError, SftpSession, SftpTransferGuard,
-    SortOrder as RemoteSortOrder, StoredTransferProgress, TarCapabilities,
-    TransferDirection as SftpTransferDirection, TransferProgress,
+    ListFilter as RemoteListFilter, LocalDownloadDisposition, PreviewContent, SftpError,
+    SftpSession, SftpTransferGuard, SortOrder as RemoteSortOrder, StoredTransferProgress,
+    TarCapabilities, TransferDirection as SftpTransferDirection, TransferProgress,
     TransferProtocol as RemoteTransferProtocol, TransferStrategy as RemoteTransferStrategy,
     TransferType as RemoteTransferType, encode_to_encoding, scp_download_directory,
     scp_download_file, scp_upload_directory, scp_upload_file, tar_download_directory,
@@ -119,11 +119,14 @@ const SFTP_GREEN: u32 = 0x22c55e; // Tauri text-green-500
 const SFTP_YELLOW: u32 = 0xeab308; // Tauri text-yellow-500
 const SFTP_ORANGE: u32 = 0xfb923c; // Tauri text-orange-400
 const SFTP_RED: u32 = 0xf87171; // Tauri text-red-400
+const SFTP_DESTRUCTIVE_TEXT: u32 = 0xffffff;
 const SFTP_CONTEXT_MENU_WIDTH: f32 = 180.0; // Tauri min-w-[180px]
 const SFTP_CONTEXT_MENU_MAX_HEIGHT: f32 = 288.0; // 8 items + separators, clamped like fixed portal menu
 const SFTP_CONTEXT_MENU_PADDING: f32 = 4.0; // Tauri py-1
 const SFTP_CONTEXT_MENU_ITEM_HEIGHT: f32 = 30.0; // Tauri px-3 py-1.5 text-xs
 const SFTP_BUTTON_TRANSPARENT_ALPHA: u32 = 0x00; // Tauri Button border-transparent/bg-transparent
+const SFTP_DESTRUCTIVE_BG_ALPHA: u32 = 0xe6;
+const SFTP_DESTRUCTIVE_BORDER_ALPHA: u32 = 0xcc;
 const SFTP_DIALOG_SHADOW_ALPHA: u32 = 0x40; // Tauri shadow-lg-ish overlay shadow
 const SFTP_DIALOG_BORDER_SUBTLE_ALPHA: u32 = 0x99; // Tauri border-theme-border/60
 const SFTP_DIALOG_BORDER_HALF_ALPHA: u32 = 0x80; // Tauri border-theme-border/50
@@ -211,6 +214,7 @@ enum SftpFileType {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum SftpButtonVariant {
     Default,
+    Destructive,
     Secondary,
     Ghost,
 }
@@ -859,7 +863,7 @@ pub(super) struct SftpWorkspaceEntity {
 
 impl Default for SftpWorkspaceEntity {
     fn default() -> Self {
-        let local_path = home_path();
+        let local_path = default_download_path();
         let remote_path = String::new();
         let (worker_tx, worker_rx) = delivery::ActiveDeliverySender::channel();
         Self {
@@ -1539,16 +1543,16 @@ mod transfers;
 // Re-export only the cross-module helpers needed by the SFTP facade and its children.
 pub(in crate::workspace::sftp) use actions::{SftpTransferLaunch, sftp_extract_archive_kind};
 use helpers::{
-    diff_cell, format_conflict_modified, format_file_size, format_modified, format_sftp_media_time,
-    format_transfer_speed, home_path, is_sftp_incomplete_store_compat_error, join_local_path,
-    join_sftp_path, list_local_files, load_remote_sftp_completion_listing,
-    load_remote_sftp_listing, load_remote_sftp_preview, load_remote_sftp_preview_hex, local_drives,
-    new_sftp_transfer_id, normalize_external_dropped_path, normalize_remote_path, parent_path,
-    preview_content_text, refreshed_local_files, remote_directory_prefixes,
-    save_remote_sftp_preview, sftp_bg, sftp_border, sftp_card_surface,
-    sftp_conflict_resolution_from_settings, sftp_diff_visual_lines, sftp_editor_language,
-    sftp_editor_language_id, sftp_file_name, sftp_hover_bg, sftp_panel_bg, sftp_path_segments,
-    sftp_preview_editor_is_network_error, sftp_preview_is_markdown,
+    default_download_path, diff_cell, format_conflict_modified, format_file_size, format_modified,
+    format_sftp_media_time, format_transfer_speed, home_path,
+    is_sftp_incomplete_store_compat_error, join_local_path, join_sftp_path, list_local_files,
+    load_remote_sftp_completion_listing, load_remote_sftp_listing, load_remote_sftp_preview,
+    load_remote_sftp_preview_hex, local_drives, new_sftp_transfer_id,
+    normalize_external_dropped_path, normalize_remote_path, parent_path, preview_content_text,
+    refreshed_local_files, remote_directory_prefixes, save_remote_sftp_preview, sftp_bg,
+    sftp_border, sftp_card_surface, sftp_conflict_resolution_from_settings, sftp_diff_visual_lines,
+    sftp_editor_language, sftp_editor_language_id, sftp_file_name, sftp_hover_bg, sftp_panel_bg,
+    sftp_path_segments, sftp_preview_editor_is_network_error, sftp_preview_is_markdown,
     sftp_source_not_newer_than_target, sftp_transfer_conflicts,
     sftp_transfer_state_from_background, sorted_sftp_files, unique_sftp_conflict_name,
 };

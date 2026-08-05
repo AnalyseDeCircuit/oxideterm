@@ -39,11 +39,8 @@ pub fn find_transfer_conflicts<'a>(
     let targets = targets.into_iter().collect::<Vec<_>>();
     transfers
         .into_iter()
-        .filter(|transfer| !transfer.source_is_directory)
         .filter_map(|transfer| {
-            let target = targets
-                .iter()
-                .find(|target| target.name == transfer.name && !target.is_directory)?;
+            let target = targets.iter().find(|target| target.name == transfer.name)?;
             Some(TransferConflict {
                 file_name: transfer.name.to_string(),
                 source_size: transfer.source_size,
@@ -78,7 +75,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn detects_only_file_name_collisions() {
+    fn detects_file_and_directory_name_collisions() {
         let conflicts = find_transfer_conflicts(
             [
                 ConflictTransfer {
@@ -107,14 +104,15 @@ mod tests {
                     name: "folder",
                     size: 0,
                     modified: Some(10),
-                    is_directory: false,
+                    is_directory: true,
                 },
             ],
         );
 
-        assert_eq!(conflicts.len(), 1);
+        assert_eq!(conflicts.len(), 2);
         assert_eq!(conflicts[0].file_name, "same.txt");
         assert_eq!(conflicts[0].target_size, 8);
+        assert_eq!(conflicts[1].file_name, "folder");
     }
 
     #[test]

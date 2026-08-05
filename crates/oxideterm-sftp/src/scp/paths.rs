@@ -9,7 +9,9 @@ use tokio::fs;
 use uuid::Uuid;
 
 use super::{SCP_MAX_DIRECTORY_DEPTH, SCP_MAX_DIRECTORY_ENTRIES, run_exec_exit0};
-use crate::{SftpError, SftpExecChannelOpener, remote_parent_path, shell_quote};
+use crate::{
+    LocalDownloadDisposition, SftpError, SftpExecChannelOpener, remote_parent_path, shell_quote,
+};
 
 pub(super) fn validate_received_name(name: &str) -> Result<(), SftpError> {
     if name.is_empty()
@@ -134,6 +136,33 @@ pub(super) async fn replace_local_path(source: &Path, destination: &Path) -> Res
     .map_err(SftpError::IoError)
 }
 
+pub(super) async fn install_local_download(
+    source: &Path,
+    destination: &Path,
+    disposition: LocalDownloadDisposition,
+) -> Result<(), SftpError> {
+    match disposition {
+        LocalDownloadDisposition::CreateNew => {
+            let source = source.to_path_buf();
+            let destination = destination.to_path_buf();
+            tokio::task::spawn_blocking(move || {
+                // A hard link provides an atomic create-if-absent operation for the
+                // staged sibling and cannot replace a file that appeared mid-transfer.
+                std::fs::File::open(&source)?.sync_all()?;
+                std::fs::hard_link(&source, &destination)?;
+                std::fs::remove_file(&source)
+            })
+            .await
+            .map_err(|error| SftpError::IoError(std::io::Error::other(error.to_string())))?
+            .map_err(SftpError::IoError)
+        }
+        LocalDownloadDisposition::ReplaceExisting => replace_local_path(source, destination).await,
+        LocalDownloadDisposition::ResumeVerified => Err(SftpError::TransferError(
+            "SCP downloads do not support restart resume".to_string(),
+        )),
+    }
+}
+
 pub(super) async fn replace_local_directory(
     source: &Path,
     destination: &Path,
@@ -219,4 +248,42 @@ pub(super) fn ensure_entry_limit(items: u64) -> Result<(), SftpError> {
         ));
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn create_new_install_preserves_an_existing_destination() {
+        let directory = tempfile::tempdir().unwrap();
+        let source = directory.path().join("download.part");
+        let destination = directory.path().join("download.txt");
+        std::fs::write(&source, b"remote").unwrap();
+        std::fs::write(&destination, b"local").unwrap();
+
+        let error =
+            install_local_download(&source, &destination, LocalDownloadDisposition::CreateNew)
+                .await
+                .unwrap_err();
+
+        assert!(matches!(error, SftpError::IoError(_)));
+        assert_eq!(std::fs::read(&destination).unwrap(), b"local");
+        assert_eq!(std::fs::read(&source).unwrap(), b"remote");
+    }
+
+    #[tokio::test]
+    async fn create_new_install_moves_a_staged_download_into_place() {
+        let directory = tempfile::tempdir().unwrap();
+        let source = directory.path().join("download.part");
+        let destination = directory.path().join("download.txt");
+        std::fs::write(&source, b"remote").unwrap();
+
+        install_local_download(&source, &destination, LocalDownloadDisposition::CreateNew)
+            .await
+            .unwrap();
+
+        assert!(!source.exists());
+        assert_eq!(std::fs::read(&destination).unwrap(), b"remote");
+    }
 }

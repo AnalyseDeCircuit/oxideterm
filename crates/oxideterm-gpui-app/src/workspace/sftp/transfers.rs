@@ -51,6 +51,7 @@ struct SftpTransferRowLabels {
     resume_tooltip: String,
     cancel_tooltip: String,
     remove_tooltip: String,
+    reveal_tooltip: String,
     loading: String,
 }
 
@@ -68,6 +69,7 @@ enum SftpTransferRowAction {
     SetState { id: u64, state: SftpTransferState },
     CancelOrRemove { id: u64 },
     ResumeIncomplete { transfer_id: String },
+    RevealLocalPath { path: String },
 }
 
 impl SftpTransferRowRenderer {
@@ -156,6 +158,11 @@ impl SftpTransferRowRenderer {
                                 transfer_id: transfer_id.clone(),
                             });
                         }
+                        SftpTransferRowAction::RevealLocalPath { path } => {
+                            // Revealing a completed download is a local UI action and does
+                            // not acquire or retain another SFTP/node consumer.
+                            cx.reveal_path(Path::new(path));
+                        }
                     }
                     cx.stop_propagation();
                 });
@@ -185,6 +192,14 @@ impl SftpTransferRowRenderer {
         };
         let status_text = self.status_text(&transfer);
         let transfer_id = transfer.id;
+        let destination_path = match transfer.direction {
+            SftpTransferDirection::Upload => transfer.remote_path.clone(),
+            SftpTransferDirection::Download => transfer.local_path.clone(),
+        };
+        let protocol_label = match transfer.protocol {
+            RemoteTransferProtocol::Sftp => "SFTP",
+            RemoteTransferProtocol::Scp => "SCP",
+        };
 
         div()
             .px(px(8.0))
@@ -240,12 +255,10 @@ impl SftpTransferRowRenderer {
                             )
                             .child(
                                 div()
+                                    .truncate()
                                     .text_size(px(SFTP_TEXT_10))
                                     .text_color(rgb(theme.text_muted))
-                                    .child(match transfer.protocol {
-                                        RemoteTransferProtocol::Sftp => "SFTP",
-                                        RemoteTransferProtocol::Scp => "SCP",
-                                    }),
+                                    .child(format!("{protocol_label} · {destination_path}")),
                             ),
                     )
                     .child(
@@ -356,6 +369,20 @@ impl SftpTransferRowRenderer {
                                     },
                                 ))
                             })
+                            .when(
+                                transfer.state == SftpTransferState::Completed
+                                    && transfer.direction == SftpTransferDirection::Download,
+                                |actions| {
+                                    actions.child(self.action_button(
+                                        format!("sftp-transfer-reveal-{transfer_id}"),
+                                        LucideIcon::FolderOpen,
+                                        self.labels.reveal_tooltip.clone(),
+                                        SftpTransferRowAction::RevealLocalPath {
+                                            path: transfer.local_path.clone(),
+                                        },
+                                    ))
+                                },
+                            )
                             .child(self.action_button(
                                 format!("sftp-transfer-dismiss-{transfer_id}"),
                                 LucideIcon::X,
@@ -535,6 +562,7 @@ impl WorkspaceApp {
                 resume_tooltip: self.i18n.t("sftp.queue.resume_tooltip"),
                 cancel_tooltip: self.i18n.t("sftp.queue.cancel_tooltip"),
                 remove_tooltip: self.i18n.t("sftp.queue.remove_tooltip"),
+                reveal_tooltip: self.i18n.t("fileManager.revealInFileManager"),
                 loading: self.i18n.t("sftp.queue.loading"),
             },
         }

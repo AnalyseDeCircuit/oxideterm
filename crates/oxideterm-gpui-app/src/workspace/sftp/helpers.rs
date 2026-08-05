@@ -43,6 +43,10 @@ pub(in crate::workspace::sftp) fn home_path() -> String {
     oxideterm_local_files::home_path()
 }
 
+pub(in crate::workspace::sftp) fn default_download_path() -> String {
+    oxideterm_local_files::default_download_path()
+}
+
 pub(in crate::workspace::sftp) fn list_local_files(
     path: &str,
 ) -> std::io::Result<Vec<SftpFileEntry>> {

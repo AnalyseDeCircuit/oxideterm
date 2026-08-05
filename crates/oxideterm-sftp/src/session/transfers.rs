@@ -26,6 +26,62 @@ impl DirectorySftpPool {
     }
 }
 
+fn validate_download_resume_progress(
+    progress: &StoredTransferProgress,
+    transfer_id: &str,
+    remote_path: &str,
+    local_path: &str,
+    total_bytes: u64,
+) -> Result<(), SftpError> {
+    let matches_transfer = progress.transfer_id == transfer_id
+        && progress.transfer_type == TransferType::Download
+        && progress.protocol == TransferProtocol::Sftp
+        && progress.strategy == TransferStrategy::File
+        && progress.source_path == PathBuf::from(remote_path)
+        && progress.destination_path == PathBuf::from(local_path)
+        && progress.total_bytes == total_bytes
+        && progress.is_incomplete();
+    if matches_transfer {
+        Ok(())
+    } else {
+        Err(SftpError::TransferError(
+            "Persisted download progress does not match the requested resume".to_string(),
+        ))
+    }
+}
+
+async fn open_local_download_file(
+    local_path: &str,
+    disposition: LocalDownloadDisposition,
+) -> Result<tokio::fs::File, SftpError> {
+    match disposition {
+        LocalDownloadDisposition::CreateNew => tokio::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(local_path)
+            .await
+            .map_err(SftpError::IoError),
+        LocalDownloadDisposition::ReplaceExisting => {
+            if let Ok(metadata) = tokio::fs::symlink_metadata(local_path).await
+                && metadata.file_type().is_symlink()
+            {
+                return Err(SftpError::InvalidPath(
+                    "Refusing to follow a symbolic link while replacing a download target"
+                        .to_string(),
+                ));
+            }
+            tokio::fs::File::create(local_path)
+                .await
+                .map_err(SftpError::IoError)
+        }
+        LocalDownloadDisposition::ResumeVerified => tokio::fs::OpenOptions::new()
+            .write(true)
+            .open(local_path)
+            .await
+            .map_err(SftpError::IoError),
+    }
+}
+
 impl SftpSession {
     pub async fn download_file(
         &self,
@@ -89,6 +145,7 @@ impl SftpSession {
         &self,
         remote_path: &str,
         local_path: &str,
+        disposition: LocalDownloadDisposition,
         progress_store: Arc<dyn ProgressStore>,
         progress_tx: Option<tokio::sync::mpsc::Sender<TransferProgress>>,
         transfer_manager: Option<Arc<SftpTransferManager>>,
@@ -102,35 +159,56 @@ impl SftpSession {
         let canonical_remote = self.resolve_path(remote_path).await?;
         let remote_info = self.stat(&canonical_remote).await?;
         let total_bytes = remote_info.size;
-        let mut offset = match tokio::fs::metadata(local_path).await {
-            Ok(metadata) => metadata.len(),
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => 0,
-            Err(error) => return Err(SftpError::IoError(error)),
-        };
-
         let stored = progress_store.load(&transfer_id).await?;
-        if stored
-            .as_ref()
-            .is_some_and(|progress| progress.total_bytes != total_bytes)
-            || offset > total_bytes
-        {
-            progress_store.delete(&transfer_id).await?;
-            tokio::fs::File::create(local_path)
+        let offset = if disposition == LocalDownloadDisposition::ResumeVerified {
+            let progress = stored.as_ref().ok_or_else(|| {
+                SftpError::TransferError(
+                    "Download resume requires a matching persisted transfer".to_string(),
+                )
+            })?;
+            validate_download_resume_progress(
+                progress,
+                &transfer_id,
+                &canonical_remote,
+                local_path,
+                total_bytes,
+            )?;
+            let metadata = tokio::fs::symlink_metadata(local_path)
                 .await
                 .map_err(SftpError::IoError)?;
-            offset = 0;
-        }
+            if !metadata.file_type().is_file() || metadata.file_type().is_symlink() {
+                return Err(SftpError::InvalidPath(
+                    "Download resume target is not a regular file".to_string(),
+                ));
+            }
+            if metadata.len() > total_bytes {
+                return Err(SftpError::TransferError(
+                    "Download resume target exceeds the remote file size".to_string(),
+                ));
+            }
+            metadata.len()
+        } else {
+            if stored.is_some() {
+                return Err(SftpError::TransferError(
+                    "Fresh download unexpectedly reused an existing transfer identifier"
+                        .to_string(),
+                ));
+            }
+            0
+        };
 
-        let mut stored_progress = StoredTransferProgress::new(
-            transfer_id.clone(),
-            TransferType::Download,
-            PathBuf::from(&canonical_remote),
-            PathBuf::from(local_path),
-            total_bytes,
-            self.session_id.clone(),
-        );
+        let mut stored_progress = stored.unwrap_or_else(|| {
+            StoredTransferProgress::new(
+                transfer_id.clone(),
+                TransferType::Download,
+                PathBuf::from(&canonical_remote),
+                PathBuf::from(local_path),
+                total_bytes,
+                self.session_id.clone(),
+            )
+        });
+        stored_progress.mark_active();
         stored_progress.transferred_bytes = offset;
-        progress_store.save(&stored_progress).await?;
 
         let result = self
             .download_file_resume_inner(
@@ -141,6 +219,7 @@ impl SftpSession {
                 },
                 &transfer_id,
                 offset,
+                disposition,
                 &progress_tx,
                 &transfer_manager,
                 progress_store.clone(),
@@ -655,9 +734,9 @@ impl SftpSession {
                 .await
                 .map_err(SftpError::IoError)?;
         }
-        let mut local_file = tokio::fs::File::create(&job.local_path)
-            .await
-            .map_err(SftpError::IoError)?;
+        // Recursive and direct downloads must never overwrite an existing local entry.
+        let mut local_file =
+            open_local_download_file(&job.local_path, LocalDownloadDisposition::CreateNew).await?;
         let mut remote_reader = remote_file.into_pipelined_downloader_for_range(
             0,
             Some(job.total_bytes),
@@ -893,6 +972,7 @@ impl SftpSession {
         job: &DownloadFileJob,
         transfer_id: &str,
         offset: u64,
+        disposition: LocalDownloadDisposition,
         progress_tx: &Option<tokio::sync::mpsc::Sender<TransferProgress>>,
         transfer_manager: &Option<Arc<SftpTransferManager>>,
         progress_store: Arc<dyn ProgressStore>,
@@ -908,23 +988,16 @@ impl SftpSession {
                 .await
                 .map_err(SftpError::IoError)?;
         }
-        let mut local_file = if offset > 0 {
-            tokio::fs::OpenOptions::new()
-                .write(true)
-                .open(&job.local_path)
-                .await
-                .map_err(SftpError::IoError)?
-        } else {
-            tokio::fs::File::create(&job.local_path)
-                .await
-                .map_err(SftpError::IoError)?
-        };
+        let mut local_file = open_local_download_file(&job.local_path, disposition).await?;
         if offset > 0 {
             local_file
-                .seek(std::io::SeekFrom::End(0))
+                .seek(std::io::SeekFrom::Start(offset))
                 .await
                 .map_err(SftpError::IoError)?;
         }
+        // Persist only after the destination was safely opened. A create-new collision
+        // must not leave a resumable record pointing at somebody else's file.
+        progress_store.save(&stored_progress).await?;
         let mut remote_reader = remote_file.into_pipelined_downloader_for_range(
             offset,
             Some(job.total_bytes),
@@ -1179,8 +1252,104 @@ fn should_retry_upload_without_temporary_file(
 }
 
 #[cfg(test)]
-mod upload_compatibility_tests {
+mod transfer_safety_tests {
     use super::*;
+
+    fn resumable_download() -> StoredTransferProgress {
+        let mut progress = StoredTransferProgress::new(
+            "transfer-1".to_string(),
+            TransferType::Download,
+            PathBuf::from("/remote/file.txt"),
+            PathBuf::from("/local/file.txt"),
+            42,
+            "session-1".to_string(),
+        );
+        progress.mark_failed("network interruption".to_string());
+        progress
+    }
+
+    #[tokio::test]
+    async fn create_new_download_preserves_an_existing_local_file() {
+        let directory = tempfile::tempdir().unwrap();
+        let destination = directory.path().join("existing.txt");
+        std::fs::write(&destination, b"local work").unwrap();
+
+        let error = open_local_download_file(
+            &destination.to_string_lossy(),
+            LocalDownloadDisposition::CreateNew,
+        )
+        .await
+        .unwrap_err();
+
+        assert!(matches!(error, SftpError::IoError(_)));
+        assert_eq!(std::fs::read(destination).unwrap(), b"local work");
+    }
+
+    #[tokio::test]
+    async fn explicit_replace_is_the_only_fresh_mode_that_truncates_a_local_file() {
+        let directory = tempfile::tempdir().unwrap();
+        let destination = directory.path().join("existing.txt");
+        std::fs::write(&destination, b"local work").unwrap();
+
+        let file = open_local_download_file(
+            &destination.to_string_lossy(),
+            LocalDownloadDisposition::ReplaceExisting,
+        )
+        .await
+        .unwrap();
+        drop(file);
+
+        assert!(std::fs::read(destination).unwrap().is_empty());
+    }
+
+    #[test]
+    fn accepts_resume_only_for_the_exact_incomplete_download() {
+        let progress = resumable_download();
+
+        assert!(
+            validate_download_resume_progress(
+                &progress,
+                "transfer-1",
+                "/remote/file.txt",
+                "/local/file.txt",
+                42,
+            )
+            .is_ok()
+        );
+    }
+
+    #[test]
+    fn rejects_resume_when_the_local_destination_does_not_match() {
+        let progress = resumable_download();
+
+        assert!(
+            validate_download_resume_progress(
+                &progress,
+                "transfer-1",
+                "/remote/file.txt",
+                "/local/unrelated.txt",
+                42,
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn rejects_resume_without_an_incomplete_status() {
+        let mut progress = resumable_download();
+        progress.mark_completed();
+
+        assert!(
+            validate_download_resume_progress(
+                &progress,
+                "transfer-1",
+                "/remote/file.txt",
+                "/local/file.txt",
+                42,
+            )
+            .is_err()
+        );
+    }
 
     #[test]
     fn retries_direct_upload_when_empty_temporary_file_is_denied() {

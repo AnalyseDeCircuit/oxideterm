@@ -784,8 +784,7 @@ impl SftpWorkspaceEntity {
 
     pub(in crate::workspace::sftp) fn apply_local_path(&mut self, path: String) {
         self.local_path_completion.dismiss();
-        self.local_path_scroll
-            .set_offset(Point::new(px(0.0), px(0.0)));
+        // Preserve the horizontal breadcrumb position when navigating through a long path.
         self.local_path = path.clone();
         self.local_path_input.clone_from(&path);
         self.editing_local_path = false;
@@ -799,8 +798,7 @@ impl SftpWorkspaceEntity {
     fn apply_remote_path(&mut self, path: String) {
         self.remote_path_completion.dismiss();
         self.remote_path_completion_pending_selection = None;
-        self.remote_path_scroll
-            .set_offset(Point::new(px(0.0), px(0.0)));
+        // Preserve the horizontal breadcrumb position when navigating through a long path.
         self.remote_path = path.clone();
         self.remote_path_input = path;
         self.editing_remote_path = false;

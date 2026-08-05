@@ -20,6 +20,24 @@ pub fn home_path() -> String {
         })
 }
 
+pub fn default_download_path() -> String {
+    select_default_download_path(dirs::download_dir(), std::env::temp_dir(), Path::is_dir)
+        .to_string_lossy()
+        .to_string()
+}
+
+fn select_default_download_path(
+    download_directory: Option<PathBuf>,
+    fallback_directory: PathBuf,
+    is_directory: impl Fn(&Path) -> bool,
+) -> PathBuf {
+    // Prefer the operating system's discoverable Downloads folder, but never
+    // fall back to the user's home directory where configuration files live.
+    download_directory
+        .filter(|path| is_directory(path))
+        .unwrap_or(fallback_directory)
+}
+
 pub fn local_sidebar_locations() -> Vec<LocalSidebarLocation> {
     let candidates = [
         (
@@ -225,6 +243,29 @@ pub fn would_move_directory_into_itself(source: &Path, target: &Path) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn default_download_path_prefers_an_existing_system_downloads_directory() {
+        let downloads = PathBuf::from("/home/alice/Downloads");
+        let fallback = PathBuf::from("/tmp");
+
+        let selected = select_default_download_path(Some(downloads.clone()), fallback, |path| {
+            path == downloads
+        });
+
+        assert_eq!(selected, downloads);
+    }
+
+    #[test]
+    fn default_download_path_does_not_fall_back_to_the_home_directory() {
+        let missing_downloads = PathBuf::from("/home/alice/Downloads");
+        let fallback = PathBuf::from("/tmp");
+
+        let selected =
+            select_default_download_path(Some(missing_downloads), fallback.clone(), |_| false);
+
+        assert_eq!(selected, fallback);
+    }
 
     #[test]
     fn sidebar_locations_keep_only_available_directories_in_semantic_order() {

@@ -45,7 +45,7 @@ impl WorkspaceApp {
                 self.i18n.t("sftp.conflict.title"),
                 self.sftp_conflict_description(),
                 self.render_sftp_conflict_body(has_background, cx),
-                Some(self.i18n.t("sftp.conflict.overwrite")),
+                Some(self.i18n.t("sftp.conflict.keep_both")),
             ),
             SftpDialog::Diff {
                 local_path,
@@ -592,7 +592,7 @@ impl WorkspaceApp {
                         .gap(px(8.0))
                         .child(self.render_sftp_button_variant(
                             self.i18n.t("sftp.conflict.keep_both"),
-                            SftpButtonVariant::Secondary,
+                            SftpButtonVariant::Default,
                             cx.listener(|this, _event, _window, cx| {
                                 this.resolve_sftp_transfer_conflict(
                                     SftpConflictResolution::Rename,
@@ -604,7 +604,7 @@ impl WorkspaceApp {
                         ))
                         .child(self.render_sftp_button_variant(
                             self.i18n.t("sftp.conflict.overwrite"),
-                            SftpButtonVariant::Default,
+                            SftpButtonVariant::Destructive,
                             cx.listener(|this, _event, _window, cx| {
                                 this.resolve_sftp_transfer_conflict(
                                     SftpConflictResolution::Overwrite,

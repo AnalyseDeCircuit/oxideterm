@@ -432,6 +432,15 @@ impl WorkspaceApp {
                 has_background,
                 window,
                 cx,
+            ))
+            .child(self.render_sftp_icon_button(
+                LucideIcon::Pencil,
+                self.i18n.t("sftp.preview.edit"),
+                cx.listener(move |this, _event, _window, cx| {
+                    this.start_sftp_path_edit(pane, cx);
+                    cx.stop_propagation();
+                }),
+                cx.entity(),
             ));
 
         if pane == SftpPane::Local {

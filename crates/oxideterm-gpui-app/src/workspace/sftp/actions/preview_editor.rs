@@ -324,6 +324,7 @@ impl WorkspaceApp {
             local_path,
             remote_path,
             None,
+            LocalDownloadDisposition::CreateNew,
             None,
             cx,
         );

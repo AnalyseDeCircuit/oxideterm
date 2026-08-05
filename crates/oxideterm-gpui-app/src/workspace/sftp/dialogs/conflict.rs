@@ -25,14 +25,29 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
-        let Some((conflict, conflict_count, apply_all)) = ({
+        let Some((conflict, conflict_count, apply_all, target_path)) = ({
             let sftp_view = self.sftp_view.read(cx);
             sftp_view.conflict_state.as_ref().and_then(|state| {
                 state
                     .conflicts
                     .get(state.current_index)
                     .cloned()
-                    .map(|conflict| (conflict, state.conflicts.len(), state.apply_to_all))
+                    .map(|conflict| {
+                        let target_path = match conflict.direction {
+                            SftpTransferDirection::Upload => {
+                                join_sftp_path(&sftp_view.remote_path, &conflict.file_name)
+                            }
+                            SftpTransferDirection::Download => {
+                                join_local_path(&sftp_view.local_path, &conflict.file_name)
+                            }
+                        };
+                        (
+                            conflict,
+                            state.conflicts.len(),
+                            state.apply_to_all,
+                            target_path,
+                        )
+                    })
             })
         }) else {
             return div().into_any_element();
@@ -76,6 +91,15 @@ impl WorkspaceApp {
                                 rgb(theme.text_muted),
                             ))
                             .child(conflict.file_name.clone()),
+                    )
+                    .child(
+                        div()
+                            .mt(px(4.0))
+                            .truncate()
+                            .text_size(px(SFTP_TEXT_XS))
+                            .font_weight(gpui::FontWeight::NORMAL)
+                            .text_color(rgb(theme.text_muted))
+                            .child(target_path),
                     ),
             )
             .child(

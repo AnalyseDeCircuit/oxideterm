@@ -11,8 +11,8 @@ use std::{
 };
 
 use oxideterm_sftp::{
-    SftpTransferManager, probe_scp_capabilities, scp_download_directory, scp_download_file,
-    scp_upload_directory, scp_upload_file,
+    LocalDownloadDisposition, SftpTransferManager, probe_scp_capabilities, scp_download_directory,
+    scp_download_file, scp_upload_directory, scp_upload_file,
 };
 use oxideterm_ssh::{
     AuthMethod, ConnectionConsumer, ConnectionPoolConfig, ProxyHopConfig, SshConfig,
@@ -126,6 +126,7 @@ async fn local_sshd_legacy_scp_file_and_directory_round_trip() {
         &connection,
         &uploaded_file.to_string_lossy(),
         &downloaded_file.to_string_lossy(),
+        LocalDownloadDisposition::CreateNew,
         "scp-file-download",
         None,
         Some(manager.clone()),

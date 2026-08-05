@@ -17,10 +17,10 @@ use channel::{ScpChannel, ScpRecord, open_scp_channel};
 use channel::{parse_file_or_directory_record, take_control_line, validate_time_record};
 use paths::{
     cleanup_remote_directory, contained_child_path, directory_total_size, ensure_entry_limit,
-    local_directory_temporary_path, local_temporary_path, remote_backup_directory_path,
-    remote_directory_replace_command, remote_temporary_directory_path, remote_temporary_path,
-    replace_local_directory, replace_local_path, safe_local_file_name, validate_received_name,
-    validate_remote_path,
+    install_local_download, local_directory_temporary_path, local_temporary_path,
+    remote_backup_directory_path, remote_directory_replace_command,
+    remote_temporary_directory_path, remote_temporary_path, replace_local_directory,
+    safe_local_file_name, validate_received_name, validate_remote_path,
 };
 use russh::ChannelMsg;
 use tokio::{
@@ -30,8 +30,9 @@ use tokio::{
 };
 
 use crate::{
-    SftpError, SftpExecChannelOpener, SftpTransferGuard, SftpTransferManager, TransferDirection,
-    TransferProgress, TransferState, remote_parent_path, shell_quote,
+    LocalDownloadDisposition, SftpError, SftpExecChannelOpener, SftpTransferGuard,
+    SftpTransferManager, TransferDirection, TransferProgress, TransferState, remote_parent_path,
+    shell_quote,
 };
 
 const SCP_STREAM_CHUNK_SIZE: usize = 256 * 1024;
@@ -158,6 +159,7 @@ pub async fn scp_download_file<O>(
     opener: &O,
     remote_path: &str,
     local_path: &str,
+    disposition: LocalDownloadDisposition,
     transfer_id: &str,
     progress_tx: Option<mpsc::Sender<TransferProgress>>,
     transfer_manager: Option<Arc<SftpTransferManager>>,
@@ -196,7 +198,10 @@ where
     .await;
     match result {
         Ok(result) => {
-            replace_local_path(&local_temp, local).await?;
+            if let Err(error) = install_local_download(&local_temp, local, disposition).await {
+                let _ = fs::remove_file(&local_temp).await;
+                return Err(error);
+            }
             Ok(result)
         }
         Err(error) => {
