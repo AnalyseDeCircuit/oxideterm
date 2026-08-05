@@ -3,6 +3,29 @@
 Stable releases are listed newest first. The release workflow uses each versioned
 section as the detailed changelog attached to the corresponding GitHub Release.
 
+## 2.0.17
+
+OxideTerm 2.0.17 strengthens Windows SSH, SFTP, and RDP workflows, adds terminal tab naming and optional SSH close-confirmation suppression, and improves AI provider compatibility and settings polish.
+
+### ✨ Highlights
+
+- Added terminal tab renaming from attached or detached windows while preserving the existing pane and session.
+- Added direct custom model ID entry for AI providers and consolidated system monitoring into the Host Tools sidebar instead of a duplicate full-page health view.
+- Added an opt-out checkbox to SSH close and disconnect confirmations, persisting the preference only after the user confirms the action.
+
+### 🛠️ Fixes
+
+- Preserved credentials entered during SSH connection tests when saving a connection, allowed unavailable X11 forwarding to fall back to a normal shell, and applied saved X11 policy changes to subsequent shells without restarting the application.
+- Made RDP display resizing recover through a controlled reconnect with stale-frame isolation instead of leaving the remote view stalled or incorrectly sized.
+- Prevented SFTP downloads from silently overwriting local files, strengthened collision and resume validation, and restored text-editor keyboard input on Windows.
+- Stored oversized Windows Credential Manager values, including long OneDrive tokens, in bounded chunks and restored them transparently.
+- Kept AI model chips visible in narrow provider cards, showed successful SSH connection tests with the success color, and stopped broad conversational wording from forcing unnecessary AI tool calls.
+
+### 🧰 Release Maintenance
+
+- Added an artifact-repair workflow that can republish successfully built native packages without rebuilding unaffected platforms.
+- Updated issue intake to close reports from superseded major versions with a bilingual upgrade notice while retaining reminders for older stable patch releases.
+
 ## 2.0.16
 
 OxideTerm 2.0.16 adds searchable settings, contextual nested session groups, and secure SSH X11 forwarding while improving terminal startup, remote previews, remote-desktop compatibility, and modem transfers.

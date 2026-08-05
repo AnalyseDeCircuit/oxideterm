@@ -38,17 +38,38 @@ jobs:
               repo: repository.repo,
               per_page: 100,
             });
+
+            // A stale marker keeps manual workflow retries from posting duplicates.
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              ...repository,
+              per_page: 100,
+            });
+
+            // A reported version from a previous major line (for example 1.x
+            // during the 2.x era) describes a product generation that no longer
+            // exists; close it with a notice instead of a soft reminder.
+            const obsolete = policy.findObsoleteStableVersion(issue.body || '', releases);
+            if (obsolete) {
+              if (!policy.hasObsoleteVersionNotice(comments)) {
+                await github.rest.issues.createComment({
+                  ...repository,
+                  body: policy.buildObsoleteVersionNotice(obsolete),
+                });
+                await github.rest.issues.update({
+                  ...repository,
+                  state: 'closed',
+                  state_reason: 'not_planned',
+                });
+                core.info(`Closed ${issue.number}: reported obsolete version v${obsolete.reported.value}.`);
+              }
+              return;
+            }
+
             const outdated = policy.findOutdatedStableVersion(issue.body || '', releases);
             if (!outdated) {
               core.info('No outdated stable version was reported.');
               return;
             }
-
-            // A stable marker keeps manual workflow retries from posting duplicates.
-            const comments = await github.paginate(github.rest.issues.listComments, {
-              ...repository,
-              per_page: 100,
-            });
             if (policy.hasVersionReminder(comments)) {
               core.info('The stable version reminder already exists.');
               return;

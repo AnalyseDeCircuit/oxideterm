@@ -71,6 +71,46 @@ test('reminds only when a reported stable version is older', () => {
   assert.equal(policy.findOutdatedStableVersion(issueBody('2.1.0-beta.1'), releases), null);
 });
 
+test('flags a previous-generation major version as obsolete', () => {
+  const releases = [release('v2.0.15'), release('v1.6.11')];
+
+  const obsolete = policy.findObsoleteStableVersion(issueBody('1.6.11'), releases);
+  assert.ok(obsolete);
+  assert.equal(obsolete.reported.value, '1.6.11');
+  assert.equal(obsolete.latest.value, '2.0.15');
+
+  // Same-generation old versions are outdated, not obsolete.
+  assert.equal(policy.findObsoleteStableVersion(issueBody('2.0.8'), releases), null);
+  // Current and future versions are never obsolete.
+  assert.equal(policy.findObsoleteStableVersion(issueBody('2.0.15'), releases), null);
+  assert.equal(policy.findObsoleteStableVersion(issueBody('2.1.0'), releases), null);
+  assert.equal(policy.findObsoleteStableVersion(issueBody('1.6.11-beta.1'), releases), null);
+});
+
+test('builds a bilingual obsolete notice with a distinct marker', () => {
+  const message = policy.buildObsoleteVersionNotice({
+    reported: { value: '1.6.11' },
+    latest: { value: '2.0.15', releaseUrl: 'https://github.com/AnalyseDeCircuit/oxideterm/releases/tag/v2.0.15' },
+  });
+
+  assert.equal(message.includes(policy.OBSOLETE_VERSION_NOTICE_MARKER), true);
+  assert.equal(message.includes(policy.VERSION_REMINDER_MARKER), false);
+  assert.equal(message.includes('**v1.6.11**'), true);
+  assert.equal(message.includes('[v2.0.15]('), true);
+});
+
+test('recognizes only an existing bot obsolete notice for retry deduplication', () => {
+  const noticeBody = `${policy.OBSOLETE_VERSION_NOTICE_MARKER}\nNotice`;
+
+  assert.equal(policy.hasObsoleteVersionNotice([
+    { user: { type: 'Bot' }, body: noticeBody },
+  ]), true);
+  assert.equal(policy.hasObsoleteVersionNotice([
+    { user: { type: 'User' }, body: noticeBody },
+    { user: { type: 'Bot' }, body: 'Unrelated comment' },
+  ]), false);
+});
+
 test('builds a bilingual reminder with a stable marker and release link', () => {
   const result = policy.findOutdatedStableVersion(
     issueBody('2.0.8'),
