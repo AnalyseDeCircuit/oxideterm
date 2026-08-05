@@ -172,7 +172,7 @@ use oxideterm_gpui_terminal::{
 };
 use oxideterm_gpui_ui::scroll::ScrollableElement;
 use oxideterm_gpui_ui::{
-    ConfirmDialogAction, ConfirmDialogVariant, ConfirmDialogView,
+    ConfirmDialogAction, ConfirmDialogVariant, ConfirmDialogView, checkbox,
     modal::{popover_backdrop, set_tauri_backdrop_blur_allowed},
     text_input::{TextInputView, text_input, text_input_anchor_probe},
     toast::{ToastVariant, ToastView, toast_action, toast_close},
@@ -786,6 +786,7 @@ pub(crate) struct WorkspaceApp {
     settings_section_list_state: ListState,
     settings_section_list_cache: RefCell<VirtualListSignatureCache>,
     standard_confirm_focused_action: Option<ConfirmDialogAction>,
+    skip_future_ssh_close_confirmations: bool,
     select_anchors: HashMap<SelectAnchorId, OverlayAnchor>,
     text_input_anchors: TextInputAnchorStore,
     selectable_text_values: HashMap<u64, String>,

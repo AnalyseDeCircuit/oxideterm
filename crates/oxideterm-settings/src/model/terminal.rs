@@ -241,6 +241,10 @@ fn default_detect_file_paths_as_links() -> bool {
     true
 }
 
+fn default_confirm_before_closing_ssh() -> bool {
+    true
+}
+
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TerminalSettings {
@@ -285,6 +289,9 @@ pub struct TerminalSettings {
     pub open_links_with_modifier: bool,
     #[serde(default = "default_detect_file_paths_as_links")]
     pub detect_file_paths_as_links: bool,
+    // Existing installations keep the protective prompt until the user opts out.
+    #[serde(default = "default_confirm_before_closing_ssh")]
+    pub confirm_before_closing_ssh: bool,
     pub selection_requires_shift: bool,
     // Keep the legacy JSON key so local and cloud-synced settings remain compatible.
     #[serde(default, rename = "freeTypeCursorPositioning")]
@@ -343,6 +350,7 @@ impl Default for TerminalSettings {
             right_click_paste: false,
             open_links_with_modifier: true,
             detect_file_paths_as_links: true,
+            confirm_before_closing_ssh: true,
             selection_requires_shift: false,
             free_type_mode: false,
             autosuggest: TerminalAutosuggestSettings::default(),
@@ -489,6 +497,19 @@ mod tests {
         let settings: TerminalSettings = serde_json::from_value(value).unwrap();
 
         assert!(!settings.right_click_paste);
+    }
+
+    #[test]
+    fn terminal_settings_confirm_ssh_close_for_legacy_settings() {
+        let mut value = serde_json::to_value(TerminalSettings::default()).unwrap();
+        value
+            .as_object_mut()
+            .unwrap()
+            .remove("confirmBeforeClosingSsh");
+
+        let settings: TerminalSettings = serde_json::from_value(value).unwrap();
+
+        assert!(settings.confirm_before_closing_ssh);
     }
 
     #[test]

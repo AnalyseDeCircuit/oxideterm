@@ -124,6 +124,7 @@
     "actions": {
       "cancel": "取消",
       "confirm": "確認",
+      "do_not_ask_again": "下次不再詢問",
       "delete": "刪除"
     },
     "cancel": "取消",

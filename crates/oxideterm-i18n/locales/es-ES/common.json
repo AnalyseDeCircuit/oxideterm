@@ -124,6 +124,7 @@
     "actions": {
       "cancel": "Cancelar",
       "confirm": "Confirmar",
+      "do_not_ask_again": "No volver a preguntar",
       "delete": "Eliminar"
     },
     "cancel": "Cancelar",

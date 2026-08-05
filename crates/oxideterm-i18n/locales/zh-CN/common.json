@@ -131,6 +131,7 @@
     "actions": {
       "cancel": "取消",
       "confirm": "确定",
+      "do_not_ask_again": "下次不再询问",
       "delete": "删除"
     },
     "cancel": "取消",

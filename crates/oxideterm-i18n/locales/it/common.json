@@ -124,6 +124,7 @@
     "actions": {
       "cancel": "Annulla",
       "confirm": "Conferma",
+      "do_not_ask_again": "Non chiedere più",
       "delete": "Elimina"
     },
     "cancel": "Annulla",

@@ -124,6 +124,7 @@
     "actions": {
       "cancel": "취소",
       "confirm": "확인",
+      "do_not_ask_again": "다시 묻지 않기",
       "delete": "삭제"
     },
     "cancel": "취소",

@@ -35,6 +35,28 @@ fn tab_kind_icon(
 }
 
 impl WorkspaceApp {
+    fn render_skip_future_ssh_close_confirmations(&self, cx: &mut Context<Self>) -> AnyElement {
+        div()
+            .w_full()
+            .flex()
+            .justify_center()
+            .child(
+                checkbox(
+                    &self.tokens,
+                    self.i18n.t("common.actions.do_not_ask_again"),
+                    self.skip_future_ssh_close_confirmations,
+                )
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(|this, _event, _window, cx| {
+                        this.toggle_skip_future_ssh_close_confirmations(cx);
+                        cx.stop_propagation();
+                    }),
+                ),
+            )
+            .into_any_element()
+    }
+
     pub(in crate::workspace) fn render_tab_bar(
         &self,
         window: &Window,
@@ -651,7 +673,7 @@ impl WorkspaceApp {
             ConfirmDialogView {
                 variant: ConfirmDialogVariant::Danger,
                 title: div().child(title).into_any_element(),
-                description: None,
+                description: Some(self.render_skip_future_ssh_close_confirmations(cx)),
                 cancel_label: div()
                     .child(self.i18n.t("common.actions.cancel"))
                     .into_any_element(),
@@ -699,6 +721,25 @@ impl WorkspaceApp {
             (Some(key), None) => self.i18n.t(key),
             (None, _) => String::new(),
         };
+        let is_ssh_confirmation = matches!(
+            &snapshot.confirm,
+            TabCloseConfirm::Single { .. } | TabCloseConfirm::Other { .. }
+        );
+        let description = if is_ssh_confirmation {
+            Some(
+                div()
+                    .w_full()
+                    .flex()
+                    .flex_col()
+                    .items_center()
+                    .gap_3()
+                    .when(!description.is_empty(), |body| body.child(description))
+                    .child(self.render_skip_future_ssh_close_confirmations(cx))
+                    .into_any_element(),
+            )
+        } else {
+            (!description.is_empty()).then(|| div().child(description).into_any_element())
+        };
         oxideterm_gpui_ui::confirm::confirm_dialog_with_focus_motion(
             &self.tokens,
             "tab-close-confirm-motion",
@@ -706,8 +747,7 @@ impl WorkspaceApp {
             ConfirmDialogView {
                 variant: ConfirmDialogVariant::Danger,
                 title: div().child(self.i18n.t(title_key)).into_any_element(),
-                description: (!description.is_empty())
-                    .then(|| div().child(description).into_any_element()),
+                description,
                 cancel_label: div()
                     .child(self.i18n.t("common.actions.cancel"))
                     .into_any_element(),

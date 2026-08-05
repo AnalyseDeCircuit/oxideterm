@@ -73,9 +73,12 @@ impl WorkspaceApp {
                 }
                 ("connections", "disconnect") => {
                     if let Some(node_id) = string_arg(&effect.args, "nodeId") {
-                        // Shared-node disconnect preserves the product's normal
-                        // cascade confirmation before NodeRouter cleanup runs.
-                        self.request_disconnect_ssh_node(&NodeId::new(node_id.to_string()), cx);
+                        // User-facing disconnect policy is resolved before NodeRouter cleanup.
+                        self.request_disconnect_ssh_node(
+                            &NodeId::new(node_id.to_string()),
+                            window,
+                            cx,
+                        );
                     }
                 }
                 ("quickCommands", "execute") => {

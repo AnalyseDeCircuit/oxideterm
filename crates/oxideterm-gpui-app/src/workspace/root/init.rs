@@ -707,6 +707,7 @@ impl WorkspaceApp {
             .measure_all(),
             settings_section_list_cache: RefCell::new(VirtualListSignatureCache::default()),
             standard_confirm_focused_action: None,
+            skip_future_ssh_close_confirmations: false,
             select_anchors: HashMap::new(),
             text_input_anchors: TextInputAnchorStore::default(),
             selectable_text_values: HashMap::new(),

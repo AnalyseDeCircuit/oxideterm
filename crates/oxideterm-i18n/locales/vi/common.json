@@ -124,6 +124,7 @@
     "actions": {
       "cancel": "Hủy",
       "confirm": "Xác nhận",
+      "do_not_ask_again": "Không hỏi lại",
       "delete": "Xóa"
     },
     "cancel": "Hủy",

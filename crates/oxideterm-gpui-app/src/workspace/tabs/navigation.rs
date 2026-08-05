@@ -424,19 +424,24 @@ impl WorkspaceApp {
     pub(in crate::workspace) fn request_disconnect_ssh_node(
         &mut self,
         node_id: &NodeId,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         let Some(node) = self.ssh_nodes.get(node_id) else {
             return;
         };
+        if !self.ssh_close_confirmation_enabled() {
+            self.disconnect_ssh_node(node_id, window, cx);
+            return;
+        }
         let title = node.title.trim();
         let display_name = if title.is_empty() {
             format!("{}@{}", node.endpoint.username, node.endpoint.host)
         } else {
             title.to_string()
         };
-        // Tauri opens the confirmation from the tree action entrypoint, while
-        // disconnectNode itself remains the backend cleanup path.
+        // Keep the transient choice scoped to the confirmation that owns it.
+        self.skip_future_ssh_close_confirmations = false;
         self.overlay.update(cx, |overlay, cx| {
             overlay.open_confirm(
                 WorkspaceOverlayConfirmKind::NodeDisconnect {
@@ -450,6 +455,7 @@ impl WorkspaceApp {
 
     pub(in crate::workspace) fn cancel_node_disconnect_confirm(&mut self, cx: &mut Context<Self>) {
         if self.begin_node_disconnect_confirm_exit(false, cx).0 {
+            self.skip_future_ssh_close_confirmations = false;
             cx.notify();
         }
     }
@@ -463,7 +469,12 @@ impl WorkspaceApp {
         if !started {
             return;
         }
+        let skip_future_confirmations = self.skip_future_ssh_close_confirmations;
+        self.skip_future_ssh_close_confirmations = false;
         if let Some(WorkspaceOverlayConfirmEffect::DisconnectNode { node_id }) = effect {
+            if skip_future_confirmations {
+                self.disable_future_ssh_close_confirmations(cx);
+            }
             self.disconnect_ssh_node(&node_id, window, cx);
         }
     }
@@ -557,8 +568,12 @@ impl WorkspaceApp {
             return;
         };
         if self.tabs(cx)[index].kind == TabKind::SshTerminal {
-            // Tauri confirms user-initiated SSH terminal tab closes while
-            // still allowing backend/session cleanup paths to close directly.
+            if !self.ssh_close_confirmation_enabled() {
+                self.close_tab_at_index(index, window, cx);
+                return;
+            }
+            // Keep the transient choice scoped to the confirmation that owns it.
+            self.skip_future_ssh_close_confirmations = false;
             self.tab_host.update(cx, |tab_host, cx| {
                 tab_host.open_close_confirm(TabCloseConfirm::Single { tab_id }, cx);
             });
@@ -620,6 +635,16 @@ impl WorkspaceApp {
             return;
         }
         if self.tab_close_ids_include_ssh_terminal(&tab_ids, cx) {
+            if !self.ssh_close_confirmation_enabled() {
+                self.request_local_terminal_close_check(
+                    LocalTerminalCloseCheck::Batch { tab_ids },
+                    window,
+                    cx,
+                );
+                return;
+            }
+            // Keep the transient choice scoped to the confirmation that owns it.
+            self.skip_future_ssh_close_confirmations = false;
             self.tab_host.update(cx, |tab_host, cx| {
                 tab_host.open_close_confirm(TabCloseConfirm::Other { tab_ids }, cx);
             });
@@ -744,6 +769,7 @@ impl WorkspaceApp {
 
     pub(in crate::workspace) fn cancel_tab_close_confirm(&mut self, cx: &mut Context<Self>) {
         if self.begin_tab_close_confirm_exit(false, cx).0 {
+            self.skip_future_ssh_close_confirmations = false;
             cx.notify();
         }
     }
@@ -758,7 +784,47 @@ impl WorkspaceApp {
             return;
         }
         if let Some(confirm) = effect {
+            if self.skip_future_ssh_close_confirmations
+                && matches!(
+                    &confirm,
+                    TabCloseConfirm::Single { .. } | TabCloseConfirm::Other { .. }
+                )
+            {
+                self.disable_future_ssh_close_confirmations(cx);
+            }
+            self.skip_future_ssh_close_confirmations = false;
             self.apply_tab_close_confirm_effect(confirm, window, cx);
+        }
+    }
+
+    pub(in crate::workspace) fn toggle_skip_future_ssh_close_confirmations(
+        &mut self,
+        cx: &mut Context<Self>,
+    ) {
+        self.skip_future_ssh_close_confirmations = !self.skip_future_ssh_close_confirmations;
+        cx.notify();
+    }
+
+    fn ssh_close_confirmation_enabled(&self) -> bool {
+        self.settings_store
+            .settings()
+            .terminal
+            .confirm_before_closing_ssh
+    }
+
+    fn disable_future_ssh_close_confirmations(&mut self, cx: &mut Context<Self>) {
+        if !self.ssh_close_confirmation_enabled() {
+            return;
+        }
+        // Persist only after the user confirms the destructive action.
+        self.settings_store
+            .settings_mut()
+            .terminal
+            .confirm_before_closing_ssh = false;
+        if self.settings_store.save().is_ok() {
+            self.settings_workspace.update(cx, |settings, _cx| {
+                settings.acknowledge_external_store_state()
+            });
         }
     }
 

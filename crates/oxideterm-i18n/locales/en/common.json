@@ -131,6 +131,7 @@
     "actions": {
       "cancel": "Cancel",
       "confirm": "Confirm",
+      "do_not_ask_again": "Don't ask again",
       "delete": "Delete"
     },
     "cancel": "Cancel",
