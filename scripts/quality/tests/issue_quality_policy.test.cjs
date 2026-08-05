@@ -5,7 +5,7 @@ const test = require('node:test');
 
 const gate = require('../issue_quality_policy.cjs');
 
-function featureBody({ version = '2.0.5', problem = '会话录制文件无法被转换工具读取。', proposal = '让录制文件保持标准格式兼容。' } = {}) {
+function featureBody({ version = '2.0.5', problem = '会话录制文件无法被转换工具读取。', proposal = '让录制文件保持标准格式兼容。', importance = '团队每周导出多次录制用于审计。' } = {}) {
   return `### OxideTerm version / 版本
 
 ${version}
@@ -18,9 +18,9 @@ ${problem}
 
 ${proposal}
 
-### Alternatives considered / 已考虑的替代方案
+### Why is this important? / 为什么这个功能对你重要？
 
-_No response_
+${importance}
 `;
 }
 

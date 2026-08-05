@@ -47,12 +47,19 @@ body:
       required: true
 
   - type: textarea
-    id: alternatives
+    id: importance
     attributes:
-      label: Alternatives considered / 已考虑的替代方案
-      description: Other tools, workflows, or workarounds you already use.
+      label: Why is this important? / 为什么这个功能对你重要？
+      description: |
+        Explain why this matters to you — how often you hit the problem, how much time it costs, or how many people it affects.
+        Requests without a concrete reason may be closed.
+        请说明该功能对你的重要性——你多久遇到一次这个问题、每次耗费多少时间、或会影响多少人。
+        没有具体理由的请求可能会被关闭。
+      placeholder: |
+        - I manage 50+ jump hosts and re-enter credentials daily, costing minutes each time.
+        - This blocks our team's standard workflow; several colleagues hit the same wall.
     validations:
-      required: false
+      required: true
 
   - type: dropdown
     id: area

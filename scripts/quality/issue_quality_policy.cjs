@@ -24,6 +24,7 @@ const REQUIRED_SECTIONS = [
       'OxideTerm version / 版本',
       'Problem or use case / 问题或使用场景',
       'Proposed solution / 期望方案',
+      'Why is this important? / 为什么这个功能对你重要？',
     ],
   },
   {

@@ -28,11 +28,16 @@ body:
     id: platform
     attributes:
       label: Platform / 平台
+      description: Include the CPU architecture — some bugs are architecture-specific.
+        请选择操作系统及 CPU 架构——部分问题与架构相关。
       options:
-        - macOS
-        - Windows
-        - Linux
-        - Other
+        - macOS (Apple Silicon / arm64)
+        - macOS (Intel / x86_64)
+        - Windows (x86_64)
+        - Windows (arm64)
+        - Linux (x86_64)
+        - Linux (arm64)
+        - Other / 其他
     validations:
       required: true
 
@@ -130,10 +135,13 @@ body:
       label: Additional environment details / 其他相关环境信息
       description: |
         Optional. Add only details that are relevant to this bug, such as remote server OS, SSH server version, shell, WSL, GPU/WebGL, or terminal renderer.
+        Linux users: please also include your desktop environment (GNOME / KDE / XFCE …) and display server (Wayland / X11).
         可选。只填写与本 bug 相关的信息，例如远程服务器系统、SSH 服务端版本、shell、WSL、GPU/WebGL 或终端渲染器。
+        Linux 用户请额外补充桌面环境（GNOME / KDE / XFCE 等）与显示服务器（Wayland / X11）。
       placeholder: |
         - Remote: Ubuntu 22.04, OpenSSH 9.6
         - Shell: zsh / bash / PowerShell
+        - Linux desktop: GNOME 46, Wayland / KDE Plasma 6, X11
         - Context: WSL / GPU rendering / external terminal
     validations:
       required: false
