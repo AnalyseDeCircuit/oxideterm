@@ -301,6 +301,12 @@ impl WorkspaceApp {
                     cx.stop_propagation();
                     return;
                 }
+                if this.active_sftp_editor_owns_key(event.keystroke.key.as_str(), cx) {
+                    // Windows emits committed characters only after an unhandled
+                    // keydown. Do not let pane-level capture override the modal
+                    // route that gives document keys to the focused editor.
+                    return;
+                }
                 let active_ime_should_receive_key =
                     this.defer_active_ime_key(&event.keystroke, window, cx);
                 if active_ime_should_receive_key {

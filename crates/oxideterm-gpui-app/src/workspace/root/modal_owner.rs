@@ -535,6 +535,22 @@ impl ActiveWindowModalProjection {
 }
 
 impl WorkspaceApp {
+    pub(in crate::workspace) fn active_sftp_editor_owns_key(&self, key: &str, cx: &App) -> bool {
+        // This mirrors the modal route so later pane-level capture cannot
+        // reclaim document keys after the SFTP editor has been selected.
+        self.active_window_modal_owner(cx)
+            .filter(|owner| {
+                matches!(
+                    owner,
+                    ActiveWindowModalOwner::ActiveTabWindowModal {
+                        kind: ActiveTabWindowModalKind::SftpEditor,
+                        ..
+                    }
+                )
+            })
+            .is_some_and(|owner| !owner.key_route(key).consumes_key())
+    }
+
     pub(in crate::workspace) fn active_window_modal_owner(
         &self,
         cx: &App,
