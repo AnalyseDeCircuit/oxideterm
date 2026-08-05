@@ -1013,6 +1013,10 @@ impl WorkspaceApp {
                 self.render_native_plugin_confirm_dialog(cx),
                 |root, dialog| root.child(dialog),
             )
+            // Tab renaming is a main-window portal and never remounts the terminal tab.
+            .when_some(self.render_tab_rename_dialog(cx), |root, dialog| {
+                root.child(dialog)
+            })
             // Tab-owned dialogs are portaled here so their backdrops cover all window chrome.
             .children(active_tab_window_modals)
             .when_some(

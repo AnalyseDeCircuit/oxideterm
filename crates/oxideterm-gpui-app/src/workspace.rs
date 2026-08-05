@@ -174,6 +174,7 @@ use oxideterm_gpui_ui::scroll::ScrollableElement;
 use oxideterm_gpui_ui::{
     ConfirmDialogAction, ConfirmDialogVariant, ConfirmDialogView,
     modal::{popover_backdrop, set_tauri_backdrop_blur_allowed},
+    text_input::{TextInputView, text_input, text_input_anchor_probe},
     toast::{ToastVariant, ToastView, toast_action, toast_close},
     toaster::toaster,
     tooltip::tooltip_content,
@@ -609,6 +610,13 @@ struct TabContextMenu {
     y: f32,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct TabRenameDialog {
+    // The dialog edits display metadata for one canonical terminal tab only.
+    tab_id: TabId,
+    draft: String,
+}
+
 #[derive(Clone, Debug)]
 struct ExitingTabVisual {
     tab_id: TabId,
@@ -714,6 +722,7 @@ pub(super) struct SelectableTextFragmentState {
 pub(crate) struct WorkspaceApp {
     focus_handle: FocusHandle,
     main_window_tabs: WorkspaceWindowTabState,
+    tab_rename_dialog: Option<TabRenameDialog>,
     detached_tab_return_drag: Option<DetachedTabReturnDrag>,
     detached_tab_return_handoff: Option<DetachedTabReturnHandoff>,
     next_tab_window_handoff_generation: u64,

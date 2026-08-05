@@ -132,6 +132,7 @@ pub(super) enum WorkspaceImeTarget {
     FileManager(FileManagerInput),
     Launcher(LauncherInput),
     Graphics(GraphicsInput),
+    TabRename,
     AiModelSelectorSearch,
     AiInlinePrompt,
     AiChatInput,
@@ -490,6 +491,7 @@ impl WorkspaceImeTarget {
             Self::FileManager(input) => 1_800 + input.anchor_key(),
             Self::Launcher(input) => 1_850 + input.anchor_key(),
             Self::Graphics(input) => 1_875 + input.anchor_key(),
+            Self::TabRename => 1_890,
             Self::AiModelSelectorSearch => 1_895,
             Self::AiInlinePrompt => 1_896,
             Self::AiChatInput => 1_897,
@@ -883,6 +885,10 @@ impl WorkspaceApp {
             )
         {
             return Some(WorkspaceImeTarget::Settings(input));
+        }
+        if self.tab_rename_dialog.is_some() {
+            // The blocking rename dialog owns text input ahead of background surfaces.
+            return Some(WorkspaceImeTarget::TabRename);
         }
         if let Some(focused_prompt) = self
             .connection_flow
@@ -1865,6 +1871,10 @@ impl WorkspaceApp {
                     None
                 }
             }
+            WorkspaceImeTarget::TabRename => self
+                .tab_rename_dialog
+                .as_ref()
+                .map(|dialog| dialog.draft.clone()),
             WorkspaceImeTarget::AiModelSelectorSearch => self
                 .ai_entity
                 .read(cx)
@@ -2701,6 +2711,13 @@ impl WorkspaceApp {
                 if self.graphics.update(cx, |graphics, cx| {
                     graphics.replace_input(input, replacement_range, text, cx)
                 }) {
+                    self.show_active_input_caret(cx);
+                    cx.notify();
+                }
+            }
+            WorkspaceImeTarget::TabRename => {
+                if let Some(dialog) = self.tab_rename_dialog.as_mut() {
+                    replace_utf16(&mut dialog.draft, replacement_range, text);
                     self.show_active_input_caret(cx);
                     cx.notify();
                 }

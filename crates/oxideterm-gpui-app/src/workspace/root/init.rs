@@ -594,6 +594,7 @@ impl WorkspaceApp {
         let mut workspace = Self {
             focus_handle,
             main_window_tabs: WorkspaceWindowTabState::new(),
+            tab_rename_dialog: None,
             detached_tab_return_drag: None,
             detached_tab_return_handoff: None,
             next_tab_window_handoff_generation: 0,

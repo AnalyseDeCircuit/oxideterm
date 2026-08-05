@@ -208,6 +208,24 @@ impl WorkspaceTabHostEntity {
             .and_then(|index| self.tabs.get(index))
     }
 
+    /// Renames only terminal display metadata without changing pane or session ownership.
+    pub(in crate::workspace) fn rename_terminal_tab(&mut self, tab_id: TabId, title: &str) -> bool {
+        let normalized_title = title.trim();
+        if normalized_title.is_empty() {
+            return false;
+        }
+        let Some(tab) = self.tab_mut_by_id(tab_id) else {
+            return false;
+        };
+        if !matches!(tab.kind, TabKind::LocalTerminal | TabKind::SshTerminal) {
+            return false;
+        }
+        tab.title.clear();
+        tab.title.push_str(normalized_title);
+        tab.title_source = TabTitleSource::Static;
+        true
+    }
+
     fn tab_mut_by_id(&mut self, tab_id: TabId) -> Option<&mut Tab> {
         let index = self.tab_index_by_id(tab_id)?;
         self.tabs.get_mut(index)
@@ -1271,6 +1289,51 @@ mod tests {
                 .and_then(|root| root.session_id_for_pane(replacement_pane)),
             Some(replacement_session)
         );
+    }
+
+    #[test]
+    fn terminal_tab_rename_preserves_pane_and_session_ownership() {
+        let mut tab_host = WorkspaceTabHostEntity::new();
+        let tab_id = TabId(1);
+        let pane_id = PaneId(2);
+        let session_id = TerminalSessionId(3);
+        let location = TerminalLocation { tab_id, pane_id };
+        tab_host.insert_and_select_main_tab(test_tab(
+            tab_id,
+            Some(PaneNode::leaf(pane_id, session_id)),
+        ));
+        tab_host.bind_terminal_location(session_id, location);
+
+        assert!(tab_host.rename_terminal_tab(tab_id, "  Production logs  "));
+        let tab = tab_host.tab_by_id(tab_id).expect("renamed terminal tab");
+        assert_eq!(tab.title, "Production logs");
+        assert_eq!(tab.title_source, TabTitleSource::Static);
+        assert_eq!(tab.active_pane_id, Some(pane_id));
+        assert_eq!(
+            tab.root_pane
+                .as_ref()
+                .and_then(|root| root.session_id_for_pane(pane_id)),
+            Some(session_id)
+        );
+        assert_eq!(tab_host.terminal_location(session_id), Some(location));
+    }
+
+    #[test]
+    fn tab_rename_rejects_empty_and_non_terminal_titles() {
+        let mut tab_host = WorkspaceTabHostEntity::new();
+        let terminal_id = TabId(1);
+        let settings_id = TabId(2);
+        tab_host.insert_tab(test_tab(terminal_id, None));
+        let mut settings_tab = test_tab(settings_id, None);
+        settings_tab.kind = TabKind::Settings;
+        settings_tab.title = "Settings".to_string();
+        settings_tab.title_source = TabTitleSource::I18nKey("settings.title");
+        tab_host.insert_tab(settings_tab);
+
+        assert!(!tab_host.rename_terminal_tab(terminal_id, "   "));
+        assert!(!tab_host.rename_terminal_tab(settings_id, "Preferences"));
+        assert_eq!(tab_host.tab_by_id(terminal_id).unwrap().title, "tab-1");
+        assert_eq!(tab_host.tab_by_id(settings_id).unwrap().title, "Settings");
     }
 
     #[test]

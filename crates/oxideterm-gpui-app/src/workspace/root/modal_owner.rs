@@ -95,6 +95,7 @@ pub(in crate::workspace) enum ActiveWindowModalOwner {
     NativePluginConfirm {
         phase: oxideterm_gpui_ui::motion::ExitPhase,
     },
+    TabRename,
     ActiveTabWindowModal {
         kind: ActiveTabWindowModalKind,
         phase: oxideterm_gpui_ui::motion::ExitPhase,
@@ -161,22 +162,23 @@ impl ActiveWindowModalOwner {
             Self::HostScheduleConfirm { .. } => 25,
             Self::HostScheduleLogs => 26,
             Self::NativePluginConfirm { .. } => 27,
-            Self::ActiveTabWindowModal { .. } => 28,
-            Self::TerminalCastPlayer => 29,
-            Self::ThemeEditor { .. } => 30,
-            Self::SettingsSshConfigImport { .. } => 31,
-            Self::TerminalCommandSpecsEditor => 32,
-            Self::AiTextEditor => 33,
-            Self::OxideImport { .. } => 34,
-            Self::OxideExport { .. } => 35,
-            Self::CommandPalette => 36,
-            Self::VersionMigration => 37,
-            Self::Onboarding => 38,
-            Self::LegalNotice { .. } => 39,
-            Self::NativeUpdateReleaseNotes { .. } => 40,
-            Self::Shortcuts => 41,
-            Self::AppLockDialog => 42,
-            Self::MermaidZoom => 43,
+            Self::TabRename => 28,
+            Self::ActiveTabWindowModal { .. } => 29,
+            Self::TerminalCastPlayer => 30,
+            Self::ThemeEditor { .. } => 31,
+            Self::SettingsSshConfigImport { .. } => 32,
+            Self::TerminalCommandSpecsEditor => 33,
+            Self::AiTextEditor => 34,
+            Self::OxideImport { .. } => 35,
+            Self::OxideExport { .. } => 36,
+            Self::CommandPalette => 37,
+            Self::VersionMigration => 38,
+            Self::Onboarding => 39,
+            Self::LegalNotice { .. } => 40,
+            Self::NativeUpdateReleaseNotes { .. } => 41,
+            Self::Shortcuts => 42,
+            Self::AppLockDialog => 43,
+            Self::MermaidZoom => 44,
         }
     }
 
@@ -217,6 +219,7 @@ impl ActiveWindowModalOwner {
             | Self::HostServiceLogs
             | Self::HostTmuxInput
             | Self::HostScheduleLogs
+            | Self::TabRename
             | Self::TerminalCastPlayer
             | Self::TerminalCommandSpecsEditor
             | Self::AiTextEditor
@@ -239,6 +242,7 @@ impl ActiveWindowModalOwner {
                 | Self::HostDockerLogs
                 | Self::HostServiceLogs
                 | Self::HostScheduleLogs
+                | Self::TabRename
                 | Self::ActiveTabWindowModal { .. }
                 | Self::TerminalCastPlayer
                 | Self::ThemeEditor { .. }
@@ -309,6 +313,7 @@ pub(in crate::workspace) struct ActiveWindowModalProjection {
     pub(in crate::workspace) host_tools_modal:
         Option<connection_monitor::HostToolsWindowModalSnapshot>,
     pub(in crate::workspace) native_plugin_phase: Option<oxideterm_gpui_ui::motion::ExitPhase>,
+    pub(in crate::workspace) tab_rename_open: bool,
     pub(in crate::workspace) active_tab_modal: Option<ActiveTabWindowModalSnapshot>,
     pub(in crate::workspace) terminal_cast_player_open: bool,
     pub(in crate::workspace) theme_editor_phase: Option<oxideterm_gpui_ui::motion::ExitPhase>,
@@ -435,6 +440,9 @@ impl ActiveWindowModalProjection {
         let native_plugin_owner = self
             .native_plugin_phase
             .map(|phase| ActiveWindowModalOwner::NativePluginConfirm { phase });
+        let tab_rename_owner = self
+            .tab_rename_open
+            .then_some(ActiveWindowModalOwner::TabRename);
         let active_tab_owner =
             self.active_tab_modal
                 .map(|snapshot| ActiveWindowModalOwner::ActiveTabWindowModal {
@@ -504,6 +512,7 @@ impl ActiveWindowModalProjection {
             tab_owner,
             host_tools_owner,
             native_plugin_owner,
+            tab_rename_owner,
             active_tab_owner,
             terminal_cast_owner,
             theme_editor_owner,
@@ -639,6 +648,7 @@ impl WorkspaceApp {
             tab_close_phase: self.tab_host.read(cx).close_confirm_phase(),
             host_tools_modal: self.host_tools.read(cx).window_modal_snapshot(),
             native_plugin_phase,
+            tab_rename_open: self.tab_rename_dialog.is_some(),
             active_tab_modal: self.active_tab_window_modal_owner(cx),
             terminal_cast_player_open: self.terminal.read(cx).cast_player_open(),
             theme_editor_phase,
@@ -911,6 +921,9 @@ impl WorkspaceApp {
             ActiveWindowModalOwner::NativePluginConfirm { .. } => {
                 let _ = self.handle_native_plugin_confirm_key(event, cx);
             }
+            ActiveWindowModalOwner::TabRename => {
+                let _ = self.handle_tab_rename_dialog_key(event, cx);
+            }
             ActiveWindowModalOwner::ActiveTabWindowModal { kind, .. } => {
                 let _ = self.handle_active_tab_window_modal_key(kind, event, window, cx);
             }
@@ -1133,6 +1146,21 @@ mod tests {
                 phase: VISIBLE,
             })
         );
+    }
+
+    #[test]
+    fn tab_rename_owns_editing_keys_above_lower_portals() {
+        let owner = ActiveWindowModalProjection {
+            native_plugin_phase: Some(VISIBLE),
+            tab_rename_open: true,
+            ..Default::default()
+        }
+        .top_owner()
+        .expect("tab rename modal owner");
+
+        assert_eq!(owner, ActiveWindowModalOwner::TabRename);
+        assert!(owner.allows_modal_ime());
+        assert_eq!(owner.key_route("enter").dispatch_owner, Some(owner));
     }
 
     #[test]
