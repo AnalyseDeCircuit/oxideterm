@@ -405,7 +405,23 @@ impl ConnectionFlowEntity {
         if let Some(pending) = pending {
             form.pending = pending;
         }
+        form.success_feedback_message = None;
         form.error = error;
+        cx.notify();
+        true
+    }
+
+    pub(in crate::workspace) fn set_form_success_feedback(
+        &mut self,
+        message: String,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let Some(form) = self.form.form.as_mut() else {
+            return false;
+        };
+        form.pending = false;
+        form.error = Some(message.clone());
+        form.success_feedback_message = Some(message);
         cx.notify();
         true
     }
@@ -1027,6 +1043,26 @@ mod tests {
             save_after_open: None,
             upstream_proxy: None,
         }
+    }
+
+    #[gpui::test]
+    fn form_feedback_keeps_success_styling_bound_to_success_message(cx: &mut TestAppContext) {
+        let entity = cx.new(ConnectionFlowEntity::new);
+        entity.update(cx, |entity, cx| {
+            entity
+                .form
+                .replace_with_new_form(NewConnectionForm::default());
+
+            assert!(entity.set_form_success_feedback("Connection successful".to_string(), cx));
+            assert!(entity.form.form.as_ref().unwrap().feedback_is_success());
+
+            assert!(entity.set_form_feedback(
+                Some(false),
+                Some("Authentication failed".to_string()),
+                cx,
+            ));
+            assert!(!entity.form.form.as_ref().unwrap().feedback_is_success());
+        });
     }
 
     #[gpui::test]

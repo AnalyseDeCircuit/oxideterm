@@ -471,6 +471,8 @@ pub(in crate::workspace) struct NewConnectionForm {
     pub(in crate::workspace) focused_field: NewConnectionField,
     pub(in crate::workspace) selected_field: Option<NewConnectionField>,
     pub(in crate::workspace) error: Option<String>,
+    // Success styling remains bound to the exact feedback message that produced it.
+    pub(in crate::workspace) success_feedback_message: Option<String>,
     pub(in crate::workspace) pending: bool,
     pub(in crate::workspace) serial_ports: Vec<oxideterm_terminal::SerialPortInfo>,
     pub(in crate::workspace) serial_ports_loading: bool,
@@ -630,6 +632,7 @@ impl Default for NewConnectionForm {
             focused_field: NewConnectionField::Name,
             selected_field: None,
             error: None,
+            success_feedback_message: None,
             pending: false,
             serial_ports: Vec::new(),
             serial_ports_loading: false,
@@ -646,6 +649,12 @@ impl Default for NewConnectionForm {
 }
 
 impl NewConnectionForm {
+    pub(in crate::workspace) fn feedback_is_success(&self) -> bool {
+        self.error
+            .as_ref()
+            .is_some_and(|message| self.success_feedback_message.as_ref() == Some(message))
+    }
+
     fn zeroize_secret_drafts(&mut self) {
         self.password.zeroize();
         self.passphrase.zeroize();

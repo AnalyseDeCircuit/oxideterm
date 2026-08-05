@@ -294,18 +294,24 @@ impl WorkspaceApp {
             .into_any_element()
     }
 
-    pub(super) fn render_prompt_error_box(&self, error: String) -> AnyElement {
-        let error_color = self.tokens.ui.error;
+    pub(super) fn render_prompt_feedback_box(&self, message: String, success: bool) -> AnyElement {
+        let feedback_color = if success {
+            self.tokens.ui.success
+        } else {
+            self.tokens.ui.error
+        };
         div()
             .rounded(px(self.tokens.radii.sm))
             .border_1()
-            .border_color(rgba((error_color << 8) | TAURI_PROMPT_ERROR_BORDER_ALPHA))
-            .bg(rgba((error_color << 8) | TAURI_PROMPT_ERROR_ALPHA))
+            .border_color(rgba(
+                (feedback_color << 8) | TAURI_PROMPT_FEEDBACK_BORDER_ALPHA,
+            ))
+            .bg(rgba((feedback_color << 8) | TAURI_PROMPT_FEEDBACK_ALPHA))
             .px(px(self.tokens.spacing.three))
             .py(px(self.tokens.spacing.two))
             .text_size(px(self.tokens.metrics.ui_text_sm))
-            .text_color(rgb(error_color))
-            .child(error)
+            .text_color(rgb(feedback_color))
+            .child(message)
             .into_any_element()
     }
 

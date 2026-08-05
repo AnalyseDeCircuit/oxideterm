@@ -30,6 +30,7 @@ struct ConnectionFormModalSnapshot {
     identity_agent: String,
     agent_available: Option<bool>,
     error: Option<String>,
+    feedback_success: bool,
     pending: bool,
     serial_port_path: String,
     serial_baud_rate: String,
@@ -65,6 +66,7 @@ impl ConnectionFormModalSnapshot {
             identity_agent: form.identity_agent.clone(),
             agent_available: form.agent_available,
             error: form.error.clone(),
+            feedback_success: form.feedback_is_success(),
             pending: form.pending,
             serial_port_path: form.serial_port_path.clone(),
             serial_baud_rate: form.serial_baud_rate.clone(),
@@ -424,7 +426,10 @@ impl WorkspaceApp {
                                         None
                                     },
                                     |content, error| {
-                                        content.child(self.render_prompt_error_box(error))
+                                        content.child(self.render_prompt_feedback_box(
+                                            error,
+                                            form.feedback_success,
+                                        ))
                                     },
                                 )
                                 .child(self.render_auth_selector(
@@ -967,10 +972,15 @@ impl WorkspaceApp {
                                 form.error.clone()
                             },
                             |content, error| {
+                                let feedback_color = if form.feedback_success {
+                                    theme.success
+                                } else {
+                                    theme.error
+                                };
                                 content.child(
                                     div()
                                         .text_size(px(self.tokens.metrics.ui_text_xs))
-                                        .text_color(rgb(theme.error))
+                                        .text_color(rgb(feedback_color))
                                         .child(error),
                                 )
                             },

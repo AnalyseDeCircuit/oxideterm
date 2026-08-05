@@ -173,27 +173,36 @@ impl WorkspaceApp {
                     cx,
                 ),
                 SshConnectionWorkerResult::Test { result } => {
-                    let (form_message, session_message) = match result {
-                        Ok(()) => (
-                            self.i18n.t("ssh.form.test_success"),
-                            self.i18n.t("sessionManager.toast.test_success"),
-                        ),
-                        Err(error) => (
-                            error.clone(),
-                            format!(
+                    match result {
+                        Ok(()) => {
+                            let form_message = self.i18n.t("ssh.form.test_success");
+                            let session_message = self.i18n.t("sessionManager.toast.test_success");
+                            // Preserve the existing inline location while selecting success chrome.
+                            let reported_to_form =
+                                self.connection_flow.update(cx, |connection_flow, cx| {
+                                    connection_flow.set_form_success_feedback(form_message, cx)
+                                });
+                            if !reported_to_form {
+                                self.session_manager.update(cx, |session_manager, cx| {
+                                    session_manager.set_status(Some(session_message), cx);
+                                });
+                            }
+                        }
+                        Err(error) => {
+                            let session_message = format!(
                                 "{}: {error}",
                                 self.i18n.t("sessionManager.toast.test_failed")
-                            ),
-                        ),
-                    };
-                    let reported_to_form =
-                        self.connection_flow.update(cx, |connection_flow, cx| {
-                            connection_flow.set_form_feedback(Some(false), Some(form_message), cx)
-                        });
-                    if !reported_to_form {
-                        self.session_manager.update(cx, |session_manager, cx| {
-                            session_manager.set_status(Some(session_message), cx);
-                        });
+                            );
+                            let reported_to_form =
+                                self.connection_flow.update(cx, |connection_flow, cx| {
+                                    connection_flow.set_form_feedback(Some(false), Some(error), cx)
+                                });
+                            if !reported_to_form {
+                                self.session_manager.update(cx, |session_manager, cx| {
+                                    session_manager.set_status(Some(session_message), cx);
+                                });
+                            }
+                        }
                     }
                     cx.notify();
                 }

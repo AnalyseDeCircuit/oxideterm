@@ -72,8 +72,8 @@ use field_controls::{AuthSelectorContext, serial_port_display_label};
 const TAURI_EDIT_MODAL_WIDTH: f32 = 500.0; // Tauri sm:max-w-[500px]
 const TAURI_EDIT_COLOR_FALLBACK: u32 = 0x22d3ee;
 const TAURI_EDIT_COLOR_FALLBACK_TEXT: &str = "#22d3ee";
-const TAURI_PROMPT_ERROR_ALPHA: u32 = 0x1a; // Tailwind red-500/10
-const TAURI_PROMPT_ERROR_BORDER_ALPHA: u32 = 0x80; // Tailwind red-500/50
+const TAURI_PROMPT_FEEDBACK_ALPHA: u32 = 0x1a;
+const TAURI_PROMPT_FEEDBACK_BORDER_ALPHA: u32 = 0x80;
 const SECRET_VISIBILITY_BUTTON_SIZE: f32 = 28.0;
 const SECRET_VISIBILITY_BUTTON_OFFSET: f32 = 4.0;
 const SECRET_VISIBILITY_ICON_SIZE: f32 = 16.0;
