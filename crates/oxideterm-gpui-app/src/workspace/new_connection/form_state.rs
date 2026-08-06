@@ -2,8 +2,8 @@ use std::fmt;
 
 use oxideterm_connections::{
     AuthType, ConnectionInfo, ConnectionTerminalOptions, ConnectionX11ForwardingOptions,
-    RemoteDesktopProfile, SavedUpstreamProxyProtocol, TransportUsernameTransition,
-    transport_port_replacement, transport_username_transition,
+    RemoteDesktopProfile, SavedAuth, SavedConnection, SavedUpstreamProxyProtocol,
+    TransportUsernameTransition, transport_port_replacement, transport_username_transition,
 };
 pub(in crate::workspace) use oxideterm_connections::{
     ConnectionTransport as NewConnectionTransport, RDP_DEFAULT_PORT_TEXT, SSH_DEFAULT_PORT_TEXT,
@@ -377,6 +377,33 @@ impl NewConnectionProxyHop {
         !self.host.trim().is_empty() && !self.username.trim().is_empty()
     }
 
+    pub(in crate::workspace) fn has_explicit_secret_draft(&self) -> bool {
+        match self.auth_tab {
+            SshAuthTab::Password => !self.password.is_empty(),
+            SshAuthTab::DefaultKey
+            | SshAuthTab::SshKey
+            | SshAuthTab::ManagedKey
+            | SshAuthTab::Certificate => !self.passphrase.is_empty(),
+            SshAuthTab::Agent | SshAuthTab::TwoFactor => false,
+        }
+    }
+
+    pub(in crate::workspace) fn matches_saved_connection(
+        &self,
+        connection: &SavedConnection,
+    ) -> bool {
+        // A saved secret is reusable only while every authentication endpoint field still
+        // matches the selected connection, preventing credentials from reaching an edited host.
+        self.saved_connection_id == connection.id
+            && self.host.trim() == connection.host
+            && self.port.trim().parse::<u16>().ok() == Some(connection.port)
+            && self.username.trim() == connection.username
+            && self.auth_tab == ssh_auth_tab_from_saved_auth(&connection.auth)
+            && self.key_path.trim() == connection.auth.key_path().unwrap_or_default()
+            && self.cert_path.trim() == connection.auth.cert_path().unwrap_or_default()
+            && self.managed_key_id.trim() == connection.auth.managed_key_id().unwrap_or_default()
+    }
+
     fn zeroize_secret_drafts(&mut self) {
         self.password.zeroize();
         self.passphrase.zeroize();
@@ -389,6 +416,15 @@ impl NewConnectionProxyHop {
         self.username = connection.username.clone();
         self.auth_tab = match connection.auth_type {
             AuthType::Password => SshAuthTab::Password,
+            AuthType::Key
+                if connection
+                    .key_path
+                    .as_deref()
+                    .unwrap_or_default()
+                    .is_empty() =>
+            {
+                SshAuthTab::DefaultKey
+            }
             AuthType::Key => SshAuthTab::SshKey,
             AuthType::ManagedKey => SshAuthTab::ManagedKey,
             AuthType::Certificate => SshAuthTab::Certificate,
@@ -406,6 +442,18 @@ impl NewConnectionProxyHop {
         self.identity_agent = connection.identity_agent.clone().unwrap_or_default();
         self.agent_forwarding_socket = connection.agent_forwarding_socket.clone();
         self.legacy_ssh_compatibility = connection.legacy_ssh_compatibility;
+    }
+}
+
+fn ssh_auth_tab_from_saved_auth(auth: &SavedAuth) -> SshAuthTab {
+    match auth {
+        SavedAuth::Password { .. } => SshAuthTab::Password,
+        SavedAuth::Key { key_path, .. } if key_path.is_empty() => SshAuthTab::DefaultKey,
+        SavedAuth::Key { .. } => SshAuthTab::SshKey,
+        SavedAuth::ManagedKey { .. } => SshAuthTab::ManagedKey,
+        SavedAuth::Certificate { .. } => SshAuthTab::Certificate,
+        SavedAuth::KeyboardInteractive => SshAuthTab::TwoFactor,
+        SavedAuth::Agent => SshAuthTab::Agent,
     }
 }
 

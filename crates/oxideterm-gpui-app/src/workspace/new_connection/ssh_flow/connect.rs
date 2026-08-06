@@ -71,6 +71,20 @@ impl WorkspaceApp {
                 cx.notify();
                 return None;
             }
+            let missing_credentials_message =
+                this.i18n.t("sessions.saved_next_hop.missing_credentials");
+            let saved_proxy_hop_auth = match saved_proxy_hop_auth_from_store(
+                &this.connection_store,
+                form,
+                &missing_credentials_message,
+            ) {
+                Ok(saved_auth) => saved_auth,
+                Err(error) => {
+                    form.error = Some(error);
+                    cx.notify();
+                    return None;
+                }
+            };
             // Resolve every fallible proxy input before moving any form-owned secret.
             let upstream_proxy = match upstream_proxy_config_from_form(
                 &this.connection_store,
@@ -112,8 +126,7 @@ impl WorkspaceApp {
                 ),
                 SshAuthTab::TwoFactor => AuthMethod::KeyboardInteractive,
             };
-            let proxy_chain = proxy_chain_from_form(form, secret_handoff)
-                .expect("proxy-chain validation completed before secret handoff");
+            let proxy_chain = proxy_chain_from_form(form, secret_handoff, saved_proxy_hop_auth);
             let config = SshConfig {
                 host: host.clone(),
                 port: port.unwrap_or(22),

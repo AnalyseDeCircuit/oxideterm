@@ -43,8 +43,9 @@ use crate::workspace::{
     },
 };
 use oxideterm_session_adapter::{
-    managed_key_resolver_from_store, proxy_chain_config_from_saved_connection,
-    ssh_config_from_saved_connection, ssh_config_from_saved_connection_with_runtime_secrets,
+    auth_method_from_saved_auth, managed_key_resolver_from_store,
+    proxy_chain_config_from_saved_connection, ssh_config_from_saved_connection,
+    ssh_config_from_saved_connection_with_runtime_secrets,
 };
 use oxideterm_terminal::{SerialSessionConfig, TelnetSessionConfig};
 

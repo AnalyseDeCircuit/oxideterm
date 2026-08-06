@@ -1314,6 +1314,46 @@ impl ConnectionStore {
         }
     }
 
+    pub fn copy_saved_auth_for_new_owner(&self, auth: &SavedAuth) -> Result<SavedAuth> {
+        // The destination receives a temporary zeroizing secret and creates its own keychain
+        // entry during upsert; sharing the source keychain id would couple deletion lifetimes.
+        match auth {
+            SavedAuth::Password { .. } => Ok(SavedAuth::Password {
+                keychain_id: None,
+                plaintext_password: Some(self.get_saved_auth_password(auth)?),
+            }),
+            SavedAuth::Key {
+                key_path,
+                has_passphrase,
+                ..
+            } => Ok(SavedAuth::Key {
+                key_path: key_path.clone(),
+                has_passphrase: *has_passphrase,
+                passphrase_keychain_id: None,
+                plaintext_passphrase: self.get_saved_auth_passphrase(auth)?,
+            }),
+            SavedAuth::Certificate {
+                key_path,
+                cert_path,
+                has_passphrase,
+                ..
+            } => Ok(SavedAuth::Certificate {
+                key_path: key_path.clone(),
+                cert_path: cert_path.clone(),
+                has_passphrase: *has_passphrase,
+                passphrase_keychain_id: None,
+                plaintext_passphrase: self.get_saved_auth_passphrase(auth)?,
+            }),
+            SavedAuth::ManagedKey { key_id, .. } => Ok(SavedAuth::ManagedKey {
+                key_id: key_id.clone(),
+                passphrase_keychain_id: None,
+                plaintext_passphrase: self.get_saved_auth_passphrase(auth)?,
+            }),
+            SavedAuth::KeyboardInteractive => Ok(SavedAuth::KeyboardInteractive),
+            SavedAuth::Agent => Ok(SavedAuth::Agent),
+        }
+    }
+
     pub fn get_saved_upstream_proxy_password(
         &self,
         auth: &SavedUpstreamProxyAuth,

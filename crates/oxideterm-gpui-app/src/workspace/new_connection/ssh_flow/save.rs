@@ -6,8 +6,51 @@ use crate::workspace::{
     WorkspaceNotificationKind, WorkspaceNotificationScope, WorkspaceNotificationSeverity,
 };
 use gpui::App;
-use oxideterm_connections::{ConnectionStore, SavedConnection};
+use oxideterm_connections::{ConnectionStore, SavedAuth, SavedConnection};
 use oxideterm_gpui_terminal::TerminalNoticeVariant;
+
+fn saved_proxy_hop_auth_copies(
+    connection_store: &ConnectionStore,
+    proxy_hops: &[NewConnectionProxyHop],
+    missing_credentials_message: &str,
+) -> anyhow::Result<Vec<Option<SavedAuth>>> {
+    proxy_hops
+        .iter()
+        .map(|hop| {
+            if hop.saved_connection_id.is_empty() || hop.has_explicit_secret_draft() {
+                return Ok(None);
+            }
+            let saved_connection = connection_store
+                .get(&hop.saved_connection_id)
+                .ok_or_else(|| anyhow::anyhow!(missing_credentials_message.to_string()))?;
+            if !hop.matches_saved_connection(saved_connection) {
+                return Err(anyhow::anyhow!(missing_credentials_message.to_string()));
+            }
+            connection_store
+                .copy_saved_auth_for_new_owner(&saved_connection.auth)
+                .map(Some)
+        })
+        .collect()
+}
+
+fn apply_saved_proxy_hop_auth_copies(
+    request: &mut SaveConnectionRequest,
+    runtime_proxy_hop_count: usize,
+    auth_copies: Vec<Option<SavedAuth>>,
+) {
+    // Runtime ancestors already own their secrets; only form-added hops can reference a
+    // saved connection whose credential must be copied into a new keychain owner.
+    for (proxy_hop, auth_copy) in request
+        .proxy_chain
+        .iter_mut()
+        .skip(runtime_proxy_hop_count)
+        .zip(auth_copies)
+    {
+        if let Some(auth) = auth_copy {
+            proxy_hop.auth = auth;
+        }
+    }
+}
 
 impl WorkspaceApp {
     pub(super) fn report_saved_next_hop_error(&mut self, i18n_key: &str, cx: &mut Context<Self>) {
@@ -468,13 +511,29 @@ impl WorkspaceApp {
             },
             None => Vec::new(),
         };
-        self.with_connection_form_mut(cx, |_this, form, _cx| {
+        self.with_connection_form_mut(cx, |this, form, _cx| {
             let form = form?;
-            Some(save_request_from_form_with_proxy_hop_prefix(
-                form,
-                &mut runtime_proxy_hops,
-                None,
-            ))
+            Some((|| {
+                let missing_credentials_message =
+                    this.i18n.t("sessions.saved_next_hop.missing_credentials");
+                let auth_copies = saved_proxy_hop_auth_copies(
+                    &this.connection_store,
+                    &form.proxy_hops,
+                    &missing_credentials_message,
+                )?;
+                let runtime_proxy_hop_count = runtime_proxy_hops.len();
+                let mut request = save_request_from_form_with_proxy_hop_prefix(
+                    form,
+                    &mut runtime_proxy_hops,
+                    None,
+                )?;
+                apply_saved_proxy_hop_auth_copies(
+                    &mut request,
+                    runtime_proxy_hop_count,
+                    auth_copies,
+                );
+                Ok(request)
+            })())
         })
     }
 

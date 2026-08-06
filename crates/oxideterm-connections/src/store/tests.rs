@@ -893,6 +893,77 @@ mod tests {
     }
 
     #[test]
+    fn copied_saved_password_uses_an_independent_proxy_keychain_owner() {
+        let mut store = load_empty_store("copy-saved-password-for-proxy-hop");
+        store
+            .upsert(request(
+                "source-hop",
+                SavedAuth::Password {
+                    keychain_id: None,
+                    plaintext_password: Some(SecretString::from("source-hop-secret")),
+                },
+            ))
+            .unwrap();
+
+        let source_keychain_id = match &store.get("source-hop").unwrap().auth {
+            SavedAuth::Password {
+                keychain_id: Some(keychain_id),
+                ..
+            } => keychain_id.clone(),
+            other => panic!("unexpected source auth: {other:?}"),
+        };
+        let copied_auth = store
+            .copy_saved_auth_for_new_owner(&store.get("source-hop").unwrap().auth)
+            .unwrap();
+        assert!(matches!(
+            &copied_auth,
+            SavedAuth::Password {
+                keychain_id: None,
+                plaintext_password: Some(_),
+            }
+        ));
+
+        let mut destination = request("target-with-hop", SavedAuth::Agent);
+        destination.proxy_chain.push(SavedProxyHop {
+            host: "jump.example.com".to_string(),
+            port: 22,
+            username: "ops".to_string(),
+            auth: copied_auth,
+            agent_forwarding: false,
+            identity_agent: None,
+            agent_forwarding_socket: None,
+            legacy_ssh_compatibility: false,
+        });
+        let (_connection, runtime_secrets) = store
+            .upsert_with_runtime_secrets(destination)
+            .expect("destination should save");
+
+        assert_eq!(
+            runtime_secrets.proxy_chain[0]
+                .as_ref()
+                .expect("copied proxy runtime secret"),
+            &SecretString::from("source-hop-secret")
+        );
+        let destination_keychain_id = match &store.get("target-with-hop").unwrap().proxy_chain[0].auth
+        {
+            SavedAuth::Password {
+                keychain_id: Some(keychain_id),
+                plaintext_password: None,
+            } => keychain_id.clone(),
+            other => panic!("unexpected destination auth: {other:?}"),
+        };
+        assert_ne!(source_keychain_id, destination_keychain_id);
+
+        assert!(store.delete("source-hop").unwrap());
+        assert_eq!(
+            store.keychain.get(&destination_keychain_id).unwrap(),
+            "source-hop-secret"
+        );
+        let persisted = fs::read_to_string(store.path()).unwrap();
+        assert!(!persisted.contains("source-hop-secret"));
+    }
+
+    #[test]
     fn upstream_proxy_password_is_saved_to_keychain_reference() {
         let mut store = load_empty_store("upstream-proxy-password");
         let path = store.path().to_path_buf();
