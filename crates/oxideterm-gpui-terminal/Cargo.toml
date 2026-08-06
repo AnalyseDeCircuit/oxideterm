@@ -26,3 +26,6 @@ tempfile = "3.23"
 unicode-segmentation.workspace = true
 unicode-width.workspace = true
 zeroize.workspace = true
+
+[dev-dependencies]
+gpui = { workspace = true, features = ["test-support"] }

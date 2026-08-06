@@ -3,6 +3,7 @@ use std::{
     env,
     hash::{Hash, Hasher},
     ops::Range,
+    rc::Rc,
     sync::{
         Arc,
         atomic::{AtomicU64, Ordering},
@@ -71,6 +72,7 @@ use scrollbar::{ScrollbarDrag, ScrollbarGeometry};
 pub type SharedTerminalSession = Arc<Mutex<TerminalSession>>;
 pub type TerminalInputInterceptor =
     Arc<dyn Fn(&[u8]) -> TerminalInputInterceptorResult + Send + Sync>;
+pub type TerminalInputBroadcaster = Rc<dyn Fn(TerminalBroadcastInputKind, &[u8], &mut App)>;
 const PRIVILEGE_PROMPT_DEBUG_ENV: &str = "OXIDETERM_PRIVILEGE_DEBUG";
 const ACTIVE_TERMINAL_POLL_INTERVAL: Duration = Duration::from_millis(16);
 const BACKGROUND_TERMINAL_POLL_INTERVAL: Duration = Duration::from_millis(64);
@@ -100,6 +102,13 @@ pub enum TerminalPaneEvent {
     ContextActionRequested,
     // Search completion is asynchronous; Workspace reads the latest pane-owned status.
     SearchStatusChanged,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum TerminalBroadcastInputKind {
+    Protocol,
+    Text,
+    Paste,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -316,6 +325,7 @@ pub struct TerminalPane {
     context_menu_presence: oxideterm_gpui_ui::motion::ExitPresence,
     context_action_requested: Option<TerminalContextAction>,
     plugin_input_interceptor: Option<TerminalInputInterceptor>,
+    input_broadcaster: Option<TerminalInputBroadcaster>,
     input_locked: bool,
     marked_text: Option<String>,
     privilege_prompt_inline_hint: Option<String>,
@@ -722,6 +732,7 @@ impl TerminalPane {
             context_menu_presence: oxideterm_gpui_ui::motion::ExitPresence::visible(),
             context_action_requested: None,
             plugin_input_interceptor: None,
+            input_broadcaster: None,
             input_locked: false,
             marked_text: None,
             privilege_prompt_inline_hint: None,
@@ -1682,12 +1693,19 @@ impl TerminalPane {
     }
 
     pub fn paste_text(&mut self, text: &str, cx: &mut Context<Self>) {
+        if self.paste_text_without_broadcast(text, cx) {
+            self.broadcast_user_input(TerminalBroadcastInputKind::Paste, text.as_bytes(), cx);
+        }
+    }
+
+    fn paste_text_without_broadcast(&mut self, text: &str, cx: &mut Context<Self>) -> bool {
         if !self.terminal_accepts_input() {
-            return;
+            return false;
         }
         let Some(bytes) = self.apply_plugin_input_interceptor(text.as_bytes()) else {
-            return;
+            return false;
         };
+        let bytes = Zeroizing::new(bytes);
         let mode = self.terminal.lock().mode();
         self.delete_free_type_selection_if_active(mode, cx);
         let now = Instant::now();
@@ -1707,7 +1725,9 @@ impl TerminalPane {
             self.last_terminal_input = Instant::now();
             self.reset_cursor_blink();
             cx.notify();
+            return true;
         }
+        false
     }
 
     pub fn send_command_line(&mut self, command: &str, cx: &mut Context<Self>) {
@@ -1823,7 +1843,9 @@ impl TerminalPane {
         if bytes.is_empty() || !self.terminal_accepts_input() {
             return;
         }
-        self.send_user_protocol_bytes(bytes, cx);
+        // AI input remains scoped to its selected pane even while the user has
+        // interactive terminal broadcasting enabled.
+        self.send_user_protocol_bytes_without_broadcast(bytes, cx);
     }
 
     pub fn send_privilege_secret_input_bytes(
@@ -1862,6 +1884,29 @@ impl TerminalPane {
 
     pub fn set_plugin_input_interceptor(&mut self, interceptor: Option<TerminalInputInterceptor>) {
         self.plugin_input_interceptor = interceptor;
+    }
+
+    pub fn set_input_broadcaster(&mut self, broadcaster: Option<TerminalInputBroadcaster>) {
+        self.input_broadcaster = broadcaster;
+    }
+
+    pub fn send_broadcast_input(
+        &mut self,
+        kind: TerminalBroadcastInputKind,
+        bytes: &[u8],
+        cx: &mut Context<Self>,
+    ) -> bool {
+        // Mirrored input uses the target pane's normal interception and PTY
+        // path, but never re-enters the broadcaster and creates a loop.
+        match kind {
+            TerminalBroadcastInputKind::Protocol => {
+                self.send_user_protocol_bytes_without_broadcast(bytes, cx)
+            }
+            TerminalBroadcastInputKind::Text => std::str::from_utf8(bytes)
+                .is_ok_and(|text| self.commit_text_without_broadcast(text, cx)),
+            TerminalBroadcastInputKind::Paste => std::str::from_utf8(bytes)
+                .is_ok_and(|text| self.paste_text_without_broadcast(text, cx)),
+        }
     }
 
     pub fn set_input_locked(&mut self, locked: bool, cx: &mut Context<Self>) {
@@ -2524,16 +2569,43 @@ impl TerminalPane {
     }
 
     pub(crate) fn send_user_protocol_bytes(&mut self, bytes: &[u8], cx: &mut Context<Self>) {
+        if self.send_user_protocol_bytes_without_broadcast(bytes, cx) {
+            self.broadcast_user_input(TerminalBroadcastInputKind::Protocol, bytes, cx);
+        }
+    }
+
+    fn send_user_protocol_bytes_without_broadcast(
+        &mut self,
+        bytes: &[u8],
+        cx: &mut Context<Self>,
+    ) -> bool {
         if !self.terminal_accepts_input() {
-            return;
+            return false;
         }
         let Some(bytes) = self.apply_plugin_input_interceptor(bytes) else {
-            return;
+            return false;
         };
+        let bytes = Zeroizing::new(bytes);
         self.observe_user_input("protocol", &bytes, cx);
         if self.send_protocol_bytes(&bytes, cx) {
             self.restore_live_output_after_user_input();
+            return true;
         }
+        false
+    }
+
+    fn broadcast_user_input(
+        &self,
+        kind: TerminalBroadcastInputKind,
+        bytes: &[u8],
+        cx: &mut Context<Self>,
+    ) {
+        let Some(broadcaster) = self.input_broadcaster.clone() else {
+            return;
+        };
+        // The callback is synchronous and receives borrowed input so commands
+        // are never retained in pane events, logs, or background tasks.
+        broadcaster(kind, bytes, cx);
     }
 
     fn send_text(&mut self, text: &str, cx: &mut Context<Self>) {
@@ -2682,18 +2754,27 @@ impl TerminalPane {
 
     fn commit_text(&mut self, text: &str, cx: &mut Context<Self>) {
         self.marked_text = None;
+        if self.commit_text_without_broadcast(text, cx) {
+            self.broadcast_user_input(TerminalBroadcastInputKind::Text, text.as_bytes(), cx);
+        }
+    }
+
+    fn commit_text_without_broadcast(&mut self, text: &str, cx: &mut Context<Self>) -> bool {
         if !self.terminal_accepts_input() {
-            return;
+            return false;
         }
         let Some(bytes) = self.apply_plugin_input_interceptor(text.as_bytes()) else {
-            return;
+            return false;
         };
+        let bytes = Zeroizing::new(bytes);
         let mode = self.terminal.lock().mode();
         self.delete_free_type_selection_if_active(mode, cx);
         self.observe_user_input("text", &bytes, cx);
         if self.send_protocol_bytes(&bytes, cx) {
             self.restore_live_output_after_user_input();
+            return true;
         }
+        false
     }
 
     fn set_marked_text(&mut self, text: &str, cx: &mut Context<Self>) {
@@ -2991,7 +3072,20 @@ mod tests {
     use super::*;
     use std::{cell::Cell, collections::HashMap, sync::Arc};
 
+    use gpui::{AppContext, IntoElement, Render, TestAppContext, div};
     use oxideterm_terminal::{TerminalAttrs, TerminalCell, TerminalColor, TerminalCursorShape};
+
+    struct TerminalTestRoot;
+
+    struct TerminalBroadcastRecorder {
+        delivered: Vec<(TerminalBroadcastInputKind, Vec<u8>)>,
+    }
+
+    impl Render for TerminalTestRoot {
+        fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
+            div()
+        }
+    }
 
     #[test]
     fn command_mark_ui_is_hidden_while_a_tui_owns_the_terminal_surface() {
@@ -3101,6 +3195,48 @@ mod tests {
     #[test]
     fn user_input_keeps_an_already_live_viewport_stable() {
         assert!(!viewport_needs_live_output_restore(0, px(0.0), false));
+    }
+
+    #[gpui::test]
+    fn direct_user_input_broadcasts_once_for_each_input_path(cx: &mut TestAppContext) {
+        let (_, cx) = cx.add_window_view(|_window, _cx| TerminalTestRoot);
+        let pane = cx.update(|window, cx| {
+            cx.new(|cx| TerminalPane::new(window, cx).expect("test terminal pane"))
+        });
+        let recorder = cx.new(|_| TerminalBroadcastRecorder {
+            delivered: Vec::new(),
+        });
+        let recorder_for_broadcaster = recorder.downgrade();
+        pane.update(cx, |pane, _cx| {
+            pane.set_input_broadcaster(Some(Rc::new(move |kind, bytes, cx| {
+                let _ = recorder_for_broadcaster.update(cx, |recorder, _cx| {
+                    recorder.delivered.push((kind, bytes.to_vec()));
+                });
+            })));
+        });
+
+        pane.update(cx, |pane, cx| {
+            pane.commit_text("x", cx);
+            pane.send_user_protocol_bytes(b"\x1b[D", cx);
+            pane.paste_text("y", cx);
+        });
+        let delivered = recorder.read_with(cx, |recorder, _cx| recorder.delivered.clone());
+        assert_eq!(
+            delivered.as_slice(),
+            [
+                (TerminalBroadcastInputKind::Text, b"x".to_vec()),
+                (TerminalBroadcastInputKind::Protocol, b"\x1b[D".to_vec()),
+                (TerminalBroadcastInputKind::Paste, b"y".to_vec()),
+            ]
+        );
+
+        pane.update(cx, |pane, cx| {
+            assert!(pane.send_broadcast_input(TerminalBroadcastInputKind::Text, b"z", cx));
+        });
+        assert_eq!(
+            recorder.read_with(cx, |recorder, _cx| recorder.delivered.len()),
+            3
+        );
     }
 
     #[test]

@@ -161,14 +161,14 @@ use oxideterm_gpui_platform::{
 };
 use oxideterm_gpui_terminal::{
     BackgroundImageRenderCache, PrivilegePromptMatch, SharedTerminalSession, TerminalBackgroundFit,
-    TerminalBackgroundPreferences, TerminalCommandSelectionLabels, TerminalContextAction,
-    TerminalHighlightRenderMode, TerminalHighlightRule as UiHighlightRule,
-    TerminalInputInterceptor, TerminalInputInterceptorResult, TerminalModemLabels, TerminalNotice,
-    TerminalNoticeVariant, TerminalOutputProcessor, TerminalPane, TerminalPaneEvent,
-    TerminalPasteLabels, TerminalRecordingState, TerminalRecordingStatus, TerminalSearchStatus,
-    TerminalSerialControlLabels, TerminalTrzszLabels, TerminalUiPreferenceOverrides,
-    TerminalUiPreferences, TerminalUiTheme, TerminalWorkingDirectorySource,
-    detect_custom_privilege_prompt,
+    TerminalBackgroundPreferences, TerminalBroadcastInputKind, TerminalCommandSelectionLabels,
+    TerminalContextAction, TerminalHighlightRenderMode, TerminalHighlightRule as UiHighlightRule,
+    TerminalInputBroadcaster, TerminalInputInterceptor, TerminalInputInterceptorResult,
+    TerminalModemLabels, TerminalNotice, TerminalNoticeVariant, TerminalOutputProcessor,
+    TerminalPane, TerminalPaneEvent, TerminalPasteLabels, TerminalRecordingState,
+    TerminalRecordingStatus, TerminalSearchStatus, TerminalSerialControlLabels,
+    TerminalTrzszLabels, TerminalUiPreferenceOverrides, TerminalUiPreferences, TerminalUiTheme,
+    TerminalWorkingDirectorySource, detect_custom_privilege_prompt,
 };
 use oxideterm_gpui_ui::scroll::ScrollableElement;
 use oxideterm_gpui_ui::{

@@ -36,6 +36,17 @@ impl WorkspaceApp {
     ) {
         let window_handle = window.window_handle();
         let terminal_label = pane.read(cx).title().to_string();
+        let workspace = cx.weak_entity();
+        let broadcaster: TerminalInputBroadcaster = Rc::new(move |kind, bytes, cx| {
+            let _ = workspace.update(cx, |workspace, cx| {
+                workspace.broadcast_terminal_input(pane_id, kind, bytes, cx);
+            });
+        });
+        pane.update(cx, |pane, _cx| {
+            // The weak callback follows the pane across detach/reconnect mounts
+            // without taking ownership of either the pane or its SSH session.
+            pane.set_input_broadcaster(Some(broadcaster));
+        });
         self.tab_host.update(cx, |tab_host, cx| {
             tab_host.register_terminal_pane(pane_id, session_id, pane, window_handle, cx);
         });
