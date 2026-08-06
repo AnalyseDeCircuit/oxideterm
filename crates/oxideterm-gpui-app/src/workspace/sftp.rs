@@ -1494,6 +1494,46 @@ mod entity_delivery_tests {
     }
 
     #[gpui::test]
+    fn pending_terminal_cwd_is_not_overwritten_by_inflight_listing(cx: &mut TestAppContext) {
+        let entity = cx.new(SftpWorkspaceEntity::new);
+        entity.update(cx, |sftp, _cx| {
+            // Opening SFTP queues the terminal cwd after the remembered directory starts loading.
+            sftp.current_tab_id = Some(TabId(1));
+            sftp.current_node_id = Some(NodeId::new("current-node"));
+            sftp.view_generation = 1;
+            sftp.remote_path = "/root/.oxideterm".to_string();
+            sftp.remote_path_input = sftp.remote_path.clone();
+            sftp.remote_loading = true;
+            sftp.remote_load_inflight = true;
+            sftp.remote_load_pending = true;
+        });
+        let sender = cx.read(|cx| entity.read(cx).worker_sender());
+
+        sender
+            .send(SftpWorkerResult::RemoteList {
+                tab_id: TabId(1),
+                node_id: NodeId::new("current-node"),
+                view_generation: 1,
+                session_id: "current-session".to_string(),
+                path: "/root".to_string(),
+                result: Ok(RemoteSftpListing {
+                    cwd: "/root".to_string(),
+                    files: Vec::new(),
+                }),
+            })
+            .expect("inflight SFTP directory delivery");
+        cx.run_until_parked();
+
+        cx.read(|cx| {
+            let sftp = entity.read(cx);
+            assert_eq!(sftp.remote_path, "/root/.oxideterm");
+            assert_eq!(sftp.remote_path_input, "/root/.oxideterm");
+            assert!(sftp.remote_load_pending);
+            assert!(!sftp.remote_load_inflight);
+        });
+    }
+
+    #[gpui::test]
     fn hidden_entity_drains_backlog_by_budget_and_stops_on_release(cx: &mut TestAppContext) {
         let entity = cx.new(SftpWorkspaceEntity::new);
         let ready_events = Arc::new(AtomicUsize::new(0));

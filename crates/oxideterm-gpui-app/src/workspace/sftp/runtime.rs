@@ -35,6 +35,15 @@ impl SftpRemoteLoadState {
     }
 }
 
+fn remote_list_result_is_superseded(
+    requested_path: &str,
+    current_path: &str,
+    load_pending: bool,
+) -> bool {
+    // A queued navigation owns the visible path, so an older listing must only release the slot.
+    load_pending && requested_path != current_path
+}
+
 #[cfg(test)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum SftpRemoteListCompletionContext {
@@ -166,6 +175,13 @@ impl SftpWorkspaceEntity {
             || self.current_node_id.as_ref() != Some(&node_id)
             || self.view_generation != view_generation
         {
+            return SftpRemoteListOutcome {
+                bind_session: None,
+                load_transfer_state_for: None,
+                changed: true,
+            };
+        }
+        if remote_list_result_is_superseded(&path, &self.remote_path, self.remote_load_pending) {
             return SftpRemoteListOutcome {
                 bind_session: None,
                 load_transfer_state_for: None,
@@ -824,17 +840,26 @@ impl WorkspaceApp {
             if sftp.current_node_id.as_ref() != Some(node_id) {
                 return;
             }
-            sftp.remote_loading = !ready;
-            if let Some(cwd) = cwd {
-                sftp.remote_path.clone_from(&cwd);
-                sftp.remote_path_input = cwd;
-            }
+            sftp.apply_router_sftp_ready(ready, cwd);
             cx.notify();
         });
     }
 }
 
 impl SftpWorkspaceEntity {
+    fn apply_router_sftp_ready(&mut self, ready: bool, cwd: Option<String>) {
+        // Channel readiness does not finish a directory load that is pending or still in flight.
+        self.remote_loading = !ready || self.remote_load_pending || self.remote_load_inflight;
+        if self.remote_load_pending {
+            // Readiness can report the shared session's older cwd while explicit navigation waits.
+            return;
+        }
+        if let Some(cwd) = cwd {
+            self.remote_path.clone_from(&cwd);
+            self.remote_path_input = cwd;
+        }
+    }
+
     fn apply_remote_path_completion(
         &mut self,
         generation: u64,
@@ -1092,6 +1117,21 @@ impl SftpWorkspaceEntity {
 #[cfg(test)]
 mod remote_load_state_tests {
     use super::*;
+
+    #[test]
+    fn sftp_ready_event_preserves_pending_terminal_cwd() {
+        let mut sftp = SftpWorkspaceEntity::default();
+        // The shared session may become ready after the terminal cwd has queued a newer load.
+        sftp.remote_path = "/root/.oxideterm".to_string();
+        sftp.remote_path_input = sftp.remote_path.clone();
+        sftp.remote_load_pending = true;
+
+        sftp.apply_router_sftp_ready(true, Some("/root".to_string()));
+
+        assert_eq!(sftp.remote_path, "/root/.oxideterm");
+        assert_eq!(sftp.remote_path_input, "/root/.oxideterm");
+        assert!(sftp.remote_loading);
+    }
 
     #[test]
     fn hidden_current_view_completion_clears_inflight_before_return() {
