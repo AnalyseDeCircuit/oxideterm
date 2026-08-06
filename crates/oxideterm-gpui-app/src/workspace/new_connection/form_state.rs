@@ -310,6 +310,7 @@ pub(in crate::workspace) fn toggle_remote_desktop_feature(
 
 pub(in crate::workspace) struct NewConnectionProxyHop {
     pub(in crate::workspace) saved_connection_id: String,
+    pub(in crate::workspace) persisted_proxy_hop_index: Option<usize>,
     pub(in crate::workspace) host: String,
     pub(in crate::workspace) port: String,
     pub(in crate::workspace) username: String,
@@ -330,6 +331,7 @@ impl fmt::Debug for NewConnectionProxyHop {
         formatter
             .debug_struct("NewConnectionProxyHop")
             .field("saved_connection_id", &self.saved_connection_id)
+            .field("persisted_proxy_hop_index", &self.persisted_proxy_hop_index)
             .field("host", &self.host)
             .field("port", &self.port)
             .field("username", &self.username)
@@ -357,6 +359,7 @@ impl NewConnectionProxyHop {
     pub(in crate::workspace) fn new() -> Self {
         Self {
             saved_connection_id: String::new(),
+            persisted_proxy_hop_index: None,
             host: String::new(),
             port: SSH_DEFAULT_PORT_TEXT.to_string(),
             username: String::new(),
@@ -411,6 +414,7 @@ impl NewConnectionProxyHop {
 
     pub(in crate::workspace) fn apply_saved_connection(&mut self, connection: &ConnectionInfo) {
         self.saved_connection_id = connection.id.clone();
+        self.persisted_proxy_hop_index = None;
         self.host = connection.host.clone();
         self.port = connection.port.to_string();
         self.username = connection.username.clone();
@@ -445,7 +449,7 @@ impl NewConnectionProxyHop {
     }
 }
 
-fn ssh_auth_tab_from_saved_auth(auth: &SavedAuth) -> SshAuthTab {
+pub(in crate::workspace) fn ssh_auth_tab_from_saved_auth(auth: &SavedAuth) -> SshAuthTab {
     match auth {
         SavedAuth::Password { .. } => SshAuthTab::Password,
         SavedAuth::Key { key_path, .. } if key_path.is_empty() => SshAuthTab::DefaultKey,

@@ -235,6 +235,7 @@ pub(super) fn proxy_hop_form_from_runtime_config(config: ProxyHopConfig) -> NewC
     let auth_fields = runtime_auth_form_fields(config.auth);
     NewConnectionProxyHop {
         saved_connection_id: String::new(),
+        persisted_proxy_hop_index: None,
         host: config.host,
         port: config.port.to_string(),
         username: config.username,

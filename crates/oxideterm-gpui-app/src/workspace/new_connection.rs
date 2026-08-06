@@ -15,6 +15,7 @@ pub(super) use form_state::{
     NewConnectionTransport, NewConnectionUpstreamProxyAuth, NewConnectionUpstreamProxyPolicy,
     SavedConnectionPromptAction, SshAuthTab, form_from_remote_desktop_profile,
     identity_agent_from_form, identity_agent_selector, refresh_identity_agent_availability,
+    ssh_auth_tab_from_saved_auth,
 };
 pub(super) use host_key_dialog::HostKeyChallenge;
 pub(super) use kbi_dialog::KeyboardInteractiveChallenge;

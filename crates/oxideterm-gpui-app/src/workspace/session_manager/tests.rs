@@ -765,6 +765,72 @@ pub(super) fn edit_properties_saved_keychain_password_starts_unloaded() {
 }
 
 #[test]
+pub(super) fn edit_properties_restores_proxy_chain_without_loading_secrets() {
+    let mut saved_connection = saved_connection_fixture(SavedAuth::Agent);
+    saved_connection.proxy_chain = vec![SavedProxyHop {
+        host: "jump.example.com".to_string(),
+        port: 2222,
+        username: "ops".to_string(),
+        auth: SavedAuth::Password {
+            keychain_id: Some("proxy-password-keychain-id".to_string()),
+            plaintext_password: None,
+        },
+        agent_forwarding: true,
+        identity_agent: Some("/tmp/proxy-agent.sock".to_string()),
+        agent_forwarding_socket: Some("/tmp/proxy-forward.sock".to_string()),
+        legacy_ssh_compatibility: true,
+    }];
+    let mut form = form_from_saved_connection(&saved_connection, None);
+
+    restore_saved_proxy_chain_in_form(&mut form, &saved_connection);
+
+    assert!(form.proxy_chain_expanded);
+    assert_eq!(form.proxy_hops.len(), 1);
+    let hop = &form.proxy_hops[0];
+    assert_eq!(hop.persisted_proxy_hop_index, Some(0));
+    assert_eq!(hop.host, "jump.example.com");
+    assert_eq!(hop.port, "2222");
+    assert_eq!(hop.username, "ops");
+    assert_eq!(hop.auth_tab, SshAuthTab::Password);
+    assert!(hop.password.is_empty());
+    assert!(hop.passphrase.is_empty());
+    assert!(hop.agent_forwarding);
+    assert_eq!(hop.identity_agent, "/tmp/proxy-agent.sock");
+    assert_eq!(
+        hop.agent_forwarding_socket.as_deref(),
+        Some("/tmp/proxy-forward.sock")
+    );
+    assert!(hop.legacy_ssh_compatibility);
+}
+
+#[test]
+pub(super) fn edit_properties_can_remove_the_entire_proxy_chain() {
+    let mut saved_connection = saved_connection_fixture(SavedAuth::Agent);
+    saved_connection.proxy_chain = vec![SavedProxyHop {
+        host: "jump.example.com".to_string(),
+        port: 22,
+        username: "ops".to_string(),
+        auth: SavedAuth::Agent,
+        agent_forwarding: false,
+        identity_agent: None,
+        agent_forwarding_socket: None,
+        legacy_ssh_compatibility: false,
+    }];
+    let mut form = form_from_saved_connection(&saved_connection, None);
+    restore_saved_proxy_chain_in_form(&mut form, &saved_connection);
+    form.proxy_hops.clear();
+
+    let request = save_request_from_form_with_existing_auth(
+        &mut form,
+        Some(saved_connection.id.clone()),
+        Some(&saved_connection.auth),
+    )
+    .unwrap();
+
+    assert!(request.proxy_chain.is_empty());
+}
+
+#[test]
 pub(super) fn edit_properties_preserves_legacy_ssh_compatibility() {
     let mut saved_connection = saved_connection_fixture(SavedAuth::Agent);
     saved_connection.options.legacy_ssh_compatibility = true;
@@ -882,6 +948,7 @@ pub(super) fn new_connection_request_carries_proxy_chain() {
     form.proxy_hops
         .push(crate::workspace::new_connection::NewConnectionProxyHop {
             saved_connection_id: String::new(),
+            persisted_proxy_hop_index: None,
             host: "jump.example.com".to_string(),
             port: "2222".to_string(),
             username: "ops".to_string(),
@@ -1059,6 +1126,7 @@ pub(super) fn proxy_hop_two_factor_is_saved_as_keyboard_interactive() {
     form.proxy_hops
         .push(crate::workspace::new_connection::NewConnectionProxyHop {
             saved_connection_id: String::new(),
+            persisted_proxy_hop_index: None,
             host: "jump.example.com".to_string(),
             port: "22".to_string(),
             username: "ops".to_string(),

@@ -35,6 +35,7 @@ impl JumpServerRenderSnapshot {
 }
 
 struct ProxyHopSummarySnapshot {
+    saved_connection_name: Option<String>,
     host: String,
     port: String,
     username: String,
@@ -938,6 +939,10 @@ impl WorkspaceApp {
                     form.proxy_hops
                         .iter()
                         .map(|hop| ProxyHopSummarySnapshot {
+                            saved_connection_name: self
+                                .connection_store
+                                .get(&hop.saved_connection_id)
+                                .map(|connection| connection.name.clone()),
                             host: hop.host.clone(),
                             port: hop.port.clone(),
                             username: hop.username.clone(),
@@ -1130,6 +1135,10 @@ impl WorkspaceApp {
         hop: &ProxyHopSummarySnapshot,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        let hop_title = hop
+            .saved_connection_name
+            .clone()
+            .unwrap_or_else(|| self.i18n.t("ssh.form.proxy_chain_jump_server"));
         let auth_label = match hop.auth_tab {
             SshAuthTab::DefaultKey => self.i18n.t("ssh.auth.default_key"),
             SshAuthTab::SshKey => self.i18n.t("ssh.auth.ssh_key"),
@@ -1206,11 +1215,7 @@ impl WorkspaceApp {
                                         .text_size(px(self.tokens.metrics.ui_text_sm))
                                         .font_weight(gpui::FontWeight::MEDIUM)
                                         .text_color(rgb(self.tokens.ui.text_muted))
-                                        .child(format!(
-                                            "{}. {}",
-                                            index + 1,
-                                            self.i18n.t("ssh.form.proxy_chain_jump_server")
-                                        )),
+                                        .child(format!("{}. {}", index + 1, hop_title)),
                                 )
                                 .child(self.render_remove_jump_button(index, cx)),
                         )

@@ -8,7 +8,7 @@ use std::{
 
 use crate::workspace::new_connection::{
     NewConnectionProxyHop, NewConnectionUpstreamProxyAuth, NewConnectionUpstreamProxyPolicy,
-    identity_agent_from_form, identity_agent_selector,
+    identity_agent_from_form, identity_agent_selector, ssh_auth_tab_from_saved_auth,
 };
 use crate::workspace::quick_commands::QuickCommandImportStrategy;
 use crate::workspace::session_icons;
@@ -17,8 +17,9 @@ use gpui::{Div, EventEmitter, Task, prelude::*, rgba};
 use oxideterm_connections::{
     AuthType, ConnectionAuthDraft, ConnectionAuthDraftKind, ConnectionDraft, ConnectionInfo,
     ConnectionStore, ProxyHopDraft, RemoteDesktopProfile, SaveConnectionRequest, SavedAuth,
-    SavedConnection, SavedUpstreamProxyAuth, SavedUpstreamProxyConfig, SavedUpstreamProxyPolicy,
-    SavedUpstreamProxyProtocol, SecretString, SerialProfile, SshConfigHost, TelnetProfile,
+    SavedConnection, SavedProxyHop, SavedUpstreamProxyAuth, SavedUpstreamProxyConfig,
+    SavedUpstreamProxyPolicy, SavedUpstreamProxyProtocol, SecretString, SerialProfile,
+    SshConfigHost, TelnetProfile,
     oxide_file::{
         ExportPreflightResult, ForwardDetail, ImportConflictStrategy, ImportPreview,
         ImportResultEnvelope, OxideExportOptions, OxideFile, OxideFileError, OxideForwardRecord,
@@ -1012,8 +1013,8 @@ use self::{
 pub(in crate::workspace) use self::helpers::save_request_from_form;
 pub(in crate::workspace) use self::helpers::{
     RuntimeSecretHandoff, duplicate_connection_template_name, form_from_saved_connection,
-    save_request_from_form_with_existing_auth, save_request_from_form_with_proxy_hop_prefix,
-    upstream_proxy_config_from_form,
+    restore_saved_proxy_chain_in_form, save_request_from_form_with_existing_auth,
+    save_request_from_form_with_proxy_hop_prefix, upstream_proxy_config_from_form,
 };
 
 #[cfg(test)]

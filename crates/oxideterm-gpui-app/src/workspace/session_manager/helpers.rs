@@ -423,6 +423,46 @@ pub(in crate::workspace) fn form_from_saved_connection(
     form
 }
 
+pub(in crate::workspace) fn restore_saved_proxy_chain_in_form(
+    form: &mut NewConnectionForm,
+    connection: &SavedConnection,
+) {
+    // Edit forms retain only non-secret hop metadata plus an index back to the
+    // persisted owner; passwords and passphrases remain in the keychain.
+    form.proxy_hops = connection
+        .proxy_chain
+        .iter()
+        .enumerate()
+        .map(|(persisted_proxy_hop_index, hop)| {
+            proxy_hop_form_from_saved_proxy_hop(persisted_proxy_hop_index, hop)
+        })
+        .collect();
+    form.proxy_chain_expanded = !form.proxy_hops.is_empty();
+}
+
+fn proxy_hop_form_from_saved_proxy_hop(
+    persisted_proxy_hop_index: usize,
+    hop: &SavedProxyHop,
+) -> NewConnectionProxyHop {
+    NewConnectionProxyHop {
+        saved_connection_id: String::new(),
+        persisted_proxy_hop_index: Some(persisted_proxy_hop_index),
+        host: hop.host.clone(),
+        port: hop.port.to_string(),
+        username: hop.username.clone(),
+        auth_tab: ssh_auth_tab_from_saved_auth(&hop.auth),
+        password: String::new(),
+        key_path: hop.auth.key_path().unwrap_or_default().to_string(),
+        managed_key_id: hop.auth.managed_key_id().unwrap_or_default().to_string(),
+        cert_path: hop.auth.cert_path().unwrap_or_default().to_string(),
+        passphrase: String::new(),
+        agent_forwarding: hop.agent_forwarding,
+        identity_agent: hop.identity_agent.clone().unwrap_or_default(),
+        agent_forwarding_socket: hop.agent_forwarding_socket.clone(),
+        legacy_ssh_compatibility: hop.legacy_ssh_compatibility,
+    }
+}
+
 pub(super) fn connection_has_unloaded_keychain_password(conn: &SavedConnection) -> bool {
     matches!(
         &conn.auth,

@@ -6,7 +6,7 @@ use crate::workspace::{
     WorkspaceNotificationKind, WorkspaceNotificationScope, WorkspaceNotificationSeverity,
 };
 use gpui::App;
-use oxideterm_connections::{ConnectionStore, SavedAuth, SavedConnection};
+use oxideterm_connections::{ConnectionStore, SavedAuth, SavedConnection, SavedProxyHop};
 use oxideterm_gpui_terminal::TerminalNoticeVariant;
 
 fn saved_proxy_hop_auth_copies(
@@ -50,6 +50,95 @@ fn apply_saved_proxy_hop_auth_copies(
             proxy_hop.auth = auth;
         }
     }
+}
+
+#[derive(Clone, Copy)]
+struct EditedProxyHopSource {
+    persisted_proxy_hop_index: Option<usize>,
+    has_explicit_secret_draft: bool,
+}
+
+fn preserve_edited_proxy_hop_auth(
+    proxy_chain: &mut [SavedProxyHop],
+    persisted_proxy_chain: &[SavedProxyHop],
+    edit_sources: Vec<EditedProxyHopSource>,
+    saved_auth_copies: Vec<Option<SavedAuth>>,
+    missing_credentials_message: &str,
+) -> anyhow::Result<()> {
+    if proxy_chain.len() != edit_sources.len() || proxy_chain.len() != saved_auth_copies.len() {
+        anyhow::bail!(missing_credentials_message.to_string());
+    }
+
+    for ((request_hop, edit_source), saved_auth_copy) in proxy_chain
+        .iter_mut()
+        .zip(edit_sources)
+        .zip(saved_auth_copies)
+    {
+        if let Some(saved_auth_copy) = saved_auth_copy {
+            request_hop.auth = saved_auth_copy;
+            continue;
+        }
+        if edit_source.has_explicit_secret_draft {
+            continue;
+        }
+        let Some(persisted_proxy_hop_index) = edit_source.persisted_proxy_hop_index else {
+            continue;
+        };
+        let persisted_hop = persisted_proxy_chain
+            .get(persisted_proxy_hop_index)
+            .ok_or_else(|| anyhow::anyhow!(missing_credentials_message.to_string()))?;
+        if !proxy_hop_auth_target_matches(request_hop, persisted_hop) {
+            anyhow::bail!(missing_credentials_message.to_string());
+        }
+        // The unchanged edit row keeps its existing keychain reference; no secret is loaded
+        // into the form or copied into another owner during an in-place connection update.
+        request_hop.auth = persisted_hop.auth.clone();
+    }
+    Ok(())
+}
+
+fn proxy_hop_auth_target_matches(left: &SavedProxyHop, right: &SavedProxyHop) -> bool {
+    left.host == right.host
+        && left.port == right.port
+        && left.username == right.username
+        && match (&left.auth, &right.auth) {
+            (SavedAuth::Password { .. }, SavedAuth::Password { .. })
+            | (SavedAuth::KeyboardInteractive, SavedAuth::KeyboardInteractive)
+            | (SavedAuth::Agent, SavedAuth::Agent) => true,
+            (
+                SavedAuth::Key {
+                    key_path: left_path,
+                    ..
+                },
+                SavedAuth::Key {
+                    key_path: right_path,
+                    ..
+                },
+            ) => left_path == right_path,
+            (
+                SavedAuth::Certificate {
+                    key_path: left_key_path,
+                    cert_path: left_cert_path,
+                    ..
+                },
+                SavedAuth::Certificate {
+                    key_path: right_key_path,
+                    cert_path: right_cert_path,
+                    ..
+                },
+            ) => left_key_path == right_key_path && left_cert_path == right_cert_path,
+            (
+                SavedAuth::ManagedKey {
+                    key_id: left_key_id,
+                    ..
+                },
+                SavedAuth::ManagedKey {
+                    key_id: right_key_id,
+                    ..
+                },
+            ) => left_key_id == right_key_id,
+            _ => false,
+        }
 }
 
 impl WorkspaceApp {
@@ -1114,7 +1203,8 @@ impl WorkspaceApp {
             return;
         };
         self.prepare_modal_interaction_boundary(cx);
-        let form = form_from_saved_connection(&conn, error);
+        let mut form = form_from_saved_connection(&conn, error);
+        restore_saved_proxy_chain_in_form(&mut form, &conn);
         self.update_connection_form_state(cx, |state| {
             state.replace_with_new_form(form);
             state.editing_saved_connection_id = Some(id.to_string());
@@ -1283,27 +1373,42 @@ impl WorkspaceApp {
         else {
             return;
         };
-        let existing_connection = self.connection_store.get(&id).cloned();
-        let existing_auth = existing_connection
-            .as_ref()
-            .map(|connection| connection.auth.clone());
-        let Some(save_request) = self.with_connection_form_mut(cx, |_this, form, _cx| {
+        let Some(existing_connection) = self.connection_store.get(&id).cloned() else {
+            return;
+        };
+        let existing_auth = existing_connection.auth.clone();
+        let Some(save_request) = self.with_connection_form_mut(cx, |this, form, _cx| {
             let form = form?;
-            Some(
-                save_request_from_form_with_existing_auth(
+            Some((|| -> anyhow::Result<SaveConnectionRequest> {
+                let missing_credentials_message =
+                    this.i18n.t("sessions.saved_next_hop.missing_credentials");
+                let saved_auth_copies = saved_proxy_hop_auth_copies(
+                    &this.connection_store,
+                    &form.proxy_hops,
+                    &missing_credentials_message,
+                )?;
+                let edit_sources = form
+                    .proxy_hops
+                    .iter()
+                    .map(|hop| EditedProxyHopSource {
+                        persisted_proxy_hop_index: hop.persisted_proxy_hop_index,
+                        has_explicit_secret_draft: hop.has_explicit_secret_draft(),
+                    })
+                    .collect();
+                let mut request = save_request_from_form_with_existing_auth(
                     form,
                     Some(id.clone()),
-                    existing_auth.as_ref(),
-                )
-                .map(|mut request| {
-                    if form.proxy_hops.is_empty()
-                        && let Some(connection) = existing_connection.as_ref()
-                    {
-                        request.proxy_chain = connection.proxy_chain.clone();
-                    }
-                    request
-                }),
-            )
+                    Some(&existing_auth),
+                )?;
+                preserve_edited_proxy_hop_auth(
+                    &mut request.proxy_chain,
+                    &existing_connection.proxy_chain,
+                    edit_sources,
+                    saved_auth_copies,
+                    &missing_credentials_message,
+                )?;
+                Ok(request)
+            })())
         }) else {
             return;
         };
@@ -1525,6 +1630,19 @@ fn saved_connection_for_open(store: &ConnectionStore, id: &str) -> Option<SavedC
 mod saved_connection_open_tests {
     use super::*;
 
+    fn password_proxy_hop(auth: SavedAuth) -> SavedProxyHop {
+        SavedProxyHop {
+            host: "jump.example.com".to_string(),
+            port: 22,
+            username: "ops".to_string(),
+            auth,
+            agent_forwarding: false,
+            identity_agent: None,
+            agent_forwarding_socket: None,
+            legacy_ssh_compatibility: false,
+        }
+    }
+
     #[test]
     fn stale_saved_connection_id_is_detected_before_opening() {
         let path = std::env::temp_dir().join(format!(
@@ -1534,5 +1652,95 @@ mod saved_connection_open_tests {
         let store = ConnectionStore::load(path).expect("empty connection store");
 
         assert!(saved_connection_for_open(&store, "removed-connection").is_none());
+    }
+
+    #[test]
+    fn unchanged_edited_proxy_hop_preserves_its_keychain_reference() {
+        let persisted_proxy_chain = vec![password_proxy_hop(SavedAuth::Password {
+            keychain_id: Some("persisted-proxy-password".to_string()),
+            plaintext_password: None,
+        })];
+        let mut edited_proxy_chain = vec![password_proxy_hop(SavedAuth::Password {
+            keychain_id: None,
+            plaintext_password: Some(SecretString::default()),
+        })];
+
+        preserve_edited_proxy_hop_auth(
+            &mut edited_proxy_chain,
+            &persisted_proxy_chain,
+            vec![EditedProxyHopSource {
+                persisted_proxy_hop_index: Some(0),
+                has_explicit_secret_draft: false,
+            }],
+            vec![None],
+            "missing proxy credentials",
+        )
+        .unwrap();
+
+        assert!(matches!(
+            &edited_proxy_chain[0].auth,
+            SavedAuth::Password {
+                keychain_id: Some(keychain_id),
+                plaintext_password: None,
+            } if keychain_id == "persisted-proxy-password"
+        ));
+    }
+
+    #[test]
+    fn saved_proxy_hop_added_during_edit_uses_its_independent_auth_copy() {
+        let mut edited_proxy_chain = vec![password_proxy_hop(SavedAuth::Password {
+            keychain_id: None,
+            plaintext_password: Some(SecretString::default()),
+        })];
+
+        preserve_edited_proxy_hop_auth(
+            &mut edited_proxy_chain,
+            &[],
+            vec![EditedProxyHopSource {
+                persisted_proxy_hop_index: None,
+                has_explicit_secret_draft: false,
+            }],
+            vec![Some(SavedAuth::Password {
+                keychain_id: None,
+                plaintext_password: Some(SecretString::from("copied-proxy-secret")),
+            })],
+            "missing proxy credentials",
+        )
+        .unwrap();
+
+        assert!(matches!(
+            &edited_proxy_chain[0].auth,
+            SavedAuth::Password {
+                keychain_id: None,
+                plaintext_password: Some(password),
+            } if password == "copied-proxy-secret"
+        ));
+    }
+
+    #[test]
+    fn edited_proxy_hop_never_reuses_credentials_for_another_host() {
+        let persisted_proxy_chain = vec![password_proxy_hop(SavedAuth::Password {
+            keychain_id: Some("persisted-proxy-password".to_string()),
+            plaintext_password: None,
+        })];
+        let mut edited_hop = password_proxy_hop(SavedAuth::Password {
+            keychain_id: None,
+            plaintext_password: Some(SecretString::default()),
+        });
+        edited_hop.host = "other.example.com".to_string();
+
+        let error = preserve_edited_proxy_hop_auth(
+            std::slice::from_mut(&mut edited_hop),
+            &persisted_proxy_chain,
+            vec![EditedProxyHopSource {
+                persisted_proxy_hop_index: Some(0),
+                has_explicit_secret_draft: false,
+            }],
+            vec![None],
+            "missing proxy credentials",
+        )
+        .unwrap_err();
+
+        assert_eq!(error.to_string(), "missing proxy credentials");
     }
 }
