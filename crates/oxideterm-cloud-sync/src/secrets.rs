@@ -241,7 +241,7 @@ impl CloudSyncSecretProvider for CloudSyncKeychainSecretProvider {
 
     fn store_secret(&mut self, key: &str, value: Option<&str>) -> Result<(), CloudSyncSecretError> {
         CloudSyncKeychainSecretProvider::store_secret(self, key, value)
-            .map_err(|error| CloudSyncSecretError::AccessFailed(error.to_string()))
+            .map_err(native_secret_access_failure)
     }
 
     fn get_many_secrets(
@@ -532,6 +532,12 @@ fn secret_missing(key: &str, secrets: &CloudSyncSecrets) -> bool {
     }
 }
 
+fn native_secret_access_failure(error: anyhow::Error) -> CloudSyncSecretError {
+    // Native credential errors contain only fixed operation context and
+    // platform status details, so retaining their chain is safe and actionable.
+    CloudSyncSecretError::AccessFailed(format!("{error:#}"))
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::{HashMap, HashSet};
@@ -602,6 +608,19 @@ mod tests {
         ] {
             assert!(!source.contains(&keychain_command));
         }
+    }
+
+    #[test]
+    fn native_secret_store_failure_retains_the_platform_cause() {
+        let error = anyhow::anyhow!("Windows credential error 1312")
+            .context("failed to store secret in the OS credential manager")
+            .context("failed to store cloud sync secret basic-username");
+
+        let displayed = native_secret_access_failure(error).to_string();
+
+        assert!(displayed.contains("failed to store cloud sync secret basic-username"));
+        assert!(displayed.contains("failed to store secret in the OS credential manager"));
+        assert!(displayed.contains("Windows credential error 1312"));
     }
 
     #[test]

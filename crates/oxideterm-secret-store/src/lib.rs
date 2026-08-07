@@ -115,22 +115,49 @@ impl NativeSecretStore {
 
         #[cfg(target_os = "windows")]
         {
-            if self.windows_chunk_manifest(account)?.is_some() {
-                return Ok(true);
-            }
-            let entry = self.entry(account)?;
-            if let Some(credential) = entry
-                .get_credential()
-                .downcast_ref::<keyring::windows::WinCredential>()
-            {
-                // Windows Credential Manager supports a metadata-only lookup.
-                return Ok(credential.get_credential().is_ok());
-            }
-            return Ok(self.get(account)?.is_some());
+            return match self.windows_chunk_manifest_state(account)? {
+                WindowsChunkManifestState::Valid(_) => Ok(true),
+                WindowsChunkManifestState::Missing => self.windows_direct_secret_exists(account),
+                WindowsChunkManifestState::Invalid => {
+                    if self.windows_direct_secret_exists(account)? {
+                        Ok(true)
+                    } else {
+                        anyhow::bail!("invalid secret metadata in the OS credential manager")
+                    }
+                }
+            };
         }
 
         #[cfg(not(any(target_os = "macos", target_os = "windows")))]
         Ok(self.get(account)?.is_some())
+    }
+
+    #[cfg(target_os = "windows")]
+    fn windows_direct_secret_exists(&self, account: &str) -> Result<bool> {
+        let entry = self.entry(account)?;
+        if let Some(credential) = entry
+            .get_credential()
+            .downcast_ref::<keyring::windows::WinCredential>()
+        {
+            // Windows Credential Manager supports a metadata-only lookup.
+            return match credential.get_credential() {
+                Ok(_) => Ok(true),
+                Err(keyring::Error::NoEntry) => Ok(false),
+                Err(error) => Err(error).context("failed to inspect the OS credential manager"),
+            };
+        }
+        Ok(self.get_windows_direct(account)?.is_some())
+    }
+
+    #[cfg(target_os = "windows")]
+    fn get_windows_direct(&self, account: &str) -> Result<Option<Zeroizing<String>>> {
+        match self.entry(account)?.get_password() {
+            Ok(secret) => Ok(Some(Zeroizing::new(secret))),
+            Err(keyring::Error::NoEntry) => Ok(None),
+            Err(error) => {
+                Err(error).context("failed to load secret from the OS credential manager")
+            }
+        }
     }
 
     #[cfg(not(target_os = "macos"))]
@@ -156,14 +183,17 @@ impl NativeSecretStore {
 
     #[cfg(target_os = "windows")]
     fn get_windows(&self, account: &str) -> Result<Option<Zeroizing<String>>> {
-        let Some(manifest) = self.windows_chunk_manifest(account)? else {
-            return match self.entry(account)?.get_password() {
-                Ok(secret) => Ok(Some(Zeroizing::new(secret))),
-                Err(keyring::Error::NoEntry) => Ok(None),
-                Err(error) => {
-                    Err(error).context("failed to load secret from the OS credential manager")
+        let manifest = match self.windows_chunk_manifest_state(account)? {
+            WindowsChunkManifestState::Missing => return self.get_windows_direct(account),
+            WindowsChunkManifestState::Valid(manifest) => manifest,
+            WindowsChunkManifestState::Invalid => {
+                // A malformed manifest cannot identify usable chunks. Preserve
+                // a valid direct credential instead of letting metadata poison it.
+                if let Some(secret) = self.get_windows_direct(account)? {
+                    return Ok(Some(secret));
                 }
-            };
+                anyhow::bail!("invalid secret metadata in the OS credential manager");
+            }
         };
 
         let mut secret = Zeroizing::new(String::new());
@@ -193,7 +223,10 @@ impl NativeSecretStore {
 
     #[cfg(target_os = "windows")]
     fn store_windows_chunks(&self, account: &str, secret: &str) -> Result<()> {
-        let previous_manifest = self.windows_chunk_manifest(account)?;
+        let previous_manifest = match self.windows_chunk_manifest_state(account)? {
+            WindowsChunkManifestState::Valid(manifest) => Some(manifest),
+            WindowsChunkManifestState::Missing | WindowsChunkManifestState::Invalid => None,
+        };
         let generation = Uuid::new_v4().simple().to_string();
         let chunks = windows_secret_chunks(secret);
 
@@ -238,12 +271,23 @@ impl NativeSecretStore {
 
     #[cfg(target_os = "windows")]
     fn delete_windows_chunks(&self, account: &str) -> Result<()> {
-        let Some(manifest) = self.windows_chunk_manifest(account)? else {
-            return Ok(());
+        let manifest = match self.windows_chunk_manifest_state(account)? {
+            WindowsChunkManifestState::Missing => return Ok(()),
+            WindowsChunkManifestState::Valid(manifest) => Some(manifest),
+            WindowsChunkManifestState::Invalid => None,
         };
+        // Remove the manifest even when it is malformed so a bad OxideTerm-only
+        // metadata entry cannot permanently block replacement or deletion.
         delete_entry_if_present(self.windows_chunk_entry(account)?)
             .context("failed to delete secret metadata from the OS credential manager")?;
-        self.delete_windows_chunk_generation(account, &manifest.generation, manifest.chunk_count)
+        if let Some(manifest) = manifest {
+            self.delete_windows_chunk_generation(
+                account,
+                &manifest.generation,
+                manifest.chunk_count,
+            )?;
+        }
+        Ok(())
     }
 
     #[cfg(target_os = "windows")]
@@ -272,10 +316,16 @@ impl NativeSecretStore {
     }
 
     #[cfg(target_os = "windows")]
-    fn windows_chunk_manifest(&self, account: &str) -> Result<Option<WindowsChunkManifest>> {
+    fn windows_chunk_manifest_state(&self, account: &str) -> Result<WindowsChunkManifestState> {
         match self.windows_chunk_entry(account)?.get_password() {
-            Ok(value) => WindowsChunkManifest::decode(&value).map(Some),
-            Err(keyring::Error::NoEntry) => Ok(None),
+            Ok(value) => {
+                let value = Zeroizing::new(value);
+                Ok(match WindowsChunkManifest::decode(value.as_str()) {
+                    Ok(manifest) => WindowsChunkManifestState::Valid(manifest),
+                    Err(_) => WindowsChunkManifestState::Invalid,
+                })
+            }
+            Err(keyring::Error::NoEntry) => Ok(WindowsChunkManifestState::Missing),
             Err(error) => {
                 Err(error).context("failed to load secret metadata from the OS credential manager")
             }
@@ -288,6 +338,14 @@ impl NativeSecretStore {
         Entry::new(&service, account)
             .context("failed to open a secret chunk in the OS credential manager")
     }
+}
+
+#[cfg(target_os = "windows")]
+#[derive(Debug)]
+enum WindowsChunkManifestState {
+    Missing,
+    Valid(WindowsChunkManifest),
+    Invalid,
 }
 
 #[cfg(target_os = "windows")]
