@@ -458,7 +458,7 @@
         "microsoft_oauth_refresh_failed": "Microsoft refresh token を更新できませんでした。再度サインインしてください。",
         "microsoft_oauth_empty_response": "Microsoft が必要な OAuth token を返しませんでした。",
         "onedrive_access_denied": "Microsoft Graph がアプリ フォルダーへのアクセスを拒否しました。アカウント種別、テナント ポリシー、アプリの同意を確認してください。",
-        "onedrive_bad_request": "Microsoft Graph が OneDrive 要求を拒否しました。アプリ フォルダーと設定済みアカウント種別が対応しているか確認してください。",
+        "onedrive_bad_request": "Microsoft Graph が OneDrive 要求を拒否しました。以下にプロバイダーの診断情報を示します。",
         "onedrive_locked": "OneDrive は同期ファイルまたはフォルダーがロックされていると報告しました。ロックが解除されてから再試行してください。",
         "onedrive_service_unavailable": "Microsoft Graph または OneDrive は一時的に利用できません。後でもう一度試してください。",
         "microsoft_oauth_missing_scope": "Microsoft が要求された scope を拒否しました。アプリ登録に Files.ReadWrite.AppFolder を追加し、再度同意してください。",

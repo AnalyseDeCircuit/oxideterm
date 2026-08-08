@@ -458,7 +458,7 @@
         "microsoft_oauth_refresh_failed": "Không thể gia hạn refresh token Microsoft. Hãy đăng nhập lại.",
         "microsoft_oauth_empty_response": "Microsoft không trả về token OAuth bắt buộc.",
         "onedrive_access_denied": "Microsoft Graph đã từ chối truy cập thư mục ứng dụng. Hãy kiểm tra loại tài khoản, chính sách tenant và consent của ứng dụng.",
-        "onedrive_bad_request": "Microsoft Graph đã từ chối yêu cầu OneDrive. Hãy kiểm tra thư mục ứng dụng và loại tài khoản đã cấu hình có được hỗ trợ không.",
+        "onedrive_bad_request": "Microsoft Graph đã từ chối yêu cầu OneDrive. Thông tin chẩn đoán từ nhà cung cấp được hiển thị bên dưới.",
         "onedrive_locked": "OneDrive báo tệp hoặc thư mục đồng bộ đang bị khóa. Hãy đợi mở khóa rồi thử lại.",
         "onedrive_service_unavailable": "Microsoft Graph hoặc OneDrive tạm thời không khả dụng. Hãy thử lại sau.",
         "microsoft_oauth_missing_scope": "Microsoft đã từ chối scope được yêu cầu. Hãy thêm Files.ReadWrite.AppFolder vào đăng ký ứng dụng và consent lại.",

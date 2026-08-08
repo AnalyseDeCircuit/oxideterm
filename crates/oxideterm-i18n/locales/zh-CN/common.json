@@ -450,7 +450,7 @@
         "microsoft_oauth_refresh_failed": "Microsoft refresh token 无法续期。请重新登录。",
         "microsoft_oauth_empty_response": "Microsoft 没有返回必需的 OAuth token。",
         "onedrive_access_denied": "Microsoft Graph 拒绝访问应用文件夹。请检查账号类型、租户策略和应用授权同意。",
-        "onedrive_bad_request": "Microsoft Graph 拒绝了 OneDrive 请求。请确认该账号类型和应用文件夹配置受支持。",
+        "onedrive_bad_request": "Microsoft Graph 拒绝了 OneDrive 请求，具体原因见后附诊断信息。",
         "onedrive_locked": "OneDrive 报告同步文件或文件夹被锁定。请等待锁释放后重试。",
         "onedrive_service_unavailable": "Microsoft Graph 或 OneDrive 暂时不可用。请稍后重试。",
         "microsoft_oauth_missing_scope": "Microsoft 拒绝了请求的 scope。请在应用注册中加入 Files.ReadWrite.AppFolder 并重新授权。",

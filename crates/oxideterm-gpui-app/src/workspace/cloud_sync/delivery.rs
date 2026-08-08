@@ -8,6 +8,9 @@ impl WorkspaceApp {
         match cloud_sync_error_message_spec(error) {
             CloudSyncErrorMessageSpec::Raw(message) => message,
             CloudSyncErrorMessageSpec::Key(key) => self.i18n.t(key),
+            CloudSyncErrorMessageSpec::KeyWithDetail { key, detail } => {
+                format!("{} ({detail})", self.i18n.t(key))
+            }
             CloudSyncErrorMessageSpec::SnapshotTooLarge { limit } => self.i18n_replace(
                 "plugin.cloud_sync.errors.snapshot_too_large",
                 &[("limit", limit.unwrap_or_else(|| "—".to_string()))],

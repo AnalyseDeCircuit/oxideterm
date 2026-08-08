@@ -450,7 +450,7 @@
         "microsoft_oauth_refresh_failed": "Microsoft refresh token could not be renewed. Sign in again.",
         "microsoft_oauth_empty_response": "Microsoft did not return the required OAuth token.",
         "onedrive_access_denied": "Microsoft Graph denied access to the app folder. Recheck account type, tenant policy, and app consent.",
-        "onedrive_bad_request": "Microsoft Graph rejected the OneDrive request. Check whether the app folder and configured account type are supported.",
+        "onedrive_bad_request": "Microsoft Graph rejected the OneDrive request. Provider diagnostics follow.",
         "onedrive_locked": "OneDrive reported the sync file or folder is locked. Wait for the lock to clear and retry.",
         "onedrive_service_unavailable": "Microsoft Graph or OneDrive is temporarily unavailable. Retry later.",
         "microsoft_oauth_missing_scope": "Microsoft rejected the requested scope. Add Files.ReadWrite.AppFolder to the app registration and consent again.",

@@ -458,7 +458,7 @@
         "microsoft_oauth_refresh_failed": "Le refresh token Microsoft n’a pas pu être renouvelé. Reconnectez-vous.",
         "microsoft_oauth_empty_response": "Microsoft n’a pas renvoyé le token OAuth requis.",
         "onedrive_access_denied": "Microsoft Graph a refusé l’accès au dossier d’application. Vérifiez le type de compte, la stratégie du tenant et le consentement de l’application.",
-        "onedrive_bad_request": "Microsoft Graph a rejeté la requête OneDrive. Vérifiez que le dossier d’application et le type de compte configuré sont pris en charge.",
+        "onedrive_bad_request": "Microsoft Graph a rejeté la requête OneDrive. Le diagnostic du fournisseur est indiqué ci-après.",
         "onedrive_locked": "OneDrive indique que le fichier ou dossier de synchronisation est verrouillé. Attendez la levée du verrou puis réessayez.",
         "onedrive_service_unavailable": "Microsoft Graph ou OneDrive est temporairement indisponible. Réessayez plus tard.",
         "microsoft_oauth_missing_scope": "Microsoft a rejeté le scope demandé. Ajoutez Files.ReadWrite.AppFolder à l’inscription de l’application et accordez à nouveau le consentement.",

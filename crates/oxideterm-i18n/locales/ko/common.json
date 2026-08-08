@@ -458,7 +458,7 @@
         "microsoft_oauth_refresh_failed": "Microsoft refresh token을 갱신할 수 없습니다. 다시 로그인하세요.",
         "microsoft_oauth_empty_response": "Microsoft가 필요한 OAuth token을 반환하지 않았습니다.",
         "onedrive_access_denied": "Microsoft Graph가 앱 폴더 접근을 거부했습니다. 계정 유형, 테넌트 정책, 앱 동의를 확인하세요.",
-        "onedrive_bad_request": "Microsoft Graph가 OneDrive 요청을 거부했습니다. 앱 폴더와 설정한 계정 유형이 지원되는지 확인하세요.",
+        "onedrive_bad_request": "Microsoft Graph가 OneDrive 요청을 거부했습니다. 아래에 공급자 진단 정보가 표시됩니다.",
         "onedrive_locked": "OneDrive가 동기화 파일 또는 폴더가 잠겼다고 보고했습니다. 잠금이 해제된 뒤 다시 시도하세요.",
         "onedrive_service_unavailable": "Microsoft Graph 또는 OneDrive를 일시적으로 사용할 수 없습니다. 나중에 다시 시도하세요.",
         "microsoft_oauth_missing_scope": "Microsoft가 요청한 scope를 거부했습니다. 앱 등록에 Files.ReadWrite.AppFolder를 추가하고 다시 동의하세요.",
