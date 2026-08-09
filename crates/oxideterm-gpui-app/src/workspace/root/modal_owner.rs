@@ -938,7 +938,7 @@ impl WorkspaceApp {
                 let _ = self.handle_native_plugin_confirm_key(event, cx);
             }
             ActiveWindowModalOwner::TabRename => {
-                let _ = self.handle_tab_rename_dialog_key(event, cx);
+                let _ = self.handle_tab_rename_dialog_key(event, window, cx);
             }
             ActiveWindowModalOwner::ActiveTabWindowModal { kind, .. } => {
                 let _ = self.handle_active_tab_window_modal_key(kind, event, window, cx);

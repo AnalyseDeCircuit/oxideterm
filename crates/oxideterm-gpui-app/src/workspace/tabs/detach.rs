@@ -168,6 +168,7 @@ impl WorkspaceApp {
     pub(in crate::workspace) fn begin_tab_rename(
         &mut self,
         tab_id: TabId,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
         let Some(title) = self.tab_by_id(tab_id, cx).and_then(|tab| {
@@ -185,22 +186,36 @@ impl WorkspaceApp {
         self.close_tab_context_menu();
         self.ime_marked_text = None;
         self.set_ime_selection_from_anchor(WorkspaceImeTarget::TabRename, 0, title_len);
+        // Move key dispatch off the terminal pane before the platform text
+        // owner receives printable input for the rename field.
+        window.focus(&self.focus_handle, cx);
         self.show_active_input_caret(cx);
         cx.notify();
         true
     }
 
-    pub(in crate::workspace) fn cancel_tab_rename(&mut self, cx: &mut Context<Self>) -> bool {
+    pub(in crate::workspace) fn cancel_tab_rename(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
         let closed = self.tab_rename_dialog.take().is_some();
         if closed {
             self.ime_marked_text = None;
             self.clear_ime_selection();
+            // Restore the pane as the keyboard owner only after the blocking
+            // rename input has released its platform text handler.
+            self.focus_active_pane(window, cx);
             cx.notify();
         }
         closed
     }
 
-    pub(in crate::workspace) fn submit_tab_rename(&mut self, cx: &mut Context<Self>) -> bool {
+    pub(in crate::workspace) fn submit_tab_rename(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
         let Some(dialog) = self.tab_rename_dialog.as_ref() else {
             return false;
         };
@@ -217,6 +232,7 @@ impl WorkspaceApp {
         self.tab_rename_dialog = None;
         self.ime_marked_text = None;
         self.clear_ime_selection();
+        self.focus_active_pane(window, cx);
         cx.notify();
         renamed
     }
@@ -224,15 +240,16 @@ impl WorkspaceApp {
     pub(in crate::workspace) fn handle_tab_rename_dialog_key(
         &mut self,
         event: &KeyDownEvent,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
         if self.tab_rename_dialog.is_none() || event.keystroke.modifiers.platform {
             return false;
         }
         match event.keystroke.key.as_str() {
-            "escape" => self.cancel_tab_rename(cx),
+            "escape" => self.cancel_tab_rename(window, cx),
             "enter" => {
-                self.submit_tab_rename(cx);
+                self.submit_tab_rename(window, cx);
                 true
             }
             _ => false,
@@ -290,8 +307,8 @@ impl WorkspaceApp {
             ConfirmDialogAction::Cancel,
             false,
             None,
-            |this, _event, _window, cx| {
-                this.cancel_tab_rename(cx);
+            |this, _event, window, cx| {
+                this.cancel_tab_rename(window, cx);
             },
             cx,
         );
@@ -301,8 +318,8 @@ impl WorkspaceApp {
             ConfirmDialogAction::Confirm,
             submit_disabled,
             None,
-            |this, _event, _window, cx| {
-                this.submit_tab_rename(cx);
+            |this, _event, window, cx| {
+                this.submit_tab_rename(window, cx);
             },
             cx,
         );
@@ -351,8 +368,8 @@ impl WorkspaceApp {
             oxideterm_gpui_ui::modal::dismissible_dialog_backdrop()
                 .on_mouse_down(
                     MouseButton::Left,
-                    cx.listener(|this, _event, _window, cx| {
-                        this.cancel_tab_rename(cx);
+                    cx.listener(|this, _event, window, cx| {
+                        this.cancel_tab_rename(window, cx);
                         cx.stop_propagation();
                     }),
                 )
@@ -1155,8 +1172,8 @@ impl WorkspaceApp {
                         )
                         .on_mouse_down(
                             MouseButton::Left,
-                            cx.listener(move |this, _event, _window, cx| {
-                                this.begin_tab_rename(menu.tab_id, cx);
+                            cx.listener(move |this, _event, window, cx| {
+                                this.begin_tab_rename(menu.tab_id, window, cx);
                                 cx.stop_propagation();
                             }),
                         ),
