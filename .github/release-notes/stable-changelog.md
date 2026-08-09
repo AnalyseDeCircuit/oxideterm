@@ -3,6 +3,27 @@
 Stable releases are listed newest first. The release workflow uses each versioned
 section as the detailed changelog attached to the corresponding GitHub Release.
 
+## 2.0.18
+
+OxideTerm 2.0.18 makes remote Shell integration safer across terminal clients, restores terminal and SSH interaction workflows, and repairs Windows Cloud Sync and OneDrive behavior.
+
+### ✨ Highlights
+
+- Migrated remote SSH directory reporting to standard OSC 7 while retaining legacy protocol parsing and in-place upgrades for existing integration packages; private editor enhancements now activate only for marked OxideTerm channels and safely remain unavailable when the server rejects the optional marker.
+- Added complete editing for saved SSH proxy chains, preserving unchanged hop credentials, copying credentials into independent owners when needed, and resolving saved proxy authentication when connecting.
+
+### 🛠️ Fixes
+
+- Restored terminal input broadcasting for typed text, protocol keys, and paste operations without rebroadcast loops or widening AI and credential input scope.
+- Prevented Tab Rename input from reaching the terminal behind its dialog, restored pane focus after the dialog closes, and stopped UTF-8 prompt glyphs such as `❯` from being mistaken for terminal control bytes.
+- Preserved terminal-driven SFTP directory navigation when shared-session readiness or an older listing completes after a newer path request.
+- Recovered valid Windows credentials when malformed chunk metadata exists, allowed damaged metadata to be replaced or deleted, and retained safe platform error context for Cloud Sync diagnosis.
+- Repaired OneDrive app-folder uploads with supported create-conflict semantics, more precise permission and conflict classification, and actionable operation and request identifiers.
+
+### 🔒 Security
+
+- Suppressed private editor OSC messages in tmux, GNU screen, and Zellij shared panes, removed private OSC clipboard payloads from terminal recordings across fragmented and oversized messages, and zeroized captured payload buffers after use.
+
 ## 2.0.17
 
 OxideTerm 2.0.17 strengthens Windows SSH, SFTP, and RDP workflows, adds terminal tab naming and optional SSH close-confirmation suppression, and improves AI provider compatibility and settings polish.
