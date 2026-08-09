@@ -12,6 +12,17 @@ let s:last_state = ''
 let s:heartbeat_timer = -1
 
 function! s:write_terminal(payload) abort
+  " A shared multiplexer pane cannot route private OSC to one attached client.
+  let l:term_program = tolower(exists('$TERM_PROGRAM') ? $TERM_PROGRAM : '')
+  let l:lc_terminal = tolower(exists('$LC_TERMINAL') ? $LC_TERMINAL : '')
+  let l:private_osc = exists('$OXIDETERM_PRIVATE_OSC') ? $OXIDETERM_PRIVATE_OSC : ''
+  let l:shared_multiplexer = (exists('$TMUX') && !empty($TMUX))
+        \ || (exists('$STY') && !empty($STY))
+        \ || (exists('$ZELLIJ') && !empty($ZELLIJ))
+  if l:shared_multiplexer
+        \ || (l:private_osc !=# '1' && l:term_program !=# 'oxideterm' && l:lc_terminal !=# 'oxideterm')
+    return
+  endif
   try
     if has('nvim')
       call chansend(v:stderr, a:payload)

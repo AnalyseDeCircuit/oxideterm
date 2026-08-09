@@ -698,7 +698,7 @@
         "confirm_description": "OxideTerm installiert lesbare Integrationsdateien auf {{host}} und fügt der erkannten Shell-Startdatei einen markierten Verweis hinzu. Fortfahren?",
         "confirm_description_terminal": "Die Verzeichnisverfolgung ist auf {{host}} nicht eingerichtet. Lesbare Shell-Integration jetzt installieren? Sie wird in neu geöffneten SSH-Terminals aktiv; dieses Terminal bleibt unverändert.",
         "dont_ask_again": "Nicht erneut fragen",
-        "disclosure": "OxideTerm schreibt lesbare Hooks für Bash, Zsh, Fish, Nushell und PowerShell in das unten angegebene Verzeichnis. Die erkannte Shell-Startdatei erhält einen klar markierten Verweis. Die Hooks melden nur das aktuelle Arbeitsverzeichnis und den Hostnamen über das private OSC 7719; Terminalausgaben werden nie verborgen oder gelöscht.",
+        "disclosure": "OxideTerm schreibt lesbare Hooks für Bash, Zsh, Fish, Nushell und PowerShell in das unten angegebene Verzeichnis. Die erkannte Shell-Startdatei erhält einen klar markierten Verweis. Die Hooks melden das aktuelle Arbeitsverzeichnis und den Hostnamen über den Standard OSC 7. Eine SSH-Markierung pro Kanal steuert private Editor-Nachrichten; bekannte gemeinsam genutzte Multiplexer unterdrücken sie. Terminalausgaben werden nie verborgen oder gelöscht.",
         "active_host": "Aktiver Host",
         "status": "Status",
         "detected_shell": "Erkannte Shell",

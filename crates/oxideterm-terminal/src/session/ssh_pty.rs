@@ -329,18 +329,26 @@ impl SshPtySession {
                         self.pending_events
                             .push(TerminalEvent::PrivilegePrompt(event));
                     }
-                    if self.output_events_enabled && !decoded.is_empty() {
-                        // Match the Tauri hook boundary: recording observes UTF-8
-                        // display output after terminal decoding, not SSH bytes.
-                        self.pending_events
-                            .push(TerminalEvent::Output(decoded.as_ref().to_vec()));
+                    if self.output_events_enabled {
+                        // The scanner removes private OSC before persistence;
+                        // decoded clipboard payloads must never reach a recording.
+                        let (_, recordable) = self.shell_integration.advance_with_recording(
+                            &mut self.parser,
+                            &mut *term,
+                            decoded.as_ref(),
+                            |event| self.pending_events.push(event),
+                        );
+                        if !recordable.is_empty() {
+                            self.pending_events.push(TerminalEvent::Output(recordable));
+                        }
+                    } else {
+                        self.shell_integration.advance(
+                            &mut self.parser,
+                            &mut *term,
+                            decoded.as_ref(),
+                            |event| self.pending_events.push(event),
+                        );
                     }
-                    self.shell_integration.advance(
-                        &mut self.parser,
-                        &mut *term,
-                        decoded.as_ref(),
-                        |event| self.pending_events.push(event),
-                    );
                     self.graphics
                         .clear_for_alt_screen_transition(&term, &mut self.graphics_alt_screen_active);
                     cursor.set(graphics_cursor_from_term(&term, size));

@@ -698,7 +698,7 @@
         "confirm_description": "OxideTerm sẽ cài đặt các tệp tích hợp có thể đọc được trên {{host}} và thêm một tham chiếu có đánh dấu vào tệp khởi động Shell được phát hiện. Tiếp tục?",
         "confirm_description_terminal": "Theo dõi thư mục chưa được cấu hình trên {{host}}. Cài đặt tích hợp Shell có thể đọc được ngay bây giờ? Tính năng sẽ hoạt động trong các terminal SSH mở mới; terminal hiện tại không bị thay đổi.",
         "dont_ask_again": "Không hỏi lại",
-        "disclosure": "OxideTerm ghi các móc Bash, Zsh, Fish, Nushell và PowerShell có thể đọc được vào thư mục bên dưới. Tệp khởi động của Shell được phát hiện sẽ nhận một tham chiếu có đánh dấu rõ ràng. Các móc chỉ phát thư mục làm việc hiện tại và tên máy chủ qua OSC 7719 riêng; đầu ra terminal không bao giờ bị ẩn hoặc xóa.",
+        "disclosure": "OxideTerm ghi các móc Bash, Zsh, Fish, Nushell và PowerShell có thể đọc được vào thư mục bên dưới. Tệp khởi động của Shell được phát hiện sẽ nhận một tham chiếu có đánh dấu rõ ràng. Các móc báo cáo thư mục làm việc hiện tại và tên máy chủ qua OSC 7 tiêu chuẩn. Dấu hiệu SSH theo từng kênh kiểm soát thông điệp riêng của trình soạn thảo và các bộ ghép kênh dùng chung đã biết sẽ chặn chúng; đầu ra terminal không bao giờ bị ẩn hoặc xóa.",
         "active_host": "Máy chủ đang hoạt động",
         "status": "Trạng thái",
         "detected_shell": "Shell được phát hiện",

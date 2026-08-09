@@ -698,7 +698,7 @@
         "confirm_description": "OxideTerm installerà file di integrazione leggibili su {{host}} e aggiungerà un riferimento contrassegnato al file di avvio della shell rilevata. Continuare?",
         "confirm_description_terminal": "Il tracciamento delle directory non è configurato su {{host}}. Installare ora l’integrazione Shell leggibile? Sarà attiva nei nuovi terminali SSH; questo terminale non verrà modificato.",
         "dont_ask_again": "Non chiedere più",
-        "disclosure": "OxideTerm scrive hook leggibili per Bash, Zsh, Fish, Nushell e PowerShell nella directory seguente. Il file di avvio della shell rilevata riceve un riferimento chiaramente contrassegnato. Gli hook emettono solo la directory di lavoro corrente e il nome host tramite l’OSC 7719 privato; l’output del terminale non viene mai nascosto o cancellato.",
+        "disclosure": "OxideTerm scrive hook leggibili per Bash, Zsh, Fish, Nushell e PowerShell nella directory seguente. Il file di avvio della shell rilevata riceve un riferimento chiaramente contrassegnato. Gli hook segnalano la directory di lavoro corrente e il nome host tramite l'OSC 7 standard. Un marcatore SSH per canale controlla i messaggi privati dell'editor e i multiplexer condivisi noti li sopprimono; l'output del terminale non viene mai nascosto o cancellato.",
         "active_host": "Host attivo",
         "status": "Stato",
         "detected_shell": "Shell rilevata",

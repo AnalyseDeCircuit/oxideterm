@@ -167,15 +167,30 @@ where
                         for event in privilege_prompt.observe(decoded.as_ref()) {
                             let _ = event_tx.send(TerminalEvent::PrivilegePrompt(event));
                         }
-                        if output_events_enabled && !decoded.is_empty() {
-                            // Tauri feeds decoded display text into TerminalRecorder after xterm
-                            // receives it. Keep the native recorder on the same side of encoding
-                            // detection instead of recording raw PTY bytes.
-                            let _ = event_tx.send(TerminalEvent::Output(decoded.as_ref().to_vec()));
+                        if output_events_enabled {
+                            // Persist only bytes released by the shell-integration
+                            // scanner so invisible private clipboard OSC cannot enter recordings.
+                            let (_, recordable) = shell_integration.advance_with_recording(
+                                parser,
+                                terminal,
+                                decoded.as_ref(),
+                                |event| {
+                                    let _ = event_tx.send(event);
+                                },
+                            );
+                            if !recordable.is_empty() {
+                                let _ = event_tx.send(TerminalEvent::Output(recordable));
+                            }
+                        } else {
+                            shell_integration.advance(
+                                parser,
+                                terminal,
+                                decoded.as_ref(),
+                                |event| {
+                                    let _ = event_tx.send(event);
+                                },
+                            );
                         }
-                        shell_integration.advance(parser, terminal, decoded.as_ref(), |event| {
-                            let _ = event_tx.send(event);
-                        });
                         if let Some(event) =
                             LocalGraphicsState::alt_screen_clear_event(alt_screen_active, terminal)
                         {

@@ -481,18 +481,25 @@ impl SerialSession {
                         self.pending_events.push(TerminalEvent::EncodingHint(hint));
                     }
                     let decoded = self.output_decoder.decode_to_utf8_bytes(&terminal_bytes);
-                    if self.output_events_enabled && !decoded.is_empty() {
-                        // Terminal recording observes decoded display bytes, not
-                        // transport bytes, and is disabled on the normal path.
-                        self.pending_events
-                            .push(TerminalEvent::Output(decoded.as_ref().to_vec()));
+                    if self.output_events_enabled {
+                        // Apply the same private-OSC recording boundary as PTY sessions.
+                        let (_, recordable) = self.shell_integration.advance_with_recording(
+                            &mut self.parser,
+                            &mut *term,
+                            decoded.as_ref(),
+                            |event| self.pending_events.push(event),
+                        );
+                        if !recordable.is_empty() {
+                            self.pending_events.push(TerminalEvent::Output(recordable));
+                        }
+                    } else {
+                        self.shell_integration.advance(
+                            &mut self.parser,
+                            &mut *term,
+                            decoded.as_ref(),
+                            |event| self.pending_events.push(event),
+                        );
                     }
-                    self.shell_integration.advance(
-                        &mut self.parser,
-                        &mut *term,
-                        decoded.as_ref(),
-                        |event| self.pending_events.push(event),
-                    );
                     self.graphics
                         .clear_for_alt_screen_transition(&term, &mut self.graphics_alt_screen_active);
                     cursor.set(graphics_cursor_from_term(&term, size));

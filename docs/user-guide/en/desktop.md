@@ -79,7 +79,7 @@ For Emacs, add this to the init file:
     (oxideterm-free-type-mode 1)))
 ```
 
-Local terminal sessions provide these adapter paths automatically. For SSH sessions, first install or repair Remote Shell Integration under Settings → Terminal → Awareness & Integration; it installs the readable adapter files under `~/.oxideterm/shell-integration` and exports the same paths. The adapter reports only editor identity, mode, selection shape, capabilities, and a user-requested copied/cut selection. Clipboard responses are bounded and ignored unless they match a recent user shortcut.
+Local terminal sessions provide these adapter paths automatically. For SSH sessions, first install or repair Remote Shell Integration under Settings → Terminal → Awareness & Integration; it installs the readable adapter files under `~/.oxideterm/shell-integration`. Their paths are exported only when the SSH server accepts OxideTerm's per-channel capability marker. Restrictive servers still retain standard OSC 7 directory awareness but disable the private editor enhancement. Loaded adapters suppress private messages inside tmux, GNU screen, and Zellij because a shared pane cannot isolate them by attached client. An active adapter reports only editor identity, mode, selection shape, capabilities, and a user-requested copied/cut selection. Clipboard responses are bounded and ignored unless they match a recent user shortcut.
 
 ### Backspace and Delete compatibility
 

@@ -698,7 +698,7 @@
         "confirm_description": "OxideTerm이 {{host}}에 읽을 수 있는 통합 파일을 설치하고 감지된 Shell 시작 파일에 표시된 참조 하나를 추가합니다. 계속할까요?",
         "confirm_description_terminal": "{{host}}에 디렉터리 추적이 구성되지 않았습니다. 읽을 수 있는 Shell 통합을 지금 설치할까요? 새로 여는 SSH 터미널에서 활성화되며 현재 터미널은 변경되지 않습니다.",
         "dont_ask_again": "다시 묻지 않기",
-        "disclosure": "OxideTerm은 읽을 수 있는 Bash, Zsh, Fish, Nushell 및 PowerShell 후크를 아래 디렉터리에 기록하고 감지된 Shell 시작 파일에 명확히 표시된 참조를 추가합니다. 후크는 비공개 OSC 7719를 통해 현재 작업 디렉터리와 호스트 이름만 전송하며 터미널 출력은 숨기거나 지우지 않습니다.",
+        "disclosure": "OxideTerm은 읽을 수 있는 Bash, Zsh, Fish, Nushell 및 PowerShell 후크를 아래 디렉터리에 기록하고 감지된 Shell 시작 파일에 명확히 표시된 참조를 추가합니다. 후크는 표준 OSC 7을 통해 현재 작업 디렉터리와 호스트 이름을 보고합니다. 채널별 SSH 표식이 비공개 편집기 메시지를 제어하고 알려진 공유 멀티플렉서는 이를 억제하며, 터미널 출력은 숨기거나 지우지 않습니다.",
         "active_host": "활성 호스트",
         "status": "상태",
         "detected_shell": "감지된 Shell",

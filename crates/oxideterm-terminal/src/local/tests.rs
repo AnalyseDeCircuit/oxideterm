@@ -1476,6 +1476,192 @@ wait
     }
 
     #[test]
+    fn shell_integration_scanner_handles_split_osc_introducer_and_st() {
+        let size = TerminalSize {
+            cols: 80,
+            rows: 8,
+            cell_width: 8,
+            cell_height: 17,
+        };
+        let mut term = Term::new(Config::default(), &size, VoidListener);
+        let mut parser = Processor::<StdSyncHandler>::new();
+        let mut integration = crate::shell_integration::TerminalShellIntegration::default();
+        let mut events = Vec::new();
+
+        integration.advance(&mut parser, &mut term, b"\x1b", |event| {
+            events.push(event)
+        });
+        integration.advance(
+            &mut parser,
+            &mut term,
+            b"]7;file://build-host/home/dev\x1b",
+            |event| events.push(event),
+        );
+        integration.advance(&mut parser, &mut term, b"\\$ ", |event| {
+            events.push(event)
+        });
+
+        assert!(events.iter().any(|event| matches!(
+            event,
+            TerminalEvent::CwdChanged {
+                cwd,
+                host: Some(host),
+            } if cwd == "/home/dev" && host == "build-host"
+        )));
+        let snapshot = snapshot_from_term(&term, size, &TerminalGraphicsState::default());
+        let visible_text = snapshot
+            .lines
+            .iter()
+            .map(|row| row.text())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(visible_text.contains("$"));
+        assert!(!visible_text.contains("file://"));
+    }
+
+    #[test]
+    fn terminal_recording_bytes_exclude_private_osc_across_chunks() {
+        let size = TerminalSize {
+            cols: 80,
+            rows: 8,
+            cell_width: 8,
+            cell_height: 17,
+        };
+        let mut term = Term::new(Config::default(), &size, VoidListener);
+        let mut parser = Processor::<StdSyncHandler>::new();
+        let mut integration = crate::shell_integration::TerminalShellIntegration::default();
+        let mut events = Vec::new();
+
+        let (_, first) = integration.advance_with_recording(
+            &mut parser,
+            &mut term,
+            b"before\x1b]7719;v=3;kind=editor-clipboard;app=vim;op=copy;data=%73%65%63%72%65%74\x1b",
+            |event| events.push(event),
+        );
+        let (_, second) = integration.advance_with_recording(
+            &mut parser,
+            &mut term,
+            b"\\after\x1b]0;title\x07",
+            |event| events.push(event),
+        );
+        let recorded = [first, second].concat();
+
+        assert_eq!(recorded, b"beforeafter\x1b]0;title\x07");
+        assert!(!String::from_utf8_lossy(&recorded).contains("7719;"));
+        assert!(!String::from_utf8_lossy(&recorded).contains("%73%65%63%72%65%74"));
+        assert!(events
+            .iter()
+            .any(|event| matches!(event, TerminalEvent::EditorClipboard(_))));
+    }
+
+    #[test]
+    fn terminal_recording_discards_oversized_private_osc_until_terminator() {
+        let size = TerminalSize {
+            cols: 80,
+            rows: 8,
+            cell_width: 8,
+            cell_height: 17,
+        };
+        let mut term = Term::new(Config::default(), &size, VoidListener);
+        let mut parser = Processor::<StdSyncHandler>::new();
+        let mut integration = crate::shell_integration::TerminalShellIntegration::default();
+        let mut oversized =
+            b"\x1b]7719;v=3;kind=editor-clipboard;app=vim;op=copy;data=".to_vec();
+        oversized.extend(std::iter::repeat_n(
+            b'A',
+            crate::editor_integration::EDITOR_PROTOCOL_PAYLOAD_LIMIT + 128,
+        ));
+
+        let (_, first) = integration.advance_with_recording(
+            &mut parser,
+            &mut term,
+            &oversized,
+            |_| {},
+        );
+        let (_, second) = integration.advance_with_recording(
+            &mut parser,
+            &mut term,
+            b"sensitive-tail\x07after",
+            |_| {},
+        );
+
+        assert!(first.is_empty());
+        assert_eq!(second, b"after");
+    }
+
+    #[test]
+    fn shell_integration_scanner_preserves_utf8_prompt_glyphs() {
+        let size = TerminalSize {
+            cols: 80,
+            rows: 8,
+            cell_width: 8,
+            cell_height: 17,
+        };
+        let mut term = Term::new(Config::default(), &size, VoidListener);
+        let mut parser = Processor::<StdSyncHandler>::new();
+        let mut integration = crate::shell_integration::TerminalShellIntegration::default();
+
+        let (_, recorded) = integration.advance_with_recording(
+            &mut parser,
+            &mut term,
+            "❯ typed input".as_bytes(),
+            |_| {},
+        );
+
+        assert_eq!(recorded, "❯ typed input".as_bytes());
+        let snapshot = snapshot_from_term(&term, size, &TerminalGraphicsState::default());
+        let visible_text = snapshot
+            .lines
+            .iter()
+            .map(|row| row.text())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(visible_text.contains("❯ typed input"));
+    }
+
+    #[test]
+    fn shell_integration_osc7_normalizes_windows_uri_and_rejects_invalid_context() {
+        let size = TerminalSize {
+            cols: 80,
+            rows: 8,
+            cell_width: 8,
+            cell_height: 17,
+        };
+        let mut term = Term::new(Config::default(), &size, VoidListener);
+        let mut parser = Processor::<StdSyncHandler>::new();
+        let mut integration = crate::shell_integration::TerminalShellIntegration::default();
+        let mut events = Vec::new();
+
+        integration.advance(
+            &mut parser,
+            &mut term,
+            b"\x1b]7;file://desktop/C:/Users/alice\x07",
+            |event| events.push(event),
+        );
+        integration.advance(
+            &mut parser,
+            &mut term,
+            b"\x1b]7;file://bad%0Ahost/home/alice\x07",
+            |event| events.push(event),
+        );
+
+        assert_eq!(
+            events
+                .iter()
+                .filter(|event| matches!(event, TerminalEvent::CwdChanged { .. }))
+                .count(),
+            1
+        );
+        assert!(events.iter().any(|event| matches!(
+            event,
+            TerminalEvent::CwdChanged {
+                cwd,
+                host: Some(host),
+            } if cwd == "C:/Users/alice" && host == "desktop"
+        )));
+    }
+
+    #[test]
     fn color_request_uses_oxideterm_terminal_palette_indices() {
         let dim_background = color_for_alacritty_request_with_override(268, None);
         assert_eq!(dim_background.r, OXIDETERM_DARK_THEME.ansi[0].r);

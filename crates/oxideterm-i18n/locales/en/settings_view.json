@@ -698,7 +698,7 @@
         "confirm_description": "OxideTerm will install readable integration files on {{host}} and add one marked reference to the detected Shell startup file. Continue?",
         "confirm_description_terminal": "Directory tracking is not configured on {{host}}. Install the readable Shell integration now? It will activate in newly opened SSH terminals; this terminal remains untouched.",
         "dont_ask_again": "Don't ask again",
-        "disclosure": "OxideTerm writes readable Bash, Zsh, Fish, Nushell, and PowerShell hooks to the directory below. The detected shell startup file receives one clearly marked reference. The hooks emit only the current working directory and host name through private OSC 7719; terminal output is never hidden or erased.",
+        "disclosure": "OxideTerm writes readable Bash, Zsh, Fish, Nushell, and PowerShell hooks to the directory below. The detected shell startup file receives one clearly marked reference. The hooks report the current working directory and host name through standard OSC 7. A per-channel SSH marker gates private editor messages, and known shared multiplexers suppress them; terminal output is never hidden or erased.",
         "active_host": "Active host",
         "status": "Status",
         "detected_shell": "Detected shell",

@@ -7,6 +7,7 @@ use alacritty_terminal::{
     term::{Term, cell::Flags},
     vte::ansi::Processor,
 };
+use zeroize::Zeroizing;
 
 const MAX_COMMAND_TEXT_LENGTH: usize = 4096;
 const MAX_MARKS: usize = 2000;
@@ -155,8 +156,47 @@ impl Default for ShellIntegrationState {
 
 #[derive(Default)]
 struct OscCapture {
-    raw: Vec<u8>,
-    payload: Vec<u8>,
+    // Private editor clipboard payloads may contain selected text, so both
+    // encoded copies are cleared when the streaming capture leaves scope.
+    raw: Zeroizing<Vec<u8>>,
+    payload: Zeroizing<Vec<u8>>,
+    pending_escape: bool,
+    private: bool,
+    complete: bool,
+}
+
+impl OscCapture {
+    fn new(introducer: &[u8]) -> Self {
+        Self {
+            raw: Zeroizing::new(introducer.to_vec()),
+            ..Self::default()
+        }
+    }
+
+    fn push_payload_byte(&mut self, byte: u8) {
+        if !self.private {
+            self.raw.push(byte);
+        }
+        if self.payload.len() < OSC_LIMIT {
+            self.payload.push(byte);
+            self.private = is_private_oxideterm_osc(&self.payload);
+        }
+    }
+
+    fn finish(&mut self, terminator: &[u8]) {
+        // Once OSC 7719 is identified, retain only its bounded payload and
+        // discard the remaining private bytes until the real terminator.
+        if !self.private {
+            self.raw.extend_from_slice(terminator);
+        }
+        self.complete = true;
+    }
+}
+
+fn is_private_oxideterm_osc(payload: &[u8]) -> bool {
+    payload
+        .strip_prefix(OXIDETERM_REMOTE_METADATA_OSC.as_bytes())
+        .is_some_and(|remaining| remaining.first() == Some(&b';'))
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -219,6 +259,7 @@ pub(crate) struct TerminalShellIntegration {
     state: ShellIntegrationState,
     marks: Vec<TerminalCommandMark>,
     pending_osc: Option<OscCapture>,
+    pending_escape: bool,
     next_command_sequence: u64,
     saved_history_clear_detector: SavedHistoryClearDetector,
 }
@@ -231,9 +272,50 @@ impl TerminalShellIntegration {
         bytes: &[u8],
         mut emit: impl FnMut(crate::TerminalEvent),
     ) -> bool {
+        self.advance_inner(parser, term, bytes, None, &mut emit)
+    }
+
+    /// Advance terminal state and return bytes that are safe to persist in a recording.
+    pub(crate) fn advance_with_recording<T: EventListener>(
+        &mut self,
+        parser: &mut Processor,
+        term: &mut Term<T>,
+        bytes: &[u8],
+        mut emit: impl FnMut(crate::TerminalEvent),
+    ) -> (bool, Vec<u8>) {
+        // Recording retains ordinary terminal protocols but excludes private
+        // OSC 7719, whose clipboard payload can contain invisible user text.
+        let mut recordable = Vec::with_capacity(bytes.len());
+        let changed = self.advance_inner(parser, term, bytes, Some(&mut recordable), &mut emit);
+        (changed, recordable)
+    }
+
+    fn advance_inner<T: EventListener>(
+        &mut self,
+        parser: &mut Processor,
+        term: &mut Term<T>,
+        bytes: &[u8],
+        mut recordable: Option<&mut Vec<u8>>,
+        emit: &mut impl FnMut(crate::TerminalEvent),
+    ) -> bool {
         let mut changed = false;
         let mut index = 0usize;
         let mut normal_start = 0usize;
+
+        if self.pending_escape && !bytes.is_empty() {
+            self.pending_escape = false;
+            if bytes[0] == b']' {
+                // Keep an OSC introducer split across transport packets out of
+                // the terminal parser until its protocol ownership is known.
+                self.saved_history_clear_detector.reset();
+                self.pending_osc = Some(OscCapture::new(&[0x1b, b']']));
+                index = 1;
+                normal_start = 1;
+                changed = true;
+            } else {
+                self.advance_terminal_bytes(parser, term, &[0x1b], recordable.as_deref_mut(), emit);
+            }
+        }
 
         while index < bytes.len() {
             if self.pending_osc.is_some() {
@@ -242,42 +324,71 @@ impl TerminalShellIntegration {
                         parser,
                         term,
                         &bytes[normal_start..index],
-                        &mut emit,
+                        recordable.as_deref_mut(),
+                        emit,
                     );
                 }
-                let consumed = self.continue_osc_capture(term, parser, &bytes[index..], &mut emit);
+                let consumed = self.continue_osc_capture(
+                    term,
+                    parser,
+                    &bytes[index..],
+                    recordable.as_deref_mut(),
+                    emit,
+                );
                 changed = true;
                 index += consumed;
                 normal_start = index;
                 continue;
             }
 
-            if bytes[index] == 0x1b && bytes.get(index + 1) == Some(&b']') {
-                if normal_start < index {
-                    self.advance_terminal_bytes(
-                        parser,
-                        term,
-                        &bytes[normal_start..index],
-                        &mut emit,
-                    );
+            if bytes[index] == 0x1b {
+                if bytes.get(index + 1) == Some(&b']') {
+                    if normal_start < index {
+                        self.advance_terminal_bytes(
+                            parser,
+                            term,
+                            &bytes[normal_start..index],
+                            recordable.as_deref_mut(),
+                            emit,
+                        );
+                    }
+                    // OSC payload bytes are opaque metadata, not terminal CSI.
+                    self.saved_history_clear_detector.reset();
+                    self.pending_osc = Some(OscCapture::new(&[0x1b, b']']));
+                    index += 2;
+                    normal_start = index;
+                    changed = true;
+                    continue;
                 }
-                // OSC payload bytes are opaque metadata, not terminal CSI.
-                self.saved_history_clear_detector.reset();
-                self.pending_osc = Some(OscCapture {
-                    raw: vec![0x1b, b']'],
-                    payload: Vec::new(),
-                });
-                index += 2;
-                normal_start = index;
-                changed = true;
-                continue;
+                if index + 1 == bytes.len() {
+                    if normal_start < index {
+                        self.advance_terminal_bytes(
+                            parser,
+                            term,
+                            &bytes[normal_start..index],
+                            recordable.as_deref_mut(),
+                            emit,
+                        );
+                    }
+                    self.pending_escape = true;
+                    index += 1;
+                    normal_start = index;
+                    changed = true;
+                    continue;
+                }
             }
 
             index += 1;
         }
 
         if normal_start < bytes.len() {
-            self.advance_terminal_bytes(parser, term, &bytes[normal_start..], &mut emit);
+            self.advance_terminal_bytes(
+                parser,
+                term,
+                &bytes[normal_start..],
+                recordable.as_deref_mut(),
+                emit,
+            );
         }
 
         changed
@@ -288,8 +399,12 @@ impl TerminalShellIntegration {
         parser: &mut Processor,
         term: &mut Term<T>,
         bytes: &[u8],
+        recordable: Option<&mut Vec<u8>>,
         emit: &mut impl FnMut(crate::TerminalEvent),
     ) {
+        if let Some(recordable) = recordable {
+            recordable.extend_from_slice(bytes);
+        }
         let saved_history_clear_count = self.saved_history_clear_detector.advance(bytes);
         parser.advance(term, bytes);
         for _ in 0..saved_history_clear_count {
@@ -378,6 +493,7 @@ impl TerminalShellIntegration {
         term: &mut Term<T>,
         parser: &mut Processor,
         bytes: &[u8],
+        mut recordable: Option<&mut Vec<u8>>,
         emit: &mut impl FnMut(crate::TerminalEvent),
     ) -> usize {
         let Some(capture) = self.pending_osc.as_mut() else {
@@ -385,31 +501,50 @@ impl TerminalShellIntegration {
         };
 
         let mut index = 0usize;
-        while index < bytes.len() {
+        let mut terminated = false;
+        if capture.pending_escape && !bytes.is_empty() {
+            capture.pending_escape = false;
+            if bytes[0] == b'\\' {
+                capture.finish(&[0x1b, b'\\']);
+                index = 1;
+                terminated = true;
+            } else {
+                capture.push_payload_byte(0x1b);
+            }
+        }
+        while index < bytes.len() && !terminated {
             let byte = bytes[index];
             if byte == 0x07 {
-                capture.raw.push(byte);
+                capture.finish(&[byte]);
                 index += 1;
                 break;
             }
             if byte == 0x1b && bytes.get(index + 1) == Some(&b'\\') {
-                capture.raw.extend_from_slice(&[0x1b, b'\\']);
+                capture.finish(&[0x1b, b'\\']);
                 index += 2;
                 break;
             }
-
-            capture.raw.push(byte);
-            if capture.payload.len() < OSC_LIMIT {
-                capture.payload.push(byte);
+            if byte == 0x1b && index + 1 == bytes.len() {
+                capture.pending_escape = true;
+                index += 1;
+                break;
             }
+
+            capture.push_payload_byte(byte);
             index += 1;
         }
 
-        let complete = self.pending_osc.as_ref().is_some_and(|capture| {
-            capture.raw.ends_with(&[0x07]) || capture.raw.ends_with(&[0x1b, b'\\'])
-        });
+        let complete = self
+            .pending_osc
+            .as_ref()
+            .is_some_and(|capture| capture.complete);
         if complete {
             if let Some(capture) = self.pending_osc.take() {
+                if !capture.private
+                    && let Some(recordable) = recordable.as_deref_mut()
+                {
+                    recordable.extend_from_slice(&capture.raw);
+                }
                 if !self.handle_osc_payload(term, &capture.payload, emit) {
                     parser.advance(term, &capture.raw);
                 }
@@ -417,9 +552,12 @@ impl TerminalShellIntegration {
         } else if self
             .pending_osc
             .as_ref()
-            .is_some_and(|capture| capture.raw.len() > OSC_LIMIT + 8)
+            .is_some_and(|capture| !capture.private && capture.raw.len() > OSC_LIMIT + 8)
             && let Some(capture) = self.pending_osc.take()
         {
+            if let Some(recordable) = recordable.as_deref_mut() {
+                recordable.extend_from_slice(&capture.raw);
+            }
             parser.advance(term, &capture.raw);
         }
 
@@ -432,7 +570,11 @@ impl TerminalShellIntegration {
         payload: &[u8],
         emit: &mut impl FnMut(crate::TerminalEvent),
     ) -> bool {
-        let text = String::from_utf8_lossy(payload);
+        let Ok(text) = std::str::from_utf8(payload) else {
+            // Invalid private payloads remain consumed without allocating a
+            // lossy copy that could duplicate clipboard-derived bytes.
+            return is_private_oxideterm_osc(payload);
+        };
         let Some((code, data)) = text.split_once(';') else {
             return false;
         };
@@ -785,18 +927,42 @@ fn parse_osc1337_cwd(data: &str) -> Option<(String, Option<String>)> {
 
 fn parse_cwd_payload(data: &str) -> Option<(String, Option<String>)> {
     if let Some(rest) = data.strip_prefix("file://") {
-        let (host, path) = if rest.starts_with('/') {
+        let (encoded_host, path) = if rest.starts_with('/') {
             (None, rest)
         } else {
             let slash = rest.find('/')?;
             let host = &rest[..slash];
             ((!host.is_empty()).then(|| host.to_string()), &rest[slash..])
         };
-        let cwd = percent_decode(path)?;
-        return (!cwd.is_empty()).then_some((cwd, host));
+        let mut cwd = percent_decode(path)?;
+        // Windows file URIs conventionally carry an extra slash before the
+        // drive letter; the remote path model stores the native drive form.
+        if cwd.len() >= 4
+            && cwd.as_bytes()[0] == b'/'
+            && cwd.as_bytes()[1].is_ascii_alphabetic()
+            && cwd.as_bytes()[2] == b':'
+            && matches!(cwd.as_bytes()[3], b'/' | b'\\')
+        {
+            cwd.remove(0);
+        }
+        if !is_absolute_remote_cwd(&cwd) || cwd.chars().any(char::is_control) {
+            return None;
+        }
+        let host = if let Some(encoded_host) = encoded_host.as_deref() {
+            let host = percent_decode(encoded_host)?;
+            if host.is_empty() || host.len() > 255 || host.chars().any(char::is_control) {
+                return None;
+            }
+            Some(host)
+        } else {
+            None
+        };
+        return Some((cwd, host));
     }
 
     let cwd = percent_decode(data)?;
+    // Preserve historical raw-path handling used by OSC 633/1337 producers;
+    // strict URI validation above applies to the new remote OSC 7 package.
     (!cwd.is_empty()).then_some((cwd, None))
 }
 

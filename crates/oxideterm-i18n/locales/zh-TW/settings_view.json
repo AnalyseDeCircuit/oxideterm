@@ -698,7 +698,7 @@
         "confirm_description": "OxideTerm 將在 {{host}} 上安裝可讀的整合檔案，並在偵測到的 Shell 啟動檔加入一段有標記的引用。是否繼續？",
         "confirm_description_terminal": "{{host}} 尚未設定目錄追蹤。是否現在安裝可讀的 Shell 整合？它會在新開啟的 SSH 終端中啟用，目前終端不會被修改。",
         "dont_ask_again": "下次不再詢問",
-        "disclosure": "OxideTerm 會將可讀的 Bash、Zsh、Fish、Nushell 與 PowerShell 掛鉤寫入下方目錄，並在偵測到的 Shell 啟動檔加入一段有明確標記的引用。掛鉤只透過私有 OSC 7719 回報目前工作目錄與主機名稱；終端輸出不會被隱藏或清除。",
+        "disclosure": "OxideTerm 會將可讀的 Bash、Zsh、Fish、Nushell 與 PowerShell 掛鉤寫入下方目錄，並在偵測到的 Shell 啟動檔加入一段有明確標記的引用。掛鉤透過標準 OSC 7 回報目前工作目錄與主機名稱；每通道 SSH 標記會控管私有編輯器訊息，已知的共用多工器會抑制這些訊息，終端輸出不會被隱藏或清除。",
         "active_host": "目前主機",
         "status": "狀態",
         "detected_shell": "偵測到的 Shell",

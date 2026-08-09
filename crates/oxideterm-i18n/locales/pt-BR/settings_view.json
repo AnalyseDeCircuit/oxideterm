@@ -698,7 +698,7 @@
         "confirm_description": "O OxideTerm instalará arquivos de integração legíveis em {{host}} e adicionará uma referência marcada ao arquivo de inicialização da shell detectada. Continuar?",
         "confirm_description_terminal": "O rastreamento de diretório não está configurado em {{host}}. Instalar agora a integração de shell legível? Ela será ativada em novos terminais SSH; este terminal permanecerá inalterado.",
         "dont_ask_again": "Não perguntar novamente",
-        "disclosure": "O OxideTerm grava ganchos legíveis para Bash, Zsh, Fish, Nushell e PowerShell no diretório abaixo. O arquivo de inicialização da shell detectada recebe uma referência claramente marcada. Os ganchos emitem apenas o diretório de trabalho atual e o nome do host pelo OSC 7719 privado; a saída do terminal nunca é ocultada nem apagada.",
+        "disclosure": "O OxideTerm grava ganchos legíveis para Bash, Zsh, Fish, Nushell e PowerShell no diretório abaixo. O arquivo de inicialização da shell detectada recebe uma referência claramente marcada. Os ganchos informam o diretório de trabalho atual e o nome do host pelo OSC 7 padrão. Um marcador SSH por canal controla as mensagens privadas do editor, e multiplexadores compartilhados conhecidos as suprimem; a saída do terminal nunca é ocultada nem apagada.",
         "active_host": "Host ativo",
         "status": "Status",
         "detected_shell": "Shell detectada",

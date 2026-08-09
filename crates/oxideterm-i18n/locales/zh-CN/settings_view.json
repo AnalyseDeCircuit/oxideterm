@@ -698,7 +698,7 @@
         "confirm_description": "OxideTerm 将在 {{host}} 上安装可读的集成文件，并向检测到的 Shell 启动文件添加一段带标记的引用。是否继续？",
         "confirm_description_terminal": "{{host}} 尚未配置目录追踪。是否现在安装可读的 Shell 集成？它会在新打开的 SSH 终端中启用，当前终端不会被修改。",
         "dont_ask_again": "下次不再询问",
-        "disclosure": "OxideTerm 会把可读的 Bash、Zsh、Fish、Nushell 和 PowerShell 钩子写入下方目录，并在检测到的 Shell 启动文件中加入一段带有明确标记的引用。钩子只通过私有 OSC 7719 上报当前工作目录和主机名；终端输出不会被隐藏或擦除。",
+        "disclosure": "OxideTerm 会把可读的 Bash、Zsh、Fish、Nushell 和 PowerShell 钩子写入下方目录，并在检测到的 Shell 启动文件中加入一段带有明确标记的引用。钩子通过标准 OSC 7 上报当前工作目录和主机名；每通道 SSH 标记控制私有编辑器消息，已知的共享复用器会抑制这些消息，终端输出不会被隐藏或擦除。",
         "active_host": "当前主机",
         "status": "状态",
         "detected_shell": "检测到的 Shell",
