@@ -1825,33 +1825,6 @@ impl WorkspaceApp {
         }
     }
 
-    pub(super) fn broadcast_terminal_input(
-        &mut self,
-        source_pane_id: PaneId,
-        kind: TerminalBroadcastInputKind,
-        bytes: &[u8],
-        cx: &mut Context<Self>,
-    ) {
-        if !self.terminal.read(cx).broadcast_enabled() {
-            return;
-        }
-
-        self.retain_live_terminal_broadcast_targets(cx);
-        if !self.terminal.read(cx).broadcast_enabled() {
-            return;
-        }
-        for pane_id in self.terminal_broadcast_target_panes(source_pane_id, cx) {
-            let Some(pane) = self.tab_host.read(cx).panes().get(&pane_id).cloned() else {
-                continue;
-            };
-            let _ = pane.update(cx, |pane, cx| {
-                // Input stays borrowed through synchronous delivery and the
-                // registered terminal session remains the sole PTY owner.
-                pane.send_broadcast_input(kind, bytes, cx);
-            });
-        }
-    }
-
     pub(super) fn terminal_broadcast_target_panes(
         &self,
         source_pane_id: PaneId,
