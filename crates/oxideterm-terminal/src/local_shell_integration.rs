@@ -383,7 +383,7 @@ function global:__oxideterm_pct_path {
 function global:__oxideterm_emit_cwd {
     $location = Get-Location
     $cwd = if ($location.ProviderPath) { $location.ProviderPath } else { $location.Path }
-    [Console]::Out.Write("`e]7;$(__oxideterm_pct_path $cwd)`a")
+    [Console]::Out.Write("$([char]27)]7;$(__oxideterm_pct_path $cwd)$([char]7)")
 }
 function global:prompt {
     __oxideterm_emit_cwd
@@ -551,6 +551,16 @@ mod tests {
         }
         assert!(posix_prompt_hook().contains("]7;file://"));
         assert!(posix_prompt_hook().contains("s|%2f|/|g"));
+    }
+
+    #[test]
+    fn powershell_hook_uses_windows_powershell_compatible_control_bytes() {
+        let hook = powershell_prompt_hook();
+
+        // Windows PowerShell 5.1 renders the PowerShell 7-only `e escape literally.
+        assert!(hook.contains("$([char]27)]7;"));
+        assert!(hook.contains("$([char]7)"));
+        assert!(!hook.contains("`e]"));
     }
 
     #[cfg(unix)]

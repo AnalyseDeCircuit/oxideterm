@@ -896,17 +896,28 @@ impl WorkspaceApp {
 
     fn close_tab_at_index(&mut self, index: usize, window: &mut Window, cx: &mut Context<Self>) {
         let exiting_visual = self.tab_exit_visual(index, cx);
-        let Some(TabRemovalTransition {
-            tab,
-            mount_cleanup,
-            previous_active_tab_id,
-            next_active_tab_id,
-        }) = self
+        let Some(transition) = self
             .tab_host
             .update(cx, |tab_host, _cx| tab_host.remove_tab_at(index))
         else {
             return;
         };
+        self.finish_tab_removal(transition, exiting_visual, window, cx);
+    }
+
+    pub(super) fn finish_tab_removal(
+        &mut self,
+        transition: TabRemovalTransition,
+        exiting_visual: Option<ExitingTabVisual>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let TabRemovalTransition {
+            tab,
+            mount_cleanup,
+            previous_active_tab_id,
+            next_active_tab_id,
+        } = transition;
         // Final tab removal revokes focus authority before any deferred UI work
         // can observe a replacement tab with the same presentation kind.
         self.ai_runtime_context

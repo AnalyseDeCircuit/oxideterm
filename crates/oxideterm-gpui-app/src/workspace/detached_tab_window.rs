@@ -54,16 +54,15 @@ impl DetachedTabWindow {
             }
             cx.notify();
         });
-        // Closing a detached window should behave like docking the tab back
-        // into the main tab strip, not like closing the underlying session.
+        // The detached native window owns this tab consumer. Releasing the
+        // window closes that tab while shared node-owned transports stay live.
         let release_subscription = cx.on_release_in(window, move |detached, window, cx| {
-            let window_id = window.window_handle().window_id();
             session_on_release.update(cx, |session, cx| {
                 session.release_detached_tab_window(
                     detached.tab_id,
                     detached.mount_id,
                     detached.window_registration,
-                    window_id,
+                    window,
                     cx,
                 );
             });

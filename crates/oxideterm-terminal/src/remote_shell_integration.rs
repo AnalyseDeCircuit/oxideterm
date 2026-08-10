@@ -632,7 +632,7 @@ if (-not $global:__oxideterm_shell_integration_v4) {
         if (-not $hostName) { $hostName = 'localhost' }
         $uriPath = $cwd -replace '\\', '/'
         if ($uriPath -match '^[A-Za-z]:/') { $uriPath = '/' + $uriPath }
-        [Console]::Out.Write("`e]7;file://$hostName$(__oxideterm_pct_path $uriPath)`a")
+        [Console]::Out.Write("$([char]27)]7;file://$hostName$(__oxideterm_pct_path $uriPath)$([char]7)")
     }
     function global:prompt {
         __oxideterm_emit_remote_metadata
@@ -716,6 +716,14 @@ mod tests {
         }
         assert!(REMOTE_INTEGRATION_README.contains("current working directory and host"));
         assert!(REMOTE_INTEGRATION_README.contains("standard OSC 7"));
+    }
+
+    #[test]
+    fn powershell_source_uses_windows_powershell_compatible_control_bytes() {
+        // Windows PowerShell 5.1 does not recognize the PowerShell 7-only `e escape.
+        assert!(POWERSHELL_INTEGRATION.contains("$([char]27)]7;"));
+        assert!(POWERSHELL_INTEGRATION.contains("$([char]7)"));
+        assert!(!POWERSHELL_INTEGRATION.contains("`e]"));
     }
 
     #[test]

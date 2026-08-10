@@ -557,22 +557,17 @@ impl WorkspaceApp {
         tab_id: TabId,
         mount_id: tabs::TabMountId,
         window_registration: window_registry::WindowRegistration,
-        window_id: gpui::WindowId,
+        current_window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        let window_id = current_window.window_handle().window_id();
         self.release_workspace_window(window_registration, window_id, cx);
         let transition = self.tab_host.update(cx, |tab_host, _cx| {
-            tab_host.release_detached_window_and_select(tab_id, mount_id, window_id)
+            tab_host.remove_tab_for_detached_window_release(tab_id, mount_id, window_id)
         });
         if let Some(transition) = transition {
-            self.apply_main_window_active_tab_change(
-                transition.selection.previous,
-                transition.selection.current,
-                cx,
-            );
             self.detached_tab_return_drag = None;
-            self.sync_active_tab_surface(cx);
-            cx.notify();
+            self.finish_tab_removal(transition, None, current_window, cx);
         }
     }
 
@@ -595,9 +590,6 @@ impl WorkspaceApp {
         current_window: Option<&mut Window>,
         cx: &mut Context<Self>,
     ) {
-        if cleanup.reason == tabs::TabMountCloseReason::DetachedWindowReleased {
-            return;
-        }
         if let Some(handle) = cleanup.detached_window {
             if let Some(window) = current_window
                 && window.window_handle().window_id() == handle.window_id()
@@ -1418,26 +1410,34 @@ impl WorkspaceApp {
                     .flex()
                     .items_center()
                     .occlude()
-                    .on_mouse_down(
-                        MouseButton::Left,
-                        cx.listener(move |this, event: &MouseDownEvent, window, cx| {
-                            this.start_detached_tab_return_drag(tab_id, event, window, cx);
-                            window.start_window_move();
-                            cx.stop_propagation();
-                        }),
-                    )
-                    .on_mouse_move(
-                        cx.listener(move |this, event: &MouseMoveEvent, window, cx| {
-                            this.update_detached_tab_return_drag(tab_id, event, window, cx);
-                        }),
-                    )
-                    .on_mouse_up(
-                        MouseButton::Left,
-                        cx.listener(move |this, event: &MouseUpEvent, window, cx| {
-                            this.finish_detached_tab_return_drag(tab_id, event, window, cx);
-                            cx.stop_propagation();
-                        }),
-                    )
+                    // Windows moves client-decorated windows through native
+                    // HTCAPTION handling; consuming mouse-down in GPUI blocks it.
+                    .when(cfg!(target_os = "windows"), |region| {
+                        region.window_control_area(gpui::WindowControlArea::Drag)
+                    })
+                    .when(!cfg!(target_os = "windows"), |region| {
+                        region
+                            .on_mouse_down(
+                                MouseButton::Left,
+                                cx.listener(move |this, event: &MouseDownEvent, window, cx| {
+                                    this.start_detached_tab_return_drag(tab_id, event, window, cx);
+                                    window.start_window_move();
+                                    cx.stop_propagation();
+                                }),
+                            )
+                            .on_mouse_move(cx.listener(
+                                move |this, event: &MouseMoveEvent, window, cx| {
+                                    this.update_detached_tab_return_drag(tab_id, event, window, cx);
+                                },
+                            ))
+                            .on_mouse_up(
+                                MouseButton::Left,
+                                cx.listener(move |this, event: &MouseUpEvent, window, cx| {
+                                    this.finish_detached_tab_return_drag(tab_id, event, window, cx);
+                                    cx.stop_propagation();
+                                }),
+                            )
+                    })
                     .child(div().min_w(px(0.0)).truncate().child(title)),
             )
             .child(

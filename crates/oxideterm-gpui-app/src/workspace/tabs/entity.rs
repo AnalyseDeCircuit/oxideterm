@@ -60,7 +60,6 @@ pub(in crate::workspace) enum TabMount {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(in crate::workspace) enum TabMountCloseReason {
     ReturnToMain,
-    DetachedWindowReleased,
     TabClosed,
 }
 
@@ -755,41 +754,27 @@ impl WorkspaceTabHostEntity {
         })
     }
 
-    #[cfg(test)]
-    pub(in crate::workspace) fn release_detached_window(
+    pub(in crate::workspace) fn remove_tab_for_detached_window_release(
         &mut self,
         tab_id: TabId,
         mount_id: TabMountId,
         window_id: gpui::WindowId,
-    ) -> Option<TabMountCleanupPlan> {
-        match self.tab_mounts.get(&tab_id).copied() {
+    ) -> Option<TabRemovalTransition> {
+        let tab_index = match self.tab_mounts.get(&tab_id).copied() {
             Some(TabMount::Detached {
                 mount_id: current_mount_id,
                 window_id: current_window_id,
                 ..
             }) if current_mount_id == mount_id && current_window_id == window_id => {
-                self.return_to_main(tab_id, TabMountCloseReason::DetachedWindowReleased)
+                self.tab_index_by_id(tab_id)?
             }
-            _ => None,
-        }
-    }
-
-    pub(in crate::workspace) fn release_detached_window_and_select(
-        &mut self,
-        tab_id: TabId,
-        mount_id: TabMountId,
-        window_id: gpui::WindowId,
-    ) -> Option<TabReturnTransition> {
-        match self.tab_mounts.get(&tab_id).copied() {
-            Some(TabMount::Detached {
-                mount_id: current_mount_id,
-                window_id: current_window_id,
-                ..
-            }) if current_mount_id == mount_id && current_window_id == window_id => {
-                self.return_to_main_and_select(tab_id, TabMountCloseReason::DetachedWindowReleased)
-            }
-            _ => None,
-        }
+            _ => return None,
+        };
+        let mut transition = self.remove_tab_at(tab_index)?;
+        // The native window is already releasing, so final tab cleanup must not
+        // re-enter its handle. Pane and terminal cleanup still follows normally.
+        transition.mount_cleanup.detached_window = None;
+        Some(transition)
     }
 
     pub(in crate::workspace) fn close_tab_mount(&mut self, tab_id: TabId) -> TabMountCleanupPlan {
@@ -1961,11 +1946,15 @@ mod tests {
     }
 
     #[gpui::test]
-    fn stale_detached_release_cannot_return_a_newer_mount(cx: &mut TestAppContext) {
+    fn detached_window_release_closes_only_its_current_tab_mount(cx: &mut TestAppContext) {
         let (_, cx) = cx.add_window_view(|_window, _cx| TabHostTestRoot);
         let first_window = cx.window_handle();
         let tab_host = cx.new(|_| WorkspaceTabHostEntity::new());
-        let tab_id = tab_host.update(cx, |tab_host, _cx| tab_host.alloc_tab_id());
+        let tab_id = tab_host.update(cx, |tab_host, _cx| {
+            let tab_id = tab_host.alloc_tab_id();
+            tab_host.insert_tab(test_tab(tab_id, None));
+            tab_id
+        });
         let first_mount_id = tab_host.update(cx, |tab_host, _cx| {
             let mount_id = tab_host.begin_detach(tab_id).expect("first reservation");
             assert!(tab_host.commit_detach(tab_id, mount_id, first_window));
@@ -1990,12 +1979,20 @@ mod tests {
         tab_host.update(cx, |tab_host, _cx| {
             assert!(
                 tab_host
-                    .release_detached_window(tab_id, first_mount_id, first_window.window_id(),)
+                    .remove_tab_for_detached_window_release(
+                        tab_id,
+                        first_mount_id,
+                        first_window.window_id(),
+                    )
                     .is_none()
             );
             assert!(
                 tab_host
-                    .release_detached_window(tab_id, second_mount_id, first_window.window_id(),)
+                    .remove_tab_for_detached_window_release(
+                        tab_id,
+                        second_mount_id,
+                        first_window.window_id(),
+                    )
                     .is_none()
             );
             assert_eq!(
@@ -2007,11 +2004,21 @@ mod tests {
                 })
             );
 
-            let cleanup = tab_host
-                .release_detached_window(tab_id, second_mount_id, second_window.window_id())
-                .expect("current release cleanup");
-            assert_eq!(cleanup.reason, TabMountCloseReason::DetachedWindowReleased);
+            let transition = tab_host
+                .remove_tab_for_detached_window_release(
+                    tab_id,
+                    second_mount_id,
+                    second_window.window_id(),
+                )
+                .expect("current release removes tab");
+            assert_eq!(transition.tab.id, tab_id);
+            assert_eq!(
+                transition.mount_cleanup.reason,
+                TabMountCloseReason::TabClosed
+            );
+            assert_eq!(transition.mount_cleanup.detached_window, None);
             assert_eq!(tab_host.mount(tab_id), None);
+            assert!(tab_host.tab_by_id(tab_id).is_none());
         });
     }
 
@@ -2084,7 +2091,11 @@ mod tests {
         let forwards_window: AnyWindowHandle = cx.add_window(|_window, _cx| TabHostTestRoot).into();
         let tab_host = cx.new(|_| WorkspaceTabHostEntity::new());
         let (sftp_tab_id, forwards_tab_id) = tab_host.update(cx, |tab_host, _cx| {
-            (tab_host.alloc_tab_id(), tab_host.alloc_tab_id())
+            let sftp_tab_id = tab_host.alloc_tab_id();
+            let forwards_tab_id = tab_host.alloc_tab_id();
+            tab_host.insert_tab(test_tab(sftp_tab_id, None));
+            tab_host.insert_tab(test_tab(forwards_tab_id, None));
+            (sftp_tab_id, forwards_tab_id)
         });
 
         let ssh_registry = SshConnectionRegistry::new(ConnectionPoolConfig::default());
@@ -2118,7 +2129,11 @@ mod tests {
 
             assert!(
                 tab_host
-                    .release_detached_window(sftp_tab_id, sftp_mount, sftp_window.window_id(),)
+                    .remove_tab_for_detached_window_release(
+                        sftp_tab_id,
+                        sftp_mount,
+                        sftp_window.window_id(),
+                    )
                     .is_some()
             );
             let forwards_cleanup = tab_host.close_tab_mount(forwards_tab_id);
