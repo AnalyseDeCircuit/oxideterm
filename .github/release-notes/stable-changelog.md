@@ -3,6 +3,25 @@
 Stable releases are listed newest first. The release workflow uses each versioned
 section as the detailed changelog attached to the corresponding GitHub Release.
 
+## 2.0.19
+
+OxideTerm 2.0.19 improves native window and terminal behavior, repairs Windows PowerShell and OneDrive compatibility, and simplifies supported update channels.
+
+### ✨ Highlights
+
+- Added native full-screen shortcuts with F11 on Windows and Linux and Control-Command-F on macOS, exposed the action in shortcut settings, and made macOS title-bar double-clicks follow the system preference.
+
+### 🛠️ Fixes
+
+- Prevented Windows PowerShell 5.1 from displaying OSC 7 directory-reporting bytes as visible `e]7;...` text in local and remote Shell integration.
+- Made detached tab windows movable through native Windows caption handling, and made closing a detached window close its tab and local terminal instead of leaving the terminal active in the background; shared SSH node connections remain independently owned.
+- Kept typed keys and pasted text flowing to selected broadcast terminals without re-entering the GPUI workspace entity during synchronous input delivery.
+- Repaired OneDrive app-folder hierarchy creation by sending Microsoft Graph conflict behavior through the supported request URL annotation.
+
+### 🧰 Release Maintenance
+
+- Retired the GPUI Preview channel from runtime settings, updater selection, help content, and plugin compatibility while preserving Stable and Beta updates and safely migrating older saved channel settings.
+
 ## 2.0.18
 
 OxideTerm 2.0.18 makes remote Shell integration safer across terminal clients, restores terminal and SSH interaction workflows, and repairs Windows Cloud Sync and OneDrive behavior.
